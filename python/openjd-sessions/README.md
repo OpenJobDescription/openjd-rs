@@ -26,12 +26,12 @@ This library requires:
 
 ## Versioning
 
-This package's version follows [Semantic Versioning 2.0](https://semver.org/), but is still considered to be in its 
+This package's version follows [Semantic Versioning 2.0](https://semver.org/), but is still considered to be in its
 initial development, thus backwards incompatible versions are denoted by minor version bumps. To help illustrate how
 versions will increment during this initial development stage, they are described below:
 
-1. The MAJOR version is currently 0, indicating initial development. 
-2. The MINOR version is currently incremented when backwards incompatible changes are introduced to the public API. 
+1. The MAJOR version is currently 0, indicating initial development.
+2. The MINOR version is currently incremented when backwards incompatible changes are introduced to the public API.
 3. The PATCH version is currently incremented when bug fixes or backwards compatible changes are introduced to the public API.
 
 ## Contributing
@@ -101,7 +101,7 @@ job_template = decode_job_template(
                 ],
                 "parameterSpace": {
                     "taskParameterDefinitions": [
-                        { "name": "Bar", "type": "INT", "range": "1-10" }   
+                        { "name": "Bar", "type": "INT", "range": "1-10" }
                     ]
                 },
                 "script": {
@@ -226,7 +226,7 @@ with Session(
     ...
 ```
 
-You must ensure that the `host` user is able to run commands as the `actions` user 
+You must ensure that the `host` user is able to run commands as the `actions` user
 with passwordless `sudo` by, for example, adding a rule like follows to your
 `sudoers` file or making the equivalent change in your user permissions directory:
 
@@ -259,6 +259,11 @@ with Session(
     ...
 ```
 
+You must ensure that the Python installation hosting this code can be run by any impersonated
+user in addition to the `host` user. The library makes impersonated subprocess calls to
+perform operations dependent on the impersonated user file system permissions, such as finding
+files in search paths.
+
 If running in a Windows Service, then you must ensure that:
 1. The `host` user is an Administrator, LocalSystem, or LocalService user as your
    security posture requires; and
@@ -288,7 +293,7 @@ For example, if you would like to verify your download of the wheel for version 
 3) Save the following contents to a file called `openjobdescription-pgp.asc`:
     ```
     -----BEGIN PGP PUBLIC KEY BLOCK-----
-    
+
     mQINBGXGjx0BEACdChrQ/nch2aYGJ4fxHNQwlPE42jeHECqTdlc1V/mug+7qN7Pc
     C4NQk4t68Y72WX/NG49gRfpAxPlSeNt18c3vJ9/sWTukmonWYGK0jQGnDWjuVgFT
     XtvJAAQBFilQXN8h779Th2lEuD4bQX+mGB7l60Xvh7vIehE3C4Srbp6KJXskPLPo
@@ -335,36 +340,36 @@ For example, if you would like to verify your download of the wheel for version 
     gpg (GnuPG) 2.0.22; Copyright (C) 2013 Free Software Foundation, Inc.
     This is free software: you are free to change and redistribute it.
     There is NO WARRANTY, to the extent permitted by law.
-    
-    
+
+
     pub  4096R/BCC40987  created: 2024-02-09  expires: 2026-02-08  usage: SCEA
                          trust: unknown       validity: unknown
     [ unknown] (1). Open Job Description <openjobdescription@amazon.com>
-    
+
     gpg> trust
     pub  4096R/BCC40987  created: 2024-02-09  expires: 2026-02-08  usage: SCEA
                          trust: unknown       validity: unknown
     [ unknown] (1). Open Job Description <openjobdescription@amazon.com>
-    
+
     Please decide how far you trust this user to correctly verify other users' keys
     (by looking at passports, checking fingerprints from different sources, etc.)
-    
+
       1 = I don't know or won't say
       2 = I do NOT trust
       3 = I trust marginally
       4 = I trust fully
       5 = I trust ultimately
       m = back to the main menu
-    
+
     Your decision? 5
     Do you really want to set this key to ultimate trust? (y/N) y
-    
+
     pub  4096R/BCC40987  created: 2024-02-09  expires: 2026-02-08  usage: SCEA
                          trust: ultimate      validity: unknown
     [ unknown] (1). Open Job Description <openjobdescription@amazon.com>
     Please note that the shown key validity is not necessarily correct
     unless you restart the program.
-    
+
     gpg> quit
     ```
 

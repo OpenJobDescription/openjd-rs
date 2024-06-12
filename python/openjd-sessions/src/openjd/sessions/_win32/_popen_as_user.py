@@ -180,7 +180,6 @@ class PopenWindowsAsUser(Popen):
                     # Raises: OSError
                     raise ctypes.WinError()
             elif self.user.logon_token is not None:
-
                 siex = STARTUPINFOEX()
                 ctypes.memmove(
                     ctypes.pointer(siex.StartupInfo), ctypes.pointer(si), ctypes.sizeof(STARTUPINFO)

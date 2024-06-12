@@ -38,7 +38,6 @@ ATTACH_PARENT_PROCESS = -1
 
 
 def signal_process(pgid: int):
-
     # Send signal can only target processes in the same console.
     # We first detach from the current console and re-attach to that of process group.
     if not kernel32.FreeConsole():
