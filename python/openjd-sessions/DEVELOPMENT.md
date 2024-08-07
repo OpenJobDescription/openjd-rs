@@ -110,9 +110,26 @@ both of these environments.
 To run the impersonation tests you will require a separate user on your workstation, and its
 password, that you are able to logon as. Then:
 
+1. Run the tests on the Windows Command Line;
+   * The tests have mixed results when running in the VSCode terminal.
+1. Run the tests with the system install of Python.
+   * Using a virtual environment can cause permission issues.
+1. The second user needs read, list, and execute permissions on the source code directory and hatch directory.
+   * Make sure object inheritence permissions are turned on.
+1. The user running the tests is an Administrator, LocalSystem, or LocalService user as your
+   security posture requires;
+1. The user running the tests has the [Replace a process level token](https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/replace-a-process-level-token)
+   privilege.
+   1. In the Windows search bar, search for `Local Security Policy`;
+   1. Navigate to `Local Policies` -> `User Rights Assignment`;
+   1. Scroll down to the `Replace a process level token` policy;
+   1. Double click the `Replace a process level token` policy;
+   1. Click `Add User or Group...`;
+   1. Add the user that will be running the test;
+   1. Click ok on both dialogs.
 1. Set the environment variable `OPENJD_TEST_WIN_USER_NAME` to the username of that user;
-2. Set the environment variable `OPENJD_TEST_WIN_USER_PASSWORD` to that user's password; and
-3. Then run the tests with `hatch run test` as normal.
+1. Set the environment variable `OPENJD_TEST_WIN_USER_PASSWORD` to that user's password; and
+1. Then run the tests with `hatch run test` as normal.
     * If done correctly, then you should not see any xfail tests related to impersonation.
 
 Run these tests in both:

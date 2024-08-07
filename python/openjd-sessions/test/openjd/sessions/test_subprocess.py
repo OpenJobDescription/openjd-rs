@@ -11,9 +11,10 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from logging.handlers import QueueHandler
 from pathlib import Path
 from queue import SimpleQueue
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import pytest
 
+import openjd
 from openjd.sessions._os_checker import is_posix, is_windows
 from openjd.sessions._session_user import PosixSessionUser, WindowsSessionUser
 from openjd.sessions._subprocess import LoggingSubprocess
@@ -693,6 +694,86 @@ class TestLoggingSubprocessWindowsCrossUser(object):
         messages = collect_queue_messages(message_queue)
         print(messages)
         assert any(windows_user.user in message for message in messages)
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-specific tests")
+    @pytest.mark.xfail(
+        not has_windows_user(),
+        reason=WIN_SET_TEST_ENV_VARS_MESSAGE,
+    )
+    def test_environment_casing(
+        self,
+        message_queue: SimpleQueue,
+        queue_handler: QueueHandler,
+        windows_user: WindowsSessionUser,
+    ) -> None:
+        # Do the imports here as these are only available on Windows
+        if is_windows():
+            from ctypes import c_void_p
+            from openjd.sessions._win32._helpers import environment_block_to_dict  # type: ignore
+
+        # Test that we run the subprocess as a desired user that differs from the current user.
+
+        # GIVEN
+        logger = build_logger(queue_handler)
+        exitcode = 0
+
+        # Powershell script that ensures that all environment variables are upper case.
+        # Explicitly not using Python as it reads in all enivronment variables as upper case
+        # on Windows and we want to make sure that we actually made all environment variables
+        # upper case in the process.
+        powershell_script = r"""
+$allEnvVars = Get-ChildItem env:
+
+foreach ($envVar in $allEnvVars) {
+    $varName = $envVar.Name
+    $varValue = $envVar.Value
+    echo "$varName=$varValue"
+
+    if ($varName -cne $varName.ToUpper()) {
+        Write-Error "Environment variable '$varName' is not in all uppercase."
+    }
+}"""
+
+        def _inject_value_to_user_dict(block: c_void_p) -> dict[str, str]:
+            """
+            Inject a lower case environment key to make sure that we have at least one
+            system environment variable that needs to be changed to upper case
+            """
+            user_dict = environment_block_to_dict(block)
+            user_dict["test_user_dict"] = "test_user_dict_value"
+            user_dict["Testdup"] = "this_is_an_original_value"
+            return user_dict
+
+        with patch(
+            f"{openjd.__package__}.sessions._win32._popen_as_user.environment_block_to_dict",
+            side_effect=_inject_value_to_user_dict,
+        ):
+            subproc = LoggingSubprocess(
+                logger=logger,
+                # Print out the environment
+                args=["powershell", "-Command", powershell_script],
+                user=windows_user,
+                # Throw a lower case environment variable in there to guarantee
+                # that there's one that needs to be changed.
+                os_env_vars={"testenv": "this_is_a_test", "TESTDUP": "this_is_a_changed_value"},
+            )
+
+            # WHEN
+            subproc.run()
+
+        # THEN
+        assert not subproc.is_running
+        assert subproc.pid is not None
+        assert subproc.exit_code == exitcode
+        messages = collect_queue_messages(message_queue)
+
+        assert "TEST_USER_DICT=test_user_dict_value" in messages
+        assert "TESTDUP=this_is_a_changed_value" in messages
+        assert "TESTENV=this_is_a_test" in messages
+
+        assert "test_user_dict=test_user_dict_value" not in messages
+        assert "Testdup=this_is_an_original_value" not in messages
+        assert "testenv=this_is_a_test" not in messages
 
     def test_basic_operation_failure(
         self,

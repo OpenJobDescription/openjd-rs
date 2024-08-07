@@ -149,7 +149,12 @@ class PopenWindowsAsUser(Popen):
             user_env: ctypes.c_void_p, env: dict[str, Optional[str]]
         ) -> ctypes.c_wchar_p:
             user_env_dict = cast(dict[str, Optional[str]], environment_block_to_dict(user_env))
-            user_env_dict.update(**env)
+            # All environment keys are converted to uppercase. This is because while Windows environment variables are case insensitive, the win32 api
+            # allows you to store multiple keys of mixed case, for example the win32 api would allow you
+            # to set both "PATH" and "Path" as environment variable keys. This leads to undefined behaviour when calling one of the keys.
+            user_env_dict = {k.upper(): v for k, v in user_env_dict.items()}
+            upper_cased_env = {k.upper(): v for k, v in env.items()}
+            user_env_dict.update(**upper_cased_env)
             result = {k: v for k, v in user_env_dict.items() if v is not None}
             return environment_block_from_dict(result)
 

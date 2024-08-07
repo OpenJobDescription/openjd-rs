@@ -31,7 +31,7 @@ from openjd.model.v2023_09 import (
 from ._action_filter import ActionMessageKind, ActionMonitoringFilter
 from ._embedded_files import write_file_for_user
 from ._logging import LOG, log_section_banner
-from ._os_checker import is_posix
+from ._os_checker import is_posix, is_windows
 from ._path_mapping import PathMappingRule
 from ._runner_base import ScriptRunnerBase
 from ._runner_env_script import EnvironmentScriptRunner
@@ -116,33 +116,51 @@ EnvironmentVariableChange = Union[EnvironmentVariableSetChange, EnvironmentVaria
 
 
 class SimplifiedEnvironmentVariableChanges:
-    """Keeps track of what variables need to be set and unset for an environment"""
+    """
+    Keeps track of what variables need to be set and unset for an environment. On Windows all environment keys
+    are stored as uppercase. This is because while Windows environment variables are case insensitive, the win32 api
+    allows you to store multiple keys of mixed case, for example the win32 api would allow you
+    to set both "PATH" and "Path" as environment variable keys. This leads to undefined behaviour when calling one of the keys.
+    """
 
     def __init__(self, initial_variables: Union[dict[str, str], "EnvironmentVariableObject"]):
-        self._to_set: dict[str, Optional[str]] = dict(initial_variables)  # Make a copy
+        self._to_set: dict[str, Optional[str]]
+
+        if is_windows():
+            self._to_set = {}
+            for var_name, var_value in initial_variables.items():
+                self._to_set[var_name.upper()] = var_value
+        else:
+            self._to_set = dict(initial_variables)  # Make a copy
 
     def simplify_ordered_changes(self, changes: list[EnvironmentVariableChange]) -> None:
         """Apply a given list of sets and unsets to the current state in order"""
         for change in changes:
             if isinstance(change, EnvironmentVariableSetChange):
-                self._to_set[change.name] = change.value
+                self._to_set[change.name.upper() if is_windows() else change.name] = change.value
             elif isinstance(change, EnvironmentVariableUnsetChange):
-                self._to_set[change.name] = None
+                self._to_set[change.name.upper() if is_windows() else change.name] = None
             else:
                 raise ValueError("Unknown type of environment variable change.")
 
     def apply_to_environment(self, env_vars: dict[str, Optional[str]]) -> None:
         """Modify a given dictionary of environment variables to reflect the changes"""
-        for var_name, var_value in self._to_set.items():
-            # Note: An env var value of None means to unset that variable
-            env_vars[var_name] = var_value
+        if is_windows():
+            # Environment variables on Windows are case insensitive when used, but are case sensitive when
+            # set via the Windows API.
+            for var_name, var_value in env_vars.copy().items():
+                del env_vars[var_name]
+                env_vars[var_name.upper()] = var_value
+
+        # Note: An env var value of None means to unset that variable
+        env_vars.update(self._to_set)
 
 
 SessionCallbackType = Callable[[str, ActionStatus], None]
 
 
 class Session(object):
-    """A context for running actions of an Open Job Descriptionob Description Job.
+    """A context for running actions of an Open Job Description Job.
 
     In Open Job Description, the Tasks for a Job's Steps are run within the context of a *Session*.
     Each Step in a Job defines the properties of the Session that are required to

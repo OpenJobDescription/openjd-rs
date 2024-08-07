@@ -563,7 +563,7 @@ class TestSessionCallbacks:
 
             # THEN
             callback.assert_not_called()
-            assert changes._to_set.get("foo") == "bar"
+            assert changes._to_set.get("FOO" if is_windows() else "foo") == "bar"
 
     @pytest.mark.parametrize(
         "state,exit_code,expected",
@@ -2017,10 +2017,14 @@ SOME_ENV_VARS = {
 class TestSimplifiedEnvironmentVariableChanges:
     def test_init(self) -> None:
         # WHEN
-        simplified = SimplifiedEnvironmentVariableChanges(SOME_ENV_VARS)
+        initial_vars = dict(SOME_ENV_VARS, **{"Asdf": "jkl;"})
+        simplified = SimplifiedEnvironmentVariableChanges(initial_vars)
 
         # THEN
-        assert simplified._to_set == SOME_ENV_VARS
+        if is_windows():
+            assert simplified._to_set == dict(SOME_ENV_VARS, **{"ASDF": "jkl;"})
+        else:
+            assert simplified._to_set == initial_vars
 
     @pytest.mark.parametrize(
         "changes,set_result",
@@ -2030,6 +2034,15 @@ class TestSimplifiedEnvironmentVariableChanges:
                 [EnvironmentVariableSetChange("QUUX", "corge")],
                 dict(SOME_ENV_VARS, **{"QUUX": "corge"}),
                 id="Set new variable",
+            ),
+            pytest.param(
+                [EnvironmentVariableSetChange("Quux", "corge")],
+                (
+                    dict(SOME_ENV_VARS, **{"QUUX": "corge"})
+                    if is_windows()
+                    else dict(SOME_ENV_VARS, **{"Quux": "corge"})
+                ),
+                id="Set new variable mixed case",
             ),
             pytest.param(
                 [EnvironmentVariableSetChange("FOO", "corge")],
@@ -2113,12 +2126,25 @@ class TestSimplifiedEnvironmentVariableChanges:
                 {"FOO": "grault", "BAZ": "qux"},
                 id="Change then unset then add existing",
             ),
+            pytest.param(
+                [
+                    EnvironmentVariableSetChange("Foo", "corge"),
+                    EnvironmentVariableUnsetChange("FOo"),
+                    EnvironmentVariableSetChange("foo", "grault"),
+                ],
+                (
+                    {"FOO": "grault", "BAZ": "qux"}
+                    if is_windows()
+                    else dict(SOME_ENV_VARS, **{"Foo": "corge", "FOo": None, "foo": "grault"})  # type: ignore
+                ),
+                id="Change then unset then add existing mixed case",
+            ),
         ],
     )
     def test_simplify_ordered_changes_happy_path(
         self,
         changes: list[EnvironmentVariableChange],
-        set_result: dict[str, str],
+        set_result: dict[str, Optional[str]],
     ) -> None:
         # GIVEN
         simplified = SimplifiedEnvironmentVariableChanges(SOME_ENV_VARS)
@@ -2168,6 +2194,12 @@ class TestSimplifiedEnvironmentVariableChanges:
                 "fix_simple_foo_to_corge",
                 {"FOO": "corge"},
                 id="Add new variable",
+            ),
+            pytest.param(
+                {"Foo": "bar"},
+                "fix_simple_foo_to_corge",
+                {"FOO": "corge"} if is_windows() else {"Foo": "bar", "FOO": "corge"},
+                id="Mixed Case",
             ),
         ],
     )
