@@ -2,14 +2,16 @@
 
 import os
 import shlex
+import time
 from ._os_checker import is_posix, is_windows
 
 if is_windows():
     from subprocess import CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW  # type: ignore
     from ._win32._popen_as_user import PopenWindowsAsUser  # type: ignore
     from ._windows_process_killer import kill_windows_process_tree
+from queue import Queue, Empty
 from typing import Any
-from threading import Event
+from threading import Event, Thread
 from logging import LoggerAdapter
 from subprocess import DEVNULL, PIPE, STDOUT, Popen, list2cmdline, run
 from typing import Callable, Optional, Sequence, cast
@@ -41,6 +43,7 @@ WINDOWS_SIGNAL_SUBPROC_SCRIPT_PATH = (
 )
 
 LOG_LINE_MAX_LENGTH = 64 * 1000  # Start out with 64 KB, can increase if needed
+STDOUT_END_GRACETIME_SECONDS = 5
 
 
 class LoggingSubprocess(object):
@@ -165,39 +168,11 @@ class LoggingSubprocess(object):
         self._logger.info(f"Command started as pid: {self._process.pid}")
         self._logger.info("Output:")
 
-        stream = self._process.stdout
-        # Convince type checker that stdout is not None
-        assert stream is not None
-
-        # Process stdout/stderr of the job; echoing it to our logger
-        def _stream_readline_max_length():
-            nonlocal stream
-            # Enforce a max line length for readline to ensure we don't infinitely grow the buffer
-            return stream.readline(LOG_LINE_MAX_LENGTH)  # type: ignore
-
         try:
-            for line in iter(_stream_readline_max_length, ""):
-                line = line.rstrip("\n\r")
-                self._logger.info(line)
-
+            self._log_subproc_stdout()  # Blocking
             self._process.wait()
             self._returncode = self._process.returncode
-            if self._returncode is not None:
-                # Print out the signed representation of returncodes that would be negative as a 32-bit signed integer
-                if self._returncode < 0x7FFFFFFF:
-                    self._logger.info(
-                        f"Process pid {self._process.pid} exited with code: {self._returncode} (unsigned) / {hex(self._returncode)} (hex)"
-                    )
-                else:
-
-                    def _tosigned(n: int) -> int:
-                        b = (n & 0xFFFFFFFF).to_bytes(4, "big", signed=False)
-                        return int.from_bytes(b, "big", signed=True)
-
-                    self._logger.info(
-                        f"Process pid {self._process.pid} exited with code: {self._returncode} (unsigned) / {hex(self._returncode)} (hex) / {_tosigned(self._returncode)} (signed)"
-                    )
-
+            self._log_returncode()
             if self._callback:
                 self._callback()
         finally:
@@ -304,6 +279,123 @@ class LoggingSubprocess(object):
         except Exception as e:
             self._logger.info(f"Process failed to start: {str(e)}")
             return None
+
+    def _log_subproc_stdout(self):
+        """
+        Blocking call which logs the STDOUT of the running subproc until the subprocess exits.
+
+        Note that this can result in hanging threads if:
+            1. The command we run creates a detatched grandchild process
+            2. The detached grandchild inherits the STDOUT stream of the process we run
+            3. The detached grandchild process does not write to STDOUT, ever.
+
+        In the above situation, there is a thread leak due to there not being a unilaterally
+        available python API which performs a timed-out blocking read on IO streams. If the
+        grandchild process ever:
+            1. Exits
+            2. Writes to STDOUT
+        or
+            3. The python session running this code ends
+
+        Then the thread exits and is cleaned up automatically by the python garbage collector.
+        """
+        assert self._process
+        stream = self._process.stdout
+        # Convince type checker that stdout is not None
+        assert stream is not None
+
+        exit_event = Event()
+
+        # Process stdout/stderr of the job; echoing it to our logger
+        def _stream_readline_max_length():
+            if exit_event.is_set():
+                return ""  # we can return anything here, just forces the iter to loop
+            # Enforce a max line length for readline to ensure we don't infinitely grow the buffer
+            return stream.readline(LOG_LINE_MAX_LENGTH)  # type: ignore
+
+        stdout_queue: Queue[str] = Queue()
+
+        def _enqueue_stdout():
+            """
+            Enqueues all the stdout from stream into the given queue, until the stream is closed
+            or exit_event is set.
+            """
+            for line in iter(_stream_readline_max_length, ""):
+                if exit_event.is_set():
+                    break
+                line = line.rstrip("\n\r")
+                stdout_queue.put(line)
+            stream.close()
+
+        process_exit_time = None
+        warn_time = None
+
+        logging_thread = Thread(target=_enqueue_stdout, daemon=True)
+        # We start the thread as a daemon, and explicitly do not call join() on it ever because:
+        #      If the subprocess creates a child subprocess that inherits the STDOUT stream, then exits while leaving
+        #      the child process running. There is an edge case where the child process never write to STDOUT and we are
+        #      stuck waiting on stream.readline() to stop blocking before exit_event can be checked to end the thread.
+        #      In this case we leave a dangling thread until the subprocess exits. This was done because
+        #       1. Python does not have support for a blocking read with a timeout.
+        #       2. Python does not have unilateral support for non-blocking reads until Python 3.12 and non-blocking
+        #          reads would require arbitrary sleep calls while waiting for output which could cause a performance
+        #          impact.
+        logging_thread.start()
+
+        while (
+            logging_thread.is_alive()
+        ):  # If the logging thread is alive, the STDOUT stream is still open
+            try:
+                # We timeout after 1 ms because the main process can end while leaving child processes that
+                # prevent closing the STDOUT stream. Waiting a maximum of 1 ms allows us to detect this quickly, while
+                # not significantly impacting CPU usage.
+                line = stdout_queue.get(timeout=0.001)
+                self._logger.info(line)
+            except Empty:
+                pass  # queue.get timed out. This means the subprocess does not print much to STDOUT. Just continue.
+
+            if self._process.poll() is not None:  # The main command exited.
+                if process_exit_time is None:
+                    process_exit_time = time.monotonic()
+                elif (time.monotonic() - process_exit_time) < 1:
+                    # There could be a bunch of STDOUT buffered up. We don't want the warning to be too noisy, so
+                    # give a second to clear the queue before we get stern and warn about ending the action.
+                    continue
+                elif not warn_time:
+                    # It's been over a second of trying to empty STDOUT. Most likely the stream is still open.
+                    self._logger.warning(
+                        f"Command exited but STDOUT stream is still open. Waiting gracetime of {STDOUT_END_GRACETIME_SECONDS} seconds for the STDOUT stream to close before ending action."
+                    )
+                    warn_time = time.monotonic()
+                elif (time.monotonic() - warn_time) > STDOUT_END_GRACETIME_SECONDS:
+                    self._logger.warning(
+                        f"Gracetime of {STDOUT_END_GRACETIME_SECONDS} seconds elapsed but the STDOUT stream is still open. Ending action."
+                    )
+                    exit_event.set()  # When the STDOUT stream ends this will cause the thread to exit.
+                    break
+
+        while not stdout_queue.empty():
+            # empty the queue
+            line = stdout_queue.get()
+            self._logger.info(line)
+
+    def _log_returncode(self):
+        """Logs the return code of the exited subprocess"""
+        if self._returncode is not None:
+            # Print out the signed representation of returncodes that would be negative as a 32-bit signed integer
+            if self._returncode < 0x7FFFFFFF:
+                self._logger.info(
+                    f"Process pid {self._process.pid} exited with code: {self._returncode} (unsigned) / {hex(self._returncode)} (hex)"
+                )
+            else:
+
+                def _tosigned(n: int) -> int:
+                    b = (n & 0xFFFFFFFF).to_bytes(4, "big", signed=False)
+                    return int.from_bytes(b, "big", signed=True)
+
+                self._logger.info(
+                    f"Process pid {self._process.pid} exited with code: {self._returncode} (unsigned) / {hex(self._returncode)} (hex) / {_tosigned(self._returncode)} (signed)"
+                )
 
     def _posix_signal_subprocess(self, signal: str, signal_subprocesses: bool = False) -> None:
         """Send a given named signal, via pkill, to the subprocess when it is running

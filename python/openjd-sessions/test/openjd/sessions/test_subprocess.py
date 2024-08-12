@@ -420,6 +420,73 @@ sys.exit(0)
         assert list_has_items_in_order(expected_messages, messages)
         all(len(m) <= expected_max_line_length for m in messages)
 
+    @pytest.mark.parametrize(
+        "command, expected_message_indices",
+        [
+            pytest.param(
+                command,
+                indices,
+                marks=pytest.mark.skipif(
+                    s == 10 and os.name == "nt",
+                    reason="Crashes runners on windows with xdist and cov",
+                ),
+            )
+            for s, indices in [
+                (0, [0, 3]),
+                (3, [0, 1, 3]),
+                (10, [0, 1, 2, 3]),
+            ]
+            for command in [
+                f'["ping", "localhost", "{"-n" if os.name == "nt" else "-c"}", "{s}"]',
+                f'["python", "-c", "import time; time.sleep({s})"]',
+            ]
+        ],
+    )
+    @pytest.mark.timeout(
+        7
+    )  # This test timing out could indicate a regression on the "actions end when subproc exits" behavior
+    def test_run_gracetime_when_process_ends_but_grandchild_uses_stdout(
+        self,
+        message_queue: SimpleQueue,
+        queue_handler: QueueHandler,
+        command: str,
+        expected_message_indices: list[int],
+    ) -> None:
+        # Make sure that the run command ends when the main subprocess ends
+        # GIVEN
+        logger = build_logger(queue_handler)
+        subproc = LoggingSubprocess(
+            logger=logger,
+            args=[
+                sys.executable,
+                "-c",
+                f'import subprocess;process = subprocess.Popen({command}, encoding="utf-8")',
+            ],
+        )
+
+        # WHEN
+        subproc.run()
+
+        # THEN
+        messages = collect_queue_messages(message_queue)
+
+        # we have to construct it here because it depends on the subproc PID
+        sample_messages = [
+            f"Command started as pid: {subproc.pid}",
+            "Command exited but STDOUT stream is still open. Waiting gracetime of 5 seconds for the STDOUT stream to close before ending action.",
+            "Gracetime of 5 seconds elapsed but the STDOUT stream is still open. Ending action.",
+            f"Process pid {subproc.pid} exited with code: 0 (unsigned) / 0x0 (hex)",
+        ]
+        expected_messages = [
+            m for i, m in enumerate(sample_messages) if i in expected_message_indices
+        ]
+        not_expected_messages = [
+            m for i, m in enumerate(sample_messages) if i not in expected_message_indices
+        ]
+
+        assert list_has_items_in_order(expected_messages, messages)
+        assert all(m not in messages for m in not_expected_messages)
+
 
 def list_has_items_in_order(expected: list, actual: list) -> bool:
     """
