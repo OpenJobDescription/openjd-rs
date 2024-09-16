@@ -467,7 +467,8 @@ class LoggingSubprocess(object):
 
         # _process will be running in new console, we run another process to attach to it and send signal
         cmd = [
-            sys.executable,
+            # When running in a service context, we want to call the non-service Python binary
+            sys.executable.lower().replace("pythonservice.exe", "python.exe"),
             str(WINDOWS_SIGNAL_SUBPROC_SCRIPT_PATH),
             str(self._process.pid),
         ]
