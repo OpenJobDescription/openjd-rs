@@ -437,6 +437,11 @@ class Session(object):
                         recursive_delete_cmd = ["rm", "-rf"]
                     else:
                         recursive_delete_cmd = [
+                            "start",
+                            '"Powershell"',
+                            "/high",
+                            "/wait",
+                            "/b",
                             "powershell",
                             "-Command",
                             "Remove-Item",
