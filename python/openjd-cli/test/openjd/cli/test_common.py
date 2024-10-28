@@ -57,8 +57,6 @@ def test_read_template_success(tempfile_extension: str, doc_serializer: Callable
     Tests that "read_template" can decode a JSON and YAML file,
     resulting in a Job Template with the same name and number of steps
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=tempfile_extension, encoding="utf8", delete=False
     ) as temp_template:
@@ -127,8 +125,6 @@ def test_read_job_template_parsingerror(tempfile_extension: str, file_contents: 
     """
     Tests that `read_job_template` raises a DecodeValidationError when provided a JSON/YAML body with schema errors
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=tempfile_extension, encoding="utf8", delete=False
     ) as temp_template:
@@ -162,8 +158,6 @@ def test_read_environment_template_parsingerror(tempfile_extension: str, file_co
     """
     Tests that `read_environment_template` raises a DecodeValidationError when provided a JSON/YAML body with schema errors
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=tempfile_extension, encoding="utf8", delete=False
     ) as temp_template:
@@ -443,16 +437,14 @@ def test_generate_job_success(
     """
     Test that a Namespace object can be used to generate a Job correctly.
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=".template.json", encoding="utf8", delete=False
     ) as temp_template:
         json.dump(template_dict, temp_template.file)
 
-    mock_args = Namespace(
-        path=Path(temp_template.name), job_params=param_list, output="human-readable"
-    )
+        mock_args = Namespace(
+            path=Path(temp_template.name), job_params=param_list, output="human-readable"
+        )
 
     # Patch `job_from_template` to "spy" on its call, ensuring that it
     # gets passed the right parameters
@@ -496,15 +488,14 @@ def test_generate_job_raises(
     template_dict: dict, param_list: list[str], expected_error: str
 ) -> None:
     """Test that generate_job() raises the expected exceptions."""
-
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=".template.json", encoding="utf8", delete=False
     ) as temp_template:
         json.dump(template_dict, temp_template.file)
 
-    args = Namespace(path=Path(temp_template.name), job_params=param_list, output="human-readable")
+        args = Namespace(
+            path=Path(temp_template.name), job_params=param_list, output="human-readable"
+        )
 
     with pytest.raises(RuntimeError) as excinfo:
         generate_job(args)

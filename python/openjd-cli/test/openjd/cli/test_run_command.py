@@ -715,7 +715,6 @@ def test_do_run_path_mapping_rules(caplog: pytest.LogCaptureFixture):
 
     try:
         # Set up a rules file and a job template file
-        temp_rules = temp_template = None
         with tempfile.NamedTemporaryFile(
             mode="w+t", suffix=".rules.json", encoding="utf8", delete=False
         ) as temp_rules:
@@ -726,20 +725,20 @@ def test_do_run_path_mapping_rules(caplog: pytest.LogCaptureFixture):
         ) as temp_template:
             json.dump(job_template, temp_template.file)
 
-        run_args = Namespace(
-            path=Path(temp_template.name),
-            step="TestStep",
-            job_params=[r"TestPath=/home/test" if os.name == "posix" else r"TestPath=c:\test"],
-            task_params=None,
-            tasks=None,
-            run_dependencies=False,
-            output="human-readable",
-            path_mapping_rules="file://" + temp_rules.name,
-            environments=[],
-            maximum_tasks=1,
-            verbose=False,
-            preserve=False,
-        )
+            run_args = Namespace(
+                path=Path(temp_template.name),
+                step="TestStep",
+                job_params=[r"TestPath=/home/test" if os.name == "posix" else r"TestPath=c:\test"],
+                task_params=None,
+                tasks=None,
+                run_dependencies=False,
+                output="human-readable",
+                path_mapping_rules="file://" + temp_rules.name,
+                environments=[],
+                maximum_tasks=1,
+                verbose=False,
+                preserve=False,
+            )
 
         # WHEN
         do_run(run_args)
@@ -765,27 +764,25 @@ def test_do_run_nonexistent_step(capsys: pytest.CaptureFixture):
     Test that invoking the `run` command with an incorrect Step name produces the right output.
     (This doesn't actually raise an error, so we have to test the output by capturing `stdout`.)
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=".template.json", encoding="utf8", delete=False
     ) as temp_template:
         json.dump(MOCK_TEMPLATE, temp_template.file)
 
-    mock_args = Namespace(
-        path=Path(temp_template.name),
-        step="FakeStep",
-        job_params=None,
-        task_params=None,
-        tasks=None,
-        maximum_tasks=-1,
-        run_dependencies=False,
-        path_mapping_rules=None,
-        environments=[],
-        output="human-readable",
-        verbose=False,
-        preserve=False,
-    )
+        mock_args = Namespace(
+            path=Path(temp_template.name),
+            step="FakeStep",
+            job_params=None,
+            task_params=None,
+            tasks=None,
+            maximum_tasks=-1,
+            run_dependencies=False,
+            path_mapping_rules=None,
+            environments=[],
+            output="human-readable",
+            verbose=False,
+            preserve=False,
+        )
     with pytest.raises(SystemExit):
         do_run(mock_args)
     assert (

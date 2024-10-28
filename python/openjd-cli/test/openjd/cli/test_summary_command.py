@@ -52,19 +52,17 @@ def test_do_summary_success(
     """
     Test that the `summary` command succeeds with various argument options.
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=".template.json", encoding="utf8", delete=False
     ) as temp_template:
         json.dump(template, temp_template.file)
 
-    mock_args = Namespace(
-        path=Path(temp_template.name),
-        job_params=mock_params,
-        step=mock_step,
-        output="human-readable",
-    )
+        mock_args = Namespace(
+            path=Path(temp_template.name),
+            job_params=mock_params,
+            step=mock_step,
+            output="human-readable",
+        )
     do_summary(mock_args)
 
     Path(temp_template.name).unlink()

@@ -23,14 +23,12 @@ def test_do_check_file_success(tempfile_extension: str, doc_serializer: Callable
     """
     Execution should succeed given a correct filepath and JSON/YAML body
     """
-    temp_template = None
-
     with tempfile.NamedTemporaryFile(
         mode="w+t", suffix=tempfile_extension, encoding="utf8", delete=False
     ) as temp_template:
         doc_serializer(MOCK_TEMPLATE, temp_template.file)
 
-    mock_args = Namespace(path=Path(temp_template.name), output="human-readable")
+        mock_args = Namespace(path=Path(temp_template.name), output="human-readable")
     do_check(mock_args)
 
     Path(temp_template.name).unlink()
