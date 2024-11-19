@@ -2,24 +2,28 @@
 
 import os
 import shlex
+import signal
+import sys
 import time
-from ._os_checker import is_posix, is_windows
+from contextlib import nullcontext
+from datetime import timedelta
+from pathlib import Path
+from queue import Queue, Empty
+from subprocess import DEVNULL, PIPE, STDOUT, Popen, list2cmdline, run
+from threading import Event, Thread
+from typing import Any
+from typing import Callable, Literal, Optional, Sequence, cast
 
-if is_windows():
+from ._linux._capabilities import try_use_cap_kill
+from ._linux._sudo import find_sudo_child_process_group_id
+from ._logging import LoggerAdapter, LogContent, LogExtraInfo
+from ._os_checker import is_linux, is_posix, is_windows
+from ._session_user import PosixSessionUser, WindowsSessionUser, SessionUser
+
+if is_windows():  # pragma: nocover
     from subprocess import CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW  # type: ignore
     from ._win32._popen_as_user import PopenWindowsAsUser  # type: ignore
     from ._windows_process_killer import kill_windows_process_tree
-from queue import Queue, Empty
-from typing import Any
-from threading import Event, Thread
-from ._logging import LoggerAdapter, LogContent, LogExtraInfo
-from subprocess import DEVNULL, PIPE, STDOUT, Popen, list2cmdline, run
-from typing import Callable, Optional, Sequence, cast
-from pathlib import Path
-from datetime import timedelta
-import sys
-
-from ._session_user import PosixSessionUser, WindowsSessionUser, SessionUser
 
 
 __all__ = ("LoggingSubprocess",)
@@ -61,6 +65,7 @@ class LoggingSubprocess(object):
     _working_dir: Optional[str]
 
     _pid: Optional[int]
+    _sudo_child_process_group_id: Optional[int]
     _returncode: Optional[int]
 
     def __init__(
@@ -93,12 +98,11 @@ class LoggingSubprocess(object):
         self._has_started = Event()
         self._pid = None
         self._returncode = None
+        self._sudo_child_process_group_id = None
 
     @property
     def pid(self) -> Optional[int]:
-        if self._pid is not None:
-            return self._pid
-        return None
+        return self._pid
 
     @property
     def exit_code(self) -> Optional[int]:
@@ -165,6 +169,17 @@ class LoggingSubprocess(object):
 
         self._pid = self._process.pid
 
+        # Would use is_posix(), but it doesn't short-circuit mypy which then complains
+        # about os.getpgid not being a valid attribute.
+        if not sys.platform == "win32":
+            if not self._user or self._user.is_process_user():
+                self._sudo_child_process_group_id = os.getpgid(self._process.pid)
+            else:
+                self._sudo_child_process_group_id = find_sudo_child_process_group_id(
+                    logger=self._logger,
+                    sudo_process=self._process,
+                )
+
         self._logger.info(
             f"Command started as pid: {self._process.pid}",
             extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
@@ -200,7 +215,7 @@ class LoggingSubprocess(object):
         """
         if self._process is not None and self._process.poll() is None:
             if is_posix():
-                self._posix_signal_subprocess(signal="term", signal_subprocesses=False)
+                self._posix_signal_subprocess(signal_name="term")
             else:
                 self._windows_notify_subprocess()
 
@@ -216,7 +231,7 @@ class LoggingSubprocess(object):
         """
         if self._process is not None and self._process.poll() is None:
             if is_posix():
-                self._posix_signal_subprocess(signal="kill", signal_subprocesses=True)
+                self._posix_signal_subprocess(signal_name="kill")
             else:
                 self._logger.info(
                     f"INTERRUPT: Start killing the process tree with the root pid: {self._process.pid}",
@@ -298,7 +313,7 @@ class LoggingSubprocess(object):
             )
             return None
 
-    def _log_subproc_stdout(self):
+    def _log_subproc_stdout(self) -> None:
         """
         Blocking call which logs the STDOUT of the running subproc until the subprocess exits.
 
@@ -423,10 +438,16 @@ class LoggingSubprocess(object):
                     extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
                 )
 
-    def _posix_signal_subprocess(self, signal: str, signal_subprocesses: bool = False) -> None:
-        """Send a given named signal, via pkill, to the subprocess when it is running
-        as a different user than this process.
-        """
+    def _posix_signal_subprocess(
+        self,
+        signal_name: Literal["term", "kill"],
+    ) -> None:
+        """Send a given named signal to the subprocess."""
+
+        # Hint to mypy to not raise module attribute errors (e.g. missing os.getpgid)
+        if sys.platform == "win32":
+            raise NotImplementedError("This method is for POSIX hosts only")
+
         # We can run into a race condition where the process exits (and another thread sets self._process to None)
         # before the cancellation happens, so we swap to a local variable to ensure a cancellation that is not needed,
         # does not raise an exception here.
@@ -450,43 +471,118 @@ class LoggingSubprocess(object):
         #  b. When we run the command using `sudo` then we need to either run code that does the whole
         #     algorithm as the other user, or `sudo` to send every process signal.
 
-        cmd = list[str]()
-        signal_child = False
+        numeric_signal = 0
+        if signal_name == "term":
+            numeric_signal = signal.SIGTERM
+            # SIGTERM is the simpler case. In the cross-user sudo case, we can send a signal to the
+            # sudo process and it will forward the signal. For the same-user case, the subprocess
+            # is the one we want to signal.
+            self._logger.info(
+                f'INTERRUPT: Sending signal "{signal_name}" to process {process.pid}',
+                extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+            )
+            try:
+                os.kill(process.pid, numeric_signal)
+            except OSError:
+                self._logger.warning(
+                    f"INTERRUPT: Unable to send {signal_name} to {process.pid}",
+                    extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+                )
+            return
+        elif signal_name == "kill":
+            numeric_signal = signal.SIGKILL
+        else:
+            raise NotImplementedError(f"Unsupported signal: {signal_name}")
+
+        kill_cmd = list[str]()
 
         if self._user is not None:
             user = cast(PosixSessionUser, self._user)
             # Only sudo if the user to run as is not the same as the current user.
             if not user.is_process_user():
-                cmd.extend(["sudo", "-u", user.user, "-i"])
-            signal_child = True
+                kill_cmd = ["sudo", "-u", user.user, "-i"]
 
-        cmd.extend(
+        # If we were unable to detect sudo's child process PID after launching the
+        # subprocess, we try again now
+        if not self._sudo_child_process_group_id:
+            self._sudo_child_process_group_id = find_sudo_child_process_group_id(
+                logger=self._logger,
+                sudo_process=process,
+            )
+
+        if not self._sudo_child_process_group_id:
+            self._logger.warning(
+                f"Failed to send signal '{signal_name}': Unable to determine child process of sudo",
+                extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+            )
+            return
+
+        # Try directly signaling the process(es) first
+        ctx_mgr = try_use_cap_kill() if is_linux() else nullcontext(enter_result=False)
+        with ctx_mgr as has_cap_kill:
+            if has_cap_kill or not self._user or self._user.is_process_user():
+                try:
+                    self._logger.info(
+                        f'INTERRUPT: Sending signal "{signal_name}" to process group {self._sudo_child_process_group_id}',
+                        extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+                    )
+                    os.killpg(self._sudo_child_process_group_id, numeric_signal)
+                except OSError:
+                    self._logger.info(
+                        "Could not directly send signal {signal_name} to {self._posix_signal_target.pid}, trying sudo.",
+                        extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+                    )
+                else:
+                    return
+            else:
+                self._logger.info(
+                    "Could not directly send signal {signal_name} to {process.pid}, trying sudo.",
+                    extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+                )
+
+        # Uncomment to visualize process tree when debugging tests
+        # self._log_process_tree()
+
+        kill_cmd.extend(
             [
-                str(POSIX_SIGNAL_SUBPROC_SCRIPT_PATH),
-                str(process.pid),
-                signal,
-                str(signal_child),
-                str(signal_subprocesses),
+                "kill",
+                "-s",
+                signal_name,
+                "--",
+                f"-{self._sudo_child_process_group_id}",
             ]
         )
         self._logger.info(
-            f"INTERRUPT: Running: {shlex.join(cmd)}",
+            f"INTERRUPT: Running: {shlex.join(kill_cmd)}",
             extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
         )
         result = run(
-            cmd,
+            kill_cmd,
             stdout=PIPE,
             stderr=STDOUT,
             stdin=DEVNULL,
         )
         if result.returncode != 0:
             self._logger.warning(
-                f"Failed to send signal '{signal}' to subprocess {process.pid}: %s",
+                f"Failed to send signal '{signal_name}' to PGID {self._sudo_child_process_group_id}: %s",
                 result.stdout.decode("utf-8"),
                 extra=LogExtraInfo(
                     openjd_log_content=LogContent.PROCESS_CONTROL | LogContent.EXCEPTION_INFO
                 ),
             )
+
+    def _log_process_tree(self) -> None:
+        """A developer method to visualize the process tree including PIDs and PGIDs when debuging tests"""
+        pstree_result = run(["pstree", "-pg"], stdout=PIPE, stderr=STDOUT, stdin=DEVNULL, text=True)
+        self._logger.debug(
+            f"pstree -pg output: {pstree_result.stdout}",
+            extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+        )
+        ps_result = run(["ps", "-ejH"], stdout=PIPE, stderr=STDOUT, stdin=DEVNULL, text=True)
+        self._logger.debug(
+            f"ps -ejH output:\n{ps_result.stdout}",
+            extra=LogExtraInfo(openjd_log_content=LogContent.PROCESS_CONTROL),
+        )
 
     def _windows_notify_subprocess(self) -> None:
         """Sends a CTRL_BREAK_EVENT signal to the subprocess"""
