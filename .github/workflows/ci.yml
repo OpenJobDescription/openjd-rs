@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [mainline]
+    branches: [main]
   pull_request:
-    branches: [mainline, release, "patch_*"]
+    branches: [main, release, "patch_*"]
 
 env:
   CARGO_INCREMENTAL: 0
@@ -29,8 +29,12 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+    name: Clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
       - name: Install rust stable with clippy
@@ -38,6 +42,8 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy
           rustup override set stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
       - name: Run cargo clippy
         run: cargo clippy --all-features --all-targets --workspace -- -D warnings
 
@@ -57,10 +63,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
-      - name: Build
-        run: cargo build --workspace --all-targets
       - name: Run tests
         run: cargo test --workspace
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install MSRV toolchain
+        run: |
+          rustup toolchain install 1.92 --profile minimal
+          rustup override set 1.92
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: Check compilation
+        run: cargo check --workspace
 
   doc:
     name: Documentation
