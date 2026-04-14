@@ -20,7 +20,10 @@ impl TrieNode {
         let parts: Vec<&str> = path.split('/').collect();
         let mut node = self;
         for &part in &parts[..parts.len() - 1] {
-            node = node.children.entry(part.to_string()).or_insert_with(TrieNode::new);
+            node = node
+                .children
+                .entry(part.to_string())
+                .or_insert_with(TrieNode::new);
         }
         let leaf = node
             .children
@@ -74,7 +77,10 @@ impl TrieNode {
         let parts: Vec<&str> = path.split('/').collect();
         let mut node = self;
         for &part in &parts[..parts.len() - 1] {
-            node = node.children.entry(part.to_string()).or_insert_with(TrieNode::new);
+            node = node
+                .children
+                .entry(part.to_string())
+                .or_insert_with(TrieNode::new);
         }
         let leaf = node
             .children
@@ -163,11 +169,8 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
 
     let mut trie = TrieNode::new();
 
-    let mut dir_set: HashMap<String, bool> = base
-        .dirs
-        .iter()
-        .map(|d| (d.path.clone(), false))
-        .collect();
+    let mut dir_set: HashMap<String, bool> =
+        base.dirs.iter().map(|d| (d.path.clone(), false)).collect();
 
     for f in &base.files {
         trie.insert(&f.path, f.clone());
@@ -182,11 +185,13 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
         }
 
         // Apply directory deletions (empty only, deepest first)
-        let mut deleted_dirs: Vec<&str> = diff.dirs.iter()
+        let mut deleted_dirs: Vec<&str> = diff
+            .dirs
+            .iter()
             .filter(|d| d.deleted)
             .map(|d| d.path.as_str())
             .collect();
-        deleted_dirs.sort_by(|a, b| b.len().cmp(&a.len()));
+        deleted_dirs.sort_by_key(|b| std::cmp::Reverse(b.len()));
         for dir_path in deleted_dirs {
             trie.delete_if_empty(dir_path);
         }
@@ -226,9 +231,7 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
 /// The result is equivalent to applying all input diffs in order.
 /// Uses `reconcile_deleted_flags` to handle directories that are
 /// deleted then re-populated by later diffs.
-pub fn compose_diffs<P: Clone>(
-    diffs: &[&Manifest<P, Diff>],
-) -> crate::Result<Manifest<P, Diff>> {
+pub fn compose_diffs<P: Clone>(diffs: &[&Manifest<P, Diff>]) -> crate::Result<Manifest<P, Diff>> {
     if diffs.is_empty() {
         return Err(crate::SnapshotError::Validation(
             "cannot compose empty list of diffs".into(),
@@ -270,7 +273,13 @@ pub fn compose_diffs<P: Clone>(
     let files = trie.collect_entries_with_deletions("");
     let dirs = dir_state
         .into_iter()
-        .map(|(path, deleted)| if deleted { crate::manifest::DirEntry::deleted(&path) } else { crate::manifest::DirEntry::new(&path) })
+        .map(|(path, deleted)| {
+            if deleted {
+                crate::manifest::DirEntry::deleted(&path)
+            } else {
+                crate::manifest::DirEntry::new(&path)
+            }
+        })
         .collect();
     let mut result = Manifest::new(diffs[0].hash_alg, diffs[0].file_chunk_size_bytes);
     result.files = files;
@@ -284,7 +293,7 @@ pub fn compose_diffs<P: Clone>(
 mod tests {
     use super::*;
     use crate::hash::HashAlgorithm;
-    use crate::manifest::{Rel, Full, Diff, DirEntry};
+    use crate::manifest::{Diff, DirEntry, Full, Rel};
     use crate::{FileEntry, Manifest, DEFAULT_FILE_CHUNK_SIZE};
 
     type RelSnapshot = Manifest<Rel, Full>;
@@ -357,7 +366,11 @@ mod tests {
         let diff2 = make_diff(vec![FileEntry::file("dir/new.txt", 10, 1)]);
         let result = compose_diffs(&[&diff1, &diff2]).unwrap();
         // dir/old.txt should still be deleted, dir/new.txt should be present
-        let new = result.files.iter().find(|f| f.path == "dir/new.txt").unwrap();
+        let new = result
+            .files
+            .iter()
+            .find(|f| f.path == "dir/new.txt")
+            .unwrap();
         assert!(!new.deleted);
     }
 
@@ -369,10 +382,10 @@ mod tests {
 
     #[test]
     fn compose_diffs_parent_hash_from_first() {
-        let diff1 = make_diff(vec![FileEntry::file("a.txt", 10, 1)])
-            .with_parent_hash(Some("hash1".into()));
-        let diff2 = make_diff(vec![FileEntry::file("b.txt", 20, 2)])
-            .with_parent_hash(Some("hash2".into()));
+        let diff1 =
+            make_diff(vec![FileEntry::file("a.txt", 10, 1)]).with_parent_hash(Some("hash1".into()));
+        let diff2 =
+            make_diff(vec![FileEntry::file("b.txt", 20, 2)]).with_parent_hash(Some("hash2".into()));
         let result = compose_diffs(&[&diff1, &diff2]).unwrap();
         assert_eq!(result.parent_manifest_hash.as_deref(), Some("hash1"));
     }
@@ -391,23 +404,27 @@ mod tests {
     #[test]
     fn compose_snapshot_chunk_size_mismatch_error() {
         let base = make_snapshot(vec![FileEntry::file("a.txt", 10, 1)]);
-        let diff: RelDiff = Manifest::new(HashAlgorithm::Xxh128, 1024).with_files(vec![
-            FileEntry::file("b.txt", 20, 2),
-        ]);
+        let diff: RelDiff = Manifest::new(HashAlgorithm::Xxh128, 1024)
+            .with_files(vec![FileEntry::file("b.txt", 20, 2)]);
         let result = compose_snapshot_with_diffs(&base, &[&diff]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("file_chunk_size_bytes mismatch"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_chunk_size_bytes mismatch"));
     }
 
     #[test]
     fn compose_diffs_chunk_size_mismatch_error() {
         let diff1 = make_diff(vec![FileEntry::file("a.txt", 10, 1)]);
-        let diff2: RelDiff = Manifest::new(HashAlgorithm::Xxh128, 1024).with_files(vec![
-            FileEntry::file("b.txt", 20, 2),
-        ]);
+        let diff2: RelDiff = Manifest::new(HashAlgorithm::Xxh128, 1024)
+            .with_files(vec![FileEntry::file("b.txt", 20, 2)]);
         let result = compose_diffs(&[&diff1, &diff2]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("file_chunk_size_bytes mismatch"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("file_chunk_size_bytes mismatch"));
     }
 
     #[test]

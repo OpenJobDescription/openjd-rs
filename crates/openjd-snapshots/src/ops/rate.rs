@@ -22,9 +22,7 @@ impl SlidingWindowRate {
         self.history.push_back((timestamp, cumulative_bytes));
 
         // Trim entries outside the window, but keep the oldest boundary entry.
-        while self.history.len() > 2
-            && timestamp - self.history[1].0 > RATE_WINDOW_SECONDS
-        {
+        while self.history.len() > 2 && timestamp - self.history[1].0 > RATE_WINDOW_SECONDS {
             self.history.pop_front();
         }
 
@@ -55,7 +53,10 @@ mod tests {
         for i in 1..=5 {
             let rate = r.update(i as f64, i * 1000);
             let expected = 1000.0;
-            assert!((rate - expected).abs() < 1.0, "at t={i}: rate={rate}, expected={expected}");
+            assert!(
+                (rate - expected).abs() < 1.0,
+                "at t={i}: rate={rate}, expected={expected}"
+            );
         }
     }
 

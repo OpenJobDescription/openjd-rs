@@ -26,7 +26,9 @@ fn do_compare(op_str: &str, a: &[ExprValue]) -> Result<std::cmp::Ordering, Expre
     a[0].compare(&a[1]).map_err(|_| {
         ExpressionError::type_error(format!(
             "Cannot use '{}' operator with {} and {}",
-            op_str, a[0].expr_type(), a[1].expr_type()
+            op_str,
+            a[0].expr_type(),
+            a[1].expr_type()
         ))
     })
 }
@@ -125,9 +127,7 @@ fn compute_slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: 
         let s = start
             .map(|i| if i < 0 { len + i } else { i.min(len - 1) })
             .unwrap_or(len - 1);
-        let e = stop
-            .map(|i| if i < 0 { len + i } else { i })
-            .unwrap_or(-1);
+        let e = stop.map(|i| if i < 0 { len + i } else { i }).unwrap_or(-1);
         (s, e)
     }
 }
@@ -168,7 +168,7 @@ pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .filter_map(|i| a[0].list_get(i as i64))
         .collect();
     ctx.count_ops(result.len())?;
-    Ok(ExprValue::make_list(result, elem_type.clone())?)
+    ExprValue::make_list(result, elem_type.clone())
 }
 
 pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {

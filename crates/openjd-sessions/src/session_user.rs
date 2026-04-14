@@ -49,7 +49,9 @@ impl PosixSessionUser {
 
 #[cfg(unix)]
 impl SessionUser for PosixSessionUser {
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn user(&self) -> &str {
         &self.user
     }
@@ -111,7 +113,11 @@ impl WindowsSessionUser {
     pub fn for_process_user() -> Result<Self, String> {
         let user = crate::win32::get_process_user()
             .map_err(|e| format!("Failed to get process user: {e}"))?;
-        Ok(Self { user, password: None, logon_token: None })
+        Ok(Self {
+            user,
+            password: None,
+            logon_token: None,
+        })
     }
 
     /// Create a WindowsSessionUser with a password (non-Session 0 only).
@@ -192,7 +198,9 @@ impl WindowsSessionUser {
 
 #[cfg(windows)]
 impl SessionUser for WindowsSessionUser {
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn user(&self) -> &str {
         &self.user
     }

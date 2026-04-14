@@ -44,7 +44,11 @@ fn test_writes_file() {
 fn test_truncates_file() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("testfile.txt");
-    fs::write(&path, "This needs to be longer than our test data to test truncation").unwrap();
+    fs::write(
+        &path,
+        "This needs to be longer than our test data to test truncation",
+    )
+    .unwrap();
 
     let data = "some text data";
     write_embedded_file_with_options(&path, data, false, None).unwrap();
@@ -128,9 +132,21 @@ fn test_materialize_basic() {
     }
 
     let files = vec![
-        FileSpec { name: "Foo", data: "foo's data", runnable: false },
-        FileSpec { name: "Bar", data: "bar's data", runnable: true },
-        FileSpec { name: "Baz", data: "baz's data", runnable: false },
+        FileSpec {
+            name: "Foo",
+            data: "foo's data",
+            runnable: false,
+        },
+        FileSpec {
+            name: "Bar",
+            data: "bar's data",
+            runnable: true,
+        },
+        FileSpec {
+            name: "Baz",
+            data: "baz's data",
+            runnable: false,
+        },
     ];
 
     for f in &files {
@@ -168,11 +184,7 @@ fn test_materialize_resolved_data() {
     let bar_path = tmp.path().join("bar.txt");
 
     // Simulate resolved data (format strings already evaluated)
-    let resolved = format!(
-        "Symbol\n{}\n{}",
-        foo_path.display(),
-        bar_path.display()
-    );
+    let resolved = format!("Symbol\n{}\n{}", foo_path.display(), bar_path.display());
 
     write_embedded_file(&foo_path, &resolved).unwrap();
     write_embedded_file(&bar_path, &resolved).unwrap();

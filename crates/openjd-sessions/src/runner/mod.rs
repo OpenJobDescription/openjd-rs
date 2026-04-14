@@ -44,9 +44,7 @@ pub enum CancelMethod {
     /// Immediately terminate via SIGKILL.
     Terminate,
     /// Send SIGTERM, wait for grace period, then SIGKILL.
-    NotifyThenTerminate {
-        terminate_delay: Duration,
-    },
+    NotifyThenTerminate { terminate_delay: Duration },
 }
 
 /// State of a script runner.
@@ -81,7 +79,12 @@ pub(crate) struct ScriptRunnerBase {
 }
 
 impl ScriptRunnerBase {
-    pub fn new(session_id: &str, working_directory: PathBuf, files_directory: PathBuf, user: Option<Arc<dyn SessionUser>>) -> Self {
+    pub fn new(
+        session_id: &str,
+        working_directory: PathBuf,
+        files_directory: PathBuf,
+        user: Option<Arc<dyn SessionUser>>,
+    ) -> Self {
         Self {
             state: ScriptRunnerState::Ready,
             cancel_token: CancellationToken::new(),
@@ -130,7 +133,14 @@ impl ScriptRunnerBase {
         #[cfg(unix)]
         if let Some(ref mut helper) = self.helper {
             let result = tokio::task::block_in_place(|| {
-                crate::cross_user_helper::run_via_helper(helper, &config, &mut filter, &self.session_id, message_tx, None)
+                crate::cross_user_helper::run_via_helper(
+                    helper,
+                    &config,
+                    &mut filter,
+                    &self.session_id,
+                    message_tx,
+                    None,
+                )
             })?;
             self.state = state_from_action(result.state);
             return Ok(result);
@@ -166,13 +176,17 @@ pub(crate) fn cancel_method_for_action(
 ) -> CancelMethod {
     match cancelation {
         None | Some(CancelationMode::Terminate) => CancelMethod::Terminate,
-        Some(CancelationMode::NotifyThenTerminate { notify_period_in_seconds }) => {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds,
+        }) => {
             let period = notify_period_in_seconds
                 .as_ref()
                 .and_then(|fs| fs.raw().parse::<u64>().ok())
                 .map(Duration::from_secs)
                 .unwrap_or(default_notify_period);
-            CancelMethod::NotifyThenTerminate { terminate_delay: period }
+            CancelMethod::NotifyThenTerminate {
+                terminate_delay: period,
+            }
         }
     }
 }
@@ -193,11 +207,9 @@ pub(crate) fn resolve_action_timeout(
                     reason: e.to_string(),
                 }
             })?;
-            let secs: u64 = s.parse().map_err(|_| {
-                SessionError::FormatString {
-                    context: "timeout".into(),
-                    reason: format!("timeout must be a positive integer, got '{s}'"),
-                }
+            let secs: u64 = s.parse().map_err(|_| SessionError::FormatString {
+                context: "timeout".into(),
+                reason: format!("timeout must be a positive integer, got '{s}'"),
             })?;
             if secs == 0 {
                 return Err(SessionError::FormatString {
@@ -242,12 +254,12 @@ pub(crate) fn resolve_action_args(
                     val => args.push(val.to_display_string()),
                 }
             } else {
-                let s = fs
-                    .resolve_string(symtab, library, rules)
-                    .map_err(|e| SessionError::FormatString {
+                let s = fs.resolve_string(symtab, library, rules).map_err(|e| {
+                    SessionError::FormatString {
                         context: "argument".into(),
                         reason: e.to_string(),
-                    })?;
+                    }
+                })?;
                 args.push(s);
             }
         }

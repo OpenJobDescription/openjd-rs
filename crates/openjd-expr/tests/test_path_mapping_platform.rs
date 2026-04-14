@@ -128,10 +128,7 @@ mod posix_host {
             posix_rule("/mnt", "/local"),
         ];
         // /mnt/a/file matches the first rule
-        assert_eq!(
-            apply_rules(&rules, "/mnt/a/file"),
-            "/local/a/file"
-        );
+        assert_eq!(apply_rules(&rules, "/mnt/a/file"), "/local/a/file");
     }
 
     #[test]
@@ -293,9 +290,7 @@ mod windows_host {
 
 #[test]
 fn apply_rules_with_format_posix_output() {
-    let rules = vec![
-        windows_rule(r"C:\projects", "/mnt/projects"),
-    ];
+    let rules = vec![windows_rule(r"C:\projects", "/mnt/projects")];
     assert_eq!(
         apply_rules_with_format(&rules, r"C:\projects\scene\file.ma", PathFormat::Posix),
         "/mnt/projects/scene/file.ma"
@@ -304,9 +299,7 @@ fn apply_rules_with_format_posix_output() {
 
 #[test]
 fn apply_rules_with_format_windows_output() {
-    let rules = vec![
-        posix_rule("/mnt/shared", r"C:\local\shared"),
-    ];
+    let rules = vec![posix_rule("/mnt/shared", r"C:\local\shared")];
     assert_eq!(
         apply_rules_with_format(&rules, "/mnt/shared/dir/file.txt", PathFormat::Windows),
         r"C:\local\shared\dir\file.txt"
@@ -315,9 +308,7 @@ fn apply_rules_with_format_windows_output() {
 
 #[test]
 fn apply_rules_with_format_uri_to_posix() {
-    let rules = vec![
-        uri_rule("s3://bucket/assets", "/local/assets"),
-    ];
+    let rules = vec![uri_rule("s3://bucket/assets", "/local/assets")];
     assert_eq!(
         apply_rules_with_format(&rules, "s3://bucket/assets/file.obj", PathFormat::Posix),
         "/local/assets/file.obj"
@@ -326,9 +317,7 @@ fn apply_rules_with_format_uri_to_posix() {
 
 #[test]
 fn apply_rules_with_format_uri_to_windows() {
-    let rules = vec![
-        uri_rule("s3://bucket/assets", r"D:\cache\assets"),
-    ];
+    let rules = vec![uri_rule("s3://bucket/assets", r"D:\cache\assets")];
     assert_eq!(
         apply_rules_with_format(&rules, "s3://bucket/assets/file.obj", PathFormat::Windows),
         r"D:\cache\assets\file.obj"

@@ -40,7 +40,10 @@ const ALL_FIXTURES: &[(&str, &str)] = &[
 fn decode_to_snapshot(json: &str) -> Snapshot {
     match decode_manifest(json).unwrap() {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("Expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "Expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 
@@ -55,7 +58,12 @@ macro_rules! round_trip_test {
             let canonical = $fixture;
             let snapshot = decode_v2023(canonical).unwrap();
             let re_encoded = encode_snapshot_v2023(&snapshot).unwrap();
-            assert_eq!(re_encoded, canonical, "Round-trip mismatch for {}", stringify!($name));
+            assert_eq!(
+                re_encoded,
+                canonical,
+                "Round-trip mismatch for {}",
+                stringify!($name)
+            );
         }
     };
 }
@@ -84,7 +92,12 @@ macro_rules! scrambled_test {
             let mut snapshot = decode_v2023(canonical).unwrap();
             snapshot.files.reverse();
             let re_encoded = encode_snapshot_v2023(&snapshot).unwrap();
-            assert_eq!(re_encoded, canonical, "Scrambled order mismatch for {}", stringify!($name));
+            assert_eq!(
+                re_encoded,
+                canonical,
+                "Scrambled order mismatch for {}",
+                stringify!($name)
+            );
         }
     };
 }
@@ -186,7 +199,13 @@ fn utf16be_sort_order_verified() {
     // Verify the expected order: ASCII < non-ASCII, uppercase < lowercase in UTF-16 BE
     assert_eq!(
         paths,
-        vec!["Atop.txt", "ztop.txt", "~tilde.txt", "\u{00e9}accent.txt", "\u{0100}macron.txt"]
+        vec![
+            "Atop.txt",
+            "ztop.txt",
+            "~tilde.txt",
+            "\u{00e9}accent.txt",
+            "\u{0100}macron.txt"
+        ]
     );
 }
 
@@ -258,11 +277,19 @@ fn extreme_values_round_trip_precision() {
     let snapshot = decode_to_snapshot(EXTREME_VALUES);
 
     // Verify large values survived decode
-    let huge = snapshot.files.iter().find(|f| f.path == "huge.dat").unwrap();
+    let huge = snapshot
+        .files
+        .iter()
+        .find(|f| f.path == "huge.dat")
+        .unwrap();
     assert_eq!(huge.size, Some(1_099_511_627_776)); // 1 TiB
     assert_eq!(huge.mtime, Some(9_999_999_999_999_999));
 
-    let tiny = snapshot.files.iter().find(|f| f.path == "tiny.txt").unwrap();
+    let tiny = snapshot
+        .files
+        .iter()
+        .find(|f| f.path == "tiny.txt")
+        .unwrap();
     assert_eq!(tiny.size, Some(0));
     assert_eq!(tiny.mtime, Some(0));
 
@@ -281,8 +308,8 @@ fn extreme_values_round_trip_precision() {
 fn cross_implementation_all_fixtures() {
     for (name, fixture) in ALL_FIXTURES {
         // Python produced it, Rust can decode it
-        let snapshot = decode_v2023(fixture)
-            .unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
+        let snapshot =
+            decode_v2023(fixture).unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
 
         // Rust re-encodes to identical output
         let re_encoded = encode_snapshot_v2023(&snapshot)

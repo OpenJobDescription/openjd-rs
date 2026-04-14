@@ -14,22 +14,15 @@ use std::fmt;
 pub enum ExpressionErrorKind {
     /// A referenced variable was not found in any symbol table.
     #[error("Undefined variable: '{name}'.{suggestion}")]
-    UndefinedVariable {
-        name: String,
-        suggestion: String,
-    },
+    UndefinedVariable { name: String, suggestion: String },
 
     /// A referenced function was not found in the function library.
     #[error("Unknown function: '{name}'")]
-    UnknownFunction {
-        name: String,
-    },
+    UnknownFunction { name: String },
 
     /// Argument types did not match any overload signature.
     #[error("{message}")]
-    TypeError {
-        message: String,
-    },
+    TypeError { message: String },
 
     /// An integer operation overflowed the 64-bit signed range.
     #[error("Integer overflow: result is outside the 64-bit signed range")]
@@ -37,28 +30,19 @@ pub enum ExpressionErrorKind {
 
     /// Division or modulo by zero.
     #[error("{op} by zero")]
-    DivisionByZero {
-        op: &'static str,
-    },
+    DivisionByZero { op: &'static str },
 
     /// A float operation produced infinity or NaN.
     #[error("{message}")]
-    FloatError {
-        message: String,
-    },
+    FloatError { message: String },
 
     /// An index was out of bounds for a list, string, or range expression.
     #[error("{message}")]
-    IndexOutOfBounds {
-        message: String,
-    },
+    IndexOutOfBounds { message: String },
 
     /// Expression memory usage exceeded the configured limit.
     #[error("Expression memory usage ({used} bytes) exceeded limit ({limit} bytes)")]
-    MemoryLimitExceeded {
-        used: usize,
-        limit: usize,
-    },
+    MemoryLimitExceeded { used: usize, limit: usize },
 
     /// Expression operation count exceeded the configured limit.
     #[error("Operation limit exceeded")]
@@ -66,9 +50,7 @@ pub enum ExpressionErrorKind {
 
     /// A Python syntax feature that is not supported in the expression language.
     #[error("{feature}")]
-    UnsupportedSyntax {
-        feature: String,
-    },
+    UnsupportedSyntax { feature: String },
 
     /// The `fail()` function was called explicitly.
     #[error("{0}")]
@@ -100,7 +82,13 @@ pub struct ExpressionError {
 impl ExpressionError {
     /// Create an error from a structured kind.
     pub fn from_kind(kind: ExpressionErrorKind) -> Self {
-        Self { kind, expr: None, col_offset: None, end_col_offset: None, caret_offset: None }
+        Self {
+            kind,
+            expr: None,
+            col_offset: None,
+            end_col_offset: None,
+            caret_offset: None,
+        }
     }
 
     /// Create an error with a plain message string.
@@ -126,22 +114,30 @@ impl ExpressionError {
 
     /// Float produced infinity or NaN.
     pub fn float_error(message: impl Into<String>) -> Self {
-        Self::from_kind(ExpressionErrorKind::FloatError { message: message.into() })
+        Self::from_kind(ExpressionErrorKind::FloatError {
+            message: message.into(),
+        })
     }
 
     /// Type mismatch error.
     pub fn type_error(message: impl Into<String>) -> Self {
-        Self::from_kind(ExpressionErrorKind::TypeError { message: message.into() })
+        Self::from_kind(ExpressionErrorKind::TypeError {
+            message: message.into(),
+        })
     }
 
     /// Index out of bounds.
     pub fn index_out_of_bounds(message: impl Into<String>) -> Self {
-        Self::from_kind(ExpressionErrorKind::IndexOutOfBounds { message: message.into() })
+        Self::from_kind(ExpressionErrorKind::IndexOutOfBounds {
+            message: message.into(),
+        })
     }
 
     /// Unsupported Python syntax feature.
     pub fn unsupported(feature: impl Into<String>) -> Self {
-        Self::from_kind(ExpressionErrorKind::UnsupportedSyntax { feature: feature.into() })
+        Self::from_kind(ExpressionErrorKind::UnsupportedSyntax {
+            feature: feature.into(),
+        })
     }
 
     /// Explicit fail() call.
@@ -183,7 +179,9 @@ impl ExpressionError {
     #[must_use]
     pub fn with_node(mut self, expr_source: &str, node: &ruff_python_ast::Expr) -> Self {
         use ruff_text_size::Ranged;
-        if self.expr.is_some() { return self; }
+        if self.expr.is_some() {
+            return self;
+        }
         self.expr = Some(expr_source.to_string());
         let range = node.range();
         self.col_offset = Some(range.start().to_usize());
@@ -195,7 +193,9 @@ impl ExpressionError {
     /// Attach expression source with explicit span (no AST node).
     #[must_use]
     pub fn with_span(mut self, expr_source: &str, col: usize, end_col: usize) -> Self {
-        if self.expr.is_some() { return self; }
+        if self.expr.is_some() {
+            return self;
+        }
         self.expr = Some(expr_source.to_string());
         self.col_offset = Some(col);
         self.end_col_offset = Some(end_col);
@@ -204,7 +204,13 @@ impl ExpressionError {
 
     /// Set the expression source and span directly (for cases where `with_node`
     /// cannot be used because the span is computed manually).
-    pub fn set_source_span(&mut self, expr_source: &str, col: usize, end_col: usize, caret_offset: usize) {
+    pub fn set_source_span(
+        &mut self,
+        expr_source: &str,
+        col: usize,
+        end_col: usize,
+        caret_offset: usize,
+    ) {
         self.expr = Some(expr_source.to_string());
         self.col_offset = Some(col);
         self.end_col_offset = Some(end_col);
@@ -222,7 +228,9 @@ impl ExpressionError {
     /// Falls back to the normal `Display` output for multi-line or
     /// context-free errors.
     pub fn message_with_expr_prefix(&self, prefix: &str) -> String {
-        let (Some(expr), Some(col), Some(end_col)) = (&self.expr, self.col_offset, self.end_col_offset) else {
+        let (Some(expr), Some(col), Some(end_col)) =
+            (&self.expr, self.col_offset, self.end_col_offset)
+        else {
             return self.to_string();
         };
         if expr.contains('\n') {
@@ -237,7 +245,10 @@ impl ExpressionError {
         let prefix_len = prefix.len();
         let span_len = end_col.saturating_sub(col);
         if span_len > 1 {
-            let caret_idx = self.caret_offset.unwrap_or(0).min(span_len.saturating_sub(1));
+            let caret_idx = self
+                .caret_offset
+                .unwrap_or(0)
+                .min(span_len.saturating_sub(1));
             out.push_str(&" ".repeat(col + prefix_len));
             out.push_str(&"~".repeat(caret_idx));
             out.push('^');
@@ -253,10 +264,16 @@ impl ExpressionError {
 impl fmt::Display for ExpressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)?;
-        if let (Some(expr), Some(col), Some(end_col)) = (&self.expr, self.col_offset, self.end_col_offset) {
+        if let (Some(expr), Some(col), Some(end_col)) =
+            (&self.expr, self.col_offset, self.end_col_offset)
+        {
             let is_multiline = expr.contains('\n');
             // For multi-line, the parser wraps in parens shifting offsets by 1
-            let (col, end_col) = if is_multiline { (col.saturating_sub(1), end_col.saturating_sub(1)) } else { (col, end_col) };
+            let (col, end_col) = if is_multiline {
+                (col.saturating_sub(1), end_col.saturating_sub(1))
+            } else {
+                (col, end_col)
+            };
 
             // Find the line containing col_offset and adjust to line-relative offsets
             let (expr_line, line_col, line_end_col) = if is_multiline {
@@ -272,7 +289,11 @@ impl fmt::Display for ExpressionError {
                     pos += line.len() + 1; // +1 for \n
                 }
                 let lc = col - line_start;
-                let lec = if end_col > line_start { (end_col - line_start).min(found_line.len()) } else { lc + 1 };
+                let lec = if end_col > line_start {
+                    (end_col - line_start).min(found_line.len())
+                } else {
+                    lc + 1
+                };
                 (found_line, lc, lec)
             } else {
                 (expr.as_str(), col, end_col)
@@ -282,8 +303,11 @@ impl fmt::Display for ExpressionError {
 
             let span_len = line_end_col.saturating_sub(line_col);
             if span_len > 1 {
-                let caret_idx = self.caret_offset.unwrap_or(0).min(span_len.saturating_sub(1));
-                write!(f, "{}{}{}", " ".repeat(line_col), "~".repeat(caret_idx), "^")?;
+                let caret_idx = self
+                    .caret_offset
+                    .unwrap_or(0)
+                    .min(span_len.saturating_sub(1));
+                write!(f, "{}{}^", " ".repeat(line_col), "~".repeat(caret_idx))?;
                 write!(f, "{}", "~".repeat(span_len.saturating_sub(caret_idx + 1)))?;
             } else {
                 write!(f, "{}^", " ".repeat(line_col))?;
@@ -311,16 +335,25 @@ fn compute_caret_offset(expr: &str, node: &ruff_python_ast::Expr) -> usize {
             // Scan backwards from right operand to find operator
             let bytes = expr.as_bytes();
             let mut i = right_start.saturating_sub(1);
-            while i > left_end && i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'(') {
+            while i > left_end
+                && i < bytes.len()
+                && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'(')
+            {
                 i -= 1;
             }
             // Check for two-char operators (**, //)
-            if i > left_end && i < bytes.len() {
-                if i >= 1 && (bytes[i-1..=i] == *b"**" || bytes[i-1..=i] == *b"//") {
-                    return (i - 1) - node_start;
-                }
+            if i > left_end
+                && i < bytes.len()
+                && i >= 1
+                && (bytes[i - 1..=i] == *b"**" || bytes[i - 1..=i] == *b"//")
+            {
+                return (i - 1) - node_start;
             }
-            if i >= left_end && i < bytes.len() { i - node_start } else { 0 }
+            if i >= left_end && i < bytes.len() {
+                i - node_start
+            } else {
+                0
+            }
         }
         ast::Expr::Attribute(a) => {
             let value_end = a.value.range().end().to_usize();

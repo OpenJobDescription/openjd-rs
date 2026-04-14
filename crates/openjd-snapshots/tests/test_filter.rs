@@ -56,10 +56,14 @@ trait HasDirs {
     fn dir_entries(&self) -> &[DirEntry];
 }
 impl<P, K> HasFiles for Manifest<P, K> {
-    fn file_entries(&self) -> &[FileEntry] { &self.files }
+    fn file_entries(&self) -> &[FileEntry] {
+        &self.files
+    }
 }
 impl<P, K> HasDirs for Manifest<P, K> {
-    fn dir_entries(&self) -> &[DirEntry] { &self.dirs }
+    fn dir_entries(&self) -> &[DirEntry] {
+        &self.dirs
+    }
 }
 
 // --- TestMatchesPatterns ---
@@ -97,11 +101,13 @@ fn matches_patterns_multiple_include_patterns() {
 fn matches_patterns_exclude_pattern_matches() {
     let f = IncludeExcludePathsFilter::new(&[], &["backup/*"]).unwrap();
     assert!(!f.matches_path("backup/file.txt"));
-    assert!(!f.matches_path("cache/data.bin").then(|| false).unwrap_or({
+    assert!(!if f.matches_path("cache/data.bin") {
+        false
+    } else {
         // cache/* doesn't match backup/* pattern
         let f2 = IncludeExcludePathsFilter::new(&[], &["cache/*"]).unwrap();
         !f2.matches_path("cache/data.bin")
-    }));
+    });
 }
 
 #[test]
@@ -362,7 +368,11 @@ fn rel_filter_files_with_include_pattern() {
 fn rel_filter_directories() {
     let m = rel_snapshot_with(
         vec![hashed_file("src/main.py", "h1", 100, 1000)],
-        vec![DirEntry::new("src"), DirEntry::new("backup"), DirEntry::new("cache")],
+        vec![
+            DirEntry::new("src"),
+            DirEntry::new("backup"),
+            DirEntry::new("cache"),
+        ],
     );
     let f = IncludeExcludePathsFilter::new(&["src*"], &[]).unwrap();
     let filtered = filter_manifest(&m, &|e| f.matches(e));
@@ -383,7 +393,10 @@ fn rel_filter_symlinks() {
     let filtered = filter_manifest(&m, &|e| f.matches(e));
     assert_eq!(filtered.files.len(), 1);
     assert_eq!(filtered.files[0].path, "link.blend");
-    assert_eq!(filtered.files[0].symlink_target.as_deref(), Some("target.blend"));
+    assert_eq!(
+        filtered.files[0].symlink_target.as_deref(),
+        Some("target.blend")
+    );
 }
 
 #[test]
@@ -457,11 +470,8 @@ fn abs_diff_filter_deleted_entries() {
 
 #[test]
 fn abs_diff_filter_preserves_parent_hash() {
-    let m = abs_diff_with(
-        vec![hashed_file("/a.txt", "h1", 10, 1000)],
-        vec![],
-    )
-    .with_parent_hash(Some("parent123".into()));
+    let m = abs_diff_with(vec![hashed_file("/a.txt", "h1", 10, 1000)], vec![])
+        .with_parent_hash(Some("parent123".into()));
     let f = IncludeExcludePathsFilter::new(&[], &[]).unwrap();
     let filtered = filter_manifest(&m, &|e| f.matches(e));
     assert_eq!(filtered.parent_manifest_hash.as_deref(), Some("parent123"));
@@ -574,7 +584,7 @@ fn custom_filter_by_size() {
         vec![],
     );
     let filtered = filter_manifest(&m, &|e| match e {
-        ManifestEntry::File(f) => f.size.map_or(true, |s| s >= 1000),
+        ManifestEntry::File(f) => f.size.is_none_or(|s| s >= 1000),
         ManifestEntry::Dir(_) => true,
     });
     let p = paths(&filtered);

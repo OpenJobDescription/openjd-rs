@@ -1,4 +1,4 @@
-use super::memory_pool::{MemoryPool, default_max_memory_bytes};
+use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::{AsyncDataCache, CopyResult};
 use crate::manifest::ManifestRef;
@@ -6,20 +6,11 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[derive(Default)]
 pub struct CacheSyncOptions {
     pub max_workers: Option<usize>,
     pub max_memory_bytes: Option<usize>,
-    pub on_progress: Option<Box<dyn Fn(&CacheSyncStatistics) -> bool + Send + Sync>>,
-}
-
-impl Default for CacheSyncOptions {
-    fn default() -> Self {
-        Self {
-            max_workers: None,
-            max_memory_bytes: None,
-            on_progress: None,
-        }
-    }
+    pub on_progress: Option<Box<super::ProgressFn<CacheSyncStatistics>>>,
 }
 
 #[derive(Debug)]
@@ -58,10 +49,13 @@ async fn transfer_object(
         transfer_object_multipart(src, dst, hash, alg, size_est, part_size, memory_pool).await
     } else {
         let _mem_permit = memory_pool.acquire(size_est as usize).await;
-        let data = src.get_object(hash, alg).await
+        let data = src
+            .get_object(hash, alg)
+            .await
             .map_err(crate::SnapshotError::Io)?;
         let actual_size = data.len() as u64;
-        dst.put_object(hash, alg, data).await
+        dst.put_object(hash, alg, data)
+            .await
             .map_err(crate::SnapshotError::Io)?;
         Ok(actual_size)
     }
@@ -78,10 +72,12 @@ async fn transfer_object_multipart(
 ) -> crate::Result<u64> {
     use futures_util::stream::{FuturesUnordered, StreamExt};
 
-    let upload_id = dst.create_multipart_upload(hash, alg).await
+    let upload_id = dst
+        .create_multipart_upload(hash, alg)
+        .await
         .map_err(crate::SnapshotError::Io)?;
 
-    let num_parts = ((size_est as usize + part_size - 1) / part_size) as i32;
+    let num_parts = (size_est as usize).div_ceil(part_size) as i32;
     let mut futures = FuturesUnordered::new();
     let mut parts = Vec::with_capacity(num_parts as usize);
     let uid: &str = &upload_id;
@@ -92,9 +88,13 @@ async fn transfer_object_multipart(
 
         futures.push(async move {
             let _permit = memory_pool.acquire(part_size).await;
-            let data = src.get_object_range(hash, alg, start, end).await
+            let data = src
+                .get_object_range(hash, alg, start, end)
+                .await
                 .map_err(crate::SnapshotError::Io)?;
-            let etag = dst.upload_part(hash, alg, uid, part_num, data).await
+            let etag = dst
+                .upload_part(hash, alg, uid, part_num, data)
+                .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok::<_, crate::SnapshotError>((part_num, etag))
         });
@@ -106,11 +106,13 @@ async fn transfer_object_multipart(
         }
         parts.sort_by_key(|(num, _)| *num);
         Ok(parts)
-    }.await;
+    }
+    .await;
 
     match result {
         Ok(parts) => {
-            dst.complete_multipart_upload(hash, alg, &upload_id, parts).await
+            dst.complete_multipart_upload(hash, alg, &upload_id, parts)
+                .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok(size_est)
         }
@@ -164,11 +166,13 @@ pub async fn cache_sync_manifest(
         }
     }
 
-    let mut stats = CacheSyncStatistics::default();
-    stats.total_objects = work_items.len();
-    stats.total_bytes = work_items.iter().map(|(_, _, s)| *s).sum();
+    let mut stats = CacheSyncStatistics {
+        total_objects: work_items.len(),
+        total_bytes: work_items.iter().map(|(_, _, s)| *s).sum(),
+        ..Default::default()
+    };
 
-    let on_progress: Option<Arc<dyn Fn(&CacheSyncStatistics) -> bool + Send + Sync>> =
+    let on_progress: Option<Arc<super::ProgressFn<CacheSyncStatistics>>> =
         options.on_progress.map(|f| Arc::from(f));
 
     if work_items.is_empty() {
@@ -181,7 +185,9 @@ pub async fn cache_sync_manifest(
     }
 
     let num_workers = options.max_workers.unwrap_or(10);
-    let max_memory = options.max_memory_bytes.unwrap_or_else(default_max_memory_bytes);
+    let max_memory = options
+        .max_memory_bytes
+        .unwrap_or_else(default_max_memory_bytes);
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let progress_stats = Arc::new(Mutex::new(stats.clone()));
@@ -203,7 +209,9 @@ pub async fn cache_sync_manifest(
         let start = start_time;
 
         handles.push(tokio::spawn(async move {
-            let _worker_permit = worker_sem.acquire_owned().await
+            let _worker_permit = worker_sem
+                .acquire_owned()
+                .await
                 .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
 
             if cancelled.load(Ordering::Relaxed) {
@@ -222,7 +230,8 @@ pub async fn cache_sync_manifest(
                     s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
                 }
                 if s.total_bytes > 0 {
-                    s.progress = ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress =
+                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -246,7 +255,9 @@ pub async fn cache_sync_manifest(
                         s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                        s.progress = ((s.copied_bytes + s.skipped_bytes) as f64
+                            / s.total_bytes as f64)
+                            * 100.0;
                     }
                     if let Some(ref cb) = on_progress {
                         if !cb(&s) {
@@ -261,9 +272,8 @@ pub async fn cache_sync_manifest(
                 }
             }
 
-            let actual_size = transfer_object(
-                src.as_ref(), dst.as_ref(), &hash, &alg, size_est, &pool
-            ).await?;
+            let actual_size =
+                transfer_object(src.as_ref(), dst.as_ref(), &hash, &alg, size_est, &pool).await?;
 
             {
                 let mut s = progress_stats.lock().unwrap();
@@ -276,7 +286,8 @@ pub async fn cache_sync_manifest(
                     s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
                 }
                 if s.total_bytes > 0 {
-                    s.progress = ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress =
+                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -310,16 +321,23 @@ pub async fn cache_sync_manifest(
         stats.rate = rc.update(stats.total_time, stats.copied_bytes + stats.skipped_bytes);
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.copied_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress =
+            ((stats.copied_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
     }
 
     let mut parts = vec![
-        format!("Synced {}", crate::hash::human_readable_file_size(stats.total_bytes)),
+        format!(
+            "Synced {}",
+            crate::hash::human_readable_file_size(stats.total_bytes)
+        ),
         format!("({} objects)", stats.total_objects),
         format!("in {:.2}s", stats.total_time),
     ];
     if stats.total_time > 0.0 {
-        parts.push(format!("({}/s)", crate::hash::human_readable_file_size(stats.rate as u64)));
+        parts.push(format!(
+            "({}/s)",
+            crate::hash::human_readable_file_size(stats.rate as u64)
+        ));
     }
     stats.progress_message = parts.join(" ");
 
@@ -339,12 +357,15 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_manifest(files: Vec<FileEntry>) -> RelManifest {
-        RelManifest::Snapshot(
-            Manifest::new(HashAlgorithm::Xxh128, -1).with_files(files),
-        )
+        RelManifest::Snapshot(Manifest::new(HashAlgorithm::Xxh128, -1).with_files(files))
     }
 
-    fn make_caches() -> (TempDir, TempDir, Arc<dyn AsyncDataCache>, Arc<dyn AsyncDataCache>) {
+    fn make_caches() -> (
+        TempDir,
+        TempDir,
+        Arc<dyn AsyncDataCache>,
+        Arc<dyn AsyncDataCache>,
+    ) {
         let src_dir = TempDir::new().unwrap();
         let dst_dir = TempDir::new().unwrap();
         let src: Arc<dyn AsyncDataCache> =
@@ -388,8 +409,13 @@ mod tests {
         ]);
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst.clone(), CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst.clone(),
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.copied_objects, 2);
         assert!(exists(&dst, "hash_a", "xxh128").await);
@@ -419,8 +445,13 @@ mod tests {
         ]);
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst, CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst,
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.skipped_objects, 1);
         assert_eq!(result.statistics.copied_objects, 1);
@@ -432,18 +463,22 @@ mod tests {
         put(&src, "chunk_0", "xxh128", b"aaa").await;
         put(&src, "chunk_1", "xxh128", b"bbb").await;
 
-        let manifest = RelManifest::Snapshot(
-            Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![{
+        let manifest =
+            RelManifest::Snapshot(Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![{
                 let mut e = FileEntry::new("big.bin");
                 e.size = Some(6);
                 e.chunk_hashes = Some(vec!["chunk_0".into(), "chunk_1".into()]);
                 e
-            }]),
-        );
+            }]));
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst.clone(), CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst.clone(),
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.copied_objects, 2);
         assert!(exists(&dst, "chunk_0", "xxh128").await);
@@ -468,8 +503,13 @@ mod tests {
         ]);
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst, CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst,
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.total_objects, 1);
         assert_eq!(result.statistics.copied_objects, 1);
@@ -496,8 +536,13 @@ mod tests {
         ]);
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst, CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst,
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.total_objects, 1);
         assert_eq!(result.statistics.copied_objects, 1);
@@ -505,21 +550,28 @@ mod tests {
 
     #[tokio::test]
     async fn sync_uses_multipart_for_large_objects() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::collections::HashMap;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         /// Wrapper that sets a small part_size so small test data triggers multipart.
         struct SmallPartCache {
             inner: Arc<dyn AsyncDataCache>,
             upload_part_calls: Arc<AtomicUsize>,
+            #[allow(clippy::type_complexity)]
             parts: Arc<Mutex<HashMap<String, Vec<(i32, Vec<u8>)>>>>,
         }
 
         #[async_trait::async_trait]
         impl AsyncDataCache for SmallPartCache {
-            fn object_key(&self, h: &str, a: &str) -> String { self.inner.object_key(h, a) }
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn multipart_part_size(&self) -> usize { 5 }
+            fn object_key(&self, h: &str, a: &str) -> String {
+                self.inner.object_key(h, a)
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn multipart_part_size(&self) -> usize {
+                5
+            }
             async fn object_exists(&self, h: &str, a: &str) -> std::io::Result<bool> {
                 self.inner.object_exists(h, a).await
             }
@@ -532,13 +584,31 @@ mod tests {
             async fn create_multipart_upload(&self, _h: &str, _a: &str) -> std::io::Result<String> {
                 Ok("test-upload-id".into())
             }
-            async fn upload_part(&self, h: &str, a: &str, _uid: &str, pn: i32, data: Vec<u8>) -> std::io::Result<String> {
+            async fn upload_part(
+                &self,
+                h: &str,
+                a: &str,
+                _uid: &str,
+                pn: i32,
+                data: Vec<u8>,
+            ) -> std::io::Result<String> {
                 self.upload_part_calls.fetch_add(1, Ordering::Relaxed);
                 let key = format!("{h}.{a}");
-                self.parts.lock().unwrap().entry(key).or_default().push((pn, data));
+                self.parts
+                    .lock()
+                    .unwrap()
+                    .entry(key)
+                    .or_default()
+                    .push((pn, data));
                 Ok(format!("etag-{pn}"))
             }
-            async fn complete_multipart_upload(&self, h: &str, a: &str, _uid: &str, parts: Vec<(i32, String)>) -> std::io::Result<()> {
+            async fn complete_multipart_upload(
+                &self,
+                h: &str,
+                a: &str,
+                _uid: &str,
+                parts: Vec<(i32, String)>,
+            ) -> std::io::Result<()> {
                 let key = format!("{h}.{a}");
                 let combined = {
                     let stored = self.parts.lock().unwrap();
@@ -551,8 +621,21 @@ mod tests {
                 self.inner.put_object(h, a, combined).await?;
                 Ok(())
             }
-            async fn abort_multipart_upload(&self, _h: &str, _a: &str, _uid: &str) -> std::io::Result<()> { Ok(()) }
-            async fn get_object_range(&self, h: &str, a: &str, s: u64, e: u64) -> std::io::Result<Vec<u8>> {
+            async fn abort_multipart_upload(
+                &self,
+                _h: &str,
+                _a: &str,
+                _uid: &str,
+            ) -> std::io::Result<()> {
+                Ok(())
+            }
+            async fn get_object_range(
+                &self,
+                h: &str,
+                a: &str,
+                s: u64,
+                e: u64,
+            ) -> std::io::Result<Vec<u8>> {
                 let data = self.inner.get_object(h, a).await?;
                 let end = std::cmp::min(e as usize + 1, data.len());
                 Ok(data[s as usize..end].to_vec())
@@ -585,13 +668,21 @@ mod tests {
         });
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src_wrapped, dst, CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src_wrapped,
+            dst,
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result.statistics.copied_objects, 1);
         assert_eq!(upload_part_calls.load(Ordering::Relaxed), 4);
         // Verify data arrived correctly via the inner cache
-        assert_eq!(get(&dst_inner, "big_hash", "xxh128").await, b"01234567890123456789");
+        assert_eq!(
+            get(&dst_inner, "big_hash", "xxh128").await,
+            b"01234567890123456789"
+        );
     }
 
     #[tokio::test]
@@ -609,11 +700,18 @@ mod tests {
             fn object_key(&self, hash: &str, algorithm: &str) -> String {
                 self.inner.object_key(hash, algorithm)
             }
-            fn as_any(&self) -> &dyn std::any::Any { self }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
             async fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool> {
                 self.inner.object_exists(hash, algorithm).await
             }
-            async fn put_object(&self, hash: &str, algorithm: &str, data: Vec<u8>) -> std::io::Result<String> {
+            async fn put_object(
+                &self,
+                hash: &str,
+                algorithm: &str,
+                data: Vec<u8>,
+            ) -> std::io::Result<String> {
                 self.inner.put_object(hash, algorithm, data).await
             }
             async fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
@@ -635,16 +733,40 @@ mod tests {
             async fn create_multipart_upload(&self, h: &str, a: &str) -> std::io::Result<String> {
                 self.inner.create_multipart_upload(h, a).await
             }
-            async fn upload_part(&self, h: &str, a: &str, u: &str, p: i32, d: Vec<u8>) -> std::io::Result<String> {
+            async fn upload_part(
+                &self,
+                h: &str,
+                a: &str,
+                u: &str,
+                p: i32,
+                d: Vec<u8>,
+            ) -> std::io::Result<String> {
                 self.inner.upload_part(h, a, u, p, d).await
             }
-            async fn complete_multipart_upload(&self, h: &str, a: &str, u: &str, p: Vec<(i32, String)>) -> std::io::Result<()> {
+            async fn complete_multipart_upload(
+                &self,
+                h: &str,
+                a: &str,
+                u: &str,
+                p: Vec<(i32, String)>,
+            ) -> std::io::Result<()> {
                 self.inner.complete_multipart_upload(h, a, u, p).await
             }
-            async fn abort_multipart_upload(&self, h: &str, a: &str, u: &str) -> std::io::Result<()> {
+            async fn abort_multipart_upload(
+                &self,
+                h: &str,
+                a: &str,
+                u: &str,
+            ) -> std::io::Result<()> {
                 self.inner.abort_multipart_upload(h, a, u).await
             }
-            async fn get_object_range(&self, h: &str, a: &str, s: u64, e: u64) -> std::io::Result<Vec<u8>> {
+            async fn get_object_range(
+                &self,
+                h: &str,
+                a: &str,
+                s: u64,
+                e: u64,
+            ) -> std::io::Result<Vec<u8>> {
                 self.inner.get_object_range(h, a, s, e).await
             }
         }
@@ -668,11 +790,23 @@ mod tests {
         }]);
 
         let result = cache_sync_manifest(
-            &[&manifest as &dyn ManifestRef], src, dst.clone(), CacheSyncOptions::default(),
-        ).await.unwrap();
+            &[&manifest as &dyn ManifestRef],
+            src,
+            dst.clone(),
+            CacheSyncOptions::default(),
+        )
+        .await
+        .unwrap();
 
-        assert!(copy_from_called.load(Ordering::Relaxed), "copy_from should have been called");
-        assert_eq!(get_object_calls.load(Ordering::Relaxed), 0, "get_object on dst should not be called");
+        assert!(
+            copy_from_called.load(Ordering::Relaxed),
+            "copy_from should have been called"
+        );
+        assert_eq!(
+            get_object_calls.load(Ordering::Relaxed),
+            0,
+            "get_object on dst should not be called"
+        );
         assert_eq!(result.statistics.copied_objects, 1);
         assert!(exists(&dst, "hash_a", "xxh128").await);
     }

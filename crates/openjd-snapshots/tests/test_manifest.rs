@@ -1,10 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // Ported from deadline-cloud test_manifest.py
 
-use openjd_snapshots::{
-    FileEntry, HashAlgorithm, Manifest, DEFAULT_FILE_CHUNK_SIZE,
-};
 use openjd_snapshots::{AbsSnapshot, AbsSnapshotDiff, Snapshot, SnapshotDiff};
+use openjd_snapshots::{FileEntry, HashAlgorithm, Manifest, DEFAULT_FILE_CHUNK_SIZE};
 
 fn abs_snapshot(files: Vec<FileEntry>) -> AbsSnapshot {
     Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(files)

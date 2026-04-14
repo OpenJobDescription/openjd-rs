@@ -51,7 +51,7 @@ fn longest_common_prefix(dirs: &[&str]) -> String {
 
 fn parent_dir(path: &str) -> String {
     match path.rfind('/') {
-        Some(pos) if pos == 0 => "/".to_string(),
+        Some(0) => "/".to_string(),
         Some(pos) => path[..pos].to_string(),
         None => String::new(),
     }
@@ -161,8 +161,8 @@ fn group_into_roots(paths: &[&str]) -> Vec<String> {
 
     let mut groups: std::collections::HashMap<String, Vec<&str>> = std::collections::HashMap::new();
     for &p in paths {
-        let key = if p.starts_with('/') {
-            match p[1..].find('/') {
+        let key = if let Some(stripped) = p.strip_prefix('/') {
+            match stripped.find('/') {
                 Some(pos) => p[..pos + 1].to_string(),
                 None => p.to_string(),
             }
@@ -389,10 +389,7 @@ mod tests {
 
     #[test]
     fn empty_partition_for_explicit_root() {
-        let m = make_abs(
-            vec![FileEntry::file("/a/file.txt", 10, 1)],
-            vec![],
-        );
+        let m = make_abs(vec![FileEntry::file("/a/file.txt", 10, 1)], vec![]);
         let opts = PartitionOptions {
             roots: Some(vec!["/a".into(), "/empty".into()]),
             ..Default::default()

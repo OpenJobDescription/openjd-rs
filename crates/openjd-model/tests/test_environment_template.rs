@@ -14,16 +14,18 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_environment_template(v, None).expect(&format!("Expected success for: {s}"));
+    decode_environment_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
@@ -33,35 +35,45 @@ fn check_env_err(s: &str, expected: &[&str]) {
 
 #[test]
 fn test_minimum_required() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_with_parameters() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "P", "type": "INT"}],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_with_most_parameters() {
-    let params: Vec<String> = (0..50).map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#)).collect();
-    let s = format!(r#"{{
+    let params: Vec<String> = (0..50)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{}],
         "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
-    }}"#, params.join(","));
+    }}"#,
+        params.join(",")
+    );
     decode_ok(&s);
 }
 
 #[test]
 fn test_with_parameter_references() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "P", "type": "INT"}],
         "environment": {
@@ -75,7 +87,8 @@ fn test_with_parameter_references() {
             },
             "variables": {"Foo": "{{Param.P}}"}
         }
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -84,34 +97,42 @@ fn test_with_parameter_references() {
 
 #[test]
 fn test_env_with_script_only() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_env_with_variables_only() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "variables": {"FOO": "bar"}}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_env_with_description() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "description": "text", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_env_with_both_script_and_variables() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}, "variables": {"FOO": "bar"}}
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -120,35 +141,41 @@ fn test_env_with_both_script_and_variables() {
 
 #[test]
 fn test_embedded_text_file() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello world"}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_embedded_file_with_filename() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "out.txt"}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn test_embedded_file_with_runnable() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "runnable": true}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -157,71 +184,78 @@ fn test_embedded_file_with_runnable() {
 
 #[test]
 fn test_empty_object() {
-    check_env_err("{}", &[
-        "missing Open Job Description schema version key: specificationVersion",
-    ]);
+    check_env_err(
+        "{}",
+        &["missing Open Job Description schema version key: specificationVersion"],
+    );
 }
 
 #[test]
 fn test_unknown_key() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}},
         "unresolved": "key"
-    }"#, &[
-        "unknown field `unresolved`",
-    ]);
+    }"#,
+        &["unknown field `unresolved`"],
+    );
 }
 
 #[test]
 fn test_missing_spec_ver() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "missing Open Job Description schema version key: specificationVersion",
-    ]);
+    }"#,
+        &["missing Open Job Description schema version key: specificationVersion"],
+    );
 }
 
 #[test]
 fn test_incorrect_spec_ver() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "is not an Environment Template version",
-    ]);
+    }"#,
+        &["is not an Environment Template version"],
+    );
 }
 
 #[test]
 fn test_environment_is_none() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": null
-    }"#, &[
-        "missing field `name`",
-    ]);
+    }"#,
+        &["missing field `name`"],
+    );
 }
 
 #[test]
 fn test_discriminator_missing() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "foo"}],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "missing 'type' field in parameter definition",
-    ]);
+    }"#,
+        &["missing 'type' field in parameter definition"],
+    );
 }
 
 #[test]
 fn test_discriminator_works() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "foo", "type": "INT", "default": "nine"}],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "Cannot parse 'nine' as integer",
-    ]);
+    }"#,
+        &["Cannot parse 'nine' as integer"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -230,40 +264,54 @@ fn test_discriminator_works() {
 
 #[test]
 fn test_empty_parameters() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "1 validation errors for EnvironmentTemplate\n",
-        "parameterDefinitions, if provided, must contain at least one element.",
-    ]);
+    }"#,
+        &[
+            "1 validation errors for EnvironmentTemplate\n",
+            "parameterDefinitions, if provided, must contain at least one element.",
+        ],
+    );
 }
 
 #[test]
 fn test_too_many_parameters() {
-    let params: Vec<String> = (0..51).map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#)).collect();
-    let s = format!(r#"{{
+    let params: Vec<String> = (0..51)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{}],
         "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
-    }}"#, params.join(","));
-    check_env_err(&s, &[
-        "1 validation errors for EnvironmentTemplate\n",
-        "parameterDefinitions must not contain more than 50 elements.",
-    ]);
+    }}"#,
+        params.join(",")
+    );
+    check_env_err(
+        &s,
+        &[
+            "1 validation errors for EnvironmentTemplate\n",
+            "parameterDefinitions must not contain more than 50 elements.",
+        ],
+    );
 }
 
 #[test]
 fn test_duplicate_parameter_names() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "P", "type": "INT"}, {"name": "P", "type": "INT"}],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[
-        "1 validation errors for EnvironmentTemplate\n",
-        "Duplicate parameter name: 'P'",
-    ]);
+    }"#,
+        &[
+            "1 validation errors for EnvironmentTemplate\n",
+            "Duplicate parameter name: 'P'",
+        ],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -272,47 +320,59 @@ fn test_duplicate_parameter_names() {
 
 #[test]
 fn test_env_missing_script_and_variables() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo"}
-    }"#, &[
-        "validation errors for EnvironmentTemplate\n",
-        "environment:\n\tmust have at least one of 'script' or 'variables'.",
-    ]);
+    }"#,
+        &[
+            "validation errors for EnvironmentTemplate\n",
+            "environment:\n\tmust have at least one of 'script' or 'variables'.",
+        ],
+    );
 }
 
 #[test]
 fn test_env_empty_variables() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}, "variables": {}}
-    }"#, &[
-        "1 validation errors for EnvironmentTemplate\n",
-        "environment -> variables:\n\tif provided, must not be empty.",
-    ]);
+    }"#,
+        &[
+            "1 validation errors for EnvironmentTemplate\n",
+            "environment -> variables:\n\tif provided, must not be empty.",
+        ],
+    );
 }
 
 #[test]
 fn test_env_variable_name_starts_with_digit() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "variables": {"2FOO": "BAR"}}
-    }"#, &[
-        "environment -> variables -> 2FOO:\n\tvariable name '2FOO' cannot start with a digit.",
-    ]);
+    }"#,
+        &["environment -> variables -> 2FOO:\n\tvariable name '2FOO' cannot start with a digit."],
+    );
 }
 
 #[test]
 fn test_env_name_too_long() {
     let long_name = "A".repeat(65);
-    let s = format!(r#"{{
+    let s = format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "environment": {{"name": "{long_name}", "variables": {{"X": "1"}}}}
-    }}"#);
-    check_env_err(&s, &[
-        "1 validation errors for EnvironmentTemplate\n",
-        "environment -> name:\n\texceeds 64 characters.",
-    ]);
+    }}"#
+    );
+    check_env_err(
+        &s,
+        &[
+            "1 validation errors for EnvironmentTemplate\n",
+            "environment -> name:\n\texceeds 64 characters.",
+        ],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -321,41 +381,44 @@ fn test_env_name_too_long() {
 
 #[test]
 fn test_embedded_empty_data() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": ""}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "environment -> script -> embeddedFiles[0] -> data:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> data:\n\tmust not be empty."],
+    );
 }
 
 #[test]
 fn test_embedded_unknown_type() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "text", "data": "hello"}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "unknown variant `text`, expected `TEXT`",
-    ]);
+    }"#,
+        &["unknown variant `text`, expected `TEXT`"],
+    );
 }
 
 #[test]
 fn test_embedded_filename_empty() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": ""}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be empty."],
+    );
 }
 
 #[test]
@@ -386,7 +449,8 @@ fn test_embedded_filename_backslash() {
 
 #[test]
 fn test_embedded_duplicate_names() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [
@@ -395,9 +459,9 @@ fn test_embedded_duplicate_names() {
             ],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "environment -> script -> embeddedFiles[1]:\n\tduplicate embedded file name 'MyFile'.",
-    ]);
+    }"#,
+        &["environment -> script -> embeddedFiles[1]:\n\tduplicate embedded file name 'MyFile'."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -406,16 +470,20 @@ fn test_embedded_duplicate_names() {
 
 fn decode_with_exts(s: &str, exts: &[&str]) {
     let v = yaml_val(s);
-    decode_environment_template(v, Some(exts)).expect(&format!("Expected success for: {s}"));
+    decode_environment_template(v, Some(exts))
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err_with_exts(s: &str, exts: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, Some(exts))
-        .expect_err(&format!("Expected error for: {s}"));
+    let err =
+        decode_environment_template(v, Some(exts)).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
@@ -427,41 +495,56 @@ const MINIMAL_ENV: &str = r#"{
 #[test]
 fn test_env_template_with_extensions_field() {
     // Environment template with a valid extensions field should parse
-    decode_with_exts(r#"{
+    decode_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": ["EXPR"],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 #[test]
 fn test_env_template_extensions_unsupported() {
     // Extension not in supported list should fail
-    check_env_err_with_exts(r#"{
+    check_env_err_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": ["EXPR"],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &[], &["unsupported extension"]);
+    }"#,
+        &[],
+        &["unsupported extension"],
+    );
 }
 
 #[test]
 fn test_env_template_extensions_unknown() {
     // Completely unknown extension name should fail
-    check_env_err_with_exts(r#"{
+    check_env_err_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": ["NOT_A_REAL_EXTENSION"],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &["NOT_A_REAL_EXTENSION"], &["Unknown or unsupported extension"]);
+    }"#,
+        &["NOT_A_REAL_EXTENSION"],
+        &["Unknown or unsupported extension"],
+    );
 }
 
 #[test]
 fn test_env_template_extensions_empty_list() {
     // Empty extensions list should fail (spec says "non-empty list" if provided)
-    check_env_err_with_exts(r#"{
+    check_env_err_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": [],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &["EXPR"], &["extensions"]);
+    }"#,
+        &["EXPR"],
+        &["extensions"],
+    );
 }
 
 #[test]
@@ -473,7 +556,8 @@ fn test_env_template_no_extensions_field_still_works() {
 #[test]
 fn test_env_template_extensions_enables_validation_context() {
     // EXPR extension should allow expression syntax in environment template format strings
-    decode_with_exts(r#"{
+    decode_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": ["FEATURE_BUNDLE_1", "EXPR"],
         "parameterDefinitions": [{"name": "P", "type": "INT"}],
@@ -485,16 +569,21 @@ fn test_env_template_extensions_enables_validation_context() {
                 }
             }
         }
-    }"#, &["FEATURE_BUNDLE_1", "EXPR"]);
+    }"#,
+        &["FEATURE_BUNDLE_1", "EXPR"],
+    );
 }
 
 #[test]
 fn test_env_template_multiple_extensions() {
-    decode_with_exts(r#"{
+    decode_with_exts(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": ["FEATURE_BUNDLE_1", "EXPR"],
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
-    }"#, &["FEATURE_BUNDLE_1", "EXPR"]);
+    }"#,
+        &["FEATURE_BUNDLE_1", "EXPR"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -504,12 +593,13 @@ fn test_env_template_multiple_extensions() {
 #[test]
 fn test_env_actions_on_enter_required() {
     // onExit alone should fail — onEnter is required
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onExit": {"command": "cleanup"}}}}
-    }"#, &[
-        "environment -> script -> actions:\n\tonEnter is required.",
-    ]);
+    }"#,
+        &["environment -> script -> actions:\n\tonEnter is required."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -518,23 +608,25 @@ fn test_env_actions_on_enter_required() {
 
 #[test]
 fn test_env_on_enter_empty_command_validated() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": ""}}}}
-    }"#, &[
-        "environment -> script -> actions -> onEnter -> command:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["environment -> script -> actions -> onEnter -> command:\n\tmust not be empty."],
+    );
 }
 
 #[test]
 fn test_env_on_exit_empty_command_validated() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {
             "onEnter": {"command": "setup"},
             "onExit": {"command": ""}
         }}}
-    }"#, &[
-        "environment -> script -> actions -> onExit -> command:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["environment -> script -> actions -> onExit -> command:\n\tmust not be empty."],
+    );
 }

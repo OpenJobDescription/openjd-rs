@@ -1,6 +1,6 @@
 use crate::manifest::{
-    AbsSnapshot, AbsSnapshotDiff, DirEntry, Diff, FileEntry, Full, Manifest, Snapshot,
-    SnapshotDiff, Abs,
+    Abs, AbsSnapshot, AbsSnapshotDiff, Diff, DirEntry, FileEntry, Full, Manifest, Snapshot,
+    SnapshotDiff,
 };
 use crate::path_util::normalize_path;
 
@@ -18,7 +18,11 @@ fn join_file(prefix: &str, f: &FileEntry) -> FileEntry {
 }
 
 fn join_dir(prefix: &str, d: &DirEntry) -> DirEntry {
-    if d.deleted { DirEntry::deleted(&join_path(prefix, &d.path)) } else { DirEntry::new(&join_path(prefix, &d.path)) }
+    if d.deleted {
+        DirEntry::deleted(join_path(prefix, &d.path))
+    } else {
+        DirEntry::new(join_path(prefix, &d.path))
+    }
 }
 
 fn join_impl<P, K, Q>(manifest: &Manifest<P, K>, prefix: &str) -> Manifest<Q, K>
@@ -26,7 +30,11 @@ where
     P: Clone,
     K: Clone,
 {
-    let files = manifest.files.iter().map(|f| join_file(prefix, f)).collect();
+    let files = manifest
+        .files
+        .iter()
+        .map(|f| join_file(prefix, f))
+        .collect();
     let dirs = manifest.dirs.iter().map(|d| join_dir(prefix, d)).collect();
     let mut result = Manifest::new(manifest.hash_alg, manifest.file_chunk_size_bytes);
     result.files = files;
@@ -64,7 +72,10 @@ pub fn join_snapshot_rel(manifest: &Snapshot, prefix: &str) -> crate::Result<Sna
 }
 
 /// Joins a relative prefix to a relative diff, producing a relative diff.
-pub fn join_snapshot_diff_rel(manifest: &SnapshotDiff, prefix: &str) -> crate::Result<SnapshotDiff> {
+pub fn join_snapshot_diff_rel(
+    manifest: &SnapshotDiff,
+    prefix: &str,
+) -> crate::Result<SnapshotDiff> {
     validate_prefix(prefix)?;
     Ok(join_impl::<_, Diff, crate::manifest::Rel>(manifest, prefix))
 }

@@ -15,7 +15,8 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 }
 
 fn redacted_env_vars_template() -> serde_yaml::Value {
-    yaml_val(r#"{
+    yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["REDACTED_ENV_VARS"],
         "name": "Test Job",
@@ -30,16 +31,14 @@ fn redacted_env_vars_template() -> serde_yaml::Value {
                 }]
             }
         }]
-    }"#)
+    }"#,
+    )
 }
 
 #[test]
 fn redacted_env_vars_extension_supported() {
     // When REDACTED_ENV_VARS is in the supported list, parsing succeeds
-    let result = decode_job_template(
-        redacted_env_vars_template(),
-        Some(&["REDACTED_ENV_VARS"]),
-    );
+    let result = decode_job_template(redacted_env_vars_template(), Some(&["REDACTED_ENV_VARS"]));
     assert!(result.is_ok(), "expected success, got: {:?}", result.err());
 }
 

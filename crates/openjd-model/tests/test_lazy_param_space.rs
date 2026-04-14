@@ -11,10 +11,7 @@ use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::template::RangeConstraint;
 use openjd_model::types::{TaskParameterType, TaskParameterValue};
 
-fn make_space(
-    params: Vec<(&str, TaskParameter)>,
-    combination: Option<&str>,
-) -> StepParameterSpace {
+fn make_space(params: Vec<(&str, TaskParameter)>, combination: Option<&str>) -> StepParameterSpace {
     StepParameterSpace {
         task_parameter_definitions: params
             .into_iter()
@@ -87,7 +84,9 @@ fn test_single_int_list() {
     let space = make_space(vec![("A", int_list(&[1, 2, 3]))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(iter.len(), 3);
-    let vals: Vec<i64> = (0..3).map(|i| get_int(&iter.get(i).unwrap(), "A")).collect();
+    let vals: Vec<i64> = (0..3)
+        .map(|i| get_int(&iter.get(i).unwrap(), "A"))
+        .collect();
     assert_eq!(vals, vec![1, 2, 3]);
 }
 
@@ -115,7 +114,9 @@ fn test_single_string_list() {
     let space = make_space(vec![("S", string_list(&["a", "b", "c"]))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(iter.len(), 3);
-    let vals: Vec<String> = (0..3).map(|i| get_string(&iter.get(i).unwrap(), "S")).collect();
+    let vals: Vec<String> = (0..3)
+        .map(|i| get_string(&iter.get(i).unwrap(), "S"))
+        .collect();
     assert_eq!(vals, vec!["a", "b", "c"]);
 }
 
@@ -124,7 +125,10 @@ fn test_single_string_list() {
 #[test]
 fn test_product_two_params() {
     let space = make_space(
-        vec![("A", int_list(&[1, 2])), ("B", string_list(&["x", "y", "z"]))],
+        vec![
+            ("A", int_list(&[1, 2])),
+            ("B", string_list(&["x", "y", "z"])),
+        ],
         Some("A * B"),
     );
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -140,7 +144,10 @@ fn test_product_two_params() {
 #[test]
 fn test_association_two_params() {
     let space = make_space(
-        vec![("A", int_list(&[1, 2, 3])), ("B", string_list(&["x", "y", "z"]))],
+        vec![
+            ("A", int_list(&[1, 2, 3])),
+            ("B", string_list(&["x", "y", "z"])),
+        ],
         Some("(A, B)"),
     );
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -155,7 +162,10 @@ fn test_association_two_params() {
 #[test]
 fn test_association_length_mismatch() {
     let space = make_space(
-        vec![("A", int_list(&[1, 2])), ("B", string_list(&["x", "y", "z"]))],
+        vec![
+            ("A", int_list(&[1, 2])),
+            ("B", string_list(&["x", "y", "z"])),
+        ],
         Some("(A, B)"),
     );
     let result = StepParameterSpaceIterator::new(&space);
@@ -188,7 +198,10 @@ fn test_product_association_mixed() {
 #[test]
 fn test_get_matches_iteration() {
     let space = make_space(
-        vec![("A", int_list(&[1, 2])), ("B", string_list(&["x", "y", "z"]))],
+        vec![
+            ("A", int_list(&[1, 2])),
+            ("B", string_list(&["x", "y", "z"])),
+        ],
         Some("A * B"),
     );
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -302,16 +315,25 @@ fn test_truly_lazy_trillion_element_space() {
     // If anything materializes eagerly, this will OOM or timeout.
     use std::time::Instant;
 
-    let space = make_space(vec![
-        ("Frame", TaskParameter::Int {
-            range: TaskParamRange::RangeExpr("1-1000000".parse::<RangeExpr>().unwrap()),
-            chunks: None,
-        }),
-        ("Tile", TaskParameter::Int {
-            range: TaskParamRange::RangeExpr("1-2000000:2".parse::<RangeExpr>().unwrap()),
-            chunks: None,
-        }),
-    ], Some("Frame * Tile"));
+    let space = make_space(
+        vec![
+            (
+                "Frame",
+                TaskParameter::Int {
+                    range: TaskParamRange::RangeExpr("1-1000000".parse::<RangeExpr>().unwrap()),
+                    chunks: None,
+                },
+            ),
+            (
+                "Tile",
+                TaskParameter::Int {
+                    range: TaskParamRange::RangeExpr("1-2000000:2".parse::<RangeExpr>().unwrap()),
+                    chunks: None,
+                },
+            ),
+        ],
+        Some("Frame * Tile"),
+    );
 
     let start = Instant::now();
     let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -339,7 +361,11 @@ fn test_truly_lazy_trillion_element_space() {
     assert_eq!(last["Tile"].value, ExprValue::Int(1_999_999)); // last value of 1-2000000:2
 
     let elapsed = start.elapsed();
-    assert!(elapsed.as_millis() < 100, "Should complete in <100ms, took {}ms", elapsed.as_millis());
+    assert!(
+        elapsed.as_millis() < 100,
+        "Should complete in <100ms, took {}ms",
+        elapsed.as_millis()
+    );
 }
 
 // (end of tests)
@@ -357,15 +383,21 @@ fn test_lazy_association_with_large_product() {
     let b_vals: Vec<String> = (0..1000).map(|i| format!("b{i}")).collect();
     let c_vals: Vec<String> = (0..1000).map(|i| format!("c{i}")).collect();
 
-    let space = make_space(vec![
-        ("A", TaskParameter::String { range: a_vals }),
-        ("B", TaskParameter::String { range: b_vals }),
-        ("C", TaskParameter::String { range: c_vals }),
-        ("D", TaskParameter::Int {
-            range: TaskParamRange::RangeExpr("1-1000000000".parse::<RangeExpr>().unwrap()),
-            chunks: None,
-        }),
-    ], Some("(A * B * C, D)"));
+    let space = make_space(
+        vec![
+            ("A", TaskParameter::String { range: a_vals }),
+            ("B", TaskParameter::String { range: b_vals }),
+            ("C", TaskParameter::String { range: c_vals }),
+            (
+                "D",
+                TaskParameter::Int {
+                    range: TaskParamRange::RangeExpr("1-1000000000".parse::<RangeExpr>().unwrap()),
+                    chunks: None,
+                },
+            ),
+        ],
+        Some("(A * B * C, D)"),
+    );
 
     let start = Instant::now();
     let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -406,32 +438,41 @@ fn test_lazy_association_with_large_product() {
     assert_eq!(mid["D"].value, ExprValue::Int(500_000_001));
 
     let elapsed = start.elapsed();
-    assert!(elapsed.as_millis() < 100, "Should complete in <100ms, took {}ms", elapsed.as_millis());
+    assert!(
+        elapsed.as_millis() < 100,
+        "Should complete in <100ms, took {}ms",
+        elapsed.as_millis()
+    );
 }
 
 #[test]
 fn test_chunk_int_contiguous_two_element_chunk_displays_as_range() {
     // Regression: a 2-element contiguous chunk like 7-8 must display as "7-8" not "7,8"
-    let space = make_space(vec![
-        ("Frame", TaskParameter::ChunkInt {
-            range: TaskParamRange::RangeExpr("1-8".parse::<RangeExpr>().unwrap()),
-            chunks: ResolvedChunks {
-                default_task_count: 3,
-                target_runtime_seconds: None,
-                range_constraint: RangeConstraint::Contiguous,
+    let space = make_space(
+        vec![(
+            "Frame",
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::RangeExpr("1-8".parse::<RangeExpr>().unwrap()),
+                chunks: ResolvedChunks {
+                    default_task_count: 3,
+                    target_runtime_seconds: None,
+                    range_constraint: RangeConstraint::Contiguous,
+                },
             },
-        }),
-    ], None);
+        )],
+        None,
+    );
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(iter.len(), 3);
     let chunks: Vec<_> = iter.collect();
     // Each chunk's Frame value is a RangeExpr — check their string representations
-    let chunk_strs: Vec<String> = chunks.iter().map(|c| {
-        match &c["Frame"].value {
+    let chunk_strs: Vec<String> = chunks
+        .iter()
+        .map(|c| match &c["Frame"].value {
             ExprValue::RangeExpr(r) => r.to_string(),
             other => panic!("Expected RangeExpr, got {:?}", other),
-        }
-    }).collect();
+        })
+        .collect();
     assert_eq!(chunk_strs, vec!["1-3", "4-6", "7-8"]);
 }
 
@@ -447,23 +488,33 @@ fn test_contains_optimized_range_expr() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     let mut hit = std::collections::HashMap::new();
-    hit.insert("Frame".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::Int,
-        value: ExprValue::Int(500_000),
-    });
+    hit.insert(
+        "Frame".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Int,
+            value: ExprValue::Int(500_000),
+        },
+    );
 
     let mut miss = std::collections::HashMap::new();
-    miss.insert("Frame".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::Int,
-        value: ExprValue::Int(2_000_000),
-    });
+    miss.insert(
+        "Frame".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Int,
+            value: ExprValue::Int(2_000_000),
+        },
+    );
 
     let start = Instant::now();
     assert!(iter.contains(&hit));
     assert!(!iter.contains(&miss));
     let elapsed = start.elapsed();
     // Must be sub-millisecond (O(log n) not O(n))
-    assert!(elapsed.as_millis() < 10, "contains() took {}ms, expected <10ms", elapsed.as_millis());
+    assert!(
+        elapsed.as_millis() < 10,
+        "contains() took {}ms, expected <10ms",
+        elapsed.as_millis()
+    );
 }
 
 #[test]
@@ -476,38 +527,56 @@ fn test_contains_product_node() {
 
     // Matching set: A=2, B="y"
     let mut matching = std::collections::HashMap::new();
-    matching.insert("A".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::Int,
-        value: ExprValue::Int(2),
-    });
-    matching.insert("B".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::String,
-        value: ExprValue::String("y".to_string()),
-    });
+    matching.insert(
+        "A".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Int,
+            value: ExprValue::Int(2),
+        },
+    );
+    matching.insert(
+        "B".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::String,
+            value: ExprValue::String("y".to_string()),
+        },
+    );
     assert!(iter.contains(&matching));
 
     // Non-matching: A=2, B="z" (z not in range)
     let mut non_matching = std::collections::HashMap::new();
-    non_matching.insert("A".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::Int,
-        value: ExprValue::Int(2),
-    });
-    non_matching.insert("B".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::String,
-        value: ExprValue::String("z".to_string()),
-    });
+    non_matching.insert(
+        "A".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Int,
+            value: ExprValue::Int(2),
+        },
+    );
+    non_matching.insert(
+        "B".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::String,
+            value: ExprValue::String("z".to_string()),
+        },
+    );
     assert!(!iter.contains(&non_matching));
 
     // Non-matching: A=99, B="x" (99 not in range)
     let mut non_matching2 = std::collections::HashMap::new();
-    non_matching2.insert("A".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::Int,
-        value: ExprValue::Int(99),
-    });
-    non_matching2.insert("B".to_string(), TaskParameterValue {
-        param_type: TaskParameterType::String,
-        value: ExprValue::String("x".to_string()),
-    });
+    non_matching2.insert(
+        "A".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Int,
+            value: ExprValue::Int(99),
+        },
+    );
+    non_matching2.insert(
+        "B".to_string(),
+        TaskParameterValue {
+            param_type: TaskParameterType::String,
+            value: ExprValue::String("x".to_string()),
+        },
+    );
     assert!(!iter.contains(&non_matching2));
 }
 
@@ -515,17 +584,21 @@ fn test_contains_product_node() {
 
 #[test]
 fn test_adaptive_chunking_basic() {
-    let space = make_space(vec![
-        ("C", TaskParameter::ChunkInt {
-            range: TaskParamRange::RangeExpr("1-10".parse::<RangeExpr>().unwrap()),
-            chunks: ResolvedChunks {
-                default_task_count: 3,
-                target_runtime_seconds: Some(10),
-                range_constraint: RangeConstraint::Contiguous,
+    let space = make_space(
+        vec![(
+            "C",
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::RangeExpr("1-10".parse::<RangeExpr>().unwrap()),
+                chunks: ResolvedChunks {
+                    default_task_count: 3,
+                    target_runtime_seconds: Some(10),
+                    range_constraint: RangeConstraint::Contiguous,
+                },
             },
-        }),
-    ], None);
-    let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        )],
+        None,
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     assert!(iter.chunks_adaptive());
     assert_eq!(iter.chunks_parameter_name(), Some("C"));
@@ -533,7 +606,7 @@ fn test_adaptive_chunking_basic() {
 
     // Iterate and collect all chunks
     let mut chunks = Vec::new();
-    while let Some(set) = iter.next() {
+    for set in iter {
         match &set["C"].value {
             ExprValue::RangeExpr(r) => chunks.push(r.to_string()),
             other => panic!("expected RangeExpr, got {other:?}"),
@@ -545,16 +618,20 @@ fn test_adaptive_chunking_basic() {
 
 #[test]
 fn test_adaptive_chunking_change_size() {
-    let space = make_space(vec![
-        ("C", TaskParameter::ChunkInt {
-            range: TaskParamRange::RangeExpr("1-12".parse::<RangeExpr>().unwrap()),
-            chunks: ResolvedChunks {
-                default_task_count: 3,
-                target_runtime_seconds: Some(10),
-                range_constraint: RangeConstraint::Contiguous,
+    let space = make_space(
+        vec![(
+            "C",
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::RangeExpr("1-12".parse::<RangeExpr>().unwrap()),
+                chunks: ResolvedChunks {
+                    default_task_count: 3,
+                    target_runtime_seconds: Some(10),
+                    range_constraint: RangeConstraint::Contiguous,
+                },
             },
-        }),
-    ], None);
+        )],
+        None,
+    );
     let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     // Get first chunk with size 3
@@ -571,7 +648,7 @@ fn test_adaptive_chunking_change_size() {
 
     // Now iterate with new size, continuing from where we left off (after 1-3)
     let mut chunks = Vec::new();
-    while let Some(set) = iter.next() {
+    for set in iter {
         match &set["C"].value {
             ExprValue::RangeExpr(r) => chunks.push(r.to_string()),
             other => panic!("expected RangeExpr, got {other:?}"),
@@ -583,16 +660,20 @@ fn test_adaptive_chunking_change_size() {
 
 #[test]
 fn test_adaptive_chunking_len_returns_zero() {
-    let space = make_space(vec![
-        ("C", TaskParameter::ChunkInt {
-            range: TaskParamRange::RangeExpr("1-10".parse::<RangeExpr>().unwrap()),
-            chunks: ResolvedChunks {
-                default_task_count: 3,
-                target_runtime_seconds: Some(10),
-                range_constraint: RangeConstraint::Contiguous,
+    let space = make_space(
+        vec![(
+            "C",
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::RangeExpr("1-10".parse::<RangeExpr>().unwrap()),
+                chunks: ResolvedChunks {
+                    default_task_count: 3,
+                    target_runtime_seconds: Some(10),
+                    range_constraint: RangeConstraint::Contiguous,
+                },
             },
-        }),
-    ], None);
+        )],
+        None,
+    );
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(iter.len(), 0, "adaptive chunking len() should return 0");
 }
@@ -604,11 +685,15 @@ fn test_adaptive_chunking_len_returns_zero() {
 #[test]
 fn path_parameter_contains() {
     fn path_list(vals: &[&str]) -> TaskParameter {
-        TaskParameter::Path { range: vals.iter().map(|s| s.to_string()).collect() }
+        TaskParameter::Path {
+            range: vals.iter().map(|s| s.to_string()).collect(),
+        }
     }
     let space = make_space(vec![("File", path_list(&["/a/b", "/c/d", "/e/f"]))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     for task in iter {
-        assert!(StepParameterSpaceIterator::new(&space).unwrap().contains(&task));
+        assert!(StepParameterSpaceIterator::new(&space)
+            .unwrap()
+            .contains(&task));
     }
 }

@@ -3,8 +3,8 @@
 
 //! Action status tracking.
 
-use std::time::SystemTime;
 use crate::action::ActionState;
+use std::time::SystemTime;
 
 /// Status of the currently running or most recently completed action.
 #[derive(Debug, Clone)]

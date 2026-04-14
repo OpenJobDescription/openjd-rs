@@ -46,33 +46,85 @@ pub struct ExprType {
 // ── Constants ──
 
 impl ExprType {
-    pub const BOOL: ExprType = ExprType { code: TypeCode::Bool, params: Vec::new() };
-    pub const INT: ExprType = ExprType { code: TypeCode::Int, params: Vec::new() };
-    pub const FLOAT: ExprType = ExprType { code: TypeCode::Float, params: Vec::new() };
-    pub const STRING: ExprType = ExprType { code: TypeCode::String, params: Vec::new() };
-    pub const PATH: ExprType = ExprType { code: TypeCode::Path, params: Vec::new() };
-    pub const RANGE_EXPR: ExprType = ExprType { code: TypeCode::RangeExpr, params: Vec::new() };
-    pub const NULLTYPE: ExprType = ExprType { code: TypeCode::Null, params: Vec::new() };
-    pub const ANY: ExprType = ExprType { code: TypeCode::Any, params: Vec::new() };
-    pub const NORETURN: ExprType = ExprType { code: TypeCode::NoReturn, params: Vec::new() };
-    pub const T: ExprType = ExprType { code: TypeCode::TypeVarT, params: Vec::new() };
-    pub const T1: ExprType = ExprType { code: TypeCode::TypeVarT1, params: Vec::new() };
-    pub const T2: ExprType = ExprType { code: TypeCode::TypeVarT2, params: Vec::new() };
-    pub const T3: ExprType = ExprType { code: TypeCode::TypeVarT3, params: Vec::new() };
+    pub const BOOL: ExprType = ExprType {
+        code: TypeCode::Bool,
+        params: Vec::new(),
+    };
+    pub const INT: ExprType = ExprType {
+        code: TypeCode::Int,
+        params: Vec::new(),
+    };
+    pub const FLOAT: ExprType = ExprType {
+        code: TypeCode::Float,
+        params: Vec::new(),
+    };
+    pub const STRING: ExprType = ExprType {
+        code: TypeCode::String,
+        params: Vec::new(),
+    };
+    pub const PATH: ExprType = ExprType {
+        code: TypeCode::Path,
+        params: Vec::new(),
+    };
+    pub const RANGE_EXPR: ExprType = ExprType {
+        code: TypeCode::RangeExpr,
+        params: Vec::new(),
+    };
+    pub const NULLTYPE: ExprType = ExprType {
+        code: TypeCode::Null,
+        params: Vec::new(),
+    };
+    pub const ANY: ExprType = ExprType {
+        code: TypeCode::Any,
+        params: Vec::new(),
+    };
+    pub const NORETURN: ExprType = ExprType {
+        code: TypeCode::NoReturn,
+        params: Vec::new(),
+    };
+    pub const T: ExprType = ExprType {
+        code: TypeCode::TypeVarT,
+        params: Vec::new(),
+    };
+    pub const T1: ExprType = ExprType {
+        code: TypeCode::TypeVarT1,
+        params: Vec::new(),
+    };
+    pub const T2: ExprType = ExprType {
+        code: TypeCode::TypeVarT2,
+        params: Vec::new(),
+    };
+    pub const T3: ExprType = ExprType {
+        code: TypeCode::TypeVarT3,
+        params: Vec::new(),
+    };
 
     /// The type code for this type.
-    pub fn code(&self) -> TypeCode { self.code }
+    pub fn code(&self) -> TypeCode {
+        self.code
+    }
 
     /// The type parameters (e.g. element type for lists, member types for unions).
-    pub fn params(&self) -> &[ExprType] { &self.params }
+    pub fn params(&self) -> &[ExprType] {
+        &self.params
+    }
 
     pub fn list(elem: ExprType) -> Self {
         // Normalize: list[unresolved[T]] -> unresolved[list[T]]
         if elem.code == TypeCode::Unresolved && elem.params.len() == 1 {
-            let inner_list = ExprType { code: TypeCode::List, params: vec![elem.params[0].clone()] };
-            return ExprType { code: TypeCode::Unresolved, params: vec![inner_list] };
+            let inner_list = ExprType {
+                code: TypeCode::List,
+                params: vec![elem.params[0].clone()],
+            };
+            return ExprType {
+                code: TypeCode::Unresolved,
+                params: vec![inner_list],
+            };
         }
-        ExprType { code: TypeCode::List, params: vec![elem] }
+        ExprType {
+            code: TypeCode::List,
+            params: vec![elem],
+        }
     }
 
     pub fn union(types: Vec<ExprType>) -> Self {
@@ -84,7 +136,10 @@ impl ExprType {
         if constraint.code == TypeCode::Unresolved {
             return constraint;
         }
-        ExprType { code: TypeCode::Unresolved, params: vec![constraint] }
+        ExprType {
+            code: TypeCode::Unresolved,
+            params: vec![constraint],
+        }
     }
 
     /// Create a function signature type: `(param_types) -> return_type`.
@@ -92,7 +147,10 @@ impl ExprType {
     pub fn signature(param_types: Vec<ExprType>, return_type: ExprType) -> Self {
         let mut params = param_types;
         params.push(return_type);
-        ExprType { code: TypeCode::Signature, params }
+        ExprType {
+            code: TypeCode::Signature,
+            params,
+        }
     }
 
     /// Get the parameter types of a signature (all params except the last).
@@ -119,7 +177,9 @@ impl ExprType {
             let sub = sig_p.match_type(arg_t)?;
             for (k, v) in sub {
                 if let Some(existing) = bindings.get(&k) {
-                    if *existing != v { return None; }
+                    if *existing != v {
+                        return None;
+                    }
                 }
                 bindings.insert(k, v);
             }
@@ -164,33 +224,52 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
         return ExprType::unresolved(inner);
     }
     // Deduplicate
-    members.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    members.sort_by_key(|a| a.to_string());
     members.dedup();
     match members.len() {
         0 => ExprType::NORETURN,
         1 => members.into_iter().next().unwrap(),
-        _ => ExprType { code: TypeCode::Union, params: members },
+        _ => ExprType {
+            code: TypeCode::Union,
+            params: members,
+        },
     }
 }
 
 // ── Queries ──
 
 impl ExprType {
-    pub fn is_list(&self) -> bool { self.code == TypeCode::List }
+    pub fn is_list(&self) -> bool {
+        self.code == TypeCode::List
+    }
 
     pub fn list_element_type(&self) -> Option<&ExprType> {
-        if self.code == TypeCode::List { self.params.first() } else { None }
+        if self.code == TypeCode::List {
+            self.params.first()
+        } else {
+            None
+        }
     }
 
     pub fn is_symbolic(&self) -> bool {
-        matches!(self.code, TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3)
-            || self.params.iter().any(|p| p.is_symbolic())
+        matches!(
+            self.code,
+            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+        ) || self.params.iter().any(|p| p.is_symbolic())
     }
 
     pub fn is_concrete(&self) -> bool {
-        if matches!(self.code, TypeCode::Any | TypeCode::Union | TypeCode::Unresolved
-            | TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
-            | TypeCode::Signature) {
+        if matches!(
+            self.code,
+            TypeCode::Any
+                | TypeCode::Union
+                | TypeCode::Unresolved
+                | TypeCode::TypeVarT
+                | TypeCode::TypeVarT1
+                | TypeCode::TypeVarT2
+                | TypeCode::TypeVarT3
+                | TypeCode::Signature
+        ) {
             return false;
         }
         self.params.iter().all(|p| p.is_concrete())
@@ -204,7 +283,8 @@ impl ExprType {
         if self.params.is_empty() {
             return self.clone();
         }
-        let new_params: Vec<ExprType> = self.params.iter().map(|p| p.substitute(bindings)).collect();
+        let new_params: Vec<ExprType> =
+            self.params.iter().map(|p| p.substitute(bindings)).collect();
         ExprType::new(self.code, new_params)
     }
 
@@ -212,12 +292,18 @@ impl ExprType {
     /// Returns bindings if successful, None if no match.
     pub fn match_type(&self, other: &ExprType) -> Option<HashMap<TypeCode, ExprType>> {
         // Type variables bind
-        if matches!(self.code, TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3) {
+        if matches!(
+            self.code,
+            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+        ) {
             let mut m = HashMap::new();
             m.insert(self.code, other.clone());
             return Some(m);
         }
-        if matches!(other.code, TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3) {
+        if matches!(
+            other.code,
+            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+        ) {
             let mut m = HashMap::new();
             m.insert(other.code, self.clone());
             return Some(m);
@@ -237,32 +323,44 @@ impl ExprType {
         if self.code == TypeCode::Union && other.code == TypeCode::Union {
             for s in &self.params {
                 for c in &other.params {
-                    if let Some(r) = s.match_type(c) { return Some(r); }
+                    if let Some(r) = s.match_type(c) {
+                        return Some(r);
+                    }
                 }
             }
             return None;
         }
         if self.code == TypeCode::Union {
             for member in &self.params {
-                if let Some(r) = member.match_type(other) { return Some(r); }
+                if let Some(r) = member.match_type(other) {
+                    return Some(r);
+                }
             }
             return None;
         }
         if other.code == TypeCode::Union {
             for member in &other.params {
-                if let Some(r) = self.match_type(member) { return Some(r); }
+                if let Some(r) = self.match_type(member) {
+                    return Some(r);
+                }
             }
             return None;
         }
         // Same code, match params
-        if self.code != other.code { return None; }
-        if self.params.len() != other.params.len() { return None; }
+        if self.code != other.code {
+            return None;
+        }
+        if self.params.len() != other.params.len() {
+            return None;
+        }
         let mut bindings = HashMap::new();
         for (sp, cp) in self.params.iter().zip(other.params.iter()) {
             let sub = sp.match_type(cp)?;
             for (k, v) in sub {
                 if let Some(existing) = bindings.get(&k) {
-                    if *existing != v { return None; }
+                    if *existing != v {
+                        return None;
+                    }
                 }
                 bindings.insert(k, v);
             }
@@ -274,8 +372,12 @@ impl ExprType {
     pub fn new(code: TypeCode, params: Vec<ExprType>) -> Self {
         match code {
             TypeCode::Union => normalize_union(params),
-            TypeCode::List if params.len() == 1 => ExprType::list(params.into_iter().next().unwrap()),
-            TypeCode::Unresolved if params.len() == 1 => ExprType::unresolved(params.into_iter().next().unwrap()),
+            TypeCode::List if params.len() == 1 => {
+                ExprType::list(params.into_iter().next().unwrap())
+            }
+            TypeCode::Unresolved if params.len() == 1 => {
+                ExprType::unresolved(params.into_iter().next().unwrap())
+            }
             _ => ExprType { code, params },
         }
     }
@@ -284,7 +386,7 @@ impl ExprType {
 // ── Parsing ──
 
 impl ExprType {
-    /// Parse a type string like "int", "list[string]", "int?", "int | string", "unresolved[int]".
+    /// Parse a type string like "int", "list\[string\]", "int?", "int | string", "unresolved\[int\]".
     pub fn parse(s: &str) -> Result<ExprType, String> {
         // Signature: (T1, T2) -> T3  — check before union split since return type may contain |
         if s.starts_with('(') {
@@ -294,7 +396,10 @@ impl ExprType {
                 let param_types = if params_str.is_empty() {
                     Vec::new()
                 } else {
-                    split_params(params_str).iter().map(|p| ExprType::parse(p)).collect::<Result<Vec<_>, _>>()?
+                    split_params(params_str)
+                        .iter()
+                        .map(|p| ExprType::parse(p))
+                        .collect::<Result<Vec<_>, _>>()?
                 };
                 let return_type = ExprType::parse(ret_str)?;
                 return Ok(ExprType::signature(param_types, return_type));
@@ -331,7 +436,10 @@ impl ExprType {
             return Ok(ExprType::list(elem));
         }
         // unresolved[T]
-        if let Some(inner) = s.strip_prefix("unresolved[").and_then(|s| s.strip_suffix(']')) {
+        if let Some(inner) = s
+            .strip_prefix("unresolved[")
+            .and_then(|s| s.strip_suffix(']'))
+        {
             let constraint = ExprType::parse(inner)?;
             return Ok(ExprType::unresolved(constraint));
         }
@@ -357,7 +465,11 @@ fn split_union(s: &str) -> Vec<&str> {
         match bytes[i] {
             b'[' | b'(' => depth += 1,
             b']' | b')' => depth -= 1,
-            b' ' if depth == 0 && i + 2 < bytes.len() && bytes[i+1] == b'|' && bytes[i+2] == b' ' => {
+            b' ' if depth == 0
+                && i + 2 < bytes.len()
+                && bytes[i + 1] == b'|'
+                && bytes[i + 2] == b' ' =>
+            {
                 parts.push(&s[start..i]);
                 i += 3;
                 start = i;
@@ -391,7 +503,9 @@ fn split_params(s: &str) -> Vec<&str> {
         i += 1;
     }
     let last = s[start..].trim();
-    if !last.is_empty() { parts.push(last); }
+    if !last.is_empty() {
+        parts.push(last);
+    }
     parts
 }
 
@@ -432,13 +546,20 @@ impl fmt::Display for ExprType {
                 }
             }
             TypeCode::Union => {
-                let non_null: Vec<_> = self.params.iter().filter(|t| t.code != TypeCode::Null).collect();
+                let non_null: Vec<_> = self
+                    .params
+                    .iter()
+                    .filter(|t| t.code != TypeCode::Null)
+                    .collect();
                 let has_null = non_null.len() < self.params.len();
                 if has_null && non_null.len() == 1 {
                     return write!(f, "{}?", non_null[0]);
                 }
-                let mut parts: Vec<std::string::String> = non_null.iter().map(|t| t.to_string()).collect();
-                if has_null { parts.push("nulltype".to_string()); }
+                let mut parts: Vec<std::string::String> =
+                    non_null.iter().map(|t| t.to_string()).collect();
+                if has_null {
+                    parts.push("nulltype".to_string());
+                }
                 write!(f, "{}", parts.join(" | "))
             }
             TypeCode::Signature => {
@@ -471,7 +592,8 @@ mod tests {
     use super::*;
 
     // ── Basic types ──
-    #[test] fn basic_types() {
+    #[test]
+    fn basic_types() {
         assert_eq!(ExprType::BOOL.code, TypeCode::Bool);
         assert_eq!(ExprType::INT.code, TypeCode::Int);
         assert_eq!(ExprType::FLOAT.code, TypeCode::Float);
@@ -480,61 +602,203 @@ mod tests {
     }
 
     // ── Display ──
-    #[test] fn display_int() { assert_eq!(ExprType::INT.to_string(), "int"); }
-    #[test] fn display_list_int() { assert_eq!(ExprType::list(ExprType::INT).to_string(), "list[int]"); }
-    #[test] fn display_any() { assert_eq!(ExprType::ANY.to_string(), "any"); }
-    #[test] fn display_noreturn() { assert_eq!(ExprType::NORETURN.to_string(), "noreturn"); }
-    #[test] fn display_typevar() { assert_eq!(ExprType::T1.to_string(), "T1"); }
-    #[test] fn display_union() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::STRING]).to_string(), "int | string"); }
-    #[test] fn display_nullable() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(), "int?"); }
-    #[test] fn display_unresolved_bare() { assert_eq!(ExprType::unresolved(ExprType::ANY).to_string(), "unresolved"); }
-    #[test] fn display_unresolved_int() { assert_eq!(ExprType::unresolved(ExprType::INT).to_string(), "unresolved[int]"); }
+    #[test]
+    fn display_int() {
+        assert_eq!(ExprType::INT.to_string(), "int");
+    }
+    #[test]
+    fn display_list_int() {
+        assert_eq!(ExprType::list(ExprType::INT).to_string(), "list[int]");
+    }
+    #[test]
+    fn display_any() {
+        assert_eq!(ExprType::ANY.to_string(), "any");
+    }
+    #[test]
+    fn display_noreturn() {
+        assert_eq!(ExprType::NORETURN.to_string(), "noreturn");
+    }
+    #[test]
+    fn display_typevar() {
+        assert_eq!(ExprType::T1.to_string(), "T1");
+    }
+    #[test]
+    fn display_union() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::INT, ExprType::STRING]).to_string(),
+            "int | string"
+        );
+    }
+    #[test]
+    fn display_nullable() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(),
+            "int?"
+        );
+    }
+    #[test]
+    fn display_unresolved_bare() {
+        assert_eq!(
+            ExprType::unresolved(ExprType::ANY).to_string(),
+            "unresolved"
+        );
+    }
+    #[test]
+    fn display_unresolved_int() {
+        assert_eq!(
+            ExprType::unresolved(ExprType::INT).to_string(),
+            "unresolved[int]"
+        );
+    }
 
     // ── Parsing ──
-    #[test] fn parse_int() { assert_eq!(ExprType::parse("int").unwrap(), ExprType::INT); }
-    #[test] fn parse_float() { assert_eq!(ExprType::parse("float").unwrap(), ExprType::FLOAT); }
-    #[test] fn parse_string() { assert_eq!(ExprType::parse("string").unwrap(), ExprType::STRING); }
-    #[test] fn parse_bool() { assert_eq!(ExprType::parse("bool").unwrap(), ExprType::BOOL); }
-    #[test] fn parse_path() { assert_eq!(ExprType::parse("path").unwrap(), ExprType::PATH); }
-    #[test] fn parse_range_expr() { assert_eq!(ExprType::parse("range_expr").unwrap(), ExprType::RANGE_EXPR); }
-    #[test] fn parse_nulltype() { assert_eq!(ExprType::parse("nulltype").unwrap(), ExprType::NULLTYPE); }
-    #[test] fn parse_noreturn() { assert_eq!(ExprType::parse("noreturn").unwrap(), ExprType::NORETURN); }
-    #[test] fn parse_any() { assert_eq!(ExprType::parse("any").unwrap(), ExprType::ANY); }
-    #[test] fn parse_list_int() { assert_eq!(ExprType::parse("list[int]").unwrap(), ExprType::list(ExprType::INT)); }
-    #[test] fn parse_list_string() { assert_eq!(ExprType::parse("list[string]").unwrap(), ExprType::list(ExprType::STRING)); }
-    #[test] fn parse_nested_list() { assert_eq!(ExprType::parse("list[list[int]]").unwrap(), ExprType::list(ExprType::list(ExprType::INT))); }
-    #[test] fn parse_optional() {
+    #[test]
+    fn parse_int() {
+        assert_eq!(ExprType::parse("int").unwrap(), ExprType::INT);
+    }
+    #[test]
+    fn parse_float() {
+        assert_eq!(ExprType::parse("float").unwrap(), ExprType::FLOAT);
+    }
+    #[test]
+    fn parse_string() {
+        assert_eq!(ExprType::parse("string").unwrap(), ExprType::STRING);
+    }
+    #[test]
+    fn parse_bool() {
+        assert_eq!(ExprType::parse("bool").unwrap(), ExprType::BOOL);
+    }
+    #[test]
+    fn parse_path() {
+        assert_eq!(ExprType::parse("path").unwrap(), ExprType::PATH);
+    }
+    #[test]
+    fn parse_range_expr() {
+        assert_eq!(ExprType::parse("range_expr").unwrap(), ExprType::RANGE_EXPR);
+    }
+    #[test]
+    fn parse_nulltype() {
+        assert_eq!(ExprType::parse("nulltype").unwrap(), ExprType::NULLTYPE);
+    }
+    #[test]
+    fn parse_noreturn() {
+        assert_eq!(ExprType::parse("noreturn").unwrap(), ExprType::NORETURN);
+    }
+    #[test]
+    fn parse_any() {
+        assert_eq!(ExprType::parse("any").unwrap(), ExprType::ANY);
+    }
+    #[test]
+    fn parse_list_int() {
+        assert_eq!(
+            ExprType::parse("list[int]").unwrap(),
+            ExprType::list(ExprType::INT)
+        );
+    }
+    #[test]
+    fn parse_list_string() {
+        assert_eq!(
+            ExprType::parse("list[string]").unwrap(),
+            ExprType::list(ExprType::STRING)
+        );
+    }
+    #[test]
+    fn parse_nested_list() {
+        assert_eq!(
+            ExprType::parse("list[list[int]]").unwrap(),
+            ExprType::list(ExprType::list(ExprType::INT))
+        );
+    }
+    #[test]
+    fn parse_optional() {
         let t = ExprType::parse("int?").unwrap();
         assert_eq!(t.code, TypeCode::Union);
         assert_eq!(t.to_string(), "int?");
     }
-    #[test] fn parse_union() {
+    #[test]
+    fn parse_union() {
         let t = ExprType::parse("int | string").unwrap();
         assert_eq!(t.code, TypeCode::Union);
         assert_eq!(t.to_string(), "int | string");
     }
-    #[test] fn parse_unresolved_bare() { assert_eq!(ExprType::parse("unresolved").unwrap(), ExprType::unresolved(ExprType::ANY)); }
-    #[test] fn parse_unresolved_int() { assert_eq!(ExprType::parse("unresolved[int]").unwrap(), ExprType::unresolved(ExprType::INT)); }
-    #[test] fn parse_unresolved_list() { assert_eq!(ExprType::parse("unresolved[list[string]]").unwrap(), ExprType::unresolved(ExprType::list(ExprType::STRING))); }
-    #[test] fn parse_unknown_rejects() { assert!(ExprType::parse("notavalidtype").is_err()); }
-    #[test] fn parse_case_sensitive() { assert!(ExprType::parse("INT").is_err()); }
-    #[test] fn parse_whitespace_rejected() { assert!(ExprType::parse(" int").is_err()); }
+    #[test]
+    fn parse_unresolved_bare() {
+        assert_eq!(
+            ExprType::parse("unresolved").unwrap(),
+            ExprType::unresolved(ExprType::ANY)
+        );
+    }
+    #[test]
+    fn parse_unresolved_int() {
+        assert_eq!(
+            ExprType::parse("unresolved[int]").unwrap(),
+            ExprType::unresolved(ExprType::INT)
+        );
+    }
+    #[test]
+    fn parse_unresolved_list() {
+        assert_eq!(
+            ExprType::parse("unresolved[list[string]]").unwrap(),
+            ExprType::unresolved(ExprType::list(ExprType::STRING))
+        );
+    }
+    #[test]
+    fn parse_unknown_rejects() {
+        assert!(ExprType::parse("notavalidtype").is_err());
+    }
+    #[test]
+    fn parse_case_sensitive() {
+        assert!(ExprType::parse("INT").is_err());
+    }
+    #[test]
+    fn parse_whitespace_rejected() {
+        assert!(ExprType::parse(" int").is_err());
+    }
 
     // ── Roundtrip ──
-    #[test] fn roundtrip_bare() { let t = ExprType::parse("unresolved").unwrap(); assert_eq!(ExprType::parse(&t.to_string()).unwrap(), t); }
-    #[test] fn roundtrip_constrained() {
-        for s in &["unresolved[int]", "unresolved[list[string]]", "unresolved[float | int]"] {
+    #[test]
+    fn roundtrip_bare() {
+        let t = ExprType::parse("unresolved").unwrap();
+        assert_eq!(ExprType::parse(&t.to_string()).unwrap(), t);
+    }
+    #[test]
+    fn roundtrip_constrained() {
+        for s in &[
+            "unresolved[int]",
+            "unresolved[list[string]]",
+            "unresolved[float | int]",
+        ] {
             let t = ExprType::parse(s).unwrap();
-            assert_eq!(ExprType::parse(&t.to_string()).unwrap(), t, "roundtrip failed for {s}");
+            assert_eq!(
+                ExprType::parse(&t.to_string()).unwrap(),
+                t,
+                "roundtrip failed for {s}"
+            );
         }
     }
 
     // ── Equality / Hash ──
-    #[test] fn eq_same() { assert_eq!(ExprType::INT, ExprType::INT); }
-    #[test] fn eq_diff() { assert_ne!(ExprType::INT, ExprType::FLOAT); }
-    #[test] fn eq_list() { assert_eq!(ExprType::list(ExprType::INT), ExprType::list(ExprType::INT)); }
-    #[test] fn ne_list() { assert_ne!(ExprType::list(ExprType::INT), ExprType::list(ExprType::STRING)); }
-    #[test] fn hash_consistent() {
+    #[test]
+    fn eq_same() {
+        assert_eq!(ExprType::INT, ExprType::INT);
+    }
+    #[test]
+    fn eq_diff() {
+        assert_ne!(ExprType::INT, ExprType::FLOAT);
+    }
+    #[test]
+    fn eq_list() {
+        assert_eq!(ExprType::list(ExprType::INT), ExprType::list(ExprType::INT));
+    }
+    #[test]
+    fn ne_list() {
+        assert_ne!(
+            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::STRING)
+        );
+    }
+    #[test]
+    fn hash_consistent() {
         use std::collections::HashSet;
         let mut s = HashSet::new();
         s.insert(ExprType::INT);
@@ -544,9 +808,22 @@ mod tests {
     }
 
     // ── Union normalization ──
-    #[test] fn union_dedup() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::INT]).code, TypeCode::Int); }
-    #[test] fn union_single_unwrap() { assert_eq!(ExprType::union(vec![ExprType::STRING]).code, TypeCode::String); }
-    #[test] fn union_flatten() {
+    #[test]
+    fn union_dedup() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::INT, ExprType::INT]).code,
+            TypeCode::Int
+        );
+    }
+    #[test]
+    fn union_single_unwrap() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::STRING]).code,
+            TypeCode::String
+        );
+    }
+    #[test]
+    fn union_flatten() {
         let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
         let u2 = ExprType::union(vec![ExprType::FLOAT, ExprType::BOOL]);
         let combined = ExprType::union(vec![u1, u2]);
@@ -554,15 +831,35 @@ mod tests {
         assert_eq!(combined.params.len(), 4);
         assert_eq!(combined.to_string(), "bool | float | int | string");
     }
-    #[test] fn union_any_absorbs() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::ANY]).code, TypeCode::Any); }
-    #[test] fn union_noreturn_collapses() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NORETURN]), ExprType::INT); }
-    #[test] fn union_all_noreturn() { assert_eq!(ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]), ExprType::NORETURN); }
-    #[test] fn union_order_independent() {
+    #[test]
+    fn union_any_absorbs() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::INT, ExprType::ANY]).code,
+            TypeCode::Any
+        );
+    }
+    #[test]
+    fn union_noreturn_collapses() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::INT, ExprType::NORETURN]),
+            ExprType::INT
+        );
+    }
+    #[test]
+    fn union_all_noreturn() {
+        assert_eq!(
+            ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]),
+            ExprType::NORETURN
+        );
+    }
+    #[test]
+    fn union_order_independent() {
         let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
         let u2 = ExprType::union(vec![ExprType::STRING, ExprType::INT]);
         assert_eq!(u1, u2);
     }
-    #[test] fn union_hash_consistent() {
+    #[test]
+    fn union_hash_consistent() {
         use std::collections::HashSet;
         let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
         let u2 = ExprType::parse("int | string").unwrap();
@@ -573,70 +870,108 @@ mod tests {
     }
 
     // ── Unresolved normalization ──
-    #[test] fn list_of_unresolved_hoists() {
+    #[test]
+    fn list_of_unresolved_hoists() {
         let t = ExprType::list(ExprType::unresolved(ExprType::INT));
         assert_eq!(t.code, TypeCode::Unresolved);
         assert_eq!(t, ExprType::unresolved(ExprType::list(ExprType::INT)));
     }
-    #[test] fn union_with_unresolved_hoists() {
+    #[test]
+    fn union_with_unresolved_hoists() {
         let t = ExprType::union(vec![ExprType::STRING, ExprType::unresolved(ExprType::INT)]);
         assert_eq!(t.code, TypeCode::Unresolved);
-        assert_eq!(t, ExprType::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING])));
+        assert_eq!(
+            t,
+            ExprType::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]))
+        );
     }
-    #[test] fn nested_unresolved_flattens() {
+    #[test]
+    fn nested_unresolved_flattens() {
         let t = ExprType::unresolved(ExprType::unresolved(ExprType::INT));
         assert_eq!(t.code, TypeCode::Unresolved);
         assert_eq!(t, ExprType::unresolved(ExprType::INT));
     }
-    #[test] fn unresolved_never_inside_list() {
+    #[test]
+    fn unresolved_never_inside_list() {
         let t = ExprType::list(ExprType::unresolved(ExprType::STRING));
         assert_eq!(t.code, TypeCode::Unresolved);
         assert_eq!(t.params[0], ExprType::list(ExprType::STRING));
     }
 
     // ── is_symbolic / is_concrete ──
-    #[test] fn concrete_int() { assert!(ExprType::INT.is_concrete()); }
-    #[test] fn concrete_list_int() { assert!(ExprType::list(ExprType::INT).is_concrete()); }
-    #[test] fn not_concrete_any() { assert!(!ExprType::ANY.is_concrete()); }
-    #[test] fn not_concrete_union() { assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING]).is_concrete()); }
-    #[test] fn not_concrete_typevar() { assert!(!ExprType::T1.is_concrete()); }
-    #[test] fn symbolic_t1() { assert!(ExprType::T1.is_symbolic()); }
-    #[test] fn not_symbolic_int() { assert!(!ExprType::INT.is_symbolic()); }
-    #[test] fn symbolic_list_t1() { assert!(ExprType::list(ExprType::T1).is_symbolic()); }
+    #[test]
+    fn concrete_int() {
+        assert!(ExprType::INT.is_concrete());
+    }
+    #[test]
+    fn concrete_list_int() {
+        assert!(ExprType::list(ExprType::INT).is_concrete());
+    }
+    #[test]
+    fn not_concrete_any() {
+        assert!(!ExprType::ANY.is_concrete());
+    }
+    #[test]
+    fn not_concrete_union() {
+        assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING]).is_concrete());
+    }
+    #[test]
+    fn not_concrete_typevar() {
+        assert!(!ExprType::T1.is_concrete());
+    }
+    #[test]
+    fn symbolic_t1() {
+        assert!(ExprType::T1.is_symbolic());
+    }
+    #[test]
+    fn not_symbolic_int() {
+        assert!(!ExprType::INT.is_symbolic());
+    }
+    #[test]
+    fn symbolic_list_t1() {
+        assert!(ExprType::list(ExprType::T1).is_symbolic());
+    }
 
     // ── match_type ──
-    #[test] fn match_simple_typevar() {
+    #[test]
+    fn match_simple_typevar() {
         let b = ExprType::T1.match_type(&ExprType::INT).unwrap();
         assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
     }
-    #[test] fn match_nested_typevar() {
+    #[test]
+    fn match_nested_typevar() {
         let list_t1 = ExprType::list(ExprType::T1);
         let list_int = ExprType::list(ExprType::INT);
         let b = list_t1.match_type(&list_int).unwrap();
         assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
     }
-    #[test] fn match_no_match() {
+    #[test]
+    fn match_no_match() {
         let list_t1 = ExprType::list(ExprType::T1);
         assert!(list_t1.match_type(&ExprType::INT).is_none());
     }
-    #[test] fn match_any() {
+    #[test]
+    fn match_any() {
         assert!(ExprType::ANY.match_type(&ExprType::INT).is_some());
         assert!(ExprType::INT.match_type(&ExprType::ANY).is_some());
     }
-    #[test] fn match_union_member() {
+    #[test]
+    fn match_union_member() {
         let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
         assert!(u.match_type(&ExprType::INT).is_some());
         assert!(u.match_type(&ExprType::STRING).is_some());
         assert!(u.match_type(&ExprType::FLOAT).is_none());
     }
-    #[test] fn match_unresolved_delegates() {
+    #[test]
+    fn match_unresolved_delegates() {
         let t = ExprType::unresolved(ExprType::INT);
         assert!(t.match_type(&ExprType::INT).is_some());
         assert!(t.match_type(&ExprType::STRING).is_none());
     }
 
     // ── substitute ──
-    #[test] fn substitute_typevar() {
+    #[test]
+    fn substitute_typevar() {
         let list_t1 = ExprType::list(ExprType::T1);
         let mut bindings = HashMap::new();
         bindings.insert(TypeCode::TypeVarT1, ExprType::INT);

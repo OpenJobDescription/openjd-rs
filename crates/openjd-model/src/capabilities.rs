@@ -19,10 +19,8 @@ pub const STANDARD_ATTRIBUTE_CAPABILITIES: &[(&str, &[&str])] = &[
 ];
 
 /// Standard attribute capability names (without values).
-pub const STANDARD_ATTRIBUTE_CAPABILITY_NAMES: &[&str] = &[
-    "attr.worker.os.family",
-    "attr.worker.cpu.arch",
-];
+pub const STANDARD_ATTRIBUTE_CAPABILITY_NAMES: &[&str] =
+    &["attr.worker.os.family", "attr.worker.cpu.arch"];
 
 /// Validate that a string is a valid amount capability name.
 pub fn validate_amount_capability_name(name: &str) -> Result<(), String> {

@@ -1,7 +1,7 @@
 // Exploratory tests for the model crate quality evaluation report.
 // These probe potential bugs identified during code review.
 
-use openjd_model::{decode_job_template, create_job};
+use openjd_model::{create_job, decode_job_template};
 use std::collections::HashMap;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -18,7 +18,8 @@ fn bug_string_param_allowed_values_byte_vs_char_length() {
     // "aéb" is 3 chars but 4 bytes. maxLength=3 should accept it
     // if using chars().count(), but validate_definition uses .len()
     // and reports length as 4.
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         parameterDefinitions:
@@ -33,7 +34,8 @@ fn bug_string_param_allowed_values_byte_vs_char_length() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
     // BUG: This should succeed (3 chars <= maxLength 3) but fails
     // because validate_definition uses byte length (4 > 3).
@@ -53,7 +55,8 @@ fn bug_string_param_allowed_values_byte_vs_char_length() {
 
 #[test]
 fn float_param_nan_accepted_by_flexfloat() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         parameterDefinitions:
@@ -66,15 +69,20 @@ fn float_param_nan_accepted_by_flexfloat() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
     // Document: NaN is currently accepted. No explicit rejection in FlexFloat.
-    assert!(result.is_ok(), "NaN is accepted — no explicit rejection in FlexFloat");
+    assert!(
+        result.is_ok(),
+        "NaN is accepted — no explicit rejection in FlexFloat"
+    );
 }
 
 #[test]
 fn float_param_infinity_accepted_by_flexfloat() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         parameterDefinitions:
@@ -87,9 +95,13 @@ fn float_param_infinity_accepted_by_flexfloat() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_ok(), "Infinity is accepted — no explicit rejection in FlexFloat");
+    assert!(
+        result.is_ok(),
+        "Infinity is accepted — no explicit rejection in FlexFloat"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -99,7 +111,8 @@ fn float_param_infinity_accepted_by_flexfloat() {
 #[test]
 fn step_name_accepts_unicode() {
     // StepTemplate.name is String, not Identifier. Unicode is valid.
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -108,9 +121,13 @@ fn step_name_accepts_unicode() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_ok(), "Step names accept Unicode (they are String, not Identifier)");
+    assert!(
+        result.is_ok(),
+        "Step names accept Unicode (they are String, not Identifier)"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -119,7 +136,8 @@ fn step_name_accepts_unicode() {
 
 #[test]
 fn combination_expr_empty_parens_rejected() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -134,14 +152,19 @@ fn combination_expr_empty_parens_rejected() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_err(), "Empty parentheses in combination should be rejected");
+    assert!(
+        result.is_err(),
+        "Empty parentheses in combination should be rejected"
+    );
 }
 
 #[test]
 fn combination_expr_leading_star_rejected() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -159,9 +182,13 @@ fn combination_expr_leading_star_rejected() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_err(), "Leading star in combination should be rejected");
+    assert!(
+        result.is_err(),
+        "Leading star in combination should be rejected"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -170,7 +197,8 @@ fn combination_expr_leading_star_rejected() {
 
 #[test]
 fn zero_dimension_parameter_space() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -179,7 +207,8 @@ fn zero_dimension_parameter_space() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let jt = decode_job_template(template, None).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
     let job = create_job(&jt, &params).unwrap();
@@ -197,7 +226,8 @@ fn zero_dimension_parameter_space() {
 #[test]
 fn lazy_param_space_range_expr_within_limit() {
     // max_task_param_range_len is 1024 for all configs (not raised by FB1)
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -211,7 +241,8 @@ fn lazy_param_space_range_expr_within_limit() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let jt = decode_job_template(template, None).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
     let job = create_job(&jt, &params).unwrap();
@@ -228,7 +259,8 @@ fn lazy_param_space_range_expr_within_limit() {
 
 #[test]
 fn duplicate_env_name_across_job_and_step_rejected() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         jobEnvironments:
@@ -245,9 +277,13 @@ fn duplicate_env_name_across_job_and_step_rejected() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_err(), "Duplicate env name across job and step should be rejected");
+    assert!(
+        result.is_err(),
+        "Duplicate env name across job and step should be rejected"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -256,7 +292,8 @@ fn duplicate_env_name_across_job_and_step_rejected() {
 
 #[test]
 fn self_referencing_step_dependency_rejected() {
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         steps:
@@ -267,9 +304,13 @@ fn self_referencing_step_dependency_rejected() {
               actions:
                 onRun:
                   command: echo
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, None);
-    assert!(result.is_err(), "Self-referencing step dependency should be rejected");
+    assert!(
+        result.is_err(),
+        "Self-referencing step dependency should be rejected"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -279,7 +320,8 @@ fn self_referencing_step_dependency_rejected() {
 #[test]
 fn simple_action_malformed_format_string_behavior() {
     let exts = &["FEATURE_BUNDLE_1"];
-    let template = yaml_val(r#"
+    let template = yaml_val(
+        r#"
         specificationVersion: "jobtemplate-2023-09"
         name: Test
         extensions:
@@ -287,13 +329,13 @@ fn simple_action_malformed_format_string_behavior() {
         steps:
           - name: Step1
             bash: "echo '{{broken'"
-    "#);
+    "#,
+    );
     let result = decode_job_template(template, Some(exts));
     // Validation catches the malformed format string before
     // resolve_syntax_sugar runs, so the silent fallback is not reached.
     // The validation error is about the format string parse failure.
-    if result.is_ok() {
-        let jt = result.unwrap();
+    if let Ok(jt) = result {
         let step = &jt.steps[0];
         let script = step.resolve_syntax_sugar().unwrap();
         let embedded = &script.embedded_files.as_ref().unwrap()[0];

@@ -63,11 +63,7 @@ fn test_no_dependencies() {
 #[test]
 fn test_linear_chain() {
     // A → B → C (C depends on B, B depends on A)
-    let job = make_job(vec![
-        ("A", vec![]),
-        ("B", vec!["A"]),
-        ("C", vec!["B"]),
-    ]);
+    let job = make_job(vec![("A", vec![]), ("B", vec!["A"]), ("C", vec!["B"])]);
     let graph = StepDependencyGraph::new(&job).unwrap();
     assert_eq!(graph.topo_sorted().unwrap(), vec![0, 1, 2]);
 }
@@ -89,22 +85,14 @@ fn test_diamond() {
 fn test_reverse_order_deps() {
     // Steps defined as [C, B, A] where C depends on B, B depends on A
     // topo_sorted should return ["A", "B", "C"] (A first, then B, then C)
-    let job = make_job(vec![
-        ("C", vec!["B"]),
-        ("B", vec!["A"]),
-        ("A", vec![]),
-    ]);
+    let job = make_job(vec![("C", vec!["B"]), ("B", vec!["A"]), ("A", vec![])]);
     let graph = StepDependencyGraph::new(&job).unwrap();
     assert_eq!(graph.topo_sorted().unwrap(), vec![2, 1, 0]);
 }
 
 #[test]
 fn test_step_node_lookup() {
-    let job = make_job(vec![
-        ("A", vec![]),
-        ("B", vec!["A"]),
-        ("C", vec!["B"]),
-    ]);
+    let job = make_job(vec![("A", vec![]), ("B", vec!["A"]), ("C", vec!["B"])]);
     let graph = StepDependencyGraph::new(&job).unwrap();
     let node_b = graph.step_node("B").unwrap();
     assert_eq!(node_b.name, "B");
@@ -141,11 +129,7 @@ fn test_max_degrees() {
 
 #[test]
 fn test_topo_sorted_names() {
-    let job = make_job(vec![
-        ("C", vec!["B"]),
-        ("B", vec!["A"]),
-        ("A", vec![]),
-    ]);
+    let job = make_job(vec![("C", vec!["B"]), ("B", vec!["A"]), ("A", vec![])]);
     let graph = StepDependencyGraph::new(&job).unwrap();
     assert_eq!(graph.topo_sorted_names().unwrap(), vec!["A", "B", "C"]);
 }
@@ -213,10 +197,7 @@ fn test_topo_sort_dep_order_random() {
 
 #[test]
 fn test_cycle_detection() {
-    let job = make_job(vec![
-        ("A", vec!["B"]),
-        ("B", vec!["A"]),
-    ]);
+    let job = make_job(vec![("A", vec!["B"]), ("B", vec!["A"])]);
     let graph = StepDependencyGraph::new(&job).unwrap();
     assert_eq!(
         graph.topo_sorted().unwrap_err().to_string(),

@@ -3,14 +3,16 @@
 
 //! Tests for path mapping materialization.
 
-use openjd_sessions::session::Session;
-use openjd_sessions::PathMappingRule;
-use openjd_sessions::PathFormat;
 use openjd_expr::format_string::FormatString;
-use openjd_model::job::{Action, StepScript, StepActions};
+use openjd_model::job::{Action, StepActions, StepScript};
+use openjd_sessions::session::Session;
+use openjd_sessions::PathFormat;
+use openjd_sessions::PathMappingRule;
 use tempfile::TempDir;
 
-fn fs(s: &str) -> FormatString { FormatString::new(s).unwrap() }
+fn fs(s: &str) -> FormatString {
+    FormatString::new(s).unwrap()
+}
 
 #[tokio::test]
 async fn test_path_mapping_file_created_with_rules() {
@@ -27,7 +29,8 @@ async fn test_path_mapping_file_created_with_rules() {
             on_run: Action {
                 command: fs("cat"),
                 args: Some(vec![fs("{{Session.PathMappingRulesFile}}")]),
-                timeout: None, cancelation: None,
+                timeout: None,
+                cancelation: None,
             },
         },
         embedded_files: None,
@@ -52,7 +55,8 @@ async fn test_path_mapping_file_created_empty_when_no_rules() {
             on_run: Action {
                 command: fs("cat"),
                 args: Some(vec![fs("{{Session.PathMappingRulesFile}}")]),
-                timeout: None, cancelation: None,
+                timeout: None,
+                cancelation: None,
             },
         },
         embedded_files: None,
@@ -78,7 +82,8 @@ async fn test_has_path_mapping_rules_true() {
             on_run: Action {
                 command: fs("sh"),
                 args: Some(vec![fs("-c"), fs("echo {{Session.HasPathMappingRules}}")]),
-                timeout: None, cancelation: None,
+                timeout: None,
+                cancelation: None,
             },
         },
         embedded_files: None,
@@ -97,7 +102,8 @@ async fn test_has_path_mapping_rules_false() {
             on_run: Action {
                 command: fs("sh"),
                 args: Some(vec![fs("-c"), fs("echo {{Session.HasPathMappingRules}}")]),
-                timeout: None, cancelation: None,
+                timeout: None,
+                cancelation: None,
             },
         },
         embedded_files: None,
@@ -110,8 +116,16 @@ async fn test_has_path_mapping_rules_false() {
 async fn test_path_mapping_multiple_rules() {
     let tmp = TempDir::new().unwrap();
     let rules = vec![
-        PathMappingRule { source_path_format: PathFormat::Posix, source_path: "/mnt/a".into(), destination_path: "/local/a".into() },
-        PathMappingRule { source_path_format: PathFormat::Windows, source_path: "C:\\share".into(), destination_path: "/local/share".into() },
+        PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/mnt/a".into(),
+            destination_path: "/local/a".into(),
+        },
+        PathMappingRule {
+            source_path_format: PathFormat::Windows,
+            source_path: "C:\\share".into(),
+            destination_path: "/local/share".into(),
+        },
     ];
     let mut session = Session::new(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
@@ -120,7 +134,8 @@ async fn test_path_mapping_multiple_rules() {
             on_run: Action {
                 command: fs("cat"),
                 args: Some(vec![fs("{{Session.PathMappingRulesFile}}")]),
-                timeout: None, cancelation: None,
+                timeout: None,
+                cancelation: None,
             },
         },
         embedded_files: None,

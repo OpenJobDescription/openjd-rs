@@ -28,8 +28,15 @@ pub struct StepScriptRunner {
 }
 
 impl StepScriptRunner {
-    pub fn new(session_id: &str, working_directory: PathBuf, files_directory: PathBuf, user: Option<Arc<dyn SessionUser>>) -> Self {
-        Self { base: ScriptRunnerBase::new(session_id, working_directory, files_directory, user) }
+    pub fn new(
+        session_id: &str,
+        working_directory: PathBuf,
+        files_directory: PathBuf,
+        user: Option<Arc<dyn SessionUser>>,
+    ) -> Self {
+        Self {
+            base: ScriptRunnerBase::new(session_id, working_directory, files_directory, user),
+        }
     }
 
     pub fn with_redactions(mut self, enabled: bool) -> Self {
@@ -47,7 +54,10 @@ impl StepScriptRunner {
         self
     }
 
-    pub fn with_cancel_request_rx(mut self, rx: tokio::sync::watch::Receiver<Option<Duration>>) -> Self {
+    pub fn with_cancel_request_rx(
+        mut self,
+        rx: tokio::sync::watch::Receiver<Option<Duration>>,
+    ) -> Self {
         self.base.cancel_request_rx = Some(rx);
         self
     }
@@ -75,22 +85,37 @@ impl StepScriptRunner {
     ) -> Result<SubprocessResult, SessionError> {
         // Step scripts: evaluate let bindings first, then materialize files
         let mut final_symtab = if let Some(bindings) = &script.let_bindings {
-            evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host()).map_err(|e| SessionError::FormatString {
-                context: "let bindings".into(),
-                reason: e.to_string(),
-            })?
+            evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host())
+                .map_err(|e| SessionError::FormatString {
+                    context: "let bindings".into(),
+                    reason: e.to_string(),
+                })?
         } else {
             symtab.clone()
         };
 
         if let Some(files) = &script.embedded_files {
-            let mut ef = EmbeddedFiles::new(EmbeddedFilesScope::Step, self.base.files_directory.clone(), &self.base.session_id)
-                .with_user(self.base.user.clone());
+            let mut ef = EmbeddedFiles::new(
+                EmbeddedFilesScope::Step,
+                self.base.files_directory.clone(),
+                &self.base.session_id,
+            )
+            .with_user(self.base.user.clone());
             ef.allocate_file_paths(files, &mut final_symtab)?;
             ef.write_file_contents(&final_symtab, library, rules)?;
         }
 
-        self.base.run_action(&script.actions.on_run, &final_symtab, library, rules, env_vars, message_tx, None, Duration::from_secs(120))
+        self.base
+            .run_action(
+                &script.actions.on_run,
+                &final_symtab,
+                library,
+                rules,
+                env_vars,
+                message_tx,
+                None,
+                Duration::from_secs(120),
+            )
             .await
     }
 

@@ -7,10 +7,10 @@
 use openjd_snapshots::{
     collect_abs_snapshot, compose_diffs, compose_snapshot_with_diffs, diff_snapshots,
     filter_manifest, hash_abs_manifest, hash_upload_abs_manifest, join_snapshot,
-    partition_manifest, subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions,
-    DiffOptions, DirEntry, FileEntry, FileSystemDataCache, HashAlgorithm, HashOptions,
-    HashUploadOptions, Manifest, ManifestEntry, PartitionOptions, Snapshot, SymlinkPolicy,
-    DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE,
+    partition_manifest, subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, DiffOptions,
+    DirEntry, FileEntry, FileSystemDataCache, HashAlgorithm, HashOptions, HashUploadOptions,
+    Manifest, ManifestEntry, PartitionOptions, Snapshot, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    WHOLE_FILE_CHUNK_SIZE,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +18,11 @@ use tempfile::TempDir;
 
 // --- Helpers ---
 
-fn abs_snapshot(chunk_size: i64, files: Vec<FileEntry>, dirs: Vec<DirEntry>) -> openjd_snapshots::AbsSnapshot {
+fn abs_snapshot(
+    chunk_size: i64,
+    files: Vec<FileEntry>,
+    dirs: Vec<DirEntry>,
+) -> openjd_snapshots::AbsSnapshot {
     Manifest::new(HashAlgorithm::Xxh128, chunk_size)
         .with_files(files)
         .with_dirs(dirs)
@@ -97,9 +101,7 @@ fn filter_preserves_chunk_size() {
         vec![],
     );
 
-    let filtered = filter_manifest(&m, &|entry: &ManifestEntry| {
-        entry.path().ends_with("a.txt")
-    });
+    let filtered = filter_manifest(&m, &|entry: &ManifestEntry| entry.path().ends_with("a.txt"));
 
     assert_eq!(filtered.file_chunk_size_bytes, custom);
     assert_eq!(filtered.files.len(), 1);
@@ -123,18 +125,22 @@ fn filter_preserves_whole_file_chunk_size() {
 #[test]
 fn diff_preserves_parent_chunk_size() {
     let custom = 64 * 1024 * 1024;
-    let parent = abs_snapshot(
-        custom,
-        vec![FileEntry::file("/tmp/a.txt", 10, 1)],
-        vec![],
-    );
+    let parent = abs_snapshot(custom, vec![FileEntry::file("/tmp/a.txt", 10, 1)], vec![]);
     let current = abs_snapshot(
         custom,
         vec![FileEntry::file("/tmp/a.txt", 10, 2)], // mtime changed
         vec![],
     );
 
-    let diff = diff_snapshots(&parent, &current, &DiffOptions { ignore_hashes: true, ..Default::default() }).unwrap();
+    let diff = diff_snapshots(
+        &parent,
+        &current,
+        &DiffOptions {
+            ignore_hashes: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(diff.file_chunk_size_bytes, custom);
 }
@@ -152,7 +158,15 @@ fn diff_preserves_whole_file_chunk_size() {
         vec![],
     );
 
-    let diff = diff_snapshots(&parent, &current, &DiffOptions { ignore_hashes: true, ..Default::default() }).unwrap();
+    let diff = diff_snapshots(
+        &parent,
+        &current,
+        &DiffOptions {
+            ignore_hashes: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(diff.file_chunk_size_bytes, WHOLE_FILE_CHUNK_SIZE);
 }
@@ -162,11 +176,7 @@ fn diff_preserves_whole_file_chunk_size() {
 #[test]
 fn compose_preserves_chunk_size() {
     let custom = 128 * 1024;
-    let base = abs_snapshot(
-        custom,
-        vec![FileEntry::file("/tmp/a.txt", 10, 1)],
-        vec![],
-    );
+    let base = abs_snapshot(custom, vec![FileEntry::file("/tmp/a.txt", 10, 1)], vec![]);
     let diff: openjd_snapshots::AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, custom)
         .with_files(vec![FileEntry::file("/tmp/b.txt", 20, 2)]);
 
@@ -261,10 +271,7 @@ fn partition_preserves_whole_file_chunk_size() {
 #[test]
 fn join_preserves_chunk_size() {
     let custom = 8 * 1024 * 1024;
-    let m = rel_snapshot(
-        custom,
-        vec![FileEntry::file("a.txt", 10, 1)],
-    );
+    let m = rel_snapshot(custom, vec![FileEntry::file("a.txt", 10, 1)]);
 
     let joined = join_snapshot(&m, "/prefix").unwrap();
 
@@ -273,10 +280,7 @@ fn join_preserves_chunk_size() {
 
 #[test]
 fn join_preserves_whole_file_chunk_size() {
-    let m = rel_snapshot(
-        WHOLE_FILE_CHUNK_SIZE,
-        vec![FileEntry::file("a.txt", 10, 1)],
-    );
+    let m = rel_snapshot(WHOLE_FILE_CHUNK_SIZE, vec![FileEntry::file("a.txt", 10, 1)]);
 
     let joined = join_snapshot(&m, "/prefix").unwrap();
 
@@ -350,7 +354,10 @@ fn hash_preserves_input_chunk_size_when_none() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: None, ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: None,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -377,7 +384,10 @@ fn hash_overrides_chunk_size_when_specified() {
     // but the hashing behavior uses 32.
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(32), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(32),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -405,13 +415,19 @@ fn hash_whole_file_disables_chunking() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(WHOLE_FILE_CHUNK_SIZE), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(WHOLE_FILE_CHUNK_SIZE),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
     assert!(f.hash.is_some(), "whole-file hash should be set");
-    assert!(f.chunk_hashes.is_none(), "chunk_hashes should be None for whole-file mode");
+    assert!(
+        f.chunk_hashes.is_none(),
+        "chunk_hashes should be None for whole-file mode"
+    );
 }
 
 #[test]
@@ -432,14 +448,24 @@ fn hash_small_file_with_small_chunks_produces_chunkhashes() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(16), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(16),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
-    assert!(f.hash.is_none(), "whole-file hash should not be set for chunked");
+    assert!(
+        f.hash.is_none(),
+        "whole-file hash should not be set for chunked"
+    );
     let chunks = f.chunk_hashes.as_ref().unwrap();
-    assert_eq!(chunks.len(), 4, "64 bytes / 16 byte chunks = 4 chunk hashes");
+    assert_eq!(
+        chunks.len(),
+        4,
+        "64 bytes / 16 byte chunks = 4 chunk hashes"
+    );
 }
 
 #[test]
@@ -460,13 +486,22 @@ fn hash_file_smaller_than_chunk_size_produces_single_hash() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(256), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(256),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
-    assert!(f.hash.is_some(), "file smaller than chunk_size should get a single hash");
-    assert!(f.chunk_hashes.is_none(), "no chunk_hashes when file < chunk_size");
+    assert!(
+        f.hash.is_some(),
+        "file smaller than chunk_size should get a single hash"
+    );
+    assert!(
+        f.chunk_hashes.is_none(),
+        "no chunk_hashes when file < chunk_size"
+    );
 }
 
 // ===== Hash Upload chunk size =====
@@ -491,7 +526,10 @@ fn hash_upload_preserves_input_chunk_size_when_none() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         make_fs_cache(cache_dir.path()),
-        HashUploadOptions { file_chunk_size_bytes: None, ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: None,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -517,7 +555,10 @@ fn hash_upload_overrides_chunk_size_when_specified() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         make_fs_cache(cache_dir.path()),
-        HashUploadOptions { file_chunk_size_bytes: Some(32), ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(32),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -547,13 +588,19 @@ fn hash_upload_whole_file_disables_chunking() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         make_fs_cache(cache_dir.path()),
-        HashUploadOptions { file_chunk_size_bytes: Some(WHOLE_FILE_CHUNK_SIZE), ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(WHOLE_FILE_CHUNK_SIZE),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
     assert!(f.hash.is_some(), "whole-file hash should be set");
-    assert!(f.chunk_hashes.is_none(), "chunk_hashes should be None for whole-file mode");
+    assert!(
+        f.chunk_hashes.is_none(),
+        "chunk_hashes should be None for whole-file mode"
+    );
 }
 
 // ===== Collect -> Hash pipeline =====
@@ -576,7 +623,10 @@ fn collect_then_hash_preserves_chunk_size() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: None, ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: None,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -603,7 +653,10 @@ fn collect_then_hash_upload_preserves_chunk_size() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         make_fs_cache(cache_dir.path()),
-        HashUploadOptions { file_chunk_size_bytes: None, ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: None,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -633,7 +686,10 @@ fn hash_upload_small_file_with_small_chunks_filesystem() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(64), ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(64),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -642,7 +698,10 @@ fn hash_upload_small_file_with_small_chunks_filesystem() {
     assert_eq!(chunks.len(), 16, "1024 / 64 = 16 chunks");
 
     // Verify chunks are retrievable from the data cache
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     for h in chunks {
         assert!(rt.block_on(dc.object_exists(h, "xxh128")).unwrap());
     }
@@ -679,8 +738,14 @@ fn hash_upload_idempotent_filesystem() {
         HashUploadOptions::default(),
     )
     .unwrap();
-    assert_eq!(r2.statistics.uploaded_files, 0, "second run should skip upload");
-    assert_eq!(r2.statistics.hashed_files, 1, "still hashed (no hash_cache)");
+    assert_eq!(
+        r2.statistics.uploaded_files, 0,
+        "second run should skip upload"
+    );
+    assert_eq!(
+        r2.statistics.hashed_files, 1,
+        "still hashed (no hash_cache)"
+    );
 }
 
 #[test]
@@ -713,7 +778,10 @@ fn hash_upload_deduplication_filesystem() {
     assert_eq!(h0, h1, "identical files should produce the same hash");
 
     // Content-addressed cache stores only one object for the shared hash
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let stored = rt.block_on(dc.get_object(h0, "xxh128")).unwrap();
     assert_eq!(stored, content);
 }
@@ -738,15 +806,24 @@ fn hash_computed_correctly_with_custom_chunk_size() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(10), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(10),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
     // File is larger than chunk size, so it should have chunk hashes
-    assert!(f.hash.is_none(), "should use chunk hashes, not whole-file hash");
+    assert!(
+        f.hash.is_none(),
+        "should use chunk hashes, not whole-file hash"
+    );
     let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
-    assert!(chunks.len() > 1, "file larger than chunk size should produce multiple chunks");
+    assert!(
+        chunks.len() > 1,
+        "file larger than chunk size should produce multiple chunks"
+    );
 }
 
 #[test]
@@ -775,8 +852,13 @@ fn hash_and_upload_with_custom_chunk_size() {
     assert!(f.hash.is_some(), "hash should be computed");
 
     // Verify file is in the data cache
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    assert!(rt.block_on(dc.object_exists(f.hash.as_ref().unwrap(), "xxh128")).unwrap());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(rt
+        .block_on(dc.object_exists(f.hash.as_ref().unwrap(), "xxh128"))
+        .unwrap());
 }
 
 #[test]
@@ -800,7 +882,10 @@ fn override_chunk_size_at_each_stage() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(hash_chunk), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(hash_chunk),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -828,12 +913,18 @@ fn override_chunk_size_affects_chunking_decision_hash() {
     // Override with small chunk size — file SHOULD be chunked
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(16), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(16),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
-    assert!(f.hash.is_none(), "should use chunk hashes, not whole-file hash");
+    assert!(
+        f.hash.is_none(),
+        "should use chunk hashes, not whole-file hash"
+    );
     let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
     assert_eq!(chunks.len(), 4, "64 bytes / 16 byte chunks = 4");
 }
@@ -861,12 +952,18 @@ fn override_chunk_size_affects_chunking_decision_hash_upload() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         dc,
-        HashUploadOptions { file_chunk_size_bytes: Some(16), ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(16),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let f = &result.manifest.files()[0];
-    assert!(f.hash.is_none(), "should use chunk hashes, not whole-file hash");
+    assert!(
+        f.hash.is_none(),
+        "should use chunk hashes, not whole-file hash"
+    );
     let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
     assert_eq!(chunks.len(), 4, "64 bytes / 16 byte chunks = 4");
 }
@@ -892,16 +989,28 @@ fn hash_multiple_small_files_with_small_chunks() {
 
     let result = hash_abs_manifest(
         &AbsManifest::Snapshot(collected),
-        HashOptions { file_chunk_size_bytes: Some(16), ..Default::default() },
+        HashOptions {
+            file_chunk_size_bytes: Some(16),
+            ..Default::default()
+        },
     )
     .unwrap();
 
     // All files > 16 bytes, so all should have chunk hashes
     for f in result.manifest.files() {
-        assert!(f.hash.is_none(), "file {} should not have whole-file hash", f.path);
+        assert!(
+            f.hash.is_none(),
+            "file {} should not have whole-file hash",
+            f.path
+        );
         let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
         let expected = f.size.unwrap() as usize / 16;
-        assert_eq!(chunks.len(), expected, "file {} chunk count mismatch", f.path);
+        assert_eq!(
+            chunks.len(),
+            expected,
+            "file {} chunk count mismatch",
+            f.path
+        );
     }
 }
 
@@ -919,14 +1028,14 @@ fn hash_identical_files_same_hash() {
     )
     .unwrap();
 
-    let result = hash_abs_manifest(
-        &AbsManifest::Snapshot(collected),
-        HashOptions::default(),
-    )
-    .unwrap();
+    let result =
+        hash_abs_manifest(&AbsManifest::Snapshot(collected), HashOptions::default()).unwrap();
 
     let files = result.manifest.files();
-    assert_eq!(files[0].hash, files[1].hash, "identical files should produce the same hash");
+    assert_eq!(
+        files[0].hash, files[1].hash,
+        "identical files should produce the same hash"
+    );
 }
 
 #[test]
@@ -942,14 +1051,14 @@ fn hash_different_files_different_hash() {
     )
     .unwrap();
 
-    let result = hash_abs_manifest(
-        &AbsManifest::Snapshot(collected),
-        HashOptions::default(),
-    )
-    .unwrap();
+    let result =
+        hash_abs_manifest(&AbsManifest::Snapshot(collected), HashOptions::default()).unwrap();
 
     let files = result.manifest.files();
-    assert_ne!(files[0].hash, files[1].hash, "different files should produce different hashes");
+    assert_ne!(
+        files[0].hash, files[1].hash,
+        "different files should produce different hashes"
+    );
 }
 
 #[test]
@@ -976,18 +1085,32 @@ fn hash_upload_multiple_files_with_chunks_filesystem() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(collected),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(32), ..Default::default() },
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(32),
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     for f in result.manifest.files() {
         assert!(f.hash.is_none(), "file {} should use chunk hashes", f.path);
         let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
         let expected = f.size.unwrap() as usize / 32;
-        assert_eq!(chunks.len(), expected, "file {} chunk count mismatch", f.path);
+        assert_eq!(
+            chunks.len(),
+            expected,
+            "file {} chunk count mismatch",
+            f.path
+        );
         for h in chunks {
-            assert!(rt.block_on(dc.object_exists(h, "xxh128")).unwrap(), "chunk should be in cache");
+            assert!(
+                rt.block_on(dc.object_exists(h, "xxh128")).unwrap(),
+                "chunk should be in cache"
+            );
         }
     }
 }

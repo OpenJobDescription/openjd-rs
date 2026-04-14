@@ -5,8 +5,8 @@
 // filenames parameter, chunk size, empty inputs, special files.
 
 use openjd_snapshots::{
-    collect_abs_snapshot, CollectOptions, HashAlgorithm, SymlinkPolicy,
-    DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE,
+    collect_abs_snapshot, CollectOptions, HashAlgorithm, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    WHOLE_FILE_CHUNK_SIZE,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -43,7 +43,11 @@ fn nested_absolute_paths() {
     )
     .unwrap();
 
-    let nested: Vec<_> = m.files.iter().filter(|f| f.path.contains("nested.txt")).collect();
+    let nested: Vec<_> = m
+        .files
+        .iter()
+        .filter(|f| f.path.contains("nested.txt"))
+        .collect();
     assert_eq!(nested.len(), 1);
     assert!(nested[0].path.starts_with('/'));
 }
@@ -62,7 +66,11 @@ fn paths_include_subdirectory_structure() {
     )
     .unwrap();
 
-    let file = m.files.iter().find(|f| f.path.contains("file.txt")).unwrap();
+    let file = m
+        .files
+        .iter()
+        .find(|f| f.path.contains("file.txt"))
+        .unwrap();
     assert!(file.path.contains("/subdir/file.txt"));
 }
 
@@ -80,7 +88,11 @@ fn file_size_captured() {
     )
     .unwrap();
 
-    let f = m.files.iter().find(|f| f.path.contains("file.txt")).unwrap();
+    let f = m
+        .files
+        .iter()
+        .find(|f| f.path.contains("file.txt"))
+        .unwrap();
     assert_eq!(f.size, Some(13)); // "Hello, World!" = 13 bytes
 }
 
@@ -97,7 +109,11 @@ fn mtime_captured() {
     )
     .unwrap();
 
-    let f = m.files.iter().find(|f| f.path.contains("file.txt")).unwrap();
+    let f = m
+        .files
+        .iter()
+        .find(|f| f.path.contains("file.txt"))
+        .unwrap();
     assert!(f.mtime.unwrap() > 0);
 }
 
@@ -193,12 +209,8 @@ fn multiple_directories_collected() {
     std::fs::write(dir1.join("file1.txt"), "content1").unwrap();
     std::fs::write(dir2.join("file2.txt"), "content2").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[dir1, dir2],
-        &[] as &[PathBuf],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m =
+        collect_abs_snapshot(&[dir1, dir2], &[] as &[PathBuf], CollectOptions::default()).unwrap();
 
     assert!(m.files.iter().any(|f| f.path.ends_with("file1.txt")));
     assert!(m.files.iter().any(|f| f.path.ends_with("file2.txt")));
@@ -236,12 +248,7 @@ fn combine_directories_and_filenames() {
     let extra = tmp.path().join("extra.txt");
     std::fs::write(&extra, "extra").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[sub],
-        &[extra],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[sub], &[extra], CollectOptions::default()).unwrap();
 
     assert!(m.files.iter().any(|f| f.path.ends_with("in_dir.txt")));
     assert!(m.files.iter().any(|f| f.path.ends_with("extra.txt")));
@@ -253,12 +260,7 @@ fn filenames_only_no_directories() {
     let f1 = tmp.path().join("file1.txt");
     std::fs::write(&f1, "content1").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[] as &[PathBuf],
-        &[f1],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[] as &[PathBuf], &[f1], CollectOptions::default()).unwrap();
 
     assert_eq!(m.files.len(), 1);
     assert_eq!(m.dirs.len(), 0);
@@ -326,12 +328,7 @@ fn empty_directory_results_in_dir_entry_only() {
     let empty = tmp.path().join("empty");
     std::fs::create_dir_all(&empty).unwrap();
 
-    let m = collect_abs_snapshot(
-        &[empty],
-        &[] as &[PathBuf],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[empty], &[] as &[PathBuf], CollectOptions::default()).unwrap();
 
     assert_eq!(m.files.len(), 0);
     assert_eq!(m.dirs.len(), 1);
@@ -383,7 +380,10 @@ fn hidden_directories_collected() {
     )
     .unwrap();
 
-    assert!(m.files.iter().any(|f| f.path.contains(".hidden_dir/file.txt")));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.contains(".hidden_dir/file.txt")));
 }
 
 #[test]
@@ -398,7 +398,10 @@ fn files_with_spaces_in_name() {
     )
     .unwrap();
 
-    assert!(m.files.iter().any(|f| f.path.contains("file with spaces.txt")));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.contains("file with spaces.txt")));
 }
 
 #[test]
@@ -413,7 +416,10 @@ fn files_with_unicode_names() {
     )
     .unwrap();
 
-    assert!(m.files.iter().any(|f| f.path.contains("файл_文件_αρχείο.txt")));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.contains("файл_文件_αρχείο.txt")));
 }
 
 #[test]
@@ -428,7 +434,11 @@ fn empty_file_collected_with_size_zero() {
     )
     .unwrap();
 
-    let f = m.files.iter().find(|f| f.path.ends_with("empty.txt")).unwrap();
+    let f = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("empty.txt"))
+        .unwrap();
     assert_eq!(f.size, Some(0));
 }
 
@@ -491,11 +501,7 @@ fn all_paths_absolute_and_normalized() {
 fn symlinks_preserve_policy() {
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("target.txt"), "data").unwrap();
-    std::os::unix::fs::symlink(
-        tmp.path().join("target.txt"),
-        tmp.path().join("link.txt"),
-    )
-    .unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("target.txt"), tmp.path().join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
@@ -507,7 +513,11 @@ fn symlinks_preserve_policy() {
     )
     .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
 }
 
@@ -516,11 +526,7 @@ fn symlinks_preserve_policy() {
 fn symlinks_exclude_all_policy() {
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("target.txt"), "data").unwrap();
-    std::os::unix::fs::symlink(
-        tmp.path().join("target.txt"),
-        tmp.path().join("link.txt"),
-    )
-    .unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("target.txt"), tmp.path().join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
@@ -550,13 +556,24 @@ fn preserve_file_symlink_has_absolute_target() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 2);
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     let abs_target = std::fs::canonicalize(&target).unwrap();
-    assert_eq!(link.symlink_target.as_deref().unwrap(), abs_target.to_str().unwrap());
+    assert_eq!(
+        link.symlink_target.as_deref().unwrap(),
+        abs_target.to_str().unwrap()
+    );
 }
 
 #[cfg(unix)]
@@ -571,10 +588,18 @@ fn preserve_directory_symlink_not_followed() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link_dir")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_dir"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
     // Contents under link_dir should NOT be collected (symlink not followed)
     assert!(!m.files.iter().any(|f| f.path.contains("link_dir/file.txt")));
@@ -591,13 +616,29 @@ fn preserve_symlink_chain() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 3);
-    let l1 = m.files.iter().find(|f| f.path.ends_with("link1.txt")).unwrap();
-    let l2 = m.files.iter().find(|f| f.path.ends_with("link2.txt")).unwrap();
-    assert!(l1.symlink_target.as_deref().unwrap().ends_with("target.txt"));
+    let l1 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link1.txt"))
+        .unwrap();
+    let l2 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link2.txt"))
+        .unwrap();
+    assert!(l1
+        .symlink_target
+        .as_deref()
+        .unwrap()
+        .ends_with("target.txt"));
     assert!(l2.symlink_target.as_deref().unwrap().ends_with("link1.txt"));
 }
 
@@ -612,13 +653,25 @@ fn preserve_escaping_symlink_kept() {
     std::os::unix::fs::symlink("../outside.txt", root.join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
-    assert!(link.symlink_target.as_deref().unwrap().ends_with("outside.txt"));
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
+    assert!(link
+        .symlink_target
+        .as_deref()
+        .unwrap()
+        .ends_with("outside.txt"));
 }
 
 // ===== Symlink ExcludeAll policy =====
@@ -633,8 +686,12 @@ fn exclude_all_skips_file_symlink() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 1);
     assert!(m.files[0].path.ends_with("target.txt"));
@@ -652,8 +709,12 @@ fn exclude_all_skips_directory_symlink() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(!m.files.iter().any(|f| f.path.contains("link_dir")));
     assert!(m.files.iter().any(|f| f.path.ends_with("file.txt")));
@@ -672,12 +733,20 @@ fn collapse_escaping_converts_escaping_symlink_to_file() {
     std::os::unix::fs::symlink(&outside, root.join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     // Escaping symlink collapsed: no symlink_target, has size
     assert!(link.symlink_target.is_none());
     assert_eq!(link.size, Some(7)); // "outside"
@@ -693,10 +762,18 @@ fn collapse_escaping_preserves_non_escaping_symlink() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     // Non-escaping symlink preserved
     assert!(link.symlink_target.is_some());
 }
@@ -713,10 +790,18 @@ fn collapse_all_file_symlink_becomes_regular() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(link.symlink_target.is_none());
     assert_eq!(link.size, Some(7));
 }
@@ -733,8 +818,12 @@ fn collapse_all_dir_symlink_walks_contents() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Should have file.txt under both subdir and link_dir
     assert!(m.files.iter().any(|f| f.path.contains("link_dir/file.txt")));
@@ -755,8 +844,12 @@ fn symlink_in_filenames_preserved() {
     let m = collect_abs_snapshot(
         &[] as &[PathBuf],
         &[link],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 1);
     assert!(m.files[0].symlink_target.is_some());
@@ -774,8 +867,12 @@ fn symlink_in_filenames_collapsed() {
     let m = collect_abs_snapshot(
         &[] as &[PathBuf],
         &[link],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 1);
     assert!(m.files[0].symlink_target.is_none());
@@ -801,11 +898,7 @@ fn error_file_as_directory() {
     let f = tmp.path().join("file.txt");
     std::fs::write(&f, "content").unwrap();
 
-    let result = collect_abs_snapshot(
-        &[f],
-        &[] as &[PathBuf],
-        CollectOptions::default(),
-    );
+    let result = collect_abs_snapshot(&[f], &[] as &[PathBuf], CollectOptions::default());
     assert!(result.is_err());
 }
 
@@ -817,11 +910,7 @@ fn directory_as_filename_not_added_as_file() {
 
     // The Rust implementation doesn't error but the directory metadata
     // is collected as a file entry (no validation). Verify it doesn't panic.
-    let _result = collect_abs_snapshot(
-        &[] as &[PathBuf],
-        &[sub],
-        CollectOptions::default(),
-    );
+    let _result = collect_abs_snapshot(&[] as &[PathBuf], &[sub], CollectOptions::default());
 }
 
 #[test]
@@ -841,7 +930,8 @@ fn error_empty_inputs_returns_empty() {
         &[] as &[PathBuf],
         &[] as &[PathBuf],
         CollectOptions::default(),
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 0);
     assert_eq!(m.dirs.len(), 0);
@@ -861,8 +951,12 @@ fn cycle_self_referential_with_collapse_all() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Regular file collected, self-referential symlink skipped (broken)
     assert!(m.files.iter().any(|f| f.path.ends_with("file.txt")));
@@ -884,8 +978,12 @@ fn cycle_two_node_with_collapse_all() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Both real files collected without infinite recursion
     assert!(m.files.iter().any(|f| f.path.ends_with("file_a.txt")));
@@ -906,11 +1004,19 @@ fn cycle_preserved_as_symlinks() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Both symlinks preserved (no recursion with Preserve)
-    let symlinks: Vec<_> = m.files.iter().filter(|f| f.symlink_target.is_some()).collect();
+    let symlinks: Vec<_> = m
+        .files
+        .iter()
+        .filter(|f| f.symlink_target.is_some())
+        .collect();
     assert_eq!(symlinks.len(), 2);
 }
 
@@ -931,10 +1037,14 @@ fn cycle_with_collapse_escaping() {
     std::os::unix::fs::symlink(&root, external.join("link_back")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Regular file collected
     assert!(m.files.iter().any(|f| f.path.ends_with("file.txt")));
@@ -960,8 +1070,12 @@ fn cycle_three_node_with_collapse_all() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(m.files.iter().any(|f| f.path.ends_with("fa.txt")));
     assert!(m.files.iter().any(|f| f.path.ends_with("fb.txt")));
@@ -977,14 +1091,19 @@ fn broken_symlink_skipped_with_collapse_all() {
     std::os::unix::fs::symlink(
         tmp.path().join("nonexistent.txt"),
         tmp.path().join("broken_link"),
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(tmp.path().join("real.txt"), "ok").unwrap();
 
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(!m.files.iter().any(|f| f.path.contains("broken_link")));
     assert!(m.files.iter().any(|f| f.path.ends_with("real.txt")));
@@ -997,13 +1116,18 @@ fn broken_symlink_excluded_with_exclude_all() {
     std::os::unix::fs::symlink(
         tmp.path().join("nonexistent.txt"),
         tmp.path().join("broken_link"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(!m.files.iter().any(|f| f.path.contains("broken_link")));
 }
@@ -1027,8 +1151,20 @@ fn nested_directories_deduplicated() {
     .unwrap();
 
     let paths: Vec<_> = m.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths.iter().filter(|p| p.contains("parent_file.txt")).count(), 1);
-    assert_eq!(paths.iter().filter(|p| p.contains("child_file.txt")).count(), 1);
+    assert_eq!(
+        paths
+            .iter()
+            .filter(|p| p.contains("parent_file.txt"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        paths
+            .iter()
+            .filter(|p| p.contains("child_file.txt"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -1045,7 +1181,13 @@ fn same_directory_twice_deduplicated() {
     )
     .unwrap();
 
-    assert_eq!(m.files.iter().filter(|f| f.path.contains("file.txt")).count(), 1);
+    assert_eq!(
+        m.files
+            .iter()
+            .filter(|f| f.path.contains("file.txt"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -1056,12 +1198,7 @@ fn file_in_directory_and_filenames_deduplicated() {
     let fp = sub.join("file.txt");
     std::fs::write(&fp, "12345").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[sub],
-        &[fp],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[sub], &[fp], CollectOptions::default()).unwrap();
 
     assert_eq!(m.files.len(), 1);
     assert_eq!(m.total_size, 5);
@@ -1075,12 +1212,7 @@ fn total_size_not_double_counted() {
     let fp = sub.join("file.txt");
     std::fs::write(&fp, "12345").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[sub],
-        &[fp],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[sub], &[fp], CollectOptions::default()).unwrap();
 
     assert_eq!(m.total_size, 5);
 }
@@ -1112,7 +1244,10 @@ fn symlink_and_target_both_collected_preserve() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1131,11 +1266,20 @@ fn symlink_in_filenames_and_directory_deduplicated() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[link],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    assert_eq!(m.files.iter().filter(|f| f.path.ends_with("link.txt")).count(), 1);
+    assert_eq!(
+        m.files
+            .iter()
+            .filter(|f| f.path.ends_with("link.txt"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -1154,7 +1298,13 @@ fn directory_entries_deduplicated() {
     .unwrap();
 
     let dir_paths: Vec<_> = m.dirs.iter().map(|d| d.path.as_str()).collect();
-    assert_eq!(dir_paths.iter().filter(|p| p.ends_with("grandchild")).count(), 1);
+    assert_eq!(
+        dir_paths
+            .iter()
+            .filter(|p| p.ends_with("grandchild"))
+            .count(),
+        1
+    );
 }
 
 // ===== ExcludeEscaping policy =====
@@ -1171,11 +1321,18 @@ fn exclude_escaping_non_escaping_preserved() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
 }
 
@@ -1192,7 +1349,10 @@ fn exclude_escaping_file_symlink_excluded() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1214,7 +1374,10 @@ fn exclude_escaping_dir_symlink_excluded() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1236,7 +1399,10 @@ fn exclude_escaping_mixed_scenario() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1258,7 +1424,10 @@ fn exclude_escaping_chain_in_in_file_in() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1273,12 +1442,16 @@ fn exclude_escaping_broken_symlink_excluded() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("root");
     std::fs::create_dir_all(&root).unwrap();
-    std::os::unix::fs::symlink(tmp.path().join("nonexistent.txt"), root.join("broken.txt")).unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("nonexistent.txt"), root.join("broken.txt"))
+        .unwrap();
 
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1294,7 +1467,10 @@ fn exclude_escaping_no_symlinks_works() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1316,14 +1492,21 @@ fn transitive_escaping_file_target_collected() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let paths: std::collections::HashSet<_> = m.files.iter().map(|f| f.path.as_str()).collect();
     // Symlink preserved
     assert!(paths.iter().any(|p| p.ends_with("link.txt")));
-    let link = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
     // Target collected as regular file
     let outside_str = outside.to_str().unwrap();
@@ -1347,7 +1530,10 @@ fn transitive_multiple_symlinks_same_target_once() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1367,11 +1553,20 @@ fn transitive_non_escaping_target_not_duplicated() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    assert_eq!(m.files.iter().filter(|f| f.path.ends_with("target.txt")).count(), 1);
+    assert_eq!(
+        m.files
+            .iter()
+            .filter(|f| f.path.ends_with("target.txt"))
+            .count(),
+        1
+    );
 }
 
 #[cfg(unix)]
@@ -1389,7 +1584,10 @@ fn transitive_dir_target_contents_collected() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1415,7 +1613,10 @@ fn transitive_chain_of_escaping_symlinks() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1423,7 +1624,11 @@ fn transitive_chain_of_escaping_symlinks() {
     assert!(paths.contains(sym2.to_str().unwrap()));
     assert!(paths.contains(sym1.to_str().unwrap()));
     assert!(paths.contains(final_file.to_str().unwrap()));
-    let final_entry = m.files.iter().find(|f| f.path == final_file.to_str().unwrap()).unwrap();
+    let final_entry = m
+        .files
+        .iter()
+        .find(|f| f.path == final_file.to_str().unwrap())
+        .unwrap();
     assert!(final_entry.symlink_target.is_none());
     assert_eq!(final_entry.size, Some(13));
 }
@@ -1440,13 +1645,19 @@ fn transitive_broken_target_skipped() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
     // Symlink preserved but target not in manifest
     assert!(m.files.iter().any(|f| f.path.ends_with("broken.txt")));
-    assert!(!m.files.iter().any(|f| f.path == nonexistent.to_str().unwrap() && f.symlink_target.is_none()));
+    assert!(!m
+        .files
+        .iter()
+        .any(|f| f.path == nonexistent.to_str().unwrap() && f.symlink_target.is_none()));
 }
 
 #[cfg(unix)]
@@ -1461,7 +1672,10 @@ fn transitive_filenames_parameter() {
     let m = collect_abs_snapshot(
         &[] as &[PathBuf],
         &[link],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1487,7 +1701,11 @@ fn runnable_flag_captured_true() {
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("script.sh")).unwrap();
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("script.sh"))
+        .unwrap();
     assert!(entry.runnable, "executable file should have runnable=true");
 }
 
@@ -1509,8 +1727,15 @@ fn runnable_flag_captured_false() {
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("file.txt")).unwrap();
-    assert!(!entry.runnable, "non-executable file should have runnable=false");
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("file.txt"))
+        .unwrap();
+    assert!(
+        !entry.runnable,
+        "non-executable file should have runnable=false"
+    );
 }
 
 #[cfg(unix)]
@@ -1522,14 +1747,12 @@ fn runnable_flag_from_filenames_parameter() {
     std::fs::write(&script, "#!/bin/bash").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let m = collect_abs_snapshot(
-        &[] as &[PathBuf],
-        &[script],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[] as &[PathBuf], &[script], CollectOptions::default()).unwrap();
 
-    assert!(m.files[0].runnable, "executable file via filenames should have runnable=true");
+    assert!(
+        m.files[0].runnable,
+        "executable file via filenames should have runnable=true"
+    );
 }
 
 #[cfg(unix)]
@@ -1548,8 +1771,15 @@ fn runnable_flag_group_execute_only() {
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("group_exec.sh")).unwrap();
-    assert!(entry.runnable, "group-executable file should have runnable=true");
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("group_exec.sh"))
+        .unwrap();
+    assert!(
+        entry.runnable,
+        "group-executable file should have runnable=true"
+    );
 }
 
 #[cfg(unix)]
@@ -1568,8 +1798,15 @@ fn runnable_flag_other_execute_only() {
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("other_exec.sh")).unwrap();
-    assert!(entry.runnable, "other-executable file should have runnable=true");
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("other_exec.sh"))
+        .unwrap();
+    assert!(
+        entry.runnable,
+        "other-executable file should have runnable=true"
+    );
 }
 
 #[cfg(unix)]
@@ -1597,9 +1834,19 @@ fn runnable_flag_preserved_through_collapse_escaping() {
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("link.sh")).unwrap();
-    assert!(entry.symlink_target.is_none(), "escaping symlink should be collapsed");
-    assert!(entry.runnable, "collapsed symlink to executable should have runnable=true");
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.sh"))
+        .unwrap();
+    assert!(
+        entry.symlink_target.is_none(),
+        "escaping symlink should be collapsed"
+    );
+    assert!(
+        entry.runnable,
+        "collapsed symlink to executable should have runnable=true"
+    );
 }
 
 // ===== CollapseEscaping extended tests =====
@@ -1616,15 +1863,22 @@ fn collapse_escaping_dir_symlink_collapsed() {
     std::os::unix::fs::symlink(&outside_dir, root.join("link_dir")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Contents appear under link_dir path
     assert!(m.files.iter().any(|f| f.path.contains("link_dir/file.txt")));
     // outside_dir NOT in manifest
-    assert!(!m.files.iter().any(|f| f.path.contains("outside_dir/file.txt")));
+    assert!(!m
+        .files
+        .iter()
+        .any(|f| f.path.contains("outside_dir/file.txt")));
     assert!(!m.dirs.iter().any(|d| d.path.ends_with("outside_dir")));
 }
 
@@ -1641,16 +1895,28 @@ fn collapse_escaping_mixed_escaping_and_non_escaping() {
     std::os::unix::fs::symlink(&outside, root.join("link_outside.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link_internal preserved as symlink
-    let link_in = m.files.iter().find(|f| f.path.ends_with("link_internal.txt")).unwrap();
+    let link_in = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_internal.txt"))
+        .unwrap();
     assert!(link_in.symlink_target.is_some());
     // link_outside collapsed
-    let link_out = m.files.iter().find(|f| f.path.ends_with("link_outside.txt")).unwrap();
+    let link_out = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_outside.txt"))
+        .unwrap();
     assert!(link_out.symlink_target.is_none());
 }
 
@@ -1668,11 +1934,19 @@ fn collapse_escaping_sibling_directory_preserved() {
     let m = collect_abs_snapshot(
         &[dir1.clone(), dir2.clone()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link_to_dir1 preserved as symlink (dir1 is in collected set)
-    let link = m.files.iter().find(|f| f.path.ends_with("link_to_dir1")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_to_dir1"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
 }
 
@@ -1687,14 +1961,26 @@ fn collapse_escaping_chain_in_in_file_in() {
     std::os::unix::fs::symlink("link1.txt", root.join("link2.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 3);
-    let l1 = m.files.iter().find(|f| f.path.ends_with("link1.txt")).unwrap();
-    let l2 = m.files.iter().find(|f| f.path.ends_with("link2.txt")).unwrap();
+    let l1 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link1.txt"))
+        .unwrap();
+    let l2 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link2.txt"))
+        .unwrap();
     assert!(l1.symlink_target.is_some());
     assert!(l2.symlink_target.is_some());
 }
@@ -1712,10 +1998,14 @@ fn collapse_escaping_chain_in_in_dir_in() {
     std::os::unix::fs::symlink("link1", root.join("link2")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Both symlinks preserved
     let l1 = m.files.iter().find(|f| f.path.ends_with("/link1")).unwrap();
@@ -1736,16 +2026,28 @@ fn collapse_escaping_chain_in_in_file_out() {
     std::os::unix::fs::symlink("link1.txt", root.join("link2.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link1 collapsed (target OUT)
-    let l1 = m.files.iter().find(|f| f.path.ends_with("link1.txt")).unwrap();
+    let l1 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link1.txt"))
+        .unwrap();
     assert!(l1.symlink_target.is_none());
     // link2 preserved (target link1 is IN)
-    let l2 = m.files.iter().find(|f| f.path.ends_with("link2.txt")).unwrap();
+    let l2 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link2.txt"))
+        .unwrap();
     assert!(l2.symlink_target.is_some());
 }
 
@@ -1762,10 +2064,14 @@ fn collapse_escaping_chain_in_in_dir_out() {
     std::os::unix::fs::symlink("link1", root.join("link2")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link1 collapsed (dir contents inlined)
     assert!(m.files.iter().any(|f| f.path.contains("link1/file.txt")));
@@ -1786,15 +2092,26 @@ fn collapse_escaping_chain_in_out_file_in() {
     std::os::unix::fs::symlink(&outside_link, root.join("link2.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // target_file collected normally
-    assert!(m.files.iter().any(|f| f.path.ends_with("file.txt") && f.symlink_target.is_none()));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.ends_with("file.txt") && f.symlink_target.is_none()));
     // link2 collapsed (outside_link is OUT)
-    let l2 = m.files.iter().find(|f| f.path.ends_with("link2.txt")).unwrap();
+    let l2 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link2.txt"))
+        .unwrap();
     assert!(l2.symlink_target.is_none());
 }
 
@@ -1812,10 +2129,14 @@ fn collapse_escaping_chain_in_out_dir_in() {
     std::os::unix::fs::symlink(&outside_link, root.join("link2")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // subdir collected normally
     assert!(m.files.iter().any(|f| f.path.contains("subdir/file.txt")));
@@ -1835,16 +2156,28 @@ fn collapse_escaping_chain_partial_escape() {
     std::os::unix::fs::symlink("link2.txt", root.join("link1.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link1 preserved (target link2 is IN)
-    let l1 = m.files.iter().find(|f| f.path.ends_with("link1.txt")).unwrap();
+    let l1 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link1.txt"))
+        .unwrap();
     assert!(l1.symlink_target.is_some());
     // link2 collapsed (target outside is OUT)
-    let l2 = m.files.iter().find(|f| f.path.ends_with("link2.txt")).unwrap();
+    let l2 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link2.txt"))
+        .unwrap();
     assert!(l2.symlink_target.is_none());
 }
 
@@ -1854,13 +2187,21 @@ fn collapse_escaping_broken_dir_symlink_skipped() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("root");
     std::fs::create_dir_all(&root).unwrap();
-    std::os::unix::fs::symlink(tmp.path().join("nonexistent_dir"), root.join("broken_dir_link")).unwrap();
+    std::os::unix::fs::symlink(
+        tmp.path().join("nonexistent_dir"),
+        root.join("broken_dir_link"),
+    )
+    .unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(!m.files.iter().any(|f| f.path.contains("broken_dir_link")));
     assert!(!m.dirs.iter().any(|d| d.path.contains("broken_dir_link")));
@@ -1877,12 +2218,20 @@ fn collapse_escaping_file_not_dir() {
     std::os::unix::fs::symlink(&outside_file, root.join("link_to_file")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let f = m.files.iter().find(|f| f.path.ends_with("link_to_file")).unwrap();
+    let f = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_to_file"))
+        .unwrap();
     assert!(f.symlink_target.is_none());
     assert_eq!(f.size, Some(7)); // "content"
 }
@@ -1901,13 +2250,20 @@ fn collapse_escaping_deeply_nested_dir() {
     std::os::unix::fs::symlink(&outside_dir, root.join("link_dir")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // All nested content inlined under link_dir
-    assert!(m.files.iter().any(|f| f.path.contains("link_dir/level1/level2/deep_file.txt")));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.contains("link_dir/level1/level2/deep_file.txt")));
 }
 
 #[cfg(unix)]
@@ -1921,13 +2277,21 @@ fn collapse_escaping_relative_symlink() {
     std::os::unix::fs::symlink("../outside.txt", root.join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Should be collapsed (relative symlink escaping the root)
-    let f = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let f = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(f.symlink_target.is_none());
     assert_eq!(f.size, Some(15)); // "outside content"
 }
@@ -2003,7 +2367,11 @@ fn optional_symlink_included_when_exists() {
     .unwrap();
 
     assert_eq!(m.files.len(), 1);
-    let entry = m.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
     assert!(entry.symlink_target.is_some());
 }
 
@@ -2017,13 +2385,24 @@ fn broken_symlink_preserved_with_preserve() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    let entry = m.files.iter().find(|f| f.path.ends_with("broken_link")).unwrap();
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("broken_link"))
+        .unwrap();
     assert!(entry.symlink_target.is_some());
-    assert!(entry.symlink_target.as_ref().unwrap().ends_with("nonexistent.txt"));
+    assert!(entry
+        .symlink_target
+        .as_ref()
+        .unwrap()
+        .ends_with("nonexistent.txt"));
 }
 
 #[cfg(unix)]
@@ -2074,13 +2453,21 @@ fn deeply_nested_transitive_dir() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
     let paths: std::collections::HashSet<_> = m.files.iter().map(|f| f.path.as_str()).collect();
     assert!(paths.contains(outside_dir.join("root_file.txt").to_str().unwrap()));
-    assert!(paths.contains(outside_dir.join("level1/level2/deep_file.txt").to_str().unwrap()));
+    assert!(paths.contains(
+        outside_dir
+            .join("level1/level2/deep_file.txt")
+            .to_str()
+            .unwrap()
+    ));
 }
 
 #[cfg(unix)]
@@ -2096,15 +2483,23 @@ fn empty_transitive_dir() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
     // link_dir symlink is in manifest
-    assert!(m.files.iter().any(|f| f.path.ends_with("link_dir") && f.symlink_target.is_some()));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.ends_with("link_dir") && f.symlink_target.is_some()));
     // No regular files from outside_dir
     let outside_str = outside_dir.to_str().unwrap();
-    assert!(!m.files.iter().any(|f| f.path.starts_with(outside_str) && f.symlink_target.is_none() && !f.path.ends_with("outside_dir")));
+    assert!(!m.files.iter().any(|f| f.path.starts_with(outside_str)
+        && f.symlink_target.is_none()
+        && !f.path.ends_with("outside_dir")));
 }
 
 #[cfg(unix)]
@@ -2124,7 +2519,10 @@ fn symlinks_in_transitive_dir_transitively_included() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -2132,7 +2530,11 @@ fn symlinks_in_transitive_dir_transitively_included() {
     // file.txt collected under outside_dir
     assert!(paths.contains(outside_dir.join("file.txt").to_str().unwrap()));
     // nested_link preserved as symlink
-    let nested = m.files.iter().find(|f| f.path.ends_with("nested_link")).unwrap();
+    let nested = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("nested_link"))
+        .unwrap();
     assert!(nested.symlink_target.is_some());
     // somewhere_else.txt transitively collected
     assert!(paths.contains(somewhere_else.to_str().unwrap()));
@@ -2156,7 +2558,10 @@ fn dir_symlinks_in_transitive_dir_transitively_included() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -2164,7 +2569,11 @@ fn dir_symlinks_in_transitive_dir_transitively_included() {
     // file.txt collected under outside_dir
     assert!(paths.contains(outside_dir.join("file.txt").to_str().unwrap()));
     // nested_dir_link preserved as symlink
-    let nested = m.files.iter().find(|f| f.path.ends_with("nested_dir_link")).unwrap();
+    let nested = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("nested_dir_link"))
+        .unwrap();
     assert!(nested.symlink_target.is_some());
     // deep_file.txt transitively collected
     assert!(paths.contains(deep_dir.join("deep_file.txt").to_str().unwrap()));
@@ -2191,7 +2600,10 @@ fn deep_chain_of_escaping_symlinks() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -2205,7 +2617,11 @@ fn deep_chain_of_escaping_symlinks() {
     assert!(paths.contains(sym1.to_str().unwrap()));
     assert!(paths.contains(final_file.to_str().unwrap()));
     // final_file is a regular file
-    let final_entry = m.files.iter().find(|f| f.path == final_file.to_str().unwrap()).unwrap();
+    let final_entry = m
+        .files
+        .iter()
+        .find(|f| f.path == final_file.to_str().unwrap())
+        .unwrap();
     assert!(final_entry.symlink_target.is_none());
 }
 
@@ -2224,12 +2640,19 @@ fn dir_symlink_in_filenames_transitive() {
     let m = collect_abs_snapshot(
         &[] as &[PathBuf],
         &[link_dir],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
     )
     .unwrap();
 
     // link_dir preserved as symlink
-    let link_entry = m.files.iter().find(|f| f.path.ends_with("link_dir")).unwrap();
+    let link_entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_dir"))
+        .unwrap();
     assert!(link_entry.symlink_target.is_some());
     // outside_dir/file.txt collected
     let paths: std::collections::HashSet<_> = m.files.iter().map(|f| f.path.as_str()).collect();
@@ -2311,12 +2734,16 @@ fn collapse_escaping_broken_file_symlink_skipped() {
     let root = tmp.path().join("root");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("real.txt"), "ok").unwrap();
-    std::os::unix::fs::symlink(tmp.path().join("nonexistent.txt"), root.join("broken.txt")).unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("nonexistent.txt"), root.join("broken.txt"))
+        .unwrap();
 
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -2341,12 +2768,22 @@ fn collapse_escaping_nested_symlinks_in_collapsed_dir_escaping_collapsed() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    let escaping = m.files.iter().find(|f| f.path.ends_with("escaping_link")).unwrap();
-    assert!(escaping.symlink_target.is_none(), "nested escaping symlink should be collapsed");
+    let escaping = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("escaping_link"))
+        .unwrap();
+    assert!(
+        escaping.symlink_target.is_none(),
+        "nested escaping symlink should be collapsed"
+    );
     assert_eq!(escaping.size, Some(3));
 }
 
@@ -2357,7 +2794,8 @@ fn collapse_escaping_nested_symlinks_in_collapsed_dir_internal_preserved() {
     let outside = tmp.path().join("outside");
     std::fs::create_dir_all(outside.join("sub")).unwrap();
     std::fs::write(outside.join("file.txt"), "content").unwrap();
-    std::os::unix::fs::symlink(outside.join("file.txt"), outside.join("sub/internal_link")).unwrap();
+    std::os::unix::fs::symlink(outside.join("file.txt"), outside.join("sub/internal_link"))
+        .unwrap();
     let root = tmp.path().join("root");
     std::fs::create_dir_all(&root).unwrap();
     std::os::unix::fs::symlink(&outside, root.join("link_dir")).unwrap();
@@ -2365,12 +2803,22 @@ fn collapse_escaping_nested_symlinks_in_collapsed_dir_internal_preserved() {
     let m = collect_abs_snapshot(
         &[root],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    let internal = m.files.iter().find(|f| f.path.ends_with("sub/internal_link")).unwrap();
-    assert!(internal.symlink_target.is_some(), "non-escaping symlink should be preserved");
+    let internal = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("sub/internal_link"))
+        .unwrap();
+    assert!(
+        internal.symlink_target.is_some(),
+        "non-escaping symlink should be preserved"
+    );
 }
 
 // ===== Deduplication tests =====
@@ -2383,6 +2831,7 @@ fn file_in_filenames_and_optional_deduplicated() {
 
     let m = collect_abs_snapshot(
         &[] as &[PathBuf],
+        #[allow(clippy::cloned_ref_to_slice_refs)] // fp is moved into optional_filenames below
         &[fp.clone()],
         CollectOptions {
             optional_filenames: vec![fp],
@@ -2429,7 +2878,10 @@ fn multiple_symlinks_to_same_target_dedup() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -2442,9 +2894,9 @@ fn multiple_symlinks_to_same_target_dedup() {
 #[test]
 fn total_size_with_multiple_files() {
     let tmp = TempDir::new().unwrap();
-    std::fs::write(tmp.path().join("a.txt"), "aaa").unwrap();       // 3
-    std::fs::write(tmp.path().join("b.txt"), "bbbbbb").unwrap();    // 6
-    std::fs::write(tmp.path().join("c.txt"), "c").unwrap();         // 1
+    std::fs::write(tmp.path().join("a.txt"), "aaa").unwrap(); // 3
+    std::fs::write(tmp.path().join("b.txt"), "bbbbbb").unwrap(); // 6
+    std::fs::write(tmp.path().join("c.txt"), "c").unwrap(); // 1
 
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
@@ -2472,11 +2924,19 @@ fn exclude_escaping_symlink_to_sibling_directory_preserved() {
     let m = collect_abs_snapshot(
         &[dir1.clone(), dir2.clone()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // dir1 is in collected set, so symlink to it is non-escaping → preserved
-    let link = m.files.iter().find(|f| f.path.ends_with("link_to_dir1")).unwrap();
+    let link = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link_to_dir1"))
+        .unwrap();
     assert!(link.symlink_target.is_some());
 }
 
@@ -2493,10 +2953,14 @@ fn exclude_escaping_chain_in_in_dir_in() {
     std::os::unix::fs::symlink("link1", root.join("link2")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Both symlinks point inside root → both preserved
     let l1 = m.files.iter().find(|f| f.path.ends_with("/link1")).unwrap();
@@ -2518,10 +2982,14 @@ fn exclude_escaping_chain_in_in_file_out() {
     std::os::unix::fs::symlink("link1.txt", root.join("link2.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link1 excluded (immediate target is outside)
     assert!(!m.files.iter().any(|f| f.path.ends_with("link1.txt")));
@@ -2543,10 +3011,14 @@ fn exclude_escaping_chain_in_in_dir_out() {
     std::os::unix::fs::symlink("link1", root.join("link2")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link1 excluded (immediate target outside)
     assert!(!m.files.iter().any(|f| f.path.ends_with("/link1")));
@@ -2568,15 +3040,22 @@ fn exclude_escaping_chain_in_out_file_in() {
     std::os::unix::fs::symlink(&outside_link, root.join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link.txt excluded (immediate target is outside root)
     assert!(!m.files.iter().any(|f| f.path.ends_with("link.txt")));
     // file.txt still collected as regular file
-    assert!(m.files.iter().any(|f| f.path.ends_with("file.txt") && f.symlink_target.is_none()));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.ends_with("file.txt") && f.symlink_target.is_none()));
 }
 
 #[cfg(unix)]
@@ -2594,10 +3073,14 @@ fn exclude_escaping_chain_in_out_dir_in() {
     std::os::unix::fs::symlink(&outside_link, root.join("link")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link excluded (immediate target is outside root)
     assert!(!m.files.iter().any(|f| f.path.ends_with("/link")));
@@ -2619,15 +3102,23 @@ fn exclude_escaping_chain_partial_escape() {
     std::os::unix::fs::symlink("link2.txt", root.join("link1.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::ExcludeEscaping, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::ExcludeEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // link2 excluded (immediate target outside)
     assert!(!m.files.iter().any(|f| f.path.ends_with("link2.txt")));
     // link1 preserved (immediate target link2 is inside root)
-    let l1 = m.files.iter().find(|f| f.path.ends_with("link1.txt")).unwrap();
+    let l1 = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link1.txt"))
+        .unwrap();
     assert!(l1.symlink_target.is_some());
 }
 
@@ -2652,10 +3143,14 @@ fn cycle_with_transitive_include() {
 
     // Should not infinite loop
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert!(m.files.iter().any(|f| f.path.ends_with("file.txt")));
 }
@@ -2680,10 +3175,14 @@ fn long_cycle_chain() {
 
     // Should terminate without infinite loop
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::TransitiveIncludeTargets, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // At minimum the root link is present
     assert!(m.files.iter().any(|f| f.path.ends_with("/link")));
@@ -2703,15 +3202,27 @@ fn preserve_keeps_all_symlinks_in_chain() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::Preserve, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 4);
     for name in &["a.txt", "b.txt", "c.txt"] {
         let entry = m.files.iter().find(|f| f.path.ends_with(name)).unwrap();
-        assert!(entry.symlink_target.is_some(), "{} should be a symlink entry", name);
+        assert!(
+            entry.symlink_target.is_some(),
+            "{} should be a symlink entry",
+            name
+        );
     }
-    let file = m.files.iter().find(|f| f.path.ends_with("file.txt")).unwrap();
+    let file = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("file.txt"))
+        .unwrap();
     assert!(file.symlink_target.is_none());
 }
 
@@ -2733,14 +3244,21 @@ fn collapse_nested_directory_symlinks() {
     std::os::unix::fs::symlink(&outside1, root.join("link_dir")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[root.clone()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Both directory symlinks collapsed, contents inlined
     assert!(m.files.iter().any(|f| f.path.contains("link_dir/f1.txt")));
-    assert!(m.files.iter().any(|f| f.path.contains("link_dir/nested/f2.txt")));
+    assert!(m
+        .files
+        .iter()
+        .any(|f| f.path.contains("link_dir/nested/f2.txt")));
 }
 
 #[cfg(unix)]
@@ -2755,15 +3273,28 @@ fn collapse_symlink_chain() {
     let m = collect_abs_snapshot(
         &[tmp.path().to_path_buf()],
         &[] as &[PathBuf],
-        CollectOptions { symlink_policy: SymlinkPolicy::CollapseAll, ..Default::default() },
-    ).unwrap();
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseAll,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // All 4 entries present, all as regular files (no symlink_target)
     assert_eq!(m.files.len(), 4);
     for name in &["a.txt", "b.txt", "c.txt", "file.txt"] {
         let entry = m.files.iter().find(|f| f.path.ends_with(name)).unwrap();
-        assert!(entry.symlink_target.is_none(), "{} should be collapsed", name);
-        assert_eq!(entry.size, Some(7), "{} should have size of target file", name);
+        assert!(
+            entry.symlink_target.is_none(),
+            "{} should be collapsed",
+            name
+        );
+        assert_eq!(
+            entry.size,
+            Some(7),
+            "{} should have size of target file",
+            name
+        );
     }
 }
 
@@ -2784,10 +3315,15 @@ fn symlink_in_optional_filenames() {
             symlink_policy: SymlinkPolicy::Preserve,
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     assert_eq!(m.files.len(), 1);
-    let entry = m.files.iter().find(|f| f.path.ends_with("opt_link.txt")).unwrap();
+    let entry = m
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("opt_link.txt"))
+        .unwrap();
     assert!(entry.symlink_target.is_some());
 }
 
@@ -2804,7 +3340,7 @@ fn unreadable_directory_raises_or_skips() {
     std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let result = collect_abs_snapshot(
-        &[unreadable.clone()],
+        std::slice::from_ref(&unreadable),
         &[] as &[PathBuf],
         CollectOptions::default(),
     );
@@ -2859,7 +3395,11 @@ fn stat_failure_on_file_skipped() {
     // The function must not panic.
     match result {
         Ok(m) => {
-            assert_eq!(m.files.len(), 0, "file with inaccessible metadata should be skipped as optional");
+            assert_eq!(
+                m.files.len(),
+                0,
+                "file with inaccessible metadata should be skipped as optional"
+            );
         }
         Err(_) => {
             // Also acceptable if the implementation propagates the error
@@ -2877,13 +3417,12 @@ fn file_deleted_during_walk_raises() {
     let ghost = tmp.path().join("ghost.txt");
     // File never created — simulates deletion before stat
 
-    let result = collect_abs_snapshot(
-        &[] as &[PathBuf],
-        &[ghost],
-        CollectOptions::default(),
-    );
+    let result = collect_abs_snapshot(&[] as &[PathBuf], &[ghost], CollectOptions::default());
 
-    assert!(result.is_err(), "missing required file should produce an error, not a panic");
+    assert!(
+        result.is_err(),
+        "missing required file should produce an error, not a panic"
+    );
 }
 
 #[cfg(unix)]
@@ -2923,9 +3462,21 @@ fn multiple_escaping_symlinks_different_targets() {
     assert!(paths.contains(outside2.to_str().unwrap()));
     assert!(paths.contains(outside3.to_str().unwrap()));
     // Verify each target has correct size
-    let t1 = m.files.iter().find(|f| f.path == outside1.to_str().unwrap()).unwrap();
-    let t2 = m.files.iter().find(|f| f.path == outside2.to_str().unwrap()).unwrap();
-    let t3 = m.files.iter().find(|f| f.path == outside3.to_str().unwrap()).unwrap();
+    let t1 = m
+        .files
+        .iter()
+        .find(|f| f.path == outside1.to_str().unwrap())
+        .unwrap();
+    let t2 = m
+        .files
+        .iter()
+        .find(|f| f.path == outside2.to_str().unwrap())
+        .unwrap();
+    let t3 = m
+        .files
+        .iter()
+        .find(|f| f.path == outside3.to_str().unwrap())
+        .unwrap();
     assert_eq!(t1.size, Some(3));
     assert_eq!(t2.size, Some(3));
     assert_eq!(t3.size, Some(5));
@@ -2972,12 +3523,7 @@ fn filenames_processed_before_directories() {
     let extra = tmp.path().join("extra.txt");
     std::fs::write(&extra, "extra").unwrap();
 
-    let m = collect_abs_snapshot(
-        &[sub],
-        &[extra],
-        CollectOptions::default(),
-    )
-    .unwrap();
+    let m = collect_abs_snapshot(&[sub], &[extra], CollectOptions::default()).unwrap();
 
     // Both sources contribute to the result
     assert!(m.files.iter().any(|f| f.path.ends_with("dir_file.txt")));

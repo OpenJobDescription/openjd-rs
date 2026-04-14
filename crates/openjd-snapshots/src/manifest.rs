@@ -276,7 +276,10 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                 }
             } else {
                 // Regular file: at most one of hash, chunk_hashes, symlink_target
-                let count = [f.hash.is_some(), f.chunk_hashes.is_some()].iter().filter(|&&v| v).count();
+                let count = [f.hash.is_some(), f.chunk_hashes.is_some()]
+                    .iter()
+                    .filter(|&&v| v)
+                    .count();
                 if count > 1 {
                     return Err(crate::SnapshotError::Validation(format!(
                         "regular file must have at most one of hash/chunk_hashes: {}",
@@ -299,9 +302,12 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
         // Validate chunkhashes
         for f in &self.files {
             if let Some(ref ch) = f.chunk_hashes {
-                let size = f.size.ok_or_else(|| crate::SnapshotError::Validation(
-                    format!("file with chunkhashes must have size: {}", f.path)
-                ))?;
+                let size = f.size.ok_or_else(|| {
+                    crate::SnapshotError::Validation(format!(
+                        "file with chunkhashes must have size: {}",
+                        f.path
+                    ))
+                })?;
                 if self.file_chunk_size_bytes == crate::hash::WHOLE_FILE_CHUNK_SIZE {
                     return Err(crate::SnapshotError::Validation(format!(
                         "file '{}' has chunkhashes but manifest has no chunking (fileChunkSizeBytes={})",
@@ -319,7 +325,11 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                 if ch.len() != expected {
                     return Err(crate::SnapshotError::Validation(format!(
                         "file '{}' with size {} should have {} chunks (chunk_size={}), got {}",
-                        f.path, size, expected, chunk_size, ch.len()
+                        f.path,
+                        size,
+                        expected,
+                        chunk_size,
+                        ch.len()
                     )));
                 }
             }
@@ -496,9 +506,8 @@ mod tests {
 
     #[test]
     fn diff_manifest_allows_deleted() {
-        let m: AbsSnapshotDiff =
-            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-                .with_files(vec![FileEntry::deleted("/tmp/gone.txt")]);
+        let m: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+            .with_files(vec![FileEntry::deleted("/tmp/gone.txt")]);
         assert!(m.validate().is_ok());
     }
 
@@ -520,8 +529,8 @@ mod tests {
 
     #[test]
     fn recompute_total_size_works() {
-        let mut m: AbsSnapshotDiff =
-            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![
+        let mut m: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+            .with_files(vec![
                 FileEntry::file("/tmp/a.txt", 100, 1),
                 FileEntry::file("/tmp/b.txt", 200, 2),
                 FileEntry::deleted("/tmp/c.txt"),
@@ -621,7 +630,8 @@ mod tests {
         use crate::hash::WHOLE_FILE_CHUNK_SIZE;
         let mut f = FileEntry::file("/tmp/big.bin", 1024, 1);
         f.chunk_hashes = Some(vec!["a".into()]);
-        let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![f]);
+        let m: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![f]);
         assert!(m.validate().is_err());
     }
 

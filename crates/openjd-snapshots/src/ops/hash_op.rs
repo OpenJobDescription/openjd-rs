@@ -8,24 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
+#[derive(Default)]
 pub struct HashOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
     pub file_chunk_size_bytes: Option<i64>,
-    pub on_progress: Option<Box<dyn Fn(&HashStatistics) -> bool + Send + Sync>>,
+    pub on_progress: Option<Box<super::ProgressFn<HashStatistics>>>,
     pub max_workers: Option<usize>,
-}
-
-impl Default for HashOptions {
-    fn default() -> Self {
-        Self {
-            hash_cache: None,
-            force_rehash: false,
-            file_chunk_size_bytes: None,
-            on_progress: None,
-            max_workers: None,
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -92,13 +81,14 @@ fn hash_manifest<P: Clone, K: Clone>(
 
     // Validate no regular files already have hashes
     for file in &manifest.files {
-        if file.symlink_target.is_none() && !file.deleted {
-            if file.hash.is_some() || file.chunk_hashes.is_some() {
-                return Err(crate::SnapshotError::Validation(format!(
-                    "file already has hashes set, cannot re-hash: {}",
-                    file.path
-                )));
-            }
+        if file.symlink_target.is_none()
+            && !file.deleted
+            && (file.hash.is_some() || file.chunk_hashes.is_some())
+        {
+            return Err(crate::SnapshotError::Validation(format!(
+                "file already has hashes set, cannot re-hash: {}",
+                file.path
+            )));
         }
     }
 
@@ -142,9 +132,13 @@ fn hash_manifest<P: Clone, K: Clone>(
                     let mut offset: u64 = 0;
                     while offset < file_size {
                         let end = std::cmp::min(offset + cs, file_size);
-                        if let Some(h) =
-                            cache.get_if_fresh(Path::new(&path), alg_str, offset as i64, end as i64, mtime)
-                        {
+                        if let Some(h) = cache.get_if_fresh(
+                            Path::new(&path),
+                            alg_str,
+                            offset as i64,
+                            end as i64,
+                            mtime,
+                        ) {
                             cached_hashes.push(h);
                         } else {
                             all_cached = false;
@@ -185,8 +179,12 @@ fn hash_manifest<P: Clone, K: Clone>(
             let _ = cb(&stats);
         }
         let unit = if chunk_size <= 0 { "files" } else { "chunks" };
-        stats.progress_message = format!("Hashed {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes), stats.total_files, unit);
+        stats.progress_message = format!(
+            "Hashed {} ({} {}) in 0.00s",
+            crate::hash::human_readable_file_size(stats.total_bytes),
+            stats.total_files,
+            unit
+        );
         return Ok((result, stats));
     }
 
@@ -197,7 +195,11 @@ fn hash_manifest<P: Clone, K: Clone>(
 
     let num_threads = options.max_workers.unwrap_or(0); // 0 = rayon default
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(if num_threads == 0 { rayon::current_num_threads() } else { num_threads })
+        .num_threads(if num_threads == 0 {
+            rayon::current_num_threads()
+        } else {
+            num_threads
+        })
         .build()
         .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
 
@@ -235,7 +237,9 @@ fn hash_manifest<P: Clone, K: Clone>(
                         s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64
+                            / s.total_bytes as f64)
+                            * 100.0;
                     }
                     if let Some(ref cb) = on_progress {
                         if !cb(&s) {
@@ -288,17 +292,24 @@ fn hash_manifest<P: Clone, K: Clone>(
         stats.rate = rc.update(stats.total_time, stats.hashed_bytes + stats.skipped_bytes);
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.hashed_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress =
+            ((stats.hashed_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
     }
 
     let unit = if chunk_size <= 0 { "files" } else { "chunks" };
     let mut parts = vec![
-        format!("Hashed {}", crate::hash::human_readable_file_size(stats.total_bytes)),
+        format!(
+            "Hashed {}",
+            crate::hash::human_readable_file_size(stats.total_bytes)
+        ),
         format!("({} {})", stats.total_files, unit),
         format!("in {:.2}s", stats.total_time),
     ];
     if stats.total_time > 0.0 {
-        parts.push(format!("({}/s)", crate::hash::human_readable_file_size(stats.rate as u64)));
+        parts.push(format!(
+            "({}/s)",
+            crate::hash::human_readable_file_size(stats.rate as u64)
+        ));
     }
     stats.progress_message = parts.join(" ");
 
@@ -338,11 +349,8 @@ mod tests {
         let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
             .with_files(vec![FileEntry::file(&path, 5, mtime)]);
 
-        let result = hash_abs_manifest(
-            &AbsManifest::Snapshot(manifest),
-            HashOptions::default(),
-        )
-        .unwrap();
+        let result =
+            hash_abs_manifest(&AbsManifest::Snapshot(manifest), HashOptions::default()).unwrap();
 
         let files = result.manifest.files();
         assert_eq!(files.len(), 1);
@@ -403,7 +411,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.manifest.files()[0].hash.as_deref(), Some("cached_hash_value"));
+        assert_eq!(
+            result.manifest.files()[0].hash.as_deref(),
+            Some("cached_hash_value")
+        );
     }
 
     #[test]
@@ -438,7 +449,10 @@ mod tests {
         .unwrap();
 
         // Should NOT be the stale cached value
-        assert_ne!(result.manifest.files()[0].hash.as_deref(), Some("stale_hash"));
+        assert_ne!(
+            result.manifest.files()[0].hash.as_deref(),
+            Some("stale_hash")
+        );
         assert!(result.manifest.files()[0].hash.is_some());
     }
 
@@ -454,11 +468,8 @@ mod tests {
                 FileEntry::deleted("/tmp/gone"),
             ]);
 
-        let result = hash_abs_manifest(
-            &AbsManifest::Diff(manifest),
-            HashOptions::default(),
-        )
-        .unwrap();
+        let result =
+            hash_abs_manifest(&AbsManifest::Diff(manifest), HashOptions::default()).unwrap();
 
         let files = result.manifest.files();
         assert!(files[0].hash.is_some()); // real file hashed
@@ -473,12 +484,15 @@ mod tests {
         let mut entry = FileEntry::file(&path, 5, mtime);
         entry.hash = Some("existing_hash".into());
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         let result = hash_abs_manifest(&AbsManifest::Snapshot(manifest), HashOptions::default());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already has hashes set"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("already has hashes set"));
     }
 
     #[test]
@@ -498,8 +512,8 @@ mod tests {
             .as_micros() as u64;
 
         let chunk_size = 256i64; // small chunk for testing
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![FileEntry::file(
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![FileEntry::file(
                 file_path.to_string_lossy().to_string(),
                 1024,
                 mtime,

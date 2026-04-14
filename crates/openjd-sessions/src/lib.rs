@@ -9,42 +9,42 @@ pub mod action;
 pub(crate) mod action_filter;
 pub mod action_status;
 pub(crate) mod capabilities;
+#[cfg(unix)]
+pub(crate) mod cross_user_helper;
 pub mod embedded_files;
 pub mod error;
+#[cfg(unix)]
+pub(crate) mod helper_binary;
 pub mod let_bindings;
 pub mod logging;
 pub mod runner;
 pub mod session;
 pub mod session_user;
 pub(crate) mod subprocess;
-#[cfg(unix)]
-pub(crate) mod helper_binary;
-#[cfg(unix)]
-pub(crate) mod cross_user_helper;
+pub mod tempdir;
 #[cfg(windows)]
 pub mod win32;
 #[cfg(windows)]
-pub(crate) mod win32_permissions;
-#[cfg(windows)]
 pub(crate) mod win32_locate;
-pub mod tempdir;
+#[cfg(windows)]
+pub(crate) mod win32_permissions;
 
 // Re-export path mapping from openjd-expr (mirrors Python where sessions re-exports from expr)
 pub use openjd_expr::path_mapping;
 
-pub use action::{ActionState, ActionResult, ActionMessage};
+pub use action::{ActionMessage, ActionResult, ActionState};
 pub use action_status::ActionStatus;
 pub use error::SessionError;
 pub use logging::LogContent;
 pub use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 pub use runner::{CancelMethod, ScriptRunnerState};
-pub use session::{Session, SessionState, SessionConfig, EnvironmentIdentifier};
-pub use subprocess::SubprocessResult;
-pub use tempdir::TempDir;
-pub use session_user::SessionUser;
-#[cfg(unix)]
-pub use session_user::PosixSessionUser;
-#[cfg(windows)]
-pub use session_user::WindowsSessionUser;
+pub use session::{EnvironmentIdentifier, Session, SessionConfig, SessionState};
 #[cfg(windows)]
 pub use session_user::BadCredentialsError;
+#[cfg(unix)]
+pub use session_user::PosixSessionUser;
+pub use session_user::SessionUser;
+#[cfg(windows)]
+pub use session_user::WindowsSessionUser;
+pub use subprocess::SubprocessResult;
+pub use tempdir::TempDir;

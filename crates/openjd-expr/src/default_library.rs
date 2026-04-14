@@ -18,7 +18,6 @@ pub fn get_default_library() -> &'static FunctionLibrary {
     &DEFAULT_LIBRARY
 }
 
-
 /// Build the default library (called once by LazyLock).
 fn build_default_library() -> FunctionLibrary {
     let lib = FunctionLibrary::new();
@@ -66,8 +65,16 @@ fn string_ops() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     let mut lib = FunctionLibrary::new();
     lib.register_sig("__add__", "(string, string) -> string", add_string);
-    lib.register_sig("__add__", "(string, range_expr) -> string", add_string_range);
-    lib.register_sig("__add__", "(range_expr, string) -> string", add_range_string);
+    lib.register_sig(
+        "__add__",
+        "(string, range_expr) -> string",
+        add_string_range,
+    );
+    lib.register_sig(
+        "__add__",
+        "(range_expr, string) -> string",
+        add_range_string,
+    );
     lib.register_sig("__mul__", "(string, int) -> string", mul_string);
     lib
 }
@@ -76,13 +83,37 @@ fn list_ops() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     let mut lib = FunctionLibrary::new();
     lib.register_sig("__add__", "(list[T1], list[T2]) -> list[T3]", add_list_list);
-    lib.register_sig("__add__", "(range_expr, list[T1]) -> list[T2]", add_range_list);
-    lib.register_sig("__add__", "(list[T1], range_expr) -> list[T2]", add_list_range);
-    lib.register_sig("__add__", "(range_expr, range_expr) -> list[int]", add_range_range);
+    lib.register_sig(
+        "__add__",
+        "(range_expr, list[T1]) -> list[T2]",
+        add_range_list,
+    );
+    lib.register_sig(
+        "__add__",
+        "(list[T1], range_expr) -> list[T2]",
+        add_list_range,
+    );
+    lib.register_sig(
+        "__add__",
+        "(range_expr, range_expr) -> list[int]",
+        add_range_range,
+    );
     lib.register_sig("__mul__", "(list[T1], int) -> list[T1]", mul_list);
-    lib.register_sig("__getitem__", "(list[T1], int) -> T1", crate::functions::misc::getitem_list);
-    lib.register_sig("__getitem__", "(string, int) -> string", crate::functions::misc::getitem_string);
-    lib.register_sig("__getitem__", "(range_expr, int) -> int", crate::functions::misc::getitem_range);
+    lib.register_sig(
+        "__getitem__",
+        "(list[T1], int) -> T1",
+        crate::functions::misc::getitem_list,
+    );
+    lib.register_sig(
+        "__getitem__",
+        "(string, int) -> string",
+        crate::functions::misc::getitem_string,
+    );
+    lib.register_sig(
+        "__getitem__",
+        "(range_expr, int) -> int",
+        crate::functions::misc::getitem_range,
+    );
     lib
 }
 
@@ -102,13 +133,37 @@ fn comparison() -> FunctionLibrary {
     lib.register_sig("__contains__", "(list[T1], T1) -> bool", contains_list);
     lib.register_sig("__contains__", "(range_expr, int) -> bool", contains_range);
     lib.register_sig("__contains__", "(string, string) -> bool", contains_string);
-    lib.register_sig("__not_contains__", "(list[T1], T1) -> bool", not_contains_list);
-    lib.register_sig("__not_contains__", "(range_expr, int) -> bool", not_contains_range);
-    lib.register_sig("__not_contains__", "(string, string) -> bool", not_contains_string);
+    lib.register_sig(
+        "__not_contains__",
+        "(list[T1], T1) -> bool",
+        not_contains_list,
+    );
+    lib.register_sig(
+        "__not_contains__",
+        "(range_expr, int) -> bool",
+        not_contains_range,
+    );
+    lib.register_sig(
+        "__not_contains__",
+        "(string, string) -> bool",
+        not_contains_string,
+    );
     // Slice — 4-arg __getitem__ overloads
-    lib.register_sig("__getitem__", "(list[T1], int | nulltype, int | nulltype, int | nulltype) -> list[T1]", slice_list);
-    lib.register_sig("__getitem__", "(range_expr, int | nulltype, int | nulltype, int | nulltype) -> range_expr | list[int]", slice_range);
-    lib.register_sig("__getitem__", "(string, int | nulltype, int | nulltype, int | nulltype) -> string", slice_string);
+    lib.register_sig(
+        "__getitem__",
+        "(list[T1], int | nulltype, int | nulltype, int | nulltype) -> list[T1]",
+        slice_list,
+    );
+    lib.register_sig(
+        "__getitem__",
+        "(range_expr, int | nulltype, int | nulltype, int | nulltype) -> range_expr | list[int]",
+        slice_range,
+    );
+    lib.register_sig(
+        "__getitem__",
+        "(string, int | nulltype, int | nulltype, int | nulltype) -> string",
+        slice_string,
+    );
     lib
 }
 
@@ -170,8 +225,16 @@ fn string_functions() -> FunctionLibrary {
     lib.register_sig("index", "(string, string) -> int", index_fn);
     lib.register_sig("rindex", "(string, string) -> int", rindex_fn);
     lib.register_sig("count", "(string, string) -> int", count_fn);
-    lib.register_sig("removeprefix", "(string, string) -> string", removeprefix_fn);
-    lib.register_sig("removesuffix", "(string, string) -> string", removesuffix_fn);
+    lib.register_sig(
+        "removeprefix",
+        "(string, string) -> string",
+        removeprefix_fn,
+    );
+    lib.register_sig(
+        "removesuffix",
+        "(string, string) -> string",
+        removesuffix_fn,
+    );
     lib.register_sig("isdigit", "(string) -> bool", isdigit_fn);
     lib.register_sig("isalpha", "(string) -> bool", isalpha_fn);
     lib.register_sig("isalnum", "(string) -> bool", isalnum_fn);
@@ -229,10 +292,26 @@ fn conversion() -> FunctionLibrary {
     lib.register_sig("bool", "(nulltype) -> bool", bool_from_null);
     lib.register_sig("bool", "(path) -> noreturn", bool_from_path);
     lib.register_sig("bool", "(list[T]) -> noreturn", bool_from_list);
-    lib.register_sig("list", "(range_expr) -> list[int]", crate::functions::list::list_from_range);
-    lib.register_sig("range_expr", "(string) -> range_expr", crate::functions::list::range_expr_from_string);
-    lib.register_sig("range_expr", "(list[int]) -> range_expr", crate::functions::list::range_expr_from_list);
-    lib.register_sig("range_expr", "(list[nulltype]) -> noreturn", crate::functions::list::range_expr_from_empty_list);
+    lib.register_sig(
+        "list",
+        "(range_expr) -> list[int]",
+        crate::functions::list::list_from_range,
+    );
+    lib.register_sig(
+        "range_expr",
+        "(string) -> range_expr",
+        crate::functions::list::range_expr_from_string,
+    );
+    lib.register_sig(
+        "range_expr",
+        "(list[int]) -> range_expr",
+        crate::functions::list::range_expr_from_list,
+    );
+    lib.register_sig(
+        "range_expr",
+        "(list[nulltype]) -> noreturn",
+        crate::functions::list::range_expr_from_empty_list,
+    );
     lib
 }
 
@@ -241,7 +320,11 @@ fn path_ops() -> FunctionLibrary {
     use crate::functions::path::*;
     let mut lib = FunctionLibrary::new();
     lib.register_sig("path", "(string) -> path", crate::functions::misc::path_fn);
-    lib.register_sig("path", "(list[string]) -> path", crate::functions::misc::path_fn);
+    lib.register_sig(
+        "path",
+        "(list[string]) -> path",
+        crate::functions::misc::path_fn,
+    );
     lib.register_sig("__truediv__", "(path, string) -> path", path_div);
     lib.register_sig("__truediv__", "(path, path) -> path", path_div);
     lib.register_sig("__add__", "(path, string) -> path", add_path_string);
@@ -253,7 +336,11 @@ fn path_ops() -> FunctionLibrary {
     lib.register_sig("with_number", "(string, int) -> string", with_number_fn);
     lib.register_sig("is_absolute", "(path) -> bool", is_absolute_fn);
     lib.register_sig("is_relative_to", "(path, path) -> bool", is_relative_to_fn);
-    lib.register_sig("is_relative_to", "(path, string) -> bool", is_relative_to_fn);
+    lib.register_sig(
+        "is_relative_to",
+        "(path, string) -> bool",
+        is_relative_to_fn,
+    );
     lib.register_sig("relative_to", "(path, path) -> path", relative_to_fn);
     lib.register_sig("relative_to", "(path, string) -> path", relative_to_fn);
     // apply_path_mapping is host-context only — registered via with_host_context()
@@ -261,7 +348,11 @@ fn path_ops() -> FunctionLibrary {
     lib.register_sig("__property_name__", "(path) -> string", prop_name);
     lib.register_sig("__property_stem__", "(path) -> string", prop_stem);
     lib.register_sig("__property_suffix__", "(path) -> string", prop_suffix);
-    lib.register_sig("__property_suffixes__", "(path) -> list[string]", prop_suffixes);
+    lib.register_sig(
+        "__property_suffixes__",
+        "(path) -> list[string]",
+        prop_suffixes,
+    );
     lib.register_sig("__property_parent__", "(path) -> path", prop_parent);
     lib.register_sig("__property_parts__", "(path) -> list[string]", prop_parts);
     lib
@@ -270,9 +361,21 @@ fn path_ops() -> FunctionLibrary {
 fn repr_ops() -> FunctionLibrary {
     use crate::functions::repr::*;
     let mut lib = FunctionLibrary::new();
-    for f in [("repr_py", repr_py_fn as fn(&mut dyn crate::function_library::EvalContext, &[crate::value::ExprValue]) -> Result<crate::value::ExprValue, crate::error::ExpressionError>),
-              ("repr_json", repr_json_fn), ("repr_sh", repr_sh_fn),
-              ("repr_cmd", repr_cmd_fn), ("repr_pwsh", repr_pwsh_fn)] {
+    for f in [
+        (
+            "repr_py",
+            repr_py_fn
+                as fn(
+                    &mut dyn crate::function_library::EvalContext,
+                    &[crate::value::ExprValue],
+                )
+                    -> Result<crate::value::ExprValue, crate::error::ExpressionError>,
+        ),
+        ("repr_json", repr_json_fn),
+        ("repr_sh", repr_sh_fn),
+        ("repr_cmd", repr_cmd_fn),
+        ("repr_pwsh", repr_pwsh_fn),
+    ] {
         lib.register_sig(f.0, "(int) -> string", f.1);
         lib.register_sig(f.0, "(float) -> string", f.1);
         lib.register_sig(f.0, "(string) -> string", f.1);
@@ -289,12 +392,32 @@ fn regex_ops() -> FunctionLibrary {
     use crate::functions::regex::*;
     let mut lib = FunctionLibrary::new();
     lib.register_sig("re_match", "(string, string) -> list[string]?", re_match_fn);
-    lib.register_sig("re_search", "(string, string) -> list[string]?", re_search_fn);
-    lib.register_sig("re_findall", "(string, string) -> list[string]", re_findall_fn);
-    lib.register_sig("re_findall", "(string, string) -> list[list[string]]", re_findall_fn);
-    lib.register_sig("re_sub", "(string, string, string) -> string", re_replace_fn);
+    lib.register_sig(
+        "re_search",
+        "(string, string) -> list[string]?",
+        re_search_fn,
+    );
+    lib.register_sig(
+        "re_findall",
+        "(string, string) -> list[string]",
+        re_findall_fn,
+    );
+    lib.register_sig(
+        "re_findall",
+        "(string, string) -> list[list[string]]",
+        re_findall_fn,
+    );
+    lib.register_sig(
+        "re_sub",
+        "(string, string, string) -> string",
+        re_replace_fn,
+    );
     lib.register_sig("re_split", "(string, string) -> list[string]", re_split_fn);
-    lib.register_sig("re_split", "(string, string, int) -> list[string]", re_split_fn);
+    lib.register_sig(
+        "re_split",
+        "(string, string, int) -> list[string]",
+        re_split_fn,
+    );
     lib.register_sig("re_escape", "(string) -> string", re_escape_fn);
     lib
 }
@@ -302,14 +425,25 @@ fn regex_ops() -> FunctionLibrary {
 /// Register host-context-only functions (e.g. apply_path_mapping).
 pub fn register_host_context_functions(lib: &mut FunctionLibrary) {
     use crate::functions::path::apply_path_mapping_fn;
-    lib.register_sig("apply_path_mapping", "(string) -> path", apply_path_mapping_fn);
+    lib.register_sig(
+        "apply_path_mapping",
+        "(string) -> path",
+        apply_path_mapping_fn,
+    );
 }
 
 pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
-    fn unresolved_apply_path_mapping(_ctx: &mut dyn crate::function_library::EvalContext, _a: &[crate::ExprValue]) -> Result<crate::ExprValue, crate::ExpressionError> {
+    fn unresolved_apply_path_mapping(
+        _ctx: &mut dyn crate::function_library::EvalContext,
+        _a: &[crate::ExprValue],
+    ) -> Result<crate::ExprValue, crate::ExpressionError> {
         Ok(crate::ExprValue::Unresolved(crate::ExprType::PATH))
     }
-    lib.register_sig("apply_path_mapping", "(string) -> path", unresolved_apply_path_mapping);
+    lib.register_sig(
+        "apply_path_mapping",
+        "(string) -> path",
+        unresolved_apply_path_mapping,
+    );
 }
 
 fn misc() -> FunctionLibrary {
@@ -356,20 +490,29 @@ mod tests {
     #[test]
     fn derive_return_type_add_int() {
         let lib = get_default_library();
-        assert_eq!(lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]), Some(ExprType::INT));
+        assert_eq!(
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
+            Some(ExprType::INT)
+        );
     }
 
     #[test]
     fn derive_return_type_add_float_coercion() {
         let lib = get_default_library();
-        assert_eq!(lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]), Some(ExprType::FLOAT));
+        assert_eq!(
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
+            Some(ExprType::FLOAT)
+        );
     }
 
     #[test]
     fn derive_return_type_getitem_generic() {
         let lib = get_default_library();
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[ExprType::list(ExprType::STRING), ExprType::INT]),
+            lib.derive_return_type(
+                "__getitem__",
+                &[ExprType::list(ExprType::STRING), ExprType::INT]
+            ),
             Some(ExprType::STRING)
         );
     }
@@ -386,17 +529,32 @@ mod tests {
     #[test]
     fn derive_return_type_comparison_operators() {
         let lib = get_default_library();
-        assert_eq!(lib.derive_return_type("__eq__", &[ExprType::INT, ExprType::INT]), Some(ExprType::BOOL));
-        assert_eq!(lib.derive_return_type("__ne__", &[ExprType::STRING, ExprType::STRING]), Some(ExprType::BOOL));
-        assert_eq!(lib.derive_return_type("__lt__", &[ExprType::INT, ExprType::FLOAT]), Some(ExprType::BOOL));
-        assert_eq!(lib.derive_return_type("__ge__", &[ExprType::FLOAT, ExprType::INT]), Some(ExprType::BOOL));
+        assert_eq!(
+            lib.derive_return_type("__eq__", &[ExprType::INT, ExprType::INT]),
+            Some(ExprType::BOOL)
+        );
+        assert_eq!(
+            lib.derive_return_type("__ne__", &[ExprType::STRING, ExprType::STRING]),
+            Some(ExprType::BOOL)
+        );
+        assert_eq!(
+            lib.derive_return_type("__lt__", &[ExprType::INT, ExprType::FLOAT]),
+            Some(ExprType::BOOL)
+        );
+        assert_eq!(
+            lib.derive_return_type("__ge__", &[ExprType::FLOAT, ExprType::INT]),
+            Some(ExprType::BOOL)
+        );
     }
 
     #[test]
     fn derive_return_type_contains_operators() {
         let lib = get_default_library();
         assert_eq!(
-            lib.derive_return_type("__contains__", &[ExprType::list(ExprType::INT), ExprType::INT]),
+            lib.derive_return_type(
+                "__contains__",
+                &[ExprType::list(ExprType::INT), ExprType::INT]
+            ),
             Some(ExprType::BOOL)
         );
         assert_eq!(
@@ -404,7 +562,10 @@ mod tests {
             Some(ExprType::BOOL)
         );
         assert_eq!(
-            lib.derive_return_type("__not_contains__", &[ExprType::list(ExprType::STRING), ExprType::STRING]),
+            lib.derive_return_type(
+                "__not_contains__",
+                &[ExprType::list(ExprType::STRING), ExprType::STRING]
+            ),
             Some(ExprType::BOOL)
         );
     }
@@ -413,11 +574,27 @@ mod tests {
     fn derive_return_type_slice_operators() {
         let lib = get_default_library();
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[ExprType::list(ExprType::INT), ExprType::NULLTYPE, ExprType::INT, ExprType::NULLTYPE]),
+            lib.derive_return_type(
+                "__getitem__",
+                &[
+                    ExprType::list(ExprType::INT),
+                    ExprType::NULLTYPE,
+                    ExprType::INT,
+                    ExprType::NULLTYPE
+                ]
+            ),
             Some(ExprType::list(ExprType::INT))
         );
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[ExprType::STRING, ExprType::INT, ExprType::NULLTYPE, ExprType::NULLTYPE]),
+            lib.derive_return_type(
+                "__getitem__",
+                &[
+                    ExprType::STRING,
+                    ExprType::INT,
+                    ExprType::NULLTYPE,
+                    ExprType::NULLTYPE
+                ]
+            ),
             Some(ExprType::STRING)
         );
     }
@@ -425,16 +602,28 @@ mod tests {
     #[test]
     fn get_property_type_path() {
         let lib = get_default_library();
-        assert_eq!(lib.get_property_type(&ExprType::PATH, "name"), Some(ExprType::STRING));
-        assert_eq!(lib.get_property_type(&ExprType::PATH, "parent"), Some(ExprType::PATH));
-        assert_eq!(lib.get_property_type(&ExprType::PATH, "suffixes"), Some(ExprType::list(ExprType::STRING)));
+        assert_eq!(
+            lib.get_property_type(&ExprType::PATH, "name"),
+            Some(ExprType::STRING)
+        );
+        assert_eq!(
+            lib.get_property_type(&ExprType::PATH, "parent"),
+            Some(ExprType::PATH)
+        );
+        assert_eq!(
+            lib.get_property_type(&ExprType::PATH, "suffixes"),
+            Some(ExprType::list(ExprType::STRING))
+        );
         assert_eq!(lib.get_property_type(&ExprType::INT, "name"), None);
     }
 
     #[test]
     fn signature_count() {
         let lib = get_default_library();
-        let total: usize = lib.function_names().map(|n| lib.get_signatures(n).len()).sum();
+        let total: usize = lib
+            .function_names()
+            .map(|n| lib.get_signatures(n).len())
+            .sum();
         assert!(total >= 190, "total signatures: {total}");
     }
 
@@ -461,31 +650,116 @@ mod tests {
         let lib = get_default_library();
         // All function names from the Python implementation
         let expected = vec![
-            "__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__", "__mod__", "__pow__",
-            "__neg__", "__pos__", "__not__",
-            "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__",
-            "__contains__", "__not_contains__",
+            "__add__",
+            "__sub__",
+            "__mul__",
+            "__truediv__",
+            "__floordiv__",
+            "__mod__",
+            "__pow__",
+            "__neg__",
+            "__pos__",
+            "__not__",
+            "__eq__",
+            "__ne__",
+            "__lt__",
+            "__le__",
+            "__gt__",
+            "__ge__",
+            "__contains__",
+            "__not_contains__",
             "__getitem__",
-            "__property_name__", "__property_stem__", "__property_suffix__",
-            "__property_suffixes__", "__property_parent__", "__property_parts__",
-            "abs", "all", "any", "as_posix", "bool", "capitalize", "ceil", "center", "count",
-            "endswith", "fail", "find", "flatten", "float", "floor", "index", "int",
-            "is_absolute", "is_relative_to", "isalnum", "isalpha", "isascii", "isdigit",
-            "islower", "isspace", "isupper", "join", "len", "list", "ljust", "lower", "lstrip",
-            "max", "min", "path", "range", "range_expr",
-            "re_escape", "re_findall", "re_match", "re_search", "re_split", "re_sub",
-            "relative_to", "removeprefix", "removesuffix", "replace", "repr_cmd", "repr_json",
-            "repr_py", "repr_pwsh", "repr_sh", "reversed", "rfind", "rindex", "rjust", "round",
-            "rsplit", "rstrip", "sorted", "split", "startswith", "string", "strip", "sum",
-            "title", "unique", "upper", "with_name", "with_number", "with_stem", "with_suffix",
+            "__property_name__",
+            "__property_stem__",
+            "__property_suffix__",
+            "__property_suffixes__",
+            "__property_parent__",
+            "__property_parts__",
+            "abs",
+            "all",
+            "any",
+            "as_posix",
+            "bool",
+            "capitalize",
+            "ceil",
+            "center",
+            "count",
+            "endswith",
+            "fail",
+            "find",
+            "flatten",
+            "float",
+            "floor",
+            "index",
+            "int",
+            "is_absolute",
+            "is_relative_to",
+            "isalnum",
+            "isalpha",
+            "isascii",
+            "isdigit",
+            "islower",
+            "isspace",
+            "isupper",
+            "join",
+            "len",
+            "list",
+            "ljust",
+            "lower",
+            "lstrip",
+            "max",
+            "min",
+            "path",
+            "range",
+            "range_expr",
+            "re_escape",
+            "re_findall",
+            "re_match",
+            "re_search",
+            "re_split",
+            "re_sub",
+            "relative_to",
+            "removeprefix",
+            "removesuffix",
+            "replace",
+            "repr_cmd",
+            "repr_json",
+            "repr_py",
+            "repr_pwsh",
+            "repr_sh",
+            "reversed",
+            "rfind",
+            "rindex",
+            "rjust",
+            "round",
+            "rsplit",
+            "rstrip",
+            "sorted",
+            "split",
+            "startswith",
+            "string",
+            "strip",
+            "sum",
+            "title",
+            "unique",
+            "upper",
+            "with_name",
+            "with_number",
+            "with_stem",
+            "with_suffix",
             "zfill",
         ];
         for name in &expected {
-            assert!(!lib.get_signatures(name).is_empty(), "Missing function: {name}");
+            assert!(
+                !lib.get_signatures(name).is_empty(),
+                "Missing function: {name}"
+            );
         }
         // apply_path_mapping should NOT be in default library
-        assert!(lib.get_signatures("apply_path_mapping").is_empty(),
-            "apply_path_mapping should only be available with host context");
+        assert!(
+            lib.get_signatures("apply_path_mapping").is_empty(),
+            "apply_path_mapping should only be available with host context"
+        );
     }
 
     #[test]

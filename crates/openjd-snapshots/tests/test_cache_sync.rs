@@ -20,9 +20,7 @@ const ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
 const SECRET_KEY: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 fn test_manifest(files: Vec<FileEntry>) -> RelManifest {
-    RelManifest::Snapshot(
-        Manifest::new(HashAlgorithm::Xxh128, -1).with_files(files),
-    )
+    RelManifest::Snapshot(Manifest::new(HashAlgorithm::Xxh128, -1).with_files(files))
 }
 
 fn make_s3_client(tmp: &Path) -> aws_sdk_s3::Client {
@@ -57,14 +55,12 @@ fn make_fs_cache() -> (TempDir, Arc<dyn AsyncDataCache>) {
 async fn make_s3_cache() -> (TempDir, Arc<dyn AsyncDataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-    client
-        .create_bucket()
-        .bucket(BUCKET)
-        .send()
-        .await
-        .unwrap();
-    let cache: Arc<dyn AsyncDataCache> =
-        Arc::new(S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client));
+    client.create_bucket().bucket(BUCKET).send().await.unwrap();
+    let cache: Arc<dyn AsyncDataCache> = Arc::new(S3DataCache::new(
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        client,
+    ));
     (tmp, cache)
 }
 

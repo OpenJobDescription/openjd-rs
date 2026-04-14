@@ -70,13 +70,11 @@ fn is_malformed_env_command(line: &str) -> bool {
         || lower.starts_with("openjd_unset_env")
 }
 
-static ENVVAR_SET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^"?[A-Za-z_][A-Za-z0-9_]*=.*$"#).unwrap()
-});
+static ENVVAR_SET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^"?[A-Za-z_][A-Za-z0-9_]*=.*$"#).unwrap());
 
-static ENVVAR_UNSET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap()
-});
+static ENVVAR_UNSET_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 
 /// Action monitoring filter that parses openjd directives from output lines.
 ///
@@ -134,17 +132,14 @@ impl ActionFilter {
         let mut pass_through = true;
 
         if let Some((kind, payload)) = parse_directive(message) {
-
             match kind {
-                ActionMessageKind::Progress => {
-                    match self.handle_progress(payload) {
-                        Ok(cb) => callbacks.push(cb),
-                        Err(err) => {
-                            msg = format!("{message} -- ERROR: {err}");
-                            return (callbacks, true, self.apply_redaction(&msg));
-                        }
+                ActionMessageKind::Progress => match self.handle_progress(payload) {
+                    Ok(cb) => callbacks.push(cb),
+                    Err(err) => {
+                        msg = format!("{message} -- ERROR: {err}");
+                        return (callbacks, true, self.apply_redaction(&msg));
                     }
-                }
+                },
                 ActionMessageKind::Status => {
                     callbacks.push(FilterCallback {
                         kind: ActionMessageKind::Status,
@@ -159,20 +154,18 @@ impl ActionFilter {
                         cancel: false,
                     });
                 }
-                ActionMessageKind::Env => {
-                    match self.handle_env(payload) {
-                        Ok(cb) => callbacks.push(cb),
-                        Err(err) => {
-                            msg = format!("{message} -- ERROR: {err}");
-                            callbacks.push(FilterCallback {
-                                kind: ActionMessageKind::Env,
-                                value: ActionMessageValue::String(err),
-                                cancel: true,
-                            });
-                            return (callbacks, true, self.apply_redaction(&msg));
-                        }
+                ActionMessageKind::Env => match self.handle_env(payload) {
+                    Ok(cb) => callbacks.push(cb),
+                    Err(err) => {
+                        msg = format!("{message} -- ERROR: {err}");
+                        callbacks.push(FilterCallback {
+                            kind: ActionMessageKind::Env,
+                            value: ActionMessageValue::String(err),
+                            cancel: true,
+                        });
+                        return (callbacks, true, self.apply_redaction(&msg));
                     }
-                }
+                },
                 ActionMessageKind::RedactedEnv => {
                     let (cbs, new_msg) = self.handle_redacted_env(payload, message);
                     callbacks.extend(cbs);
@@ -180,20 +173,18 @@ impl ActionFilter {
                     // Always show the redacted line — it's safe to display
                     return (callbacks, true, msg);
                 }
-                ActionMessageKind::UnsetEnv => {
-                    match self.handle_unset_env(payload) {
-                        Ok(cb) => callbacks.push(cb),
-                        Err(err) => {
-                            msg = format!("{message} -- ERROR: {err}");
-                            callbacks.push(FilterCallback {
-                                kind: ActionMessageKind::UnsetEnv,
-                                value: ActionMessageValue::String(err),
-                                cancel: true,
-                            });
-                            return (callbacks, true, self.apply_redaction(&msg));
-                        }
+                ActionMessageKind::UnsetEnv => match self.handle_unset_env(payload) {
+                    Ok(cb) => callbacks.push(cb),
+                    Err(err) => {
+                        msg = format!("{message} -- ERROR: {err}");
+                        callbacks.push(FilterCallback {
+                            kind: ActionMessageKind::UnsetEnv,
+                            value: ActionMessageValue::String(err),
+                            cancel: true,
+                        });
+                        return (callbacks, true, self.apply_redaction(&msg));
                     }
-                }
+                },
                 ActionMessageKind::SessionRuntimeLoglevel => {
                     if let Some(cb) = self.handle_loglevel(payload) {
                         callbacks.push(cb);
@@ -302,8 +293,8 @@ impl ActionFilter {
 
         // Handle JSON-encoded format
         if trimmed.starts_with('"') {
-            let decoded: String = serde_json::from_str(trimmed)
-                .map_err(|e| format!("JSON decode error: {e}"))?;
+            let decoded: String =
+                serde_json::from_str(trimmed).map_err(|e| format!("JSON decode error: {e}"))?;
             let (name, value) = decoded
                 .split_once('=')
                 .ok_or("Failed to parse environment variable assignment.")?;
@@ -467,7 +458,6 @@ pub fn redact_openjd_redacted_env_requests(command: &str) -> String {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,7 +485,10 @@ mod tests {
         let (cbs, pass, _) = f.filter_message("openjd_status: a status string", "foo");
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].kind, ActionMessageKind::Status);
-        assert_eq!(cbs[0].value, ActionMessageValue::String("a status string".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("a status string".into())
+        );
         assert!(!pass);
     }
 
@@ -505,7 +498,10 @@ mod tests {
         let (cbs, pass, _) = f.filter_message("openjd_fail: an error message", "foo");
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].kind, ActionMessageKind::Fail);
-        assert_eq!(cbs[0].value, ActionMessageValue::String("an error message".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("an error message".into())
+        );
         assert!(!pass);
     }
 
@@ -515,7 +511,13 @@ mod tests {
         let (cbs, pass, _) = f.filter_message("openjd_env: foo=bar", "foo");
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].kind, ActionMessageKind::Env);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "foo".into(), value: "bar".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "foo".into(),
+                value: "bar".into()
+            }
+        );
         assert!(!pass);
     }
 
@@ -523,28 +525,52 @@ mod tests {
     fn test_captures_suppress_env_allowable_chars() {
         let mut f = make_filter(true, false);
         let (cbs, _, _) = f.filter_message("openjd_env: F_F_12=bar", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "F_F_12".into(), value: "bar".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "F_F_12".into(),
+                value: "bar".into()
+            }
+        );
     }
 
     #[test]
     fn test_captures_suppress_env_assign_empty() {
         let mut f = make_filter(true, false);
         let (cbs, _, _) = f.filter_message("openjd_env: foo=", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "foo".into(), value: "".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "foo".into(),
+                value: "".into()
+            }
+        );
     }
 
     #[test]
     fn test_captures_suppress_env_assign_whitespace() {
         let mut f = make_filter(true, false);
         let (cbs, _, _) = f.filter_message("openjd_env: foo= ", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "foo".into(), value: " ".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "foo".into(),
+                value: " ".into()
+            }
+        );
     }
 
     #[test]
     fn test_captures_suppress_env_leading_whitespace() {
         let mut f = make_filter(true, false);
         let (cbs, _, _) = f.filter_message("openjd_env:  \t foo=bar", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "foo".into(), value: "bar".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "foo".into(),
+                value: "bar".into()
+            }
+        );
     }
 
     #[test]
@@ -675,7 +701,10 @@ mod tests {
         let (cbs, _, _) = f.filter_message("openjd_env: foo", "foo");
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].kind, ActionMessageKind::Env);
-        assert_eq!(cbs[0].value, ActionMessageValue::String("Failed to parse environment variable assignment.".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("Failed to parse environment variable assignment.".into())
+        );
         assert!(cbs[0].cancel);
     }
 
@@ -683,7 +712,10 @@ mod tests {
     fn test_malformed_env_extra_whitespace() {
         let mut f = make_filter(false, false);
         let (cbs, _, _) = f.filter_message("openjd_env: foo =value", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::String("Failed to parse environment variable assignment.".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("Failed to parse environment variable assignment.".into())
+        );
         assert!(cbs[0].cancel);
     }
 
@@ -691,7 +723,10 @@ mod tests {
     fn test_malformed_env_start_with_digit() {
         let mut f = make_filter(false, false);
         let (cbs, _, _) = f.filter_message("openjd_env: 1F_F_12=bar", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::String("Failed to parse environment variable assignment.".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("Failed to parse environment variable assignment.".into())
+        );
         assert!(cbs[0].cancel);
     }
 
@@ -758,7 +793,10 @@ mod tests {
         let mut f = make_filter(false, false);
         let (cbs, _, _) = f.filter_message("openjd_unset_env: foo=bar", "foo");
         assert_eq!(cbs[0].kind, ActionMessageKind::UnsetEnv);
-        assert_eq!(cbs[0].value, ActionMessageValue::String("Failed to parse environment variable name.".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("Failed to parse environment variable name.".into())
+        );
         assert!(cbs[0].cancel);
     }
 
@@ -766,7 +804,10 @@ mod tests {
     fn test_malformed_unset_env_start_with_digit() {
         let mut f = make_filter(false, false);
         let (cbs, _, _) = f.filter_message("openjd_unset_env: 1F_F_12", "foo");
-        assert_eq!(cbs[0].value, ActionMessageValue::String("Failed to parse environment variable name.".into()));
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::String("Failed to parse environment variable name.".into())
+        );
         assert!(cbs[0].cancel);
     }
 
@@ -808,7 +849,13 @@ mod tests {
         // Should callback with env var
         assert_eq!(cbs.len(), 1);
         assert_eq!(cbs[0].kind, ActionMessageKind::Env);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "PASSWORD".into(), value: "secret123".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "PASSWORD".into(),
+                value: "secret123".into()
+            }
+        );
         // Message should be redacted
         assert!(msg.contains("PASSWORD=********"));
         assert!(!msg.contains("secret123"));
@@ -834,7 +881,10 @@ mod tests {
     fn test_redacted_env_uses_fixed_length_redaction() {
         let mut f = make_filter(false, false);
         let (_, _, msg1) = f.filter_message("openjd_redacted_env: KEY=x", "foo");
-        let (_, _, msg2) = f.filter_message("openjd_redacted_env: TOKEN=abcdefghijklmnopqrstuvwxyz1234567890", "foo");
+        let (_, _, msg2) = f.filter_message(
+            "openjd_redacted_env: TOKEN=abcdefghijklmnopqrstuvwxyz1234567890",
+            "foo",
+        );
         assert_eq!(msg1, "openjd_redacted_env: KEY=********");
         assert_eq!(msg2, "openjd_redacted_env: TOKEN=********");
     }
@@ -847,7 +897,10 @@ mod tests {
         let (_, _, msg1) = f.filter_message("openjd_redacted_env: PASSWORD=supersecret123", "foo");
         assert!(!msg1.contains("supersecret123"));
 
-        let (_, _, msg2) = f.filter_message("Here is the password: supersecret123 for your reference", "foo");
+        let (_, _, msg2) = f.filter_message(
+            "Here is the password: supersecret123 for your reference",
+            "foo",
+        );
         assert!(!msg2.contains("supersecret123"));
         assert!(msg2.contains("Here is the password: ********"));
     }
@@ -860,7 +913,10 @@ mod tests {
         f.filter_message("openjd_redacted_env: PASSWORD=password123", "foo");
         f.filter_message("openjd_redacted_env: API_KEY=abcdef123456", "foo");
 
-        let (_, _, msg) = f.filter_message("Using PASSWORD=password123 and API_KEY=abcdef123456 for authentication", "foo");
+        let (_, _, msg) = f.filter_message(
+            "Using PASSWORD=password123 and API_KEY=abcdef123456 for authentication",
+            "foo",
+        );
         assert!(!msg.contains("password123"));
         assert!(!msg.contains("abcdef123456"));
         assert!(msg.contains("Using PASSWORD=******** and API_KEY=******** for authentication"));
@@ -873,7 +929,13 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message("openjd_redacted_env: PASSWORD=secret123", "foo");
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "PASSWORD".into(), value: "secret123".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "PASSWORD".into(),
+                value: "secret123".into()
+            }
+        );
         assert!(msg.contains("PASSWORD=********"));
         assert!(!msg.contains("secret123"));
     }
@@ -931,7 +993,13 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message("openjd_redacted_env: KEY=VALUE", "foo");
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "KEY".into(), value: "VALUE".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "KEY".into(),
+                value: "VALUE".into()
+            }
+        );
         assert!(!msg.contains("VALUE") || msg.contains("********"));
     }
 
@@ -950,7 +1018,13 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message("openjd_redacted_env: KEY= VALUE", "foo");
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "KEY".into(), value: " VALUE".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "KEY".into(),
+                value: " VALUE".into()
+            }
+        );
         // Subsequent log should redact
         let (_, _, msg2) = f.filter_message("The value is:  VALUE", "foo");
         assert!(!msg2.contains(" VALUE") || msg2.contains("********"));
@@ -962,7 +1036,10 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message("openjd_redacted_env: KEY =VALUE", "foo");
         // Should not set env var (invalid format)
-        let env_cbs: Vec<_> = cbs.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(env_cbs.is_empty());
         // But should still redact VALUE in subsequent logs
         let (_, _, msg2) = f.filter_message("The value is: VALUE", "foo");
@@ -974,7 +1051,10 @@ mod tests {
     fn test_edge_case_no_equals() {
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message("openjd_redacted_env: KEYVALUE", "foo");
-        let env_cbs: Vec<_> = cbs.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(env_cbs.is_empty());
     }
 
@@ -983,7 +1063,13 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message("openjd_redacted_env: KEY=VALUE=MORE", "foo");
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "KEY".into(), value: "VALUE=MORE".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "KEY".into(),
+                value: "VALUE=MORE".into()
+            }
+        );
     }
 
     #[test]
@@ -991,7 +1077,13 @@ mod tests {
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message("openjd_redacted_env: KEY=", "foo");
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].value, ActionMessageValue::EnvVar { name: "KEY".into(), value: "".into() });
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "KEY".into(),
+                value: "".into()
+            }
+        );
     }
 
     // === test_redacted_env_special_values ===
@@ -1000,7 +1092,8 @@ mod tests {
     fn test_special_chars() {
         let mut f = make_filter(false, true);
         let val = "p@$$w0rd!*&^%";
-        let (cbs, _, msg) = f.filter_message(&format!("openjd_redacted_env: TEST_VAR={val}"), "foo");
+        let (cbs, _, msg) =
+            f.filter_message(&format!("openjd_redacted_env: TEST_VAR={val}"), "foo");
         assert_eq!(cbs.len(), 1);
         assert!(!msg.contains(val));
         assert!(msg.contains("********"));
@@ -1010,7 +1103,8 @@ mod tests {
     fn test_windows_paths() {
         let mut f = make_filter(false, true);
         let val = "C:\\Program Files\\App\\bin;D:\\Tools";
-        let (cbs, _, msg) = f.filter_message(&format!("openjd_redacted_env: TEST_VAR={val}"), "foo");
+        let (cbs, _, msg) =
+            f.filter_message(&format!("openjd_redacted_env: TEST_VAR={val}"), "foo");
         assert_eq!(cbs.len(), 1);
         assert!(!msg.contains(val));
     }
@@ -1021,7 +1115,10 @@ mod tests {
     fn test_json_format_standard() {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message(r#"openjd_redacted_env: "FOO=BAR""#, "foo");
-        let env_cbs: Vec<_> = cbs.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(!env_cbs.is_empty());
         assert!(!msg.contains("BAR") || msg.contains("********"));
     }
@@ -1030,7 +1127,10 @@ mod tests {
     fn test_json_format_with_newline() {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message(r#"openjd_redacted_env: "FOO=BAR\nBAZ""#, "foo");
-        let env_cbs: Vec<_> = cbs.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(!env_cbs.is_empty());
         assert!(!msg.contains("BAR"));
         assert!(!msg.contains("BAZ"));
@@ -1040,7 +1140,10 @@ mod tests {
     fn test_json_format_empty_value() {
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message(r#"openjd_redacted_env: "FOO=""#, "foo");
-        let env_cbs: Vec<_> = cbs.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(!env_cbs.is_empty());
     }
 
@@ -1086,7 +1189,10 @@ mod tests {
     #[test]
     fn test_multiline_first_part_redacted() {
         let mut f = make_filter(false, true);
-        f.filter_message(r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#, "foo");
+        f.filter_message(
+            r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#,
+            "foo",
+        );
         let (_, _, msg) = f.filter_message("The first part is: first_line", "foo");
         assert!(!msg.contains("first_line"));
         assert!(msg.contains("The first part is: ********"));
@@ -1095,7 +1201,10 @@ mod tests {
     #[test]
     fn test_multiline_middle_line_exact_match() {
         let mut f = make_filter(false, true);
-        f.filter_message(r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#, "foo");
+        f.filter_message(
+            r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#,
+            "foo",
+        );
         // Middle line by itself should be fully redacted (line-level redaction)
         let (_, _, msg) = f.filter_message("second_line", "foo");
         assert_eq!(msg, "********");
@@ -1104,7 +1213,10 @@ mod tests {
     #[test]
     fn test_multiline_middle_line_with_prefix_not_redacted() {
         let mut f = make_filter(false, true);
-        f.filter_message(r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#, "foo");
+        f.filter_message(
+            r#"openjd_redacted_env: "SECRETVAR=first_line\nsecond_line\nthird_line""#,
+            "foo",
+        );
         // Middle line with prefix should NOT be redacted (only exact match)
         let (_, _, msg) = f.filter_message("Prefix second_line", "foo");
         assert!(msg.contains("Prefix second_line"));
@@ -1115,7 +1227,10 @@ mod tests {
     #[test]
     fn test_multiline_last_part_with_prefix() {
         let mut f = make_filter(false, true);
-        f.filter_message(r#"openjd_redacted_env: "SECRETVAR=first_line\nmiddle_line\nlast_line""#, "foo");
+        f.filter_message(
+            r#"openjd_redacted_env: "SECRETVAR=first_line\nmiddle_line\nlast_line""#,
+            "foo",
+        );
         // Last line with prefix should be redacted (first/last go in regular redaction set)
         let (_, _, msg) = f.filter_message("Prefix last_line", "foo");
         assert!(!msg.contains("last_line"));
@@ -1125,7 +1240,10 @@ mod tests {
     #[test]
     fn test_multiline_middle_with_prefix_not_redacted() {
         let mut f = make_filter(false, true);
-        f.filter_message(r#"openjd_redacted_env: "SECRETVAR=first_line\nmiddle_line\nlast_line""#, "foo");
+        f.filter_message(
+            r#"openjd_redacted_env: "SECRETVAR=first_line\nmiddle_line\nlast_line""#,
+            "foo",
+        );
         // Middle line with prefix should NOT be redacted
         let (_, _, msg) = f.filter_message("Prefix middle_line", "foo");
         assert!(msg.contains("Prefix middle_line"));
@@ -1142,8 +1260,14 @@ mod tests {
         let (cbs_red, _, _) = f_red.filter_message("openjd_redacted_env: KEY=VALUE", "foo");
 
         // Both should produce env var callbacks with same name/value
-        let env_vars: Vec<_> = cbs_env.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
-        let red_vars: Vec<_> = cbs_red.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_vars: Vec<_> = cbs_env
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
+        let red_vars: Vec<_> = cbs_red
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert_eq!(env_vars.len(), 1);
         assert_eq!(red_vars.len(), 1);
         assert_eq!(env_vars[0].value, red_vars[0].value);
@@ -1158,15 +1282,24 @@ mod tests {
         let (cbs_env, _, _) = f_env.filter_message("openjd_env: KEY =VALUE", "foo");
         let (cbs_red, _, _) = f_red.filter_message("openjd_redacted_env: KEY =VALUE", "foo");
 
-        let env_vars: Vec<_> = cbs_env.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
-        let red_vars: Vec<_> = cbs_red.iter().filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. })).collect();
+        let env_vars: Vec<_> = cbs_env
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
+        let red_vars: Vec<_> = cbs_red
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
         assert!(env_vars.is_empty());
         assert!(red_vars.is_empty());
     }
 
     #[test]
     fn test_redact_no_redaction() {
-        assert_eq!(redact_openjd_redacted_env_requests("echo hello world"), "echo hello world");
+        assert_eq!(
+            redact_openjd_redacted_env_requests("echo hello world"),
+            "echo hello world"
+        );
     }
 
     #[test]

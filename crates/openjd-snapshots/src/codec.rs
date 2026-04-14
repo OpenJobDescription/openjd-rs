@@ -67,15 +67,22 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
 
     // Warn about empty directories being dropped (v2023 has no directory support)
     if !collapsed.dirs.is_empty() {
-        let implied: std::collections::HashSet<String> = collapsed.files.iter()
+        let implied: std::collections::HashSet<String> = collapsed
+            .files
+            .iter()
             .filter(|f| !f.deleted)
             .filter_map(|f| f.path.rfind('/').map(|i| f.path[..i].to_string()))
             .collect();
-        let empty_count = collapsed.dirs.iter()
+        let empty_count = collapsed
+            .dirs
+            .iter()
             .filter(|d| !implied.contains(&d.path))
             .count();
         if empty_count > 0 {
-            warn!(count = empty_count, "dropping empty directories not supported in v2023 format");
+            warn!(
+                count = empty_count,
+                "dropping empty directories not supported in v2023 format"
+            );
         }
     }
 
@@ -135,20 +142,30 @@ pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     let deleted_count = collapsed.files.iter().filter(|f| f.deleted).count()
         + collapsed.dirs.iter().filter(|d| d.deleted).count();
     if deleted_count > 0 {
-        warn!(count = deleted_count, "dropping deletions not supported in v2023 format");
+        warn!(
+            count = deleted_count,
+            "dropping deletions not supported in v2023 format"
+        );
     }
 
     // Warn about empty directories being dropped
     if !collapsed.dirs.is_empty() {
-        let implied: std::collections::HashSet<String> = collapsed.files.iter()
+        let implied: std::collections::HashSet<String> = collapsed
+            .files
+            .iter()
             .filter(|f| !f.deleted)
             .filter_map(|f| f.path.rfind('/').map(|i| f.path[..i].to_string()))
             .collect();
-        let empty_count = collapsed.dirs.iter()
+        let empty_count = collapsed
+            .dirs
+            .iter()
             .filter(|d| !d.deleted && !implied.contains(&d.path))
             .count();
         if empty_count > 0 {
-            warn!(count = empty_count, "dropping empty directories not supported in v2023 format");
+            warn!(
+                count = empty_count,
+                "dropping empty directories not supported in v2023 format"
+            );
         }
     }
 
@@ -459,9 +476,7 @@ fn parse_hash_alg(s: Option<&str>) -> Result<HashAlgorithm> {
 }
 
 fn utf16_be_bytes(s: &str) -> Vec<u8> {
-    s.encode_utf16()
-        .flat_map(|u| u.to_be_bytes())
-        .collect()
+    s.encode_utf16().flat_map(|u| u.to_be_bytes()).collect()
 }
 
 /// Produce canonical JSON: sorted keys, no whitespace, ASCII-safe strings.
@@ -472,7 +487,13 @@ fn canonical_json(value: &Value) -> String {
             keys.sort();
             let entries: Vec<String> = keys
                 .iter()
-                .map(|k| format!("{}:{}", canonical_json(&Value::String((*k).clone())), canonical_json(&map[*k])))
+                .map(|k| {
+                    format!(
+                        "{}:{}",
+                        canonical_json(&Value::String((*k).clone())),
+                        canonical_json(&map[*k])
+                    )
+                })
                 .collect();
             format!("{{{}}}", entries.join(","))
         }
@@ -624,7 +645,10 @@ fn decode_files(
                 .ok_or_else(|| SnapshotError::Validation("file entry missing 'name'".into()))?;
             let path = expand_path_reference(name, dir_index)?;
 
-            let hash = f.get("hash").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let hash = f
+                .get("hash")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let chunk_hashes = f.get("chunkhashes").and_then(|v| v.as_array()).map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))

@@ -2,9 +2,9 @@
 // Ported from deadline-cloud test_subtree_manifest.py (first 36 tests)
 
 use openjd_snapshots::{
+    subtree_rel_snapshot, subtree_rel_snapshot_diff, subtree_snapshot, subtree_snapshot_diff,
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, HashAlgorithm, Manifest, Snapshot,
     SnapshotDiff, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
-    subtree_rel_snapshot, subtree_rel_snapshot_diff, subtree_snapshot, subtree_snapshot_diff,
 };
 
 // --- Helpers ---
@@ -63,8 +63,15 @@ fn basic_subtree_extraction() {
             DirEntry::new("assets/models"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
-    assert_eq!(paths(&result), ["wood.png", "metal.png"].into_iter().map(String::from).collect());
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    assert_eq!(
+        paths(&result),
+        ["wood.png", "metal.png"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 #[test]
@@ -77,14 +84,22 @@ fn directories_rebased() {
             DirEntry::new("assets/textures/sub"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
-    assert_eq!(dir_paths(&result), ["sub"].into_iter().map(String::from).collect());
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    assert_eq!(
+        dir_paths(&result),
+        ["sub"].into_iter().map(String::from).collect()
+    );
 }
 
 #[test]
 fn preserves_file_metadata() {
-    let m = rel(vec![hf("assets/textures/wood.png", "hash1", 100, 1000)], vec![]);
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let m = rel(
+        vec![hf("assets/textures/wood.png", "hash1", 100, 1000)],
+        vec![],
+    );
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.files.len(), 1);
     let e = &result.files[0];
     assert_eq!(e.path, "wood.png");
@@ -103,7 +118,8 @@ fn total_size_recalculated() {
         ],
         vec![],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.total_size, 300); // 100 + 200
 }
 
@@ -119,13 +135,23 @@ fn nested_subtree() {
     );
     let result = subtree_rel_snapshot(&m, "a/b/c", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.files.len(), 2);
-    assert_eq!(paths(&result), ["d/file.txt", "other.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        paths(&result),
+        ["d/file.txt", "other.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 #[test]
 fn empty_result() {
-    let m = rel(vec![hf("assets/models/chair.blend", "h1", 100, 1000)], vec![]);
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let m = rel(
+        vec![hf("assets/models/chair.blend", "h1", 100, 1000)],
+        vec![],
+    );
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert!(result.files.is_empty());
     assert_eq!(result.total_size, 0);
 }
@@ -165,7 +191,8 @@ fn deleted_markers_preserved() {
         vec![FileEntry::deleted("assets/textures/old.png")],
         vec![DirEntry::new("assets"), DirEntry::new("assets/textures")],
     );
-    let result = subtree_rel_snapshot_diff(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot_diff(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.files.len(), 1);
     assert_eq!(result.files[0].path, "old.png");
     assert!(result.files[0].deleted);
@@ -173,9 +200,13 @@ fn deleted_markers_preserved() {
 
 #[test]
 fn discards_parent_manifest_hash() {
-    let m = rel_diff(vec![hf("assets/textures/file.png", "h1", 100, 1000)], vec![])
-        .with_parent_hash(Some("parent123".into()));
-    let result = subtree_rel_snapshot_diff(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let m = rel_diff(
+        vec![hf("assets/textures/file.png", "h1", 100, 1000)],
+        vec![],
+    )
+    .with_parent_hash(Some("parent123".into()));
+    let result =
+        subtree_rel_snapshot_diff(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert!(result.parent_manifest_hash.is_none());
 }
 
@@ -190,7 +221,8 @@ fn symlink_within_subtree_preserved() {
         ],
         vec![DirEntry::new("assets"), DirEntry::new("assets/textures")],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let link = result.files.iter().find(|f| f.path == "current").unwrap();
     assert_eq!(link.symlink_target.as_deref(), Some("wood.png"));
 }
@@ -209,7 +241,8 @@ fn escaping_symlink_collapsed() {
             DirEntry::new("assets/shared"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let current = result.files.iter().find(|f| f.path == "current").unwrap();
     assert!(current.symlink_target.is_none());
     assert_eq!(current.hash.as_deref(), Some("h2"));
@@ -245,7 +278,8 @@ fn escaping_symlink_excluded_with_exclude_escaping() {
             DirEntry::new("assets/shared"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
     let p = paths(&result);
     assert!(!p.contains("current"));
     assert!(p.contains("wood.png"));
@@ -260,7 +294,8 @@ fn non_escaping_symlink_preserved_with_exclude_escaping() {
         ],
         vec![DirEntry::new("assets"), DirEntry::new("assets/textures")],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
     let link = result.files.iter().find(|f| f.path == "current").unwrap();
     assert_eq!(link.symlink_target.as_deref(), Some("wood.png"));
 }
@@ -281,12 +316,18 @@ fn exclude_escaping_vs_collapse_escaping() {
     );
 
     // EXCLUDE_ESCAPING: symlink is excluded
-    let result_exclude = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
+    let result_exclude =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
     assert!(!paths(&result_exclude).contains("current"));
 
     // COLLAPSE_ESCAPING: symlink is collapsed
-    let result_collapse = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
-    let current = result_collapse.files.iter().find(|f| f.path == "current").unwrap();
+    let result_collapse =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let current = result_collapse
+        .files
+        .iter()
+        .find(|f| f.path == "current")
+        .unwrap();
     assert!(current.symlink_target.is_none());
     assert_eq!(current.hash.as_deref(), Some("h2"));
 }
@@ -306,7 +347,8 @@ fn exclude_escaping_directory_symlink() {
             DirEntry::new("assets/shared/v2"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::ExcludeEscaping).unwrap();
     let p = paths(&result);
     assert!(!p.contains("link"));
     assert!(!p.contains("link/a.png"));
@@ -337,7 +379,8 @@ fn symlink_to_missing_target_excluded() {
         ],
         vec![DirEntry::new("assets"), DirEntry::new("assets/textures")],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let p = paths(&result);
     assert!(!p.contains("broken"));
     assert!(p.contains("wood.png"));
@@ -384,9 +427,20 @@ fn absolute_paths_converted_to_relative() {
             DirEntry::new("/projects/scene/assets/textures"),
         ],
     );
-    let result = subtree_snapshot(&m, "/projects/scene/assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result = subtree_snapshot(
+        &m,
+        "/projects/scene/assets/textures",
+        SymlinkPolicy::CollapseEscaping,
+    )
+    .unwrap();
     let p = paths(&result);
-    assert_eq!(p, ["wood.png", "metal.png"].into_iter().map(String::from).collect());
+    assert_eq!(
+        p,
+        ["wood.png", "metal.png"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
     for e in &result.files {
         assert!(!e.path.starts_with('/'));
     }
@@ -439,7 +493,8 @@ fn directory_symlink_collapsed() {
             DirEntry::new("assets/shared/v2"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let p = paths(&result);
     assert!(p.contains("link/a.png"));
     assert!(p.contains("link/b.png"));
@@ -455,7 +510,8 @@ fn directory_symlink_collapsed_with_implicit_dirs() {
         ],
         vec![],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let p = paths(&result);
     assert!(p.contains("link/a.png"));
     assert!(p.contains("link/b.png"));
@@ -478,7 +534,8 @@ fn directory_symlink_with_nested_symlink_collapsed() {
             DirEntry::new("assets/data"),
         ],
     );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     let by_path: std::collections::HashMap<_, _> =
         result.files.iter().map(|f| (f.path.as_str(), f)).collect();
 
@@ -512,7 +569,8 @@ fn preserves_chunk_size_abs_diff() {
         vec![DirEntry::new("/root/subdir")],
     );
     m.file_chunk_size_bytes = 64 * 1024 * 1024;
-    let result = subtree_snapshot_diff(&m, "/root/subdir", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result =
+        subtree_snapshot_diff(&m, "/root/subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.file_chunk_size_bytes, 64 * 1024 * 1024);
 }
 
@@ -576,7 +634,9 @@ fn two_symlink_cycle() {
 
 #[test]
 fn is_absolute_path_posix() {
-    assert!(openjd_snapshots::path_util::is_absolute_path("/home/user/file.txt"));
+    assert!(openjd_snapshots::path_util::is_absolute_path(
+        "/home/user/file.txt"
+    ));
     assert!(openjd_snapshots::path_util::is_absolute_path("/"));
 }
 
@@ -584,51 +644,73 @@ fn is_absolute_path_posix() {
 fn is_absolute_path_windows_drive() {
     assert!(openjd_snapshots::path_util::is_absolute_path("C:"));
     assert!(openjd_snapshots::path_util::is_absolute_path("C:/"));
-    assert!(openjd_snapshots::path_util::is_absolute_path("C:/Users/file.txt"));
-    assert!(openjd_snapshots::path_util::is_absolute_path("D:/Projects/file.txt"));
+    assert!(openjd_snapshots::path_util::is_absolute_path(
+        "C:/Users/file.txt"
+    ));
+    assert!(openjd_snapshots::path_util::is_absolute_path(
+        "D:/Projects/file.txt"
+    ));
 }
 
 #[test]
 fn is_absolute_path_windows_unc() {
-    assert!(openjd_snapshots::path_util::is_absolute_path("//server/share/file.txt"));
+    assert!(openjd_snapshots::path_util::is_absolute_path(
+        "//server/share/file.txt"
+    ));
 }
 
 #[test]
 fn is_absolute_path_relative() {
-    assert!(!openjd_snapshots::path_util::is_absolute_path("assets/file.txt"));
+    assert!(!openjd_snapshots::path_util::is_absolute_path(
+        "assets/file.txt"
+    ));
     assert!(!openjd_snapshots::path_util::is_absolute_path("file.txt"));
     assert!(!openjd_snapshots::path_util::is_absolute_path("./file.txt"));
-    assert!(!openjd_snapshots::path_util::is_absolute_path("../file.txt"));
+    assert!(!openjd_snapshots::path_util::is_absolute_path(
+        "../file.txt"
+    ));
 }
 
 #[test]
 fn normalize_subtree_path() {
-    assert_eq!(openjd_snapshots::path_util::normalize_path("assets/textures/"), "assets/textures");
-    assert_eq!(openjd_snapshots::path_util::normalize_path("assets//textures"), "assets/textures");
-    assert_eq!(openjd_snapshots::path_util::normalize_path("assets/./textures"), "assets/textures");
+    assert_eq!(
+        openjd_snapshots::path_util::normalize_path("assets/textures/"),
+        "assets/textures"
+    );
+    assert_eq!(
+        openjd_snapshots::path_util::normalize_path("assets//textures"),
+        "assets/textures"
+    );
+    assert_eq!(
+        openjd_snapshots::path_util::normalize_path("assets/./textures"),
+        "assets/textures"
+    );
 }
 
 #[cfg(windows)]
 #[test]
 fn normalize_subtree_path_converts_backslashes() {
-    assert_eq!(openjd_snapshots::path_util::normalize_path("assets\\textures\\wood"), "assets/textures/wood");
+    assert_eq!(
+        openjd_snapshots::path_util::normalize_path("assets\\textures\\wood"),
+        "assets/textures/wood"
+    );
 }
 
 #[cfg(not(windows))]
 #[test]
 fn normalize_subtree_path_preserves_backslashes() {
     // On POSIX, backslashes are valid filename characters
-    assert_eq!(openjd_snapshots::path_util::normalize_path("assets\\textures\\wood"), "assets\\textures\\wood");
+    assert_eq!(
+        openjd_snapshots::path_util::normalize_path("assets\\textures\\wood"),
+        "assets\\textures\\wood"
+    );
 }
 
 // ===== TestSubtreeManifestValidation (remaining) =====
 
 #[test]
 fn dot_subtree_with_absolute_manifest_raises_error() {
-    let m = abs(
-        vec![hf("/home/user/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = abs(vec![hf("/home/user/file.txt", "h1", 100, 1000)], vec![]);
     // subtree_snapshot with "." on absolute manifest: the result would have absolute paths
     // but output type is Snapshot (relative). The implementation strips prefix "." which
     // leaves absolute paths unchanged - this is tested via the type system.
@@ -644,10 +726,7 @@ fn dot_subtree_with_absolute_manifest_raises_error() {
 #[test]
 fn absolute_subtree_with_relative_manifest_raises_error() {
     // Absolute subtree path with relative manifest should raise a validation error
-    let m = rel(
-        vec![hf("assets/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("assets/file.txt", "h1", 100, 1000)], vec![]);
     let result = subtree_rel_snapshot(&m, "/home/user/assets", SymlinkPolicy::CollapseEscaping);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("absolute"));
@@ -670,8 +749,19 @@ fn unc_path_subtree_extraction() {
             DirEntry::new("//server/share/assets/models"),
         ],
     );
-    let result = subtree_snapshot(&m, "//server/share/assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
-    assert_eq!(paths(&result), ["wood.png", "metal.png"].into_iter().map(String::from).collect());
+    let result = subtree_snapshot(
+        &m,
+        "//server/share/assets/textures",
+        SymlinkPolicy::CollapseEscaping,
+    )
+    .unwrap();
+    assert_eq!(
+        paths(&result),
+        ["wood.png", "metal.png"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 #[test]
@@ -680,8 +770,12 @@ fn unc_path_deep_nesting_no_infinite_loop() {
         vec![hf("//server/share/a/b/c/d/e/f/file.txt", "h1", 100, 1000)],
         vec![],
     );
-    let result = subtree_snapshot(&m, "//server/share/a/b/c", SymlinkPolicy::CollapseEscaping).unwrap();
-    assert_eq!(paths(&result), ["d/e/f/file.txt"].into_iter().map(String::from).collect());
+    let result =
+        subtree_snapshot(&m, "//server/share/a/b/c", SymlinkPolicy::CollapseEscaping).unwrap();
+    assert_eq!(
+        paths(&result),
+        ["d/e/f/file.txt"].into_iter().map(String::from).collect()
+    );
 }
 
 #[test]
@@ -694,8 +788,19 @@ fn unc_path_multiple_servers() {
         ],
         vec![],
     );
-    let result = subtree_snapshot(&m, "//server1/share/assets", SymlinkPolicy::CollapseEscaping).unwrap();
-    assert_eq!(paths(&result), ["file1.txt", "file2.txt"].into_iter().map(String::from).collect());
+    let result = subtree_snapshot(
+        &m,
+        "//server1/share/assets",
+        SymlinkPolicy::CollapseEscaping,
+    )
+    .unwrap();
+    assert_eq!(
+        paths(&result),
+        ["file1.txt", "file2.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 // ===== TestIdentitySubtree =====
@@ -717,13 +822,21 @@ fn identity_subtree_paths_unchanged() {
     let result = subtree_rel_snapshot(&m, ".", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(
         paths(&result),
-        ["assets/textures/wood.png", "assets/models/chair.blend", "root_file.txt"]
-            .into_iter().map(String::from).collect()
+        [
+            "assets/textures/wood.png",
+            "assets/models/chair.blend",
+            "root_file.txt"
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect()
     );
     assert_eq!(
         dir_paths(&result),
         ["assets", "assets/textures", "assets/models"]
-            .into_iter().map(String::from).collect()
+            .into_iter()
+            .map(String::from)
+            .collect()
     );
 }
 
@@ -752,7 +865,11 @@ fn identity_subtree_collapse_policy_collapses_all_symlinks() {
         vec![],
     );
     let result = subtree_rel_snapshot(&m, ".", SymlinkPolicy::CollapseAll).unwrap();
-    let link = result.files.iter().find(|f| f.path == "link_to_target").unwrap();
+    let link = result
+        .files
+        .iter()
+        .find(|f| f.path == "link_to_target")
+        .unwrap();
     assert!(link.symlink_target.is_none());
     assert_eq!(link.hash.as_deref(), Some("h1"));
     assert_eq!(link.size, Some(100));
@@ -783,7 +900,11 @@ fn identity_subtree_collapse_escaping_preserves_symlinks() {
         vec![],
     );
     let result = subtree_rel_snapshot(&m, ".", SymlinkPolicy::CollapseEscaping).unwrap();
-    let link = result.files.iter().find(|f| f.path == "link_to_target").unwrap();
+    let link = result
+        .files
+        .iter()
+        .find(|f| f.path == "link_to_target")
+        .unwrap();
     assert_eq!(link.symlink_target.as_deref(), Some("target.txt"));
 }
 
@@ -866,8 +987,16 @@ fn invariant_collapse_policy() {
     let single_step = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseAll).unwrap();
     let step1 = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     let two_step = subtree_rel_snapshot(&step1, ".", SymlinkPolicy::CollapseAll).unwrap();
-    let single_set: std::collections::HashSet<_> = single_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
-    let two_set: std::collections::HashSet<_> = two_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
+    let single_set: std::collections::HashSet<_> = single_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
+    let two_set: std::collections::HashSet<_> = two_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
     assert_eq!(single_set, two_set);
 }
 
@@ -884,8 +1013,16 @@ fn invariant_exclude_policy() {
     let single_step = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::ExcludeAll).unwrap();
     let step1 = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     let two_step = subtree_rel_snapshot(&step1, ".", SymlinkPolicy::ExcludeAll).unwrap();
-    let single_set: std::collections::HashSet<_> = single_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
-    let two_set: std::collections::HashSet<_> = two_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
+    let single_set: std::collections::HashSet<_> = single_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
+    let two_set: std::collections::HashSet<_> = two_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
     assert_eq!(single_set, two_set);
 }
 
@@ -904,17 +1041,30 @@ fn invariant_exception_escaping_symlink_collapse_vs_exclude() {
     let single_step = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::ExcludeAll).unwrap();
     let single_paths = paths(&single_step);
     assert!(!single_paths.contains("escaping_link"));
-    assert_eq!(single_paths, ["file.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        single_paths,
+        ["file.txt"].into_iter().map(String::from).collect()
+    );
 
     // Two-step: COLLAPSE_ESCAPING then EXCLUDE_ALL
     let step1 = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     let two_step = subtree_rel_snapshot(&step1, ".", SymlinkPolicy::ExcludeAll).unwrap();
     let two_paths = paths(&two_step);
     assert!(two_paths.contains("escaping_link"));
-    assert_eq!(two_paths, ["file.txt", "escaping_link"].into_iter().map(String::from).collect());
+    assert_eq!(
+        two_paths,
+        ["file.txt", "escaping_link"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 
     // Verify collapsed symlink has target's content
-    let link = two_step.files.iter().find(|f| f.path == "escaping_link").unwrap();
+    let link = two_step
+        .files
+        .iter()
+        .find(|f| f.path == "escaping_link")
+        .unwrap();
     assert_eq!(link.hash.as_deref(), Some("h2"));
     assert_eq!(link.size, Some(200));
     assert!(link.symlink_target.is_none());
@@ -936,10 +1086,22 @@ fn invariant_with_escaping_symlink_collapsed() {
     let single_step = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseAll).unwrap();
     let step1 = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     let two_step = subtree_rel_snapshot(&step1, ".", SymlinkPolicy::CollapseAll).unwrap();
-    let single_set: std::collections::HashSet<_> = single_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
-    let two_set: std::collections::HashSet<_> = two_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
+    let single_set: std::collections::HashSet<_> = single_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
+    let two_set: std::collections::HashSet<_> = two_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
     assert_eq!(single_set, two_set);
-    assert!(single_set.iter().any(|(p, h, s)| p.as_str() == "escaping_link" && h.as_deref() == Some("h2") && *s == Some(200)));
+    assert!(single_set
+        .iter()
+        .any(|(p, h, s)| p.as_str() == "escaping_link"
+            && h.as_deref() == Some("h2")
+            && *s == Some(200)));
 }
 
 #[test]
@@ -974,10 +1136,20 @@ fn invariant_non_escaping_symlink() {
     let single_step = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseAll).unwrap();
     let step1 = subtree_rel_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping).unwrap();
     let two_step = subtree_rel_snapshot(&step1, ".", SymlinkPolicy::CollapseAll).unwrap();
-    let single_set: std::collections::HashSet<_> = single_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
-    let two_set: std::collections::HashSet<_> = two_step.files.iter().map(|f| (&f.path, &f.hash, f.size)).collect();
+    let single_set: std::collections::HashSet<_> = single_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
+    let two_set: std::collections::HashSet<_> = two_step
+        .files
+        .iter()
+        .map(|f| (&f.path, &f.hash, f.size))
+        .collect();
     assert_eq!(single_set, two_set);
-    assert!(single_set.iter().any(|(p, h, s)| p.as_str() == "link" && h.as_deref() == Some("h1") && *s == Some(100)));
+    assert!(single_set
+        .iter()
+        .any(|(p, h, s)| p.as_str() == "link" && h.as_deref() == Some("h1") && *s == Some(100)));
 }
 
 // ===== TestSubtreeSymlinkCycles (remaining) =====
@@ -1059,21 +1231,16 @@ fn cycle_in_directory_symlink() {
 fn is_within_subtree_exact_match() {
     // A file at exactly the subtree root path should NOT appear (it's the root itself, not a child)
     // The strip_prefix logic returns empty string for exact match, which is skipped.
-    let m = rel(
-        vec![hf("assets/textures", "h1", 100, 1000)],
-        vec![],
-    );
-    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let m = rel(vec![hf("assets/textures", "h1", 100, 1000)], vec![]);
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
     assert!(result.files.is_empty());
 }
 
 #[test]
 fn is_within_subtree_child() {
     // A child path under the subtree root should be included and rebased
-    let m = rel(
-        vec![hf("foo/bar/baz.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("foo/bar/baz.txt", "h1", 100, 1000)], vec![]);
     let result = subtree_rel_snapshot(&m, "foo/bar", SymlinkPolicy::CollapseEscaping).unwrap();
     assert_eq!(result.files.len(), 1);
     assert_eq!(result.files[0].path, "baz.txt");
@@ -1082,10 +1249,7 @@ fn is_within_subtree_child() {
 #[test]
 fn is_within_subtree_not_within() {
     // A path outside the subtree should not be included
-    let m = rel(
-        vec![hf("other/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("other/file.txt", "h1", 100, 1000)], vec![]);
     let result = subtree_rel_snapshot(&m, "foo/bar", SymlinkPolicy::CollapseEscaping).unwrap();
     assert!(result.files.is_empty());
 }
@@ -1093,10 +1257,7 @@ fn is_within_subtree_not_within() {
 #[test]
 fn is_within_subtree_prefix_not_directory() {
     // '/foo/bar' is NOT within '/foo/b' — prefix match but not at a directory boundary
-    let m = rel(
-        vec![hf("foo/bar/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("foo/bar/file.txt", "h1", 100, 1000)], vec![]);
     let result = subtree_rel_snapshot(&m, "foo/b", SymlinkPolicy::CollapseEscaping).unwrap();
     assert!(result.files.is_empty());
 }
@@ -1105,10 +1266,20 @@ fn is_within_subtree_prefix_not_directory() {
 fn rebase_path() {
     // Rebasing from one root to another: extracting subtree rebases paths to be relative
     let m = abs(
-        vec![hf("/projects/scene/assets/textures/wood.png", "h1", 100, 1000)],
+        vec![hf(
+            "/projects/scene/assets/textures/wood.png",
+            "h1",
+            100,
+            1000,
+        )],
         vec![DirEntry::new("/projects/scene/assets/textures")],
     );
-    let result = subtree_snapshot(&m, "/projects/scene/assets", SymlinkPolicy::CollapseEscaping).unwrap();
+    let result = subtree_snapshot(
+        &m,
+        "/projects/scene/assets",
+        SymlinkPolicy::CollapseEscaping,
+    )
+    .unwrap();
     assert_eq!(result.files.len(), 1);
     assert_eq!(result.files[0].path, "textures/wood.png");
     assert_eq!(result.dirs.len(), 1);
@@ -1118,10 +1289,7 @@ fn rebase_path() {
 #[test]
 fn relative_subtree_with_absolute_manifest_raises_error() {
     // Relative subtree path with absolute manifest should raise a validation error
-    let m = abs(
-        vec![hf("/root/subdir/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = abs(vec![hf("/root/subdir/file.txt", "h1", 100, 1000)], vec![]);
     let result = subtree_snapshot(&m, "subdir", SymlinkPolicy::CollapseEscaping);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("relative"));

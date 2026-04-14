@@ -6,11 +6,11 @@
 //! Each test targets a specific suspicious code pattern. Tests are designed
 //! to either confirm the bug exists or prove the code is correct.
 
-use openjd_model::template::{Identifier, Description};
-use openjd_model::{decode_job_template, decode_environment_template};
-use openjd_model::step_param_space::StepParameterSpaceIterator;
-use openjd_model::types::{TaskParameterType, TaskParameterValue, TaskParameterSet};
 use openjd_model::job;
+use openjd_model::step_param_space::StepParameterSpaceIterator;
+use openjd_model::template::{Description, Identifier};
+use openjd_model::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
+use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -34,14 +34,20 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 fn identifier_512_bytes_ascii_is_accepted() {
     // 512 ASCII chars = 512 bytes — should be accepted
     let s = "A".repeat(512);
-    assert!(Identifier::new(&s).is_ok(), "512 ASCII chars should be accepted");
+    assert!(
+        Identifier::new(&s).is_ok(),
+        "512 ASCII chars should be accepted"
+    );
 }
 
 #[test]
 fn identifier_513_bytes_ascii_is_rejected() {
     // 513 ASCII chars = 513 bytes — should be rejected
     let s = "A".repeat(513);
-    assert!(Identifier::new(&s).is_err(), "513 ASCII chars should be rejected");
+    assert!(
+        Identifier::new(&s).is_err(),
+        "513 ASCII chars should be rejected"
+    );
 }
 
 #[test]
@@ -52,24 +58,33 @@ fn identifier_length_check_uses_bytes_not_chars() {
     let err = Identifier::new(&s).unwrap_err();
     let msg = err.to_string();
     // The error message reports s.len() which is byte length
-    assert!(msg.contains("513"), "Error should report byte length 513, got: {msg}");
+    assert!(
+        msg.contains("513"),
+        "Error should report byte length 513, got: {msg}"
+    );
 }
 
 #[test]
 fn description_length_check_uses_chars_not_bytes() {
     // Description allows unicode. Create a string of 2048 multibyte chars.
     // Each 'é' (U+00E9) is 2 bytes in UTF-8.
-    let s: String = std::iter::repeat('é').take(2048).collect();
+    let s: String = std::iter::repeat_n('é', 2048).collect();
     assert_eq!(s.chars().count(), 2048);
     assert_eq!(s.len(), 4096); // 2048 * 2 bytes
-    // Description uses chars().count(), so 2048 chars should be accepted
-    assert!(Description::new(&s).is_ok(), "2048 chars (4096 bytes) should be accepted by Description");
+                               // Description uses chars().count(), so 2048 chars should be accepted
+    assert!(
+        Description::new(&s).is_ok(),
+        "2048 chars (4096 bytes) should be accepted by Description"
+    );
 }
 
 #[test]
 fn description_2049_chars_is_rejected() {
-    let s: String = std::iter::repeat('é').take(2049).collect();
-    assert!(Description::new(&s).is_err(), "2049 chars should be rejected by Description");
+    let s: String = std::iter::repeat_n('é', 2049).collect();
+    assert!(
+        Description::new(&s).is_err(),
+        "2049 chars should be rejected by Description"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -87,16 +102,17 @@ fn flexfloat_display_large_whole_number_overflow() {
     // 1e19 = 10_000_000_000_000_000_000.0 which exceeds i64::MAX (9_223_372_036_854_775_807)
     // FlexFloat Display does: if fract() == 0.0 { write!(f, "{}", self.0 as i64) }
     // This will saturate to i64::MAX, producing wrong output.
-    let template_yaml = format!(r#"{{
+    let template_yaml = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
-        "parameterDefinitions": [{{
+        "parameterDefinitions": [{
             "name": "BigFloat",
             "type": "FLOAT",
             "default": 1e19
-        }}],
-        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}}}]
-    }}"#);
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#
+    .to_string();
     let v = yaml_val(&template_yaml);
     let jt = decode_job_template(v, None).unwrap();
 
@@ -116,8 +132,10 @@ fn flexfloat_display_large_whole_number_overflow() {
         );
     }
     // If we get here, the display is correct (or at least not i64::MAX)
-    assert_eq!(default_str, expected_correct,
-        "FlexFloat should display 1e19 correctly, got: {default_str}");
+    assert_eq!(
+        default_str, expected_correct,
+        "FlexFloat should display 1e19 correctly, got: {default_str}"
+    );
 }
 
 #[test]
@@ -159,12 +177,14 @@ fn flexfloat_display_negative_large_whole_number() {
 #[test]
 fn empty_extensions_job_template() {
     // Job template with extensions: []
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": [],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#);
+    }"#,
+    );
     let result = decode_job_template(v, None);
     // Record whether this succeeds or fails
     let job_result_is_err = result.is_err();
@@ -176,14 +196,16 @@ fn empty_extensions_job_template() {
     }
 
     // Environment template with extensions: []
-    let v2 = yaml_val(r#"{
+    let v2 = yaml_val(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "extensions": [],
         "environment": {
             "name": "E",
             "script": {"actions": {"onEnter": {"command": "echo"}}}
         }
-    }"#);
+    }"#,
+    );
     let env_result = decode_environment_template(v2, None);
     let env_result_is_err = env_result.is_err();
     if env_result_is_err {
@@ -211,7 +233,8 @@ fn empty_extensions_job_template() {
 
 #[test]
 fn environment_variables_all_preserved() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "jobEnvironments": [{
@@ -229,7 +252,8 @@ fn environment_variables_all_preserved() {
             "script": {"actions": {"onEnter": {"command": "setup"}}}
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(v, None).unwrap();
     let envs = jt.job_environments.as_ref().unwrap();
     let vars = envs[0].variables.as_ref().unwrap();
@@ -237,12 +261,18 @@ fn environment_variables_all_preserved() {
     // All 8 variables must be present
     assert_eq!(vars.len(), 8, "Expected 8 variables, got {}", vars.len());
     let expected = [
-        ("VAR_A", "alpha"), ("VAR_B", "bravo"), ("VAR_C", "charlie"),
-        ("VAR_D", "delta"), ("VAR_E", "echo"), ("VAR_F", "foxtrot"),
-        ("VAR_G", "golf"), ("VAR_H", "hotel"),
+        ("VAR_A", "alpha"),
+        ("VAR_B", "bravo"),
+        ("VAR_C", "charlie"),
+        ("VAR_D", "delta"),
+        ("VAR_E", "echo"),
+        ("VAR_F", "foxtrot"),
+        ("VAR_G", "golf"),
+        ("VAR_H", "hotel"),
     ];
     for (key, val) in &expected {
-        let actual = vars.get(*key)
+        let actual = vars
+            .get(*key)
             .unwrap_or_else(|| panic!("Missing variable: {key}"));
         assert_eq!(actual.raw(), *val, "Variable {key} has wrong value");
     }
@@ -259,7 +289,8 @@ fn environment_variables_all_preserved() {
 
 #[test]
 fn string_param_maxlength_uses_chars_not_bytes() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{
@@ -269,19 +300,23 @@ fn string_param_maxlength_uses_chars_not_bytes() {
             "maxLength": 5
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(v, None).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "héllo" is 5 chars but 6 bytes — should be accepted with maxLength=5
     let test_value = openjd_expr::ExprValue::String("héllo".to_string());
-    assert!(param.check_constraints(&test_value).is_ok(),
-        "5-character string 'héllo' should pass maxLength=5 (char count, not byte count)");
+    assert!(
+        param.check_constraints(&test_value).is_ok(),
+        "5-character string 'héllo' should pass maxLength=5 (char count, not byte count)"
+    );
 }
 
 #[test]
 fn string_param_minlength_uses_chars_not_bytes() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{
@@ -291,19 +326,23 @@ fn string_param_minlength_uses_chars_not_bytes() {
             "minLength": 6
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(v, None).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "ééé" is 3 chars but 6 bytes — should be rejected with minLength=6
     let test_value = openjd_expr::ExprValue::String("ééé".to_string());
-    assert!(param.check_constraints(&test_value).is_err(),
-        "3-character string 'ééé' should fail minLength=6 (char count, not byte count)");
+    assert!(
+        param.check_constraints(&test_value).is_err(),
+        "3-character string 'ééé' should fail minLength=6 (char count, not byte count)"
+    );
 }
 
 #[test]
 fn path_param_maxlength_uses_chars_not_bytes() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{
@@ -313,7 +352,8 @@ fn path_param_maxlength_uses_chars_not_bytes() {
             "maxLength": 10
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(v, None).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
@@ -322,8 +362,10 @@ fn path_param_maxlength_uses_chars_not_bytes() {
         value: "/tmp/héllo".to_string(),
         format: openjd_expr::PathFormat::Posix,
     };
-    assert!(param.check_constraints(&test_value).is_ok(),
-        "10-character path '/tmp/héllo' should pass maxLength=10 (char count, not byte count)");
+    assert!(
+        param.check_constraints(&test_value).is_ok(),
+        "10-character path '/tmp/héllo' should pass maxLength=10 (char count, not byte count)"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -345,12 +387,17 @@ fn validate_containment_path_as_string_works() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     let mut params = TaskParameterSet::new();
-    params.insert("Dir".into(), TaskParameterValue {
-        param_type: TaskParameterType::Path,
-        value: openjd_expr::ExprValue::String("/tmp/b".to_string()),
-    });
-    assert!(iter.validate_containment(&params).is_ok(),
-        "validate_containment should accept ExprValue::String for PATH param");
+    params.insert(
+        "Dir".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
+            value: openjd_expr::ExprValue::String("/tmp/b".to_string()),
+        },
+    );
+    assert!(
+        iter.validate_containment(&params).is_ok(),
+        "validate_containment should accept ExprValue::String for PATH param"
+    );
 }
 
 #[test]
@@ -360,23 +407,31 @@ fn validate_containment_path_as_path_value() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     let mut params = TaskParameterSet::new();
-    params.insert("Dir".into(), TaskParameterValue {
-        param_type: TaskParameterType::Path,
-        value: openjd_expr::ExprValue::Path {
-            value: "/tmp/b".to_string(),
-            format: openjd_expr::PathFormat::Posix,
+    params.insert(
+        "Dir".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
+            value: openjd_expr::ExprValue::Path {
+                value: "/tmp/b".to_string(),
+                format: openjd_expr::PathFormat::Posix,
+            },
         },
-    });
-    assert!(iter.validate_containment(&params).is_ok(),
-        "validate_containment should accept ExprValue::Path for PATH param");
+    );
+    assert!(
+        iter.validate_containment(&params).is_ok(),
+        "validate_containment should accept ExprValue::Path for PATH param"
+    );
 }
 
 // Helper to build a PATH parameter space
 fn make_path_space(paths: Vec<&str>) -> job::StepParameterSpace {
     let mut defs = indexmap::IndexMap::new();
-    defs.insert("Dir".to_string(), job::TaskParameter::Path {
-        range: paths.iter().map(|s| s.to_string()).collect(),
-    });
+    defs.insert(
+        "Dir".to_string(),
+        job::TaskParameter::Path {
+            range: paths.iter().map(|s| s.to_string()).collect(),
+        },
+    );
     job::StepParameterSpace {
         task_parameter_definitions: defs,
         combination: None,

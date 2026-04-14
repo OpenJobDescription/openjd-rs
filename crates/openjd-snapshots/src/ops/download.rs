@@ -1,8 +1,8 @@
+use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, FileEntry, Manifest, SymlinkPolicy};
-use super::memory_pool::{MemoryPool, default_max_memory_bytes, num_cpus};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,7 +67,7 @@ pub struct DownloadOptions {
     pub file_conflict_resolution: FileConflictResolution,
     pub apply_deletes: bool,
     pub symlink_policy: SymlinkPolicy,
-    pub on_progress: Option<Box<dyn Fn(&DownloadStatistics) -> bool + Send + Sync>>,
+    pub on_progress: Option<Box<super::ProgressFn<DownloadStatistics>>>,
     pub max_workers: Option<usize>,
     pub max_memory_bytes: Option<usize>,
 }
@@ -208,7 +208,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
             .map(|&i| result.files[i].path.as_str())
             .collect();
 
-        let mut in_degree: HashMap<usize, usize> = symlink_indices.iter().map(|&i| (i, 0)).collect();
+        let mut in_degree: HashMap<usize, usize> =
+            symlink_indices.iter().map(|&i| (i, 0)).collect();
         let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
         let path_to_idx: HashMap<&str, usize> = symlink_indices
             .iter()
@@ -279,9 +280,13 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     if let Ok(actual_mtime) = get_mtime(path) {
                         // Whole-file hash cache check
                         if let Some(ref file_hash) = file.hash {
-                            if let Some(cached_hash) =
-                                cache.get_if_fresh(path, alg_str, 0, WHOLE_FILE_RANGE_END, actual_mtime)
-                            {
+                            if let Some(cached_hash) = cache.get_if_fresh(
+                                path,
+                                alg_str,
+                                0,
+                                WHOLE_FILE_RANGE_END,
+                                actual_mtime,
+                            ) {
                                 if cached_hash == *file_hash {
                                     stats.skipped_files += 1;
                                     stats.skipped_bytes += file_size;
@@ -299,7 +304,11 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                                 for expected in chunk_hashes {
                                     let end = std::cmp::min(offset + cs, file_size);
                                     if let Some(cached) = cache.get_if_fresh(
-                                        path, alg_str, offset as i64, end as i64, actual_mtime,
+                                        path,
+                                        alg_str,
+                                        offset as i64,
+                                        end as i64,
+                                        actual_mtime,
                                     ) {
                                         if cached != *expected {
                                             all_cached = false;
@@ -341,7 +350,10 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
     let download_items: Vec<WorkItem> = work_items
         .iter()
         .filter(|(_, skipped, _)| !skipped)
-        .map(|(i, _, _)| WorkItem { index: *i, file_size: result.files[*i].size.unwrap_or(0) })
+        .map(|(i, _, _)| WorkItem {
+            index: *i,
+            file_size: result.files[*i].size.unwrap_or(0),
+        })
         .collect();
 
     // Apply skipped mtime updates
@@ -351,7 +363,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         }
     }
 
-    let on_progress: Option<Arc<dyn Fn(&DownloadStatistics) -> bool + Send + Sync>> =
+    let on_progress: Option<Arc<super::ProgressFn<DownloadStatistics>>> =
         options.on_progress.map(|f| Arc::from(f));
 
     if download_items.is_empty() {
@@ -361,9 +373,17 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         if let Some(ref cb) = on_progress {
             let _ = cb(&stats);
         }
-        let unit = if manifest.file_chunk_size_bytes <= 0 { "files" } else { "chunks" };
-        stats.progress_message = format!("Downloaded {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes), stats.total_files, unit);
+        let unit = if manifest.file_chunk_size_bytes <= 0 {
+            "files"
+        } else {
+            "chunks"
+        };
+        stats.progress_message = format!(
+            "Downloaded {} ({} {}) in 0.00s",
+            crate::hash::human_readable_file_size(stats.total_bytes),
+            stats.total_files,
+            unit
+        );
         return Ok((result, stats));
     }
 
@@ -405,7 +425,9 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
             let index = item.index;
 
             let handle = tokio::spawn(async move {
-                let _worker_permit = worker_sem.acquire_owned().await
+                let _worker_permit = worker_sem
+                    .acquire_owned()
+                    .await
                     .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
 
                 if cancelled.load(Ordering::Relaxed) {
@@ -439,7 +461,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         .map_err(crate::SnapshotError::Io)?;
 
                     let mut file_offset: u64 = 0;
-                    let mut chunk_handles: Vec<tokio::task::JoinHandle<std::io::Result<u64>>> = Vec::new();
+                    let mut chunk_handles: Vec<tokio::task::JoinHandle<std::io::Result<u64>>> =
+                        Vec::new();
                     for h in chunk_hashes {
                         let cs = manifest_chunk_size as u64;
                         let remaining = file_size - file_offset;
@@ -447,17 +470,28 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
 
                         if this_chunk_size >= multipart_threshold {
                             // Split large chunk into parallel byte-range parts
-                            let num_parts = (this_chunk_size as usize + part_size - 1) / part_size;
+                            let num_parts = (this_chunk_size as usize).div_ceil(part_size);
                             for part_idx in 0..num_parts {
                                 let part_start = part_idx as u64 * part_size as u64;
-                                let part_end = std::cmp::min(part_start + part_size as u64 - 1, this_chunk_size - 1);
+                                let part_end = std::cmp::min(
+                                    part_start + part_size as u64 - 1,
+                                    this_chunk_size - 1,
+                                );
                                 let write_offset = file_offset + part_start;
                                 let dc = dc.clone();
                                 let alg = alg.clone();
                                 let h = h.clone();
                                 let tp = target_path.clone();
                                 chunk_handles.push(tokio::spawn(async move {
-                                    dc.stream_range_to_file_at_offset(&h, &alg, part_start, part_end, &tp, write_offset).await
+                                    dc.stream_range_to_file_at_offset(
+                                        &h,
+                                        &alg,
+                                        part_start,
+                                        part_end,
+                                        &tp,
+                                        write_offset,
+                                    )
+                                    .await
                                 }));
                             }
                         } else {
@@ -473,7 +507,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         file_offset += this_chunk_size;
                     }
                     for handle in chunk_handles {
-                        handle.await
+                        handle
+                            .await
                             .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
                             .map_err(crate::SnapshotError::Io)?;
                     }
@@ -481,7 +516,15 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     Vec::new()
                 } else if let Some(ref hash) = file_hash {
                     if file_size >= multipart_threshold {
-                        download_multipart_to_file(&dc, hash, &alg, file_size, part_size, target_path.clone()).await?;
+                        download_multipart_to_file(
+                            &dc,
+                            hash,
+                            &alg,
+                            file_size,
+                            part_size,
+                            target_path.clone(),
+                        )
+                        .await?;
                         already_written = true;
                         Vec::new()
                     } else {
@@ -495,7 +538,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                                 .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
                                 .map_err(crate::SnapshotError::Io)?;
                         }
-                        dc.copy_object_to_file(hash, &alg, &tmp).await
+                        dc.copy_object_to_file(hash, &alg, &tmp)
+                            .await
                             .map_err(crate::SnapshotError::Io)?;
                         let tp = target_path.clone();
                         tokio::task::spawn_blocking(move || std::fs::rename(&tmp, &tp))
@@ -507,7 +551,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     }
                 } else {
                     return Err(crate::SnapshotError::Validation(format!(
-                        "file has no hash or chunk_hashes: {}", file_path
+                        "file has no hash or chunk_hashes: {}",
+                        file_path
                     )));
                 };
 
@@ -528,9 +573,10 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                             return Err(e);
                         }
                         Ok(())
-                    }).await
-                        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
-                        .map_err(crate::SnapshotError::Io)?;
+                    })
+                    .await
+                    .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                    .map_err(crate::SnapshotError::Io)?;
                 }
 
                 // Update progress
@@ -545,7 +591,9 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         s.rate = rc.update(elapsed, s.downloaded_bytes + s.skipped_bytes);
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64
+                            / s.total_bytes as f64)
+                            * 100.0;
                     }
                     if let Some(ref cb) = on_progress {
                         if !cb(&s) {
@@ -581,7 +629,14 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
 
         if let Some(ref cache) = hash_cache {
             if let Some(ref hash) = file.hash {
-                let _ = cache.put(&target_path, alg_str, 0, WHOLE_FILE_RANGE_END, hash, actual_mtime);
+                let _ = cache.put(
+                    &target_path,
+                    alg_str,
+                    0,
+                    WHOLE_FILE_RANGE_END,
+                    hash,
+                    actual_mtime,
+                );
             }
             if let Some(ref chunk_hashes) = file.chunk_hashes {
                 let cs = result.file_chunk_size_bytes as u64;
@@ -590,7 +645,14 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     let mut offset: u64 = 0;
                     for h in chunk_hashes {
                         let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(&target_path, alg_str, offset as i64, end as i64, h, actual_mtime);
+                        let _ = cache.put(
+                            &target_path,
+                            alg_str,
+                            offset as i64,
+                            end as i64,
+                            h,
+                            actual_mtime,
+                        );
                         offset = end;
                     }
                 }
@@ -603,20 +665,35 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
         let mut rc = rate_calc.lock().unwrap();
-        stats.rate = rc.update(stats.total_time, stats.downloaded_bytes + stats.skipped_bytes);
+        stats.rate = rc.update(
+            stats.total_time,
+            stats.downloaded_bytes + stats.skipped_bytes,
+        );
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.downloaded_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress = ((stats.downloaded_bytes + stats.skipped_bytes) as f64
+            / stats.total_bytes as f64)
+            * 100.0;
     }
 
-    let unit = if manifest.file_chunk_size_bytes <= 0 { "files" } else { "chunks" };
+    let unit = if manifest.file_chunk_size_bytes <= 0 {
+        "files"
+    } else {
+        "chunks"
+    };
     let mut parts = vec![
-        format!("Downloaded {}", crate::hash::human_readable_file_size(stats.total_bytes)),
+        format!(
+            "Downloaded {}",
+            crate::hash::human_readable_file_size(stats.total_bytes)
+        ),
         format!("({} {})", stats.total_files, unit),
         format!("in {:.2}s", stats.total_time),
     ];
     if stats.total_time > 0.0 {
-        parts.push(format!("({}/s)", crate::hash::human_readable_file_size(stats.rate as u64)));
+        parts.push(format!(
+            "({}/s)",
+            crate::hash::human_readable_file_size(stats.rate as u64)
+        ));
     }
     stats.progress_message = parts.join(" ");
 
@@ -639,11 +716,12 @@ async fn download_multipart_to_file(
     let tp = target_path.clone();
     let fs = file_size;
     tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
-        .await.map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+        .await
+        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
         .map_err(crate::SnapshotError::Io)?;
 
     // Download parts in parallel, write each at its offset
-    let num_parts = (file_size as usize + part_size - 1) / part_size;
+    let num_parts = (file_size as usize).div_ceil(part_size);
     let mut handles = Vec::with_capacity(num_parts);
 
     for part_idx in 0..num_parts {
@@ -655,14 +733,17 @@ async fn download_multipart_to_file(
         let tp = target_path.clone();
 
         handles.push(tokio::spawn(async move {
-            dc.stream_range_to_file_at_offset(&h, &a, start, end, &tp, start).await
+            dc.stream_range_to_file_at_offset(&h, &a, start, end, &tp, start)
+                .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok::<_, crate::SnapshotError>(())
         }));
     }
 
     for handle in handles {
-        handle.await.map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+        handle
+            .await
+            .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
     }
 
     Ok(())
@@ -740,10 +821,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn setup_data_cache_with_file(
-        cache: &FileSystemDataCache,
-        content: &[u8],
-    ) -> String {
+    fn setup_data_cache_with_file(cache: &FileSystemDataCache, content: &[u8]) -> String {
         let hash = hash_data(content);
         ContentAddressedDataCache::put_object(cache, &hash, "xxh128", content).unwrap();
         hash
@@ -761,8 +839,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         let result = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -788,8 +866,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 6, 1000);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -814,8 +892,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         let result = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -844,8 +922,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -870,8 +948,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 3, 1000);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -924,7 +1002,7 @@ mod tests {
             .iter()
             .map(|c| {
                 let h = hash_data(c);
-                ContentAddressedDataCache::put_object(&data_cache, &h, "xxh128", *c).unwrap();
+                ContentAddressedDataCache::put_object(&data_cache, &h, "xxh128", c).unwrap();
                 h
             })
             .collect();
@@ -933,8 +1011,7 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
         entry.chunk_hashes = Some(chunk_hashes);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 3)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
 
         download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -958,8 +1035,8 @@ mod tests {
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 4, 999);
         entry.hash = Some(hash);
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
         let result = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
@@ -982,9 +1059,7 @@ mod tests {
 
         let dir_path = tmp.path().join("new_dir");
         let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_dirs(vec![DirEntry::new(
-                dir_path.to_string_lossy().to_string(),
-            )]);
+            .with_dirs(vec![DirEntry::new(dir_path.to_string_lossy().to_string())]);
 
         download_abs_manifest(
             &AbsManifest::Snapshot(manifest),

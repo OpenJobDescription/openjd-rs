@@ -27,13 +27,15 @@ pub mod uri_path;
 pub mod value;
 
 pub use error::{ExpressionError, ExpressionErrorKind};
-pub use eval::{ParsedExpression, Evaluator, EvaluationResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
+pub use eval::{
+    EvaluationResult, Evaluator, ParsedExpression, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT,
+};
+pub use format_string::escape_format_string;
 pub use format_string::FormatString;
 pub use format_string::FormatStringValidationError;
-pub use format_string::escape_format_string;
 pub use path_mapping::{PathFormat, PathMappingRule};
 pub use range_expr::{RangeExpr, RangeExprError};
-pub use symbol_table::{SymbolTable, SymbolTableError, SerializedSymbolTable};
+pub use symbol_table::{SerializedSymbolTable, SymbolTable, SymbolTableError};
 pub use types::{ExprType, TypeCode};
 pub use value::ExprValue;
 
@@ -60,10 +62,7 @@ pub use value::ExprValue;
 /// let result = ev.evaluate(&parsed.ast).unwrap();
 /// assert_eq!(result, ExprValue::Int(3));
 /// ```
-pub fn evaluate_expression(
-    expr: &str,
-    symtab: &SymbolTable,
-) -> Result<ExprValue, ExpressionError> {
+pub fn evaluate_expression(expr: &str, symtab: &SymbolTable) -> Result<ExprValue, ExpressionError> {
     let parsed = ParsedExpression::new(expr)?;
     let symtabs = [symtab];
     let mut evaluator = parsed.evaluator(&symtabs);
@@ -82,7 +81,8 @@ pub fn evaluate_expression_bounded(
 ) -> Result<EvaluationResult, ExpressionError> {
     let parsed = ParsedExpression::new(expr)?;
     let symtabs = [symtab];
-    let mut evaluator = parsed.evaluator(&symtabs)
+    let mut evaluator = parsed
+        .evaluator(&symtabs)
         .with_memory_limit(memory_limit)
         .with_operation_limit(operation_limit);
     let value = evaluator.evaluate(&parsed.ast)?;

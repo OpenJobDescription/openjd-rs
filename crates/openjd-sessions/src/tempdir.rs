@@ -15,15 +15,14 @@ pub fn custom_gettempdir() -> Result<PathBuf, SessionError> {
 
     #[cfg(windows)]
     let base = {
-        let program_data = std::env::var("PROGRAMDATA")
-            .unwrap_or_else(|_| {
-                log::warn!(
-                    target: "openjd.sessions",
-                    "Environment variable \"PROGRAMDATA\" is not set. \
-                     Creating session working directories under C:\\ProgramData"
-                );
-                r"C:\ProgramData".to_string()
-            });
+        let program_data = std::env::var("PROGRAMDATA").unwrap_or_else(|_| {
+            log::warn!(
+                target: "openjd.sessions",
+                "Environment variable \"PROGRAMDATA\" is not set. \
+                 Creating session working directories under C:\\ProgramData"
+            );
+            r"C:\ProgramData".to_string()
+        });
         PathBuf::from(program_data).join("Amazon")
     };
 
@@ -84,7 +83,11 @@ impl TempDir {
     /// - `dir`: parent directory (defaults to `custom_gettempdir()`)
     /// - `prefix`: optional name prefix
     /// - `user`: optional session user for cross-user ownership
-    pub fn new(dir: Option<&Path>, prefix: Option<&str>, _user: Option<&dyn SessionUser>) -> Result<Self, SessionError> {
+    pub fn new(
+        dir: Option<&Path>,
+        prefix: Option<&str>,
+        _user: Option<&dyn SessionUser>,
+    ) -> Result<Self, SessionError> {
         let parent = match dir {
             Some(d) => d.to_path_buf(),
             None => custom_gettempdir()?,
@@ -112,11 +115,12 @@ impl TempDir {
             } else {
                 0o700
             };
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
-                .map_err(|e| SessionError::TempDir {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).map_err(
+                |e| SessionError::TempDir {
                     path: path.clone(),
                     source: e,
-                })?;
+                },
+            )?;
         }
 
         // Windows: set DACL — full control for process user, modify for session user.
@@ -138,7 +142,10 @@ impl TempDir {
             }
         }
 
-        Ok(Self { path, cleaned_up: false })
+        Ok(Self {
+            path,
+            cleaned_up: false,
+        })
     }
 
     pub fn path(&self) -> &Path {

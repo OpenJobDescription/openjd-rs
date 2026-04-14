@@ -14,8 +14,8 @@
 //! - `StaticChunkNode`: pre-computed chunk boundaries
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use openjd_expr::value::Float64;
 use openjd_expr::{ExprValue, RangeExpr};
@@ -23,7 +23,7 @@ use openjd_expr::{ExprValue, RangeExpr};
 use crate::error::OpenJdError;
 use crate::job;
 use crate::template::RangeConstraint;
-use crate::types::{TaskParameterSet, TaskParameterValue, TaskParameterType};
+use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 
 // ── Shared utilities ──
 
@@ -34,23 +34,31 @@ fn tokenize(expr: &str) -> Vec<String> {
     for ch in expr.chars() {
         match ch {
             '*' | '(' | ')' | ',' => {
-                if !current.is_empty() { tokens.push(std::mem::take(&mut current)); }
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
                 tokens.push(ch.to_string());
             }
             c if c.is_whitespace() => {
-                if !current.is_empty() { tokens.push(std::mem::take(&mut current)); }
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
             }
             _ => current.push(ch),
         }
     }
-    if !current.is_empty() { tokens.push(current); }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
     tokens
 }
 
 /// Compress a slice of integers into a compact range expression string.
 /// e.g., [1,2,3,5,7,8,9] → "1-3,5,7-9"
 fn compress_range_expr(values: &[i64]) -> String {
-    if values.is_empty() { return String::new(); }
+    if values.is_empty() {
+        return String::new();
+    }
     let mut parts = Vec::new();
     let mut start = values[0];
     let mut end = values[0];
@@ -68,8 +76,11 @@ fn compress_range_expr(values: &[i64]) -> String {
 }
 
 fn push_range(parts: &mut Vec<String>, start: i64, end: i64) {
-    if start == end { parts.push(start.to_string()); }
-    else { parts.push(format!("{start}-{end}")); }
+    if start == end {
+        parts.push(start.to_string());
+    } else {
+        parts.push(format!("{start}-{end}"));
+    }
 }
 
 // ── Node trait and implementations ──
@@ -100,11 +111,15 @@ struct IndexedNodeIterator {
 
 impl NodeIterator for IndexedNodeIterator {
     fn next(&mut self, _result: &mut TaskParameterSet) -> bool {
-        if self.index >= self.len { return false; }
+        if self.index >= self.len {
+            return false;
+        }
         self.index += 1;
         true
     }
-    fn reset(&mut self) { self.index = 0; }
+    fn reset(&mut self) {
+        self.index = 0;
+    }
 }
 
 /// Value-producing iterator for a single parameter with a list of values.
@@ -117,15 +132,22 @@ struct RangeListIterator {
 
 impl NodeIterator for RangeListIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.index >= self.values.len() { return false; }
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: self.param_type,
-            value: self.values[self.index].clone(),
-        });
+        if self.index >= self.values.len() {
+            return false;
+        }
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: self.param_type,
+                value: self.values[self.index].clone(),
+            },
+        );
         self.index += 1;
         true
     }
-    fn reset(&mut self) { self.index = 0; }
+    fn reset(&mut self) {
+        self.index = 0;
+    }
 }
 
 /// Value-producing iterator for a single parameter with a RangeExpr.
@@ -137,15 +159,26 @@ struct RangeExprIterator {
 
 impl NodeIterator for RangeExprIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.index >= self.range.len() { return false; }
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: TaskParameterType::Int,
-            value: ExprValue::Int(self.range.get(self.index as i64).expect("index checked against range.len()")),
-        });
+        if self.index >= self.range.len() {
+            return false;
+        }
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: TaskParameterType::Int,
+                value: ExprValue::Int(
+                    self.range
+                        .get(self.index as i64)
+                        .expect("index checked against range.len()"),
+                ),
+            },
+        );
         self.index += 1;
         true
     }
-    fn reset(&mut self) { self.index = 0; }
+    fn reset(&mut self) {
+        self.index = 0;
+    }
 }
 
 /// Value-producing iterator for static chunk nodes.
@@ -165,11 +198,19 @@ impl StaticChunkIterator {
         let offset = i * self.small + i.min(self.leftovers);
         match &self.range {
             job::TaskParamRange::RangeExpr(r) => {
-                let start = r.get(offset as i64).expect("chunk offset within range bounds");
-                let end = r.get((offset + size - 1) as i64).expect("chunk end within range bounds");
+                let start = r
+                    .get(offset as i64)
+                    .expect("chunk offset within range bounds");
+                let end = r
+                    .get((offset + size - 1) as i64)
+                    .expect("chunk end within range bounds");
                 let range_str = match self.constraint {
                     RangeConstraint::Contiguous => {
-                        if size == 1 { start.to_string() } else { format!("{start}-{end}") }
+                        if size == 1 {
+                            start.to_string()
+                        } else {
+                            format!("{start}-{end}")
+                        }
                     }
                     RangeConstraint::Noncontiguous => {
                         let vals: Vec<i64> = (offset..offset + size)
@@ -178,7 +219,9 @@ impl StaticChunkIterator {
                         compress_range_expr(&vals)
                     }
                 };
-                let expr = range_str.parse::<RangeExpr>().expect("range string built from valid integers");
+                let expr = range_str
+                    .parse::<RangeExpr>()
+                    .expect("range string built from valid integers");
                 match self.constraint {
                     RangeConstraint::Contiguous => expr.with_contiguous(true),
                     RangeConstraint::Noncontiguous => expr,
@@ -188,12 +231,17 @@ impl StaticChunkIterator {
                 let chunk = &values[offset..offset + size];
                 let range_str = match self.constraint {
                     RangeConstraint::Contiguous => {
-                        if chunk.len() == 1 { chunk[0].to_string() }
-                        else { format!("{}-{}", chunk[0], chunk[chunk.len() - 1]) }
+                        if chunk.len() == 1 {
+                            chunk[0].to_string()
+                        } else {
+                            format!("{}-{}", chunk[0], chunk[chunk.len() - 1])
+                        }
                     }
                     RangeConstraint::Noncontiguous => compress_range_expr(chunk),
                 };
-                let expr = range_str.parse::<RangeExpr>().expect("range string built from valid integers");
+                let expr = range_str
+                    .parse::<RangeExpr>()
+                    .expect("range string built from valid integers");
                 match self.constraint {
                     RangeConstraint::Contiguous => expr.with_contiguous(true),
                     RangeConstraint::Noncontiguous => expr,
@@ -205,24 +253,35 @@ impl StaticChunkIterator {
 
 impl NodeIterator for StaticChunkIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.index >= self.num_chunks { return false; }
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: TaskParameterType::ChunkInt,
-            value: ExprValue::RangeExpr(self.chunk_range_expr(self.index)),
-        });
+        if self.index >= self.num_chunks {
+            return false;
+        }
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: TaskParameterType::ChunkInt,
+                value: ExprValue::RangeExpr(self.chunk_range_expr(self.index)),
+            },
+        );
         self.index += 1;
         true
     }
-    fn reset(&mut self) { self.index = 0; }
+    fn reset(&mut self) {
+        self.index = 0;
+    }
 }
 
 /// Zero-dimensional space: produces one empty parameter set.
 struct ZeroDimSpaceNode;
 
 impl Node for ZeroDimSpaceNode {
-    fn len(&self) -> usize { 1 }
+    fn len(&self) -> usize {
+        1
+    }
     fn get(&self, _index: usize, _result: &mut TaskParameterSet) {}
-    fn validate_containment(&self, _params: &TaskParameterSet) -> Result<(), String> { Ok(()) }
+    fn validate_containment(&self, _params: &TaskParameterSet) -> Result<(), String> {
+        Ok(())
+    }
     fn iter(&self) -> Box<dyn NodeIterator> {
         Box::new(IndexedNodeIterator { len: 1, index: 0 })
     }
@@ -236,23 +295,35 @@ struct RangeListNode {
 }
 
 impl Node for RangeListNode {
-    fn len(&self) -> usize { self.values.len() }
+    fn len(&self) -> usize {
+        self.values.len()
+    }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: self.param_type,
-            value: self.values[index].clone(),
-        });
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: self.param_type,
+                value: self.values[index].clone(),
+            },
+        );
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
-        let v = params.get(&self.name).ok_or_else(||
-            format!("Parameter '{}' not found in the provided parameters.", self.name)
-        )?;
+        let v = params.get(&self.name).ok_or_else(|| {
+            format!(
+                "Parameter '{}' not found in the provided parameters.",
+                self.name
+            )
+        })?;
         if self.param_type == TaskParameterType::ChunkInt {
             // Chunk: value must be a RangeExpr whose elements are all in our range
             match &v.value {
                 ExprValue::RangeExpr(r) => {
                     for val in r.iter() {
-                        if !self.values.iter().any(|ev| matches!(ev, ExprValue::Int(i) if *i == val)) {
+                        if !self
+                            .values
+                            .iter()
+                            .any(|ev| matches!(ev, ExprValue::Int(i) if *i == val))
+                        {
                             return Err(format!(
                                 "Parameter '{}' value '{}' is not a subset of the range in the parameter space.",
                                 self.name, r
@@ -263,13 +334,15 @@ impl Node for RangeListNode {
                 }
                 _ => Err(format!(
                     "Parameter '{}' value '{}' is not in the parameter space range.",
-                    self.name, v.value.to_display_string()
+                    self.name,
+                    v.value.to_display_string()
                 )),
             }
         } else if !self.values.iter().any(|ev| expr_value_eq(ev, &v.value)) {
             Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
-                self.name, v.value.to_display_string()
+                self.name,
+                v.value.to_display_string()
             ))
         } else {
             Ok(())
@@ -292,29 +365,44 @@ struct RangeExprNode {
 }
 
 impl Node for RangeExprNode {
-    fn len(&self) -> usize { self.range.len() }
+    fn len(&self) -> usize {
+        self.range.len()
+    }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
-        let val = self.range.get(index as i64).expect("caller must pass index < self.range.len()");
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: TaskParameterType::Int,
-            value: ExprValue::Int(val),
-        });
+        let val = self
+            .range
+            .get(index as i64)
+            .expect("caller must pass index < self.range.len()");
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: TaskParameterType::Int,
+                value: ExprValue::Int(val),
+            },
+        );
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
-        let v = params.get(&self.name).ok_or_else(||
-            format!("Parameter '{}' not found in the provided parameters.", self.name)
-        )?;
+        let v = params.get(&self.name).ok_or_else(|| {
+            format!(
+                "Parameter '{}' not found in the provided parameters.",
+                self.name
+            )
+        })?;
         match &v.value {
             ExprValue::Int(i) => {
-                if self.range.contains(*i) { Ok(()) }
-                else { Err(format!(
-                    "Parameter '{}' value '{}' is not in the parameter space range.",
-                    self.name, i
-                )) }
+                if self.range.contains(*i) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Parameter '{}' value '{}' is not in the parameter space range.",
+                        self.name, i
+                    ))
+                }
             }
             _ => Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
-                self.name, v.value.to_display_string()
+                self.name,
+                v.value.to_display_string()
             )),
         }
     }
@@ -333,8 +421,8 @@ struct StaticChunkNode {
     range: job::TaskParamRange<i64>,
     constraint: RangeConstraint,
     num_chunks: usize,
-    small: usize,      // base chunk size = total / num_chunks
-    leftovers: usize,   // first `leftovers` chunks get size small+1
+    small: usize,     // base chunk size = total / num_chunks
+    leftovers: usize, // first `leftovers` chunks get size small+1
 }
 
 impl StaticChunkNode {
@@ -351,11 +439,19 @@ impl StaticChunkNode {
         let (offset, size) = self.chunk_bounds(i);
         match &self.range {
             job::TaskParamRange::RangeExpr(r) => {
-                let start = r.get(offset as i64).expect("chunk offset within range bounds");
-                let end = r.get((offset + size - 1) as i64).expect("chunk end within range bounds");
+                let start = r
+                    .get(offset as i64)
+                    .expect("chunk offset within range bounds");
+                let end = r
+                    .get((offset + size - 1) as i64)
+                    .expect("chunk end within range bounds");
                 let range_str = match self.constraint {
                     RangeConstraint::Contiguous => {
-                        if size == 1 { start.to_string() } else { format!("{start}-{end}") }
+                        if size == 1 {
+                            start.to_string()
+                        } else {
+                            format!("{start}-{end}")
+                        }
                     }
                     RangeConstraint::Noncontiguous => {
                         let vals: Vec<i64> = (offset..offset + size)
@@ -364,7 +460,9 @@ impl StaticChunkNode {
                         compress_range_expr(&vals)
                     }
                 };
-                let expr = range_str.parse::<RangeExpr>().expect("range string built from valid integers");
+                let expr = range_str
+                    .parse::<RangeExpr>()
+                    .expect("range string built from valid integers");
                 match self.constraint {
                     RangeConstraint::Contiguous => expr.with_contiguous(true),
                     RangeConstraint::Noncontiguous => expr,
@@ -374,12 +472,17 @@ impl StaticChunkNode {
                 let chunk = &values[offset..offset + size];
                 let range_str = match self.constraint {
                     RangeConstraint::Contiguous => {
-                        if chunk.len() == 1 { chunk[0].to_string() }
-                        else { format!("{}-{}", chunk[0], chunk[chunk.len() - 1]) }
+                        if chunk.len() == 1 {
+                            chunk[0].to_string()
+                        } else {
+                            format!("{}-{}", chunk[0], chunk[chunk.len() - 1])
+                        }
                     }
                     RangeConstraint::Noncontiguous => compress_range_expr(chunk),
                 };
-                let expr = range_str.parse::<RangeExpr>().expect("range string built from valid integers");
+                let expr = range_str
+                    .parse::<RangeExpr>()
+                    .expect("range string built from valid integers");
                 match self.constraint {
                     RangeConstraint::Contiguous => expr.with_contiguous(true),
                     RangeConstraint::Noncontiguous => expr,
@@ -390,28 +493,40 @@ impl StaticChunkNode {
 }
 
 impl Node for StaticChunkNode {
-    fn len(&self) -> usize { self.num_chunks }
+    fn len(&self) -> usize {
+        self.num_chunks
+    }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: TaskParameterType::ChunkInt,
-            value: ExprValue::RangeExpr(self.chunk_range_expr(index)),
-        });
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: TaskParameterType::ChunkInt,
+                value: ExprValue::RangeExpr(self.chunk_range_expr(index)),
+            },
+        );
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
-        let v = params.get(&self.name).ok_or_else(||
-            format!("Parameter '{}' not found in the provided parameters.", self.name)
-        )?;
+        let v = params.get(&self.name).ok_or_else(|| {
+            format!(
+                "Parameter '{}' not found in the provided parameters.",
+                self.name
+            )
+        })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
-                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i) == *r) { Ok(()) }
-                else { Err(format!(
-                    "Parameter '{}' value '{}' is not a valid chunk in the parameter space.",
-                    self.name, r
-                )) }
+                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i) == *r) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Parameter '{}' value '{}' is not a valid chunk in the parameter space.",
+                        self.name, r
+                    ))
+                }
             }
             _ => Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
-                self.name, v.value.to_display_string()
+                self.name,
+                v.value.to_display_string()
             )),
         }
     }
@@ -435,7 +550,9 @@ struct ProductNode {
 }
 
 impl Node for ProductNode {
-    fn len(&self) -> usize { self.length }
+    fn len(&self) -> usize {
+        self.length
+    }
     fn get(&self, mut index: usize, result: &mut TaskParameterSet) {
         for child in self.children.iter().rev() {
             let child_len = child.len();
@@ -469,19 +586,25 @@ struct ChildIterator {
 
 impl ProductIterator {
     fn new(children: &[Box<dyn Node>]) -> Self {
-        let children = children.iter().map(|child| {
-            ChildIterator {
+        let children = children
+            .iter()
+            .map(|child| ChildIterator {
                 iter: child.iter(),
                 current: TaskParameterSet::new(),
-            }
-        }).collect();
-        Self { children, started: false }
+            })
+            .collect();
+        Self {
+            children,
+            started: false,
+        }
     }
 
     /// Advance the first value from each child. Returns false if any child is empty.
     fn initialize(&mut self) -> bool {
         for child in &mut self.children {
-            if !child.iter.next(&mut child.current) { return false; }
+            if !child.iter.next(&mut child.current) {
+                return false;
+            }
         }
         true
     }
@@ -491,22 +614,30 @@ impl NodeIterator for ProductIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
         if !self.started {
             self.started = true;
-            if !self.initialize() { return false; }
+            if !self.initialize() {
+                return false;
+            }
         } else {
             // Advance rightmost, carry left
             let mut carry = true;
             for child in self.children.iter_mut().rev() {
-                if !carry { break; }
+                if !carry {
+                    break;
+                }
                 child.current.clear();
                 if child.iter.next(&mut child.current) {
                     carry = false;
                 } else {
                     // Exhausted — reset and advance to first value, carry continues
                     child.iter.reset();
-                    if !child.iter.next(&mut child.current) { return false; }
+                    if !child.iter.next(&mut child.current) {
+                        return false;
+                    }
                 }
             }
-            if carry { return false; }
+            if carry {
+                return false;
+            }
         }
         for child in &self.children {
             result.extend(child.current.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -529,7 +660,9 @@ struct AssociationNode {
 }
 
 impl Node for AssociationNode {
-    fn len(&self) -> usize { self.length }
+    fn len(&self) -> usize {
+        self.length
+    }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
         for child in &self.children {
             child.get(index, result);
@@ -547,12 +680,15 @@ impl Node for AssociationNode {
             }
         }
         // Build a display of the mismatched values
-        let values: Vec<String> = params.iter()
-            .filter(|(k, _)| self.children.iter().any(|c| {
-                let mut ps = TaskParameterSet::new();
-                c.get(0, &mut ps);
-                ps.contains_key(*k)
-            }))
+        let values: Vec<String> = params
+            .iter()
+            .filter(|(k, _)| {
+                self.children.iter().any(|c| {
+                    let mut ps = TaskParameterSet::new();
+                    c.get(0, &mut ps);
+                    ps.contains_key(*k)
+                })
+            })
             .map(|(k, v)| format!("{}={}", k, v.value.to_display_string()))
             .collect();
         Err(format!(
@@ -572,12 +708,13 @@ struct AssociationIterator {
 
 impl AssociationIterator {
     fn new(children: &[Box<dyn Node>]) -> Self {
-        let children = children.iter().map(|child| {
-            ChildIterator {
+        let children = children
+            .iter()
+            .map(|child| ChildIterator {
                 iter: child.iter(),
                 current: TaskParameterSet::new(),
-            }
-        }).collect();
+            })
+            .collect();
         Self { children }
     }
 }
@@ -586,7 +723,9 @@ impl NodeIterator for AssociationIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
         for child in &mut self.children {
             child.current.clear();
-            if !child.iter.next(&mut child.current) { return false; }
+            if !child.iter.next(&mut child.current) {
+                return false;
+            }
             result.extend(child.current.iter().map(|(k, v)| (k.clone(), v.clone())));
         }
         true
@@ -612,15 +751,18 @@ impl Node for AdaptiveChunkNode {
         // Upper bound: one chunk per value. Actual count depends on runtime chunk size.
         // Used only for association length validation during construction.
         let dtc = self.default_task_count.load(Ordering::Relaxed).max(1);
-        (self.values.len() + dtc - 1) / dtc
+        self.values.len().div_ceil(dtc)
     }
     fn get(&self, _index: usize, _result: &mut TaskParameterSet) {
         // Random access not supported — use iter() instead.
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
-        let v = params.get(&self.name).ok_or_else(||
-            format!("Parameter '{}' not found in the provided parameters.", self.name)
-        )?;
+        let v = params.get(&self.name).ok_or_else(|| {
+            format!(
+                "Parameter '{}' not found in the provided parameters.",
+                self.name
+            )
+        })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
                 for val in r.iter() {
@@ -635,7 +777,8 @@ impl Node for AdaptiveChunkNode {
             }
             _ => Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
-                self.name, v.value.to_display_string()
+                self.name,
+                v.value.to_display_string()
             )),
         }
     }
@@ -663,12 +806,17 @@ impl AdaptiveChunkIterator {
     fn make_chunk(&self, slice: &[i64]) -> RangeExpr {
         let range_str = match self.range_constraint {
             RangeConstraint::Contiguous => {
-                if slice.len() == 1 { slice[0].to_string() }
-                else { format!("{}-{}", slice[0], slice[slice.len() - 1]) }
+                if slice.len() == 1 {
+                    slice[0].to_string()
+                } else {
+                    format!("{}-{}", slice[0], slice[slice.len() - 1])
+                }
             }
             RangeConstraint::Noncontiguous => compress_range_expr(slice),
         };
-        let expr = range_str.parse::<RangeExpr>().expect("range string built from valid integers");
+        let expr = range_str
+            .parse::<RangeExpr>()
+            .expect("range string built from valid integers");
         match self.range_constraint {
             RangeConstraint::Contiguous => expr.with_contiguous(true),
             RangeConstraint::Noncontiguous => expr,
@@ -678,7 +826,9 @@ impl AdaptiveChunkIterator {
 
 impl NodeIterator for AdaptiveChunkIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.cursor >= self.values.len() { return false; }
+        if self.cursor >= self.values.len() {
+            return false;
+        }
         let chunk_size = self.default_task_count.load(Ordering::Relaxed).max(1);
         let chunk = match self.range_constraint {
             RangeConstraint::Contiguous => {
@@ -701,13 +851,18 @@ impl NodeIterator for AdaptiveChunkIterator {
                 self.make_chunk(slice)
             }
         };
-        result.insert(self.name.clone(), TaskParameterValue {
-            param_type: TaskParameterType::ChunkInt,
-            value: ExprValue::RangeExpr(chunk),
-        });
+        result.insert(
+            self.name.clone(),
+            TaskParameterValue {
+                param_type: TaskParameterType::ChunkInt,
+                value: ExprValue::RangeExpr(chunk),
+            },
+        );
         true
     }
-    fn reset(&mut self) { self.cursor = 0; }
+    fn reset(&mut self) {
+        self.cursor = 0;
+    }
 }
 
 // ── Public API ──
@@ -731,17 +886,28 @@ impl StepParameterSpaceIterator {
 
     /// Create with an explicit chunk task count override.
     /// When `Some(1)`, disables adaptive chunking and counts individual tasks.
-    pub fn new_with_chunk_override(space: &job::StepParameterSpace, override_count: Option<usize>) -> Result<Self, OpenJdError> {
+    pub fn new_with_chunk_override(
+        space: &job::StepParameterSpace,
+        override_count: Option<usize>,
+    ) -> Result<Self, OpenJdError> {
         Self::new_inner(space, override_count)
     }
 
-    fn new_inner(space: &job::StepParameterSpace, chunk_override: Option<usize>) -> Result<Self, OpenJdError> {
+    fn new_inner(
+        space: &job::StepParameterSpace,
+        chunk_override: Option<usize>,
+    ) -> Result<Self, OpenJdError> {
         let names: HashSet<String> = space.task_parameter_definitions.keys().cloned().collect();
 
         if space.task_parameter_definitions.is_empty() {
             return Ok(Self {
-                root: Box::new(ZeroDimSpaceNode), names, current_index: 0,
-                adaptive: false, adaptive_chunk_size: None, node_iter: None, chunks_param_name: None,
+                root: Box::new(ZeroDimSpaceNode),
+                names,
+                current_index: 0,
+                adaptive: false,
+                adaptive_chunk_size: None,
+                node_iter: None,
+                chunks_param_name: None,
             });
         }
 
@@ -752,7 +918,7 @@ impl StepParameterSpaceIterator {
         if chunk_override.is_none() {
             for (name, param) in &space.task_parameter_definitions {
                 if let job::TaskParameter::ChunkInt { chunks, .. } = param {
-                    if chunks.target_runtime_seconds.map_or(false, |t| t > 0) {
+                    if chunks.target_runtime_seconds.is_some_and(|t| t > 0) {
                         let arc = Arc::new(AtomicUsize::new(chunks.default_task_count.max(1)));
                         adaptive_info = Some((name.clone(), arc));
                         break;
@@ -783,24 +949,46 @@ impl StepParameterSpaceIterator {
         let adaptive_chunk_size = adaptive_info.map(|(_, rc)| rc);
         let node_iter = if adaptive { Some(root.iter()) } else { None };
 
-        Ok(Self { root, names, current_index: 0, adaptive, adaptive_chunk_size, node_iter, chunks_param_name })
+        Ok(Self {
+            root,
+            names,
+            current_index: 0,
+            adaptive,
+            adaptive_chunk_size,
+            node_iter,
+            chunks_param_name,
+        })
     }
 
-    pub fn names(&self) -> &HashSet<String> { &self.names }
+    pub fn names(&self) -> &HashSet<String> {
+        &self.names
+    }
 
     pub fn len(&self) -> usize {
-        if self.adaptive { 0 } else { self.root.len() }
+        if self.adaptive {
+            0
+        } else {
+            self.root.len()
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        if self.adaptive { false } else { self.root.len() == 0 }
+        if self.adaptive {
+            false
+        } else {
+            self.root.len() == 0
+        }
     }
 
     /// Random access to a specific task parameter set by index.
     /// Returns `None` for out-of-bounds or when adaptive chunking is active.
     pub fn get(&self, index: usize) -> Option<TaskParameterSet> {
-        if self.adaptive { return None; }
-        if index >= self.root.len() { return None; }
+        if self.adaptive {
+            return None;
+        }
+        if index >= self.root.len() {
+            return None;
+        }
         let mut result = TaskParameterSet::new();
         self.root.get(index, &mut result);
         Some(result)
@@ -828,7 +1016,9 @@ impl StepParameterSpaceIterator {
     }
 
     /// Whether adaptive chunking is active.
-    pub fn chunks_adaptive(&self) -> bool { self.adaptive }
+    pub fn chunks_adaptive(&self) -> bool {
+        self.adaptive
+    }
 
     /// The parameter name used for chunking, if any.
     pub fn chunks_parameter_name(&self) -> Option<&str> {
@@ -837,7 +1027,9 @@ impl StepParameterSpaceIterator {
 
     /// Current default_task_count for adaptive chunking.
     pub fn chunks_default_task_count(&self) -> Option<usize> {
-        self.adaptive_chunk_size.as_ref().map(|a| a.load(Ordering::Relaxed))
+        self.adaptive_chunk_size
+            .as_ref()
+            .map(|a| a.load(Ordering::Relaxed))
     }
 
     /// Update the chunk size for adaptive chunking.
@@ -850,8 +1042,13 @@ impl StepParameterSpaceIterator {
 }
 
 fn params_equal(a: &TaskParameterSet, b: &TaskParameterSet) -> bool {
-    if a.len() != b.len() { return false; }
-    a.iter().all(|(k, v)| b.get(k).map_or(false, |bv| expr_value_eq(&v.value, &bv.value)))
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().all(|(k, v)| {
+        b.get(k)
+            .is_some_and(|bv| expr_value_eq(&v.value, &bv.value))
+    })
 }
 
 fn expr_value_eq(a: &ExprValue, b: &ExprValue) -> bool {
@@ -873,7 +1070,11 @@ impl Iterator for StepParameterSpaceIterator {
         if self.adaptive {
             let iter = self.node_iter.as_mut()?;
             let mut result = TaskParameterSet::new();
-            if iter.next(&mut result) { Some(result) } else { None }
+            if iter.next(&mut result) {
+                Some(result)
+            } else {
+                None
+            }
         } else {
             let item = self.get(self.current_index)?;
             self.current_index += 1;
@@ -902,7 +1103,8 @@ fn parse_node_expr(
     let result = parse_node_product(tokens, &mut pos, space, adaptive_info)?;
     if pos < tokens.len() {
         return Err(OpenJdError::DecodeValidation(format!(
-            "Unexpected token '{}' in combination expression", tokens[pos]
+            "Unexpected token '{}' in combination expression",
+            tokens[pos]
         )));
     }
     Ok(result)
@@ -934,7 +1136,9 @@ fn parse_node_element(
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
 ) -> Result<Box<dyn Node>, OpenJdError> {
     if *pos >= tokens.len() {
-        return Err(OpenJdError::DecodeValidation("Unexpected end of combination expression".into()));
+        return Err(OpenJdError::DecodeValidation(
+            "Unexpected end of combination expression".into(),
+        ));
     }
     if tokens[*pos] == "(" {
         *pos += 1;
@@ -944,7 +1148,9 @@ fn parse_node_element(
             children.push(parse_node_product(tokens, pos, space, adaptive_info)?);
         }
         if *pos >= tokens.len() || tokens[*pos] != ")" {
-            return Err(OpenJdError::DecodeValidation("Missing closing parenthesis in combination".into()));
+            return Err(OpenJdError::DecodeValidation(
+                "Missing closing parenthesis in combination".into(),
+            ));
         }
         *pos += 1;
         let length = children[0].len();
@@ -957,9 +1163,9 @@ fn parse_node_element(
             }
         }
         if children.len() == 1 {
-            return Err(OpenJdError::DecodeValidation(
-                "Association expression must have more than one term.".into()
-            ));
+            Err(OpenJdError::DecodeValidation(
+                "Association expression must have more than one term.".into(),
+            ))
         } else {
             Ok(Box::new(AssociationNode { children, length }))
         }
@@ -976,10 +1182,11 @@ fn make_leaf_node(
     space: &job::StepParameterSpace,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
 ) -> Result<Box<dyn Node>, OpenJdError> {
-    let param = space.task_parameter_definitions.get(name)
-        .ok_or_else(|| OpenJdError::DecodeValidation(format!(
+    let param = space.task_parameter_definitions.get(name).ok_or_else(|| {
+        OpenJdError::DecodeValidation(format!(
             "Unknown parameter '{name}' in combination expression"
-        )))?;
+        ))
+    })?;
 
     match param {
         job::TaskParameter::Int { range, chunks } => {
@@ -1001,7 +1208,10 @@ fn make_leaf_node(
         job::TaskParameter::Float { range } => Ok(Box::new(RangeListNode {
             name: name.to_string(),
             param_type: TaskParameterType::Float,
-            values: range.iter().map(|&f| ExprValue::Float(Float64::new(f).unwrap())).collect(),
+            values: range
+                .iter()
+                .map(|&f| ExprValue::Float(Float64::new(f).unwrap()))
+                .collect(),
         })),
         job::TaskParameter::String { range } => Ok(Box::new(RangeListNode {
             name: name.to_string(),
@@ -1056,7 +1266,7 @@ fn make_chunk_node(
     }
 
     let default_task_count = chunks.default_task_count.max(1);
-    let chunk_count = (total_len + default_task_count - 1) / default_task_count;
+    let chunk_count = total_len.div_ceil(default_task_count);
     let small = total_len / chunk_count;
     let leftovers = total_len % chunk_count;
 
@@ -1086,13 +1296,19 @@ mod tests {
     #[test]
     fn test_tokenize() {
         assert_eq!(tokenize("A * B"), vec!["A", "*", "B"]);
-        assert_eq!(tokenize("(A, B) * C"), vec!["(", "A", ",", "B", ")", "*", "C"]);
+        assert_eq!(
+            tokenize("(A, B) * C"),
+            vec!["(", "A", ",", "B", ")", "*", "C"]
+        );
         assert_eq!(tokenize("A"), vec!["A"]);
     }
 
     // ── Helper to build test spaces ──
 
-    fn make_space(params: Vec<(&str, job::TaskParameter)>, combination: Option<&str>) -> job::StepParameterSpace {
+    fn make_space(
+        params: Vec<(&str, job::TaskParameter)>,
+        combination: Option<&str>,
+    ) -> job::StepParameterSpace {
         let mut defs = indexmap::IndexMap::new();
         for (name, param) in params {
             defs.insert(name.to_string(), param);
@@ -1104,7 +1320,10 @@ mod tests {
     }
 
     fn int_param(values: Vec<i64>) -> job::TaskParameter {
-        job::TaskParameter::Int { range: job::TaskParamRange::List(values), chunks: None }
+        job::TaskParameter::Int {
+            range: job::TaskParamRange::List(values),
+            chunks: None,
+        }
     }
 
     fn adaptive_chunk_param(values: Vec<i64>, default_task_count: usize) -> job::TaskParameter {
@@ -1209,10 +1428,7 @@ mod tests {
     #[test]
     fn test_lazy_static_chunk_with_huge_range() {
         // 100B items / 1000 per chunk = 100M chunks — construction must be lazy
-        let space = make_space(
-            vec![("C", static_chunk_param(HUGE_RANGE, 1000))],
-            None,
-        );
+        let space = make_space(vec![("C", static_chunk_param(HUGE_RANGE, 1000))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert_eq!(iter.len(), 100_000_000);
         // Random access to last chunk
@@ -1231,16 +1447,18 @@ mod tests {
             ],
             None,
         );
-        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert!(iter.chunks_adaptive());
         // Iterate a few — must not OOM from materializing X's 100B values
         let mut count = 0;
-        while let Some(params) = iter.next() {
+        for params in iter {
             assert!(params.contains_key("A"));
             assert!(params.contains_key("X"));
             assert!(params.contains_key("Chunk"));
             count += 1;
-            if count >= 5 { break; }
+            if count >= 5 {
+                break;
+            }
         }
         assert_eq!(count, 5);
     }
@@ -1278,14 +1496,16 @@ mod tests {
             ],
             None,
         );
-        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert!(iter.chunks_adaptive());
         let mut count = 0;
-        while let Some(params) = iter.next() {
+        for params in iter {
             assert!(params.contains_key("Frame"));
             assert!(params.contains_key("Chunk"));
             count += 1;
-            if count > 100 { break; }
+            if count > 100 {
+                break;
+            }
         }
         assert_eq!(count, 4);
     }
@@ -1324,7 +1544,10 @@ mod tests {
         let space = make_space(vec![("Frame", int_param(vec![1, 2, 3]))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         let mut params = TaskParameterSet::new();
-        params.insert("Wrong".into(), tpv(TaskParameterType::Int, ExprValue::Int(1)));
+        params.insert(
+            "Wrong".into(),
+            tpv(TaskParameterType::Int, ExprValue::Int(1)),
+        );
         let err = iter.validate_containment(&params).unwrap_err();
         assert!(err.contains("do not match"), "got: {err}");
         assert!(err.contains("Wrong"), "got: {err}");
@@ -1336,11 +1559,17 @@ mod tests {
         let space = make_space(vec![("Frame", int_param(vec![1, 2, 3]))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         let mut params = TaskParameterSet::new();
-        params.insert("Frame".into(), tpv(TaskParameterType::Int, ExprValue::Int(99)));
+        params.insert(
+            "Frame".into(),
+            tpv(TaskParameterType::Int, ExprValue::Int(99)),
+        );
         let err = iter.validate_containment(&params).unwrap_err();
         assert!(err.contains("Frame"), "got: {err}");
         assert!(err.contains("99"), "got: {err}");
-        assert!(err.contains("not in the parameter space range"), "got: {err}");
+        assert!(
+            err.contains("not in the parameter space range"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -1352,7 +1581,10 @@ mod tests {
         let err = iter.validate_containment(&params).unwrap_err();
         assert!(err.contains("X"), "got: {err}");
         assert!(err.contains("99"), "got: {err}");
-        assert!(err.contains("not in the parameter space range"), "got: {err}");
+        assert!(
+            err.contains("not in the parameter space range"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -1360,17 +1592,17 @@ mod tests {
         let space = make_space(vec![("Frame", int_param(vec![1, 2, 3]))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         let mut params = TaskParameterSet::new();
-        params.insert("Frame".into(), tpv(TaskParameterType::Int, ExprValue::Int(2)));
+        params.insert(
+            "Frame".into(),
+            tpv(TaskParameterType::Int, ExprValue::Int(2)),
+        );
         assert!(iter.validate_containment(&params).is_ok());
     }
 
     #[test]
     fn test_validate_containment_association_not_found() {
         let space = make_space(
-            vec![
-                ("A", int_param(vec![1, 2])),
-                ("B", int_param(vec![10, 20])),
-            ],
+            vec![("A", int_param(vec![1, 2])), ("B", int_param(vec![10, 20]))],
             Some("(A, B)"),
         );
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
@@ -1384,17 +1616,17 @@ mod tests {
 
     #[test]
     fn test_validate_containment_chunk_not_subset() {
-        let space = make_space(
-            vec![("C", static_chunk_param("1-10", 5))],
-            None,
-        );
+        let space = make_space(vec![("C", static_chunk_param("1-10", 5))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         // Chunk "1-99" is not a subset of range 1-10
         let mut params = TaskParameterSet::new();
-        params.insert("C".into(), tpv(
-            TaskParameterType::ChunkInt,
-            ExprValue::RangeExpr("1-99".parse::<RangeExpr>().unwrap()),
-        ));
+        params.insert(
+            "C".into(),
+            tpv(
+                TaskParameterType::ChunkInt,
+                ExprValue::RangeExpr("1-99".parse::<RangeExpr>().unwrap()),
+            ),
+        );
         let err = iter.validate_containment(&params).unwrap_err();
         assert!(err.contains("C"), "got: {err}");
         assert!(err.contains("not"), "got: {err}");

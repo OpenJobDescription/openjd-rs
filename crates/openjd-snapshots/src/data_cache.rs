@@ -34,7 +34,12 @@ pub trait AsyncDataCache: Send + Sync {
     fn object_key(&self, hash: &str, algorithm: &str) -> String;
     fn as_any(&self) -> &dyn Any;
     async fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool>;
-    async fn put_object(&self, hash: &str, algorithm: &str, data: Vec<u8>) -> std::io::Result<String>;
+    async fn put_object(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        data: Vec<u8>,
+    ) -> std::io::Result<String>;
     async fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>>;
 
     /// Attempt a server-side copy from another cache. Returns `NotSupported` by default.
@@ -53,24 +58,53 @@ pub trait AsyncDataCache: Send + Sync {
     }
 
     // Multipart upload
-    async fn create_multipart_upload(&self, hash: &str, algorithm: &str) -> std::io::Result<String>;
-    async fn upload_part(&self, hash: &str, algorithm: &str, upload_id: &str,
-                         part_number: i32, data: Vec<u8>) -> std::io::Result<String>;
-    async fn complete_multipart_upload(&self, hash: &str, algorithm: &str, upload_id: &str,
-                                       parts: Vec<(i32, String)>) -> std::io::Result<()>;
-    async fn abort_multipart_upload(&self, hash: &str, algorithm: &str,
-                                     upload_id: &str) -> std::io::Result<()>;
+    async fn create_multipart_upload(&self, hash: &str, algorithm: &str)
+        -> std::io::Result<String>;
+    async fn upload_part(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        part_number: i32,
+        data: Vec<u8>,
+    ) -> std::io::Result<String>;
+    async fn complete_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        parts: Vec<(i32, String)>,
+    ) -> std::io::Result<()>;
+    async fn abort_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+    ) -> std::io::Result<()>;
 
     // Byte-range download
-    async fn get_object_range(&self, hash: &str, algorithm: &str,
-                              start: u64, end: u64) -> std::io::Result<Vec<u8>>;
+    async fn get_object_range(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        start: u64,
+        end: u64,
+    ) -> std::io::Result<Vec<u8>>;
 
     /// Stream a byte-range of a cached object directly to a file at a given offset.
     /// Default uses get_object_range + write. S3 overrides to stream without buffering.
-    async fn stream_range_to_file_at_offset(&self, hash: &str, algorithm: &str,
-                                             range_start: u64, range_end: u64,
-                                             dest: &std::path::Path, file_offset: u64) -> std::io::Result<u64> {
-        let data = self.get_object_range(hash, algorithm, range_start, range_end).await?;
+    async fn stream_range_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        range_start: u64,
+        range_end: u64,
+        dest: &std::path::Path,
+        file_offset: u64,
+    ) -> std::io::Result<u64> {
+        let data = self
+            .get_object_range(hash, algorithm, range_start, range_end)
+            .await?;
         let len = data.len() as u64;
         let dest = dest.to_path_buf();
         tokio::task::spawn_blocking(move || {
@@ -79,12 +113,19 @@ pub trait AsyncDataCache: Send + Sync {
             f.seek(SeekFrom::Start(file_offset))?;
             f.write_all(&data)?;
             Ok::<_, std::io::Error>(len)
-        }).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     /// Copy a cached object directly to a file. The default reads into memory then writes.
     /// Filesystem implementations can override for zero-copy (e.g. sendfile).
-    async fn copy_object_to_file(&self, hash: &str, algorithm: &str, dest: &std::path::Path) -> std::io::Result<u64> {
+    async fn copy_object_to_file(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+    ) -> std::io::Result<u64> {
         let data = self.get_object(hash, algorithm).await?;
         let len = data.len() as u64;
         tokio::fs::write(dest, &data).await?;
@@ -93,8 +134,13 @@ pub trait AsyncDataCache: Send + Sync {
 
     /// Write a cached object into an already-open file at a given offset.
     /// Default reads into memory then writes. Filesystem can override for efficiency.
-    async fn write_object_to_file_at_offset(&self, hash: &str, algorithm: &str,
-                                             dest: &std::path::Path, offset: u64) -> std::io::Result<u64> {
+    async fn write_object_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+        offset: u64,
+    ) -> std::io::Result<u64> {
         let data = self.get_object(hash, algorithm).await?;
         let len = data.len() as u64;
         let dest = dest.to_path_buf();
@@ -104,7 +150,9 @@ pub trait AsyncDataCache: Send + Sync {
             f.seek(SeekFrom::Start(offset))?;
             f.write_all(&data)?;
             Ok::<_, std::io::Error>(len)
-        }).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 }
 
@@ -155,16 +203,25 @@ impl ContentAddressedDataCache for FileSystemDataCache {
 #[async_trait]
 impl AsyncDataCache for FileSystemDataCache {
     fn object_key(&self, hash: &str, algorithm: &str) -> String {
-        self.object_path(hash, algorithm).to_string_lossy().into_owned()
+        self.object_path(hash, algorithm)
+            .to_string_lossy()
+            .into_owned()
     }
 
-    fn as_any(&self) -> &dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
     async fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool> {
         Ok(self.object_path(hash, algorithm).exists())
     }
 
-    async fn put_object(&self, hash: &str, algorithm: &str, data: Vec<u8>) -> std::io::Result<String> {
+    async fn put_object(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        data: Vec<u8>,
+    ) -> std::io::Result<String> {
         let path = self.object_path(hash, algorithm);
         tokio::fs::write(&path, &data).await?;
         Ok(path.to_string_lossy().into_owned())
@@ -174,36 +231,85 @@ impl AsyncDataCache for FileSystemDataCache {
         tokio::fs::read(self.object_path(hash, algorithm)).await
     }
 
-    async fn create_multipart_upload(&self, _hash: &str, _algorithm: &str) -> std::io::Result<String> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "multipart not supported for filesystem"))
+    async fn create_multipart_upload(
+        &self,
+        _hash: &str,
+        _algorithm: &str,
+    ) -> std::io::Result<String> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "multipart not supported for filesystem",
+        ))
     }
-    async fn upload_part(&self, _hash: &str, _algorithm: &str, _upload_id: &str,
-                         _part_number: i32, _data: Vec<u8>) -> std::io::Result<String> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "multipart not supported for filesystem"))
+    async fn upload_part(
+        &self,
+        _hash: &str,
+        _algorithm: &str,
+        _upload_id: &str,
+        _part_number: i32,
+        _data: Vec<u8>,
+    ) -> std::io::Result<String> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "multipart not supported for filesystem",
+        ))
     }
-    async fn complete_multipart_upload(&self, _hash: &str, _algorithm: &str, _upload_id: &str,
-                                       _parts: Vec<(i32, String)>) -> std::io::Result<()> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "multipart not supported for filesystem"))
+    async fn complete_multipart_upload(
+        &self,
+        _hash: &str,
+        _algorithm: &str,
+        _upload_id: &str,
+        _parts: Vec<(i32, String)>,
+    ) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "multipart not supported for filesystem",
+        ))
     }
-    async fn abort_multipart_upload(&self, _hash: &str, _algorithm: &str,
-                                     _upload_id: &str) -> std::io::Result<()> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "multipart not supported for filesystem"))
+    async fn abort_multipart_upload(
+        &self,
+        _hash: &str,
+        _algorithm: &str,
+        _upload_id: &str,
+    ) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "multipart not supported for filesystem",
+        ))
     }
-    async fn get_object_range(&self, _hash: &str, _algorithm: &str,
-                              _start: u64, _end: u64) -> std::io::Result<Vec<u8>> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "range get not supported for filesystem"))
+    async fn get_object_range(
+        &self,
+        _hash: &str,
+        _algorithm: &str,
+        _start: u64,
+        _end: u64,
+    ) -> std::io::Result<Vec<u8>> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "range get not supported for filesystem",
+        ))
     }
 
-    async fn copy_object_to_file(&self, hash: &str, algorithm: &str, dest: &std::path::Path) -> std::io::Result<u64> {
+    async fn copy_object_to_file(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+    ) -> std::io::Result<u64> {
         let src = self.object_path(hash, algorithm);
         let dest = dest.to_path_buf();
         tokio::task::spawn_blocking(move || std::fs::copy(&src, &dest))
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+            .map_err(std::io::Error::other)?
     }
 
-    async fn write_object_to_file_at_offset(&self, hash: &str, algorithm: &str,
-                                             dest: &std::path::Path, offset: u64) -> std::io::Result<u64> {
+    async fn write_object_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+        offset: u64,
+    ) -> std::io::Result<u64> {
         let src = self.object_path(hash, algorithm);
         let dest = dest.to_path_buf();
         tokio::task::spawn_blocking(move || {
@@ -214,7 +320,9 @@ impl AsyncDataCache for FileSystemDataCache {
             dest_file.seek(SeekFrom::Start(offset))?;
             std::io::copy(&mut src_file, &mut dest_file)?;
             Ok::<_, std::io::Error>(src_len)
-        }).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 }
 
@@ -281,7 +389,7 @@ mod tests {
     }
 }
 
-use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tracing::warn;
 
 fn rand_u64() -> u64 {
@@ -289,15 +397,24 @@ fn rand_u64() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let s = RandomState::new();
     let mut h = s.build_hasher();
-    h.write_u64(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default()
-        .as_nanos() as u64);
+    h.write_u64(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64,
+    );
     h.finish()
 }
 
 pub struct CacheValidationState {
     hit_count: AtomicU64,
     invalidated: AtomicBool,
+}
+
+impl Default for CacheValidationState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CacheValidationState {
@@ -313,7 +430,7 @@ impl CacheValidationState {
         if count <= 100 {
             return true;
         }
-        rand_u64() % 100 == 0
+        rand_u64().is_multiple_of(100)
     }
 
     fn invalidate(&self) {
@@ -338,11 +455,7 @@ pub struct S3DataCache {
 }
 
 impl S3DataCache {
-    pub fn new(
-        bucket: String,
-        key_prefix: String,
-        client: aws_sdk_s3::Client,
-    ) -> Self {
+    pub fn new(bucket: String, key_prefix: String, client: aws_sdk_s3::Client) -> Self {
         Self {
             bucket,
             key_prefix,
@@ -367,10 +480,11 @@ impl S3DataCache {
         s3_client: aws_sdk_s3::Client,
         sts_client: aws_sdk_sts::Client,
     ) -> crate::Result<Self> {
-        let resp = sts_client.get_caller_identity()
-            .send().await
-            .map_err(|e| crate::SnapshotError::Other(format!("STS GetCallerIdentity failed: {e}")))?;
-        let account = resp.account()
+        let resp = sts_client.get_caller_identity().send().await.map_err(|e| {
+            crate::SnapshotError::Other(format!("STS GetCallerIdentity failed: {e}"))
+        })?;
+        let account = resp
+            .account()
             .ok_or_else(|| crate::SnapshotError::Other("STS response missing Account".into()))?
             .to_string();
         let mut cache = Self::new(bucket, key_prefix, s3_client);
@@ -429,7 +543,12 @@ impl ContentAddressedDataCache for S3DataCache {
     }
 
     fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String> {
-        block_on_async(AsyncDataCache::put_object(self, hash, algorithm, data.to_vec()))
+        block_on_async(AsyncDataCache::put_object(
+            self,
+            hash,
+            algorithm,
+            data.to_vec(),
+        ))
     }
 
     fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
@@ -443,7 +562,9 @@ impl AsyncDataCache for S3DataCache {
         format!("{}/{hash}.{algorithm}", self.key_prefix)
     }
 
-    fn as_any(&self) -> &dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
     fn multipart_part_size(&self) -> usize {
         self.multipart_part_size
@@ -461,14 +582,15 @@ impl AsyncDataCache for S3DataCache {
         let src_key = src_s3.object_key(hash, algorithm);
         let dst_key = self.object_key(hash, algorithm);
         let copy_source = format!("{}/{}", src_s3.bucket, src_key);
-        self.client.copy_object()
+        self.client
+            .copy_object()
             .bucket(&self.bucket)
             .key(&dst_key)
             .copy_source(&copy_source)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
             .send()
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("S3 CopyObject failed: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("S3 CopyObject failed: {e}")))?;
         self.record_in_check_cache(hash, algorithm);
         Ok(CopyResult::ServerSideCopy)
     }
@@ -480,147 +602,248 @@ impl AsyncDataCache for S3DataCache {
             }
             // Probabilistic verification: do HeadObject to confirm
             let key = AsyncDataCache::object_key(self, hash, algorithm);
-            return match self.client.head_object().bucket(&self.bucket).key(&key)
+            return match self
+                .client
+                .head_object()
+                .bucket(&self.bucket)
+                .key(&key)
                 .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-                .send().await {
+                .send()
+                .await
+            {
                 Ok(_) => Ok(true),
                 Err(e) => {
-                    if e.as_service_error().map_or(false, |se| se.is_not_found()) {
+                    if e.as_service_error().is_some_and(|se| se.is_not_found()) {
                         warn!(key = %key, "S3 check cache stale entry detected, invalidating cache");
                         self.cache_validation.invalidate();
                         Ok(false)
                     } else {
-                        Err(std::io::Error::new(std::io::ErrorKind::Other,
-                            format!("S3 HeadObject failed for {key}: {e}")))
+                        Err(std::io::Error::other(format!(
+                            "S3 HeadObject failed for {key}: {e}"
+                        )))
                     }
                 }
             };
         }
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        match self.client.head_object().bucket(&self.bucket).key(&key)
+        match self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await {
+            .send()
+            .await
+        {
             Ok(_) => {
                 self.record_in_check_cache(hash, algorithm);
                 Ok(true)
             }
             Err(e) => {
-                if e.as_service_error().map_or(false, |se| se.is_not_found()) {
+                if e.as_service_error().is_some_and(|se| se.is_not_found()) {
                     Ok(false)
                 } else {
-                    Err(std::io::Error::new(std::io::ErrorKind::Other,
-                        format!("S3 HeadObject failed for {key}: {e}")))
+                    Err(std::io::Error::other(format!(
+                        "S3 HeadObject failed for {key}: {e}"
+                    )))
                 }
             }
         }
     }
 
-    async fn put_object(&self, hash: &str, algorithm: &str, data: Vec<u8>) -> std::io::Result<String> {
+    async fn put_object(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        data: Vec<u8>,
+    ) -> std::io::Result<String> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
         let body = aws_sdk_s3::primitives::ByteStream::from(data);
-        self.client.put_object().bucket(&self.bucket).key(&key).body(body)
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .body(body)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 PutObject failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 PutObject failed for {key}: {e}")))?;
         self.record_in_check_cache(hash, algorithm);
         Ok(key)
     }
 
     async fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self.client.get_object().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject failed for {key}: {e}")))?;
-        let bytes = resp.body.collect().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject body read failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
+        })?;
         Ok(bytes.to_vec())
     }
 
-    async fn create_multipart_upload(&self, hash: &str, algorithm: &str) -> std::io::Result<String> {
+    async fn create_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+    ) -> std::io::Result<String> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self.client.create_multipart_upload().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(&key)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 CreateMultipartUpload failed for {key}: {e}")))?;
-        resp.upload_id().map(|s| s.to_string())
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "missing upload_id"))
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!("S3 CreateMultipartUpload failed for {key}: {e}"))
+            })?;
+        resp.upload_id()
+            .map(|s| s.to_string())
+            .ok_or_else(|| std::io::Error::other("missing upload_id"))
     }
 
-    async fn upload_part(&self, hash: &str, algorithm: &str, upload_id: &str,
-                         part_number: i32, data: Vec<u8>) -> std::io::Result<String> {
+    async fn upload_part(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        part_number: i32,
+        data: Vec<u8>,
+    ) -> std::io::Result<String> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
         let body = aws_sdk_s3::primitives::ByteStream::from(data);
-        let resp = self.client.upload_part()
-            .bucket(&self.bucket).key(&key).upload_id(upload_id)
-            .part_number(part_number).body(body)
+        let resp = self
+            .client
+            .upload_part()
+            .bucket(&self.bucket)
+            .key(&key)
+            .upload_id(upload_id)
+            .part_number(part_number)
+            .body(body)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 UploadPart failed for {key} part {part_number}: {e}")))?;
-        resp.e_tag().map(|s| s.to_string())
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "missing ETag"))
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!(
+                    "S3 UploadPart failed for {key} part {part_number}: {e}"
+                ))
+            })?;
+        resp.e_tag()
+            .map(|s| s.to_string())
+            .ok_or_else(|| std::io::Error::other("missing ETag"))
     }
 
-    async fn complete_multipart_upload(&self, hash: &str, algorithm: &str, upload_id: &str,
-                                       parts: Vec<(i32, String)>) -> std::io::Result<()> {
+    async fn complete_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        parts: Vec<(i32, String)>,
+    ) -> std::io::Result<()> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let completed_parts: Vec<_> = parts.into_iter()
-            .map(|(num, etag)| aws_sdk_s3::types::CompletedPart::builder()
-                .part_number(num).e_tag(etag).build())
+        let completed_parts: Vec<_> = parts
+            .into_iter()
+            .map(|(num, etag)| {
+                aws_sdk_s3::types::CompletedPart::builder()
+                    .part_number(num)
+                    .e_tag(etag)
+                    .build()
+            })
             .collect();
         let upload = aws_sdk_s3::types::CompletedMultipartUpload::builder()
-            .set_parts(Some(completed_parts)).build();
-        self.client.complete_multipart_upload()
-            .bucket(&self.bucket).key(&key).upload_id(upload_id)
+            .set_parts(Some(completed_parts))
+            .build();
+        self.client
+            .complete_multipart_upload()
+            .bucket(&self.bucket)
+            .key(&key)
+            .upload_id(upload_id)
             .multipart_upload(upload)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 CompleteMultipartUpload failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!("S3 CompleteMultipartUpload failed for {key}: {e}"))
+            })?;
         self.record_in_check_cache(hash, algorithm);
         Ok(())
     }
 
-    async fn abort_multipart_upload(&self, hash: &str, algorithm: &str,
-                                     upload_id: &str) -> std::io::Result<()> {
+    async fn abort_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+    ) -> std::io::Result<()> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        self.client.abort_multipart_upload()
-            .bucket(&self.bucket).key(&key).upload_id(upload_id)
+        self.client
+            .abort_multipart_upload()
+            .bucket(&self.bucket)
+            .key(&key)
+            .upload_id(upload_id)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 AbortMultipartUpload failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!("S3 AbortMultipartUpload failed for {key}: {e}"))
+            })?;
         Ok(())
     }
 
-    async fn get_object_range(&self, hash: &str, algorithm: &str,
-                              start: u64, end: u64) -> std::io::Result<Vec<u8>> {
+    async fn get_object_range(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        start: u64,
+        end: u64,
+    ) -> std::io::Result<Vec<u8>> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
         let range = format!("bytes={start}-{end}");
-        let resp = self.client.get_object().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .range(&range)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject range failed for {key}: {e}")))?;
-        let bytes = resp.body.collect().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject range body read failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!("S3 GetObject range failed for {key}: {e}"))
+            })?;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!(
+                "S3 GetObject range body read failed for {key}: {e}"
+            ))
+        })?;
         Ok(bytes.to_vec())
     }
 
-    async fn copy_object_to_file(&self, hash: &str, algorithm: &str, dest: &std::path::Path) -> std::io::Result<u64> {
+    async fn copy_object_to_file(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+    ) -> std::io::Result<u64> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self.client.get_object().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
         let mut body = resp.body;
         let dest = dest.to_path_buf();
         // Stream chunks to file without buffering the entire response
@@ -635,22 +858,34 @@ impl AsyncDataCache for S3DataCache {
             }
             Ok::<_, std::io::Error>(total)
         });
-        while let Some(chunk) = body.try_next().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))? {
+        while let Some(chunk) = body
+            .try_next()
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+        {
             let _ = tx.send(chunk).await;
         }
         drop(tx);
-        writer.await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        writer.await.map_err(std::io::Error::other)?
     }
 
-    async fn write_object_to_file_at_offset(&self, hash: &str, algorithm: &str,
-                                             dest: &std::path::Path, offset: u64) -> std::io::Result<u64> {
+    async fn write_object_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+        offset: u64,
+    ) -> std::io::Result<u64> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self.client.get_object().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
         let mut body = resp.body;
         let dest = dest.to_path_buf();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
@@ -665,25 +900,40 @@ impl AsyncDataCache for S3DataCache {
             }
             Ok::<_, std::io::Error>(total)
         });
-        while let Some(chunk) = body.try_next().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))? {
+        while let Some(chunk) = body
+            .try_next()
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+        {
             let _ = tx.send(chunk).await;
         }
         drop(tx);
-        writer.await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        writer.await.map_err(std::io::Error::other)?
     }
 
-    async fn stream_range_to_file_at_offset(&self, hash: &str, algorithm: &str,
-                                             range_start: u64, range_end: u64,
-                                             dest: &std::path::Path, file_offset: u64) -> std::io::Result<u64> {
+    async fn stream_range_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        range_start: u64,
+        range_end: u64,
+        dest: &std::path::Path,
+        file_offset: u64,
+    ) -> std::io::Result<u64> {
         let key = AsyncDataCache::object_key(self, hash, algorithm);
         let range = format!("bytes={range_start}-{range_end}");
-        let resp = self.client.get_object().bucket(&self.bucket).key(&key)
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
             .range(&range)
             .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other,
-                format!("S3 GetObject range failed for {key}: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| {
+                std::io::Error::other(format!("S3 GetObject range failed for {key}: {e}"))
+            })?;
         let mut body = resp.body;
         let dest = dest.to_path_buf();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
@@ -698,12 +948,15 @@ impl AsyncDataCache for S3DataCache {
             }
             Ok::<_, std::io::Error>(total)
         });
-        while let Some(chunk) = body.try_next().await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))? {
+        while let Some(chunk) = body
+            .try_next()
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+        {
             let _ = tx.send(chunk).await;
         }
         drop(tx);
-        writer.await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+        writer.await.map_err(std::io::Error::other)?
     }
 }
 
@@ -728,7 +981,10 @@ mod cache_validation_tests {
         }
         // After 100, not all should return true (1% chance each)
         let count = (0..1000).filter(|_| state.should_verify()).count();
-        assert!(count < 1000, "expected some false results after 100, but all returned true");
+        assert!(
+            count < 1000,
+            "expected some false results after 100, but all returned true"
+        );
     }
 
     #[test]

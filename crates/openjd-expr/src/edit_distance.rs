@@ -8,8 +8,12 @@
 pub fn edit_distance(s1: &str, s2: &str) -> usize {
     let s1: Vec<char> = s1.chars().collect();
     let s2: Vec<char> = s2.chars().collect();
-    if s1.is_empty() { return s2.len(); }
-    if s2.is_empty() { return s1.len(); }
+    if s1.is_empty() {
+        return s2.len();
+    }
+    if s2.is_empty() {
+        return s1.len();
+    }
 
     let mut prev: Vec<usize> = (0..=s2.len()).collect();
     let mut curr = vec![0; s2.len() + 1];
@@ -94,7 +98,10 @@ mod tests {
 
     #[test]
     fn test_suggest_single_match() {
-        let s = suggest_closest("Param.Frane", &["Param.Frame", "Param.Scene", "RawParam.Frame"]);
+        let s = suggest_closest(
+            "Param.Frane",
+            &["Param.Frame", "Param.Scene", "RawParam.Frame"],
+        );
         assert_eq!(s, " Did you mean: Param.Frame");
     }
 

@@ -33,7 +33,9 @@ impl std::fmt::Display for RunResult {
         writeln!(f, "{}", self.message)?;
         writeln!(f)?;
         writeln!(f, "Job: {}", self.job_name)?;
-        if let Some(sn) = &self.step_name { writeln!(f, "Step: {sn}")?; }
+        if let Some(sn) = &self.step_name {
+            writeln!(f, "Step: {sn}")?;
+        }
         writeln!(f, "Duration: {:.3} seconds", self.duration)?;
         write!(f, "Chunks run: {}", self.chunks_run)
     }

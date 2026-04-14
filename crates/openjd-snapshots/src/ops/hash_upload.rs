@@ -1,4 +1,4 @@
-use super::memory_pool::{MemoryPool, default_max_memory_bytes, num_cpus};
+use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
 use crate::hash::{hash_data, WHOLE_FILE_CHUNK_SIZE};
@@ -9,26 +9,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
+#[derive(Default)]
 pub struct HashUploadOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
     pub file_chunk_size_bytes: Option<i64>,
-    pub on_progress: Option<Box<dyn Fn(&UploadStatistics) -> bool + Send + Sync>>,
+    pub on_progress: Option<Box<super::ProgressFn<UploadStatistics>>>,
     pub max_workers: Option<usize>,
     pub max_memory_bytes: Option<usize>,
-}
-
-impl Default for HashUploadOptions {
-    fn default() -> Self {
-        Self {
-            hash_cache: None,
-            force_rehash: false,
-            file_chunk_size_bytes: None,
-            on_progress: None,
-            max_workers: None,
-            max_memory_bytes: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -82,8 +70,16 @@ pub fn hash_upload_abs_manifest(
 }
 
 enum FileResult {
-    Whole { hash: String, uploaded: bool, size: u64 },
-    Chunked { hashes: Vec<String>, uploaded: bool, hashed_bytes: u64 },
+    Whole {
+        hash: String,
+        uploaded: bool,
+        size: u64,
+    },
+    Chunked {
+        hashes: Vec<String>,
+        uploaded: bool,
+        hashed_bytes: u64,
+    },
 }
 
 fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
@@ -95,13 +91,14 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
 
     // Validate no regular files already have hashes
     for file in &manifest.files {
-        if file.symlink_target.is_none() && !file.deleted {
-            if file.hash.is_some() || file.chunk_hashes.is_some() {
-                return Err(crate::SnapshotError::Validation(format!(
-                    "file already has hashes set, cannot re-hash: {}",
-                    file.path
-                )));
-            }
+        if file.symlink_target.is_none()
+            && !file.deleted
+            && (file.hash.is_some() || file.chunk_hashes.is_some())
+        {
+            return Err(crate::SnapshotError::Validation(format!(
+                "file already has hashes set, cannot re-hash: {}",
+                file.path
+            )));
         }
     }
 
@@ -112,11 +109,13 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let mut result = manifest.clone();
     let mut stats = UploadStatistics::default();
 
-    let on_progress: Option<Arc<dyn Fn(&UploadStatistics) -> bool + Send + Sync>> =
+    let on_progress: Option<Arc<super::ProgressFn<UploadStatistics>>> =
         options.on_progress.map(|f| Arc::from(f));
 
     let num_workers = options.max_workers.unwrap_or(10);
-    let max_memory = options.max_memory_bytes.unwrap_or_else(default_max_memory_bytes);
+    let max_memory = options
+        .max_memory_bytes
+        .unwrap_or_else(default_max_memory_bytes);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(num_cpus().max(4))
@@ -224,8 +223,12 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             let _ = cb(&stats);
         }
         let unit = if chunk_size <= 0 { "files" } else { "chunks" };
-        stats.progress_message = format!("Hashed/uploaded {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes), stats.total_files, unit);
+        stats.progress_message = format!(
+            "Hashed/uploaded {} ({} {}) in 0.00s",
+            crate::hash::human_readable_file_size(stats.total_bytes),
+            stats.total_files,
+            unit
+        );
         return Ok((result, stats));
     }
 
@@ -252,7 +255,9 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             let start = start_time;
 
             let handle = tokio::spawn(async move {
-                let _worker_permit = worker_sem.acquire_owned().await
+                let _worker_permit = worker_sem
+                    .acquire_owned()
+                    .await
                     .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
 
                 if cancelled.load(Ordering::Relaxed) {
@@ -287,7 +292,11 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                                 s.skipped_bytes += size;
                             }
                         }
-                        FileResult::Chunked { uploaded, hashed_bytes, .. } => {
+                        FileResult::Chunked {
+                            uploaded,
+                            hashed_bytes,
+                            ..
+                        } => {
                             s.hashed_files += 1;
                             s.hashed_bytes += hashed_bytes;
                             if *uploaded {
@@ -302,7 +311,9 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                         s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64
+                            / s.total_bytes as f64)
+                            * 100.0;
                     }
                     if let Some(ref cb) = on_progress {
                         if !cb(&s) {
@@ -366,17 +377,24 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         stats.rate = rc.update(stats.total_time, stats.hashed_bytes + stats.skipped_bytes);
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.hashed_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress =
+            ((stats.hashed_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
     }
 
     let unit = if chunk_size <= 0 { "files" } else { "chunks" };
     let mut parts = vec![
-        format!("Hashed/uploaded {}", crate::hash::human_readable_file_size(stats.total_bytes)),
+        format!(
+            "Hashed/uploaded {}",
+            crate::hash::human_readable_file_size(stats.total_bytes)
+        ),
         format!("({} {})", stats.total_files, unit),
         format!("in {:.2}s", stats.total_time),
     ];
     if stats.total_time > 0.0 {
-        parts.push(format!("({}/s)", crate::hash::human_readable_file_size(stats.rate as u64)));
+        parts.push(format!(
+            "({}/s)",
+            crate::hash::human_readable_file_size(stats.rate as u64)
+        ));
     }
     stats.progress_message = parts.join(" ");
 
@@ -400,18 +418,30 @@ async fn process_whole_async(
         })?;
         let hash = hash_data(&data);
         Ok::<_, crate::SnapshotError>((hash, data))
-    }).await.map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    })
+    .await
+    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
 
     // Stage 2: Async I/O upload
-    let uploaded = if !data_cache.object_exists(&hash, &alg_str).await.unwrap_or(false) {
-        data_cache.put_object(&hash, &alg_str, data).await
+    let uploaded = if !data_cache
+        .object_exists(&hash, &alg_str)
+        .await
+        .unwrap_or(false)
+    {
+        data_cache
+            .put_object(&hash, &alg_str, data)
+            .await
             .map_err(crate::SnapshotError::Io)?;
         true
     } else {
         false
     };
 
-    Ok(FileResult::Whole { hash, uploaded, size: file_size })
+    Ok(FileResult::Whole {
+        hash,
+        uploaded,
+        size: file_size,
+    })
 }
 
 async fn process_whole_multipart(
@@ -434,22 +464,36 @@ async fn process_whole_multipart(
         let mut buf = vec![0u8; ps];
         loop {
             let n = f.read(&mut buf)?;
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             hasher.update(&buf[..n]);
         }
         Ok::<_, crate::SnapshotError>(format!("{:032x}", hasher.digest128()))
-    }).await.map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    })
+    .await
+    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
 
     // Stage 2: Check if already exists
-    if data_cache.object_exists(&hash, &alg_str).await.unwrap_or(false) {
-        return Ok(FileResult::Whole { hash, uploaded: false, size: file_size });
+    if data_cache
+        .object_exists(&hash, &alg_str)
+        .await
+        .unwrap_or(false)
+    {
+        return Ok(FileResult::Whole {
+            hash,
+            uploaded: false,
+            size: file_size,
+        });
     }
 
     // Stage 3: Multipart upload
-    let upload_id = data_cache.create_multipart_upload(&hash, &alg_str).await
+    let upload_id = data_cache
+        .create_multipart_upload(&hash, &alg_str)
+        .await
         .map_err(crate::SnapshotError::Io)?;
 
-    let num_parts = ((file_size as usize + part_size - 1) / part_size) as i32;
+    let num_parts = (file_size as usize).div_ceil(part_size) as i32;
     let mut upload_handles = Vec::new();
 
     for part_num in 1..=num_parts {
@@ -469,10 +513,14 @@ async fn process_whole_multipart(
                 let mut buf = vec![0u8; this_part_size];
                 f.read_exact(&mut buf)?;
                 Ok::<_, std::io::Error>(buf)
-            }).await.map_err(|e| crate::SnapshotError::Other(e.to_string()))?
-              .map_err(crate::SnapshotError::Io)?;
+            })
+            .await
+            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+            .map_err(crate::SnapshotError::Io)?;
 
-            let etag = dc.upload_part(&h, &a, &uid, part_num, part_data).await
+            let etag = dc
+                .upload_part(&h, &a, &uid, part_num, part_data)
+                .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok::<_, crate::SnapshotError>((part_num, etag))
         }));
@@ -480,16 +528,23 @@ async fn process_whole_multipart(
 
     let mut parts: Vec<(i32, String)> = Vec::new();
     for handle in upload_handles {
-        let (part_num, etag) = handle.await
+        let (part_num, etag) = handle
+            .await
             .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
         parts.push((part_num, etag));
     }
     parts.sort_by_key(|(num, _)| *num);
 
-    data_cache.complete_multipart_upload(&hash, &alg_str, &upload_id, parts).await
+    data_cache
+        .complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
+        .await
         .map_err(crate::SnapshotError::Io)?;
 
-    Ok(FileResult::Whole { hash, uploaded: true, size: file_size })
+    Ok(FileResult::Whole {
+        hash,
+        uploaded: true,
+        size: file_size,
+    })
 }
 
 async fn process_chunked_async(
@@ -508,7 +563,9 @@ async fn process_chunked_async(
         let mut buf = vec![0u8; chunk_size as usize];
         loop {
             let n = f.read(&mut buf)?;
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             let chunk = buf[..n].to_vec();
             let hash = hash_data(&chunk);
             result.push((hash, chunk));
@@ -517,7 +574,9 @@ async fn process_chunked_async(
             result.push((hash_data(&[]), vec![]));
         }
         Ok::<_, crate::SnapshotError>(result)
-    }).await.map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    })
+    .await
+    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
 
     // Stage 2: Upload chunks in parallel
     let hashed_bytes: u64 = chunks.iter().map(|(_, c)| c.len() as u64).sum();
@@ -527,7 +586,8 @@ async fn process_chunked_async(
         let alg = alg_str.clone();
         upload_handles.push(tokio::spawn(async move {
             if !dc.object_exists(&hash, &alg).await.unwrap_or(false) {
-                dc.put_object(&hash, &alg, chunk).await
+                dc.put_object(&hash, &alg, chunk)
+                    .await
                     .map_err(crate::SnapshotError::Io)?;
                 Ok::<_, crate::SnapshotError>((hash, true))
             } else {
@@ -538,13 +598,20 @@ async fn process_chunked_async(
     let mut hashes = Vec::with_capacity(upload_handles.len());
     let mut any_uploaded = false;
     for handle in upload_handles {
-        let (hash, uploaded) = handle.await
+        let (hash, uploaded) = handle
+            .await
             .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
-        if uploaded { any_uploaded = true; }
+        if uploaded {
+            any_uploaded = true;
+        }
         hashes.push(hash);
     }
 
-    Ok(FileResult::Chunked { hashes, uploaded: any_uploaded, hashed_bytes })
+    Ok(FileResult::Chunked {
+        hashes,
+        uploaded: any_uploaded,
+        hashed_bytes,
+    })
 }
 
 #[cfg(test)]
@@ -579,7 +646,8 @@ mod tests {
         let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
             .with_files(vec![FileEntry::file(&path, 5, mtime)]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
         let result = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest),
             data_cache.clone(),
@@ -588,8 +656,13 @@ mod tests {
         .unwrap();
 
         let hash = result.manifest.files()[0].hash.as_ref().unwrap();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        assert!(rt.block_on(data_cache.object_exists(hash, "xxh128")).unwrap());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        assert!(rt
+            .block_on(data_cache.object_exists(hash, "xxh128"))
+            .unwrap());
         let stored = rt.block_on(data_cache.get_object(hash, "xxh128")).unwrap();
         assert_eq!(stored, b"hello");
         assert_eq!(result.statistics.uploaded_files, 1);
@@ -605,7 +678,8 @@ mod tests {
         let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
             .with_files(vec![FileEntry::file(&path, 5, mtime)]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
 
         let _ = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest.clone()),
@@ -634,20 +708,27 @@ mod tests {
         let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
             .with_files(vec![FileEntry::file(&path, 5, mtime)]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
         let hash_cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
 
         let _ = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest.clone()),
             data_cache.clone(),
-            HashUploadOptions { hash_cache: Some(hash_cache.clone()), ..Default::default() },
+            HashUploadOptions {
+                hash_cache: Some(hash_cache.clone()),
+                ..Default::default()
+            },
         )
         .unwrap();
 
         let result = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest),
             data_cache.clone(),
-            HashUploadOptions { hash_cache: Some(hash_cache), ..Default::default() },
+            HashUploadOptions {
+                hash_cache: Some(hash_cache),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(result.statistics.skipped_files, 1);
@@ -668,7 +749,8 @@ mod tests {
                 FileEntry::deleted("/tmp/gone"),
             ]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
         let result = hash_upload_abs_manifest(
             &AbsManifest::Diff(manifest),
             data_cache.clone(),
@@ -690,17 +772,21 @@ mod tests {
         let mut entry = FileEntry::file(&path, 5, mtime);
         entry.hash = Some("existing_hash".into());
 
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![entry]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
         let result = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest),
             data_cache.clone(),
             HashUploadOptions::default(),
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already has hashes set"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("already has hashes set"));
     }
 
     #[test]
@@ -720,14 +806,15 @@ mod tests {
 
         let cache_dir = TempDir::new().unwrap();
         let chunk_size = 256i64;
-        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![FileEntry::file(
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![FileEntry::file(
                 file_path.to_string_lossy().to_string(),
                 1024,
                 mtime,
             )]);
 
-        let data_cache: Arc<dyn AsyncDataCache> = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
         let result = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest),
             data_cache.clone(),
@@ -743,10 +830,18 @@ mod tests {
         let chunks = f.chunk_hashes.as_ref().unwrap();
         assert_eq!(chunks.len(), 4);
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         for h in chunks {
             assert!(rt.block_on(data_cache.object_exists(h, "xxh128")).unwrap());
-            assert_eq!(rt.block_on(data_cache.get_object(h, "xxh128")).unwrap().len(), 256);
+            assert_eq!(
+                rt.block_on(data_cache.get_object(h, "xxh128"))
+                    .unwrap()
+                    .len(),
+                256
+            );
         }
 
         let _ = std::fs::remove_file(&file_path);

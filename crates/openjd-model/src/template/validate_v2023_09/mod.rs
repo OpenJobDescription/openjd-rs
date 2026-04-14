@@ -10,16 +10,16 @@
 //! - Pass 5: Format strings (base or EXPR profile)
 //! - Pass 6: TASK_CHUNKING (validate or reject)
 
-mod limits;
-mod structure;
 mod feature_bundle_1;
 mod format_strings;
-mod task_chunking;
 pub(crate) mod helpers;
+mod limits;
+mod structure;
+mod task_chunking;
 
 use crate::error::{OpenJdError, ValidationErrors};
 use crate::template::*;
-use crate::types::{ValidationContext, KnownExtension, JobParameterType, TaskParameterType};
+use crate::types::{JobParameterType, KnownExtension, TaskParameterType, ValidationContext};
 
 /// Numeric limits computed from revision + extensions.
 #[derive(Debug, Clone)]
@@ -88,18 +88,35 @@ impl EffectiveRules {
         let fb1 = ctx.has_extension(KnownExtension::FeatureBundle1);
         let chunking = ctx.has_extension(KnownExtension::TaskChunking);
 
-        let mut job_param_types: std::collections::HashSet<JobParameterType> =
-            [JobParameterType::String, JobParameterType::Int, JobParameterType::Float, JobParameterType::Path].into_iter().collect();
+        let mut job_param_types: std::collections::HashSet<JobParameterType> = [
+            JobParameterType::String,
+            JobParameterType::Int,
+            JobParameterType::Float,
+            JobParameterType::Path,
+        ]
+        .into_iter()
+        .collect();
         if expr {
             job_param_types.extend([
-                JobParameterType::Bool, JobParameterType::RangeExpr,
-                JobParameterType::ListString, JobParameterType::ListInt, JobParameterType::ListFloat,
-                JobParameterType::ListPath, JobParameterType::ListBool, JobParameterType::ListListInt,
+                JobParameterType::Bool,
+                JobParameterType::RangeExpr,
+                JobParameterType::ListString,
+                JobParameterType::ListInt,
+                JobParameterType::ListFloat,
+                JobParameterType::ListPath,
+                JobParameterType::ListBool,
+                JobParameterType::ListListInt,
             ]);
         }
 
-        let mut task_param_types: std::collections::HashSet<TaskParameterType> =
-            [TaskParameterType::Int, TaskParameterType::Float, TaskParameterType::String, TaskParameterType::Path].into_iter().collect();
+        let mut task_param_types: std::collections::HashSet<TaskParameterType> = [
+            TaskParameterType::Int,
+            TaskParameterType::Float,
+            TaskParameterType::String,
+            TaskParameterType::Path,
+        ]
+        .into_iter()
+        .collect();
         if chunking {
             task_param_types.insert(TaskParameterType::ChunkInt);
         }
@@ -137,7 +154,10 @@ pub fn validate_job_template(jt: &JobTemplate, ctx: &ValidationContext) -> Resul
 }
 
 /// Validate an environment template through all passes.
-pub fn validate_environment_template(et: &EnvironmentTemplate, ctx: &ValidationContext) -> Result<(), OpenJdError> {
+pub fn validate_environment_template(
+    et: &EnvironmentTemplate,
+    ctx: &ValidationContext,
+) -> Result<(), OpenJdError> {
     let limits = EffectiveLimits::from_context(ctx);
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();
@@ -145,10 +165,19 @@ pub fn validate_environment_template(et: &EnvironmentTemplate, ctx: &ValidationC
     // Parameter definitions
     if let Some(params) = &et.parameter_definitions {
         if params.is_empty() {
-            errors.add(&[], "parameterDefinitions, if provided, must contain at least one element.");
+            errors.add(
+                &[],
+                "parameterDefinitions, if provided, must contain at least one element.",
+            );
         }
         if params.len() > limits.max_param_count {
-            errors.add(&[], format!("parameterDefinitions must not contain more than {} elements.", limits.max_param_count));
+            errors.add(
+                &[],
+                format!(
+                    "parameterDefinitions must not contain more than {} elements.",
+                    limits.max_param_count
+                ),
+            );
         }
         let mut param_names = std::collections::HashSet::new();
         for p in params {
@@ -162,7 +191,10 @@ pub fn validate_environment_template(et: &EnvironmentTemplate, ctx: &ValidationC
     let env = &et.environment;
     let env_path = vec![crate::error::PathElement::Field("environment".into())];
     if env.script.is_none() && env.variables.is_none() {
-        errors.add(&env_path, format!("must have at least one of 'script' or 'variables'."));
+        errors.add(
+            &env_path,
+            "must have at least one of 'script' or 'variables'.".to_string(),
+        );
     }
     structure::validate_single_environment(env, &limits, &rules, &env_path, &mut errors);
 

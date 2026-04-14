@@ -45,8 +45,12 @@ fn download_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(result.statistics.downloaded_files, 0);
     assert_eq!(result.statistics.total_bytes, 0);
 }
@@ -58,10 +62,14 @@ fn download_single_file() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("output.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"hello world",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"hello world", &*dc);
     let manifest = make_snapshot(vec![entry]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
     assert_eq!(result.statistics.downloaded_files, 1);
@@ -75,9 +83,14 @@ fn download_creates_parent_dirs() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("a/b/c/file.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"nested",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"nested", &*dc);
     let manifest = make_snapshot(vec![entry]);
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "nested");
 }
@@ -93,12 +106,16 @@ fn download_multiple_files_with_subdirs() {
     let p3 = tmp.path().join("subdir/file3.txt");
 
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"Content 1",&*dc),
-        hashed_entry(&p2.to_string_lossy(), b"Content 2",&*dc),
-        hashed_entry(&p3.to_string_lossy(), b"Content 3",&*dc),
+        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc),
+        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc),
+        hashed_entry(&p3.to_string_lossy(), b"Content 3", &*dc),
     ]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), "Content 1");
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), "Content 2");
@@ -113,10 +130,14 @@ fn download_updates_mtime_in_manifest() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("file.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"data",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"data", &*dc);
     let manifest = make_snapshot(vec![entry]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let actual_mtime = result.manifest.files()[0].mtime.unwrap();
     assert_ne!(actual_mtime, 1000); // not the placeholder
@@ -130,10 +151,14 @@ fn download_creates_manifest_dirs() {
     let dc = new_data_cache(&cache_dir);
     let dir_path = tmp.path().join("new_dir");
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_dirs(vec![DirEntry::new(dir_path.to_string_lossy().to_string())]);
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_dirs(vec![DirEntry::new(dir_path.to_string_lossy().to_string())]);
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert!(dir_path.is_dir());
 }
@@ -148,7 +173,7 @@ fn conflict_skip() {
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new content",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc);
     let manifest = make_snapshot(vec![entry]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -172,9 +197,14 @@ fn conflict_overwrite() {
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new content",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc);
     let manifest = make_snapshot(vec![entry]);
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
 }
@@ -187,7 +217,7 @@ fn conflict_create_copy() {
     let dest = tmp.path().join("file.txt");
     std::fs::write(&dest, b"old").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new", &*dc);
     let manifest = make_snapshot(vec![entry]);
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -268,8 +298,8 @@ fn diff_deletes_empty_directory() {
     let dir_to_delete = tmp.path().join("empty_dir");
     std::fs::create_dir(&dir_to_delete).unwrap();
 
-    let manifest: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_dirs(vec![DirEntry {
+    let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_dirs(vec![DirEntry {
             path: dir_to_delete.to_string_lossy().to_string(),
             deleted: true,
         }]);
@@ -296,8 +326,8 @@ fn non_empty_directory_not_deleted() {
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("file.txt"), b"content").unwrap();
 
-    let manifest: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_dirs(vec![DirEntry {
+    let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_dirs(vec![DirEntry {
             path: dir.to_string_lossy().to_string(),
             deleted: true,
         }]);
@@ -327,21 +357,20 @@ fn deletion_order_children_before_parents() {
     let file_in_child = child.join("file.txt");
     std::fs::write(&file_in_child, b"content").unwrap();
 
-    let manifest: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![FileEntry::deleted(
-                file_in_child.to_string_lossy().to_string(),
-            )])
-            .with_dirs(vec![
-                DirEntry {
-                    path: parent.to_string_lossy().to_string(),
-                    deleted: true,
-                },
-                DirEntry {
-                    path: child.to_string_lossy().to_string(),
-                    deleted: true,
-                },
-            ]);
+    let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_files(vec![FileEntry::deleted(
+            file_in_child.to_string_lossy().to_string(),
+        )])
+        .with_dirs(vec![
+            DirEntry {
+                path: parent.to_string_lossy().to_string(),
+                deleted: true,
+            },
+            DirEntry {
+                path: child.to_string_lossy().to_string(),
+                deleted: true,
+            },
+        ]);
     download_abs_manifest(
         &AbsManifest::Diff(manifest),
         dc.clone(),
@@ -369,8 +398,11 @@ fn rejects_file_with_no_hash() {
     // File entry with no hash and no chunk_hashes
     let entry = FileEntry::file(dest.to_string_lossy().to_string(), 100, 1000);
     let manifest = make_snapshot(vec![entry]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default());
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    );
     match result {
         Err(e) => assert!(e.to_string().contains("no hash"), "unexpected error: {e}"),
         Ok(_) => panic!("expected error for file with no hash"),
@@ -399,9 +431,13 @@ fn download_chunked_file() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
     entry.chunk_hashes = Some(chunk_hashes);
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), b"aaabbbcccddd");
 }
@@ -423,7 +459,12 @@ fn download_creates_symlink() {
         link.to_string_lossy().to_string(),
         target.to_string_lossy().to_string(),
     )]);
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
     assert_eq!(std::fs::read_to_string(&link).unwrap(), "target content");
@@ -473,7 +514,12 @@ fn round_trip_upload_then_download() {
         openjd_snapshots::join_snapshot(&rel, &dst_dir.path().to_string_lossy()).unwrap();
 
     // Download
-    download_abs_manifest(&AbsManifest::Snapshot(dl_manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(dl_manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         std::fs::read_to_string(dst_dir.path().join("hello.txt")).unwrap(),
@@ -496,14 +542,17 @@ fn hash_cache_skip_on_second_download() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"hello",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"hello", &*dc);
     let manifest = make_snapshot(vec![entry]);
 
     // First download
     let r1 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
@@ -513,7 +562,10 @@ fn hash_cache_skip_on_second_download() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 0);
@@ -529,14 +581,17 @@ fn hash_cache_stale_mtime_redownloads() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"original",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"original", &*dc);
     let manifest = make_snapshot(vec![entry]);
 
     // First download
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "original");
@@ -549,7 +604,10 @@ fn hash_cache_stale_mtime_redownloads() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 1);
@@ -566,13 +624,16 @@ fn hash_cache_deleted_file_redownloads() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"content",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc);
     let manifest = make_snapshot(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -581,7 +642,10 @@ fn hash_cache_deleted_file_redownloads() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 1);
@@ -595,7 +659,7 @@ fn without_hash_cache_always_downloads() {
     let dc = new_data_cache(&cache_dir);
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"content",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc);
     let manifest = make_snapshot(vec![entry]);
 
     let r1 = download_abs_manifest(
@@ -628,11 +692,16 @@ fn no_temp_files_after_success() {
     let p1 = dl_dir.join("file1.txt");
     let p2 = dl_dir.join("file2.txt");
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"Content 1",&*dc),
-        hashed_entry(&p2.to_string_lossy(), b"Content 2",&*dc),
+        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc),
+        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc),
     ]);
 
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let tmp_files: Vec<_> = std::fs::read_dir(&dl_dir)
         .unwrap()
@@ -649,10 +718,15 @@ fn atomic_write_produces_correct_content() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("atomic.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"atomic content",&*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"atomic content", &*dc);
     let manifest = make_snapshot(vec![entry]);
 
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default()).unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "atomic content");
 }
@@ -681,14 +755,16 @@ fn chunked_download_round_trip_with_hash_cache() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 10, 1000);
     entry.chunk_hashes = Some(chunk_hashes);
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, 4).with_files(vec![entry]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 4).with_files(vec![entry]);
 
     // First download
     let r1 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
@@ -699,7 +775,10 @@ fn chunked_download_round_trip_with_hash_cache() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
@@ -719,8 +798,8 @@ fn download_progress_callback_invoked() {
     let p1 = tmp.path().join("a.txt");
     let p2 = tmp.path().join("b.txt");
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"aaa",&*dc),
-        hashed_entry(&p2.to_string_lossy(), b"bbb",&*dc),
+        hashed_entry(&p1.to_string_lossy(), b"aaa", &*dc),
+        hashed_entry(&p2.to_string_lossy(), b"bbb", &*dc),
     ]);
 
     let call_count = Arc::new(AtomicUsize::new(0));
@@ -751,7 +830,7 @@ fn download_progress_callback_cancel() {
     let mut files = Vec::new();
     for i in 0..20 {
         let p = tmp.path().join(format!("f{i}.txt"));
-        files.push(hashed_entry(&p.to_string_lossy(), b"data",&*dc));
+        files.push(hashed_entry(&p.to_string_lossy(), b"data", &*dc));
     }
 
     let manifest = make_snapshot(files);
@@ -833,8 +912,13 @@ fn download_progress_fields_populated() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), b"hello",&*dc)]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
+    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), b"hello", &*dc)]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
     assert!(result.statistics.total_time > 0.0);
     assert!(result.statistics.rate >= 0.0);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
@@ -845,7 +929,12 @@ fn download_progress_zero_for_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
     assert_eq!(result.statistics.total_files, 0);
     assert_eq!(result.statistics.progress, 0.0);
 }
@@ -858,22 +947,31 @@ fn download_progress_callback_receives_timing() {
     let mut files = Vec::new();
     for i in 0..5 {
         let p = tmp.path().join(format!("f{i}.txt"));
-        files.push(hashed_entry(&p.to_string_lossy(), format!("content{i}").repeat(100).as_bytes(),&*dc));
+        files.push(hashed_entry(
+            &p.to_string_lossy(),
+            format!("content{i}").repeat(100).as_bytes(),
+            &*dc,
+        ));
     }
     let manifest = make_snapshot(files);
     let times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let t = times.clone();
-    let _ = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions {
-        on_progress: Some(Box::new(move |stats| {
-            t.lock().unwrap().push(stats.total_time);
-            true
-        })),
-        ..Default::default()
-    }).unwrap();
+    let _ = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions {
+            on_progress: Some(Box::new(move |stats| {
+                t.lock().unwrap().push(stats.total_time);
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
     for i in 1..t.len() {
-        assert!(t[i] >= t[i-1], "total_time not monotonic");
+        assert!(t[i] >= t[i - 1], "total_time not monotonic");
     }
 }
 
@@ -883,8 +981,17 @@ fn download_progress_rate_positive() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("big.txt");
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), &vec![0u8; 10000],&*dc)]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
+    let manifest = make_snapshot(vec![hashed_entry(
+        &dest.to_string_lossy(),
+        &vec![0u8; 10000],
+        &*dc,
+    )]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
     assert!(result.statistics.rate > 0.0);
 }
 
@@ -896,9 +1003,22 @@ fn download_progress_message_contains_rate() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), b"rate test",&*dc)]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
-    assert!(result.statistics.progress_message.contains("/s)"), "message: {}", result.statistics.progress_message);
+    let manifest = make_snapshot(vec![hashed_entry(
+        &dest.to_string_lossy(),
+        b"rate test",
+        &*dc,
+    )]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        result.statistics.progress_message.contains("/s)"),
+        "message: {}",
+        result.statistics.progress_message
+    );
 }
 
 #[test]
@@ -907,11 +1027,28 @@ fn download_progress_message_contains_elapsed_time() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), b"time test",&*dc)]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
+    let manifest = make_snapshot(vec![hashed_entry(
+        &dest.to_string_lossy(),
+        b"time test",
+        &*dc,
+    )]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
     // Message should contain "in X.XXs"
-    assert!(result.statistics.progress_message.contains("in "), "message: {}", result.statistics.progress_message);
-    assert!(result.statistics.progress_message.contains("s"), "message: {}", result.statistics.progress_message);
+    assert!(
+        result.statistics.progress_message.contains("in "),
+        "message: {}",
+        result.statistics.progress_message
+    );
+    assert!(
+        result.statistics.progress_message.contains("s"),
+        "message: {}",
+        result.statistics.progress_message
+    );
 }
 
 #[test]
@@ -921,12 +1058,21 @@ fn download_final_statistics_transfer_rate_calculation() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
     let content = vec![0u8; 10000];
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), &content,&*dc)]);
-    let result = download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), DownloadOptions::default()).unwrap();
+    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), &content, &*dc)]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions::default(),
+    )
+    .unwrap();
     // rate should be approximately total_bytes / total_time
     let expected = result.statistics.total_bytes as f64 / result.statistics.total_time;
-    assert!((result.statistics.rate - expected).abs() < 1.0,
-        "rate {} != expected {}", result.statistics.rate, expected);
+    assert!(
+        (result.statistics.rate - expected).abs() < 1.0,
+        "rate {} != expected {}",
+        result.statistics.rate,
+        expected
+    );
 }
 
 // ===== Symlink policy and delete edge cases =====
@@ -974,9 +1120,7 @@ fn diff_deletes_symlink() {
     let link = tmp.path().join("link.txt");
     std::os::unix::fs::symlink(&target, &link).unwrap();
 
-    let manifest = make_diff(vec![FileEntry::deleted(
-        link.to_string_lossy().to_string(),
-    )]);
+    let manifest = make_diff(vec![FileEntry::deleted(link.to_string_lossy().to_string())]);
     download_abs_manifest(
         &AbsManifest::Diff(manifest),
         dc.clone(),
@@ -1063,11 +1207,17 @@ fn download_mixed_regular_and_chunked_files() {
 
     let manifest: AbsSnapshot =
         Manifest::new(HashAlgorithm::Xxh128, 2).with_files(vec![regular, chunked]);
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
-    assert_eq!(std::fs::read_to_string(&regular_path).unwrap(), "whole file");
+    assert_eq!(
+        std::fs::read_to_string(&regular_path).unwrap(),
+        "whole file"
+    );
     assert_eq!(std::fs::read(&chunked_path).unwrap(), b"AABBCC");
     assert_eq!(result.statistics.downloaded_files, 2);
 }
@@ -1081,12 +1231,7 @@ fn download_chunked_file_conflict_skip() {
     let dest = tmp.path().join("chunked.bin");
     std::fs::write(&dest, b"old data").unwrap();
 
-    let (_, manifest) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"new", b"dat"],
-        3,
-        &*dc,
-    );
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1111,15 +1256,14 @@ fn download_chunked_file_conflict_overwrite() {
     let dest = tmp.path().join("chunked.bin");
     std::fs::write(&dest, b"old data").unwrap();
 
-    let (_, manifest) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"new", b"dat"],
-        3,
-        &*dc,
-    );
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc);
 
-    download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-        .unwrap();
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), b"newdat");
 }
@@ -1131,16 +1275,14 @@ fn download_chunked_file_preserves_mtime() {
     let dc = new_data_cache(&cache_dir);
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"XX", b"YY"],
-        2,
-        &*dc,
-    );
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"XX", b"YY"], 2, &*dc);
 
-    let result =
-        download_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let actual_mtime = result.manifest.files()[0].mtime.unwrap();
     assert_ne!(actual_mtime, 1000);
@@ -1160,32 +1302,28 @@ fn chunked_file_downloaded_when_hash_mismatch() {
     let dest = tmp.path().join("chunked.bin");
 
     // First download with old content
-    let (_, manifest_old) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"old", b"dat"],
-        3,
-        &*dc,
-    );
+    let (_, manifest_old) = chunked_entry(&dest.to_string_lossy(), &[b"old", b"dat"], 3, &*dc);
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest_old),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(std::fs::read(&dest).unwrap(), b"olddat");
 
     // Now create a new manifest with different chunk content
-    let (_, manifest_new) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"NEW", b"DAT"],
-        3,
-        &*dc,
-    );
+    let (_, manifest_new) = chunked_entry(&dest.to_string_lossy(), &[b"NEW", b"DAT"], 3, &*dc);
 
     let r = download_abs_manifest(
         &AbsManifest::Snapshot(manifest_new),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1202,18 +1340,16 @@ fn hash_cache_updated_after_chunked_download() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"AA", b"BB"],
-        2,
-        &*dc,
-    );
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"AA", b"BB"], 2, &*dc);
 
     // First download populates hash cache
     let r1 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
@@ -1222,7 +1358,10 @@ fn hash_cache_updated_after_chunked_download() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
@@ -1238,17 +1377,15 @@ fn second_download_skips_chunked_file() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(
-        &dest.to_string_lossy(),
-        &[b"abc", b"def", b"gh"],
-        3,
-        &*dc,
-    );
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"abc", b"def", b"gh"], 3, &*dc);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1258,7 +1395,10 @@ fn second_download_skips_chunked_file() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1303,7 +1443,10 @@ fn download_progress_with_hash_cache_hits() {
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
     )
     .unwrap();
 
@@ -1311,7 +1454,10 @@ fn download_progress_with_hash_cache_hits() {
     let r2 = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        DownloadOptions { hash_cache: Some(hc), ..Default::default() },
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
     )
     .unwrap();
 

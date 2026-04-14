@@ -1,10 +1,10 @@
+use openjd_snapshots::path_util::{is_absolute_path, normalize_path};
 /// Rust port of all tests from
 /// deadline-cloud/test/unit/deadline_job_attachments/snapshots/operations/test_join_manifest.py
 use openjd_snapshots::{
     join_snapshot, join_snapshot_diff, join_snapshot_diff_rel, join_snapshot_rel, DirEntry,
     FileEntry, HashAlgorithm, Manifest, Snapshot, SnapshotDiff, DEFAULT_FILE_CHUNK_SIZE,
 };
-use openjd_snapshots::path_util::{is_absolute_path, normalize_path};
 
 fn snap(files: Vec<FileEntry>, dirs: Vec<DirEntry>) -> Snapshot {
     Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
@@ -39,19 +39,28 @@ fn normalize_path_preserves_leading_slash() {
 
 #[test]
 fn join_path_relative() {
-    assert_eq!(normalize_path("assets/textures/wood.png"), "assets/textures/wood.png");
+    assert_eq!(
+        normalize_path("assets/textures/wood.png"),
+        "assets/textures/wood.png"
+    );
     assert_eq!(normalize_path("a/b/c/d.txt"), "a/b/c/d.txt");
 }
 
 #[test]
 fn join_path_absolute_posix() {
-    assert_eq!(normalize_path("/projects/scene/wood.png"), "/projects/scene/wood.png");
+    assert_eq!(
+        normalize_path("/projects/scene/wood.png"),
+        "/projects/scene/wood.png"
+    );
     assert_eq!(normalize_path("/a/b/c/d.txt"), "/a/b/c/d.txt");
 }
 
 #[test]
 fn join_path_absolute_windows() {
-    assert_eq!(normalize_path("C:/projects/scene/wood.png"), "C:/projects/scene/wood.png");
+    assert_eq!(
+        normalize_path("C:/projects/scene/wood.png"),
+        "C:/projects/scene/wood.png"
+    );
     assert_eq!(normalize_path("C:/a/b/c/d.txt"), "C:/a/b/c/d.txt");
 }
 
@@ -80,7 +89,10 @@ fn is_absolute_path_relative() {
 #[test]
 fn rel_basic_join_relative_prefix() {
     let m = snap(
-        vec![hfile("wood.png", "h1", 100, 1000), hfile("metal.png", "h2", 200, 2000)],
+        vec![
+            hfile("wood.png", "h1", 100, 1000),
+            hfile("metal.png", "h2", 200, 2000),
+        ],
         vec![DirEntry::new("sub")],
     );
     let result = join_snapshot_rel(&m, "assets/textures").unwrap();
@@ -125,7 +137,10 @@ fn rel_preserves_file_metadata() {
 #[test]
 fn rel_preserves_total_size() {
     let m = snap(
-        vec![hfile("a.txt", "h1", 100, 1000), hfile("b.txt", "h2", 200, 2000)],
+        vec![
+            hfile("a.txt", "h1", 100, 1000),
+            hfile("b.txt", "h2", 200, 2000),
+        ],
         vec![],
     );
     let result = join_snapshot_rel(&m, "prefix").unwrap();
@@ -179,7 +194,9 @@ fn abs_symlink_targets_prefixed() {
     let by_path: std::collections::HashMap<&str, &FileEntry> =
         result.files.iter().map(|f| (f.path.as_str(), f)).collect();
     assert_eq!(
-        by_path["/projects/scene/data/current"].symlink_target.as_deref(),
+        by_path["/projects/scene/data/current"]
+            .symlink_target
+            .as_deref(),
         Some("/projects/scene/data/wood.png")
     );
 }
@@ -190,7 +207,10 @@ fn abs_symlink_targets_prefixed() {
 fn diff_preserves_deleted_markers() {
     let m = snap_diff(
         vec![FileEntry::deleted("old.txt")],
-        vec![DirEntry { path: "old_dir".into(), deleted: true }],
+        vec![DirEntry {
+            path: "old_dir".into(),
+            deleted: true,
+        }],
     );
     let result = join_snapshot_diff_rel(&m, "prefix").unwrap();
     assert_eq!(result.files[0].path, "prefix/old.txt");

@@ -53,15 +53,16 @@ impl IncludeExcludePathsFilter {
     }
 
     pub fn matches_path(&self, path: &str) -> bool {
-        let included =
-            self.include.is_empty() || self.include.iter().any(|p| p.matches(path));
+        let included = self.include.is_empty() || self.include.iter().any(|p| p.matches(path));
         included && !self.exclude.iter().any(|p| p.matches(path))
     }
 }
 
 impl std::fmt::Debug for IncludeExcludePathsFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "IncludeExcludePathsFilter {{ include: {:?}, exclude: {:?} }}",
+        write!(
+            f,
+            "IncludeExcludePathsFilter {{ include: {:?}, exclude: {:?} }}",
             self.include.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
             self.exclude.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
         )
@@ -179,10 +180,7 @@ mod tests {
 
     #[test]
     fn filter_dirs() {
-        let m = make_snapshot(
-            vec![],
-            vec![DirEntry::new("src"), DirEntry::new("build")],
-        );
+        let m = make_snapshot(vec![], vec![DirEntry::new("src"), DirEntry::new("build")]);
         let result = filter_manifest(&m, &|e| e.path() == "src");
         assert_eq!(result.dirs.len(), 1);
         assert_eq!(result.dirs[0].path, "src");

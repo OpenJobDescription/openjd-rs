@@ -3,12 +3,12 @@
 
 //! Step types per spec §3.
 
-use crate::format_string::FormatString;
-use super::actions::{StepActions, Action, CancelationMode};
+use super::actions::{Action, CancelationMode, StepActions};
 use super::constrained_strings::Description;
-use super::environment::{Environment, EmbeddedFile};
+use super::environment::{EmbeddedFile, Environment};
 use super::host_requirements::HostRequirements;
 use super::task_parameters::StepParameterSpaceDefinition;
+use crate::format_string::FormatString;
 use serde::Deserialize;
 
 /// SimpleAction syntax sugar (FEATURE_BUNDLE_1).
@@ -71,7 +71,9 @@ impl StepTemplate {
         for &(command, ext, arg_prefix, sa_opt) in interpreters {
             let Some(sa) = sa_opt else { continue };
 
-            let safe_name: String = self.name.chars()
+            let safe_name: String = self
+                .name
+                .chars()
                 .map(|c| if c.is_alphanumeric() { c } else { '_' })
                 .take(200)
                 .collect();
@@ -102,7 +104,10 @@ impl StepTemplate {
                     name: embedded_name,
                     file_type: crate::types::FileType::Text,
                     filename: Some(FormatString::new(&filename).unwrap()),
-                    data: Some(FormatString::new(&sa.script).unwrap_or_else(|_| FormatString::new("").unwrap())),
+                    data: Some(
+                        FormatString::new(&sa.script)
+                            .unwrap_or_else(|_| FormatString::new("").unwrap()),
+                    ),
                     runnable: Some(true),
                     end_of_line: None,
                 }]),

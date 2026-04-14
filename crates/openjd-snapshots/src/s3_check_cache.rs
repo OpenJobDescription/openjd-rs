@@ -24,7 +24,9 @@ impl S3CheckCache {
             );",
         )
         .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_default() -> crate::Result<Self> {

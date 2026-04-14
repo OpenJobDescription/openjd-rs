@@ -3,28 +3,35 @@
 
 //! Tests ported from Python test_create_job.py and test_merge_job_parameters.py
 
-use openjd_model::{decode_job_template, decode_environment_template, preprocess_job_parameters, merge_job_parameter_definitions, build_symbol_table};
 use openjd_model::JobParameterInputValues;
+use openjd_model::{
+    build_symbol_table, decode_environment_template, decode_job_template,
+    merge_job_parameter_definitions, preprocess_job_parameters,
+};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
 }
 
 fn minimal_job_template(params: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "parameterDefinitions": [{params}],
         "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
-    }}"#))
+    }}"#
+    ))
 }
 
 fn minimal_env_template(params: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{params}],
         "environment": {{"name": "env", "script": {{"actions": {{"onEnter": {{"command": "do thing"}}}}}}}}
-    }}"#))
+    }}"#
+    ))
 }
 
 /// Provides platform-appropriate temporary directories for tests that call
@@ -42,18 +49,27 @@ impl TestDirs {
         let cwd = root.path().join("cwd");
         std::fs::create_dir_all(&template_dir).unwrap();
         std::fs::create_dir_all(&cwd).unwrap();
-        Self { _root: root, template_dir, cwd }
+        Self {
+            _root: root,
+            template_dir,
+            cwd,
+        }
     }
-    fn template(&self) -> &std::path::Path { &self.template_dir }
-    fn cwd(&self) -> &std::path::Path { &self.cwd }
+    fn template(&self) -> &std::path::Path {
+        &self.template_dir
+    }
+    fn cwd(&self) -> &std::path::Path {
+        &self.cwd
+    }
     /// Join a relative path and normalize separators to match the model's behavior.
     fn join_normalized(base: &std::path::Path, relative: &str) -> String {
         let joined = base.join(relative);
         // The model normalizes all separators to the OS native
-        joined.to_string_lossy().replace('/', &std::path::MAIN_SEPARATOR.to_string())
+        joined
+            .to_string_lossy()
+            .replace('/', std::path::MAIN_SEPARATOR_STR)
     }
 }
-
 
 // === preprocess_job_parameters ===
 
@@ -64,7 +80,8 @@ fn test_preprocess_string_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("hello".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "hello"));
 }
 
@@ -75,8 +92,12 @@ fn test_preprocess_int_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Int(42)));
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Int(42)
+    ));
 }
 
 #[test]
@@ -86,8 +107,12 @@ fn test_preprocess_float_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Float(_)));
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Float(_)
+    ));
 }
 
 #[test]
@@ -96,7 +121,8 @@ fn test_preprocess_uses_default() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "bar"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "bar"));
 }
 
@@ -122,7 +148,8 @@ fn test_preprocess_extra_param() {
 #[test]
 fn test_preprocess_int_constraint_violation() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "INT", "minValue": 10, "maxValue": 20}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "INT", "minValue": 10, "maxValue": 20}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("5".into()));
@@ -132,7 +159,8 @@ fn test_preprocess_int_constraint_violation() {
 #[test]
 fn test_preprocess_string_allowed_values_violation() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["a", "b"]}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["a", "b"]}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("c".into()));
@@ -144,15 +172,18 @@ fn test_preprocess_string_allowed_values_violation() {
 #[test]
 fn test_path_default_joined_to_template_dir() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap();
-    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value { let exp = TestDirs::join_normalized(td.template(), "data/input.csv"); assert_eq!(s, &exp); } else { panic!("Expected String"); }
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        let exp = TestDirs::join_normalized(td.template(), "data/input.csv");
+        assert_eq!(s, &exp);
+    } else {
+        panic!("Expected String");
+    }
 }
 
 #[test]
@@ -161,13 +192,18 @@ fn test_path_user_value_joined_to_cwd() {
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("DataDir".into(), openjd_expr::ExprValue::String("my/output".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap();
-    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value { let exp = td.cwd().join("my/output").to_string_lossy().to_string(); assert_eq!(s, &exp); } else { panic!("Expected String"); }
+    input.insert(
+        "DataDir".into(),
+        openjd_expr::ExprValue::String("my/output".into()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        let exp = td.cwd().join("my/output").to_string_lossy().to_string();
+        assert_eq!(s, &exp);
+    } else {
+        panic!("Expected String");
+    }
 }
 
 #[test]
@@ -177,42 +213,55 @@ fn test_path_absolute_user_value_unchanged() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     let abs_path = td.cwd().join("absolute_test").to_string_lossy().to_string();
-    input.insert("DataDir".into(), openjd_expr::ExprValue::String(abs_path.clone()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap();
-    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value { assert_eq!(s, &abs_path); } else { panic!("Expected String"); }
+    input.insert(
+        "DataDir".into(),
+        openjd_expr::ExprValue::String(abs_path.clone()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        assert_eq!(s, &abs_path);
+    } else {
+        panic!("Expected String");
+    }
 }
 
 #[test]
 fn test_path_absolute_default_rejected() {
     let td = TestDirs::new();
-    let abs_default = if cfg!(windows) { r#"C:\\absolute\\path"# } else { "/absolute/path" };
-    let jt_val = minimal_job_template(&format!(r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#, abs_default));
+    let abs_default = if cfg!(windows) {
+        r#"C:\\absolute\\path"#
+    } else {
+        "/absolute/path"
+    };
+    let jt_val = minimal_job_template(&format!(
+        r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#,
+        abs_default
+    ));
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let err = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap_err();
-    assert!(err.to_string().contains("absolute path"), "Expected absolute path error, got: {err}");
+    let err =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap_err();
+    assert!(
+        err.to_string().contains("absolute path"),
+        "Expected absolute path error, got: {err}"
+    );
 }
 
 #[test]
 fn test_path_default_walkup_rejected() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "../escape/path"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "../escape/path"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let err = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap_err();
-    assert!(err.to_string().contains("outside of the template directory"), "Expected walkup error, got: {err}");
+    let err =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("outside of the template directory"),
+        "Expected walkup error, got: {err}"
+    );
 }
 
 #[test]
@@ -221,12 +270,11 @@ fn test_path_empty_default_not_joined() {
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": ""}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap();
-    assert!(matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s == ""));
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    assert!(
+        matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s.is_empty())
+    );
 }
 
 #[test]
@@ -236,12 +284,11 @@ fn test_path_empty_user_value_not_joined() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("DataDir".into(), openjd_expr::ExprValue::String("".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(), false,
-    ).unwrap();
-    assert!(matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s == ""));
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    assert!(
+        matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s.is_empty())
+    );
 }
 
 // === build_symbol_table ===
@@ -253,7 +300,8 @@ fn test_build_symbol_table_int() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Frame".into(), openjd_expr::ExprValue::String("42".into()));
-    let params = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let params =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     let val = symtab.get_value("Param.Frame").unwrap();
     assert_eq!(val.to_display_string(), "42");
@@ -265,8 +313,12 @@ fn test_build_symbol_table_string() {
     let jt_val = minimal_job_template(r#"{"name": "Name", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Name".into(), openjd_expr::ExprValue::String("hello".into()));
-    let params = preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    input.insert(
+        "Name".into(),
+        openjd_expr::ExprValue::String("hello".into()),
+    );
+    let params =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     let val = symtab.get_value("Param.Name").unwrap();
     assert_eq!(val.to_display_string(), "hello");
@@ -285,9 +337,11 @@ fn test_merge_no_env_templates() {
 
 #[test]
 fn test_merge_env_and_job_same_param() {
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "job_default"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "job_default"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
-    let et_val = minimal_env_template(r#"{"name": "Foo", "type": "STRING", "default": "env_default"}"#);
+    let et_val =
+        minimal_env_template(r#"{"name": "Foo", "type": "STRING", "default": "env_default"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
     assert_eq!(merged.len(), 1);
@@ -306,11 +360,13 @@ fn test_merge_type_conflict() {
 
 #[test]
 fn test_merge_env_only_param() {
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
     let et_val = minimal_env_template(r#"{"name": "EnvParam", "type": "INT", "default": "5"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
@@ -326,13 +382,15 @@ fn expr_job_template_with_path_param(param_name: &str, default: Option<&str>) ->
         Some(d) => format!(r#", "default": "{d}""#),
         None => String::new(),
     };
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "test",
         "parameterDefinitions": [{{"name": "{param_name}", "type": "PATH"{default_str}}}],
         "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
-    }}"#))
+    }}"#
+    ))
 }
 
 #[test]
@@ -342,13 +400,12 @@ fn test_uri_user_value_preserved() {
     let jt_val = expr_job_template_with_path_param("S3File", None);
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("S3File".into(), openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(),
-        false,
-    ).unwrap();
+    input.insert(
+        "S3File".into(),
+        openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     // URI should be preserved as-is, not joined with /tmp/cwd
     match &result["S3File"].value {
         openjd_expr::ExprValue::String(s) => assert_eq!(s, "s3://my-bucket/assets/teapot.obj"),
@@ -363,11 +420,14 @@ fn test_uri_default_preserved() {
     let jt_val = expr_job_template_with_path_param("S3File", Some("s3://my-bucket/default.obj"));
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let result = preprocess_job_parameters(
-        &jt, &JobParameterInputValues::new(), &[],
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
         td.template(),
         td.cwd(),
         false,
-    ).unwrap();
+    )
+    .unwrap();
     match &result["S3File"].value {
         openjd_expr::ExprValue::String(s) => assert_eq!(s, "s3://my-bucket/default.obj"),
         other => panic!("Expected String, got {:?}", other),
@@ -380,15 +440,16 @@ fn test_https_uri_user_value_preserved() {
     let jt_val = expr_job_template_with_path_param("HttpFile", None);
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("HttpFile".into(), openjd_expr::ExprValue::String("https://cdn.example.com/models/scene.obj".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(),
-        false,
-    ).unwrap();
+    input.insert(
+        "HttpFile".into(),
+        openjd_expr::ExprValue::String("https://cdn.example.com/models/scene.obj".into()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     match &result["HttpFile"].value {
-        openjd_expr::ExprValue::String(s) => assert_eq!(s, "https://cdn.example.com/models/scene.obj"),
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(s, "https://cdn.example.com/models/scene.obj")
+        }
         other => panic!("Expected String, got {:?}", other),
     }
 }
@@ -397,24 +458,31 @@ fn test_https_uri_user_value_preserved() {
 fn test_uri_not_preserved_without_expr_extension() {
     let td = TestDirs::new();
     // Without EXPR extension, URI values are treated as relative paths and joined
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "parameterDefinitions": [{"name": "S3File", "type": "PATH"}],
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("S3File".into(), openjd_expr::ExprValue::String("s3://my-bucket/file.obj".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(),
-        false,
-    ).unwrap();
+    input.insert(
+        "S3File".into(),
+        openjd_expr::ExprValue::String("s3://my-bucket/file.obj".into()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     // Without EXPR, the URI is treated as a relative path and joined with cwd
     match &result["S3File"].value {
-        openjd_expr::ExprValue::String(s) => assert!({ let cwd_str = td.cwd().to_string_lossy().to_string(); s.contains(&cwd_str) }, "Expected joined path, got: {s}"),
+        openjd_expr::ExprValue::String(s) => assert!(
+            {
+                let cwd_str = td.cwd().to_string_lossy().to_string();
+                s.contains(&cwd_str)
+            },
+            "Expected joined path, got: {s}"
+        ),
         other => panic!("Expected String, got {:?}", other),
     }
 }
@@ -426,15 +494,21 @@ fn test_relative_path_still_joined_with_expr() {
     let jt_val = expr_job_template_with_path_param("LocalFile", None);
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("LocalFile".into(), openjd_expr::ExprValue::String("subdir/file.txt".into()));
-    let result = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(),
-        false,
-    ).unwrap();
+    input.insert(
+        "LocalFile".into(),
+        openjd_expr::ExprValue::String("subdir/file.txt".into()),
+    );
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     match &result["LocalFile"].value {
-        openjd_expr::ExprValue::String(s) => { let exp = td.cwd().join("subdir/file.txt").to_string_lossy().to_string(); assert_eq!(s, &exp); },
+        openjd_expr::ExprValue::String(s) => {
+            let exp = td
+                .cwd()
+                .join("subdir/file.txt")
+                .to_string_lossy()
+                .to_string();
+            assert_eq!(s, &exp);
+        }
         other => panic!("Expected String, got {:?}", other),
     }
 }
@@ -447,18 +521,23 @@ fn test_uri_in_build_symbol_table() {
     let jt_val = expr_job_template_with_path_param("S3File", None);
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("S3File".into(), openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()));
-    let params = preprocess_job_parameters(
-        &jt, &input, &[],
-        td.template(),
-        td.cwd(),
-        false,
-    ).unwrap();
+    input.insert(
+        "S3File".into(),
+        openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()),
+    );
+    let params =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     // RawParam should be the original string
-    assert_eq!(symtab.get_string("RawParam.S3File").unwrap(), "s3://my-bucket/assets/teapot.obj");
+    assert_eq!(
+        symtab.get_string("RawParam.S3File").unwrap(),
+        "s3://my-bucket/assets/teapot.obj"
+    );
     // Param.S3File should NOT be in the template-scope symtab (PATH types are host-context only)
-    assert!(symtab.get_value("Param.S3File").is_none(), "Param.S3File should not be in template-scope symtab");
+    assert!(
+        symtab.get_value("Param.S3File").is_none(),
+        "Param.S3File should not be in template-scope symtab"
+    );
 }
 
 // === create_job ===
@@ -469,10 +548,11 @@ use openjd_model::job;
 fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
     let td = TestDirs::new();
     let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
-    let supported = vec!["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
-    let supported_refs: Vec<&str> = supported.iter().copied().collect();
+    let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
+    let supported_refs: Vec<&str> = supported.to_vec();
     let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
-    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params.iter()
+    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
+        .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
         .collect();
     let processed = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), true).unwrap();
@@ -482,10 +562,11 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
 fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String {
     let td = TestDirs::new();
     let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
-    let supported = vec!["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
-    let supported_refs: Vec<&str> = supported.iter().copied().collect();
+    let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
+    let supported_refs: Vec<&str> = supported.to_vec();
     let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
-    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params.iter()
+    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
+        .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
         .collect();
     let processed = match preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), true) {
@@ -497,11 +578,14 @@ fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String 
 
 #[test]
 fn test_create_job_basic_minimal_template() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "MyJob",
         "steps": [{"name": "Step1", "script": {"actions": {"onRun": {"command": "echo", "args": ["hello"]}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.name, "MyJob");
     assert_eq!(job.steps.len(), 1);
     assert_eq!(job.steps[0].name, "Step1");
@@ -512,18 +596,22 @@ fn test_create_job_basic_minimal_template() {
 
 #[test]
 fn test_create_job_parameter_binding_in_job_name() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Render-{{Param.Scene}}",
         "parameterDefinitions": [{"name": "Scene", "type": "STRING"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[("Scene", "forest")]);
+    }"#,
+        &[("Scene", "forest")],
+    );
     assert_eq!(job.name, "Render-forest");
 }
 
 #[test]
 fn test_create_job_host_requirements_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "Test",
@@ -535,7 +623,9 @@ fn test_create_job_host_requirements_resolved() {
             },
             "script": {"actions": {"onRun": {"command": "run"}}}
         }]
-    }"#, &[("MinCpu", "4")]);
+    }"#,
+        &[("MinCpu", "4")],
+    );
     let hr = job.steps[0].host_requirements.as_ref().unwrap();
     let amt = &hr.amounts.as_ref().unwrap()[0];
     assert_eq!(amt.name, "amount.worker.vcpu");
@@ -545,7 +635,8 @@ fn test_create_job_host_requirements_resolved() {
 
 #[test]
 fn test_create_job_parameter_space_int_list() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{
@@ -555,7 +646,9 @@ fn test_create_job_parameter_space_int_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     let frame = &ps.task_parameter_definitions["Frame"];
     match frame {
@@ -569,7 +662,8 @@ fn test_create_job_parameter_space_int_list() {
 
 #[test]
 fn test_create_job_parameter_space_range_expr() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Frames", "type": "STRING"}],
@@ -580,7 +674,9 @@ fn test_create_job_parameter_space_range_expr() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[("Frames", "1-10")]);
+    }"#,
+        &[("Frames", "1-10")],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     let frame = &ps.task_parameter_definitions["Frame"];
     match frame {
@@ -594,7 +690,8 @@ fn test_create_job_parameter_space_range_expr() {
 
 #[test]
 fn test_create_job_environment_carry_forward() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "jobEnvironments": [{
@@ -604,7 +701,9 @@ fn test_create_job_environment_carry_forward() {
         }],
         "parameterDefinitions": [{"name": "Bar", "type": "STRING", "default": "baz"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let envs = job.job_environments.as_ref().unwrap();
     assert_eq!(envs.len(), 1);
     assert_eq!(envs[0].name, "MyEnv");
@@ -615,7 +714,8 @@ fn test_create_job_environment_carry_forward() {
 
 #[test]
 fn test_create_job_step_environment_carry_forward() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "x"}],
@@ -627,7 +727,9 @@ fn test_create_job_step_environment_carry_forward() {
             }],
             "script": {"actions": {"onRun": {"command": "run"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let step_envs = job.steps[0].step_environments.as_ref().unwrap();
     assert_eq!(step_envs.len(), 1);
     assert_eq!(step_envs[0].name, "StepEnv");
@@ -637,19 +739,25 @@ fn test_create_job_step_environment_carry_forward() {
 
 #[test]
 fn test_create_job_missing_required_parameter() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Required", "type": "STRING"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
-    assert!(err.contains("Values missing for required job parameters: Required"),
-        "Expected missing parameter error, got: {err}");
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("Values missing for required job parameters: Required"),
+        "Expected missing parameter error, got: {err}"
+    );
 }
 
 #[test]
 fn test_create_job_syntax_sugar_bash() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["FEATURE_BUNDLE_1"],
         "name": "Test",
@@ -657,7 +765,9 @@ fn test_create_job_syntax_sugar_bash() {
             "name": "MyStep",
             "bash": {"script": "echo hello"}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.steps[0].name, "MyStep");
     assert_eq!(job.steps[0].script.actions.on_run.command.raw(), "bash");
     let files = job.steps[0].script.embedded_files.as_ref().unwrap();
@@ -669,7 +779,8 @@ fn test_create_job_syntax_sugar_bash() {
 
 #[test]
 fn test_create_job_dependencies_preserved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [
@@ -680,7 +791,9 @@ fn test_create_job_dependencies_preserved() {
                 "script": {"actions": {"onRun": {"command": "test"}}}
             }
         ]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.steps.len(), 2);
     let deps = job.steps[1].dependencies.as_ref().unwrap();
     assert_eq!(deps.len(), 1);
@@ -689,18 +802,22 @@ fn test_create_job_dependencies_preserved() {
 
 #[test]
 fn test_create_job_extensions_carried_forward() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.extensions, Some(vec!["EXPR".to_string()]));
 }
 
 #[test]
 fn test_create_job_job_name_in_step_let_binding() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "MyJob",
@@ -710,13 +827,16 @@ fn test_create_job_job_name_in_step_let_binding() {
             "let": ["nameLen = len(Job.Name)"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{nameLen}}"]}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.steps[0].name, "S");
 }
 
 #[test]
 fn test_create_job_step_name_in_let_binding() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
@@ -726,13 +846,16 @@ fn test_create_job_step_name_in_let_binding() {
             "let": ["stepLen = len(Step.Name)"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{stepLen}}"]}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert_eq!(job.steps[0].name, "RenderStep");
 }
 
 #[test]
 fn test_create_job_step_let_binding_in_host_requirements() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "MyJob",
@@ -745,7 +868,9 @@ fn test_create_job_step_let_binding_in_host_requirements() {
             },
             "script": {"actions": {"onRun": {"command": "work"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let hr = job.steps[0].host_requirements.as_ref().unwrap();
     let amt = &hr.amounts.as_ref().unwrap()[0];
     assert_eq!(amt.name, "amount.worker.vcpu");
@@ -754,7 +879,8 @@ fn test_create_job_step_let_binding_in_host_requirements() {
 
 #[test]
 fn test_create_job_resolved_symtab_populated() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
@@ -764,13 +890,26 @@ fn test_create_job_resolved_symtab_populated() {
             "let": ["doubled = Param.Count * 2", "label = 'hello'"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{doubled}}"]}}}
         }]
-    }"#, &[]);
-    let symtab = job.steps[0].resolved_symtab.as_ref().expect("should have resolved_symtab").to_symtab(openjd_expr::PathFormat::Posix).unwrap();
-    assert_eq!(symtab.get_value("doubled"), Some(&openjd_expr::ExprValue::Int(84)));
+    }"#,
+        &[],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        symtab.get_value("doubled"),
+        Some(&openjd_expr::ExprValue::Int(84))
+    );
     // "label" is not referenced by any format string, so it's filtered out
     assert_eq!(symtab.get_value("label"), None);
     // Param.Count is referenced by the let binding "doubled = Param.Count * 2"
-    assert_eq!(symtab.get_value("Param.Count"), Some(&openjd_expr::ExprValue::Int(42)));
+    assert_eq!(
+        symtab.get_value("Param.Count"),
+        Some(&openjd_expr::ExprValue::Int(42))
+    );
     // Job.Name and Step.Name are not referenced by any format string or let binding
     assert_eq!(symtab.get_value("Job.Name"), None);
     assert_eq!(symtab.get_value("Step.Name"), None);
@@ -778,12 +917,20 @@ fn test_create_job_resolved_symtab_populated() {
 
 #[test]
 fn test_create_job_resolved_symtab_always_present() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[]);
-    let symtab = job.steps[0].resolved_symtab.as_ref().expect("should always have resolved_symtab").to_symtab(openjd_expr::PathFormat::Posix).unwrap();
+    }"#,
+        &[],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should always have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
     assert_eq!(symtab.get_value("Step.Name"), None); // No EXPR extension, so no Step.Name
 }
 
@@ -798,46 +945,65 @@ fn test_create_job_resolved_symtab_always_present() {
 /// then verify which fields got resolved (TEMPLATE scope) vs carried through (SESSION/TASK).
 #[test]
 fn test_scope_boundary_action_command_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "RESOLVED"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "{{Param.Val}}"}}}}]
-    }"#, &[]);
-    assert_eq!(job.steps[0].script.actions.on_run.command.raw(), "{{Param.Val}}",
-        "Action command is SESSION/TASK scope — must NOT be resolved during create_job");
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        job.steps[0].script.actions.on_run.command.raw(),
+        "{{Param.Val}}",
+        "Action command is SESSION/TASK scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_action_args_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "RESOLVED"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo", "args": ["{{Param.Val}}"]}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let args = job.steps[0].script.actions.on_run.args.as_ref().unwrap();
-    assert_eq!(args[0].raw(), "{{Param.Val}}",
-        "Action args are SESSION/TASK scope — must NOT be resolved during create_job");
+    assert_eq!(
+        args[0].raw(),
+        "{{Param.Val}}",
+        "Action args are SESSION/TASK scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_action_timeout_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["FEATURE_BUNDLE_1"],
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "INT", "default": 30}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run", "timeout": "{{Param.Val}}"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let timeout = job.steps[0].script.actions.on_run.timeout.as_ref().unwrap();
-    assert_eq!(timeout.raw(), "{{Param.Val}}",
-        "Action timeout is SESSION/TASK scope — must NOT be resolved during create_job");
+    assert_eq!(
+        timeout.raw(),
+        "{{Param.Val}}",
+        "Action timeout is SESSION/TASK scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_cancelation_notify_period_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["FEATURE_BUNDLE_1"],
         "name": "Test",
@@ -846,10 +1012,20 @@ fn test_scope_boundary_cancelation_notify_period_not_resolved() {
             "command": "run",
             "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{Param.Val}}"}
         }}}}]
-    }"#, &[]);
-    let cancel = job.steps[0].script.actions.on_run.cancelation.as_ref().unwrap();
+    }"#,
+        &[],
+    );
+    let cancel = job.steps[0]
+        .script
+        .actions
+        .on_run
+        .cancelation
+        .as_ref()
+        .unwrap();
     match cancel {
-        openjd_model::job::CancelationMode::NotifyThenTerminate { notify_period_in_seconds } => {
+        openjd_model::job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds,
+        } => {
             let notify = notify_period_in_seconds.as_ref().unwrap();
             assert_eq!(notify.raw(), "{{Param.Val}}",
                 "Cancelation notifyPeriodInSeconds is SESSION/TASK scope — must NOT be resolved during create_job");
@@ -860,7 +1036,8 @@ fn test_scope_boundary_cancelation_notify_period_not_resolved() {
 
 #[test]
 fn test_scope_boundary_embedded_file_filename_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "script.sh"}],
@@ -868,15 +1045,21 @@ fn test_scope_boundary_embedded_file_filename_not_resolved() {
             "embeddedFiles": [{"name": "myfile", "type": "TEXT", "filename": "{{Param.Val}}", "data": "echo hi"}],
             "actions": {"onRun": {"command": "bash", "args": ["{{Task.File.myfile}}"]}}
         }}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let files = job.steps[0].script.embedded_files.as_ref().unwrap();
-    assert_eq!(files[0].filename.as_ref().unwrap().raw(), "{{Param.Val}}",
-        "EmbeddedFile filename is SESSION/TASK scope — must NOT be resolved during create_job");
+    assert_eq!(
+        files[0].filename.as_ref().unwrap().raw(),
+        "{{Param.Val}}",
+        "EmbeddedFile filename is SESSION/TASK scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_embedded_file_data_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "hello"}],
@@ -884,15 +1067,21 @@ fn test_scope_boundary_embedded_file_data_not_resolved() {
             "embeddedFiles": [{"name": "myfile", "type": "TEXT", "data": "echo {{Param.Val}}"}],
             "actions": {"onRun": {"command": "bash", "args": ["{{Task.File.myfile}}"]}}
         }}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let files = job.steps[0].script.embedded_files.as_ref().unwrap();
-    assert_eq!(files[0].data.as_ref().unwrap().raw(), "echo {{Param.Val}}",
-        "EmbeddedFile data is SESSION/TASK scope — must NOT be resolved during create_job");
+    assert_eq!(
+        files[0].data.as_ref().unwrap().raw(),
+        "echo {{Param.Val}}",
+        "EmbeddedFile data is SESSION/TASK scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_env_action_command_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "setup"}],
@@ -904,39 +1093,60 @@ fn test_scope_boundary_env_action_command_not_resolved() {
             }}
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let env = &job.job_environments.as_ref().unwrap()[0];
     let script = env.script.as_ref().unwrap();
     let on_enter = script.actions.on_enter.as_ref().unwrap();
-    assert_eq!(on_enter.command.raw(), "{{Param.Val}}",
-        "Environment onEnter command is SESSION scope — must NOT be resolved during create_job");
-    assert_eq!(on_enter.args.as_ref().unwrap()[0].raw(), "{{Param.Val}}",
-        "Environment onEnter args are SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(
+        on_enter.command.raw(),
+        "{{Param.Val}}",
+        "Environment onEnter command is SESSION scope — must NOT be resolved during create_job"
+    );
+    assert_eq!(
+        on_enter.args.as_ref().unwrap()[0].raw(),
+        "{{Param.Val}}",
+        "Environment onEnter args are SESSION scope — must NOT be resolved during create_job"
+    );
     let on_exit = script.actions.on_exit.as_ref().unwrap();
-    assert_eq!(on_exit.command.raw(), "{{Param.Val}}",
-        "Environment onExit command is SESSION scope — must NOT be resolved during create_job");
-    assert_eq!(on_exit.args.as_ref().unwrap()[0].raw(), "{{Param.Val}}",
-        "Environment onExit args are SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(
+        on_exit.command.raw(),
+        "{{Param.Val}}",
+        "Environment onExit command is SESSION scope — must NOT be resolved during create_job"
+    );
+    assert_eq!(
+        on_exit.args.as_ref().unwrap()[0].raw(),
+        "{{Param.Val}}",
+        "Environment onExit args are SESSION scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_env_variables_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "x"}],
         "jobEnvironments": [{"name": "E", "variables": {"KEY": "{{Param.Val}}"}}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let env = &job.job_environments.as_ref().unwrap()[0];
     let vars = env.variables.as_ref().unwrap();
-    assert_eq!(vars["KEY"].raw(), "{{Param.Val}}",
-        "Environment variables are SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(
+        vars["KEY"].raw(),
+        "{{Param.Val}}",
+        "Environment variables are SESSION scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_env_embedded_files_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "x"}],
@@ -948,18 +1158,30 @@ fn test_scope_boundary_env_embedded_files_not_resolved() {
             }
         }],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let env = &job.job_environments.as_ref().unwrap()[0];
-    let files = env.script.as_ref().unwrap().embedded_files.as_ref().unwrap();
+    let files = env
+        .script
+        .as_ref()
+        .unwrap()
+        .embedded_files
+        .as_ref()
+        .unwrap();
     assert_eq!(files[0].filename.as_ref().unwrap().raw(), "{{Param.Val}}",
         "Environment embedded file filename is SESSION scope — must NOT be resolved during create_job");
-    assert_eq!(files[0].data.as_ref().unwrap().raw(), "echo {{Param.Val}}",
-        "Environment embedded file data is SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(
+        files[0].data.as_ref().unwrap().raw(),
+        "echo {{Param.Val}}",
+        "Environment embedded file data is SESSION scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_step_env_action_not_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Val", "type": "STRING", "default": "x"}],
@@ -974,18 +1196,27 @@ fn test_scope_boundary_step_env_action_not_resolved() {
             }],
             "script": {"actions": {"onRun": {"command": "run"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let step_env = &job.steps[0].step_environments.as_ref().unwrap()[0];
     let script = step_env.script.as_ref().unwrap();
-    assert_eq!(script.actions.on_enter.as_ref().unwrap().command.raw(), "{{Param.Val}}",
-        "Step environment onEnter is SESSION scope — must NOT be resolved during create_job");
-    assert_eq!(script.actions.on_exit.as_ref().unwrap().command.raw(), "{{Param.Val}}",
-        "Step environment onExit is SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(
+        script.actions.on_enter.as_ref().unwrap().command.raw(),
+        "{{Param.Val}}",
+        "Step environment onEnter is SESSION scope — must NOT be resolved during create_job"
+    );
+    assert_eq!(
+        script.actions.on_exit.as_ref().unwrap().command.raw(),
+        "{{Param.Val}}",
+        "Step environment onExit is SESSION scope — must NOT be resolved during create_job"
+    );
 }
 
 #[test]
 fn test_scope_boundary_script_let_bindings_carried_through() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -997,25 +1228,38 @@ fn test_scope_boundary_script_let_bindings_carried_through() {
                 "actions": {"onRun": {"command": "echo", "args": ["{{myvar}}"]}}
             }
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let let_bindings = job.steps[0].script.let_bindings.as_ref().unwrap();
-    assert_eq!(let_bindings[0], "myvar = Param.Val",
-        "Script-level let bindings are SESSION/TASK scope — must be carried through as strings");
+    assert_eq!(
+        let_bindings[0], "myvar = Param.Val",
+        "Script-level let bindings are SESSION/TASK scope — must be carried through as strings"
+    );
 }
 
 // Verify TEMPLATE-scope fields ARE resolved (positive control)
 #[test]
 fn test_scope_boundary_template_scope_fields_are_resolved() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{{Param.JobName}}",
         "parameterDefinitions": [
             {"name": "JobName", "type": "STRING", "default": "MyJob"}
         ],
         "steps": [{"name": "MyStep", "script": {"actions": {"onRun": {"command": "run"}}}}]
-    }"#, &[]);
-    assert_eq!(job.name, "MyJob", "Job name is TEMPLATE scope — must be resolved");
-    assert_eq!(job.steps[0].name, "MyStep", "Step name is a plain string — passed through as-is");
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        job.name, "MyJob",
+        "Job name is TEMPLATE scope — must be resolved"
+    );
+    assert_eq!(
+        job.steps[0].name, "MyStep",
+        "Step name is a plain string — passed through as-is"
+    );
 }
 
 // === Task parameter value validation (§3.4.2) ===
@@ -1023,7 +1267,9 @@ fn test_scope_boundary_template_scope_fields_are_resolved() {
 #[test]
 fn test_string_task_param_value_too_long() {
     let long_val = "x".repeat(1025);
-    let err = parse_and_create_err(&format!(r#"{{
+    let err = parse_and_create_err(
+        &format!(
+            r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{{
@@ -1033,13 +1279,20 @@ fn test_string_task_param_value_too_long() {
             }},
             "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
         }}]
-    }}"#), &[]);
-    assert!(err.contains("exceeds 1024 characters"), "Expected length error, got: {err}");
+    }}"#
+        ),
+        &[],
+    );
+    assert!(
+        err.contains("exceeds 1024 characters"),
+        "Expected length error, got: {err}"
+    );
 }
 
 #[test]
 fn test_path_task_param_empty_value() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "E", "type": "STRING", "default": ""}],
@@ -1050,14 +1303,21 @@ fn test_path_task_param_empty_value() {
             },
             "script": {"actions": {"onRun": {"command": "run"}}}
         }]
-    }"#, &[]);
-    assert!(err.contains("must not be empty"), "Expected empty path error, got: {err}");
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("must not be empty"),
+        "Expected empty path error, got: {err}"
+    );
 }
 
 #[test]
 fn test_path_task_param_value_too_long() {
     let long_val = "x".repeat(1025);
-    let err = parse_and_create_err(&format!(r#"{{
+    let err = parse_and_create_err(
+        &format!(
+            r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{{
@@ -1067,14 +1327,22 @@ fn test_path_task_param_value_too_long() {
             }},
             "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
         }}]
-    }}"#), &[]);
-    assert!(err.contains("exceeds 1024 characters"), "Expected length error, got: {err}");
+    }}"#
+        ),
+        &[],
+    );
+    assert!(
+        err.contains("exceeds 1024 characters"),
+        "Expected length error, got: {err}"
+    );
 }
 
 #[test]
 fn test_string_task_param_1024_chars_ok() {
     let val_1024 = "x".repeat(1024);
-    let job = parse_and_create(&format!(r#"{{
+    let job = parse_and_create(
+        &format!(
+            r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{{
@@ -1084,7 +1352,10 @@ fn test_string_task_param_1024_chars_ok() {
             }},
             "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
         }}]
-    }}"#), &[]);
+    }}"#
+        ),
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Val"] {
         job::TaskParameter::String { range } => assert_eq!(range[0].len(), 1024),
@@ -1101,7 +1372,8 @@ fn test_create_job_v2023_09_comprehensive() {
     // range values should be evaluated at TEMPLATE scope.
     // Note: Rust validates INT/FLOAT list range values at parse time, so we use literal values
     // in list ranges and format strings only in range expressions and STRING ranges.
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{{ Param.StringParam }}",
         "description": "job description",
@@ -1150,11 +1422,13 @@ fn test_create_job_v2023_09_comprehensive() {
                 "actions": {"onRun": {"command": "{{ Param.IntParam }}", "args": ["{{ Param.FloatParam }}"], "timeout": 10}}
             }
         }]
-    }"#, &[
-        ("IntParam", "10"),
-        ("FloatParam", "10"),
-        ("RangeExpressionParam", "3"),
-    ]);
+    }"#,
+        &[
+            ("IntParam", "10"),
+            ("FloatParam", "10"),
+            ("RangeExpressionParam", "3"),
+        ],
+    );
 
     // Job name should be resolved (TEMPLATE scope)
     assert_eq!(job.name, "TheOtherJobName");
@@ -1177,7 +1451,7 @@ fn test_create_job_v2023_09_comprehensive() {
                 // "2 - 3" resolves to values [2, 3]
                 let vals: Vec<i64> = r.iter().collect();
                 assert_eq!(vals, vec![2, 3]);
-            },
+            }
             other => panic!("Expected RangeExpr, got {:?}", other),
         },
         other => panic!("Expected Int, got {:?}", other),
@@ -1192,23 +1466,35 @@ fn test_create_job_v2023_09_comprehensive() {
     match &ps.task_parameter_definitions["ParamS"] {
         job::TaskParameter::String { range } => {
             assert_eq!(range, &["foo", "TheOtherJobName"]);
-        },
+        }
         other => panic!("Expected String, got {:?}", other),
     }
 
     // Parameters should be populated
     assert_eq!(job.parameters.len(), 4);
-    assert!(matches!(&job.parameters["StringParam"].value, openjd_expr::ExprValue::String(s) if s == "TheOtherJobName"));
+    assert!(
+        matches!(&job.parameters["StringParam"].value, openjd_expr::ExprValue::String(s) if s == "TheOtherJobName")
+    );
     // INT/FLOAT params are stored as typed values
-    assert!(matches!(&job.parameters["IntParam"].value, openjd_expr::ExprValue::Int(10)));
-    assert!(matches!(&job.parameters["FloatParam"].value, openjd_expr::ExprValue::Float(_)));
-    assert!(matches!(&job.parameters["RangeExpressionParam"].value, openjd_expr::ExprValue::Int(3)));
+    assert!(matches!(
+        &job.parameters["IntParam"].value,
+        openjd_expr::ExprValue::Int(10)
+    ));
+    assert!(matches!(
+        &job.parameters["FloatParam"].value,
+        openjd_expr::ExprValue::Float(_)
+    ));
+    assert!(matches!(
+        &job.parameters["RangeExpressionParam"].value,
+        openjd_expr::ExprValue::Int(3)
+    ));
 }
 
 #[test]
 fn test_create_job_v2023_09_task_chunking() {
     // End-to-end test for TASK_CHUNKING extension from Python test_create.py
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["TASK_CHUNKING"],
         "name": "Job {{ Param.IntParam }}",
@@ -1233,10 +1519,9 @@ fn test_create_job_v2023_09_task_chunking() {
             },
             "script": {"actions": {"onRun": {"command": "{{ Param.IntParam }}"}}}
         }]
-    }"#, &[
-        ("IntParam", "10"),
-        ("RangeExpressionParam", "3"),
-    ]);
+    }"#,
+        &[("IntParam", "10"), ("RangeExpressionParam", "3")],
+    );
 
     assert_eq!(job.name, "Job 10");
     assert_eq!(job.extensions, Some(vec!["TASK_CHUNKING".to_string()]));
@@ -1249,12 +1534,12 @@ fn test_create_job_v2023_09_task_chunking() {
                     // Range expression "2 - 3" resolves to values 2,3
                     let vals: Vec<i64> = r.iter().collect();
                     assert_eq!(vals, vec![2, 3]);
-                },
+                }
                 other => panic!("Expected RangeExpr, got {:?}", other),
             }
             assert_eq!(chunks.default_task_count, 3);
             assert_eq!(chunks.target_runtime_seconds, Some(10));
-        },
+        }
         other => panic!("Expected ChunkInt, got {:?}", other),
     }
 }
@@ -1265,7 +1550,8 @@ fn test_create_job_v2023_09_task_chunking() {
 fn test_uneven_parameter_space_association() {
     let td = TestDirs::new();
     // Association with mismatched lengths should fail during create_job or iteration
-    let v: serde_yaml::Value = serde_yaml::from_str(r#"{
+    let v: serde_yaml::Value = serde_yaml::from_str(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{
@@ -1279,16 +1565,31 @@ fn test_uneven_parameter_space_association() {
             },
             "script": {"actions": {"onRun": {"command": "do something"}}}
         }]
-    }"#).unwrap();
+    }"#,
+    )
+    .unwrap();
     let jt = decode_job_template(v, None).unwrap();
-    let processed = preprocess_job_parameters(&jt, &JobParameterInputValues::new(), &[], td.cwd(), td.cwd(), true).unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        td.cwd(),
+        td.cwd(),
+        true,
+    )
+    .unwrap();
     let result = create_job(&jt, &processed);
     // The error may occur at create_job or at iteration time
     match result {
         Err(e) => {
             let msg = e.to_string();
-            assert!(msg.contains("same number of values") || msg.contains("same length") || msg.contains("identical ranges") || msg.contains("argument lengths"),
-                "Expected association length mismatch error, got: {msg}");
+            assert!(
+                msg.contains("same number of values")
+                    || msg.contains("same length")
+                    || msg.contains("identical ranges")
+                    || msg.contains("argument lengths"),
+                "Expected association length mismatch error, got: {msg}"
+            );
         }
         Ok(job) => {
             // If create_job succeeds, the error should occur during iteration
@@ -1297,8 +1598,13 @@ fn test_uneven_parameter_space_association() {
             match err {
                 Err(e) => {
                     let msg = e.to_string();
-                    assert!(msg.contains("same number of values") || msg.contains("same length") || msg.contains("identical ranges") || msg.contains("argument lengths"),
-                        "Expected association length mismatch error, got: {msg}");
+                    assert!(
+                        msg.contains("same number of values")
+                            || msg.contains("same length")
+                            || msg.contains("identical ranges")
+                            || msg.contains("argument lengths"),
+                        "Expected association length mismatch error, got: {msg}"
+                    );
                 }
                 Ok(_) => panic!("Expected error from StepParameterSpaceIterator::new"),
             }
@@ -1312,16 +1618,23 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
     // In Rust, the name length is validated at decode time, not create_job time.
     // This test verifies that a 256-char name in the template itself is rejected.
     let long_name = "a".repeat(256);
-    let template = format!(r#"{{
+    let template = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{long_name}",
         "steps": [{{"name": "Step", "script": {{"actions": {{"onRun": {{"command": "do something"}}}}}}}}]
-    }}"#);
+    }}"#
+    );
     let v: serde_yaml::Value = serde_yaml::from_str(&template).unwrap();
     let err = decode_job_template(v, None).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("128") || msg.contains("too long") || msg.contains("at most") || msg.contains("characters"),
-        "Expected name too long error, got: {msg}");
+    assert!(
+        msg.contains("128")
+            || msg.contains("too long")
+            || msg.contains("at most")
+            || msg.contains("characters"),
+        "Expected name too long error, got: {msg}"
+    );
 }
 
 // === Tests ported from Python _internal/test_create_job.py ===
@@ -1332,23 +1645,36 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
 #[test]
 fn test_preprocess_reports_extra_with_environments() {
     let td = TestDirs::new();
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
-    let et_val = yaml_val(r#"{
+    let et_val = yaml_val(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "ThisIsKnown", "type": "STRING"}],
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
-    }"#);
+    }"#,
+    );
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("ThisIsUnknown".into(), openjd_expr::ExprValue::String("value".into()));
-    input.insert("ThisIsKnown".into(), openjd_expr::ExprValue::String("value".into()));
+    input.insert(
+        "ThisIsUnknown".into(),
+        openjd_expr::ExprValue::String("value".into()),
+    );
+    input.insert(
+        "ThisIsKnown".into(),
+        openjd_expr::ExprValue::String("value".into()),
+    );
     let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
-    assert!(err.to_string().contains("ThisIsUnknown"), "Expected extra param error, got: {err}");
+    assert!(
+        err.to_string().contains("ThisIsUnknown"),
+        "Expected extra param error, got: {err}"
+    );
 }
 
 #[test]
@@ -1356,34 +1682,49 @@ fn test_preprocess_reports_missing_with_environments() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "ThisIsNotDefined", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
-    let et_val = yaml_val(r#"{
+    let et_val = yaml_val(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "ThisIsAlsoMissing", "type": "STRING"}],
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
-    }"#);
+    }"#,
+    );
     let et = decode_environment_template(et_val, None).unwrap();
     let input = JobParameterInputValues::new();
     let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("ThisIsNotDefined"), "Expected missing param error, got: {msg}");
-    assert!(msg.contains("ThisIsAlsoMissing"), "Expected missing env param error, got: {msg}");
+    assert!(
+        msg.contains("ThisIsNotDefined"),
+        "Expected missing param error, got: {msg}"
+    );
+    assert!(
+        msg.contains("ThisIsAlsoMissing"),
+        "Expected missing env param error, got: {msg}"
+    );
 }
 
 #[test]
 fn test_preprocess_collects_defaults_with_environments() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
-    let et_val = yaml_val(r#"{
+    let et_val = yaml_val(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "Bar", "type": "STRING", "default": "alsoDefaultValue"}],
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
-    }"#);
+    }"#,
+    );
     let et = decode_environment_template(et_val, None).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "defaultValue"));
-    assert!(matches!(result["Bar"].value, openjd_expr::ExprValue::String(ref s) if s == "alsoDefaultValue"));
+    assert!(
+        matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "defaultValue")
+    );
+    assert!(
+        matches!(result["Bar"].value, openjd_expr::ExprValue::String(ref s) if s == "alsoDefaultValue")
+    );
 }
 
 #[test]
@@ -1391,11 +1732,13 @@ fn test_preprocess_checks_constraints_with_environments() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "maxLength": 1}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
-    let et_val = yaml_val(r#"{
+    let et_val = yaml_val(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{"name": "Bar", "type": "STRING", "minLength": 5}],
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
-    }"#);
+    }"#,
+    );
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
@@ -1403,15 +1746,18 @@ fn test_preprocess_checks_constraints_with_environments() {
     let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
     let msg = err.to_string();
     // At minimum, the first constraint violation should be reported
-    assert!(msg.contains("Foo") || msg.contains("Bar"),
-        "Expected constraint error for Foo or Bar, got: {msg}");
+    assert!(
+        msg.contains("Foo") || msg.contains("Bar"),
+        "Expected constraint error for Foo or Bar, got: {msg}"
+    );
 }
 
 #[test]
 fn test_preprocess_collects_multiple_errors() {
     let td = TestDirs::new();
     // Extra param, missing param, and constraint violation — at least one should be reported
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "parameterDefinitions": [
@@ -1419,7 +1765,8 @@ fn test_preprocess_collects_multiple_errors() {
             {"name": "Buz", "type": "STRING"}
         ],
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
@@ -1428,19 +1775,27 @@ fn test_preprocess_collects_multiple_errors() {
     let msg = err.to_string();
     // The Rust implementation may report errors differently (one at a time or all at once)
     // At minimum, one of the errors should be reported
-    assert!(msg.contains("Foo") || msg.contains("Bar") || msg.contains("Buz"),
-        "Expected at least one error about Foo, Bar, or Buz, got: {msg}");
+    assert!(
+        msg.contains("Foo") || msg.contains("Bar") || msg.contains("Buz"),
+        "Expected at least one error about Foo, Bar, or Buz, got: {msg}"
+    );
 }
 
 #[test]
 fn test_preprocess_ignores_defaults_when_value_provided() {
     let td = TestDirs::new();
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String("FooValue".into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("FooValue".into()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "FooValue"));
+    assert!(
+        matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "FooValue")
+    );
 }
 
 #[test]
@@ -1452,8 +1807,11 @@ fn test_preprocess_string_constraint_violation_message() {
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("Foo") && (msg.contains("1") || msg.contains("maximum") || msg.contains("exceed")),
-        "Expected constraint message mentioning Foo and length limit, got: {msg}");
+    assert!(
+        msg.contains("Foo")
+            && (msg.contains("1") || msg.contains("maximum") || msg.contains("exceed")),
+        "Expected constraint message mentioning Foo and length limit, got: {msg}"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1461,13 +1819,15 @@ fn test_preprocess_string_constraint_violation_message() {
 // ══════════════════════════════════════════════════════════════
 
 fn expr_job_template_with_param(param_json: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "test",
         "parameterDefinitions": [{param_json}],
         "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
-    }}"#))
+    }}"#
+    ))
 }
 
 #[test]
@@ -1490,38 +1850,54 @@ fn test_preprocess_float_to_int_coercion_whole() {
     let td = TestDirs::new();
     // Float(5.0) for INT param → coerces to Int(5)
     // Use env-only param to avoid check_constraints on raw value
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Int(5)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Int(5)
+    ));
 }
 
 #[test]
 fn test_preprocess_float_to_int_coercion_fractional_falls_through() {
     let td = TestDirs::new();
     // Float(5.5) for INT param → can't coerce losslessly, returns error
-    let jt_val = yaml_val(r#"{
+    let jt_val = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(jt_val, None).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.5).unwrap()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.5).unwrap()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("not a valid integer"), "Expected integer coercion error, got: {msg}");
+    assert!(
+        msg.contains("not a valid integer"),
+        "Expected integer coercion error, got: {msg}"
+    );
 }
 
 #[test]
@@ -1533,7 +1909,10 @@ fn test_preprocess_bool_coercion_true() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("true".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Bool(true)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Bool(true)
+    ));
 }
 
 #[test]
@@ -1544,7 +1923,10 @@ fn test_preprocess_bool_coercion_false() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("false".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Bool(false)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Bool(false)
+    ));
 }
 
 #[test]
@@ -1555,7 +1937,10 @@ fn test_preprocess_bool_coercion_yes() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("yes".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Bool(true)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Bool(true)
+    ));
 }
 
 #[test]
@@ -1566,7 +1951,10 @@ fn test_preprocess_bool_coercion_0() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("0".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Bool(false)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Bool(false)
+    ));
 }
 
 #[test]
@@ -1590,7 +1978,10 @@ fn test_preprocess_bool_from_bool_value() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Bool(true));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Bool(true)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Bool(true)
+    ));
 }
 
 #[test]
@@ -1602,7 +1993,10 @@ fn test_preprocess_range_expr_coercion() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("1-10".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::RangeExpr(_)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::RangeExpr(_)
+    ));
 }
 
 #[test]
@@ -1612,26 +2006,33 @@ fn test_preprocess_range_expr_invalid_stays_string() {
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "RANGE_EXPR"}"#);
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String("not-a-range".into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("not-a-range".into()),
+    );
     let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
     assert!(err.to_string().contains("not a valid range"), "got: {err}");
 }
 
 fn expr_env_template(params: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "parameterDefinitions": [{params}],
         "environment": {{"name": "env", "script": {{"actions": {{"onEnter": {{"command": "bar"}}}}}}}}
-    }}"#))
+    }}"#
+    ))
 }
 
 fn expr_job_no_params() -> serde_yaml::Value {
-    yaml_val(r#"{
+    yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "test",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-    }"#)
+    }"#,
+    )
 }
 
 #[test]
@@ -1641,11 +2042,21 @@ fn test_preprocess_list_int_json_coercion() {
     // Use env-only param to bypass check_constraints on raw String
     let jt_val = expr_job_no_params();
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
-    let et = decode_environment_template(expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#), Some(&["EXPR"])).unwrap();
+    let et = decode_environment_template(
+        expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String("[1,2,3]".into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("[1,2,3]".into()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::ListInt(_)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::ListInt(_)
+    ));
 }
 
 #[test]
@@ -1653,11 +2064,21 @@ fn test_preprocess_list_string_json_coercion() {
     let td = TestDirs::new();
     let jt_val = expr_job_no_params();
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
-    let et = decode_environment_template(expr_env_template(r#"{"name": "Foo", "type": "LIST[STRING]"}"#), Some(&["EXPR"])).unwrap();
+    let et = decode_environment_template(
+        expr_env_template(r#"{"name": "Foo", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String(r#"["a","b"]"#.into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String(r#"["a","b"]"#.into()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::ListString(_, _)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::ListString(_, _)
+    ));
 }
 
 #[test]
@@ -1665,11 +2086,21 @@ fn test_preprocess_list_bool_json_coercion() {
     let td = TestDirs::new();
     let jt_val = expr_job_no_params();
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
-    let et = decode_environment_template(expr_env_template(r#"{"name": "Foo", "type": "LIST[BOOL]"}"#), Some(&["EXPR"])).unwrap();
+    let et = decode_environment_template(
+        expr_env_template(r#"{"name": "Foo", "type": "LIST[BOOL]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String("[true,false]".into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("[true,false]".into()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::ListBool(_)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::ListBool(_)
+    ));
 }
 
 #[test]
@@ -1678,13 +2109,23 @@ fn test_preprocess_list_invalid_json_stays_string() {
     // Non-JSON string for LIST[INT] → returns error
     let jt_val = expr_job_no_params();
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
-    let et = decode_environment_template(expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#), Some(&["EXPR"])).unwrap();
+    let et = decode_environment_template(
+        expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
     let mut input = JobParameterInputValues::new();
-    input.insert("Foo".into(), openjd_expr::ExprValue::String("not json".into()));
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("not json".into()),
+    );
     let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("not valid JSON"), "Expected JSON parse error, got: {msg}");
+    assert!(
+        msg.contains("not valid JSON"),
+        "Expected JSON parse error, got: {msg}"
+    );
 }
 
 // ── Fix 1: coerce_from_str errors on invalid values ──
@@ -1699,7 +2140,10 @@ fn test_coerce_string_to_int_errors_on_non_numeric() {
     input.insert("Foo".into(), openjd_expr::ExprValue::String("abc".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not a valid integer"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("not a valid integer"));
 }
 
 #[test]
@@ -1712,7 +2156,10 @@ fn test_coerce_string_to_float_errors_on_non_numeric() {
     input.insert("Foo".into(), openjd_expr::ExprValue::String("xyz".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not a valid float"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("not a valid float"));
 }
 
 #[test]
@@ -1724,7 +2171,10 @@ fn test_coerce_valid_int_string_succeeds() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Int(42)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Int(42)
+    ));
 }
 
 #[test]
@@ -1736,7 +2186,10 @@ fn test_coerce_valid_float_string_succeeds() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
     let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
-    assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::Float(_)));
+    assert!(matches!(
+        result["Foo"].value,
+        openjd_expr::ExprValue::Float(_)
+    ));
 }
 
 // ── Fix 2: relative template dir guard ──
@@ -1748,22 +2201,34 @@ fn test_relative_template_dir_with_walkup_false_errors() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "bar"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let result = preprocess_job_parameters(
-        &jt, &JobParameterInputValues::new(), &[],
-        std::path::Path::new("relative/dir"), td.cwd(), false,
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        std::path::Path::new("relative/dir"),
+        td.cwd(),
+        false,
     );
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("is not an absolute path"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("is not an absolute path"));
 }
 
 #[test]
 fn test_relative_template_dir_with_walkup_true_succeeds() {
     let td = TestDirs::new();
     // Relative job_template_dir + allow_job_template_dir_walk_up=true → OK
-    let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "PATH", "default": "data/input.csv"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "Foo", "type": "PATH", "default": "data/input.csv"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let result = preprocess_job_parameters(
-        &jt, &JobParameterInputValues::new(), &[],
-        std::path::Path::new("relative/dir"), td.cwd(), true,
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        std::path::Path::new("relative/dir"),
+        td.cwd(),
+        true,
     );
     assert!(result.is_ok());
 }
@@ -1775,7 +2240,8 @@ fn test_merged_parameter_is_accessible() {
     // Verify MergedParameter is usable from the public API
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
-    let merged: Vec<openjd_model::MergedParameterDefinition> = merge_job_parameter_definitions(&jt, &[]).unwrap();
+    let merged: Vec<openjd_model::MergedParameterDefinition> =
+        merge_job_parameter_definitions(&jt, &[]).unwrap();
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "Foo");
     assert_eq!(merged[0].param_type, openjd_model::JobParameterType::String);
@@ -1819,28 +2285,43 @@ fn test_path_absolute_default_allowed_with_walkup() {
     } else {
         ("/absolute/path", "/absolute/path")
     };
-    let jt_val = minimal_job_template(&format!(r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#, json_default));
+    let jt_val = minimal_job_template(&format!(
+        r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#,
+        json_default
+    ));
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(
-        &jt, &input, &[], td.template(), td.cwd(), true,
-    ).unwrap();
-    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value { assert_eq!(s, expected); } else { panic!("Expected String"); }
+    let result =
+        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), true).unwrap();
+    if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        assert_eq!(s, expected);
+    } else {
+        panic!("Expected String");
+    }
 }
 
 #[test]
 fn test_path_default_relative_template_dir() {
     let td = TestDirs::new();
     // When template dir is relative and walk-up is disallowed, error is raised
-    let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
+    let jt_val =
+        minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
-        &jt, &input, &[], std::path::Path::new("relative/template"), td.cwd(), false,
+        &jt,
+        &input,
+        &[],
+        std::path::Path::new("relative/template"),
+        td.cwd(),
+        false,
     );
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("is not an absolute path"), "Expected absolute path error, got: {msg}");
+    assert!(
+        msg.contains("is not an absolute path"),
+        "Expected absolute path error, got: {msg}"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1849,7 +2330,8 @@ fn test_path_default_relative_template_dir() {
 
 #[test]
 fn test_create_job_int_range_expr_list() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1860,7 +2342,9 @@ fn test_create_job_int_range_expr_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Frame"] {
         openjd_model::job::TaskParameter::Int { range, .. } => match range {
@@ -1873,7 +2357,8 @@ fn test_create_job_int_range_expr_list() {
 
 #[test]
 fn test_create_job_int_range_expr_range_expr() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1885,7 +2370,9 @@ fn test_create_job_int_range_expr_range_expr() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[("Frames", "1-5")]);
+    }"#,
+        &[("Frames", "1-5")],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Frame"] {
         openjd_model::job::TaskParameter::Int { range, .. } => match range {
@@ -1898,7 +2385,8 @@ fn test_create_job_int_range_expr_range_expr() {
 
 #[test]
 fn test_create_job_int_range_expr_non_int_elements() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1909,13 +2397,16 @@ fn test_create_job_int_range_expr_non_int_elements() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert!(err.contains("Expected int in range"), "got: {err}");
 }
 
 #[test]
 fn test_create_job_int_range_string_fallback() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Frames", "type": "STRING"}],
@@ -1926,7 +2417,9 @@ fn test_create_job_int_range_string_fallback() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[("Frames", "1-5")]);
+    }"#,
+        &[("Frames", "1-5")],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Frame"] {
         openjd_model::job::TaskParameter::Int { range, .. } => match range {
@@ -1939,7 +2432,8 @@ fn test_create_job_int_range_string_fallback() {
 
 #[test]
 fn test_create_job_float_range_expr_list() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1950,20 +2444,23 @@ fn test_create_job_float_range_expr_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
             assert!((range[0] - 1.0).abs() < f64::EPSILON);
-        },
+        }
         other => panic!("Expected Float, got {:?}", other),
     }
 }
 
 #[test]
 fn test_create_job_float_range_expr_int_promotion() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1974,20 +2471,23 @@ fn test_create_job_float_range_expr_int_promotion() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
             assert!((range[0] - 1.0).abs() < f64::EPSILON);
-        },
+        }
         other => panic!("Expected Float, got {:?}", other),
     }
 }
 
 #[test]
 fn test_create_job_float_range_expr_not_list() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -1998,13 +2498,16 @@ fn test_create_job_float_range_expr_not_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert!(err.contains("must evaluate to a list"), "got: {err}");
 }
 
 #[test]
 fn test_create_job_string_range_expr_list() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -2015,7 +2518,9 @@ fn test_create_job_string_range_expr_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["Scene"] {
         openjd_model::job::TaskParameter::String { range } => assert_eq!(range, &["a", "b", "c"]),
@@ -2025,7 +2530,8 @@ fn test_create_job_string_range_expr_list() {
 
 #[test]
 fn test_create_job_string_range_expr_not_list() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -2036,13 +2542,16 @@ fn test_create_job_string_range_expr_not_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     assert!(err.contains("must evaluate to a list"), "got: {err}");
 }
 
 #[test]
 fn test_create_job_path_range_expr_list() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -2053,17 +2562,22 @@ fn test_create_job_path_range_expr_list() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["File"] {
-        openjd_model::job::TaskParameter::Path { range } => assert_eq!(range, &["/tmp/a", "/tmp/b"]),
+        openjd_model::job::TaskParameter::Path { range } => {
+            assert_eq!(range, &["/tmp/a", "/tmp/b"])
+        }
         other => panic!("Expected Path, got {:?}", other),
     }
 }
 
 #[test]
 fn test_create_job_host_req_attributes_any_of() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "OS", "type": "STRING"}],
@@ -2074,7 +2588,9 @@ fn test_create_job_host_req_attributes_any_of() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[("OS", "linux")]);
+    }"#,
+        &[("OS", "linux")],
+    );
     let hr = job.steps[0].host_requirements.as_ref().unwrap();
     let attrs = hr.attributes.as_ref().unwrap();
     assert_eq!(attrs[0].name, "attr.worker.os.family");
@@ -2083,7 +2599,8 @@ fn test_create_job_host_req_attributes_any_of() {
 
 #[test]
 fn test_create_job_host_req_attributes_all_of() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{
@@ -2093,7 +2610,9 @@ fn test_create_job_host_req_attributes_all_of() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let hr = job.steps[0].host_requirements.as_ref().unwrap();
     let attrs = hr.attributes.as_ref().unwrap();
     assert_eq!(attrs[0].all_of.as_ref().unwrap(), &["linux"]);
@@ -2101,7 +2620,8 @@ fn test_create_job_host_req_attributes_all_of() {
 
 #[test]
 fn test_create_job_host_req_attributes_both() {
-    let job = parse_and_create(r#"{
+    let job = parse_and_create(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{
@@ -2114,7 +2634,9 @@ fn test_create_job_host_req_attributes_both() {
             },
             "script": {"actions": {"onRun": {"command": "render"}}}
         }]
-    }"#, &[]);
+    }"#,
+        &[],
+    );
     let hr = job.steps[0].host_requirements.as_ref().unwrap();
     let attrs = hr.attributes.as_ref().unwrap();
     assert_eq!(attrs.len(), 2);
@@ -2127,8 +2649,8 @@ fn test_create_job_host_req_attributes_both() {
 //          error paths, and remaining coverage gaps
 // ══════════════════════════════════════════════════════════════
 
-use openjd_model::{evaluate_let_bindings, JobParameterType, JobParameterValue};
 use openjd_expr::PathFormat;
+use openjd_model::{evaluate_let_bindings, JobParameterType, JobParameterValue};
 use std::collections::HashMap;
 
 // --- build_symbol_table: LIST[PATH] param ---
@@ -2136,10 +2658,13 @@ use std::collections::HashMap;
 #[test]
 fn test_build_symbol_table_list_path() {
     let mut params: openjd_model::JobParameterValues = HashMap::new();
-    params.insert("Paths".into(), JobParameterValue {
-        param_type: JobParameterType::ListPath,
-        value: openjd_expr::ExprValue::ListString(vec!["/a".into(), "/b".into()], 0),
-    });
+    params.insert(
+        "Paths".into(),
+        JobParameterValue {
+            param_type: JobParameterType::ListPath,
+            value: openjd_expr::ExprValue::ListString(vec!["/a".into(), "/b".into()], 0),
+        },
+    );
     let symtab = build_symbol_table(&params).unwrap();
     // Param.Paths should NOT be in the template-scope symtab (PATH types are host-context only)
     assert!(symtab.get_value("Param.Paths").is_none());
@@ -2155,18 +2680,21 @@ fn test_evaluate_let_bindings_basic() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 1 + 2".to_string()];
     let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
-    assert!(matches!(result.get_value("x").unwrap(), openjd_expr::ExprValue::Int(3)));
+    assert!(matches!(
+        result.get_value("x").unwrap(),
+        openjd_expr::ExprValue::Int(3)
+    ));
 }
 
 #[test]
 fn test_evaluate_let_bindings_chained() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
-    let bindings = vec![
-        "x = 10".to_string(),
-        "y = x * 2".to_string(),
-    ];
+    let bindings = vec!["x = 10".to_string(), "y = x * 2".to_string()];
     let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
-    assert!(matches!(result.get_value("y").unwrap(), openjd_expr::ExprValue::Int(20)));
+    assert!(matches!(
+        result.get_value("y").unwrap(),
+        openjd_expr::ExprValue::Int(20)
+    ));
 }
 
 #[test]
@@ -2174,8 +2702,11 @@ fn test_evaluate_let_bindings_with_library() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let lib = openjd_expr::default_library::get_default_library();
     let bindings = vec!["x = len('hello')".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, Some(&lib), PathFormat::Posix).unwrap();
-    assert!(matches!(result.get_value("x").unwrap(), openjd_expr::ExprValue::Int(5)));
+    let result = evaluate_let_bindings(&bindings, &symtab, Some(lib), PathFormat::Posix).unwrap();
+    assert!(matches!(
+        result.get_value("x").unwrap(),
+        openjd_expr::ExprValue::Int(5)
+    ));
 }
 
 #[test]
@@ -2191,7 +2722,10 @@ fn test_evaluate_let_bindings_syntax_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = @@@".to_string()];
     let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
-    assert!(err.to_string().contains("Error evaluating let binding"), "got: {err}");
+    assert!(
+        err.to_string().contains("Error evaluating let binding"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -2199,7 +2733,10 @@ fn test_evaluate_let_bindings_eval_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = undefined_var".to_string()];
     let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
-    assert!(err.to_string().contains("Error evaluating let binding"), "got: {err}");
+    assert!(
+        err.to_string().contains("Error evaluating let binding"),
+        "got: {err}"
+    );
 }
 
 // --- create_job: name resolution and attribute error paths ---
@@ -2211,7 +2748,8 @@ fn test_evaluate_let_bindings_eval_error() {
 
 #[test]
 fn test_create_job_host_req_amount_non_numeric() {
-    let err = parse_and_create_err(r#"{
+    let err = parse_and_create_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["FEATURE_BUNDLE_1"],
         "name": "Test",
@@ -2223,6 +2761,8 @@ fn test_create_job_host_req_amount_non_numeric() {
             },
             "script": {"actions": {"onRun": {"command": "foo"}}}
         }]
-    }"#, &[("Mem", "notanumber")]);
+    }"#,
+        &[("Mem", "notanumber")],
+    );
     assert!(err.contains("not a valid number"), "got: {err}");
 }

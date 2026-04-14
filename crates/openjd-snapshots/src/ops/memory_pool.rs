@@ -50,7 +50,9 @@ impl MemoryPool {
 ///
 /// Returns the number of available CPU cores, defaulting to 4 if detection fails.
 pub(crate) fn num_cpus() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
 }
 
 /// Formula: `min(16GB, max(256MB, total_ram/4, available_ram - 1GB))`
@@ -135,7 +137,10 @@ mod tests {
         let handle = tokio::spawn(async move { pool2.acquire(80).await });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(!handle.is_finished(), "should be blocked waiting for memory");
+        assert!(
+            !handle.is_finished(),
+            "should be blocked waiting for memory"
+        );
 
         drop(p1);
         let _p2 = handle.await.unwrap();

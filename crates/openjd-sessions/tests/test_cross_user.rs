@@ -36,15 +36,13 @@ fn disjoint_user() -> Option<Arc<PosixSessionUser>> {
 }
 
 fn require_target_user() -> Arc<PosixSessionUser> {
-    target_user().expect(
-        "OPENJD_TEST_SUDO_TARGET_USER and OPENJD_TEST_SUDO_SHARED_GROUP must be set",
-    )
+    target_user()
+        .expect("OPENJD_TEST_SUDO_TARGET_USER and OPENJD_TEST_SUDO_SHARED_GROUP must be set")
 }
 
 fn require_disjoint_user() -> Arc<PosixSessionUser> {
-    disjoint_user().expect(
-        "OPENJD_TEST_SUDO_DISJOINT_USER and OPENJD_TEST_SUDO_DISJOINT_GROUP must be set",
-    )
+    disjoint_user()
+        .expect("OPENJD_TEST_SUDO_DISJOINT_USER and OPENJD_TEST_SUDO_DISJOINT_GROUP must be set")
 }
 
 fn make_session(user: Arc<PosixSessionUser>) -> Session {
@@ -62,7 +60,7 @@ fn make_session(user: Arc<PosixSessionUser>) -> Session {
         session_root_directory: Some(root),
         user: Some(user),
         revision_extensions: None,
-    cancel_token: None,
+        cancel_token: None,
     };
     Session::with_config(config).unwrap()
 }
@@ -119,7 +117,10 @@ async fn test_cross_user_subprocess_notify() {
         "Expected Timeout or Failed, got {:?}",
         r.state
     );
-    assert!(r.stdout.contains("Log from test 0"), "Should see early output");
+    assert!(
+        r.stdout.contains("Log from test 0"),
+        "Should see early output"
+    );
     assert!(
         !r.stdout.contains("Log from test 19"),
         "Should not complete all iterations"
@@ -176,7 +177,10 @@ async fn test_cross_user_subprocess_terminate_tree() {
         "Expected Timeout or Failed, got {:?}",
         r.state
     );
-    assert!(r.stdout.contains("Log from test 0"), "Should see early output");
+    assert!(
+        r.stdout.contains("Log from test 0"),
+        "Should see early output"
+    );
     assert!(
         !r.stdout.contains("Log from test 19"),
         "Should not complete all iterations"
@@ -333,7 +337,11 @@ async fn test_cross_user_tempdir_permissions() {
         .as_raw();
     assert_eq!(meta.gid(), expected_gid, "Group should be {}", user.group);
     assert_eq!(meta.mode() & 0o777, 0o770, "Mode should be 0o770");
-    assert_eq!(meta.uid(), nix::unistd::geteuid().as_raw(), "Owner should be us");
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "Owner should be us"
+    );
 }
 
 /// TempDir cleanup works when files are owned by the target user.

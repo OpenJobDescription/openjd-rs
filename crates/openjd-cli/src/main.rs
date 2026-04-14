@@ -10,7 +10,7 @@ pub mod run;
 mod summary;
 
 use clap::{Parser, Subcommand};
-use log::{Log, Metadata, Record, LevelFilter};
+use log::{LevelFilter, Log, Metadata, Record};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -19,10 +19,17 @@ static SESSION_START: OnceLock<Instant> = OnceLock::new();
 static TIMESTAMP_FORMAT: OnceLock<String> = OnceLock::new();
 
 fn format_log_timestamp() -> String {
-    let fmt = TIMESTAMP_FORMAT.get().map(|s| s.as_str()).unwrap_or("relative");
+    let fmt = TIMESTAMP_FORMAT
+        .get()
+        .map(|s| s.as_str())
+        .unwrap_or("relative");
     match fmt {
-        "local" => chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string(),
-        "utc" => chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+        "local" => chrono::Local::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3f")
+            .to_string(),
+        "utc" => chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string(),
         _ => {
             let start = SESSION_START.get().copied().unwrap_or_else(Instant::now);
             let d = start.elapsed();
@@ -39,12 +46,20 @@ fn format_log_timestamp() -> String {
 struct SessionLogger;
 
 impl Log for SessionLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool { true }
+    fn enabled(&self, _metadata: &Metadata) -> bool {
+        true
+    }
 
     fn log(&self, record: &Record) {
-        struct Visitor { bits: Option<u64> }
+        struct Visitor {
+            bits: Option<u64>,
+        }
         impl<'kvs> log::kv::VisitSource<'kvs> for Visitor {
-            fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+            fn visit_pair(
+                &mut self,
+                key: log::kv::Key<'kvs>,
+                value: log::kv::Value<'kvs>,
+            ) -> Result<(), log::kv::Error> {
                 if key.as_str() == "openjd_log_content" {
                     self.bits = value.to_u64();
                 }
@@ -94,9 +109,16 @@ async fn main() {
 
     // Rewrite -tp to --task-param for Python CLI compatibility
     // (clap doesn't support multi-char short flags)
-    let rewritten: Vec<String> = args.iter().map(|a| {
-        if a == "-tp" { "--task-param".to_string() } else { a.clone() }
-    }).collect();
+    let rewritten: Vec<String> = args
+        .iter()
+        .map(|a| {
+            if a == "-tp" {
+                "--task-param".to_string()
+            } else {
+                a.clone()
+            }
+        })
+        .collect();
     let cli = Cli::parse_from(rewritten);
     let result = match cli.command {
         Commands::Check(args) => check::execute(args),

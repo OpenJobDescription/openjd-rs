@@ -3,9 +3,9 @@
 
 //! Context-aware help for `openjd-rs run <template> --help`.
 
-use std::path::Path;
 use openjd_model::parse::{self, DocumentType};
-use openjd_model::template::{JobTemplate, JobParameterDefinition};
+use openjd_model::template::{JobParameterDefinition, JobTemplate};
+use std::path::Path;
 
 /// Check if the CLI args are `run <path> -h/--help` and if so, print
 /// context-aware help and exit. Returns true if handled.
@@ -22,7 +22,8 @@ pub fn try_context_aware_help(args: &[String]) -> bool {
     }
 
     // Find the template path — first positional arg after "run" that doesn't start with -
-    let template_path = args[2..].iter()
+    let template_path = args[2..]
+        .iter()
         .find(|a| !a.starts_with('-'))
         .map(|s| s.as_str());
 
@@ -34,7 +35,8 @@ pub fn try_context_aware_help(args: &[String]) -> bool {
     let path = Path::new(path_str);
 
     // Find --extensions value if present
-    let extensions = args.windows(2)
+    let extensions = args
+        .windows(2)
         .find(|w| w[0] == "--extensions")
         .map(|w| w[1].as_str());
 
@@ -50,7 +52,10 @@ pub fn try_context_aware_help(args: &[String]) -> bool {
     }
 }
 
-fn generate_template_help(path: &Path, extensions_arg: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+fn generate_template_help(
+    path: &Path,
+    extensions_arg: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
     if !path.exists() {
         return Err(format!("'{}' not found or does not exist.", path.display()).into());
     }
@@ -63,10 +68,15 @@ fn generate_template_help(path: &Path, extensions_arg: Option<&str>) -> Result<S
     };
     let template_value = parse::document_string_to_object(&content, doc_type)?;
 
-    let default_exts = vec!["TASK_CHUNKING", "REDACTED_ENV_VARS", "FEATURE_BUNDLE_1", "EXPR"];
+    let default_exts = vec![
+        "TASK_CHUNKING",
+        "REDACTED_ENV_VARS",
+        "FEATURE_BUNDLE_1",
+        "EXPR",
+    ];
     let supported_exts: Vec<&str> = match extensions_arg {
-        Some(s) if s.is_empty() => vec![],
-        Some(s) => s.split(',').map(|e| e.trim()).collect(),
+        Some(s) if !s.is_empty() => s.split(',').map(|e| e.trim()).collect(),
+        Some(_) => vec![],
         None => default_exts,
     };
 
@@ -80,7 +90,10 @@ pub fn format_help(template: &JobTemplate, path: &Path) -> String {
     let mut out = String::new();
 
     // Usage line
-    out.push_str(&format!("usage: openjd-rs run {} [arguments]\n\n", path.display()));
+    out.push_str(&format!(
+        "usage: openjd-rs run {} [arguments]\n\n",
+        path.display()
+    ));
 
     // Job name
     out.push_str(&format!("Job: {}\n", template.name));
@@ -106,10 +119,14 @@ pub fn format_help(template: &JobTemplate, path: &Path) -> String {
 
     // Standard options
     out.push_str("Standard Options:\n");
-    out.push_str("  -p, --job-param <KEY=VALUE>  Job parameters (Key=Value, file://path, or inline JSON)\n");
+    out.push_str(
+        "  -p, --job-param <KEY=VALUE>  Job parameters (Key=Value, file://path, or inline JSON)\n",
+    );
     out.push_str("  --environment <PATH>       Environment template files\n");
     out.push_str("  --verbose                  Enable verbose logging\n");
-    out.push_str("  -h, --help                 Print help (leave out template to list all options)\n");
+    out.push_str(
+        "  -h, --help                 Print help (leave out template to list all options)\n",
+    );
 
     out
 }

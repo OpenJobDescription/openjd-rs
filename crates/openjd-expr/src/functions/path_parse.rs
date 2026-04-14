@@ -46,8 +46,15 @@ fn anchor_len(path: &str, fmt: PathFormat) -> usize {
         PathFormat::Windows => {
             if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
                 // C:\ or C:
-                if bytes.len() > 2 && is_sep(bytes[2] as char, fmt) { 3 } else { 2 }
-            } else if bytes.len() >= 2 && is_sep(bytes[0] as char, fmt) && is_sep(bytes[1] as char, fmt) {
+                if bytes.len() > 2 && is_sep(bytes[2] as char, fmt) {
+                    3
+                } else {
+                    2
+                }
+            } else if bytes.len() >= 2
+                && is_sep(bytes[0] as char, fmt)
+                && is_sep(bytes[1] as char, fmt)
+            {
                 // UNC: \\server\share\ is the full anchor
                 let rest = &path[2..];
                 let server_end = rest.find(|c: char| is_sep(c, fmt)).unwrap_or(rest.len());
@@ -55,12 +62,18 @@ fn anchor_len(path: &str, fmt: PathFormat) -> usize {
                 if after_server < path.len() {
                     // Have share part
                     let share_rest = &path[after_server + 1..];
-                    let share_end = share_rest.find(|c: char| is_sep(c, fmt)).unwrap_or(share_rest.len());
+                    let share_end = share_rest
+                        .find(|c: char| is_sep(c, fmt))
+                        .unwrap_or(share_rest.len());
                     let end = after_server + 1 + share_end;
                     // anchor = \\server\share\ — always include trailing sep conceptually
                     // If there's a sep after share, include it; otherwise anchor extends to end
                     // (the trailing sep will be added by parts/parent as needed)
-                    if end < path.len() { end + 1 } else { end }
+                    if end < path.len() {
+                        end + 1
+                    } else {
+                        end
+                    }
                 } else {
                     // Just \\server, no share
                     after_server
@@ -72,7 +85,11 @@ fn anchor_len(path: &str, fmt: PathFormat) -> usize {
             }
         }
         PathFormat::Posix | PathFormat::Uri => {
-            if bytes.len() >= 2 && bytes[0] == b'/' && bytes[1] == b'/' && (bytes.len() < 3 || bytes[2] != b'/') {
+            if bytes.len() >= 2
+                && bytes[0] == b'/'
+                && bytes[1] == b'/'
+                && (bytes.len() < 3 || bytes[2] != b'/')
+            {
                 2 // POSIX // is special
             } else if !bytes.is_empty() && bytes[0] == b'/' {
                 1
@@ -126,8 +143,8 @@ pub fn file_name(path: &str, fmt: PathFormat) -> &str {
 /// Get the parent (everything before the last separator).
 /// Returns the path itself if there's no parent (like "/" returns "/").
 pub fn parent(path: &str, fmt: PathFormat) -> String {
-    let (p, name) = split(path, fmt);
-    let base = if name.is_empty() { p } else { p };
+    let (p, _name) = split(path, fmt);
+    let base = p;
     // For Windows UNC with share, ensure trailing backslash
     if fmt == PathFormat::Windows {
         let s = base.replace('/', "\\");
@@ -183,7 +200,10 @@ pub fn parts(path: &str, fmt: PathFormat) -> Vec<String> {
         if fmt == PathFormat::Windows {
             anchor_str = anchor_str.replace('/', "\\");
             // UNC root (\\server\share) must have trailing backslash
-            if anchor_str.starts_with("\\\\") && anchor_str.matches('\\').count() >= 3 && !anchor_str.ends_with('\\') {
+            if anchor_str.starts_with("\\\\")
+                && anchor_str.matches('\\').count() >= 3
+                && !anchor_str.ends_with('\\')
+            {
                 anchor_str.push('\\');
             }
         }
@@ -237,13 +257,18 @@ mod tests {
 
     #[test]
     fn posix_parts_absolute() {
-        assert_eq!(parts("/mnt/renders/scene.exr", PathFormat::Posix),
-            vec!["/", "mnt", "renders", "scene.exr"]);
+        assert_eq!(
+            parts("/mnt/renders/scene.exr", PathFormat::Posix),
+            vec!["/", "mnt", "renders", "scene.exr"]
+        );
     }
 
     #[test]
     fn posix_parts_relative() {
-        assert_eq!(parts("sub/file.exr", PathFormat::Posix), vec!["sub", "file.exr"]);
+        assert_eq!(
+            parts("sub/file.exr", PathFormat::Posix),
+            vec!["sub", "file.exr"]
+        );
     }
 
     #[test]
@@ -253,30 +278,42 @@ mod tests {
 
     #[test]
     fn windows_parts_drive() {
-        assert_eq!(parts(r"C:\mnt\file.txt", PathFormat::Windows),
-            vec![r"C:\", "mnt", "file.txt"]);
+        assert_eq!(
+            parts(r"C:\mnt\file.txt", PathFormat::Windows),
+            vec![r"C:\", "mnt", "file.txt"]
+        );
     }
 
     #[test]
     fn windows_parts_root_backslash() {
-        assert_eq!(parts(r"\mnt\data\file.txt", PathFormat::Windows),
-            vec![r"\", "mnt", "data", "file.txt"]);
+        assert_eq!(
+            parts(r"\mnt\data\file.txt", PathFormat::Windows),
+            vec![r"\", "mnt", "data", "file.txt"]
+        );
     }
 
     #[test]
     fn windows_parts_unc() {
-        assert_eq!(parts(r"\\server\share\dir", PathFormat::Windows),
-            vec![r"\\server\share\", "dir"]);
+        assert_eq!(
+            parts(r"\\server\share\dir", PathFormat::Windows),
+            vec![r"\\server\share\", "dir"]
+        );
     }
 
     #[test]
     fn posix_file_name() {
-        assert_eq!(file_name("/mnt/renders/scene.exr", PathFormat::Posix), "scene.exr");
+        assert_eq!(
+            file_name("/mnt/renders/scene.exr", PathFormat::Posix),
+            "scene.exr"
+        );
     }
 
     #[test]
     fn posix_parent() {
-        assert_eq!(parent("/mnt/renders/scene.exr", PathFormat::Posix), "/mnt/renders");
+        assert_eq!(
+            parent("/mnt/renders/scene.exr", PathFormat::Posix),
+            "/mnt/renders"
+        );
     }
 
     #[test]
@@ -286,12 +323,18 @@ mod tests {
 
     #[test]
     fn posix_file_stem() {
-        assert_eq!(file_stem("/mnt/renders/scene.exr", PathFormat::Posix), "scene");
+        assert_eq!(
+            file_stem("/mnt/renders/scene.exr", PathFormat::Posix),
+            "scene"
+        );
     }
 
     #[test]
     fn posix_extension() {
-        assert_eq!(extension("/mnt/renders/scene.exr", PathFormat::Posix), ".exr");
+        assert_eq!(
+            extension("/mnt/renders/scene.exr", PathFormat::Posix),
+            ".exr"
+        );
     }
 
     #[test]
@@ -306,22 +349,34 @@ mod tests {
 
     #[test]
     fn posix_suffixes_compound() {
-        assert_eq!(suffixes("archive.tar.gz", PathFormat::Posix), vec![".tar", ".gz"]);
+        assert_eq!(
+            suffixes("archive.tar.gz", PathFormat::Posix),
+            vec![".tar", ".gz"]
+        );
     }
 
     #[test]
     fn posix_suffixes_none() {
-        assert_eq!(suffixes("Makefile", PathFormat::Posix), Vec::<String>::new());
+        assert_eq!(
+            suffixes("Makefile", PathFormat::Posix),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
     fn windows_parent_backslash() {
-        assert_eq!(parent(r"\mnt\renders\scene.exr", PathFormat::Windows), r"\mnt\renders");
+        assert_eq!(
+            parent(r"\mnt\renders\scene.exr", PathFormat::Windows),
+            r"\mnt\renders"
+        );
     }
 
     #[test]
     fn windows_file_name_mixed_sep() {
-        assert_eq!(file_name(r"C:\mnt/renders\scene.exr", PathFormat::Windows), "scene.exr");
+        assert_eq!(
+            file_name(r"C:\mnt/renders\scene.exr", PathFormat::Windows),
+            "scene.exr"
+        );
     }
 
     // ── POSIX parts: pathlib ground truth ──
@@ -351,28 +406,36 @@ mod tests {
     #[test]
     fn posix_parts_repeated_separators() {
         // Collapses repeated /
-        assert_eq!(parts("/mnt//renders///scene.exr", PathFormat::Posix),
-            vec!["/", "mnt", "renders", "scene.exr"]);
+        assert_eq!(
+            parts("/mnt//renders///scene.exr", PathFormat::Posix),
+            vec!["/", "mnt", "renders", "scene.exr"]
+        );
     }
 
     #[test]
     fn posix_parts_double_slash_root() {
         // pathlib treats // as a special root
-        assert_eq!(parts("//mnt/file", PathFormat::Posix),
-            vec!["//", "mnt", "file"]);
+        assert_eq!(
+            parts("//mnt/file", PathFormat::Posix),
+            vec!["//", "mnt", "file"]
+        );
     }
 
     #[test]
     fn posix_parts_trailing_slash() {
         // Trailing slash stripped
-        assert_eq!(parts("/mnt/renders/", PathFormat::Posix),
-            vec!["/", "mnt", "renders"]);
+        assert_eq!(
+            parts("/mnt/renders/", PathFormat::Posix),
+            vec!["/", "mnt", "renders"]
+        );
     }
 
     #[test]
     fn posix_parts_deep() {
-        assert_eq!(parts("/a/b/c/d/e", PathFormat::Posix),
-            vec!["/", "a", "b", "c", "d", "e"]);
+        assert_eq!(
+            parts("/a/b/c/d/e", PathFormat::Posix),
+            vec!["/", "a", "b", "c", "d", "e"]
+        );
     }
 
     #[test]
@@ -432,13 +495,18 @@ mod tests {
 
     #[test]
     fn posix_hidden_tar_gz_suffixes() {
-        assert_eq!(suffixes(".hidden.tar.gz", PathFormat::Posix),
-            vec![".tar", ".gz"]);
+        assert_eq!(
+            suffixes(".hidden.tar.gz", PathFormat::Posix),
+            vec![".tar", ".gz"]
+        );
     }
 
     #[test]
     fn posix_hidden_tar_gz_stem() {
-        assert_eq!(file_stem(".hidden.tar.gz", PathFormat::Posix), ".hidden.tar");
+        assert_eq!(
+            file_stem(".hidden.tar.gz", PathFormat::Posix),
+            ".hidden.tar"
+        );
     }
 
     #[test]
@@ -456,55 +524,68 @@ mod tests {
 
     #[test]
     fn windows_parts_drive_file() {
-        assert_eq!(parts(r"C:\mnt\file.txt", PathFormat::Windows),
-            vec![r"C:\", "mnt", "file.txt"]);
+        assert_eq!(
+            parts(r"C:\mnt\file.txt", PathFormat::Windows),
+            vec![r"C:\", "mnt", "file.txt"]
+        );
     }
 
     #[test]
     fn windows_parts_forward_slash() {
         // Forward slashes accepted, normalized to backslash in root
-        assert_eq!(parts("C:/path/to/file", PathFormat::Windows),
-            vec![r"C:\", "path", "to", "file"]);
+        assert_eq!(
+            parts("C:/path/to/file", PathFormat::Windows),
+            vec![r"C:\", "path", "to", "file"]
+        );
     }
 
     #[test]
     fn windows_parts_repeated_separators() {
-        assert_eq!(parts("C:/path//to///file", PathFormat::Windows),
-            vec![r"C:\", "path", "to", "file"]);
+        assert_eq!(
+            parts("C:/path//to///file", PathFormat::Windows),
+            vec![r"C:\", "path", "to", "file"]
+        );
     }
 
     #[test]
     fn windows_parts_unc_root() {
         // PureWindowsPath('\\\\server\\share').parts == ('\\\\server\\share\\',)
-        assert_eq!(parts(r"\\server\share", PathFormat::Windows),
-            vec![r"\\server\share\"]);
+        assert_eq!(
+            parts(r"\\server\share", PathFormat::Windows),
+            vec![r"\\server\share\"]
+        );
     }
 
     #[test]
     fn windows_parts_unc_dir() {
-        assert_eq!(parts(r"\\server\share\dir", PathFormat::Windows),
-            vec![r"\\server\share\", "dir"]);
+        assert_eq!(
+            parts(r"\\server\share\dir", PathFormat::Windows),
+            vec![r"\\server\share\", "dir"]
+        );
     }
 
     #[test]
     fn windows_parts_unc_dir_file() {
-        assert_eq!(parts(r"\\server\share\dir\file.txt", PathFormat::Windows),
-            vec![r"\\server\share\", "dir", "file.txt"]);
+        assert_eq!(
+            parts(r"\\server\share\dir\file.txt", PathFormat::Windows),
+            vec![r"\\server\share\", "dir", "file.txt"]
+        );
     }
 
     #[test]
     fn windows_parts_root_only() {
         // PureWindowsPath('\\mnt\\data\\file.txt').parts == ('\\', 'mnt', 'data', 'file.txt')
-        assert_eq!(parts(r"\mnt\data\file.txt", PathFormat::Windows),
-            vec![r"\", "mnt", "data", "file.txt"]);
+        assert_eq!(
+            parts(r"\mnt\data\file.txt", PathFormat::Windows),
+            vec![r"\", "mnt", "data", "file.txt"]
+        );
     }
 
     #[test]
     fn windows_parts_unc_no_share() {
         // PureWindowsPath('\\\\server').parts == ('\\\\server',)
         // Note: no trailing backslash when there's no share
-        assert_eq!(parts(r"\\server", PathFormat::Windows),
-            vec![r"\\server"]);
+        assert_eq!(parts(r"\\server", PathFormat::Windows), vec![r"\\server"]);
     }
 
     #[test]
@@ -516,15 +597,16 @@ mod tests {
     #[test]
     fn windows_parts_trailing_slash() {
         // PureWindowsPath('C:\\mnt\\').parts == ('C:\\', 'mnt')
-        assert_eq!(parts(r"C:\mnt\", PathFormat::Windows),
-            vec![r"C:\", "mnt"]);
+        assert_eq!(parts(r"C:\mnt\", PathFormat::Windows), vec![r"C:\", "mnt"]);
     }
 
     #[test]
     fn windows_parts_unc_trailing_slash() {
         // PureWindowsPath('\\\\server\\share\\').parts == ('\\\\server\\share\\',)
-        assert_eq!(parts(r"\\server\share\", PathFormat::Windows),
-            vec![r"\\server\share\"]);
+        assert_eq!(
+            parts(r"\\server\share\", PathFormat::Windows),
+            vec![r"\\server\share\"]
+        );
     }
 
     // ── Windows properties: pathlib ground truth ──
@@ -551,7 +633,10 @@ mod tests {
     fn windows_unc_parent() {
         // PureWindowsPath('\\\\server\\share').parent == PureWindowsPath('\\\\server\\share\\')
         // The parent of UNC root is itself (with trailing backslash)
-        assert_eq!(parent(r"\\server\share", PathFormat::Windows), r"\\server\share\");
+        assert_eq!(
+            parent(r"\\server\share", PathFormat::Windows),
+            r"\\server\share\"
+        );
     }
 
     #[test]
@@ -563,6 +648,9 @@ mod tests {
     #[test]
     fn windows_unc_dir_parent() {
         // PureWindowsPath('\\\\server\\share\\dir').parent == PureWindowsPath('\\\\server\\share\\')
-        assert_eq!(parent(r"\\server\share\dir", PathFormat::Windows), r"\\server\share\");
+        assert_eq!(
+            parent(r"\\server\share\dir", PathFormat::Windows),
+            r"\\server\share\"
+        );
     }
 }

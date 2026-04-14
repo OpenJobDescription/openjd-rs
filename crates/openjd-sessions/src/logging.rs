@@ -69,14 +69,34 @@ pub fn timestamp_usec() -> u64 {
 /// Log a section banner (major section separator).
 pub fn log_section_banner(session_id: &str, title: &str) {
     session_log!(info, session_id, LogContent::BANNER, "");
-    session_log!(info, session_id, LogContent::BANNER, "==============================================");
+    session_log!(
+        info,
+        session_id,
+        LogContent::BANNER,
+        "=============================================="
+    );
     session_log!(info, session_id, LogContent::BANNER, "--------- {}", title);
-    session_log!(info, session_id, LogContent::BANNER, "==============================================");
+    session_log!(
+        info,
+        session_id,
+        LogContent::BANNER,
+        "=============================================="
+    );
 }
 
 /// Log a subsection banner (minor section separator).
 pub fn log_subsection_banner(session_id: &str, title: &str) {
-    session_log!(info, session_id, LogContent::BANNER, "----------------------------------------------");
+    session_log!(
+        info,
+        session_id,
+        LogContent::BANNER,
+        "----------------------------------------------"
+    );
     session_log!(info, session_id, LogContent::BANNER, "{}", title);
-    session_log!(info, session_id, LogContent::BANNER, "----------------------------------------------");
+    session_log!(
+        info,
+        session_id,
+        LogContent::BANNER,
+        "----------------------------------------------"
+    );
 }

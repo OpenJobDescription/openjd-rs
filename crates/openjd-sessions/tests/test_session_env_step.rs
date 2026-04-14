@@ -4,13 +4,13 @@
 //! Tests for Session environment and step execution — mirrors Python
 //! test_runner_env_script.py and test_runner_step_script.py
 
-use openjd_sessions::action::ActionState;
-use openjd_sessions::session::{Session, SessionState};
 use openjd_expr::format_string::FormatString;
 use openjd_model::job::{
-    Action, Environment, EnvironmentActions, EnvironmentScript, EmbeddedFile,
-    StepScript, StepActions,
+    Action, EmbeddedFile, Environment, EnvironmentActions, EnvironmentScript, StepActions,
+    StepScript,
 };
+use openjd_sessions::action::ActionState;
+use openjd_sessions::session::{Session, SessionState};
 use std::collections::HashMap;
 use tempfile::TempDir;
 
@@ -57,7 +57,11 @@ fn make_step_script(command: &str, args: Vec<&str>) -> StepScript {
 async fn test_env_enter_basic() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", Some(make_action("sh", vec!["-c", "echo Hello"])), None);
+    let env = make_env(
+        "test_env",
+        Some(make_action("sh", vec!["-c", "echo Hello"])),
+        None,
+    );
     let result = session.enter_environment(&env, None, None, None).await;
     assert!(result.is_ok());
     assert!(!result.unwrap().is_empty());
@@ -67,8 +71,15 @@ async fn test_env_enter_basic() {
 async fn test_env_exit_basic() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", None, Some(make_action("sh", vec!["-c", "echo Goodbye"])));
-    let id = session.enter_environment(&env, None, None, None).await.unwrap();
+    let env = make_env(
+        "test_env",
+        None,
+        Some(make_action("sh", vec!["-c", "echo Goodbye"])),
+    );
+    let id = session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
     let result = session.exit_environment(&id, None, true, None).await;
     assert!(result.is_ok());
     assert!(result.unwrap().contains("Goodbye"));
@@ -80,7 +91,11 @@ async fn test_env_exit_basic() {
 async fn test_env_enter_no_action() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", None, Some(make_action("sh", vec!["-c", "echo x"])));
+    let env = make_env(
+        "test_env",
+        None,
+        Some(make_action("sh", vec!["-c", "echo x"])),
+    );
     let result = session.enter_environment(&env, None, None, None).await;
     assert!(result.is_ok());
 }
@@ -89,8 +104,15 @@ async fn test_env_enter_no_action() {
 async fn test_env_exit_no_action() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", Some(make_action("sh", vec!["-c", "echo x"])), None);
-    let id = session.enter_environment(&env, None, None, None).await.unwrap();
+    let env = make_env(
+        "test_env",
+        Some(make_action("sh", vec!["-c", "echo x"])),
+        None,
+    );
+    let id = session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
     let result = session.exit_environment(&id, None, true, None).await;
     assert!(result.is_ok());
 }
@@ -108,9 +130,15 @@ async fn test_env_no_script() {
         variables: None,
         resolved_symtab: None,
     };
-    assert!(session.enter_environment(&env, None, None, None).await.is_ok());
+    assert!(session
+        .enter_environment(&env, None, None, None)
+        .await
+        .is_ok());
     let id = session.environments_entered().last().unwrap().clone();
-    assert!(session.exit_environment(&id, None, true, None).await.is_ok());
+    assert!(session
+        .exit_environment(&id, None, true, None)
+        .await
+        .is_ok());
 }
 
 // === test_run_with_files ===
@@ -190,9 +218,15 @@ async fn test_env_exit_removes_variables() {
         variables: Some(vars),
         resolved_symtab: None,
     };
-    session.enter_environment(&env, None, None, None).await.unwrap();
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
     let id = session.environments_entered().last().unwrap().clone();
-    session.exit_environment(&id, None, true, None).await.unwrap();
+    session
+        .exit_environment(&id, None, true, None)
+        .await
+        .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo MY_VAR=${MY_VAR:-unset}"]);
     let result = session.run_task(&script, None, None, None).await.unwrap();
@@ -234,8 +268,15 @@ async fn test_step_run_failing() {
 async fn test_env_enter_fail() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", Some(make_action("sh", vec!["-c", "exit 1"])), None);
-    assert!(session.enter_environment(&env, None, None, None).await.is_err());
+    let env = make_env(
+        "test_env",
+        Some(make_action("sh", vec!["-c", "exit 1"])),
+        None,
+    );
+    assert!(session
+        .enter_environment(&env, None, None, None)
+        .await
+        .is_err());
 }
 
 // === test_env_exit_fail ===
@@ -244,9 +285,19 @@ async fn test_env_enter_fail() {
 async fn test_env_exit_fail() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new(tmp.path().to_path_buf());
-    let env = make_env("test_env", None, Some(make_action("sh", vec!["-c", "exit 1"])));
-    let id = session.enter_environment(&env, None, None, None).await.unwrap();
-    assert!(session.exit_environment(&id, None, true, None).await.is_err());
+    let env = make_env(
+        "test_env",
+        None,
+        Some(make_action("sh", vec!["-c", "exit 1"])),
+    );
+    let id = session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+    assert!(session
+        .exit_environment(&id, None, true, None)
+        .await
+        .is_err());
 }
 
 // === test_env_sets_env_vars_via_stdout ===
@@ -257,10 +308,16 @@ async fn test_env_sets_env_vars_via_stdout() {
     let mut session = Session::new(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
-        Some(make_action("sh", vec!["-c", "echo 'openjd_env: DYNAMIC_VAR=dynamic_value'"])),
+        Some(make_action(
+            "sh",
+            vec!["-c", "echo 'openjd_env: DYNAMIC_VAR=dynamic_value'"],
+        )),
         None,
     );
-    session.enter_environment(&env, None, None, None).await.unwrap();
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo DYNAMIC_VAR=$DYNAMIC_VAR"]);
     let result = session.run_task(&script, None, None, None).await.unwrap();
@@ -276,17 +333,29 @@ async fn test_env_unsets_env_vars_via_stdout() {
 
     let env1 = make_env(
         "env1",
-        Some(make_action("sh", vec!["-c", "echo 'openjd_env: TO_UNSET=value'"])),
+        Some(make_action(
+            "sh",
+            vec!["-c", "echo 'openjd_env: TO_UNSET=value'"],
+        )),
         None,
     );
-    session.enter_environment(&env1, None, None, None).await.unwrap();
+    session
+        .enter_environment(&env1, None, None, None)
+        .await
+        .unwrap();
 
     let env2 = make_env(
         "env2",
-        Some(make_action("sh", vec!["-c", "echo 'openjd_unset_env: TO_UNSET'"])),
+        Some(make_action(
+            "sh",
+            vec!["-c", "echo 'openjd_unset_env: TO_UNSET'"],
+        )),
         None,
     );
-    session.enter_environment(&env2, None, None, None).await.unwrap();
+    session
+        .enter_environment(&env2, None, None, None)
+        .await
+        .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo TO_UNSET=${TO_UNSET:-unset}"]);
     let result = session.run_task(&script, None, None, None).await.unwrap();
@@ -320,13 +389,26 @@ async fn test_session_state_ended_after_failure() {
 #[tokio::test]
 async fn test_redacted_env_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf()).with_revision_extensions(openjd_model::types::ValidationContext::with_extensions(openjd_model::types::SpecificationRevision::V2023_09, [openjd_model::types::KnownExtension::RedactedEnvVars].into_iter().collect()));
+    let mut session = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+        openjd_model::types::ValidationContext::with_extensions(
+            openjd_model::types::SpecificationRevision::V2023_09,
+            [openjd_model::types::KnownExtension::RedactedEnvVars]
+                .into_iter()
+                .collect(),
+        ),
+    );
     let env = make_env(
         "test_env",
-        Some(make_action("sh", vec!["-c", "echo 'openjd_redacted_env: SECRET=mysecret'"])),
+        Some(make_action(
+            "sh",
+            vec!["-c", "echo 'openjd_redacted_env: SECRET=mysecret'"],
+        )),
         None,
     );
-    session.enter_environment(&env, None, None, None).await.unwrap();
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo SECRET=$SECRET"]);
     let result = session.run_task(&script, None, None, None).await.unwrap();
@@ -344,10 +426,13 @@ async fn test_env_with_resolved_variables() {
     let tmp = TempDir::new().unwrap();
     use openjd_model::types::JobParameterValue;
     let mut job_params = HashMap::new();
-    job_params.insert("Value".to_string(), JobParameterValue {
-        param_type: openjd_model::types::JobParameterType::String,
-        value: openjd_expr::ExprValue::String("resolved_value".into()),
-    });
+    job_params.insert(
+        "Value".to_string(),
+        JobParameterValue {
+            param_type: openjd_model::types::JobParameterType::String,
+            value: openjd_expr::ExprValue::String("resolved_value".into()),
+        },
+    );
     let session_config = openjd_sessions::session::SessionConfig {
         session_id: "test".into(),
         job_parameter_values: job_params,
@@ -358,7 +443,7 @@ async fn test_env_with_resolved_variables() {
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
         revision_extensions: None,
-    cancel_token: None,
+        cancel_token: None,
     };
     let mut session = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();
@@ -420,7 +505,10 @@ async fn test_env_with_let_bindings_and_embedded_files() {
     // The configPath should resolve to the file path
     let config_path = files_dir.join("config.txt");
     assert!(config_path.exists());
-    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), "config data");
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        "config data"
+    );
 }
 
 // === test_step_with_let_bindings_and_embedded_files ===

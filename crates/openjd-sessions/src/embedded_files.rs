@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 use openjd_expr::function_library::FunctionLibrary;
+use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 use openjd_expr::ExprValue;
 use openjd_model::job::EmbeddedFile;
 use openjd_model::symbol_table::SymbolTable;
@@ -42,9 +42,7 @@ pub use openjd_model::types::EndOfLine;
 /// Convert line endings in data based on the specified mode.
 pub fn convert_line_endings(data: &str, eol: EndOfLine) -> Vec<u8> {
     match eol {
-        EndOfLine::Lf => {
-            data.replace("\r\n", "\n").into_bytes()
-        }
+        EndOfLine::Lf => data.replace("\r\n", "\n").into_bytes(),
         EndOfLine::Crlf => {
             let normalized = data.replace("\r\n", "\n");
             normalized.replace('\n', "\r\n").into_bytes()
@@ -153,7 +151,11 @@ pub struct EmbeddedFiles {
 }
 
 impl EmbeddedFiles {
-    pub fn new(scope: EmbeddedFilesScope, session_files_directory: PathBuf, session_id: &str) -> Self {
+    pub fn new(
+        scope: EmbeddedFilesScope,
+        session_files_directory: PathBuf,
+        session_id: &str,
+    ) -> Self {
         Self {
             scope,
             target_directory: session_files_directory,
@@ -177,16 +179,22 @@ impl EmbeddedFiles {
             EmbeddedFilesScope::Step => "Task",
             EmbeddedFilesScope::Env => "Environment",
         };
-        session_log!(info, &self.session_id, LogContent::FILE_PATH, "Writing embedded files for {} to disk.", scope_name);
+        session_log!(
+            info,
+            &self.session_id,
+            LogContent::FILE_PATH,
+            "Writing embedded files for {} to disk.",
+            scope_name
+        );
         for file in files {
             let symbol = symtab_key(self.scope, &file.name);
             let filename = if let Some(ref fname_fs) = file.filename {
-                let resolved = fname_fs
-                    .resolve_string(symtab, None, &[])
-                    .map_err(|e| SessionError::FormatString {
+                let resolved = fname_fs.resolve_string(symtab, None, &[]).map_err(|e| {
+                    SessionError::FormatString {
                         context: format!("embedded file '{}' filename", file.name),
                         reason: e.to_string(),
-                    })?;
+                    }
+                })?;
                 self.target_directory.join(resolved)
             } else {
                 let name = random_hex_filename();
@@ -198,11 +206,12 @@ impl EmbeddedFiles {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-                        .map_err(|e| SessionError::EmbeddedFile {
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| {
+                        SessionError::EmbeddedFile {
                             name: file.name.clone(),
                             source: e,
-                        })?;
+                        }
+                    })?;
                 }
                 path
             };
@@ -238,20 +247,27 @@ impl EmbeddedFiles {
                         context: format!("embedded file '{}' data", record.file.name),
                         reason: e.to_string(),
                     })?;
-                session_log!(info, &self.session_id, LogContent::FILE_PATH, "Writing: {}", record.filename.display());
-                session_log!(debug, &self.session_id, LogContent::FILE_CONTENTS, "Contents:\n{}", &resolved);
+                session_log!(
+                    info,
+                    &self.session_id,
+                    LogContent::FILE_PATH,
+                    "Writing: {}",
+                    record.filename.display()
+                );
+                session_log!(
+                    debug,
+                    &self.session_id,
+                    LogContent::FILE_CONTENTS,
+                    "Contents:\n{}",
+                    &resolved
+                );
                 let eol = parse_end_of_line(record.file.end_of_line);
                 let runnable = record.file.runnable.unwrap_or(false);
-                write_embedded_file_with_options(
-                    &record.filename,
-                    &resolved,
-                    runnable,
-                    eol,
-                )
-                .map_err(|e| SessionError::EmbeddedFile {
-                    name: record.file.name.clone(),
-                    source: e,
-                })?;
+                write_embedded_file_with_options(&record.filename, &resolved, runnable, eol)
+                    .map_err(|e| SessionError::EmbeddedFile {
+                        name: record.file.name.clone(),
+                        source: e,
+                    })?;
                 #[cfg(unix)]
                 if let Some(ref user) = self.user {
                     if !user.is_process_user() {

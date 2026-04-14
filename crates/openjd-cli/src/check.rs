@@ -3,9 +3,9 @@
 
 //! `openjd-rs check` command — validate a template file.
 
-use std::path::PathBuf;
 use clap::Args;
 use openjd_model::parse::{self, DocumentType};
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct CheckArgs {

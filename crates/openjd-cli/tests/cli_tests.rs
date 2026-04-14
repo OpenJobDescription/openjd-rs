@@ -45,29 +45,42 @@ mod cli_entrypoint {
         let template = templates_dir().join("basic.yaml");
         let (code, stdout, _stderr) = run_cli(&["check", template.to_str().unwrap()]);
         assert_eq!(code, 0, "check should succeed");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_cli_run_success_base() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "base run should succeed. stderr: {stderr}");
-        assert!(stdout.contains("All actions completed successfully!"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("All actions completed successfully!"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_cli_run_success_with_params() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=value1",
-            "--extensions", "",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=value1",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "run with params should succeed. stderr: {stderr}");
     }
@@ -76,13 +89,20 @@ mod cli_entrypoint {
     fn test_cli_run_success_with_multiple_params() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=value1",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=value1",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
-        assert_eq!(code, 0, "run with multiple options should succeed. stderr: {stderr}");
+        assert_eq!(
+            code, 0,
+            "run with multiple options should succeed. stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -106,10 +126,8 @@ mod cli_entrypoint {
     #[test]
     fn test_cli_argument_errors_run_no_step_arg_value() {
         let tdir = templates_dir();
-        let (code, _stdout, _stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step",
-        ]);
+        let (code, _stdout, _stderr) =
+            run_cli(&["run", tdir.join("basic.yaml").to_str().unwrap(), "--step"]);
         assert_ne!(code, 0, "missing step value should fail");
     }
 }
@@ -126,20 +144,29 @@ mod check_command {
     #[test]
     fn test_do_check_file_success_json() {
         let mut f = NamedTempFile::with_suffix(".template.json").unwrap();
-        write!(f, r#"{{
+        write!(
+            f,
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "test",
             "steps": [{{"name": "s1", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
-        }}"#).unwrap();
+        }}"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "JSON check should succeed. stderr: {stderr}");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_do_check_file_success_yaml() {
         let mut f = NamedTempFile::with_suffix(".template.yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 steps:
   - name: s1
@@ -147,10 +174,15 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "YAML check should succeed. stderr: {stderr}");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -171,7 +203,9 @@ steps:
     #[test]
     fn test_do_check_file_success_ojdt() {
         let mut f = NamedTempFile::with_suffix(".ojdt").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 steps:
   - name: s1
@@ -179,16 +213,26 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
-        assert_eq!(code, 0, ".ojdt check should succeed (parsed as YAML). stderr: {stderr}");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert_eq!(
+            code, 0,
+            ".ojdt check should succeed (parsed as YAML). stderr: {stderr}"
+        );
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_do_run_file_success_ojdt() {
         let mut f = NamedTempFile::with_suffix(".ojdt").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 steps:
   - name: s1
@@ -197,7 +241,9 @@ steps:
         onRun:
           command: echo
           args: ["ojdt works"]
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, ".ojdt run should succeed. stderr: {stderr}");
         assert!(stdout.contains("ojdt works"), "stdout: {stdout}");
@@ -206,7 +252,9 @@ steps:
     #[test]
     fn test_do_summary_file_success_ojdt() {
         let mut f = NamedTempFile::with_suffix(".ojdt").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: OjdtJob
 steps:
   - name: s1
@@ -214,7 +262,9 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, ".ojdt summary should succeed. stderr: {stderr}");
         assert!(stdout.contains("OjdtJob"), "stdout: {stdout}");
@@ -236,10 +286,8 @@ mod common_params {
     #[test]
     fn test_params_from_key_value_pair() {
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", "J=TestValue",
-        ]);
+        let (code, stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", "J=TestValue"]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("DoTask TestValue"), "stdout: {stdout}");
     }
@@ -250,10 +298,7 @@ mod common_params {
         write!(f, r#"{{"J": "FromFile"}}"#).unwrap();
         let file_arg = format!("file://{}", f.path().display());
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", &file_arg,
-        ]);
+        let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap(), "-p", &file_arg]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("DoTask FromFile"), "stdout: {stdout}");
     }
@@ -262,7 +307,9 @@ mod common_params {
     fn test_params_value_with_equals() {
         // Create a template that accepts a STRING param and echoes it
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: MyParam
@@ -274,11 +321,11 @@ steps:
         onRun:
           command: echo
           args: ["{{{{Param.MyParam}}}}"]
-"#).unwrap();
-        let (code, stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "MyParam=One=Two",
-        ]);
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) =
+            run_cli(&["run", f.path().to_str().unwrap(), "-p", "MyParam=One=Two"]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("One=Two"), "stdout: {stdout}");
     }
@@ -293,13 +340,10 @@ steps:
     #[test]
     fn test_params_yaml_file() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, "J: YamlValue\n").unwrap();
+        writeln!(f, "J: YamlValue").unwrap();
         let file_arg = format!("file://{}", f.path().display());
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", &file_arg,
-        ]);
+        let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap(), "-p", &file_arg]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("YamlValue"), "stdout: {stdout}");
     }
@@ -311,7 +355,9 @@ steps:
         let file_arg = format!("file://{}", f.path().display());
         // Use a template with two params: J and an extra one
         let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(tmpl, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            tmpl,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: J
@@ -325,11 +371,16 @@ steps:
         onRun:
           command: echo
           args: ["{{{{Param.J}}}} {{{{Param.Extra}}}}"]
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tmpl.path().to_str().unwrap(),
-            "-p", &file_arg,
-            "-p", "Extra=ExtraVal",
+            "run",
+            tmpl.path().to_str().unwrap(),
+            "-p",
+            &file_arg,
+            "-p",
+            "Extra=ExtraVal",
         ]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("FromFile"), "stdout: {stdout}");
@@ -342,10 +393,8 @@ steps:
         write!(f, "{{bad json}}").unwrap();
         let file_arg = format!("file://{}", f.path().display());
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", &file_arg,
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", &file_arg]);
         assert_ne!(code, 0, "bad JSON should fail");
         assert!(!stderr.is_empty(), "stderr: {stderr}");
     }
@@ -356,10 +405,8 @@ steps:
         write!(f, r#"["not", "a", "dict"]"#).unwrap();
         let file_arg = format!("file://{}", f.path().display());
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", &file_arg,
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", &file_arg]);
         assert_ne!(code, 0, "non-dict JSON should fail");
         assert!(stderr.contains("dictionary"), "stderr: {stderr}");
     }
@@ -369,10 +416,8 @@ steps:
         let dir = tempfile::TempDir::new().unwrap();
         let file_arg = format!("file://{}", dir.path().display());
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", &file_arg,
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", &file_arg]);
         assert_ne!(code, 0, "directory as param file should fail");
         assert!(!stderr.is_empty(), "stderr: {stderr}");
     }
@@ -380,25 +425,25 @@ steps:
     #[test]
     fn test_params_not_json_string() {
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", "- not json -",
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", "- not json -"]);
         assert_ne!(code, 0, "non-json non-kvp should fail");
-        assert!(stderr.contains("not formatted correctly") || stderr.contains("format"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("not formatted correctly") || stderr.contains("format"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_params_json_array_string() {
         let template = templates_dir().join("simple_with_j_param.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "-p", r#"["a", "b"]"#,
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "-p", r#"["a", "b"]"#]);
         assert_ne!(code, 0, "JSON array string should fail");
-        assert!(stderr.contains("not formatted correctly") || stderr.contains("format"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("not formatted correctly") || stderr.contains("format"),
+            "stderr: {stderr}"
+        );
     }
 }
 
@@ -415,13 +460,21 @@ mod run_with_env {
         let (code, stdout, stderr) = run_cli(&[
             "run",
             tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
-            "-p", "J=Jvalue",
-            "--env", tdir.join("env_with_param.yaml").to_str().unwrap(),
+            "-p",
+            "J=Jvalue",
+            "--env",
+            tdir.join("env_with_param.yaml").to_str().unwrap(),
         ]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
-        assert!(stdout.contains("EnvWithParam Enter DefaultForEnvParam"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("EnvWithParam Enter DefaultForEnvParam"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("DoTask Jvalue"), "stdout: {stdout}");
-        assert!(stdout.contains("EnvWithParam Exit DefaultForEnvParam"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("EnvWithParam Exit DefaultForEnvParam"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -430,14 +483,23 @@ mod run_with_env {
         let (code, stdout, stderr) = run_cli(&[
             "run",
             tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
-            "-p", "J=Jvalue",
-            "-p", "EnvParam=EnvParamValue",
-            "--env", tdir.join("env_with_param.yaml").to_str().unwrap(),
+            "-p",
+            "J=Jvalue",
+            "-p",
+            "EnvParam=EnvParamValue",
+            "--env",
+            tdir.join("env_with_param.yaml").to_str().unwrap(),
         ]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
-        assert!(stdout.contains("EnvWithParam Enter EnvParamValue"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("EnvWithParam Enter EnvParamValue"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("DoTask Jvalue"), "stdout: {stdout}");
-        assert!(stdout.contains("EnvWithParam Exit EnvParamValue"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("EnvWithParam Exit EnvParamValue"),
+            "stdout: {stdout}"
+        );
     }
 }
 
@@ -469,7 +531,10 @@ mod feature_bundle_1 {
         let template = templates_dir().join("feature_bundle_1_timeout.yaml");
         let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap()]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
-        assert!(stdout.contains("Running with timeout 5s"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Running with timeout 5s"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -501,7 +566,10 @@ mod feature_bundle_1 {
         let template = templates_dir().join("feature_bundle_1_eol_lf.yaml");
         let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap()]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
-        assert!(stdout.contains("310a 6c69 6e65 320a 6c69"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("310a 6c69 6e65 320a 6c69"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -509,7 +577,10 @@ mod feature_bundle_1 {
         let template = templates_dir().join("feature_bundle_1_eol_crlf.yaml");
         let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap()]);
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
-        assert!(stdout.contains("310d 0a6c 696e 6532 0d0a"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("310d 0a6c 696e 6532 0d0a"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -519,10 +590,16 @@ mod feature_bundle_1 {
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         if cfg!(windows) {
             // On Windows, AUTO should produce CRLF
-            assert!(stdout.contains("310d 0a6c 696e 6532 0d0a"), "stdout: {stdout}");
+            assert!(
+                stdout.contains("310d 0a6c 696e 6532 0d0a"),
+                "stdout: {stdout}"
+            );
         } else {
             // On Linux/macOS, AUTO should produce LF
-            assert!(stdout.contains("310a 6c69 6e65 320a 6c69"), "stdout: {stdout}");
+            assert!(
+                stdout.contains("310a 6c69 6e65 320a 6c69"),
+                "stdout: {stdout}"
+            );
         }
     }
 
@@ -531,7 +608,10 @@ mod feature_bundle_1 {
         let template = templates_dir().join("feature_bundle_1_python.yaml");
         let (code, stdout, _stderr) = run_cli(&["check", template.to_str().unwrap()]);
         assert_eq!(code, 0, "check should succeed");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 }
 
@@ -549,9 +629,18 @@ mod redacted_env {
         assert_eq!(code, 0, "should succeed. stderr: {stderr}");
         assert!(stdout.contains("Setting redacted vars"), "stdout: {stdout}");
         // Verify the openjd_redacted_env protocol lines are not leaked
-        assert!(!stdout.contains("openjd_redacted_env: SECRETVAR=SECRETVAL"), "should not leak protocol. stdout: {stdout}");
-        assert!(!stdout.contains("openjd_redacted_env: KEYSPACE =SECRETVAL"), "should not leak protocol. stdout: {stdout}");
-        assert!(!stdout.contains("openjd_redacted_env: VALSPACE= SPACEVAL"), "should not leak protocol. stdout: {stdout}");
+        assert!(
+            !stdout.contains("openjd_redacted_env: SECRETVAR=SECRETVAL"),
+            "should not leak protocol. stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("openjd_redacted_env: KEYSPACE =SECRETVAL"),
+            "should not leak protocol. stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("openjd_redacted_env: VALSPACE= SPACEVAL"),
+            "should not leak protocol. stdout: {stdout}"
+        );
     }
 }
 
@@ -570,11 +659,15 @@ mod run_command {
     fn test_run_first_step() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=Jvalue",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=Jvalue",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("J1 Enter"), "stdout: {stdout}");
@@ -588,11 +681,15 @@ mod run_command {
     fn test_run_second_step_with_dep() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
-            "--step", "Second",
-            "-p", "J=Jvalue",
+            "run",
+            tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
+            "--step",
+            "Second",
+            "-p",
+            "J=Jvalue",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("J=Jvalue Fuz=1"), "stdout: {stdout}");
@@ -605,27 +702,39 @@ mod run_command {
     fn test_run_second_step_no_dep() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
-            "--step", "Second",
-            "-p", "J=Jvalue",
-            "--extensions", "",
+            "run",
+            tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
+            "--step",
+            "Second",
+            "-p",
+            "J=Jvalue",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("J=Jvalue Fuz=1"), "stdout: {stdout}");
         // Should NOT run First step
-        assert!(!stdout.contains("Foo=1. Bar=Bar1"), "should not run dep. stdout: {stdout}");
+        assert!(
+            !stdout.contains("Foo=1. Bar=Bar1"),
+            "should not run dep. stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_with_one_env() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=Jvalue",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=Jvalue",
             "--run-dependencies",
-            "--environment", tdir.join("env_1.yaml").to_str().unwrap(),
-            "--extensions", "",
+            "--environment",
+            tdir.join("env_1.yaml").to_str().unwrap(),
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Env1 Enter"), "stdout: {stdout}");
@@ -637,13 +746,19 @@ mod run_command {
     fn test_run_with_two_envs() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=Jvalue",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=Jvalue",
             "--run-dependencies",
-            "--environment", tdir.join("env_1.yaml").to_str().unwrap(),
-            "--environment", tdir.join("env_2.yaml").to_str().unwrap(),
-            "--extensions", "",
+            "--environment",
+            tdir.join("env_1.yaml").to_str().unwrap(),
+            "--environment",
+            tdir.join("env_2.yaml").to_str().unwrap(),
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Env1 Enter"), "stdout: {stdout}");
@@ -663,41 +778,64 @@ mod run_command {
     fn test_run_nonexistent_step() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "FakeStep",
-            "-p", "J=Jvalue",
-            "--extensions", "",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "FakeStep",
+            "-p",
+            "J=Jvalue",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0);
-        assert!(stderr.contains("No Step with name 'FakeStep'"), "stderr: {stderr}");
+        assert!(
+            stderr.contains("No Step with name 'FakeStep'"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_preserve_option() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
-        write!(f, r#"{{
+        write!(
+            f,
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "TestJob",
             "steps": [{{
                 "name": "TestStep",
                 "script": {{"actions": {{"onRun": {{"command": "echo", "args": ["hello"]}}}}}}
             }}]
-        }}"#).unwrap();
-        let (code, stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "--preserve",
-        ]);
+        }}"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap(), "--preserve"]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Working directory preserved at"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Working directory preserved at"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_path_mapping_rules() {
         let mut template_f = NamedTempFile::with_suffix(".json").unwrap();
         let (source_format, source_path, dest_path, param_value, expected) = if cfg!(windows) {
-            ("WINDOWS", r"D:\\home\\work", r"E:\\mnt\\work", r"D:\home\work", r"Mapped:E:\mnt\work")
+            (
+                "WINDOWS",
+                r"D:\\home\\work",
+                r"E:\\mnt\\work",
+                r"D:\home\work",
+                r"Mapped:E:\mnt\work",
+            )
         } else {
-            ("POSIX", "/home/test", "/mnt/test", "/home/test", "Mapped:/mnt/test")
+            (
+                "POSIX",
+                "/home/test",
+                "/mnt/test",
+                "/home/test",
+                "Mapped:/mnt/test",
+            )
         };
         write!(template_f, r#"{{
             "specificationVersion": "jobtemplate-2023-09",
@@ -710,21 +848,28 @@ mod run_command {
         }}"#).unwrap();
 
         let mut rules_f = NamedTempFile::with_suffix(".rules.json").unwrap();
-        write!(rules_f, r#"{{
+        write!(
+            rules_f,
+            r#"{{
             "version": "pathmapping-1.0",
             "path_mapping_rules": [{{
                 "source_path_format": "{source_format}",
                 "source_path": "{source_path}",
                 "destination_path": "{dest_path}"
             }}]
-        }}"#).unwrap();
+        }}"#
+        )
+        .unwrap();
 
         let rules_arg = format!("file://{}", rules_f.path().display());
         let param_arg = format!("TestPath={param_value}");
         let (code, stdout, stderr) = run_cli(&[
-            "run", template_f.path().to_str().unwrap(),
-            "-p", &param_arg,
-            "--path-mapping-rules", &rules_arg,
+            "run",
+            template_f.path().to_str().unwrap(),
+            "-p",
+            &param_arg,
+            "--path-mapping-rules",
+            &rules_arg,
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains(expected), "stdout: {stdout}");
@@ -736,52 +881,82 @@ mod run_command {
     fn test_run_bare_step() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("All actions completed successfully!"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("All actions completed successfully!"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_normal_step() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "NormalStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "NormalStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Hello, world!"), "stdout: {stdout}");
-        assert!(stdout.contains("All actions completed successfully!"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("All actions completed successfully!"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_dependent_step_with_deps() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "DependentStep",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "DependentStep",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Running step 'BareStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("Running step 'DependentStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("All actions completed successfully!"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Running step 'BareStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Running step 'DependentStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("All actions completed successfully!"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_dependent_step_no_deps() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "DependentStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "DependentStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(!stdout.contains("Running step 'BareStep'"), "should not run dep. stdout: {stdout}");
+        assert!(
+            !stdout.contains("Running step 'BareStep'"),
+            "should not run dep. stdout: {stdout}"
+        );
         assert!(stdout.contains("I am dependent!"), "stdout: {stdout}");
     }
 
@@ -789,55 +964,91 @@ mod run_command {
     fn test_run_extra_dependent_step() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "ExtraDependentStep",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "ExtraDependentStep",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Running step 'BareStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("Running step 'DependentStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("Running step 'TaskParamStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("Running step 'ExtraDependentStep'"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Running step 'BareStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Running step 'DependentStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Running step 'TaskParamStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Running step 'ExtraDependentStep'"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_task_param_step() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("1.Hi!"), "stdout: {stdout}");
-        assert!(stdout.contains("All actions completed successfully!"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("All actions completed successfully!"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_bad_command() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BadCommand",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BadCommand",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "bad command should fail");
-        assert!(!stderr.is_empty() || !_stdout.is_empty(), "should have error output");
+        assert!(
+            !stderr.is_empty() || !_stdout.is_empty(),
+            "should have error output"
+        );
     }
 
     #[test]
     fn test_step_dep_has_step_env() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "StepDepHasStepEnv",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "StepDepHasStepEnv",
             "--run-dependencies",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Running step 'NormalStep'"), "stdout: {stdout}");
-        assert!(stdout.contains("Running step 'StepDepHasStepEnv'"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Running step 'NormalStep'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Running step 'StepDepHasStepEnv'"),
+            "stdout: {stdout}"
+        );
     }
 
     // --- Env/task failure tests (from test_do_run_success parametrized cases) ---
@@ -846,23 +1057,34 @@ mod run_command {
     fn test_enter_env_fails() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
-            "-p", "J=Jvalue",
-            "--environment", tdir.join("env_fails_enter.yaml").to_str().unwrap(),
+            "run",
+            tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
+            "-p",
+            "J=Jvalue",
+            "--environment",
+            tdir.join("env_fails_enter.yaml").to_str().unwrap(),
         ]);
         assert_ne!(code, 0, "should fail when env enter fails");
         assert!(stdout.contains("EnvEnterFail Enter"), "stdout: {stdout}");
         // Should not run the task
-        assert!(!stdout.contains("DoTask"), "should not run task. stdout: {stdout}");
+        assert!(
+            !stdout.contains("DoTask"),
+            "should not run task. stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_task_fails_still_exits_env() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("simple_with_j_param_exit_1.yaml").to_str().unwrap(),
-            "-p", "J=Jvalue",
-            "--environment", tdir.join("env_1.yaml").to_str().unwrap(),
+            "run",
+            tdir.join("simple_with_j_param_exit_1.yaml")
+                .to_str()
+                .unwrap(),
+            "-p",
+            "J=Jvalue",
+            "--environment",
+            tdir.join("env_1.yaml").to_str().unwrap(),
         ]);
         assert_ne!(code, 0, "should fail when task exits 1");
         assert!(stdout.contains("Env1 Enter"), "stdout: {stdout}");
@@ -873,9 +1095,12 @@ mod run_command {
     fn test_env_exit_fails() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
-            "-p", "J=Jvalue",
-            "--environment", tdir.join("env_fails_exit.yaml").to_str().unwrap(),
+            "run",
+            tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
+            "-p",
+            "J=Jvalue",
+            "--environment",
+            tdir.join("env_fails_exit.yaml").to_str().unwrap(),
         ]);
         // Task should still run even if env exit fails
         assert!(stdout.contains("EnvExitFail Enter"), "stdout: {stdout}");
@@ -889,7 +1114,8 @@ mod run_command {
     fn test_step_let_bindings_in_step_env() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("step_let_in_step_env.yaml").to_str().unwrap(),
+            "run",
+            tdir.join("step_let_in_step_env.yaml").to_str().unwrap(),
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("ENTER_VAL:21"), "stdout: {stdout}");
@@ -907,12 +1133,21 @@ mod run_command {
         // printing EXIT_NORMAL.
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("job_sleep_exit_normal.yaml").to_str().unwrap(),
-            "--step", "Timeout",
-            "-p", "J=x",
+            "run",
+            tdir.join("job_sleep_exit_normal.yaml").to_str().unwrap(),
+            "--step",
+            "Timeout",
+            "-p",
+            "J=x",
         ]);
-        assert!(stdout.contains("SLEEP"), "should print SLEEP. stdout: {stdout}");
-        assert!(!stdout.contains("EXIT_NORMAL"), "should NOT print EXIT_NORMAL (killed by timeout). stdout: {stdout}");
+        assert!(
+            stdout.contains("SLEEP"),
+            "should print SLEEP. stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("EXIT_NORMAL"),
+            "should NOT print EXIT_NORMAL (killed by timeout). stdout: {stdout}"
+        );
         assert_ne!(code, 0, "task should fail due to timeout");
     }
 }
@@ -932,34 +1167,42 @@ mod common_errors {
         write!(f, r#"{{ "specificationVersion": "jobtemplate-2023-09" }}"#).unwrap();
         let (code, _stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
         assert_ne!(code, 0, "should fail validation");
-        assert!(stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_check_job_template_parsing_error_yaml() {
         let mut f = NamedTempFile::with_suffix(".template.yaml").unwrap();
-        write!(f, "specificationVersion: \"jobtemplate-2023-09\"\n").unwrap();
+        writeln!(f, "specificationVersion: \"jobtemplate-2023-09\"").unwrap();
         let (code, _stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
         assert_ne!(code, 0, "should fail validation");
-        assert!(stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_check_env_template_parsing_error() {
         let mut f = NamedTempFile::with_suffix(".template.yaml").unwrap();
-        write!(f, "specificationVersion: \"environment-2023-09\"\n").unwrap();
+        writeln!(f, "specificationVersion: \"environment-2023-09\"").unwrap();
         let (code, _stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
         assert_ne!(code, 0, "should fail validation");
-        assert!(stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("validation") || stderr.contains("missing") || stderr.contains("error"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_extra_params_error() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 steps:
   - name: s1
@@ -967,20 +1210,24 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "ExtraParam=value",
-        ]);
+"#
+        )
+        .unwrap();
+        let (code, _stdout, stderr) =
+            run_cli(&["run", f.path().to_str().unwrap(), "-p", "ExtraParam=value"]);
         assert_ne!(code, 0, "extra params should fail");
-        assert!(stderr.contains("not defined") || stderr.contains("parameter"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("not defined") || stderr.contains("parameter"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_missing_required_params_error() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: Required
@@ -993,19 +1240,23 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-        ]);
+"#
+        )
+        .unwrap();
+        let (code, _stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
         assert_ne!(code, 0, "missing params should fail");
-        assert!(stderr.contains("missing") || stderr.contains("required") || stderr.contains("Values"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("missing") || stderr.contains("required") || stderr.contains("Values"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_invalid_param_type_error() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: Count
@@ -1016,20 +1267,24 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
-        let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "Count=notanumber",
-        ]);
+"#
+        )
+        .unwrap();
+        let (code, _stdout, stderr) =
+            run_cli(&["run", f.path().to_str().unwrap(), "-p", "Count=notanumber"]);
         assert_ne!(code, 0, "invalid type should fail");
-        assert!(stderr.contains("integer") || stderr.contains("INT") || stderr.contains("error"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("integer") || stderr.contains("INT") || stderr.contains("error"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_param_constraint_violation() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: Title
@@ -1045,21 +1300,32 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "Title=a",
-            "-p", "Required=5",
+            "run",
+            f.path().to_str().unwrap(),
+            "-p",
+            "Title=a",
+            "-p",
+            "Required=5",
         ]);
         assert_ne!(code, 0, "constraint violation should fail");
-        assert!(stderr.contains("length") || stderr.contains("characters") || stderr.contains("at least"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("length")
+                || stderr.contains("characters")
+                || stderr.contains("at least"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_param_file_nonexistent() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: P
@@ -1070,20 +1336,31 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "file:///nonexistent/params.json",
+            "run",
+            f.path().to_str().unwrap(),
+            "-p",
+            "file:///nonexistent/params.json",
         ]);
         assert_ne!(code, 0, "nonexistent param file should fail");
-        assert!(stderr.to_lowercase().contains("no such file") || stderr.to_lowercase().contains("cannot read") || stderr.to_lowercase().contains("not found") || stderr.to_lowercase().contains("does not exist"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.to_lowercase().contains("no such file")
+                || stderr.to_lowercase().contains("cannot read")
+                || stderr.to_lowercase().contains("not found")
+                || stderr.to_lowercase().contains("does not exist"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_run_invalid_param_format() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 steps:
   - name: s1
@@ -1091,14 +1368,20 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", "bad format no equals",
+            "run",
+            f.path().to_str().unwrap(),
+            "-p",
+            "bad format no equals",
         ]);
         assert_ne!(code, 0, "badly formatted param should fail");
-        assert!(stderr.contains("Invalid parameter format") || stderr.contains("not formatted"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("Invalid parameter format") || stderr.contains("not formatted"),
+            "stderr: {stderr}"
+        );
     }
 }
 
@@ -1114,39 +1397,47 @@ mod chunked_job {
         let template = templates_dir().join("chunked_job.yaml");
         let (code, stdout, _stderr) = run_cli(&["check", template.to_str().unwrap()]);
         assert_eq!(code, 0, "check should succeed with default extensions");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_check_chunked_job_no_extensions() {
         let template = templates_dir().join("chunked_job.yaml");
-        let (code, _stdout, stderr) = run_cli(&[
-            "check", template.to_str().unwrap(),
-            "--extensions", "",
-        ]);
+        let (code, _stdout, stderr) =
+            run_cli(&["check", template.to_str().unwrap(), "--extensions", ""]);
         assert_ne!(code, 0, "should fail without TASK_CHUNKING extension");
-        assert!(stderr.contains("TASK_CHUNKING") || stderr.contains("extension") || stderr.contains("Unsupported"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("TASK_CHUNKING")
+                || stderr.contains("extension")
+                || stderr.contains("Unsupported"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_check_chunked_job_with_extension() {
         let template = templates_dir().join("chunked_job.yaml");
         let (code, stdout, _stderr) = run_cli(&[
-            "check", template.to_str().unwrap(),
-            "--extensions", "TASK_CHUNKING",
+            "check",
+            template.to_str().unwrap(),
+            "--extensions",
+            "TASK_CHUNKING",
         ]);
         assert_eq!(code, 0, "check should succeed with TASK_CHUNKING");
-        assert!(stdout.contains("passes validation checks"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_chunked_job_default_options() {
         let template = templates_dir().join("chunked_job.yaml");
-        let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-        ]);
+        let (code, stdout, stderr) =
+            run_cli(&["run", template.to_str().unwrap(), "--step", "Chunked Step"]);
         assert_eq!(code, 0, "stderr: {stderr}");
         // Should run 4 chunks of 10 items each (1-10, 11-20, 21-30, 31-40)
         assert!(stdout.contains("1-10"), "stdout: {stdout}");
@@ -1159,11 +1450,16 @@ mod chunked_job {
     fn test_run_chunked_job_maximum_task_count() {
         let template = templates_dir().join("chunked_job.yaml");
         let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-            "-p", "ChunkSize=3",
-            "-p", "TargetRuntime=0",
-            "--maximum-tasks", "3",
+            "run",
+            template.to_str().unwrap(),
+            "--step",
+            "Chunked Step",
+            "-p",
+            "ChunkSize=3",
+            "-p",
+            "TargetRuntime=0",
+            "--maximum-tasks",
+            "3",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         // Should only run 3 chunks
@@ -1174,10 +1470,14 @@ mod chunked_job {
     fn test_run_chunked_job_adaptive_chunking() {
         let template = templates_dir().join("chunked_job.yaml");
         let (code, stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-            "-p", "ChunkSize=1",
-            "-p", "TargetRuntime=10000",
+            "run",
+            template.to_str().unwrap(),
+            "--step",
+            "Chunked Step",
+            "-p",
+            "ChunkSize=1",
+            "-p",
+            "TargetRuntime=10000",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         // With TargetRuntime very high and ChunkSize=1, adaptive chunking should
@@ -1192,13 +1492,18 @@ mod chunked_job {
         // values against the parameter space range.
         let template = templates_dir().join("chunked_job.yaml");
         let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-            "-t", "Item=0",
+            "run",
+            template.to_str().unwrap(),
+            "--step",
+            "Chunked Step",
+            "-t",
+            "Item=0",
         ]);
         assert_ne!(code, 0, "should reject out-of-range task param value");
-        assert!(stderr.contains("not in the parameter space") || stderr.contains("not a valid chunk"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("not in the parameter space") || stderr.contains("not a valid chunk"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1206,12 +1511,18 @@ mod chunked_job {
         // "1;2" is not a valid range expression — the CLI rejects it at parse time
         let template = templates_dir().join("chunked_job.yaml");
         let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-            "-t", "Item=1;2",
+            "run",
+            template.to_str().unwrap(),
+            "--step",
+            "Chunked Step",
+            "-t",
+            "Item=1;2",
         ]);
         assert_ne!(code, 0, "task should fail with invalid range expression");
-        assert!(stderr.contains("invalid range expression"), "stderr: {stderr}");
+        assert!(
+            stderr.contains("invalid range expression"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1220,13 +1531,23 @@ mod chunked_job {
         // task param values against the parameter space range.
         let template = templates_dir().join("chunked_job.yaml");
         let (code, _stdout, stderr) = run_cli(&[
-            "run", template.to_str().unwrap(),
-            "--step", "Chunked Step",
-            "-t", "Item=30-41",
+            "run",
+            template.to_str().unwrap(),
+            "--step",
+            "Chunked Step",
+            "-t",
+            "Item=30-41",
         ]);
-        assert_ne!(code, 0, "should reject out-of-range interval task param values");
-        assert!(stderr.contains("not in the parameter space") || stderr.contains("not a valid chunk") || stderr.contains("not a subset"),
-            "stderr: {stderr}");
+        assert_ne!(
+            code, 0,
+            "should reject out-of-range interval task param values"
+        );
+        assert!(
+            stderr.contains("not in the parameter space")
+                || stderr.contains("not a valid chunk")
+                || stderr.contains("not a subset"),
+            "stderr: {stderr}"
+        );
     }
 }
 
@@ -1243,21 +1564,28 @@ mod context_aware_help {
     fn test_help_with_yaml_template() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(), "-h",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "-h",
         ]);
         assert_eq!(code, 0);
         assert!(stdout.contains("Job: my-job"), "stdout: {stdout}");
-        assert!(stdout.contains("Job Parameters (-p/--job-param PARAM_NAME=VALUE):"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Job Parameters (-p/--job-param PARAM_NAME=VALUE):"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("Message (STRING)"), "stdout: {stdout}");
-        assert!(stdout.contains("[default: 'Hello, world!']"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("[default: 'Hello, world!']"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_help_with_long_flag() {
         let tdir = templates_dir();
-        let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(), "--help",
-        ]);
+        let (code, stdout, _stderr) =
+            run_cli(&["run", tdir.join("basic.yaml").to_str().unwrap(), "--help"]);
         assert_eq!(code, 0);
         assert!(stdout.contains("Job: Job"), "stdout: {stdout}");
         assert!(stdout.contains("J (STRING)"), "stdout: {stdout}");
@@ -1267,7 +1595,9 @@ mod context_aware_help {
     #[test]
     fn test_help_with_description() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
-        write!(f, r#"{{
+        write!(
+            f,
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "TestJob",
             "description": "This is a test job with a description",
@@ -1275,11 +1605,16 @@ mod context_aware_help {
                 "name": "TestStep",
                 "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
             }}]
-        }}"#).unwrap();
+        }}"#
+        )
+        .unwrap();
         let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "-h"]);
         assert_eq!(code, 0);
         assert!(stdout.contains("Job: TestJob"), "stdout: {stdout}");
-        assert!(stdout.contains("This is a test job with a description"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("This is a test job with a description"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -1301,34 +1636,54 @@ mod context_aware_help {
         }}"#).unwrap();
         let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "--help"]);
         assert_eq!(code, 0);
-        assert!(stdout.contains("StringParam (STRING) [default: 'hello']"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("StringParam (STRING) [default: 'hello']"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("A string parameter"), "stdout: {stdout}");
-        assert!(stdout.contains("IntParam (INT) [required]"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("IntParam (INT) [required]"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("range: 1 to 10"), "stdout: {stdout}");
-        assert!(stdout.contains("FloatParam (FLOAT) [default: 3.14]"), "stdout: {stdout}");
-        assert!(stdout.contains("PathParam (PATH) [required]"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("FloatParam (FLOAT) [default: 3.14]"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("PathParam (PATH) [required]"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_help_includes_standard_options() {
         let tdir = templates_dir();
-        let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(), "-h",
-        ]);
+        let (code, stdout, _stderr) =
+            run_cli(&["run", tdir.join("basic.yaml").to_str().unwrap(), "-h"]);
         assert_eq!(code, 0);
         assert!(stdout.contains("Standard Options:"), "stdout: {stdout}");
         assert!(stdout.contains("--job-param"), "stdout: {stdout}");
         assert!(stdout.contains("--environment"), "stdout: {stdout}");
         assert!(stdout.contains("--verbose"), "stdout: {stdout}");
-        assert!(stdout.contains("leave out template to list all options"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("leave out template to list all options"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_help_without_template_shows_standard_help() {
         let (code, stdout, _stderr) = run_cli(&["run", "--help"]);
         assert_eq!(code, 0);
-        assert!(!stdout.contains("Job:"), "should not show job info. stdout: {stdout}");
-        assert!(!stdout.contains("Job Parameters"), "should not show params. stdout: {stdout}");
+        assert!(
+            !stdout.contains("Job:"),
+            "should not show job info. stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("Job Parameters"),
+            "should not show params. stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -1358,8 +1713,10 @@ mod context_aware_help {
         let (code, _stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap(), "-h"]);
         assert_ne!(code, 0);
         assert!(stderr.contains("Error:"), "stderr: {stderr}");
-        assert!(stderr.contains("Invalid job template") || stderr.contains("validation"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("Invalid job template") || stderr.contains("validation"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1367,8 +1724,14 @@ mod context_aware_help {
         let (code, _stdout, stderr) = run_cli(&["run", "does_not_exist.json", "--help"]);
         assert_ne!(code, 0);
         assert!(stderr.contains("Error:"), "stderr: {stderr}");
-        assert!(!stderr.contains("Traceback"), "should not show traceback. stderr: {stderr}");
-        assert!(!stderr.contains("panicked"), "should not show panic. stderr: {stderr}");
+        assert!(
+            !stderr.contains("Traceback"),
+            "should not show traceback. stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked"),
+            "should not show panic. stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1390,31 +1753,54 @@ mod context_aware_help {
         }}"#).unwrap();
         let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "-h"]);
         assert_eq!(code, 0);
-        assert!(stdout.contains("Environment (STRING) [default: 'dev']"), "stdout: {stdout}");
-        assert!(stdout.contains("allowed: 'dev', 'staging', 'prod'"), "stdout: {stdout}");
-        assert!(stdout.contains("Ratio (FLOAT) [default: 0.5]"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Environment (STRING) [default: 'dev']"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("allowed: 'dev', 'staging', 'prod'"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Ratio (FLOAT) [default: 0.5]"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("range: 0 to 1"), "stdout: {stdout}");
-        assert!(stdout.contains("Username (STRING) [default: 'user']"), "stdout: {stdout}");
-        assert!(stdout.contains("length: 3 to 20 characters"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Username (STRING) [default: 'user']"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("length: 3 to 20 characters"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_normal_execution_unaffected() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
-            "-p", "J=TestValue",
-            "--extensions", "",
+            "run",
+            tdir.join("simple_with_j_param.yaml").to_str().unwrap(),
+            "-p",
+            "J=TestValue",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0);
         assert!(stdout.contains("DoTask"), "stdout: {stdout}");
-        assert!(!stdout.contains("Job Parameters"), "should not show help. stdout: {stdout}");
+        assert!(
+            !stdout.contains("Job Parameters"),
+            "should not show help. stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_no_params_template_no_params_section() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
-        write!(f, r#"{{
+        write!(
+            f,
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "no-params-job",
             "description": "A job without parameters",
@@ -1422,12 +1808,20 @@ mod context_aware_help {
                 "name": "Step1",
                 "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
             }}]
-        }}"#).unwrap();
+        }}"#
+        )
+        .unwrap();
         let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "-h"]);
         assert_eq!(code, 0);
         assert!(stdout.contains("Job: no-params-job"), "stdout: {stdout}");
-        assert!(stdout.contains("A job without parameters"), "stdout: {stdout}");
-        assert!(!stdout.contains("Job Parameters"), "should not show params section. stdout: {stdout}");
+        assert!(
+            stdout.contains("A job without parameters"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("Job Parameters"),
+            "should not show params section. stdout: {stdout}"
+        );
         assert!(stdout.contains("Standard Options:"), "stdout: {stdout}");
     }
 
@@ -1435,14 +1829,19 @@ mod context_aware_help {
     fn test_job_info_before_standard_options() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(), "-h",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "-h",
         ]);
         assert_eq!(code, 0);
         let job_idx = stdout.find("Job: my-job").unwrap();
         let params_idx = stdout.find("Job Parameters").unwrap();
         let options_idx = stdout.find("Standard Options:").unwrap();
         assert!(job_idx < params_idx, "job name should come before params");
-        assert!(params_idx < options_idx, "params should come before standard options");
+        assert!(
+            params_idx < options_idx,
+            "params should come before standard options"
+        );
     }
 
     #[test]
@@ -1457,7 +1856,9 @@ mod context_aware_help {
     #[test]
     fn test_required_vs_optional_parameters() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
-        write!(f, r#"{{
+        write!(
+            f,
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "ReqOptTest",
             "parameterDefinitions": [
@@ -1467,7 +1868,9 @@ mod context_aware_help {
                 {{"name": "Message", "type": "STRING", "default": ""}}
             ],
             "steps": [{{"name": "S1", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
-        }}"#).unwrap();
+        }}"#
+        )
+        .unwrap();
         let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "-h"]);
         assert_eq!(code, 0);
         assert!(stdout.contains("RequiredParam"), "stdout: {stdout}");
@@ -1475,9 +1878,15 @@ mod context_aware_help {
         assert!(stdout.contains("OptionalParam"), "stdout: {stdout}");
         assert!(stdout.contains("default_value"), "stdout: {stdout}");
         assert!(stdout.contains("Count"), "stdout: {stdout}");
-        assert!(stdout.contains("[default: 0]"), "Count with default=0 should show as default. stdout: {stdout}");
+        assert!(
+            stdout.contains("[default: 0]"),
+            "Count with default=0 should show as default. stdout: {stdout}"
+        );
         assert!(stdout.contains("Message"), "stdout: {stdout}");
-        assert!(stdout.contains("[default: '']"), "Message with default='' should show as default. stdout: {stdout}");
+        assert!(
+            stdout.contains("[default: '']"),
+            "Message with default='' should show as default. stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -1535,23 +1944,43 @@ mod context_aware_help {
         assert_ne!(code, 0, "should fail with missing params");
         let output = format!("{stdout}{stderr}");
         // Should show the missing params error
-        assert!(output.contains("missing") || output.contains("Missing"),
-            "should mention missing params. output: {output}");
+        assert!(
+            output.contains("missing") || output.contains("Missing"),
+            "should mention missing params. output: {output}"
+        );
         // Should also show context-aware help with job info
-        assert!(output.contains("Job: TestJob"),
-            "should show job name. output: {output}");
-        assert!(output.contains("A test job with required parameters"),
-            "should show job description. output: {output}");
-        assert!(output.contains("Job Parameters"),
-            "should show parameters section. output: {output}");
-        assert!(output.contains("RequiredParam1") && output.contains("STRING") && output.contains("[required]"),
-            "should show RequiredParam1 info. output: {output}");
-        assert!(output.contains("First required parameter"),
-            "should show param1 description. output: {output}");
-        assert!(output.contains("RequiredParam2") && output.contains("INT") && output.contains("[required]"),
-            "should show RequiredParam2 info. output: {output}");
-        assert!(output.contains("Second required parameter"),
-            "should show param2 description. output: {output}");
+        assert!(
+            output.contains("Job: TestJob"),
+            "should show job name. output: {output}"
+        );
+        assert!(
+            output.contains("A test job with required parameters"),
+            "should show job description. output: {output}"
+        );
+        assert!(
+            output.contains("Job Parameters"),
+            "should show parameters section. output: {output}"
+        );
+        assert!(
+            output.contains("RequiredParam1")
+                && output.contains("STRING")
+                && output.contains("[required]"),
+            "should show RequiredParam1 info. output: {output}"
+        );
+        assert!(
+            output.contains("First required parameter"),
+            "should show param1 description. output: {output}"
+        );
+        assert!(
+            output.contains("RequiredParam2")
+                && output.contains("INT")
+                && output.contains("[required]"),
+            "should show RequiredParam2 info. output: {output}"
+        );
+        assert!(
+            output.contains("Second required parameter"),
+            "should show param2 description. output: {output}"
+        );
     }
 }
 
@@ -1567,7 +1996,9 @@ mod run_with_env_expr {
     #[test]
     fn test_run_job_with_env_expr_extension() {
         let mut job_f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(job_f, r#"specificationVersion: jobtemplate-2023-09
+        write!(
+            job_f,
+            r#"specificationVersion: jobtemplate-2023-09
 name: TestJob
 extensions:
   - FEATURE_BUNDLE_1
@@ -1575,10 +2006,14 @@ steps:
   - name: TestStep
     bash:
       script: echo "Task ran"
-"#).unwrap();
+"#
+        )
+        .unwrap();
 
         let mut env_f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(env_f, r#"specificationVersion: environment-2023-09
+        write!(
+            env_f,
+            r#"specificationVersion: environment-2023-09
 extensions:
   - EXPR
 environment:
@@ -1593,32 +2028,44 @@ environment:
         command: echo
         args:
           - "Exit"
-"#).unwrap();
+"#
+        )
+        .unwrap();
 
         let (code, stdout, stderr) = run_cli(&[
-            "run", job_f.path().to_str().unwrap(),
-            "--environment", env_f.path().to_str().unwrap(),
+            "run",
+            job_f.path().to_str().unwrap(),
+            "--environment",
+            env_f.path().to_str().unwrap(),
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Enter 3"), "EXPR should evaluate. stdout: {stdout}");
+        assert!(
+            stdout.contains("Enter 3"),
+            "EXPR should evaluate. stdout: {stdout}"
+        );
     }
 }
 
 mod new_cli_options {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_run_task_param_explicit() {
         // --task-param should run a single task with explicit values
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--task-param", "TaskNumber=1",
-            "--task-param", "TaskMessage=Hi!",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--task-param",
+            "TaskNumber=1",
+            "--task-param",
+            "TaskMessage=Hi!",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Running Task"), "stdout: {stdout}");
@@ -1629,10 +2076,14 @@ mod new_cli_options {
         // --tasks with inline JSON array
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", r#"[{"TaskNumber": "1", "TaskMessage": "Hi!"}]"#,
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            r#"[{"TaskNumber": "1", "TaskMessage": "Hi!"}]"#,
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Running Task"), "stdout: {stdout}");
@@ -1643,10 +2094,13 @@ mod new_cli_options {
         // --verbose should be accepted without error
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
             "--verbose",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
     }
@@ -1655,51 +2109,76 @@ mod new_cli_options {
     fn test_run_timestamp_format_utc() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--timestamp-format", "utc",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--timestamp-format",
+            "utc",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         // UTC timestamps contain 'T' and 'Z'
-        assert!(stdout.contains('T') && stdout.contains('Z'), "Expected UTC timestamps, stdout: {stdout}");
+        assert!(
+            stdout.contains('T') && stdout.contains('Z'),
+            "Expected UTC timestamps, stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_timestamp_format_local() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--timestamp-format", "local",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--timestamp-format",
+            "local",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         // Local timestamps contain 'T' but not 'Z'
-        assert!(stdout.contains('T'), "Expected local timestamps, stdout: {stdout}");
+        assert!(
+            stdout.contains('T'),
+            "Expected local timestamps, stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_output_json() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--output", "json",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--output",
+            "json",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains(r#""status": "success""#), "Expected JSON output, stdout: {stdout}");
+        assert!(
+            stdout.contains(r#""status": "success""#),
+            "Expected JSON output, stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_run_output_yaml() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--output", "yaml",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--output",
+            "yaml",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("status: success"), "stdout: {stdout}");
@@ -1712,7 +2191,9 @@ mod new_cli_options {
     fn test_run_auto_select_single_step() {
         // Job with one step should auto-select it without --step
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: SingleStepJob
 steps:
   - name: OnlyStep
@@ -1721,10 +2202,10 @@ steps:
         onRun:
           command: echo
           args: ["auto-selected"]
-"#).unwrap();
-        let (code, stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-        ]);
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("auto-selected"), "stdout: {stdout}");
     }
@@ -1733,11 +2214,16 @@ steps:
     fn test_run_task_param_conflicts_with_maximum_tasks() {
         let tdir = templates_dir();
         let (code, _stdout, _stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--task-param", "TaskNumber=1",
-            "--maximum-tasks", "5",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--task-param",
+            "TaskNumber=1",
+            "--maximum-tasks",
+            "5",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "conflicting options should fail");
     }
@@ -1746,7 +2232,9 @@ steps:
     fn test_run_inline_json_params() {
         // -p with inline JSON
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: Greeting
@@ -1758,10 +2246,14 @@ steps:
         onRun:
           command: echo
           args: ["{{{{Param.Greeting}}}}"]
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&[
-            "run", f.path().to_str().unwrap(),
-            "-p", r#"{"Greeting": "HelloJSON"}"#,
+            "run",
+            f.path().to_str().unwrap(),
+            "-p",
+            r#"{"Greeting": "HelloJSON"}"#,
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("HelloJSON"), "stdout: {stdout}");
@@ -1771,13 +2263,19 @@ steps:
     fn test_run_preserve_shows_working_dir() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
             "--preserve",
-            "--extensions", "",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Working directory preserved at:"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Working directory preserved at:"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -1785,13 +2283,18 @@ steps:
         // --task-param without --step on a multi-step job should error
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--task-param", "TaskNumber=1",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--task-param",
+            "TaskNumber=1",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "should fail without --step on multi-step job");
-        assert!(stderr.contains("requires a specified step") || stderr.contains("single step"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("requires a specified step") || stderr.contains("single step"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1800,11 +2303,16 @@ steps:
         // Pass a value containing '=' to verify split_once behavior
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "-t", "TaskNumber=1",
-            "-t", "TaskMessage=One=Two",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "-t",
+            "TaskNumber=1",
+            "-t",
+            "TaskMessage=One=Two",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("One=Two"), "stdout: {stdout}");
@@ -1814,29 +2322,42 @@ steps:
     fn test_task_param_bad_format() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "-t", "NoEquals",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "-t",
+            "NoEquals",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "bad format should fail");
-        assert!(stderr.contains("defined incorrectly") || stderr.contains("format"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("defined incorrectly") || stderr.contains("format"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_task_param_duplicate() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "-t", "TaskNumber=1",
-            "-t", "TaskNumber=2",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "-t",
+            "TaskNumber=1",
+            "-t",
+            "TaskNumber=2",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "duplicate should fail");
-        assert!(stderr.contains("more than once") || stderr.contains("duplicate"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("more than once") || stderr.contains("duplicate"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -1846,10 +2367,14 @@ steps:
         let tasks_arg = format!("file://{}", f.path().display());
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", &tasks_arg,
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            &tasks_arg,
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Running Task"), "stdout: {stdout}");
@@ -1862,10 +2387,14 @@ steps:
         let tasks_arg = format!("file://{}", f.path().display());
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", &tasks_arg,
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            &tasks_arg,
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Running Task"), "stdout: {stdout}");
@@ -1875,38 +2404,54 @@ steps:
     fn test_tasks_not_a_list() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", r#"{"TaskNumber": "1"}"#,
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            r#"{"TaskNumber": "1"}"#,
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "non-list should fail");
-        assert!(stderr.contains("list") || stderr.contains("must be"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("list") || stderr.contains("must be"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_tasks_not_list_of_dicts() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", "[1, 2, 3]",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            "[1, 2, 3]",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0, "non-dict items should fail");
-        assert!(stderr.contains("maps") || stderr.contains("must be"),
-            "stderr: {stderr}");
+        assert!(
+            stderr.contains("maps") || stderr.contains("must be"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_tasks_numeric_values_coerced() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--tasks", r#"[{"TaskNumber": 1, "TaskMessage": "Hi!"}]"#,
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            r#"[{"TaskNumber": 1, "TaskMessage": "Hi!"}]"#,
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "numeric coercion should succeed. stderr: {stderr}");
         assert!(stdout.contains("Running Task"), "stdout: {stdout}");
@@ -1915,13 +2460,15 @@ steps:
 
 mod summary_command {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_summary_basic_job() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: TestJob
 steps:
   - name: Step1
@@ -1930,19 +2477,26 @@ steps:
         onRun:
           command: echo
           args: ["hello"]
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Summary for 'TestJob'"), "stdout: {stdout}");
         assert!(stdout.contains("Total steps: 1"), "stdout: {stdout}");
         assert!(stdout.contains("Total tasks: 1"), "stdout: {stdout}");
-        assert!(stdout.contains("'Step1' (1 total Tasks)"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("'Step1' (1 total Tasks)"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_summary_with_parameters() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: ParamJob
 parameterDefinitions:
   - name: Greeting
@@ -1954,16 +2508,23 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Greeting (STRING): Hello"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Greeting (STRING): Hello"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_summary_with_task_params() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: TaskParamJob
 steps:
   - name: Render
@@ -1976,7 +2537,9 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("10 total Tasks"), "stdout: {stdout}");
@@ -1987,12 +2550,18 @@ steps:
     fn test_summary_step_filter() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "summary", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--extensions", "",
+            "summary",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Summary for Step 'TaskParamStep'"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Summary for Step 'TaskParamStep'"),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains("Total tasks:"), "stdout: {stdout}");
     }
 
@@ -2000,9 +2569,12 @@ steps:
     fn test_summary_nonexistent_step() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "summary", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "NoSuchStep",
-            "--extensions", "",
+            "summary",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "NoSuchStep",
+            "--extensions",
+            "",
         ]);
         assert_ne!(code, 0);
         assert!(stderr.contains("does not exist"), "stderr: {stderr}");
@@ -2011,7 +2583,9 @@ steps:
     #[test]
     fn test_summary_json_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: JsonJob
 steps:
   - name: S1
@@ -2019,17 +2593,25 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
-        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap(), "--output", "json"]);
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--output", "json"]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains(r#""status": "success""#), "stdout: {stdout}");
+        assert!(
+            stdout.contains(r#""status": "success""#),
+            "stdout: {stdout}"
+        );
         assert!(stdout.contains(r#""name": "JsonJob""#), "stdout: {stdout}");
     }
 
     #[test]
     fn test_summary_yaml_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: YamlJob
 parameterDefinitions:
   - name: Greeting
@@ -2041,24 +2623,33 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
-        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap(), "--output", "yaml"]);
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--output", "yaml"]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("status: success"), "stdout: {stdout}");
         assert!(stdout.contains("name: YamlJob"), "stdout: {stdout}");
         assert!(stdout.contains("total_steps: 1"), "stdout: {stdout}");
         assert!(stdout.contains("total_tasks: 1"), "stdout: {stdout}");
         // Should include structured step data (not just top-level keys)
-        assert!(stdout.contains("- name: S1"), "steps should be structured. stdout: {stdout}");
+        assert!(
+            stdout.contains("- name: S1"),
+            "steps should be structured. stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_summary_with_dependencies() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "summary", tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
-            "-p", "J=hello",
-            "--extensions", "",
+            "summary",
+            tdir.join("basic_dependency_job.yaml").to_str().unwrap(),
+            "-p",
+            "J=hello",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("dependencies"), "stdout: {stdout}");
@@ -2067,7 +2658,9 @@ steps:
     #[test]
     fn test_summary_with_environments() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: EnvJob
 steps:
   - name: S1
@@ -2083,7 +2676,9 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Total environments: 1"), "stdout: {stdout}");
@@ -2094,7 +2689,9 @@ steps:
     #[test]
     fn test_summary_missing_required_param() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: test
 parameterDefinitions:
   - name: Required
@@ -2105,32 +2702,46 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, _stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_ne!(code, 0);
-        assert!(stderr.contains("missing") || stderr.contains("Required"), "stderr: {stderr}");
+        assert!(
+            stderr.contains("missing") || stderr.contains("Required"),
+            "stderr: {stderr}"
+        );
     }
 
     #[test]
     fn test_summary_step_with_params() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "summary", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "TaskParamStep",
-            "--extensions", "",
+            "summary",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Total tasks: 9"), "stdout: {stdout}");
-        assert!(stdout.contains("Total task parameters: 2"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("Total task parameters: 2"),
+            "stdout: {stdout}"
+        );
     }
 
     #[test]
     fn test_summary_step_bare() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "summary", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--extensions", "",
+            "summary",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Total tasks: 1"), "stdout: {stdout}");
@@ -2140,7 +2751,9 @@ steps:
     #[test]
     fn test_summary_with_combination_expr() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: ComboJob
 steps:
   - name: ComboStep
@@ -2160,7 +2773,9 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("ComboStep"), "stdout: {stdout}");
@@ -2172,7 +2787,9 @@ steps:
     #[test]
     fn test_summary_job_with_root_envs() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(f, r#"specificationVersion: "jobtemplate-2023-09"
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
 name: RootEnvJob
 jobEnvironments:
   - name: GlobalEnv
@@ -2184,7 +2801,9 @@ steps:
       actions:
         onRun:
           command: echo
-"#).unwrap();
+"#
+        )
+        .unwrap();
         let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Total environments: 1"), "stdout: {stdout}");
@@ -2195,10 +2814,14 @@ steps:
     fn test_summary_step_and_params() {
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "summary", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "-p", "Message=CustomMsg",
-            "--step", "TaskParamStep",
-            "--extensions", "",
+            "summary",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "-p",
+            "Message=CustomMsg",
+            "--step",
+            "TaskParamStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("TaskParamStep"), "stdout: {stdout}");
@@ -2220,15 +2843,29 @@ mod all_steps_topo_sort {
         // With topo sort, they must run: A, B, C.
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("reverse_dependency_order.yaml").to_str().unwrap(),
-            "--extensions", "",
+            "run",
+            tdir.join("reverse_dependency_order.yaml").to_str().unwrap(),
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        let a_pos = stdout.find("Running step 'StepA'").expect("StepA should run");
-        let b_pos = stdout.find("Running step 'StepB'").expect("StepB should run");
-        let c_pos = stdout.find("Running step 'StepC'").expect("StepC should run");
-        assert!(a_pos < b_pos, "StepA must run before StepB. stdout: {stdout}");
-        assert!(b_pos < c_pos, "StepB must run before StepC. stdout: {stdout}");
+        let a_pos = stdout
+            .find("Running step 'StepA'")
+            .expect("StepA should run");
+        let b_pos = stdout
+            .find("Running step 'StepB'")
+            .expect("StepB should run");
+        let c_pos = stdout
+            .find("Running step 'StepC'")
+            .expect("StepC should run");
+        assert!(
+            a_pos < b_pos,
+            "StepA must run before StepB. stdout: {stdout}"
+        );
+        assert!(
+            b_pos < c_pos,
+            "StepB must run before StepC. stdout: {stdout}"
+        );
     }
 }
 
@@ -2244,10 +2881,14 @@ mod python_compat {
         // Python uses --job-param; Rust should accept it too
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "--job-param", "J=value1",
-            "--extensions", "",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "--job-param",
+            "J=value1",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
     }
@@ -2257,10 +2898,14 @@ mod python_compat {
         // Both Python and Rust use -p
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--step", "First",
-            "-p", "J=value1",
-            "--extensions", "",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--step",
+            "First",
+            "-p",
+            "J=value1",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
     }
@@ -2269,9 +2914,12 @@ mod python_compat {
     fn test_summary_job_param_long_flag() {
         let tdir = templates_dir();
         let (code, _stdout, stderr) = run_cli(&[
-            "summary", tdir.join("basic.yaml").to_str().unwrap(),
-            "--job-param", "J=value1",
-            "--extensions", "",
+            "summary",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--job-param",
+            "J=value1",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
     }
@@ -2281,15 +2929,21 @@ mod python_compat {
         // Python uses -tp; Rust should accept it
         let tdir = templates_dir();
         let (_code, _stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "-tp", "Foo=bar",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "-tp",
+            "Foo=bar",
+            "--extensions",
+            "",
         ]);
         // BareStep has no task params, so this may fail for a different reason,
         // but it should NOT fail with "unrecognized argument -tp"
-        assert!(!stderr.contains("unrecognized") && !stderr.contains("unexpected argument"),
-            "-tp should be recognized as task-param flag. stderr: {stderr}");
+        assert!(
+            !stderr.contains("unrecognized") && !stderr.contains("unexpected argument"),
+            "-tp should be recognized as task-param flag. stderr: {stderr}"
+        );
     }
 
     #[test]
@@ -2297,14 +2951,20 @@ mod python_compat {
         // Python uses "chunks_run" in JSON output; Rust should match
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--output", "json",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--output",
+            "json",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("\"chunks_run\""),
-            "JSON output should use 'chunks_run' to match Python CLI. stdout: {stdout}");
+        assert!(
+            stdout.contains("\"chunks_run\""),
+            "JSON output should use 'chunks_run' to match Python CLI. stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -2312,14 +2972,20 @@ mod python_compat {
         // Python uses "chunks_run" in YAML output; Rust should match
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--output", "yaml",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--output",
+            "yaml",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("chunks_run:"),
-            "YAML output should use 'chunks_run' to match Python CLI. stdout: {stdout}");
+        assert!(
+            stdout.contains("chunks_run:"),
+            "YAML output should use 'chunks_run' to match Python CLI. stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -2327,13 +2993,18 @@ mod python_compat {
         // Python uses "Chunks run:" in human output; Rust should match
         let tdir = templates_dir();
         let (code, stdout, stderr) = run_cli(&[
-            "run", tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step", "BareStep",
-            "--extensions", "",
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--extensions",
+            "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Chunks run:"),
-            "Human output should say 'Chunks run:' to match Python CLI. stdout: {stdout}");
+        assert!(
+            stdout.contains("Chunks run:"),
+            "Human output should say 'Chunks run:' to match Python CLI. stdout: {stdout}"
+        );
     }
 
     #[test]
@@ -2341,12 +3012,16 @@ mod python_compat {
         // Context-aware help should show --job-param, not --parameter
         let tdir = templates_dir();
         let (code, stdout, _stderr) = run_cli(&[
-            "run", tdir.join("basic.yaml").to_str().unwrap(),
-            "--extensions", "",
+            "run",
+            tdir.join("basic.yaml").to_str().unwrap(),
+            "--extensions",
+            "",
             "-h",
         ]);
         assert_eq!(code, 0);
-        assert!(stdout.contains("--job-param"),
-            "Context help should show --job-param. stdout: {stdout}");
+        assert!(
+            stdout.contains("--job-param"),
+            "Context help should show --job-param. stdout: {stdout}"
+        );
     }
 }

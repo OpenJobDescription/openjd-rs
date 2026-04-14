@@ -3,9 +3,9 @@
 
 //! Task parameter definitions per spec §3.4.
 
-use crate::format_string::FormatString;
 use super::constrained_strings::Identifier;
 use super::parameters::FlexInt;
+use crate::format_string::FormatString;
 use serde::Deserialize;
 
 /// §3.4.1 TaskParameterDefinition — discriminated union on `type`.
@@ -61,12 +61,12 @@ impl<'de> Deserialize<'de> for IntRange {
                     .collect();
                 Ok(IntRange::List(items?))
             }
-            serde_yaml::Value::String(s) => {
-                FormatString::new(&s)
-                    .map(IntRange::Expression)
-                    .map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom("Expected list or string for range")),
+            serde_yaml::Value::String(s) => FormatString::new(&s)
+                .map(IntRange::Expression)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(
+                "Expected list or string for range",
+            )),
         }
     }
 }
@@ -85,13 +85,16 @@ impl<'de> Deserialize<'de> for StringRange {
         let val = serde_yaml::Value::deserialize(deserializer)?;
         match &val {
             serde_yaml::Value::Sequence(_) => {
-                let items: Vec<FormatString> = serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
+                let items: Vec<FormatString> =
+                    serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
                 Ok(StringRange::List(items))
             }
-            serde_yaml::Value::String(s) => {
-                FormatString::new(s).map(StringRange::Expression).map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom("Expected list or string for range")),
+            serde_yaml::Value::String(s) => FormatString::new(s)
+                .map(StringRange::Expression)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(
+                "Expected list or string for range",
+            )),
         }
     }
 }
@@ -107,15 +110,16 @@ impl<'de> Deserialize<'de> for FloatRangeItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let val = serde_yaml::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => {
-                n.as_f64().map(FloatRangeItem::Float)
-                    .ok_or_else(|| serde::de::Error::custom("Invalid number in float range"))
-            }
-            serde_yaml::Value::String(s) => {
-                FormatString::new(s).map(FloatRangeItem::FormatString)
-                    .map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom("Expected number or string in float range")),
+            serde_yaml::Value::Number(n) => n
+                .as_f64()
+                .map(FloatRangeItem::Float)
+                .ok_or_else(|| serde::de::Error::custom("Invalid number in float range")),
+            serde_yaml::Value::String(s) => FormatString::new(s)
+                .map(FloatRangeItem::FormatString)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(
+                "Expected number or string in float range",
+            )),
         }
     }
 }
@@ -131,13 +135,16 @@ impl<'de> Deserialize<'de> for FloatRange {
         let val = serde_yaml::Value::deserialize(deserializer)?;
         match &val {
             serde_yaml::Value::Sequence(_) => {
-                let items: Vec<FloatRangeItem> = serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
+                let items: Vec<FloatRangeItem> =
+                    serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
                 Ok(FloatRange::List(items))
             }
-            serde_yaml::Value::String(s) => {
-                FormatString::new(s).map(FloatRange::Expression).map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom("Expected list or string for range")),
+            serde_yaml::Value::String(s) => FormatString::new(s)
+                .map(FloatRange::Expression)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(
+                "Expected list or string for range",
+            )),
         }
     }
 }
@@ -217,7 +224,9 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
                     if f.fract() == 0.0 {
                         Ok(Self::Int(f as i64))
                     } else {
-                        Err(serde::de::Error::custom(format!("Expected integer, got float: {f}")))
+                        Err(serde::de::Error::custom(format!(
+                            "Expected integer, got float: {f}"
+                        )))
                     }
                 } else {
                     Err(serde::de::Error::custom("Invalid number"))
@@ -231,23 +240,21 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
                         .map_err(serde::de::Error::custom)
                 } else {
                     // Try parsing as integer
-                    s.trim().parse::<i64>()
-                        .map(Self::Int)
-                        .map_err(|_| serde::de::Error::custom(format!("Cannot parse '{s}' as integer")))
+                    s.trim().parse::<i64>().map(Self::Int).map_err(|_| {
+                        serde::de::Error::custom(format!("Cannot parse '{s}' as integer"))
+                    })
                 }
             }
             serde_yaml::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected integer, got boolean"))
             }
-            serde_yaml::Value::Null => {
-                Err(serde::de::Error::custom("Expected integer, got null"))
-            }
+            serde_yaml::Value::Null => Err(serde::de::Error::custom("Expected integer, got null")),
             _ => Err(serde::de::Error::custom("Expected integer or string")),
         }
     }
 }
 
-/// Chunks configuration for CHUNK[INT] parameters.
+/// Chunks configuration for `CHUNK[INT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChunksDefinition {

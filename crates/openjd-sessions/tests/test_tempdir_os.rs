@@ -76,22 +76,24 @@ fn test_tempdir_posix_permissions() {
 
 #[test]
 fn test_is_posix() {
+    const { assert!(cfg!(unix) || !cfg!(unix)) };
     #[cfg(unix)]
-    assert!(cfg!(unix));
-    #[cfg(not(unix))]
-    assert!(!cfg!(unix));
+    const {
+        assert!(cfg!(unix))
+    };
 }
 
 #[test]
 fn test_is_windows() {
+    const { assert!(cfg!(windows) || !cfg!(windows)) };
     #[cfg(windows)]
-    assert!(cfg!(windows));
-    #[cfg(not(windows))]
-    assert!(!cfg!(windows));
+    const {
+        assert!(cfg!(windows))
+    };
 }
 
 #[test]
 fn test_os_detection_consistent() {
-    assert!(!(cfg!(unix) && cfg!(windows)));
-    assert!(cfg!(unix) || cfg!(windows) || cfg!(target_os = "wasi"));
+    const { assert!(!(cfg!(unix) && cfg!(windows))) };
+    const { assert!(cfg!(unix) || cfg!(windows) || cfg!(target_os = "wasi")) };
 }

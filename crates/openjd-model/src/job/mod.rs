@@ -18,7 +18,7 @@ use openjd_expr::format_string::FormatString;
 use openjd_expr::symbol_table::SerializedSymbolTable;
 use openjd_expr::ExprValue;
 use openjd_expr::RangeExpr;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::types::{EndOfLine, FileType};
 
@@ -172,7 +172,10 @@ pub enum TaskParameter {
 
 /// A resolved range — either a concrete list or a RangeExpr.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", bound(deserialize = "T: serde::de::DeserializeOwned"))]
+#[serde(
+    rename_all = "camelCase",
+    bound(deserialize = "T: serde::de::DeserializeOwned")
+)]
 pub enum TaskParamRange<T: Serialize> {
     List(Vec<T>),
     RangeExpr(RangeExpr),
@@ -216,4 +219,3 @@ pub struct AttributeRequirement {
 pub struct StepDependency {
     pub depends_on: String,
 }
-

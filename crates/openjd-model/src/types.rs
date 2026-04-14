@@ -357,7 +357,10 @@ impl ValidationContext {
     }
 
     pub fn with_extensions(revision: SpecificationRevision, extensions: Extensions) -> Self {
-        Self { revision, extensions }
+        Self {
+            revision,
+            extensions,
+        }
     }
 
     pub fn has_extension(&self, ext: KnownExtension) -> bool {
@@ -375,22 +378,33 @@ mod tests {
     ];
 
     fn job_template_versions() -> Vec<TemplateSpecificationVersion> {
-        ALL_VERSIONS.iter().copied().filter(|v| v.is_job_template()).collect()
+        ALL_VERSIONS
+            .iter()
+            .copied()
+            .filter(|v| v.is_job_template())
+            .collect()
     }
 
     fn environment_template_versions() -> Vec<TemplateSpecificationVersion> {
-        ALL_VERSIONS.iter().copied().filter(|v| v.is_environment_template()).collect()
+        ALL_VERSIONS
+            .iter()
+            .copied()
+            .filter(|v| v.is_environment_template())
+            .collect()
     }
 
     #[test]
     fn test_all_values_classified() {
-        let job_versions: std::collections::HashSet<_> = job_template_versions().into_iter().collect();
-        let env_versions: std::collections::HashSet<_> = environment_template_versions().into_iter().collect();
+        let job_versions: std::collections::HashSet<_> =
+            job_template_versions().into_iter().collect();
+        let env_versions: std::collections::HashSet<_> =
+            environment_template_versions().into_iter().collect();
         // No overlap
         assert!(job_versions.is_disjoint(&env_versions));
         // Together they cover all versions
         let all: std::collections::HashSet<_> = ALL_VERSIONS.iter().copied().collect();
-        let union: std::collections::HashSet<_> = job_versions.union(&env_versions).copied().collect();
+        let union: std::collections::HashSet<_> =
+            job_versions.union(&env_versions).copied().collect();
         assert_eq!(union, all);
     }
 
@@ -413,7 +427,11 @@ mod tests {
     #[test]
     fn test_environment_template_versions() {
         for v in environment_template_versions() {
-            assert!(v.is_environment_template(), "{:?} should be an env template", v);
+            assert!(
+                v.is_environment_template(),
+                "{:?} should be an env template",
+                v
+            );
         }
     }
 
@@ -471,11 +489,26 @@ mod tests {
 
     #[test]
     fn test_job_param_type_case_insensitive() {
-        assert_eq!(JobParameterType::from_spec_str("string"), Some(JobParameterType::String));
-        assert_eq!(JobParameterType::from_spec_str("Int"), Some(JobParameterType::Int));
-        assert_eq!(JobParameterType::from_spec_str("list[int]"), Some(JobParameterType::ListInt));
-        assert_eq!(JobParameterType::from_spec_str("List[List[Int]]"), Some(JobParameterType::ListListInt));
-        assert_eq!(JobParameterType::from_spec_str("range_expr"), Some(JobParameterType::RangeExpr));
+        assert_eq!(
+            JobParameterType::from_spec_str("string"),
+            Some(JobParameterType::String)
+        );
+        assert_eq!(
+            JobParameterType::from_spec_str("Int"),
+            Some(JobParameterType::Int)
+        );
+        assert_eq!(
+            JobParameterType::from_spec_str("list[int]"),
+            Some(JobParameterType::ListInt)
+        );
+        assert_eq!(
+            JobParameterType::from_spec_str("List[List[Int]]"),
+            Some(JobParameterType::ListListInt)
+        );
+        assert_eq!(
+            JobParameterType::from_spec_str("range_expr"),
+            Some(JobParameterType::RangeExpr)
+        );
     }
 
     #[test]
@@ -489,8 +522,14 @@ mod tests {
     fn test_job_param_type_expr_type() {
         assert_eq!(JobParameterType::String.expr_type(), ExprType::STRING);
         assert_eq!(JobParameterType::Path.expr_type(), ExprType::PATH);
-        assert_eq!(JobParameterType::ListInt.expr_type(), ExprType::list(ExprType::INT));
-        assert_eq!(JobParameterType::ListListInt.expr_type(), ExprType::list(ExprType::list(ExprType::INT)));
+        assert_eq!(
+            JobParameterType::ListInt.expr_type(),
+            ExprType::list(ExprType::INT)
+        );
+        assert_eq!(
+            JobParameterType::ListListInt.expr_type(),
+            ExprType::list(ExprType::list(ExprType::INT))
+        );
     }
 
     #[test]
@@ -528,7 +567,10 @@ mod tests {
     fn test_task_param_type_expr_type() {
         assert_eq!(TaskParameterType::String.expr_type(), ExprType::STRING);
         assert_eq!(TaskParameterType::Path.expr_type(), ExprType::PATH);
-        assert_eq!(TaskParameterType::ChunkInt.expr_type(), ExprType::RANGE_EXPR);
+        assert_eq!(
+            TaskParameterType::ChunkInt.expr_type(),
+            ExprType::RANGE_EXPR
+        );
     }
 
     #[test]

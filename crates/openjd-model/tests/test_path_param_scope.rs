@@ -25,21 +25,25 @@ fn check_ok_ext(s: &str, ext: &[&str]) {
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
 fn check_err_ext(s: &str, ext: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(ext))
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(ext)).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
@@ -49,17 +53,21 @@ fn check_err_ext(s: &str, ext: &[&str], expected: &[&str]) {
 
 #[test]
 fn path_param_not_in_job_name() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{Param.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#, &["name:", "Param.Foo"]);
+    }"#,
+        &["name:", "Param.Foo"],
+    );
 }
 
 #[test]
 fn path_param_not_in_parameter_space_range() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
@@ -68,12 +76,15 @@ fn path_param_not_in_parameter_space_range() {
                 {"name": "Bar", "type": "STRING", "range": ["{{Param.Foo}}"]}
             ]}
         }]
-    }"#, &["Param.Foo"]);
+    }"#,
+        &["Param.Foo"],
+    );
 }
 
 #[test]
 fn path_param_not_in_int_range_start() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
@@ -82,7 +93,9 @@ fn path_param_not_in_int_range_start() {
                 {"name": "Bar", "type": "INT", "range": "{{Param.Foo}}"}
             ]}
         }]
-    }"#, &["Param.Foo"]);
+    }"#,
+        &["Param.Foo"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -91,17 +104,20 @@ fn path_param_not_in_int_range_start() {
 
 #[test]
 fn path_rawparam_in_job_name() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{RawParam.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn path_rawparam_in_parameter_space_range() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
@@ -110,7 +126,8 @@ fn path_rawparam_in_parameter_space_range() {
                 {"name": "Bar", "type": "STRING", "range": ["{{RawParam.Foo}}"]}
             ]}
         }]
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -119,25 +136,29 @@ fn path_rawparam_in_parameter_space_range() {
 
 #[test]
 fn path_param_in_environment_script() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}],
         "jobEnvironments": [{"name": "Env", "script": {"actions": {"onEnter": {"command": "echo {{Param.Foo}}"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn path_param_in_step_environment_script() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}},
             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "echo {{Param.Foo}}"}}}}]
         }]
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -146,22 +167,26 @@ fn path_param_in_step_environment_script() {
 
 #[test]
 fn path_param_in_step_script() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo {{Param.Foo}}"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn path_param_in_step_script_args() {
-    check_ok(r#"{
+    check_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo", "args": ["{{Param.Foo}}"]}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -170,18 +195,23 @@ fn path_param_in_step_script_args() {
 
 #[test]
 fn list_path_param_not_in_job_name() {
-    check_err_ext(r#"{
+    check_err_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo {{Param.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "LIST[PATH]", "default": ["/tmp"]}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#, &["EXPR"], &["name:", "Param.Foo"]);
+    }"#,
+        &["EXPR"],
+        &["name:", "Param.Foo"],
+    );
 }
 
 #[test]
 fn list_path_param_not_in_parameter_space_range() {
-    check_err_ext(r#"{
+    check_err_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
@@ -191,7 +221,10 @@ fn list_path_param_not_in_parameter_space_range() {
                 {"name": "Bar", "type": "STRING", "range": ["{{Param.Foo}}"]}
             ]}
         }]
-    }"#, &["EXPR"], &["Param.Foo"]);
+    }"#,
+        &["EXPR"],
+        &["Param.Foo"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -200,18 +233,22 @@ fn list_path_param_not_in_parameter_space_range() {
 
 #[test]
 fn list_path_rawparam_in_job_name() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo {{RawParam.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "LIST[PATH]", "default": ["/tmp"]}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 #[test]
 fn list_path_rawparam_in_parameter_space_range() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
@@ -221,7 +258,9 @@ fn list_path_rawparam_in_parameter_space_range() {
                 {"name": "Bar", "type": "STRING", "range": ["{{RawParam.Foo}}"]}
             ]}
         }]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -230,19 +269,23 @@ fn list_path_rawparam_in_parameter_space_range() {
 
 #[test]
 fn list_path_param_in_environment_script() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "LIST[PATH]", "default": ["/tmp"]}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}}}],
         "jobEnvironments": [{"name": "Env", "script": {"actions": {"onEnter": {"command": "echo {{Param.Foo}}"}}}}]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 #[test]
 fn list_path_param_in_step_environment_script() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
@@ -250,7 +293,9 @@ fn list_path_param_in_step_environment_script() {
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo"}}},
             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "echo {{Param.Foo}}"}}}}]
         }]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -262,7 +307,8 @@ fn list_path_rawparam_has_list_type_in_template_scope() {
     // RawParam.Foo for LIST[PATH] should be list[string], not string.
     // len() on list[string] returns int; len() on string also returns int,
     // but sorted() only accepts lists — so this validates the type is list.
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Job {{sorted(RawParam.Foo)}}",
@@ -270,7 +316,9 @@ fn list_path_rawparam_has_list_type_in_template_scope() {
         "steps": [{"name": "Step",
             "script": {"actions": {"onRun": {"command": "echo"}}}
         }]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -279,26 +327,31 @@ fn list_path_rawparam_has_list_type_in_template_scope() {
 
 #[test]
 fn list_path_param_in_step_script() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "LIST[PATH]", "default": ["/tmp"]}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo {{Param.Foo}}"}}}}]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
 
 #[test]
 fn list_path_param_in_step_script_args() {
-    check_ok_ext(r#"{
+    check_ok_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Foo",
         "parameterDefinitions": [{"name": "Foo", "type": "LIST[PATH]", "default": ["/tmp"]}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo", "args": ["{{Param.Foo}}"]}}}}]
-    }"#, &["EXPR"]);
+    }"#,
+        &["EXPR"],
+    );
 }
-
 
 // ══════════════════════════════════════════════════════════════
 // Env.File.* must NOT be available in step scripts (§7.3)
@@ -307,7 +360,8 @@ fn list_path_param_in_step_script_args() {
 #[test]
 fn env_file_not_available_in_step_script_with_expr() {
     // Env.File.* is only available within environment scripts, not step scripts.
-    check_err_ext(r#"{
+    check_err_ext(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
@@ -322,5 +376,8 @@ fn env_file_not_available_in_step_script_with_expr() {
             }],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{Env.File.cfg}}"]}}}
         }]
-    }"#, &["EXPR"], &["Env.File.cfg"]);
+    }"#,
+        &["EXPR"],
+        &["Env.File.cfg"],
+    );
 }

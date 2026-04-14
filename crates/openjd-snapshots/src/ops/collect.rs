@@ -45,7 +45,10 @@ fn file_meta(meta: &std::fs::Metadata) -> crate::Result<(u64, u64, bool)> {
 
 fn abs_normalized(p: &Path) -> crate::Result<String> {
     let abs = std::path::absolute(p).map_err(|e| {
-        SnapshotError::Io(std::io::Error::new(e.kind(), format!("{}: {}", p.display(), e)))
+        SnapshotError::Io(std::io::Error::new(
+            e.kind(),
+            format!("{}: {}", p.display(), e),
+        ))
     })?;
     Ok(normalize_path(&abs.to_string_lossy()))
 }
@@ -53,7 +56,10 @@ fn abs_normalized(p: &Path) -> crate::Result<String> {
 /// Like abs_normalized but doesn't follow the final symlink component.
 fn abs_normalized_no_follow(p: &Path) -> crate::Result<String> {
     let abs = std::path::absolute(p).map_err(|e| {
-        SnapshotError::Io(std::io::Error::new(e.kind(), format!("{}: {}", p.display(), e)))
+        SnapshotError::Io(std::io::Error::new(
+            e.kind(),
+            format!("{}: {}", p.display(), e),
+        ))
     })?;
     Ok(normalize_path(&abs.to_string_lossy()))
 }
@@ -76,7 +82,9 @@ pub fn collect_abs_snapshot(
     filenames: &[impl AsRef<Path>],
     options: CollectOptions,
 ) -> crate::Result<AbsSnapshot> {
-    let chunk_size = options.file_chunk_size_bytes.unwrap_or(DEFAULT_FILE_CHUNK_SIZE);
+    let chunk_size = options
+        .file_chunk_size_bytes
+        .unwrap_or(DEFAULT_FILE_CHUNK_SIZE);
     let mut files: Vec<FileEntry> = Vec::new();
     let mut dirs: Vec<DirEntry> = Vec::new();
     let mut deferred_symlinks: Vec<DeferredSymlink> = Vec::new();
@@ -95,9 +103,8 @@ pub fn collect_abs_snapshot(
             )));
         }
         for entry in WalkDir::new(dir).follow_links(false) {
-            let entry = entry.map_err(|e| {
-                SnapshotError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            })?;
+            let entry =
+                entry.map_err(|e| SnapshotError::Io(std::io::Error::other(e.to_string())))?;
             let ft = entry.file_type();
             let path = entry.path();
 
@@ -139,7 +146,12 @@ pub fn collect_abs_snapshot(
                 }
             }
         }
-        collect_single_file(filename, &mut files, &mut deferred_symlinks, &mut seen_paths)?;
+        collect_single_file(
+            filename,
+            &mut files,
+            &mut deferred_symlinks,
+            &mut seen_paths,
+        )?;
     }
 
     // Process optional filenames
@@ -149,7 +161,12 @@ pub fn collect_abs_snapshot(
             debug!(path = %filename.display(), "optional file not found, skipping");
             continue;
         }
-        collect_single_file(filename, &mut files, &mut deferred_symlinks, &mut seen_paths)?;
+        collect_single_file(
+            filename,
+            &mut files,
+            &mut deferred_symlinks,
+            &mut seen_paths,
+        )?;
     }
 
     // Process deferred symlinks based on policy
@@ -161,7 +178,9 @@ pub fn collect_abs_snapshot(
         &mut dirs,
     )?;
 
-    let mut manifest = Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(files).with_dirs(dirs);
+    let mut manifest = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(files)
+        .with_dirs(dirs);
     manifest.recompute_total_size();
     debug!(
         files = manifest.files.len(),
@@ -229,7 +248,15 @@ fn process_symlinks(
                 let resolved = resolve_symlink_target(&sym.fs_path, &target)?;
                 if is_escaping(&resolved, collected_set) {
                     // Collapse: replace symlink with target content
-                    collapse_symlink(&sym.path, &sym.fs_path, files, dirs, &mut visited, None, None)?;
+                    collapse_symlink(
+                        &sym.path,
+                        &sym.fs_path,
+                        files,
+                        dirs,
+                        &mut visited,
+                        None,
+                        None,
+                    )?;
                 } else {
                     // Preserve as symlink with absolute target
                     files.push(FileEntry::symlink(&sym.path, &resolved));
@@ -239,7 +266,15 @@ fn process_symlinks(
         SymlinkPolicy::CollapseAll => {
             let mut visited = HashSet::new();
             for sym in &deferred {
-                collapse_symlink(&sym.path, &sym.fs_path, files, dirs, &mut visited, None, None)?;
+                collapse_symlink(
+                    &sym.path,
+                    &sym.fs_path,
+                    files,
+                    dirs,
+                    &mut visited,
+                    None,
+                    None,
+                )?;
             }
         }
         SymlinkPolicy::ExcludeEscaping => {
@@ -276,10 +311,7 @@ fn process_symlinks(
                         } else if sym_meta.is_dir() {
                             for entry in WalkDir::new(&target_path).follow_links(false) {
                                 let entry = entry.map_err(|e| {
-                                    SnapshotError::Io(std::io::Error::new(
-                                        std::io::ErrorKind::Other,
-                                        e.to_string(),
-                                    ))
+                                    SnapshotError::Io(std::io::Error::other(e.to_string()))
                                 })?;
                                 let ft = entry.file_type();
                                 let ep = entry.path();
@@ -368,9 +400,8 @@ fn collapse_symlink(
         let mroot = manifest_root.unwrap_or(symlink_manifest_path);
 
         for entry in WalkDir::new(&real_target).follow_links(false) {
-            let entry = entry.map_err(|e| {
-                SnapshotError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            })?;
+            let entry =
+                entry.map_err(|e| SnapshotError::Io(std::io::Error::other(e.to_string())))?;
             let ft = entry.file_type();
             let ep = entry.path();
 
@@ -379,7 +410,11 @@ fn collapse_symlink(
             if rel.as_os_str().is_empty() {
                 continue; // skip the root dir itself
             }
-            let mapped = format!("{}/{}", symlink_manifest_path, normalize_path(&rel.to_string_lossy()));
+            let mapped = format!(
+                "{}/{}",
+                symlink_manifest_path,
+                normalize_path(&rel.to_string_lossy())
+            );
 
             if ft.is_symlink() {
                 // Resolve the nested symlink's target
@@ -399,7 +434,11 @@ fn collapse_symlink(
 
                 if let Ok(rel_to_root) = resolved.strip_prefix(root) {
                     // Internal symlink: preserve with translated target
-                    let translated = format!("{}/{}", mroot, normalize_path(&rel_to_root.to_string_lossy()));
+                    let translated = format!(
+                        "{}/{}",
+                        mroot,
+                        normalize_path(&rel_to_root.to_string_lossy())
+                    );
                     files.push(FileEntry::symlink(&mapped, &translated));
                 } else if resolved.is_dir() {
                     // External directory symlink: recursively collapse
@@ -504,8 +543,12 @@ mod tests {
         // Should have the root dir, a/, and a/b/ (3 dirs total)
         // Plus the file
         assert_eq!(result.files.len(), 1);
-        assert!(result.dirs.len() >= 3, "expected at least 3 dirs, got {}: {:?}",
-            result.dirs.len(), result.dirs.iter().map(|d| &d.path).collect::<Vec<_>>());
+        assert!(
+            result.dirs.len() >= 3,
+            "expected at least 3 dirs, got {}: {:?}",
+            result.dirs.len(),
+            result.dirs.iter().map(|d| &d.path).collect::<Vec<_>>()
+        );
         assert!(result.dirs.iter().any(|d| d.path.ends_with("/a")));
         assert!(result.dirs.iter().any(|d| d.path.ends_with("/a/b")));
     }
@@ -556,7 +599,11 @@ mod tests {
         .unwrap();
 
         for f in &result.files {
-            assert!(crate::path_util::is_absolute_path(&f.path), "not absolute: {}", f.path);
+            assert!(
+                crate::path_util::is_absolute_path(&f.path),
+                "not absolute: {}",
+                f.path
+            );
             assert!(!f.path.contains("/../"), "not normalized: {}", f.path);
         }
     }
@@ -583,11 +630,8 @@ mod tests {
     fn symlinks_preserve_policy() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("target.txt"), "data").unwrap();
-        std::os::unix::fs::symlink(
-            tmp.path().join("target.txt"),
-            tmp.path().join("link.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("target.txt"), tmp.path().join("link.txt"))
+            .unwrap();
 
         let result = collect_abs_snapshot(
             &[tmp.path().to_path_buf()],
@@ -599,7 +643,11 @@ mod tests {
         )
         .unwrap();
 
-        let symlink_entry = result.files.iter().find(|f| f.path.ends_with("link.txt")).unwrap();
+        let symlink_entry = result
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("link.txt"))
+            .unwrap();
         assert!(symlink_entry.symlink_target.is_some());
     }
 
@@ -608,11 +656,8 @@ mod tests {
     fn symlinks_exclude_all_policy() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("target.txt"), "data").unwrap();
-        std::os::unix::fs::symlink(
-            tmp.path().join("target.txt"),
-            tmp.path().join("link.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("target.txt"), tmp.path().join("link.txt"))
+            .unwrap();
 
         let result = collect_abs_snapshot(
             &[tmp.path().to_path_buf()],
@@ -657,10 +702,8 @@ mod tests {
         std::fs::create_dir_all(outside.join("sub")).unwrap();
         std::fs::write(outside.join("file.txt"), "content").unwrap();
         // Internal symlink: points within the same target directory
-        std::os::unix::fs::symlink(
-            outside.join("file.txt"),
-            outside.join("sub/internal_link"),
-        ).unwrap();
+        std::os::unix::fs::symlink(outside.join("file.txt"), outside.join("sub/internal_link"))
+            .unwrap();
 
         // Create root with escaping dir symlink
         let root = tmp.path().join("root");
@@ -668,19 +711,38 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("link_dir")).unwrap();
 
         let m = collect_abs_snapshot(
-            &[root.clone()],
+            std::slice::from_ref(&root),
             &[] as &[PathBuf],
-            CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-        ).unwrap();
+            CollectOptions {
+                symlink_policy: SymlinkPolicy::CollapseEscaping,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         // The internal symlink should be preserved with a translated target
-        let internal = m.files.iter().find(|f| f.path.ends_with("sub/internal_link")).unwrap();
-        assert!(internal.symlink_target.is_some(), "internal symlink should be preserved");
+        let internal = m
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("sub/internal_link"))
+            .unwrap();
+        assert!(
+            internal.symlink_target.is_some(),
+            "internal symlink should be preserved"
+        );
         let target = internal.symlink_target.as_ref().unwrap();
-        assert!(target.ends_with("link_dir/file.txt"), "target should be translated, got: {}", target);
+        assert!(
+            target.ends_with("link_dir/file.txt"),
+            "target should be translated, got: {}",
+            target
+        );
 
         // The regular file should be collapsed normally
-        let file = m.files.iter().find(|f| f.path.ends_with("link_dir/file.txt")).unwrap();
+        let file = m
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("link_dir/file.txt"))
+            .unwrap();
         assert!(file.symlink_target.is_none());
         assert_eq!(file.size, Some(7));
     }
@@ -707,14 +769,25 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("link_dir")).unwrap();
 
         let m = collect_abs_snapshot(
-            &[root.clone()],
+            std::slice::from_ref(&root),
             &[] as &[PathBuf],
-            CollectOptions { symlink_policy: SymlinkPolicy::CollapseEscaping, ..Default::default() },
-        ).unwrap();
+            CollectOptions {
+                symlink_policy: SymlinkPolicy::CollapseEscaping,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         // The external symlink should be collapsed to a regular file
-        let external = m.files.iter().find(|f| f.path.ends_with("external_link")).unwrap();
-        assert!(external.symlink_target.is_none(), "external symlink should be collapsed");
+        let external = m
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("external_link"))
+            .unwrap();
+        assert!(
+            external.symlink_target.is_none(),
+            "external symlink should be collapsed"
+        );
         assert_eq!(external.size, Some(3)); // "far"
     }
 }

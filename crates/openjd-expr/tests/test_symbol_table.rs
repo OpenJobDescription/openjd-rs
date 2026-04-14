@@ -1,54 +1,78 @@
+#![allow(clippy::approx_constant)]
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Tests ported from Python test_symbol_table.py
 
-use openjd_expr::{SymbolTable, ExprValue, PathFormat};
 use openjd_expr::value::Float64;
+use openjd_expr::{ExprValue, PathFormat, SymbolTable};
 
 // ══════════════════════════════════════════════════════════════
 // TestSymbolTable
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn construct_empty() {
+#[test]
+fn construct_empty() {
     let st = SymbolTable::new();
     assert!(!st.contains("Param"));
 }
 
-#[test] fn construct_from_pairs() {
+#[test]
+fn construct_from_pairs() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.Frame", ExprValue::Int(42)),
         ("Param.Name", ExprValue::String("test".into())),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert!(st.contains("Param"));
     assert_eq!(st.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("test".into()))
+    );
 }
 
-#[test] fn construct_with_path() {
-    let st = SymbolTable::from_pairs(vec![
-        ("Param.InputFile", ExprValue::Path { value: "/projects/render.exr".into(), format: PathFormat::Posix }),
-    ]).unwrap();
-    assert_eq!(st.get_value("Param.InputFile").unwrap().to_display_string(), "/projects/render.exr");
+#[test]
+fn construct_with_path() {
+    let st = SymbolTable::from_pairs(vec![(
+        "Param.InputFile",
+        ExprValue::Path {
+            value: "/projects/render.exr".into(),
+            format: PathFormat::Posix,
+        },
+    )])
+    .unwrap();
+    assert_eq!(
+        st.get_value("Param.InputFile").unwrap().to_display_string(),
+        "/projects/render.exr"
+    );
 }
 
-#[test] fn construct_nested_subtable() {
+#[test]
+fn construct_nested_subtable() {
     let mut inner = SymbolTable::new();
     inner.set("Frame", ExprValue::Int(100)).unwrap();
-    inner.set("Name", ExprValue::String("nested".into())).unwrap();
+    inner
+        .set("Name", ExprValue::String("nested".into()))
+        .unwrap();
     let mut st = SymbolTable::new();
     st.set_table("Param", inner);
     assert_eq!(st.get_value("Param.Frame"), Some(&ExprValue::Int(100)));
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("nested".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("nested".into()))
+    );
 }
 
-#[test] fn construct_from_clone() {
+#[test]
+fn construct_from_clone() {
     let original = SymbolTable::from_pairs(vec![("Param.Frame", ExprValue::Int(42))]).unwrap();
     let copy = original.clone();
     assert_eq!(copy.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn set_dotted_path() {
+#[test]
+fn set_dotted_path() {
     let mut st = SymbolTable::new();
     st.set("Task.Param.Index", ExprValue::Int(5)).unwrap();
     assert!(st.get_table("Task").is_some());
@@ -56,19 +80,25 @@ use openjd_expr::value::Float64;
     assert_eq!(st.get_value("Task.Param.Index"), Some(&ExprValue::Int(5)));
 }
 
-#[test] fn set_creates_intermediate_tables() {
+#[test]
+fn set_creates_intermediate_tables() {
     let mut st = SymbolTable::new();
     st.set("A.B.C.D", ExprValue::String("deep".into())).unwrap();
     assert!(st.get_table("A").is_some());
     assert!(st.get_table("A").unwrap().get_table("B").is_some());
-    assert_eq!(st.get_value("A.B.C.D"), Some(&ExprValue::String("deep".into())));
+    assert_eq!(
+        st.get_value("A.B.C.D"),
+        Some(&ExprValue::String("deep".into()))
+    );
 }
 
-#[test] fn set_various_types() {
+#[test]
+fn set_various_types() {
     let mut st = SymbolTable::new();
     st.set("b", ExprValue::Bool(true)).unwrap();
     st.set("i", ExprValue::Int(42)).unwrap();
-    st.set("f", ExprValue::Float(Float64::new(3.14).unwrap())).unwrap();
+    st.set("f", ExprValue::Float(Float64::new(1.2345).unwrap()))
+        .unwrap();
     st.set("s", ExprValue::String("hello".into())).unwrap();
     st.set("n", ExprValue::Null).unwrap();
     assert!(matches!(st.get_value("b"), Some(ExprValue::Bool(true))));
@@ -78,13 +108,15 @@ use openjd_expr::value::Float64;
     assert!(matches!(st.get_value("n"), Some(ExprValue::Null)));
 }
 
-#[test] fn set_expr_value_passthrough() {
+#[test]
+fn set_expr_value_passthrough() {
     let mut st = SymbolTable::new();
     st.set("Test", ExprValue::Int(999)).unwrap();
     assert_eq!(st.get_value("Test"), Some(&ExprValue::Int(999)));
 }
 
-#[test] fn get_existing() {
+#[test]
+fn get_existing() {
     let st = SymbolTable::from_pairs(vec![("Param.X", ExprValue::Int(1))]).unwrap();
     assert!(st.get("Param").is_some());
     assert!(st.get("Missing").is_none());
@@ -94,52 +126,65 @@ use openjd_expr::value::Float64;
 // TestDottedPathLookup
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn getitem_dotted() {
+#[test]
+fn getitem_dotted() {
     let st = SymbolTable::from_pairs(vec![("Param.X", ExprValue::Int(42))]).unwrap();
     assert_eq!(st.get_value("Param.X"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn getitem_dotted_deep() {
+#[test]
+fn getitem_dotted_deep() {
     let st = SymbolTable::from_pairs(vec![("A.B.C", ExprValue::String("hello".into()))]).unwrap();
-    assert_eq!(st.get_value("A.B.C"), Some(&ExprValue::String("hello".into())));
+    assert_eq!(
+        st.get_value("A.B.C"),
+        Some(&ExprValue::String("hello".into()))
+    );
 }
 
-#[test] fn getitem_dotted_missing() {
+#[test]
+fn getitem_dotted_missing() {
     let st = SymbolTable::from_pairs(vec![("Param.X", ExprValue::Int(42))]).unwrap();
     assert!(st.get_value("Param.Y").is_none());
 }
 
-#[test] fn contains_dotted() {
+#[test]
+fn contains_dotted() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.X", ExprValue::Int(42)),
         ("Param.Y", ExprValue::String("hi".into())),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert!(st.contains("Param.X"));
     assert!(st.contains("Param.Y"));
     assert!(!st.contains("Param.Z"));
 }
 
-#[test] fn get_dotted() {
+#[test]
+fn get_dotted() {
     let st = SymbolTable::from_pairs(vec![("Param.X", ExprValue::Int(42))]).unwrap();
     assert!(st.get("Param.X").is_some());
     assert!(st.get("Param.Y").is_none());
 }
 
-#[test] fn simple_key_works() {
+#[test]
+fn simple_key_works() {
     let st = SymbolTable::from_pairs(vec![("X", ExprValue::Int(42))]).unwrap();
     assert!(st.contains("X"));
     assert_eq!(st.get_value("X"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn get_returns_subtable() {
+#[test]
+fn get_returns_subtable() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.X", ExprValue::Int(42)),
         ("Param.Y", ExprValue::String("hi".into())),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert!(st.get_table("Param").is_some());
 }
 
-#[test] fn contains_namespace() {
+#[test]
+fn contains_namespace() {
     let st = SymbolTable::from_pairs(vec![("Param.X", ExprValue::Int(42))]).unwrap();
     assert!(st.contains("Param"));
     assert!(st.contains("Param.X"));
@@ -150,27 +195,42 @@ use openjd_expr::value::Float64;
 // Integration: SymbolTable with evaluate_expression
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn eval_with_symtab() {
+#[test]
+fn eval_with_symtab() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.Frame", ExprValue::Int(42)),
         ("Param.Name", ExprValue::String("test".into())),
-    ]).unwrap();
+    ])
+    .unwrap();
     let r = openjd_expr::evaluate_expression("Param.Frame + 1", &st).unwrap();
     assert_eq!(r.to_display_string(), "43");
 }
 
-#[test] fn eval_with_path() {
-    let st = SymbolTable::from_pairs(vec![
-        ("P", ExprValue::Path { value: "/a/b/file.txt".into(), format: PathFormat::Posix }),
-    ]).unwrap();
+#[test]
+fn eval_with_path() {
+    let st = SymbolTable::from_pairs(vec![(
+        "P",
+        ExprValue::Path {
+            value: "/a/b/file.txt".into(),
+            format: PathFormat::Posix,
+        },
+    )])
+    .unwrap();
     let r = openjd_expr::evaluate_expression("P.name", &st).unwrap();
     assert_eq!(r.to_display_string(), "file.txt");
 }
 
-#[test] fn eval_with_list() {
-    let st = SymbolTable::from_pairs(vec![
-        ("Items", ExprValue::make_list(vec![ExprValue::Int(10), ExprValue::Int(20)], openjd_expr::ExprType::INT).unwrap()),
-    ]).unwrap();
+#[test]
+fn eval_with_list() {
+    let st = SymbolTable::from_pairs(vec![(
+        "Items",
+        ExprValue::make_list(
+            vec![ExprValue::Int(10), ExprValue::Int(20)],
+            openjd_expr::ExprType::INT,
+        )
+        .unwrap(),
+    )])
+    .unwrap();
     let r = openjd_expr::evaluate_expression("Items[0] + Items[1]", &st).unwrap();
     assert_eq!(r.to_display_string(), "30");
 }
@@ -179,67 +239,81 @@ use openjd_expr::value::Float64;
 // Generic set() with Into<ExprValue> (B)
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn set_i32() {
+#[test]
+fn set_i32() {
     let mut st = SymbolTable::new();
     st.set("X", 42).unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn set_i64() {
+#[test]
+fn set_i64() {
     let mut st = SymbolTable::new();
     st.set("X", 42_i64).unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn set_f64() {
+#[test]
+fn set_f64() {
     let mut st = SymbolTable::new();
-    st.set("X", ExprValue::Float(Float64::new(3.14).unwrap())).unwrap();
+    st.set("X", ExprValue::Float(Float64::new(1.2345).unwrap()))
+        .unwrap();
     assert!(matches!(st.get_value("X"), Some(ExprValue::Float(_))));
 }
 
-#[test] fn set_bool() {
+#[test]
+fn set_bool() {
     let mut st = SymbolTable::new();
     st.set("X", true).unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::Bool(true)));
 }
 
-#[test] fn set_str_ref() {
+#[test]
+fn set_str_ref() {
     let mut st = SymbolTable::new();
     st.set("X", "hello").unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::String("hello".into())));
 }
 
-#[test] fn set_string_owned() {
+#[test]
+fn set_string_owned() {
     let mut st = SymbolTable::new();
     st.set("X", String::from("hello")).unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::String("hello".into())));
 }
 
-#[test] fn set_expr_value_still_works() {
+#[test]
+fn set_expr_value_still_works() {
     let mut st = SymbolTable::new();
     st.set("X", ExprValue::Int(42)).unwrap();
     assert_eq!(st.get_value("X"), Some(&ExprValue::Int(42)));
 }
 
-#[test] fn set_dotted_generic() {
+#[test]
+fn set_dotted_generic() {
     let mut st = SymbolTable::new();
     st.set("Param.Frame", 42).unwrap();
     st.set("Param.Name", "test").unwrap();
     assert_eq!(st.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("test".into()))
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
 // From<ExprType> auto-wraps as unresolved (C)
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn set_expr_type_becomes_unresolved() {
+#[test]
+fn set_expr_type_becomes_unresolved() {
     let mut st = SymbolTable::new();
     st.set("X", openjd_expr::ExprType::INT).unwrap();
     assert!(matches!(st.get_value("X"), Some(ExprValue::Unresolved(_))));
 }
 
-#[test] fn set_expr_type_path_unresolved() {
+#[test]
+fn set_expr_type_path_unresolved() {
     let mut st = SymbolTable::new();
     st.set("Session.Dir", openjd_expr::ExprType::PATH).unwrap();
     let val = st.get_value("Session.Dir").unwrap();
@@ -251,16 +325,21 @@ use openjd_expr::value::Float64;
 // symtab! macro (D)
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn symtab_macro_basic() {
+#[test]
+fn symtab_macro_basic() {
     let st = openjd_expr::symtab! {
         "Param.Frame" => 42,
         "Param.Name" => "test",
     };
     assert_eq!(st.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("test".into()))
+    );
 }
 
-#[test] fn symtab_macro_mixed_types() {
+#[test]
+fn symtab_macro_mixed_types() {
     let st = openjd_expr::symtab! {
         "i" => 1,
         "f" => ExprValue::Float(Float64::new(2.5).unwrap()),
@@ -275,19 +354,22 @@ use openjd_expr::value::Float64;
     assert!(matches!(st.get_value("u"), Some(ExprValue::Unresolved(_))));
 }
 
-#[test] fn symtab_macro_empty() {
+#[test]
+fn symtab_macro_empty() {
     let st = openjd_expr::symtab! {};
     assert!(!st.contains("anything"));
 }
 
-#[test] fn symtab_macro_trailing_comma() {
+#[test]
+fn symtab_macro_trailing_comma() {
     let st = openjd_expr::symtab! {
         "X" => 1,
     };
     assert_eq!(st.get_value("X"), Some(&ExprValue::Int(1)));
 }
 
-#[test] fn symtab_macro_eval() {
+#[test]
+fn symtab_macro_eval() {
     let st = openjd_expr::symtab! {
         "Param.X" => 10,
         "Param.Y" => 20,
@@ -300,21 +382,29 @@ use openjd_expr::value::Float64;
 // FromIterator (E)
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn from_iterator() {
+#[test]
+fn from_iterator() {
     let st: SymbolTable = [
         ("Param.Frame", ExprValue::from(42)),
         ("Param.Name", ExprValue::from("test")),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
     assert_eq!(st.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("test".into()))
+    );
 }
 
-#[test] fn from_iterator_empty() {
+#[test]
+fn from_iterator_empty() {
     let st: SymbolTable = std::iter::empty::<(&str, ExprValue)>().collect();
     assert!(!st.contains("anything"));
 }
 
-#[test] fn from_iterator_vec() {
+#[test]
+fn from_iterator_vec() {
     let pairs = vec![("A", ExprValue::Int(1)), ("B", ExprValue::Int(2))];
     let st: SymbolTable = pairs.into_iter().collect();
     assert_eq!(st.get_value("A"), Some(&ExprValue::Int(1)));
@@ -325,7 +415,8 @@ use openjd_expr::value::Float64;
 // Error cases (SymbolTableError)
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn set_conflict_scalar_then_dotted() {
+#[test]
+fn set_conflict_scalar_then_dotted() {
     // Setting "A.B" as scalar, then "A.B.C" should fail because "A.B" is not a table
     let mut st = SymbolTable::new();
     st.set("A.B", 42).unwrap();
@@ -333,7 +424,8 @@ use openjd_expr::value::Float64;
     assert!(err.to_string().contains("is not a table"));
 }
 
-#[test] fn set_overwrite_value() {
+#[test]
+fn set_overwrite_value() {
     let mut st = SymbolTable::new();
     st.set("X", 1).unwrap();
     st.set("X", 2).unwrap();
@@ -344,51 +436,72 @@ use openjd_expr::value::Float64;
 // API coverage: keys, all_paths, get_string, set_string
 // ══════════════════════════════════════════════════════════════
 
-#[test] fn keys_returns_top_level() {
+#[test]
+fn keys_returns_top_level() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.X", ExprValue::Int(1)),
         ("Task.Y", ExprValue::Int(2)),
-    ]).unwrap();
+    ])
+    .unwrap();
     let mut keys: Vec<&str> = st.keys().collect();
     keys.sort();
     assert_eq!(keys, vec!["Param", "Task"]);
 }
 
-#[test] fn all_paths_collects_leaves() {
+#[test]
+fn all_paths_collects_leaves() {
     let st = SymbolTable::from_pairs(vec![
         ("Param.X", ExprValue::Int(1)),
         ("Param.Y", ExprValue::Int(2)),
         ("Task.Name", ExprValue::String("t".into())),
-    ]).unwrap();
+    ])
+    .unwrap();
     let mut paths = Vec::new();
     st.all_paths("", &mut paths);
     paths.sort();
     assert_eq!(paths, vec!["Param.X", "Param.Y", "Task.Name"]);
 }
 
-#[test] fn get_string_returns_str() {
+#[test]
+fn get_string_returns_str() {
     let mut st = SymbolTable::new();
     st.set("X", "hello").unwrap();
     assert_eq!(st.get_string("X"), Some("hello"));
     assert_eq!(st.get_string("Missing"), None);
 }
 
-#[test] fn get_string_returns_path_value() {
+#[test]
+fn get_string_returns_path_value() {
     let mut st = SymbolTable::new();
-    st.set("P", ExprValue::Path { value: "/a/b".into(), format: PathFormat::Posix }).unwrap();
+    st.set(
+        "P",
+        ExprValue::Path {
+            value: "/a/b".into(),
+            format: PathFormat::Posix,
+        },
+    )
+    .unwrap();
     assert_eq!(st.get_string("P"), Some("/a/b"));
 }
 
-#[test] fn set_string_convenience() {
+#[test]
+fn set_string_convenience() {
     let mut st = SymbolTable::new();
     st.set_string("Param.Name", "test").unwrap();
-    assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+    assert_eq!(
+        st.get_value("Param.Name"),
+        Some(&ExprValue::String("test".into()))
+    );
 }
 
-#[test] fn set_value_over_existing_table_errors() {
+#[test]
+fn set_value_over_existing_table_errors() {
     let mut st = SymbolTable::new();
     st.set("A.B.C", ExprValue::Int(1)).unwrap();
     // A.B is a table containing C. Setting A.B to a scalar should error.
     let err = st.set("A.B", ExprValue::Int(2)).unwrap_err();
-    assert!(err.to_string().contains("A.B"), "Error should mention the conflicting path: {err}");
+    assert!(
+        err.to_string().contains("A.B"),
+        "Error should mention the conflicting path: {err}"
+    );
 }

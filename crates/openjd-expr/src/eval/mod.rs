@@ -10,5 +10,5 @@
 pub mod evaluator;
 mod parse;
 
-pub use evaluator::{Evaluator, EvaluationResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
+pub use evaluator::{EvaluationResult, Evaluator, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
 pub use parse::ParsedExpression;

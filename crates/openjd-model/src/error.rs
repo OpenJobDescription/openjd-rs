@@ -36,7 +36,12 @@ pub enum OpenJdError {
     UnsupportedSchema(String),
 }
 
-fn format_string_error(message: &str, input: &Option<String>, start: &Option<usize>, end: &Option<usize>) -> String {
+fn format_string_error(
+    message: &str,
+    input: &Option<String>,
+    start: &Option<usize>,
+    end: &Option<usize>,
+) -> String {
     match (input, start, end) {
         (Some(input), Some(s), Some(e)) => {
             format!("Failed to parse interpolation expression at [{s}, {e}]. {message}\n  {input}")
@@ -212,7 +217,10 @@ mod tests {
         let mut ve = ValidationErrors::default();
         ve.add(&[PathElement::Field("name".into())], "must not be empty");
         let s = ve.format("JobTemplate");
-        assert_eq!(s, "1 validation errors for JobTemplate\nname:\n\tmust not be empty");
+        assert_eq!(
+            s,
+            "1 validation errors for JobTemplate\nname:\n\tmust not be empty"
+        );
     }
 
     #[test]
@@ -251,7 +259,14 @@ mod tests {
     fn test_multiple_errors() {
         let mut ve = ValidationErrors::default();
         ve.add(&[PathElement::Field("name".into())], "too long");
-        ve.add(&[PathElement::Field("steps".into()), PathElement::Index(0), PathElement::Field("name".into())], "empty");
+        ve.add(
+            &[
+                PathElement::Field("steps".into()),
+                PathElement::Index(0),
+                PathElement::Field("name".into()),
+            ],
+            "empty",
+        );
         assert_eq!(ve.len(), 2);
         let result = ve.into_result("JobTemplate");
         assert!(result.is_err());

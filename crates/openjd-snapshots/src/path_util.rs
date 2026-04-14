@@ -48,7 +48,7 @@ pub fn normalize_path(path: &str) -> String {
             ".." => {
                 if is_abs {
                     parts.pop();
-                } else if parts.last().map_or(true, |&p| p == "..") {
+                } else if parts.last().is_none_or(|&p| p == "..") {
                     parts.push("..");
                 } else {
                     parts.pop();

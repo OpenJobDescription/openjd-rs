@@ -28,7 +28,9 @@ impl HashCache {
             );",
         )
         .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_default() -> crate::Result<Self> {
@@ -46,20 +48,20 @@ impl HashCache {
         let path_bytes = file_path.to_string_lossy().into_owned().into_bytes();
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-                "SELECT file_hash, last_modified_time FROM hashesV4
+            "SELECT file_hash, last_modified_time FROM hashesV4
                  WHERE file_path = ?1 AND hash_algorithm = ?2
                    AND range_start = ?3 AND range_end = ?4",
-                rusqlite::params![path_bytes, algorithm, range_start, range_end],
-                |row| {
-                    let hash: String = row.get(0)?;
-                    let mtime: u64 = match row.get_ref(1)?.as_str() {
-                        Ok(s) => s.parse::<u64>().unwrap_or(0),
-                        Err(_) => row.get::<_, i64>(1)? as u64,
-                    };
-                    Ok((hash, mtime))
-                },
-            )
-            .ok()
+            rusqlite::params![path_bytes, algorithm, range_start, range_end],
+            |row| {
+                let hash: String = row.get(0)?;
+                let mtime: u64 = match row.get_ref(1)?.as_str() {
+                    Ok(s) => s.parse::<u64>().unwrap_or(0),
+                    Err(_) => row.get::<_, i64>(1)? as u64,
+                };
+                Ok((hash, mtime))
+            },
+        )
+        .ok()
     }
 
     pub fn put(
@@ -75,12 +77,19 @@ impl HashCache {
         let mtime_text = rusqlite::types::Value::Text(mtime.to_string());
         let conn = self.conn.lock().unwrap();
         conn.execute(
-                "INSERT OR REPLACE INTO hashesV4
+            "INSERT OR REPLACE INTO hashesV4
                  (file_path, hash_algorithm, range_start, range_end, file_hash, last_modified_time)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![path_bytes, algorithm, range_start, range_end, hash, mtime_text],
-            )
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+            rusqlite::params![
+                path_bytes,
+                algorithm,
+                range_start,
+                range_end,
+                hash,
+                mtime_text
+            ],
+        )
+        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
         Ok(())
     }
 
@@ -153,7 +162,12 @@ mod tests {
     fn missing_entry_returns_none() {
         let (_tmp, cache) = make_cache();
         assert!(cache
-            .get(Path::new("/no/such/file"), "xxh128", 0, WHOLE_FILE_RANGE_END)
+            .get(
+                Path::new("/no/such/file"),
+                "xxh128",
+                0,
+                WHOLE_FILE_RANGE_END
+            )
             .is_none());
     }
 

@@ -19,8 +19,8 @@ use crate::error::SessionError;
 use crate::logging::LogContent;
 use crate::runner::CancelMethod;
 use crate::session_log;
-use std::sync::Arc;
 use crate::session_user::SessionUser;
+use std::sync::Arc;
 
 /// Grace time to wait for stdout to close after process exits.
 const STDOUT_GRACE_TIME: Duration = Duration::from_secs(5);
@@ -97,7 +97,16 @@ mod platform {
         }
         // Fall back to sudo kill
         let _ = std::process::Command::new("sudo")
-            .args(["-u", user.user(), "-i", "kill", "-s", "kill", "--", &format!("-{pgid}")])
+            .args([
+                "-u",
+                user.user(),
+                "-i",
+                "kill",
+                "-s",
+                "kill",
+                "--",
+                &format!("-{pgid}"),
+            ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -137,7 +146,8 @@ mod platform {
         loop {
             // Try procfs first (Linux)
             if let Some(child_pid) = find_child_pid_procfs(sudo_pid) {
-                if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid))) {
+                if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid)))
+                {
                     let pgid = pgid.as_raw();
                     // Wait until the child has its own process group (not sudo's)
                     if sudo_pgid != Some(pgid) {
@@ -149,7 +159,9 @@ mod platform {
             } else {
                 // Fall back to pgrep
                 if let Some(child_pid) = find_child_pid_pgrep(sudo_pid) {
-                    if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid))) {
+                    if let Ok(pgid) =
+                        nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid)))
+                    {
                         let pgid = pgid.as_raw();
                         if sudo_pgid != Some(pgid) {
                             return Some(pgid);
@@ -208,7 +220,12 @@ mod platform {
     }
 
     /// Spawn a delayed SIGKILL after a grace period, handling cross-user via sudo.
-    pub fn spawn_delayed_terminate(pid: i32, sudo_child_pgid: Option<i32>, user: Option<Arc<dyn SessionUser>>, delay: Duration) {
+    pub fn spawn_delayed_terminate(
+        pid: i32,
+        sudo_child_pgid: Option<i32>,
+        user: Option<Arc<dyn SessionUser>>,
+        delay: Duration,
+    ) {
         if let Some(ref user) = user {
             if !user.is_process_user() {
                 let pgid = sudo_child_pgid;
@@ -236,7 +253,10 @@ mod platform {
     ///
     /// # Safety
     /// Calls `pre_exec` which runs in the forked child before exec.
-    pub unsafe fn configure_command(cmd: &mut Command, use_setsid: bool) -> Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
+    pub unsafe fn configure_command(
+        cmd: &mut Command,
+        use_setsid: bool,
+    ) -> Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
         cmd.pre_exec(move || {
             // Redirect stderr to stdout so output ordering is preserved
             if nix::libc::dup2(1, 2) == -1 {
@@ -257,9 +277,8 @@ mod platform {
 
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows::Win32::System::Threading::{
-        OpenProcess, TerminateProcess, GetExitCodeProcess,
-        PROCESS_TERMINATE, PROCESS_QUERY_INFORMATION,
-        CREATE_NEW_PROCESS_GROUP,
+        GetExitCodeProcess, OpenProcess, TerminateProcess, CREATE_NEW_PROCESS_GROUP,
+        PROCESS_QUERY_INFORMATION, PROCESS_TERMINATE,
     };
 
     /// Send CTRL_BREAK_EVENT to a process group for graceful cancellation.
@@ -268,8 +287,7 @@ mod platform {
     /// attach to the target's console, send CTRL_BREAK, then re-attach to our own.
     fn send_ctrl_break(pid: u32) -> bool {
         use windows::Win32::System::Console::{
-            FreeConsole, AttachConsole, GenerateConsoleCtrlEvent,
-            CTRL_BREAK_EVENT,
+            AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT,
         };
         unsafe {
             // Detach from our console
@@ -321,8 +339,8 @@ mod platform {
     /// Get child PIDs of a process using CreateToolhelp32Snapshot.
     fn get_child_pids(parent_pid: u32) -> Vec<u32> {
         use windows::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
-            PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
         };
         let mut children = Vec::new();
         unsafe {
@@ -365,7 +383,11 @@ mod platform {
     }
 
     /// Terminate: kill the entire process tree.
-    pub fn send_terminate(pid: i32, _sudo_child_pgid: Option<i32>, _user: Option<&dyn SessionUser>) {
+    pub fn send_terminate(
+        pid: i32,
+        _sudo_child_pgid: Option<i32>,
+        _user: Option<&dyn SessionUser>,
+    ) {
         kill_process_tree(pid as u32);
     }
 
@@ -383,7 +405,12 @@ mod platform {
     }
 
     /// Delayed terminate: kill the process tree after a grace period.
-    pub fn spawn_delayed_terminate(pid: i32, _sudo_child_pgid: Option<i32>, _user: Option<Arc<dyn SessionUser>>, delay: Duration) {
+    pub fn spawn_delayed_terminate(
+        pid: i32,
+        _sudo_child_pgid: Option<i32>,
+        _user: Option<Arc<dyn SessionUser>>,
+        delay: Duration,
+    ) {
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             kill_process_tree(pid as u32);
@@ -397,11 +424,14 @@ mod platform {
     ///
     /// # Safety
     /// This function is safe on Windows (no pre_exec).
-    pub unsafe fn configure_command(cmd: &mut Command, _use_setsid: bool) -> Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
+    pub unsafe fn configure_command(
+        cmd: &mut Command,
+        _use_setsid: bool,
+    ) -> Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
         use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows::Win32::Foundation::HANDLE;
         use windows::Win32::Security::SECURITY_ATTRIBUTES;
         use windows::Win32::System::Pipes::CreatePipe;
-        use windows::Win32::Foundation::HANDLE;
 
         // CREATE_NEW_PROCESS_GROUP is required for CTRL_BREAK_EVENT to work
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP.0);
@@ -439,7 +469,9 @@ mod platform {
             0,
             true, // bInheritHandle
             windows::Win32::Foundation::DUPLICATE_SAME_ACCESS,
-        ).is_err() {
+        )
+        .is_err()
+        {
             // Fall back: just use the one handle for stdout, pipe stderr separately
             cmd.stdout(write_stdio_stdout);
             cmd.stderr(std::process::Stdio::piped());
@@ -448,7 +480,8 @@ mod platform {
             let read_tokio = tokio::fs::File::from_std(read_std);
             return Some(Box::new(read_tokio));
         }
-        let write_owned_dup = OwnedHandle::from_raw_handle(write_handle_dup.0 as *mut std::ffi::c_void);
+        let write_owned_dup =
+            OwnedHandle::from_raw_handle(write_handle_dup.0 as *mut std::ffi::c_void);
         let write_stdio_stderr = std::process::Stdio::from(write_owned_dup);
 
         cmd.stdout(write_stdio_stdout);
@@ -462,7 +495,6 @@ mod platform {
     }
 }
 
-
 use platform::*;
 
 /// Generate a shell script that sets up env vars, cd, and exec's the command.
@@ -474,9 +506,11 @@ fn generate_command_shell_script(
     working_dir: Option<&Path>,
 ) -> Result<String, SessionError> {
     let quote = |s: &str| -> Result<String, SessionError> {
-        shlex::try_quote(s)
-            .map(|c| c.into_owned())
-            .map_err(|_| SessionError::Runtime(format!("Cannot shell-quote string containing null byte: {s:?}")))
+        shlex::try_quote(s).map(|c| c.into_owned()).map_err(|_| {
+            SessionError::Runtime(format!(
+                "Cannot shell-quote string containing null byte: {s:?}"
+            ))
+        })
     };
     let mut script = String::from("#!/bin/sh\n");
     for (name, value) in env_vars {
@@ -503,7 +537,10 @@ fn generate_command_shell_script(
 /// for NotifyThenTerminate cancelation.
 fn write_cancel_info(working_dir: &Path, terminate_delay: Duration) {
     let notify_end = std::time::SystemTime::now() + terminate_delay;
-    let secs = notify_end.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = notify_end
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     // Format as ISO 8601 UTC
     let s = secs % 60;
     let m = (secs / 60) % 60;
@@ -536,8 +573,8 @@ fn days_to_ymd(total_days: u64) -> (u64, u64, u64) {
 /// Format a command argument list for logging, applying redaction for any
 /// `openjd_redacted_env:` tokens that may appear in the arguments.
 pub(crate) fn format_command_for_log(args: &[String]) -> String {
-    let joined = shlex::try_join(args.iter().map(|s| s.as_str()))
-        .unwrap_or_else(|_| args.join(" "));
+    let joined =
+        shlex::try_join(args.iter().map(|s| s.as_str())).unwrap_or_else(|_| args.join(" "));
     crate::action_filter::redact_openjd_redacted_env_requests(&joined)
 }
 
@@ -568,8 +605,12 @@ pub async fn run_subprocess(
     let mut merged: HashMap<String, String> = std::env::vars().collect();
     for (k, v) in &config.env_vars {
         match v {
-            Some(val) => { merged.insert(k.clone(), val.clone()); }
-            None => { merged.remove(k); }
+            Some(val) => {
+                merged.insert(k.clone(), val.clone());
+            }
+            None => {
+                merged.remove(k);
+            }
         }
     }
 
@@ -577,16 +618,26 @@ pub async fn run_subprocess(
         #[cfg(unix)]
         {
             // Cross-user: generate shell script wrapper
-            let script_content = generate_command_shell_script(args, &config.env_vars, config.working_dir.as_deref())?;
-            let script_dir = config.working_dir.as_deref().unwrap_or_else(|| std::path::Path::new("/tmp"));
+            let script_content = generate_command_shell_script(
+                args,
+                &config.env_vars,
+                config.working_dir.as_deref(),
+            )?;
+            let script_dir = config
+                .working_dir
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("/tmp"));
             let script_path = script_dir.join(format!("_openjd_run_{}.sh", std::process::id()));
-            std::fs::write(&script_path, &script_content).map_err(|e| SessionError::SubprocessStart {
-                command: args[0].clone(),
-                source: e,
+            std::fs::write(&script_path, &script_content).map_err(|e| {
+                SessionError::SubprocessStart {
+                    command: args[0].clone(),
+                    source: e,
+                }
             })?;
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o770));
+                let _ =
+                    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o770));
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(_user.group()) {
                     let _ = nix::unistd::chown(&script_path, None, Some(grp.gid));
                 }
@@ -615,12 +666,22 @@ pub async fn run_subprocess(
     // Log the command line (redacting any openjd_redacted_env tokens)
     if final_args != *args {
         // Cross-user: log the actual command, not the sudo wrapper
-        session_log!(info, session_id, LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
-            "Running command {}", format_command_for_log(args));
+        session_log!(
+            info,
+            session_id,
+            LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+            "Running command {}",
+            format_command_for_log(args)
+        );
         log::debug!(target: "openjd.sessions", "Wrapper: {}", format_command_for_log(&final_args));
     } else {
-        session_log!(info, session_id, LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
-            "Running command {}", format_command_for_log(&final_args));
+        session_log!(
+            info,
+            session_id,
+            LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+            "Running command {}",
+            format_command_for_log(&final_args)
+        );
     }
 
     // Spawn the process. On Windows cross-user, we use Win32 APIs directly;
@@ -629,7 +690,11 @@ pub async fn run_subprocess(
     let mut win32_process_handle: Option<windows::Win32::Foundation::HANDLE> = None;
 
     #[allow(unused_mut)]
-    let (mut child, pid, stdout_for_reading): (Option<tokio::process::Child>, i32, Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>) = {
+    let (mut child, pid, stdout_for_reading): (
+        Option<tokio::process::Child>,
+        i32,
+        Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>,
+    ) = {
         #[cfg(windows)]
         if let Some(_cross) = cross_user {
             use crate::session_user::WindowsSessionUser;
@@ -648,10 +713,22 @@ pub async fn run_subprocess(
                         win32_process_handle = Some(spawned.process_handle);
                         let std_file: std::fs::File = spawned.stdout_read.into();
                         let tokio_file = tokio::fs::File::from_std(std_file);
-                        (None, p, Some(Box::new(tokio_file) as Box<dyn tokio::io::AsyncRead + Unpin + Send>))
+                        (
+                            None,
+                            p,
+                            Some(Box::new(tokio_file)
+                                as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+                        )
                     }
                     Err(e) => {
-                        session_log!(info, session_id, LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL, "Process failed to start: '{}': {}", args[0], e);
+                        session_log!(
+                            info,
+                            session_id,
+                            LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
+                            "Process failed to start: '{}': {}",
+                            args[0],
+                            e
+                        );
                         return Err(SessionError::SubprocessStart {
                             command: args[0].clone(),
                             source: std::io::Error::new(std::io::ErrorKind::Other, e),
@@ -659,25 +736,45 @@ pub async fn run_subprocess(
                     }
                 }
             } else {
-                return Err(SessionError::Runtime("Cross-user on Windows requires WindowsSessionUser".into()));
+                return Err(SessionError::Runtime(
+                    "Cross-user on Windows requires WindowsSessionUser".into(),
+                ));
             }
         } else {
             let mut cmd = Command::new(&final_args[0]);
             cmd.args(&final_args[1..]);
             cmd.env_clear();
-            for (k, v) in &merged { cmd.env(k, v); }
-            if let Some(dir) = &config.working_dir { cmd.current_dir(dir); }
+            for (k, v) in &merged {
+                cmd.env(k, v);
+            }
+            if let Some(dir) = &config.working_dir {
+                cmd.current_dir(dir);
+            }
             let merged_reader = unsafe { configure_command(&mut cmd, use_setsid) };
             if merged_reader.is_none() {
                 // POSIX: configure_command sets up dup2 in pre_exec, we pipe stdout normally
                 cmd.stdout(std::process::Stdio::piped());
             }
             let mut c = cmd.spawn().map_err(|e| {
-                session_log!(info, session_id, LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL, "Process failed to start: '{}': {}", final_args[0], e);
-                SessionError::SubprocessStart { command: final_args[0].clone(), source: e }
+                session_log!(
+                    info,
+                    session_id,
+                    LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
+                    "Process failed to start: '{}': {}",
+                    final_args[0],
+                    e
+                );
+                SessionError::SubprocessStart {
+                    command: final_args[0].clone(),
+                    source: e,
+                }
             })?;
             let p = c.id().unwrap_or(0) as i32;
-            let stdout = merged_reader.or_else(|| c.stdout.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>));
+            let stdout = merged_reader.or_else(|| {
+                c.stdout
+                    .take()
+                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
+            });
             (Some(c), p, stdout)
         }
 
@@ -687,27 +784,56 @@ pub async fn run_subprocess(
             cmd.args(&final_args[1..]);
             if cross_user.is_none() {
                 cmd.env_clear();
-                for (k, v) in &merged { cmd.env(k, v); }
+                for (k, v) in &merged {
+                    cmd.env(k, v);
+                }
             }
             if cross_user.is_none() {
-                if let Some(dir) = &config.working_dir { cmd.current_dir(dir); }
+                if let Some(dir) = &config.working_dir {
+                    cmd.current_dir(dir);
+                }
             }
             let merged_reader = unsafe { configure_command(&mut cmd, use_setsid) };
             if merged_reader.is_none() {
                 cmd.stdout(std::process::Stdio::piped());
             }
             let mut c = cmd.spawn().map_err(|e| {
-                session_log!(info, session_id, LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL, "Process failed to start: '{}': {}", final_args[0], e);
-                SessionError::SubprocessStart { command: final_args[0].clone(), source: e }
+                session_log!(
+                    info,
+                    session_id,
+                    LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
+                    "Process failed to start: '{}': {}",
+                    final_args[0],
+                    e
+                );
+                SessionError::SubprocessStart {
+                    command: final_args[0].clone(),
+                    source: e,
+                }
             })?;
             let p = c.id().unwrap_or(0) as i32;
-            let stdout = merged_reader.or_else(|| c.stdout.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>));
+            let stdout = merged_reader.or_else(|| {
+                c.stdout
+                    .take()
+                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
+            });
             (Some(c), p, stdout)
         }
     };
 
-    session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Command started as pid: {}", pid);
-    session_log!(info, session_id, LogContent::BANNER | LogContent::COMMAND_OUTPUT, "Output:");
+    session_log!(
+        info,
+        session_id,
+        LogContent::PROCESS_CONTROL,
+        "Command started as pid: {}",
+        pid
+    );
+    session_log!(
+        info,
+        session_id,
+        LogContent::BANNER | LogContent::COMMAND_OUTPUT,
+        "Output:"
+    );
 
     // For cross-user, find sudo's child process group ID
     let sudo_child_pgid = if cross_user.is_some() {
@@ -817,8 +943,8 @@ pub async fn run_subprocess(
         #[cfg(windows)]
         {
             win32_process_handle.and_then(|h| {
-                use windows::Win32::System::Threading::{WaitForSingleObject, GetExitCodeProcess};
                 use std::os::windows::process::ExitStatusExt;
+                use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
                 unsafe {
                     let _ = WaitForSingleObject(h, 60000);
                     let mut code = 0u32;
@@ -829,7 +955,9 @@ pub async fn run_subprocess(
             })
         }
         #[cfg(not(windows))]
-        { None }
+        {
+            None
+        }
     };
 
     // Clean up script file
@@ -838,7 +966,13 @@ pub async fn run_subprocess(
     }
 
     let exit_code = exit_status.and_then(|s| s.code());
-    session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Process exit code: {}", exit_code.map_or("N/A".to_string(), |c| c.to_string()));
+    session_log!(
+        info,
+        session_id,
+        LogContent::PROCESS_CONTROL,
+        "Process exit code: {}",
+        exit_code.map_or("N/A".to_string(), |c| c.to_string())
+    );
 
     let state = if timed_out {
         ActionState::Timeout
@@ -852,7 +986,11 @@ pub async fn run_subprocess(
         ActionState::Failed
     };
 
-    Ok(SubprocessResult { state, exit_code, stdout: stdout_collected })
+    Ok(SubprocessResult {
+        state,
+        exit_code,
+        stdout: stdout_collected,
+    })
 }
 
 pub(crate) fn process_line(
@@ -921,7 +1059,9 @@ pub(crate) fn process_line(
         }
         if cancel {
             let fail_msg = "Action canceled due to malformed command".to_string();
-            let _ = message_tx.send(ActionMessage::CancelMarkFailed { fail_message: fail_msg });
+            let _ = message_tx.send(ActionMessage::CancelMarkFailed {
+                fail_message: fail_msg,
+            });
         }
     }
     (display, pass_through)
@@ -935,14 +1075,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_empty_string_arg() {
-        let script = generate_command_shell_script(
-            &["echo".into(), "".into()],
-            &HashMap::new(),
-            None,
-        ).unwrap();
+        let script =
+            generate_command_shell_script(&["echo".into(), "".into()], &HashMap::new(), None)
+                .unwrap();
         let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
         assert!(exec_line.contains("echo"), "script was: {script}");
-        assert!(exec_line.len() > "exec echo".len(), "empty arg missing, script was: {script}");
+        assert!(
+            exec_line.len() > "exec echo".len(),
+            "empty arg missing, script was: {script}"
+        );
     }
 
     #[cfg(unix)]
@@ -952,7 +1093,8 @@ mod tests {
             &["echo".into(), "hello world".into()],
             &HashMap::new(),
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
         assert!(exec_line.contains("hello world"), "script was: {script}");
     }
@@ -960,11 +1102,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_args_with_single_quotes() {
-        let script = generate_command_shell_script(
-            &["echo".into(), "it's".into()],
-            &HashMap::new(),
-            None,
-        ).unwrap();
+        let script =
+            generate_command_shell_script(&["echo".into(), "it's".into()], &HashMap::new(), None)
+                .unwrap();
         let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
         assert!(exec_line.contains("echo"), "script was: {script}");
         assert!(exec_line.contains("it"), "script was: {script}");
@@ -977,7 +1117,8 @@ mod tests {
             &["echo".into(), r#"say "hello""#.into()],
             &HashMap::new(),
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
         assert!(exec_line.contains("hello"), "script was: {script}");
     }
@@ -986,11 +1127,9 @@ mod tests {
     #[test]
     fn test_args_with_special_characters() {
         let input = "a$b`c\\d;e|f&g";
-        let script = generate_command_shell_script(
-            &["echo".into(), input.into()],
-            &HashMap::new(),
-            None,
-        ).unwrap();
+        let script =
+            generate_command_shell_script(&["echo".into(), input.into()], &HashMap::new(), None)
+                .unwrap();
         let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
         // Verify round-trip: shlex::split of the exec args should recover the original
         let parsed = shlex::split(&exec_line["exec ".len()..]).unwrap();
@@ -1003,11 +1142,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("FOO".into(), Some("bar baz".into()));
         env.insert("REMOVE".into(), None);
-        let script = generate_command_shell_script(
-            &["cmd".into()],
-            &env,
-            None,
-        ).unwrap();
+        let script = generate_command_shell_script(&["cmd".into()], &env, None).unwrap();
         assert!(script.contains("export FOO="), "script was: {script}");
         assert!(script.contains("bar baz"), "script was: {script}");
         assert!(script.contains("unset REMOVE"), "script was: {script}");
@@ -1020,7 +1155,8 @@ mod tests {
             &["cmd".into()],
             &HashMap::new(),
             Some(Path::new("/tmp/my dir")),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(script.contains("cd "), "script was: {script}");
         assert!(script.contains("/tmp/my dir"), "script was: {script}");
     }
@@ -1030,11 +1166,9 @@ mod tests {
     fn test_script_structure() {
         let mut env = HashMap::new();
         env.insert("K".into(), Some("V".into()));
-        let script = generate_command_shell_script(
-            &["a".into(), "b".into()],
-            &env,
-            Some(Path::new("/w")),
-        ).unwrap();
+        let script =
+            generate_command_shell_script(&["a".into(), "b".into()], &env, Some(Path::new("/w")))
+                .unwrap();
         assert!(script.starts_with("#!/bin/sh\n"), "script was: {script}");
         assert!(script.ends_with('\n'), "script was: {script}");
         let last_line = script.trim_end().lines().last().unwrap();
@@ -1056,7 +1190,9 @@ mod tests {
             working_dir: None,
             timeout: None,
             user: None,
-            cancel_method: CancelMethod::NotifyThenTerminate { terminate_delay: Duration::from_secs(60) },
+            cancel_method: CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_secs(60),
+            },
             cancel_request_rx: Some(cancel_rx),
         };
 
@@ -1069,11 +1205,17 @@ mod tests {
 
         let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
         let start = std::time::Instant::now();
-        let result = run_subprocess(config, &mut filter, "test", msg_tx, token).await.unwrap();
+        let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+            .await
+            .unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result.state, ActionState::Canceled);
-        assert!(elapsed < Duration::from_secs(5), "took {:?}, expected < 5s", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "took {:?}, expected < 5s",
+            elapsed
+        );
     }
 
     #[cfg(unix)]
@@ -1092,7 +1234,9 @@ mod tests {
             working_dir: None,
             timeout: None,
             user: None,
-            cancel_method: CancelMethod::NotifyThenTerminate { terminate_delay: Duration::from_secs(1) },
+            cancel_method: CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_secs(1),
+            },
             cancel_request_rx: Some(cancel_rx),
         };
 
@@ -1104,12 +1248,22 @@ mod tests {
 
         let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
         let start = std::time::Instant::now();
-        let result = run_subprocess(config, &mut filter, "test", msg_tx, token).await.unwrap();
+        let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+            .await
+            .unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result.state, ActionState::Canceled);
-        assert!(elapsed >= Duration::from_millis(800), "took {:?}, expected >= 800ms", elapsed);
-        assert!(elapsed < Duration::from_secs(5), "took {:?}, expected < 5s", elapsed);
+        assert!(
+            elapsed >= Duration::from_millis(800),
+            "took {:?}, expected >= 800ms",
+            elapsed
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "took {:?}, expected < 5s",
+            elapsed
+        );
     }
 
     #[cfg(unix)]
@@ -1140,11 +1294,17 @@ mod tests {
 
         let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
         let start = std::time::Instant::now();
-        let result = run_subprocess(config, &mut filter, "test", msg_tx, token).await.unwrap();
+        let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+            .await
+            .unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result.state, ActionState::Canceled);
-        assert!(elapsed < Duration::from_secs(2), "took {:?}, expected < 2s", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "took {:?}, expected < 2s",
+            elapsed
+        );
     }
 
     #[test]
@@ -1171,15 +1331,28 @@ mod tests {
         ];
         let result = format_command_for_log(&args);
         assert!(!result.contains("secret123"), "secret leaked in: {result}");
-        assert!(result.contains("openjd_redacted_env:"), "token missing in: {result}");
-        assert!(result.contains("********"), "redaction missing in: {result}");
+        assert!(
+            result.contains("openjd_redacted_env:"),
+            "token missing in: {result}"
+        );
+        assert!(
+            result.contains("********"),
+            "redaction missing in: {result}"
+        );
     }
 
     #[test]
     fn test_format_command_for_log_no_redaction_needed() {
-        let args = vec!["python".to_string(), "-c".to_string(), "print('hello')".to_string()];
+        let args = vec![
+            "python".to_string(),
+            "-c".to_string(),
+            "print('hello')".to_string(),
+        ];
         let result = format_command_for_log(&args);
-        assert!(result.contains("print('hello')") || result.contains("print"), "got: {result}");
+        assert!(
+            result.contains("print('hello')") || result.contains("print"),
+            "got: {result}"
+        );
         assert!(!result.contains("********"));
     }
 
@@ -1214,7 +1387,8 @@ mod tests {
         write_cancel_info(dir.path(), Duration::from_secs(30));
         let path = dir.path().join("cancel_info.json");
         assert!(path.exists());
-        let content: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let ts = content["NotifyEnd"].as_str().unwrap();
         assert!(ts.ends_with('Z'), "Expected UTC timestamp, got: {ts}");
         assert!(ts.contains('T'), "Expected ISO 8601, got: {ts}");
@@ -1225,7 +1399,8 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        let (display, pass_through) = process_line("hello world", &mut filter, "test", &tx, &mut saw_fail);
+        let (display, pass_through) =
+            process_line("hello world", &mut filter, "test", &tx, &mut saw_fail);
         assert!(pass_through);
         assert_eq!(display, "hello world");
         assert!(!saw_fail);
@@ -1236,7 +1411,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        let (_display, _pass_through) = process_line("openjd_progress: 0.5", &mut filter, "test", &tx, &mut saw_fail);
+        let (_display, _pass_through) = process_line(
+            "openjd_progress: 0.5",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         assert!(!saw_fail);
         match rx.try_recv().unwrap() {
             ActionMessage::Progress(v) => assert!((v - 0.5).abs() < f64::EPSILON),
@@ -1249,7 +1430,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        process_line("openjd_status: rendering frame 42", &mut filter, "test", &tx, &mut saw_fail);
+        process_line(
+            "openjd_status: rendering frame 42",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         assert!(!saw_fail);
         match rx.try_recv().unwrap() {
             ActionMessage::Status(s) => assert_eq!(s, "rendering frame 42"),
@@ -1262,7 +1449,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        process_line("openjd_fail: out of memory", &mut filter, "test", &tx, &mut saw_fail);
+        process_line(
+            "openjd_fail: out of memory",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         assert!(saw_fail);
         match rx.try_recv().unwrap() {
             ActionMessage::Fail(s) => assert_eq!(s, "out of memory"),
@@ -1275,7 +1468,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        process_line("openjd_env: MY_VAR=my_value", &mut filter, "test", &tx, &mut saw_fail);
+        process_line(
+            "openjd_env: MY_VAR=my_value",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         match rx.try_recv().unwrap() {
             ActionMessage::SetEnv { name, value } => {
                 assert_eq!(name, "MY_VAR");
@@ -1290,7 +1489,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        process_line("openjd_unset_env: MY_VAR", &mut filter, "test", &tx, &mut saw_fail);
+        process_line(
+            "openjd_unset_env: MY_VAR",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         match rx.try_recv().unwrap() {
             ActionMessage::UnsetEnv { name } => assert_eq!(name, "MY_VAR"),
             other => panic!("Expected UnsetEnv, got: {other:?}"),
@@ -1302,7 +1507,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut filter = ActionFilter::new("test", false, false);
         let mut saw_fail = false;
-        process_line("openjd_redacted_env: SECRET=hunter2", &mut filter, "test", &tx, &mut saw_fail);
+        process_line(
+            "openjd_redacted_env: SECRET=hunter2",
+            &mut filter,
+            "test",
+            &tx,
+            &mut saw_fail,
+        );
         match rx.try_recv().unwrap() {
             ActionMessage::RedactedEnv { name, value } => {
                 assert_eq!(name, "SECRET");
@@ -1337,9 +1548,13 @@ mod tests {
             let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
             let mut filter = ActionFilter::new("test", false, false);
             let token = CancellationToken::new();
-            let result = run_subprocess(config, &mut filter, "test", msg_tx, token).await.unwrap();
+            let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+                .await
+                .unwrap();
             let mut msgs = Vec::new();
-            while let Ok(m) = msg_rx.try_recv() { msgs.push(m); }
+            while let Ok(m) = msg_rx.try_recv() {
+                msgs.push(m);
+            }
             (result, msgs)
         })
     }
@@ -1411,7 +1626,10 @@ mod tests {
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
         });
         assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("No command"), "expected empty args error");
+        assert!(
+            err.unwrap_err().to_string().contains("No command"),
+            "expected empty args error"
+        );
     }
 
     #[cfg(unix)]
@@ -1434,9 +1652,13 @@ mod tests {
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
             };
-            let r = run_subprocess(config, &mut filter, "test", msg_tx, token).await.unwrap();
+            let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
+                .await
+                .unwrap();
             let mut msgs = Vec::new();
-            while let Ok(m) = msg_rx.try_recv() { msgs.push(m); }
+            while let Ok(m) = msg_rx.try_recv() {
+                msgs.push(m);
+            }
             (r, msgs)
         });
         assert_eq!(r.state, ActionState::Timeout);
@@ -1468,7 +1690,11 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("OPENJD_UNSET_TEST".into(), None);
         let (r, _) = run_with_config(SubprocessConfig {
-            args: vec!["sh".into(), "-c".into(), "echo VAL=${OPENJD_UNSET_TEST:-UNSET}".into()],
+            args: vec![
+                "sh".into(),
+                "-c".into(),
+                "echo VAL=${OPENJD_UNSET_TEST:-UNSET}".into(),
+            ],
             env_vars: env,
             working_dir: None,
             timeout: None,
@@ -1504,40 +1730,62 @@ mod tests {
     #[test]
     fn test_run_subprocess_openjd_progress() {
         let (r, msgs) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo 'openjd_progress: 0.75'".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo 'openjd_progress: 0.75'".into(),
         ]);
         assert_eq!(r.state, ActionState::Success);
-        assert!(msgs.iter().any(|m| matches!(m, ActionMessage::Progress(v) if (*v - 0.75).abs() < f64::EPSILON)),
-            "Expected Progress(0.75), got: {msgs:?}");
+        assert!(
+            msgs.iter().any(
+                |m| matches!(m, ActionMessage::Progress(v) if (*v - 0.75).abs() < f64::EPSILON)
+            ),
+            "Expected Progress(0.75), got: {msgs:?}"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn test_run_subprocess_openjd_status() {
         let (r, msgs) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo 'openjd_status: rendering'".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo 'openjd_status: rendering'".into(),
         ]);
         assert_eq!(r.state, ActionState::Success);
-        assert!(msgs.iter().any(|m| matches!(m, ActionMessage::Status(s) if s == "rendering")),
-            "Expected Status(rendering), got: {msgs:?}");
+        assert!(
+            msgs.iter()
+                .any(|m| matches!(m, ActionMessage::Status(s) if s == "rendering")),
+            "Expected Status(rendering), got: {msgs:?}"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn test_run_subprocess_openjd_fail_sets_failed() {
         let (r, msgs) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo 'openjd_fail: something broke'".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo 'openjd_fail: something broke'".into(),
         ]);
-        assert_eq!(r.state, ActionState::Failed, "openjd_fail should cause Failed state even with exit 0");
-        assert!(msgs.iter().any(|m| matches!(m, ActionMessage::Fail(s) if s == "something broke")),
-            "Expected Fail message, got: {msgs:?}");
+        assert_eq!(
+            r.state,
+            ActionState::Failed,
+            "openjd_fail should cause Failed state even with exit 0"
+        );
+        assert!(
+            msgs.iter()
+                .any(|m| matches!(m, ActionMessage::Fail(s) if s == "something broke")),
+            "Expected Fail message, got: {msgs:?}"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn test_run_subprocess_openjd_env() {
         let (r, msgs) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo 'openjd_env: FOO=bar'".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo 'openjd_env: FOO=bar'".into(),
         ]);
         assert_eq!(r.state, ActionState::Success);
         assert!(msgs.iter().any(|m| matches!(m, ActionMessage::SetEnv { name, value } if name == "FOO" && value == "bar")),
@@ -1549,18 +1797,26 @@ mod tests {
     fn test_run_subprocess_stderr_merged() {
         // stderr should be merged into stdout
         let (r, _) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo stdout_line; echo stderr_line >&2".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo stdout_line; echo stderr_line >&2".into(),
         ]);
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("stdout_line"), "stdout: {}", r.stdout);
-        assert!(r.stdout.contains("stderr_line"), "stderr should be merged into stdout: {}", r.stdout);
+        assert!(
+            r.stdout.contains("stderr_line"),
+            "stderr should be merged into stdout: {}",
+            r.stdout
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn test_run_subprocess_multiline_output() {
         let (r, _) = run_simple(vec![
-            "sh".into(), "-c".into(), "echo line1; echo line2; echo line3".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo line1; echo line2; echo line3".into(),
         ]);
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("line1\n"), "stdout: {:?}", r.stdout);

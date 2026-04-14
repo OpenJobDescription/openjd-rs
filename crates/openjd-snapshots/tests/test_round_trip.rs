@@ -1,8 +1,8 @@
 use openjd_snapshots::{
     collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
-    subtree_snapshot, AbsManifest, CollectOptions, AsyncDataCache, DownloadOptions,
-    FileEntry, FileSystemDataCache, HashCache, HashUploadOptions, HashAlgorithm, Manifest,
-    SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, DownloadOptions, FileEntry,
+    FileSystemDataCache, HashAlgorithm, HashCache, HashUploadOptions, Manifest, SymlinkPolicy,
+    DEFAULT_FILE_CHUNK_SIZE,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -226,7 +226,13 @@ fn delete_via_diff_manifest() {
 
     let keep_hash = {
         let h = openjd_snapshots::hash::hash_data(b"keep");
-        openjd_snapshots::ContentAddressedDataCache::put_object(&*data_cache, &h, "xxh128", b"keep").unwrap();
+        openjd_snapshots::ContentAddressedDataCache::put_object(
+            &*data_cache,
+            &h,
+            "xxh128",
+            b"keep",
+        )
+        .unwrap();
         h
     };
 

@@ -71,13 +71,11 @@ fn expand_dir_symlink(
         let new_path = format!("{link_rel_path}/{suffix}");
         if let Some(ref sym_target) = f.symlink_target {
             // Nested symlink inside directory - resolve it
-            match resolve_symlink(sym_target, file_lookup, 64) {
-                Some(real) => {
-                    let mut entry = real.clone();
-                    entry.path = new_path;
-                    result.push(entry);
-                }
-                None => {} // cycle or missing target - skip
+            // cycle or missing target - skip
+            if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
+                let mut entry = real.clone();
+                entry.path = new_path;
+                result.push(entry);
             }
         } else {
             let mut entry = f.clone();
@@ -117,13 +115,11 @@ fn process_files(
                         ));
                         continue;
                     }
-                    match resolve_symlink(target, file_lookup, 64) {
-                        Some(real) => {
-                            let mut entry = real.clone();
-                            entry.path = rel_path;
-                            result.push(entry);
-                        }
-                        None => {} // cycle or missing - skip
+                    // cycle or missing - skip
+                    if let Some(real) = resolve_symlink(target, file_lookup, 64) {
+                        let mut entry = real.clone();
+                        entry.path = rel_path;
+                        result.push(entry);
                     }
                     continue;
                 }
@@ -158,13 +154,11 @@ fn process_files(
                                 ));
                                 continue;
                             }
-                            match resolve_symlink(target, file_lookup, 64) {
-                                Some(real) => {
-                                    let mut entry = real.clone();
-                                    entry.path = rel_path;
-                                    result.push(entry);
-                                }
-                                None => {} // cycle or missing - skip
+                            // cycle or missing - skip
+                            if let Some(real) = resolve_symlink(target, file_lookup, 64) {
+                                let mut entry = real.clone();
+                                entry.path = rel_path;
+                                result.push(entry);
                             }
                         }
                     }
@@ -186,7 +180,11 @@ fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
                 if rel.is_empty() {
                     None
                 } else {
-                    Some(if d.deleted { DirEntry::deleted(&rel) } else { DirEntry::new(&rel) })
+                    Some(if d.deleted {
+                        DirEntry::deleted(&rel)
+                    } else {
+                        DirEntry::new(&rel)
+                    })
                 }
             })
         })
@@ -212,24 +210,37 @@ fn subtree_impl<P: Clone, K: Clone>(
     // Validate path style consistency (skip for identity subtree)
     if prefix != "." && !prefix.is_empty() {
         let subtree_is_abs = crate::path_util::is_absolute_path(&prefix);
-        let manifest_is_abs = manifest.files.first().map(|f| crate::path_util::is_absolute_path(&f.path))
-            .or_else(|| manifest.dirs.first().map(|d| crate::path_util::is_absolute_path(&d.path)));
+        let manifest_is_abs = manifest
+            .files
+            .first()
+            .map(|f| crate::path_util::is_absolute_path(&f.path))
+            .or_else(|| {
+                manifest
+                    .dirs
+                    .first()
+                    .map(|d| crate::path_util::is_absolute_path(&d.path))
+            });
         if let Some(m_abs) = manifest_is_abs {
             if subtree_is_abs && !m_abs {
-                return Err(crate::SnapshotError::Validation(
-                    format!("subtree path is absolute ('{}') but manifest uses relative paths", prefix)
-                ));
+                return Err(crate::SnapshotError::Validation(format!(
+                    "subtree path is absolute ('{}') but manifest uses relative paths",
+                    prefix
+                )));
             }
             if !subtree_is_abs && m_abs {
-                return Err(crate::SnapshotError::Validation(
-                    format!("subtree path is relative ('{}') but manifest uses absolute paths", prefix)
-                ));
+                return Err(crate::SnapshotError::Validation(format!(
+                    "subtree path is relative ('{}') but manifest uses absolute paths",
+                    prefix
+                )));
             }
         }
     }
 
-    let file_lookup: HashMap<&str, &FileEntry> =
-        manifest.files.iter().map(|f| (f.path.as_str(), f)).collect();
+    let file_lookup: HashMap<&str, &FileEntry> = manifest
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f))
+        .collect();
 
     let files = process_files(&manifest.files, &prefix, symlink_policy, &file_lookup)?;
     let dirs = process_dirs(&manifest.dirs, &prefix);
@@ -281,18 +292,42 @@ pub fn subtree_rel_snapshot_diff(
 use crate::manifest::{AbsManifest, RelManifest};
 
 /// Extracts a subtree from an absolute manifest, producing a RelManifest.
-pub fn subtree_manifest(manifest: &AbsManifest, subtree: &str, symlink_policy: SymlinkPolicy) -> crate::Result<RelManifest> {
+pub fn subtree_manifest(
+    manifest: &AbsManifest,
+    subtree: &str,
+    symlink_policy: SymlinkPolicy,
+) -> crate::Result<RelManifest> {
     match manifest {
-        AbsManifest::Snapshot(s) => Ok(RelManifest::Snapshot(subtree_snapshot(s, subtree, symlink_policy)?)),
-        AbsManifest::Diff(d) => Ok(RelManifest::Diff(subtree_snapshot_diff(d, subtree, symlink_policy)?)),
+        AbsManifest::Snapshot(s) => Ok(RelManifest::Snapshot(subtree_snapshot(
+            s,
+            subtree,
+            symlink_policy,
+        )?)),
+        AbsManifest::Diff(d) => Ok(RelManifest::Diff(subtree_snapshot_diff(
+            d,
+            subtree,
+            symlink_policy,
+        )?)),
     }
 }
 
 /// Extracts a subtree from a relative manifest, producing a RelManifest.
-pub fn subtree_rel_manifest(manifest: &RelManifest, subtree: &str, symlink_policy: SymlinkPolicy) -> crate::Result<RelManifest> {
+pub fn subtree_rel_manifest(
+    manifest: &RelManifest,
+    subtree: &str,
+    symlink_policy: SymlinkPolicy,
+) -> crate::Result<RelManifest> {
     match manifest {
-        RelManifest::Snapshot(s) => Ok(RelManifest::Snapshot(subtree_rel_snapshot(s, subtree, symlink_policy)?)),
-        RelManifest::Diff(d) => Ok(RelManifest::Diff(subtree_rel_snapshot_diff(d, subtree, symlink_policy)?)),
+        RelManifest::Snapshot(s) => Ok(RelManifest::Snapshot(subtree_rel_snapshot(
+            s,
+            subtree,
+            symlink_policy,
+        )?)),
+        RelManifest::Diff(d) => Ok(RelManifest::Diff(subtree_rel_snapshot_diff(
+            d,
+            subtree,
+            symlink_policy,
+        )?)),
     }
 }
 
@@ -428,10 +463,7 @@ mod tests {
 
     #[test]
     fn identity_subtree_empty() {
-        let m = make_rel(
-            vec![FileEntry::file("a.txt", 10, 1)],
-            vec![],
-        );
+        let m = make_rel(vec![FileEntry::file("a.txt", 10, 1)], vec![]);
         let result = subtree_rel_snapshot(&m, "", SymlinkPolicy::CollapseEscaping).unwrap();
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.files[0].path, "a.txt");

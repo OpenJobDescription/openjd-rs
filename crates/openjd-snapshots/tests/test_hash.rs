@@ -27,7 +27,11 @@ fn make_file(dir: &Path, name: &str, content: &[u8]) -> (String, u64, u64) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_micros() as u64;
-    (p.to_string_lossy().into_owned(), content.len() as u64, mtime)
+    (
+        p.to_string_lossy().into_owned(),
+        content.len() as u64,
+        mtime,
+    )
 }
 
 fn snapshot(files: Vec<FileEntry>) -> AbsManifest {
@@ -77,7 +81,10 @@ fn hash_matches_direct_hash() {
     let result = hash_abs_manifest(&m, HashOptions::default()).unwrap();
 
     let expected = openjd_snapshots::hash::hash_file(Path::new(&path)).unwrap();
-    assert_eq!(result.manifest.files()[0].hash.as_deref(), Some(expected.as_str()));
+    assert_eq!(
+        result.manifest.files()[0].hash.as_deref(),
+        Some(expected.as_str())
+    );
 }
 
 #[test]
@@ -184,7 +191,10 @@ fn symlinks_pass_through() {
 
     assert!(result.manifest.files()[0].hash.is_some());
     assert!(result.manifest.files()[1].hash.is_none());
-    assert_eq!(result.manifest.files()[1].symlink_target.as_deref(), Some("/tmp/target"));
+    assert_eq!(
+        result.manifest.files()[1].symlink_target.as_deref(),
+        Some("/tmp/target")
+    );
 }
 
 #[test]
@@ -304,14 +314,11 @@ fn diff_mixed_entries() {
             FileEntry::file(&mod_path, ms, mm),
             FileEntry::deleted("/old/deleted.txt"),
         ],
-        vec![
-            DirEntry::new("/new/dir"),
-            {
-                let mut d = DirEntry::new("/deleted/dir");
-                d.deleted = true;
-                d
-            },
-        ],
+        vec![DirEntry::new("/new/dir"), {
+            let mut d = DirEntry::new("/deleted/dir");
+            d.deleted = true;
+            d
+        }],
         Some("parent789"),
     );
     let result = hash_abs_manifest(&m, HashOptions::default()).unwrap();
@@ -383,7 +390,10 @@ fn cache_populated_after_hashing() {
     );
     assert!(cached.is_some());
     let (hash, _) = cached.unwrap();
-    assert_eq!(hash, result.manifest.files()[0].hash.as_ref().unwrap().as_str());
+    assert_eq!(
+        hash,
+        result.manifest.files()[0].hash.as_ref().unwrap().as_str()
+    );
 }
 
 #[test]
@@ -414,7 +424,10 @@ fn cache_hit_returns_cached_hash() {
     )
     .unwrap();
 
-    assert_eq!(result.manifest.files()[0].hash.as_deref(), Some(fake_hash.as_str()));
+    assert_eq!(
+        result.manifest.files()[0].hash.as_deref(),
+        Some(fake_hash.as_str())
+    );
 }
 
 #[test]
@@ -445,7 +458,10 @@ fn cache_miss_on_stale_mtime() {
     )
     .unwrap();
 
-    assert_ne!(result.manifest.files()[0].hash.as_deref(), Some(fake_hash.as_str()));
+    assert_ne!(
+        result.manifest.files()[0].hash.as_deref(),
+        Some(fake_hash.as_str())
+    );
     assert!(result.manifest.files()[0].hash.is_some());
 }
 
@@ -477,7 +493,10 @@ fn force_rehash_ignores_cache() {
     )
     .unwrap();
 
-    assert_ne!(result.manifest.files()[0].hash.as_deref(), Some("stale_hash"));
+    assert_ne!(
+        result.manifest.files()[0].hash.as_deref(),
+        Some("stale_hash")
+    );
     assert!(result.manifest.files()[0].hash.is_some());
 
     // Cache should be updated with the new hash
@@ -503,7 +522,10 @@ fn no_cache_always_computes() {
     let result = hash_abs_manifest(&m, HashOptions::default()).unwrap();
 
     let expected = openjd_snapshots::hash::hash_file(Path::new(&path)).unwrap();
-    assert_eq!(result.manifest.files()[0].hash.as_deref(), Some(expected.as_str()));
+    assert_eq!(
+        result.manifest.files()[0].hash.as_deref(),
+        Some(expected.as_str())
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -711,7 +733,12 @@ fn parallel_hashing_produces_same_results() {
     )
     .unwrap();
 
-    for (a, b) in r_seq.manifest.files().iter().zip(r_par.manifest.files().iter()) {
+    for (a, b) in r_seq
+        .manifest
+        .files()
+        .iter()
+        .zip(r_par.manifest.files().iter())
+    {
         assert_eq!(a.hash, b.hash);
         assert_eq!(a.chunk_hashes, b.chunk_hashes);
     }
@@ -1016,19 +1043,27 @@ fn progress_callback_receives_timing() {
     let tmp = TempDir::new().unwrap();
     let mut files = Vec::new();
     for i in 0..5 {
-        let (p, s, m) = make_file(tmp.path(), &format!("f{i}.txt"), format!("content{i}").repeat(100).as_bytes());
+        let (p, s, m) = make_file(
+            tmp.path(),
+            &format!("f{i}.txt"),
+            format!("content{i}").repeat(100).as_bytes(),
+        );
         files.push(FileEntry::file(&p, s, m));
     }
     let m = snapshot(files);
     let times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let t = times.clone();
-    let _ = hash_abs_manifest(&m, HashOptions {
-        on_progress: Some(Box::new(move |stats| {
-            t.lock().unwrap().push(stats.total_time);
-            true
-        })),
-        ..Default::default()
-    }).unwrap();
+    let _ = hash_abs_manifest(
+        &m,
+        HashOptions {
+            on_progress: Some(Box::new(move |stats| {
+                t.lock().unwrap().push(stats.total_time);
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
     for &time in t.iter() {
@@ -1036,7 +1071,7 @@ fn progress_callback_receives_timing() {
     }
     // Monotonically non-decreasing
     for i in 1..t.len() {
-        assert!(t[i] >= t[i-1]);
+        assert!(t[i] >= t[i - 1]);
     }
 }
 
@@ -1058,15 +1093,23 @@ fn progress_with_cache_hits_counts_skipped() {
     let cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
     let manifest = snapshot(vec![FileEntry::file(&p, s, m)]);
     // First hash populates cache
-    let _ = hash_abs_manifest(&manifest, HashOptions {
-        hash_cache: Some(cache.clone()),
-        ..Default::default()
-    }).unwrap();
+    let _ = hash_abs_manifest(
+        &manifest,
+        HashOptions {
+            hash_cache: Some(cache.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     // Second hash hits cache
-    let result = hash_abs_manifest(&manifest, HashOptions {
-        hash_cache: Some(cache),
-        ..Default::default()
-    }).unwrap();
+    let result = hash_abs_manifest(
+        &manifest,
+        HashOptions {
+            hash_cache: Some(cache),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(result.statistics.skipped_files, 1);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }

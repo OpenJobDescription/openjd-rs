@@ -154,7 +154,10 @@ fn test_remap_unc_from_file() {
 fn test_remap_unc_to_file() {
     let rule = windows_rule("z:\\assets", "\\\\128.0.0.1\\share\\assets");
     let result = rule.apply_with_format("z:\\assets\\file", PathFormat::Windows);
-    assert_eq!(result, Some("\\\\128.0.0.1\\share\\assets\\file".to_string()));
+    assert_eq!(
+        result,
+        Some("\\\\128.0.0.1\\share\\assets\\file".to_string())
+    );
 }
 
 // === test_does_not_remap ===
@@ -168,13 +171,19 @@ fn test_does_not_remap_posix_parent_dir() {
 #[test]
 fn test_does_not_remap_posix_different_dir_too_short() {
     let rule = posix_rule("/mnt/shared", "c:\\newprefix");
-    assert_eq!(rule.apply_with_format("/mnt/share", PathFormat::Windows), None);
+    assert_eq!(
+        rule.apply_with_format("/mnt/share", PathFormat::Windows),
+        None
+    );
 }
 
 #[test]
 fn test_does_not_remap_posix_different_dir_same_prefix() {
     let rule = posix_rule("/mnt/shared", "c:\\newprefix");
-    assert_eq!(rule.apply_with_format("/mnt/shared2", PathFormat::Windows), None);
+    assert_eq!(
+        rule.apply_with_format("/mnt/shared2", PathFormat::Windows),
+        None
+    );
 }
 
 #[test]
@@ -186,13 +195,19 @@ fn test_does_not_remap_windows_parent_dir() {
 #[test]
 fn test_does_not_remap_windows_different_dir_too_short() {
     let rule = windows_rule("c:\\mnt\\shared\\", "c:\\newprefix");
-    assert_eq!(rule.apply_with_format("c:\\mnt\\share", PathFormat::Windows), None);
+    assert_eq!(
+        rule.apply_with_format("c:\\mnt\\share", PathFormat::Windows),
+        None
+    );
 }
 
 #[test]
 fn test_does_not_remap_windows_different_dir_same_prefix() {
     let rule = windows_rule("c:\\mnt\\shared\\", "c:\\newprefix");
-    assert_eq!(rule.apply_with_format("c:\\mnt\\shared2", PathFormat::Windows), None);
+    assert_eq!(
+        rule.apply_with_format("c:\\mnt\\shared2", PathFormat::Windows),
+        None
+    );
 }
 
 // === test_from_dict_success (via serde) ===

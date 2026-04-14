@@ -3,14 +3,14 @@
 //! Tests for S3DataCache using s3s + s3s-fs for in-process S3 emulation.
 
 use aws_sdk_s3::config::{Credentials, Region};
-use openjd_snapshots::{
-    collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
-    subtree_snapshot, AbsManifest, CollectOptions, AsyncDataCache, DirEntry,
-    DownloadOptions, FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
-    S3DataCache, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
-};
 use openjd_snapshots::hash::hash_data;
 use openjd_snapshots::ContentAddressedDataCache as SyncCache;
+use openjd_snapshots::{
+    collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
+    subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, DirEntry, DownloadOptions,
+    FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest, S3DataCache,
+    SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+};
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
 use s3s_fs::FileSystem;
@@ -54,12 +54,18 @@ fn make_s3_fixture() -> (TempDir, Arc<S3DataCache>) {
 
     // Create bucket
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async {
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
 
-    let data_cache = Arc::new(S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client));
+    let data_cache = Arc::new(S3DataCache::new(
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        client,
+    ));
     (tmp, data_cache)
 }
 
@@ -100,8 +106,15 @@ type AbsSnapshotDiff = Manifest<openjd_snapshots::manifest::Abs, openjd_snapshot
 #[test]
 fn s3_put_and_get_object() {
     let (_tmp, cache) = make_s3_fixture();
-    openjd_snapshots::ContentAddressedDataCache::put_object(&*cache, "abc123", "xxh128", b"hello world").unwrap();
-    let data = openjd_snapshots::ContentAddressedDataCache::get_object(&*cache, "abc123", "xxh128").unwrap();
+    openjd_snapshots::ContentAddressedDataCache::put_object(
+        &*cache,
+        "abc123",
+        "xxh128",
+        b"hello world",
+    )
+    .unwrap();
+    let data = openjd_snapshots::ContentAddressedDataCache::get_object(&*cache, "abc123", "xxh128")
+        .unwrap();
     assert_eq!(data, b"hello world");
 }
 
@@ -229,8 +242,8 @@ fn s3_hash_upload_symlinks_and_deleted_pass_through() {
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "real.txt", b"data");
 
-    let manifest: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![
+    let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_files(vec![
             FileEntry::file(&path, size, mtime),
             FileEntry::symlink("/tmp/link", "/tmp/target"),
             FileEntry::deleted("/tmp/gone"),
@@ -280,8 +293,8 @@ fn s3_download_single_file() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -305,8 +318,8 @@ fn s3_download_creates_parent_dirs() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 6, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -324,14 +337,16 @@ fn s3_download_chunked_file() {
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<&[u8]> = vec![b"aaa", b"bbb", b"ccc", b"ddd"];
-    let chunk_hashes: Vec<String> = chunks.iter().map(|c| upload_to_s3(&*data_cache, c)).collect();
+    let chunk_hashes: Vec<String> = chunks
+        .iter()
+        .map(|c| upload_to_s3(&*data_cache, c))
+        .collect();
 
     let dest = tmp.path().join("chunked.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
     entry.chunk_hashes = Some(chunk_hashes);
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -355,8 +370,8 @@ fn s3_download_skip_conflict() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -384,8 +399,8 @@ fn s3_download_overwrite_conflict() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -409,8 +424,8 @@ fn s3_download_create_copy_conflict() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 3, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -435,10 +450,10 @@ fn s3_download_applies_deletes() {
     let file_to_delete = tmp.path().join("gone.txt");
     std::fs::write(&file_to_delete, b"bye").unwrap();
 
-    let manifest: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![
-            FileEntry::deleted(file_to_delete.to_string_lossy().to_string()),
-        ]);
+    let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_files(vec![FileEntry::deleted(
+            file_to_delete.to_string_lossy().to_string(),
+        )]);
 
     download_abs_manifest(
         &AbsManifest::Diff(manifest),
@@ -457,9 +472,7 @@ fn s3_download_creates_manifest_dirs() {
 
     let dir_path = tmp.path().join("new_dir");
     let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_dirs(vec![DirEntry::new(
-            dir_path.to_string_lossy().to_string(),
-        )]);
+        .with_dirs(vec![DirEntry::new(dir_path.to_string_lossy().to_string())]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -534,7 +547,9 @@ fn s3_round_trip_collect_upload_download() {
 fn s3_multipart_upload_round_trip() {
     let (_s3_tmp, data_cache) = make_s3_fixture();
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
 
     rt.block_on(async {
         use openjd_snapshots::AsyncDataCache;
@@ -546,17 +561,34 @@ fn s3_multipart_upload_round_trip() {
         let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
 
         // Upload 3 parts
-        let part1 = data_cache.upload_part(hash, alg, &upload_id, 1, b"part1data".to_vec()).await.unwrap();
-        let part2 = data_cache.upload_part(hash, alg, &upload_id, 2, b"part2data".to_vec()).await.unwrap();
-        let part3 = data_cache.upload_part(hash, alg, &upload_id, 3, b"part3data".to_vec()).await.unwrap();
+        let part1 = data_cache
+            .upload_part(hash, alg, &upload_id, 1, b"part1data".to_vec())
+            .await
+            .unwrap();
+        let part2 = data_cache
+            .upload_part(hash, alg, &upload_id, 2, b"part2data".to_vec())
+            .await
+            .unwrap();
+        let part3 = data_cache
+            .upload_part(hash, alg, &upload_id, 3, b"part3data".to_vec())
+            .await
+            .unwrap();
 
         // Complete
-        data_cache.complete_multipart_upload(hash, alg, &upload_id, vec![
-            (1, part1), (2, part2), (3, part3),
-        ]).await.unwrap();
+        data_cache
+            .complete_multipart_upload(
+                hash,
+                alg,
+                &upload_id,
+                vec![(1, part1), (2, part2), (3, part3)],
+            )
+            .await
+            .unwrap();
 
         // Verify content
-        let data = AsyncDataCache::get_object(&*data_cache, hash, alg).await.unwrap();
+        let data = AsyncDataCache::get_object(&*data_cache, hash, alg)
+            .await
+            .unwrap();
         assert_eq!(data, b"part1datapart2datapart3data");
     });
 }
@@ -565,17 +597,24 @@ fn s3_multipart_upload_round_trip() {
 fn s3_get_object_range() {
     let (_s3_tmp, data_cache) = make_s3_fixture();
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
 
     rt.block_on(async {
         use openjd_snapshots::AsyncDataCache;
 
         // Upload a file
         let content = b"hello world, this is range test data";
-        AsyncDataCache::put_object(&*data_cache, "range_hash", "xxh128", content.to_vec()).await.unwrap();
+        AsyncDataCache::put_object(&*data_cache, "range_hash", "xxh128", content.to_vec())
+            .await
+            .unwrap();
 
         // Get a range (bytes 6-10 inclusive = "world")
-        let range_data = data_cache.get_object_range("range_hash", "xxh128", 6, 10).await.unwrap();
+        let range_data = data_cache
+            .get_object_range("range_hash", "xxh128", 6, 10)
+            .await
+            .unwrap();
         assert_eq!(range_data, b"world");
     });
 }
@@ -584,7 +623,9 @@ fn s3_get_object_range() {
 fn s3_abort_multipart_upload() {
     let (_s3_tmp, data_cache) = make_s3_fixture();
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
 
     rt.block_on(async {
         use openjd_snapshots::AsyncDataCache;
@@ -593,13 +634,21 @@ fn s3_abort_multipart_upload() {
         let alg = "xxh128";
 
         let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
-        data_cache.upload_part(hash, alg, &upload_id, 1, b"data".to_vec()).await.unwrap();
+        data_cache
+            .upload_part(hash, alg, &upload_id, 1, b"data".to_vec())
+            .await
+            .unwrap();
 
         // Abort instead of complete
-        data_cache.abort_multipart_upload(hash, alg, &upload_id).await.unwrap();
+        data_cache
+            .abort_multipart_upload(hash, alg, &upload_id)
+            .await
+            .unwrap();
 
         // Object should not exist
-        assert!(!AsyncDataCache::object_exists(&*data_cache, hash, alg).await.unwrap_or(false));
+        assert!(!AsyncDataCache::object_exists(&*data_cache, hash, alg)
+            .await
+            .unwrap_or(false));
     });
 }
 
@@ -617,7 +666,9 @@ fn s3_check_cache_hit_skips_head_object() {
 
     // Attach the check cache to the data cache
     let mut data_cache_with_check = S3DataCache::new(
-        BUCKET.to_string(), PREFIX.to_string(), data_cache.client.clone(),
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        data_cache.client.clone(),
     );
     data_cache_with_check.s3_check_cache = Some(check_cache);
 
@@ -632,7 +683,9 @@ fn s3_check_cache_miss_calls_head_object() {
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
     let mut data_cache_with_check = S3DataCache::new(
-        BUCKET.to_string(), PREFIX.to_string(), data_cache.client.clone(),
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        data_cache.client.clone(),
     );
     data_cache_with_check.s3_check_cache = Some(check_cache);
 
@@ -656,7 +709,9 @@ fn make_s3_fixture_small_parts() -> (TempDir, Arc<S3DataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async {
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
@@ -675,11 +730,15 @@ fn s3_multipart_download_large_file() {
     let hash = upload_to_s3(&*data_cache, &content);
     let dest = tmp.path().join("large.bin");
 
-    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), content.len() as u64, 1000);
+    let mut entry = FileEntry::file(
+        dest.to_string_lossy().to_string(),
+        content.len() as u64,
+        1000,
+    );
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -702,11 +761,15 @@ fn s3_multipart_download_small_file() {
     let hash = upload_to_s3(&*data_cache, content);
     let dest = tmp.path().join("small.bin");
 
-    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), content.len() as u64, 1000);
+    let mut entry = FileEntry::file(
+        dest.to_string_lossy().to_string(),
+        content.len() as u64,
+        1000,
+    );
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -728,10 +791,11 @@ fn s3_multipart_download_chunked_file() {
     // but chunked files go through the chunk-reassembly path (not multipart).
     // This verifies chunked download still works with a small part size.
     let chunk_size = SMALL_PART_SIZE * 3; // 96 bytes per chunk
-    let chunks: Vec<Vec<u8>> = (0..3u8)
-        .map(|i| vec![i; chunk_size])
+    let chunks: Vec<Vec<u8>> = (0..3u8).map(|i| vec![i; chunk_size]).collect();
+    let chunk_hashes: Vec<String> = chunks
+        .iter()
+        .map(|c| upload_to_s3(&*data_cache, c))
         .collect();
-    let chunk_hashes: Vec<String> = chunks.iter().map(|c| upload_to_s3(&*data_cache, c)).collect();
 
     let total_size = chunks.iter().map(|c| c.len()).sum::<usize>();
     let dest = tmp.path().join("chunked_large.bin");
@@ -770,12 +834,16 @@ fn s3_multipart_download_mixed_sizes() {
     let small_dest = tmp.path().join("small.bin");
 
     let mut large_entry = FileEntry::file(
-        large_dest.to_string_lossy().to_string(), large_content.len() as u64, 1000,
+        large_dest.to_string_lossy().to_string(),
+        large_content.len() as u64,
+        1000,
     );
     large_entry.hash = Some(large_hash);
 
     let mut small_entry = FileEntry::file(
-        small_dest.to_string_lossy().to_string(), small_content.len() as u64, 1000,
+        small_dest.to_string_lossy().to_string(),
+        small_content.len() as u64,
+        1000,
     );
     small_entry.hash = Some(small_hash);
 
@@ -802,7 +870,9 @@ fn make_s3_fixture_with_expected_bucket_owner(owner: &str) -> (TempDir, Arc<S3Da
     let client = make_s3_client(tmp.path());
 
     let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all().build().unwrap();
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async {
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
@@ -820,7 +890,10 @@ fn s3_data_cache_expected_bucket_owner_none() {
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(), b"data");
+    assert_eq!(
+        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
+        b"data"
+    );
 }
 
 #[test]
@@ -832,7 +905,10 @@ fn s3_data_cache_expected_bucket_owner_set() {
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(), b"data");
+    assert_eq!(
+        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
+        b"data"
+    );
 }
 
 #[test]
@@ -843,7 +919,10 @@ fn s3_data_cache_expected_bucket_owner_mismatch() {
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(), b"data");
+    assert_eq!(
+        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
+        b"data"
+    );
 }
 
 #[test]
@@ -882,8 +961,8 @@ fn s3_download_with_expected_bucket_owner() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 14, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -934,8 +1013,8 @@ fn s3_download_excludes_expected_bucket_owner_when_disabled() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 16, 1000);
     entry.hash = Some(hash);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_files(vec![entry]);
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -954,16 +1033,18 @@ use openjd_snapshots::FileSystemDataCache;
 
 fn make_fs_async_cache() -> (TempDir, Arc<dyn AsyncDataCache>) {
     let tmp = TempDir::new().unwrap();
-    let cache: Arc<dyn AsyncDataCache> = Arc::new(
-        FileSystemDataCache::new(tmp.path().join("cache")).unwrap()
-    );
+    let cache: Arc<dyn AsyncDataCache> =
+        Arc::new(FileSystemDataCache::new(tmp.path().join("cache")).unwrap());
     (tmp, cache)
 }
 
 #[tokio::test]
 async fn fs_async_put_and_get_object() {
     let (_tmp, cache) = make_fs_async_cache();
-    cache.put_object("abc123", "xxh128", b"hello world".to_vec()).await.unwrap();
+    cache
+        .put_object("abc123", "xxh128", b"hello world".to_vec())
+        .await
+        .unwrap();
     let data = cache.get_object("abc123", "xxh128").await.unwrap();
     assert_eq!(data, b"hello world");
 }
@@ -972,7 +1053,10 @@ async fn fs_async_put_and_get_object() {
 async fn fs_async_object_exists() {
     let (_tmp, cache) = make_fs_async_cache();
     assert!(!cache.object_exists("abc123", "xxh128").await.unwrap());
-    cache.put_object("abc123", "xxh128", b"data".to_vec()).await.unwrap();
+    cache
+        .put_object("abc123", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
     assert!(cache.object_exists("abc123", "xxh128").await.unwrap());
 }
 
@@ -986,9 +1070,15 @@ async fn fs_async_object_key_format() {
 #[tokio::test]
 async fn fs_async_copy_object_to_file() {
     let (_tmp, cache) = make_fs_async_cache();
-    cache.put_object("abc123", "xxh128", b"copy me".to_vec()).await.unwrap();
+    cache
+        .put_object("abc123", "xxh128", b"copy me".to_vec())
+        .await
+        .unwrap();
     let dest = _tmp.path().join("dest.bin");
-    let n = cache.copy_object_to_file("abc123", "xxh128", &dest).await.unwrap();
+    let n = cache
+        .copy_object_to_file("abc123", "xxh128", &dest)
+        .await
+        .unwrap();
     assert_eq!(n, 7);
     assert_eq!(std::fs::read(&dest).unwrap(), b"copy me");
 }
@@ -996,13 +1086,19 @@ async fn fs_async_copy_object_to_file() {
 #[tokio::test]
 async fn fs_async_write_object_to_file_at_offset() {
     let (_tmp, cache) = make_fs_async_cache();
-    cache.put_object("abc123", "xxh128", b"HELLO".to_vec()).await.unwrap();
+    cache
+        .put_object("abc123", "xxh128", b"HELLO".to_vec())
+        .await
+        .unwrap();
 
     let dest = _tmp.path().join("preallocated.bin");
     // Create a 20-byte zero-filled file
-    std::fs::write(&dest, &[0u8; 20]).unwrap();
+    std::fs::write(&dest, [0u8; 20]).unwrap();
 
-    let n = cache.write_object_to_file_at_offset("abc123", "xxh128", &dest, 10).await.unwrap();
+    let n = cache
+        .write_object_to_file_at_offset("abc123", "xxh128", &dest, 10)
+        .await
+        .unwrap();
     assert_eq!(n, 5);
 
     let contents = std::fs::read(&dest).unwrap();
@@ -1017,13 +1113,22 @@ async fn fs_async_multipart_returns_unsupported() {
     let err = cache.create_multipart_upload("h", "a").await.unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
 
-    let err = cache.upload_part("h", "a", "uid", 1, vec![]).await.unwrap_err();
+    let err = cache
+        .upload_part("h", "a", "uid", 1, vec![])
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
 
-    let err = cache.complete_multipart_upload("h", "a", "uid", vec![]).await.unwrap_err();
+    let err = cache
+        .complete_multipart_upload("h", "a", "uid", vec![])
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
 
-    let err = cache.abort_multipart_upload("h", "a", "uid").await.unwrap_err();
+    let err = cache
+        .abort_multipart_upload("h", "a", "uid")
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
 
     let err = cache.get_object_range("h", "a", 0, 10).await.unwrap_err();
@@ -1133,14 +1238,16 @@ fn s3_download_chunked_with_stream_range() {
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<Vec<u8>> = (0..3u8).map(|i| vec![i; 16]).collect();
-    let chunk_hashes: Vec<String> = chunks.iter().map(|c| upload_to_s3(&*data_cache, c)).collect();
+    let chunk_hashes: Vec<String> = chunks
+        .iter()
+        .map(|c| upload_to_s3(&*data_cache, c))
+        .collect();
 
     let dest = tmp.path().join("chunked_stream.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 48, 1000);
     entry.chunk_hashes = Some(chunk_hashes);
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, 16).with_files(vec![entry]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 16).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1175,8 +1282,7 @@ fn s3_download_chunked_mixed_stream_and_write() {
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 40, 1000);
     entry.chunk_hashes = Some(chunk_hashes);
 
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, 16).with_files(vec![entry]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 16).with_files(vec![entry]);
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1197,7 +1303,10 @@ fn s3_download_chunked_mixed_stream_and_write() {
 #[test]
 fn s3_get_object_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
         AsyncDataCache::get_object(&*data_cache, "nonexistent_hash", "xxh128").await
     });
@@ -1207,9 +1316,14 @@ fn s3_get_object_nonexistent_returns_error() {
 #[test]
 fn s3_get_object_range_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.get_object_range("nonexistent_hash", "xxh128", 0, 10).await
+        data_cache
+            .get_object_range("nonexistent_hash", "xxh128", 0, 10)
+            .await
     });
     assert!(result.is_err());
 }
@@ -1218,9 +1332,14 @@ fn s3_get_object_range_nonexistent_returns_error() {
 fn s3_copy_object_to_file_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
     let dest = _tmp.path().join("dest.bin");
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.copy_object_to_file("nonexistent_hash", "xxh128", &dest).await
+        data_cache
+            .copy_object_to_file("nonexistent_hash", "xxh128", &dest)
+            .await
     });
     assert!(result.is_err());
 }
@@ -1229,10 +1348,15 @@ fn s3_copy_object_to_file_nonexistent_returns_error() {
 fn s3_write_object_to_file_at_offset_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
     let dest = _tmp.path().join("preallocated.bin");
-    std::fs::write(&dest, &[0u8; 64]).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    std::fs::write(&dest, [0u8; 64]).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.write_object_to_file_at_offset("nonexistent_hash", "xxh128", &dest, 0).await
+        data_cache
+            .write_object_to_file_at_offset("nonexistent_hash", "xxh128", &dest, 0)
+            .await
     });
     assert!(result.is_err());
 }
@@ -1241,10 +1365,15 @@ fn s3_write_object_to_file_at_offset_nonexistent_returns_error() {
 fn s3_stream_range_to_file_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
     let dest = _tmp.path().join("preallocated.bin");
-    std::fs::write(&dest, &[0u8; 64]).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    std::fs::write(&dest, [0u8; 64]).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.stream_range_to_file_at_offset("nonexistent_hash", "xxh128", 0, 10, &dest, 0).await
+        data_cache
+            .stream_range_to_file_at_offset("nonexistent_hash", "xxh128", 0, 10, &dest, 0)
+            .await
     });
     assert!(result.is_err());
 }
@@ -1252,9 +1381,14 @@ fn s3_stream_range_to_file_nonexistent_returns_error() {
 #[test]
 fn s3_abort_nonexistent_multipart_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.abort_multipart_upload("somehash", "xxh128", "fake_upload_id").await
+        data_cache
+            .abort_multipart_upload("somehash", "xxh128", "fake_upload_id")
+            .await
     });
     assert!(result.is_err());
 }
@@ -1262,9 +1396,14 @@ fn s3_abort_nonexistent_multipart_returns_error() {
 #[test]
 fn s3_upload_part_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.upload_part("somehash", "xxh128", "fake_upload_id", 1, b"data".to_vec()).await
+        data_cache
+            .upload_part("somehash", "xxh128", "fake_upload_id", 1, b"data".to_vec())
+            .await
     });
     assert!(result.is_err());
 }
@@ -1272,11 +1411,19 @@ fn s3_upload_part_nonexistent_returns_error() {
 #[test]
 fn s3_complete_multipart_nonexistent_returns_error() {
     let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let result = rt.block_on(async {
-        data_cache.complete_multipart_upload("somehash", "xxh128", "fake_upload_id", vec![
-            (1, "fake_etag".to_string()),
-        ]).await
+        data_cache
+            .complete_multipart_upload(
+                "somehash",
+                "xxh128",
+                "fake_upload_id",
+                vec![(1, "fake_etag".to_string())],
+            )
+            .await
     });
     assert!(result.is_err());
 }
@@ -1289,7 +1436,11 @@ fn s3_force_s3_check_bypasses_cache() {
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
-    let mut dc = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), base_cache.client.clone());
+    let mut dc = S3DataCache::new(
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        base_cache.client.clone(),
+    );
     dc.s3_check_cache = Some(check_cache.clone());
     dc.force_s3_check = true;
 
@@ -1303,8 +1454,13 @@ fn s3_force_s3_check_bypasses_cache() {
     // Upload the object so HeadObject succeeds, then verify object_exists
     // goes through the HeadObject path (not the cache short-circuit)
     SyncCache::put_object(&*base_cache, "test_hash", "xxh128", b"data").unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let exists = rt.block_on(async { AsyncDataCache::object_exists(&dc, "test_hash", "xxh128").await }).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let exists = rt
+        .block_on(async { AsyncDataCache::object_exists(&dc, "test_hash", "xxh128").await })
+        .unwrap();
     assert!(exists);
 }
 
@@ -1314,7 +1470,11 @@ fn s3_cache_validation_stale_entry_invalidates() {
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
-    let mut dc = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), base_cache.client.clone());
+    let mut dc = S3DataCache::new(
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        base_cache.client.clone(),
+    );
     dc.s3_check_cache = Some(check_cache.clone());
 
     // Put a stale entry — object doesn't actually exist in S3
@@ -1328,9 +1488,16 @@ fn s3_cache_validation_stale_entry_invalidates() {
     // returns true for the first 100 calls). HeadObject fails because the object
     // doesn't exist. s3s returns a generic service error (not is_not_found()),
     // so the code returns Err rather than triggering invalidation.
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let result = rt.block_on(async { AsyncDataCache::object_exists(&dc, "stale_hash", "xxh128").await });
-    assert!(result.is_err(), "s3s HeadObject on missing key returns Err (not Ok(false))");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result =
+        rt.block_on(async { AsyncDataCache::object_exists(&dc, "stale_hash", "xxh128").await });
+    assert!(
+        result.is_err(),
+        "s3s HeadObject on missing key returns Err (not Ok(false))"
+    );
 
     // Invalidation is NOT triggered because s3s doesn't return is_not_found()
     // (it returns NoSuchKey instead of NotFound). This is a known s3s limitation.
@@ -1346,7 +1513,11 @@ fn s3_cache_validation_valid_entry_confirmed() {
     // Upload a real object
     SyncCache::put_object(&*data_cache, "real_hash", "xxh128", b"real data").unwrap();
 
-    let mut dc = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), data_cache.client.clone());
+    let mut dc = S3DataCache::new(
+        BUCKET.to_string(),
+        PREFIX.to_string(),
+        data_cache.client.clone(),
+    );
     dc.s3_check_cache = Some(check_cache.clone());
 
     // Populate check cache
@@ -1354,8 +1525,13 @@ fn s3_cache_validation_valid_entry_confirmed() {
     check_cache.put_entry(&cache_key).unwrap();
 
     // Probabilistic verification does HeadObject, object exists → returns true
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let exists = rt.block_on(async { AsyncDataCache::object_exists(&dc, "real_hash", "xxh128").await }).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let exists = rt
+        .block_on(async { AsyncDataCache::object_exists(&dc, "real_hash", "xxh128").await })
+        .unwrap();
     assert!(exists);
     assert!(!dc.cache_validation.is_invalidated());
 }

@@ -21,7 +21,11 @@ pub enum PathFormat {
 
 impl PathFormat {
     pub fn host() -> Self {
-        if cfg!(windows) { PathFormat::Windows } else { PathFormat::Posix }
+        if cfg!(windows) {
+            PathFormat::Windows
+        } else {
+            PathFormat::Posix
+        }
     }
 }
 
@@ -48,7 +52,10 @@ impl PathMappingRule {
     /// - `Posix` / `Uri` → `/`
     /// - `Windows` → `\`
     pub fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String> {
-        let sep = match output_format { PathFormat::Windows => '\\', _ => '/' };
+        let sep = match output_format {
+            PathFormat::Windows => '\\',
+            _ => '/',
+        };
         match self.source_path_format {
             PathFormat::Uri => self.apply_uri(path, sep),
             PathFormat::Posix => self.apply_filesystem(path, false, sep),
@@ -60,7 +67,11 @@ impl PathMappingRule {
     /// Returns `None` if there is no `://` separator.
     fn uri_path_start(uri: &str) -> Option<usize> {
         let authority_start = uri.find("://")? + 3;
-        Some(uri[authority_start..].find('/').map_or(uri.len(), |i| authority_start + i))
+        Some(
+            uri[authority_start..]
+                .find('/')
+                .map_or(uri.len(), |i| authority_start + i),
+        )
     }
 
     fn apply_uri(&self, path: &str, sep: char) -> Option<String> {
@@ -163,7 +174,11 @@ pub fn apply_rules(rules: &[PathMappingRule], path: &str) -> String {
 ///
 /// Rules must be pre-sorted by decreasing `source_path` length (longest match first).
 #[must_use]
-pub fn apply_rules_with_format(rules: &[PathMappingRule], path: &str, output_format: PathFormat) -> String {
+pub fn apply_rules_with_format(
+    rules: &[PathMappingRule],
+    path: &str,
+    output_format: PathFormat,
+) -> String {
     for rule in rules {
         if let Some(mapped) = rule.apply_with_format(path, output_format) {
             return mapped;
@@ -210,13 +225,25 @@ mod tests {
         assert_eq!(file.version, "pathmapping-1.0");
         assert_eq!(file.path_mapping_rules.len(), 2);
 
-        assert_eq!(file.path_mapping_rules[0].source_path_format, PathFormat::Posix);
+        assert_eq!(
+            file.path_mapping_rules[0].source_path_format,
+            PathFormat::Posix
+        );
         assert_eq!(file.path_mapping_rules[0].source_path, "/home/user");
-        assert_eq!(file.path_mapping_rules[0].destination_path, "/mnt/shared/user");
+        assert_eq!(
+            file.path_mapping_rules[0].destination_path,
+            "/mnt/shared/user"
+        );
 
-        assert_eq!(file.path_mapping_rules[1].source_path_format, PathFormat::Windows);
+        assert_eq!(
+            file.path_mapping_rules[1].source_path_format,
+            PathFormat::Windows
+        );
         assert_eq!(file.path_mapping_rules[1].source_path, "C:\\Users\\user");
-        assert_eq!(file.path_mapping_rules[1].destination_path, "/mnt/shared/user");
+        assert_eq!(
+            file.path_mapping_rules[1].destination_path,
+            "/mnt/shared/user"
+        );
     }
 
     #[test]
@@ -225,8 +252,15 @@ mod tests {
         let json = serde_json::to_string(&file).unwrap();
         let roundtrip: PathMappingFile = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(roundtrip.path_mapping_rules.len(), file.path_mapping_rules.len());
-        for (a, b) in file.path_mapping_rules.iter().zip(roundtrip.path_mapping_rules.iter()) {
+        assert_eq!(
+            roundtrip.path_mapping_rules.len(),
+            file.path_mapping_rules.len()
+        );
+        for (a, b) in file
+            .path_mapping_rules
+            .iter()
+            .zip(roundtrip.path_mapping_rules.iter())
+        {
             assert_eq!(a.source_path_format, b.source_path_format);
             assert_eq!(a.source_path, b.source_path);
             assert_eq!(a.destination_path, b.destination_path);
@@ -268,7 +302,8 @@ mod tests {
 
     #[test]
     fn deserialize_uri_format() {
-        let json = r#"{"source_path_format":"URI","source_path":"s3://bucket","destination_path":"/mnt"}"#;
+        let json =
+            r#"{"source_path_format":"URI","source_path":"s3://bucket","destination_path":"/mnt"}"#;
         let rule: PathMappingRule = serde_json::from_str(json).unwrap();
         assert_eq!(rule.source_path_format, PathFormat::Uri);
     }

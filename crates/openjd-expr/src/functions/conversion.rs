@@ -15,40 +15,61 @@ pub fn string_fn(_: Ctx, a: &[ExprValue]) -> R {
 }
 
 pub fn int_from_int(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Int(i) => Ok(ExprValue::Int(*i)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Int(i) => Ok(ExprValue::Int(*i)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn int_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
-            if f.0.fract() != 0.0 { return Err(ExpressionError::new(format!("Cannot convert {f} to int: not a whole number"))); }
-            if *f > i64::MAX as f64 || *f < i64::MIN as f64 { return Err(ExpressionError::integer_overflow()); }
+            if f.0.fract() != 0.0 {
+                return Err(ExpressionError::new(format!(
+                    "Cannot convert {f} to int: not a whole number"
+                )));
+            }
+            if *f > i64::MAX as f64 || *f < i64::MIN as f64 {
+                return Err(ExpressionError::integer_overflow());
+            }
             Ok(ExprValue::Int(f.0 as i64))
         }
-        _ => Err(ExpressionError::type_error("type error"))
+        _ => Err(ExpressionError::type_error("type error")),
     }
 }
 
 pub fn int_from_bool(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Bool(b) => Ok(ExprValue::Int(if *b { 1 } else { 0 })), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Bool(b) => Ok(ExprValue::Int(if *b { 1 } else { 0 })),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn int_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => {
-            let v: i64 = s.trim().parse().map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to int")))?;
+            let v: i64 = s
+                .trim()
+                .parse()
+                .map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to int")))?;
             Ok(ExprValue::Int(v))
         }
-        _ => Err(ExpressionError::type_error("type error"))
+        _ => Err(ExpressionError::type_error("type error")),
     }
 }
 
 pub fn float_from_float(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Float(f) => Ok(ExprValue::Float(Float64::new(f.0)?)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Float(f) => Ok(ExprValue::Float(Float64::new(f.0)?)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn float_from_int(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Int(i) => Ok(ExprValue::Float(Float64::new(*i as f64)?)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Int(i) => Ok(ExprValue::Float(Float64::new(*i as f64)?)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn float_from_string(_: Ctx, a: &[ExprValue]) -> R {
@@ -56,26 +77,42 @@ pub fn float_from_string(_: Ctx, a: &[ExprValue]) -> R {
         ExprValue::String(s) => {
             let lower = s.trim().to_lowercase();
             if lower == "inf" || lower == "infinity" || lower == "-inf" || lower == "-infinity" {
-                return Err(ExpressionError::float_error("Cannot convert to float: infinity"));
+                return Err(ExpressionError::float_error(
+                    "Cannot convert to float: infinity",
+                ));
             }
-            if lower == "nan" { return Err(ExpressionError::float_error("Cannot convert to float: NaN")); }
-            let v: f64 = s.trim().parse().map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to float")))?;
+            if lower == "nan" {
+                return Err(ExpressionError::float_error("Cannot convert to float: NaN"));
+            }
+            let v: f64 = s
+                .trim()
+                .parse()
+                .map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to float")))?;
             Ok(ExprValue::Float(Float64::new(v)?))
         }
-        _ => Err(ExpressionError::type_error("type error"))
+        _ => Err(ExpressionError::type_error("type error")),
     }
 }
 
 pub fn bool_from_bool(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Bool(b) => Ok(ExprValue::Bool(*b)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Bool(b) => Ok(ExprValue::Bool(*b)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn bool_from_int(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Int(i) => Ok(ExprValue::Bool(*i != 0)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Int(i) => Ok(ExprValue::Bool(*i != 0)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn bool_from_float(_: Ctx, a: &[ExprValue]) -> R {
-    match &a[0] { ExprValue::Float(f) => Ok(ExprValue::Bool(*f != 0.0)), _ => Err(ExpressionError::type_error("type error")) }
+    match &a[0] {
+        ExprValue::Float(f) => Ok(ExprValue::Bool(*f != 0.0)),
+        _ => Err(ExpressionError::type_error("type error")),
+    }
 }
 
 pub fn bool_from_null(_: Ctx, _a: &[ExprValue]) -> R {
@@ -91,7 +128,7 @@ pub fn bool_from_string(_: Ctx, a: &[ExprValue]) -> R {
                 "Cannot convert '{s}' to bool. Expected one of: 1, true, on, yes, 0, false, off, no"
             ))),
         },
-        _ => Err(ExpressionError::type_error("type error"))
+        _ => Err(ExpressionError::type_error("type error")),
     }
 }
 

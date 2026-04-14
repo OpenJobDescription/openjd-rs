@@ -3,10 +3,10 @@
 
 //! Environment types per spec §4.
 
-use crate::format_string::FormatString;
-use crate::types::{EndOfLine, FileType};
 use super::actions::EnvironmentActions;
 use super::constrained_strings::Description;
+use crate::format_string::FormatString;
+use crate::types::{EndOfLine, FileType};
 use serde::Deserialize;
 use std::collections::HashMap;
 

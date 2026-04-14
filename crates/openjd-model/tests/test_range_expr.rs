@@ -265,7 +265,10 @@ fn from_str_one_int() {
 #[test]
 fn from_str_out_of_order() {
     assert_eq!(
-        "9,0,3,2,8,10,1,4,7,6,5".parse::<RangeExpr>().unwrap().to_string(),
+        "9,0,3,2,8,10,1,4,7,6,5"
+            .parse::<RangeExpr>()
+            .unwrap()
+            .to_string(),
         "0-10"
     );
 }
@@ -281,7 +284,10 @@ fn from_str_ranges_out_of_order_with_steps() {
 #[test]
 fn from_str_pos_neg_steps() {
     assert_eq!(
-        "5-3:-1,12-8:-2,2-0:-1,6-7:2".parse::<RangeExpr>().unwrap().to_string(),
+        "5-3:-1,12-8:-2,2-0:-1,6-7:2"
+            .parse::<RangeExpr>()
+            .unwrap()
+            .to_string(),
         "0-5,6-12:2"
     );
 }
@@ -312,7 +318,10 @@ fn from_values_one_int() {
 
 #[test]
 fn from_values_two_ranges() {
-    assert_eq!(RangeExpr::from_values(vec![1, 2, 3, 4, 5, 7]).to_string(), "1-5,7");
+    assert_eq!(
+        RangeExpr::from_values(vec![1, 2, 3, 4, 5, 7]).to_string(),
+        "1-5,7"
+    );
 }
 
 #[test]

@@ -3,11 +3,11 @@
 
 //! Job template per spec §1.1.
 
-use crate::format_string::FormatString;
 use super::constrained_strings::{Description, ExtensionName};
 use super::environment::Environment;
 use super::parameters::JobParameterDefinition;
 use super::step::StepTemplate;
+use crate::format_string::FormatString;
 use serde::Deserialize;
 
 /// §1.1 JobTemplate

@@ -18,9 +18,9 @@
 ///     cargo test -p openjd-snapshots --test test_s3_integration -- --ignored
 use openjd_snapshots::{
     cache_sync_manifest, collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest,
-    join_snapshot, subtree_snapshot, AbsManifest, AsyncDataCache, CacheSyncOptions,
-    CollectOptions, DownloadOptions, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
-    ManifestRef, RelManifest, S3DataCache, SymlinkPolicy,
+    join_snapshot, subtree_snapshot, AbsManifest, AsyncDataCache, CacheSyncOptions, CollectOptions,
+    DownloadOptions, FileEntry, HashAlgorithm, HashUploadOptions, Manifest, ManifestRef,
+    RelManifest, S3DataCache, SymlinkPolicy,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -156,7 +156,9 @@ fn s3_round_trip_collect_upload_download() {
         if let Some(ref hash) = f.hash {
             assert!(
                 openjd_snapshots::ContentAddressedDataCache::object_exists(
-                    &*data_cache, hash, "xxh128"
+                    &*data_cache,
+                    hash,
+                    "xxh128"
                 )
                 .unwrap(),
                 "object should exist in S3: {hash}"
@@ -232,8 +234,8 @@ async fn s3_cache_sync_server_side_copy() {
         .unwrap();
 
     // Build manifest referencing those objects
-    let manifest = RelManifest::Snapshot(
-        Manifest::new(HashAlgorithm::Xxh128, -1).with_files(vec![
+    let manifest =
+        RelManifest::Snapshot(Manifest::new(HashAlgorithm::Xxh128, -1).with_files(vec![
             {
                 let mut e = FileEntry::new("a.txt");
                 e.hash = Some("hash_a".into());
@@ -246,8 +248,7 @@ async fn s3_cache_sync_server_side_copy() {
                 e.size = Some(5);
                 e
             },
-        ]),
-    );
+        ]));
 
     // First sync: should copy both objects
     let result = cache_sync_manifest(

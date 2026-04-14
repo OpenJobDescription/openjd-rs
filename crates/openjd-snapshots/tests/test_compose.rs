@@ -2,8 +2,8 @@
 // Ported from deadline-cloud test_compose_manifest.py (62 tests)
 
 use openjd_snapshots::{
-    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, HashAlgorithm, Manifest, Snapshot,
-    SnapshotDiff, compose_diffs, compose_snapshot_with_diffs, DEFAULT_FILE_CHUNK_SIZE,
+    compose_diffs, compose_snapshot_with_diffs, AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry,
+    HashAlgorithm, Manifest, Snapshot, SnapshotDiff, DEFAULT_FILE_CHUNK_SIZE,
 };
 
 // --- Helpers ---
@@ -44,7 +44,10 @@ fn hf(path: &str, hash: &str, size: u64, mtime: u64) -> FileEntry {
 }
 
 fn deleted_dir(path: &str) -> DirEntry {
-    DirEntry { path: path.into(), deleted: true }
+    DirEntry {
+        path: path.into(),
+        deleted: true,
+    }
 }
 
 fn fpaths(m: &Snapshot) -> std::collections::HashSet<String> {
@@ -57,15 +60,27 @@ fn fpaths_abs(m: &AbsSnapshot) -> std::collections::HashSet<String> {
 
 #[allow(dead_code)]
 fn dpaths(m: &Snapshot) -> std::collections::HashSet<String> {
-    m.dirs.iter().filter(|d| !d.deleted).map(|d| d.path.clone()).collect()
+    m.dirs
+        .iter()
+        .filter(|d| !d.deleted)
+        .map(|d| d.path.clone())
+        .collect()
 }
 
 fn diff_fpaths(m: &SnapshotDiff) -> std::collections::HashSet<String> {
-    m.files.iter().filter(|f| !f.deleted).map(|f| f.path.clone()).collect()
+    m.files
+        .iter()
+        .filter(|f| !f.deleted)
+        .map(|f| f.path.clone())
+        .collect()
 }
 
 fn diff_fpaths_abs(m: &AbsSnapshotDiff) -> std::collections::HashSet<String> {
-    m.files.iter().filter(|f| !f.deleted).map(|f| f.path.clone()).collect()
+    m.files
+        .iter()
+        .filter(|f| !f.deleted)
+        .map(|f| f.path.clone())
+        .collect()
 }
 
 // ===== TestComposeManifestsValidation =====
@@ -100,12 +115,12 @@ fn single_snapshot_returns_as_is() {
 
 #[test]
 fn snapshot_with_no_diffs_returns_snapshot() {
-    let base = snap(vec![
-        hf("a.txt", "h1", 10, 1),
-        hf("b.txt", "h2", 20, 2),
-    ]);
+    let base = snap(vec![hf("a.txt", "h1", 10, 1), hf("b.txt", "h2", 20, 2)]);
     let result = compose_snapshot_with_diffs(&base, &[]).unwrap();
-    assert_eq!(fpaths(&result), ["a.txt", "b.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        fpaths(&result),
+        ["a.txt", "b.txt"].into_iter().map(String::from).collect()
+    );
     assert_eq!(result.total_size, 30);
 }
 
@@ -125,7 +140,13 @@ fn snapshot_diff_adds_new_file() {
     let base = snap(vec![hf("existing.txt", "h1", 100, 1000)]);
     let d = diff(vec![hf("new.txt", "h2", 200, 2000)]);
     let result = compose_snapshot_with_diffs(&base, &[&d]).unwrap();
-    assert_eq!(fpaths(&result), ["existing.txt", "new.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        fpaths(&result),
+        ["existing.txt", "new.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 #[test]
@@ -147,7 +168,10 @@ fn snapshot_diff_deletes_file() {
     ]);
     let d = diff(vec![FileEntry::deleted("delete.txt")]);
     let result = compose_snapshot_with_diffs(&base, &[&d]).unwrap();
-    assert_eq!(fpaths(&result), ["keep.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        fpaths(&result),
+        ["keep.txt"].into_iter().map(String::from).collect()
+    );
     assert!(result.files.iter().all(|f| !f.deleted));
 }
 
@@ -197,7 +221,10 @@ fn snapshot_symlink_handling() {
     let base = snap(vec![FileEntry::symlink("link.txt", "old_target.txt")]);
     let d = diff(vec![FileEntry::symlink("link.txt", "new_target.txt")]);
     let result = compose_snapshot_with_diffs(&base, &[&d]).unwrap();
-    assert_eq!(result.files[0].symlink_target.as_deref(), Some("new_target.txt"));
+    assert_eq!(
+        result.files[0].symlink_target.as_deref(),
+        Some("new_target.txt")
+    );
 }
 
 #[test]
@@ -244,7 +271,10 @@ fn abs_snapshot_diff_adds_new_file() {
     let result = compose_snapshot_with_diffs(&base, &[&d]).unwrap();
     assert_eq!(
         fpaths_abs(&result),
-        ["/project/existing.txt", "/project/new.txt"].into_iter().map(String::from).collect()
+        ["/project/existing.txt", "/project/new.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
     );
 }
 
@@ -260,10 +290,10 @@ fn diff_result_is_diff_type() {
 
 #[test]
 fn diff_parent_hash_from_first_diff() {
-    let d1 = diff(vec![hf("file1.txt", "h1", 100, 1000)])
-        .with_parent_hash(Some("first_parent".into()));
-    let d2 = diff(vec![hf("file2.txt", "h2", 200, 2000)])
-        .with_parent_hash(Some("second_parent".into()));
+    let d1 =
+        diff(vec![hf("file1.txt", "h1", 100, 1000)]).with_parent_hash(Some("first_parent".into()));
+    let d2 =
+        diff(vec![hf("file2.txt", "h2", 200, 2000)]).with_parent_hash(Some("second_parent".into()));
     let result = compose_diffs(&[&d1, &d2]).unwrap();
     assert_eq!(result.parent_manifest_hash.as_deref(), Some("first_parent"));
 }
@@ -273,7 +303,13 @@ fn diff_additions_merged() {
     let d1 = diff(vec![hf("file1.txt", "h1", 100, 1000)]);
     let d2 = diff(vec![hf("file2.txt", "h2", 200, 2000)]);
     let result = compose_diffs(&[&d1, &d2]).unwrap();
-    assert_eq!(diff_fpaths(&result), ["file1.txt", "file2.txt"].into_iter().map(String::from).collect());
+    assert_eq!(
+        diff_fpaths(&result),
+        ["file1.txt", "file2.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
 }
 
 #[test]
@@ -332,7 +368,11 @@ fn diff_directory_deletion_then_file_added_reconciles() {
     let result = compose_diffs(&[&d1, &d2]).unwrap();
     let dir = result.dirs.iter().find(|d| d.path == "dir" && !d.deleted);
     assert!(dir.is_some());
-    let f = result.files.iter().find(|f| f.path == "dir/newfile.txt").unwrap();
+    let f = result
+        .files
+        .iter()
+        .find(|f| f.path == "dir/newfile.txt")
+        .unwrap();
     assert!(!f.deleted);
 }
 
@@ -344,10 +384,16 @@ fn diff_nested_directory_deletion_reconciliation() {
     );
     let d2 = diff_with_dirs(
         vec![hf("a/b/c/new.txt", "h1", 100, 1000)],
-        vec![DirEntry::new("a"), DirEntry::new("a/b"), DirEntry::new("a/b/c")],
+        vec![
+            DirEntry::new("a"),
+            DirEntry::new("a/b"),
+            DirEntry::new("a/b/c"),
+        ],
     );
     let result = compose_diffs(&[&d1, &d2]).unwrap();
-    let non_deleted: std::collections::HashSet<_> = result.dirs.iter()
+    let non_deleted: std::collections::HashSet<_> = result
+        .dirs
+        .iter()
         .filter(|d| !d.deleted)
         .map(|d| d.path.as_str())
         .collect();
@@ -377,7 +423,10 @@ fn abs_diff_additions_merged() {
     let result = compose_diffs(&[&d1, &d2]).unwrap();
     assert_eq!(
         diff_fpaths_abs(&result),
-        ["/project/file1.txt", "/project/file2.txt"].into_iter().map(String::from).collect()
+        ["/project/file1.txt", "/project/file2.txt"]
+            .into_iter()
+            .map(String::from)
+            .collect()
     );
 }
 

@@ -12,30 +12,46 @@ pub static AMOUNT_CAP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^([A-Za-z_][A-Za-z0-9_]*:)?amount\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$").unwrap()
 });
 pub static ATTR_CAP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^([A-Za-z_][A-Za-z0-9_]*:)?attr\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$").unwrap()
+    Regex::new(
+        r"(?i)^([A-Za-z_][A-Za-z0-9_]*:)?attr\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$",
+    )
+    .unwrap()
 });
-pub static ATTR_VALUE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Za-z_][A-Za-z0-9_\-]*$").unwrap()
-});
+pub static ATTR_VALUE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_\-]*$").unwrap());
 
 pub const STANDARD_AMOUNT_CAPABILITIES: &[&str] = &[
-    "amount.worker.vcpu", "amount.worker.memory", "amount.worker.gpu",
-    "amount.worker.gpu.memory", "amount.worker.disk.scratch",
+    "amount.worker.vcpu",
+    "amount.worker.memory",
+    "amount.worker.gpu",
+    "amount.worker.gpu.memory",
+    "amount.worker.disk.scratch",
 ];
-pub const STANDARD_ATTRIBUTE_CAPABILITIES: &[&str] = &[
-    "attr.worker.os.family", "attr.worker.cpu.arch",
-];
+pub const STANDARD_ATTRIBUTE_CAPABILITIES: &[&str] =
+    &["attr.worker.os.family", "attr.worker.cpu.arch"];
 pub const RESERVED_SCOPES: &[&str] = &["worker", "job", "step", "task"];
 
 pub fn has_control_chars(s: &str) -> bool {
-    s.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    s.chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
 }
 
 /// Check if a capability name uses a reserved scope without being a standard capability.
-pub fn check_capability_reserved_scope(name: &str, standard: &[&str], path: &[PathElement], errors: &mut ValidationErrors) {
+pub fn check_capability_reserved_scope(
+    name: &str,
+    standard: &[&str],
+    path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
     let lower = name.to_lowercase();
-    let capability = if lower.contains(':') { lower.split(':').nth(1).unwrap_or(&lower) } else { &lower };
-    if standard.iter().any(|s| *s == capability) { return; }
+    let capability = if lower.contains(':') {
+        lower.split(':').nth(1).unwrap_or(&lower)
+    } else {
+        &lower
+    };
+    if standard.contains(&capability) {
+        return;
+    }
     let parts: Vec<&str> = capability.split('.').collect();
     if parts.len() >= 2 {
         let scope = parts[1];
@@ -52,15 +68,24 @@ pub fn validate_env_var_name(name: &str, path: &[PathElement], errors: &mut Vali
         return;
     }
     if name.len() > 256 {
-        errors.add(path, format!("variable name '{name}' exceeds 256 characters."));
+        errors.add(
+            path,
+            format!("variable name '{name}' exceeds 256 characters."),
+        );
     }
     let first = name.chars().next().unwrap();
     if first.is_ascii_digit() {
-        errors.add(path, format!("variable name '{name}' cannot start with a digit."));
+        errors.add(
+            path,
+            format!("variable name '{name}' cannot start with a digit."),
+        );
     }
     for ch in name.chars() {
         if !ch.is_ascii_alphanumeric() && ch != '_' {
-            errors.add(path, format!("variable name '{name}' contains invalid character '{ch}'."));
+            errors.add(
+                path,
+                format!("variable name '{name}' contains invalid character '{ch}'."),
+            );
             return;
         }
     }

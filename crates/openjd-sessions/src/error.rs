@@ -35,10 +35,7 @@ pub enum SessionError {
 
     /// Failed to resolve a format string expression.
     #[error("Failed to resolve {context}: {reason}")]
-    FormatString {
-        context: String,
-        reason: String,
-    },
+    FormatString { context: String, reason: String },
 
     /// Failed to write an embedded file.
     #[error("Failed to write embedded file '{name}': {source}")]
@@ -80,6 +77,10 @@ pub enum SessionError {
 fn format_expected(states: &[SessionState]) -> String {
     match states {
         [single] => single.to_string(),
-        _ => states.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" or "),
+        _ => states
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(" or "),
     }
 }

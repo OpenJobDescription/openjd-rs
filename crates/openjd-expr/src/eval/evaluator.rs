@@ -10,9 +10,9 @@
 use ruff_python_ast as ast;
 
 use crate::error::{ExpressionError, ExpressionErrorKind};
+use crate::path_mapping::PathFormat;
 use crate::symbol_table::SymbolTable;
 use crate::value::{ExprValue, Float64};
-use crate::path_mapping::PathFormat;
 
 /// Default memory limit: 100 million bytes.
 pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per spec
@@ -36,7 +36,7 @@ pub struct EvaluationResult {
 ///
 /// # Builder Pattern
 ///
-/// Create via [`ParsedExpression::evaluator`] or [`Evaluator::new`], then
+/// Create via [`super::ParsedExpression::evaluator`] or [`Evaluator::new`], then
 /// configure with `with_*` methods before calling [`evaluate`](Self::evaluate):
 ///
 /// ```
@@ -71,14 +71,15 @@ pub struct Evaluator<'a> {
     regex_cache: std::collections::HashMap<String, regex::Regex>,
 }
 
-static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> = std::sync::LazyLock::new(std::collections::HashMap::new);
+static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
+    std::sync::LazyLock::new(std::collections::HashMap::new);
 static EMPTY_RULES: &[crate::path_mapping::PathMappingRule] = &[];
 
 impl<'a> Evaluator<'a> {
     /// Create a new evaluator with default settings.
     ///
     /// Symbol tables are searched in order during name resolution.
-    /// Use [`ParsedExpression::evaluator`] instead when evaluating a parsed
+    /// Use [`super::ParsedExpression::evaluator`] instead when evaluating a parsed
     /// expression, as it pre-configures keyword renames and source context.
     pub fn new(symtabs: &'a [&'a SymbolTable]) -> Self {
         Self {
@@ -93,7 +94,8 @@ impl<'a> Evaluator<'a> {
             keyword_renames: &EMPTY_KEYWORD_RENAMES,
             library: crate::default_library::get_default_library(),
             path_mapping_rules: EMPTY_RULES,
-            target_type: None, regex_cache: std::collections::HashMap::new(),
+            target_type: None,
+            regex_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -104,7 +106,8 @@ impl<'a> Evaluator<'a> {
     /// host-context functions or restrict available operations.
     #[must_use]
     pub fn with_library(mut self, library: &'a crate::function_library::FunctionLibrary) -> Self {
-        self.library = library; self
+        self.library = library;
+        self
     }
 
     /// Set the maximum memory (in bytes) that evaluation may consume.
@@ -114,7 +117,8 @@ impl<'a> Evaluator<'a> {
     /// [`MemoryLimitExceeded`](crate::ExpressionErrorKind::MemoryLimitExceeded).
     #[must_use]
     pub fn with_memory_limit(mut self, limit: usize) -> Self {
-        self.memory_limit = limit; self
+        self.memory_limit = limit;
+        self
     }
 
     /// Set the maximum number of operations that evaluation may perform.
@@ -125,7 +129,8 @@ impl<'a> Evaluator<'a> {
     /// [`OperationLimitExceeded`](crate::ExpressionErrorKind::OperationLimitExceeded).
     #[must_use]
     pub fn with_operation_limit(mut self, limit: usize) -> Self {
-        self.operation_limit = limit; self
+        self.operation_limit = limit;
+        self
     }
 
     /// Set the path format for path operations and validation.
@@ -136,7 +141,8 @@ impl<'a> Evaluator<'a> {
     /// symbol table match this format.
     #[must_use]
     pub fn with_path_format(mut self, format: PathFormat) -> Self {
-        self.path_format = format; self
+        self.path_format = format;
+        self
     }
 
     /// Set the target type for context-dependent coercion.
@@ -146,7 +152,8 @@ impl<'a> Evaluator<'a> {
     /// model layer when the expected type of a template field is known.
     #[must_use]
     pub fn with_target_type(mut self, t: &crate::types::ExprType) -> Self {
-        self.target_type = Some(t.clone()); self
+        self.target_type = Some(t.clone());
+        self
     }
 
     /// Set path mapping rules for `apply_path_mapping()` calls.
@@ -155,7 +162,10 @@ impl<'a> Evaluator<'a> {
     /// host-context functions via the [`EvalContext`](crate::function_library::EvalContext)
     /// trait. First matching rule wins.
     #[must_use]
-    pub fn with_path_mapping_rules(mut self, rules: &'a [crate::path_mapping::PathMappingRule]) -> Self {
+    pub fn with_path_mapping_rules(
+        mut self,
+        rules: &'a [crate::path_mapping::PathMappingRule],
+    ) -> Self {
         self.path_mapping_rules = rules;
         self
     }
@@ -163,24 +173,33 @@ impl<'a> Evaluator<'a> {
     /// Set the original expression source text for error messages.
     ///
     /// When set, errors include the source text with caret positioning.
-    /// Automatically configured by [`ParsedExpression::evaluator`].
+    /// Automatically configured by [`super::ParsedExpression::evaluator`].
     #[must_use]
     pub fn with_expr_source(mut self, source: &'a str) -> Self {
-        self.expr_source = Some(source); self
+        self.expr_source = Some(source);
+        self
     }
 
     /// Set keyword rename mappings for Python keyword attribute access.
     ///
     /// Maps renamed identifiers back to their original names (e.g.,
     /// `if_` → `if`) so that `Param.if` works despite `if` being a Python
-    /// keyword. Automatically configured by [`ParsedExpression::evaluator`].
+    /// keyword. Automatically configured by [`super::ParsedExpression::evaluator`].
     #[must_use]
-    pub fn with_keyword_renames(mut self, renames: &'a std::collections::HashMap<String, String>) -> Self {
-        self.keyword_renames = renames; self
+    pub fn with_keyword_renames(
+        mut self,
+        renames: &'a std::collections::HashMap<String, String>,
+    ) -> Self {
+        self.keyword_renames = renames;
+        self
     }
 
-    pub fn peak_memory(&self) -> usize { self.peak_memory }
-    pub fn operation_count(&self) -> usize { self.operation_count }
+    pub fn peak_memory(&self) -> usize {
+        self.peak_memory
+    }
+    pub fn operation_count(&self) -> usize {
+        self.operation_count
+    }
 
     /// Evaluate an AST expression node.
     pub fn evaluate(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
@@ -196,15 +215,14 @@ impl<'a> Evaluator<'a> {
             }
             Ok(val) => {
                 if let Some(ref tt) = self.target_type {
-                    val.coerce(tt, self.path_format)
-                        .map_err(|msg| {
-                            let e = ExpressionError::new(msg);
-                            if let Some(src) = &self.expr_source {
-                                e.with_node(src, node)
-                            } else {
-                                e
-                            }
-                        })
+                    val.coerce(tt, self.path_format).map_err(|msg| {
+                        let e = ExpressionError::new(msg);
+                        if let Some(src) = &self.expr_source {
+                            e.with_node(src, node)
+                        } else {
+                            e
+                        }
+                    })
                 } else {
                     Ok(val)
                 }
@@ -217,8 +235,8 @@ impl<'a> Evaluator<'a> {
         match node {
             ast::Expr::NumberLiteral(n) => self.eval_number(n),
             ast::Expr::StringLiteral(s) => self.eval_string(s),
-            ast::Expr::BooleanLiteral(b) => { self.track(ExprValue::Bool(b.value)) }
-            ast::Expr::NoneLiteral(_) => { self.track(ExprValue::Null) }
+            ast::Expr::BooleanLiteral(b) => self.track(ExprValue::Bool(b.value)),
+            ast::Expr::NoneLiteral(_) => self.track(ExprValue::Null),
             ast::Expr::Name(n) => self.eval_name(n),
             ast::Expr::Attribute(a) => self.eval_attribute(a),
             ast::Expr::BinOp(b) => self.eval_binop(b),
@@ -232,19 +250,25 @@ impl<'a> Evaluator<'a> {
             ast::Expr::ListComp(lc) => {
                 // Validate restrictions
                 if lc.generators.len() != 1 {
-                    return Err(ExpressionError::unsupported("Multiple 'for' clauses in list comprehensions are not supported"));
+                    return Err(ExpressionError::unsupported(
+                        "Multiple 'for' clauses in list comprehensions are not supported",
+                    ));
                 }
                 let gen = &lc.generators[0];
                 if gen.ifs.len() > 1 {
                     return Err(ExpressionError::unsupported("Multiple 'if' clauses in a list comprehension are not supported; combine with 'and'"));
                 }
                 if !matches!(&gen.target, ast::Expr::Name(_)) {
-                    return Err(ExpressionError::unsupported("Tuple unpacking in list comprehension is not supported"));
+                    return Err(ExpressionError::unsupported(
+                        "Tuple unpacking in list comprehension is not supported",
+                    ));
                 }
                 // Reject loop variables that don't start with lowercase or underscore
                 if let ast::Expr::Name(n) = &gen.target {
                     let var_name = n.id.as_str();
-                    if !var_name.is_empty() && !var_name.starts_with(|c: char| c.is_lowercase() || c == '_') {
+                    if !var_name.is_empty()
+                        && !var_name.starts_with(|c: char| c.is_lowercase() || c == '_')
+                    {
                         return Err(ExpressionError::new(format!(
                             "Loop variable '{var_name}' must start with a lowercase letter or underscore"
                         )));
@@ -257,8 +281,6 @@ impl<'a> Evaluator<'a> {
                     let inner = unwrap_unresolved(&iterable.expr_type());
                     let elem_type = if let Some(et) = inner.list_element_type() {
                         et.clone()
-                    } else if inner.code == crate::types::TypeCode::RangeExpr {
-                        ExprType::INT
                     } else {
                         ExprType::INT
                     };
@@ -268,7 +290,8 @@ impl<'a> Evaluator<'a> {
                         _ => unreachable!(),
                     };
                     let mut tmp = crate::symbol_table::SymbolTable::new();
-                    tmp.set(&var_name, ExprValue::unresolved(elem_type.clone())).map_err(|e| ExpressionError::new(e.to_string()))?;
+                    tmp.set(&var_name, ExprValue::unresolved(elem_type.clone()))
+                        .map_err(|e| ExpressionError::new(e.to_string()))?;
                     let combined: Vec<&crate::symbol_table::SymbolTable> = {
                         let mut v: Vec<&crate::symbol_table::SymbolTable> = self.symtabs.to_vec();
                         v.push(&tmp);
@@ -286,7 +309,8 @@ impl<'a> Evaluator<'a> {
                         keyword_renames: self.keyword_renames,
                         library: self.library,
                         path_mapping_rules: self.path_mapping_rules,
-                        target_type: None, regex_cache: std::collections::HashMap::new(),
+                        target_type: None,
+                        regex_cache: std::collections::HashMap::new(),
                     };
                     let body_val = child.evaluate(&lc.elt)?;
                     self.current_memory = child.current_memory;
@@ -300,7 +324,10 @@ impl<'a> Evaluator<'a> {
                 } else if let ExprValue::RangeExpr(r) = &iterable {
                     r.iter().map(ExprValue::Int).collect()
                 } else {
-                    return Err(ExpressionError::type_error(format!("Cannot iterate over {}", iterable.expr_type())));
+                    return Err(ExpressionError::type_error(format!(
+                        "Cannot iterate over {}",
+                        iterable.expr_type()
+                    )));
                 };
                 // Release the iterable — we've extracted the items
                 self.release(&iterable);
@@ -315,7 +342,8 @@ impl<'a> Evaluator<'a> {
                 for item in &items {
                     self.count_op()?;
                     let mut tmp = crate::symbol_table::SymbolTable::new();
-                    tmp.set(&var_name, item.clone()).map_err(|e| ExpressionError::new(e.to_string()))?;
+                    tmp.set(&var_name, item.clone())
+                        .map_err(|e| ExpressionError::new(e.to_string()))?;
                     let mut combined = base_symtabs.clone();
                     combined.push(&tmp);
                     let mut child = Evaluator {
@@ -330,13 +358,16 @@ impl<'a> Evaluator<'a> {
                         keyword_renames: self.keyword_renames,
                         library: self.library,
                         path_mapping_rules: self.path_mapping_rules,
-                        target_type: None, regex_cache: std::collections::HashMap::new(),
+                        target_type: None,
+                        regex_cache: std::collections::HashMap::new(),
                     };
                     // Check filter
                     let mut include = true;
                     if let Some(if_clause) = gen.ifs.first() {
                         let cond = child.evaluate(if_clause)?;
-                        if let ExprValue::Bool(b) = cond { include = b; }
+                        if let ExprValue::Bool(b) = cond {
+                            include = b;
+                        }
                     }
                     if include {
                         let val = child.evaluate(&lc.elt)?;
@@ -355,12 +386,16 @@ impl<'a> Evaluator<'a> {
                     if let Some(inner) = t.list_element_type() {
                         if inner.list_element_type().is_some() {
                             return Err(ExpressionError::new(
-                                "Lists may be nested at most 2 levels deep"
+                                "Lists may be nested at most 2 levels deep",
                             ));
                         }
                     }
                 }
-                let elem_type = if result.is_empty() { ExprType::INT } else { result[0].expr_type() };
+                let elem_type = if result.is_empty() {
+                    ExprType::INT
+                } else {
+                    result[0].expr_type()
+                };
                 self.track(ExprValue::make_list(result, elem_type)?)
             }
             ast::Expr::Slice(s) => {
@@ -373,19 +408,45 @@ impl<'a> Evaluator<'a> {
                 }
                 self.track(ExprValue::unresolved(ExprType::INT))
             }
-            ast::Expr::Starred(_) => Err(ExpressionError::unsupported("Star unpacking is not supported")),
-            ast::Expr::Lambda(_) => Err(ExpressionError::unsupported("Lambda expressions are not supported")),
-            ast::Expr::Dict(_) => Err(ExpressionError::unsupported("Dict literals are not supported")),
-            ast::Expr::Set(_) => Err(ExpressionError::unsupported("Set literals are not supported")),
-            ast::Expr::DictComp(_) => Err(ExpressionError::unsupported("Dict comprehensions are not supported")),
-            ast::Expr::SetComp(_) => Err(ExpressionError::unsupported("Set comprehensions are not supported")),
-            ast::Expr::Generator(_) => Err(ExpressionError::unsupported("Generator expressions are not supported")),
-            ast::Expr::Await(_) => Err(ExpressionError::unsupported("Await expressions are not supported")),
-            ast::Expr::FString(_) => Err(ExpressionError::unsupported("f-strings are not supported; use string concatenation")),
-            ast::Expr::BytesLiteral(_) => Err(ExpressionError::unsupported("Byte strings are not supported")),
-            ast::Expr::EllipsisLiteral(_) => Err(ExpressionError::unsupported("Ellipsis is not supported")),
-            ast::Expr::Tuple(_) => Err(ExpressionError::unsupported("Tuple literals are not supported")),
-            ast::Expr::Named(_) => Err(ExpressionError::unsupported("Walrus operator (:=) is not supported")),
+            ast::Expr::Starred(_) => Err(ExpressionError::unsupported(
+                "Star unpacking is not supported",
+            )),
+            ast::Expr::Lambda(_) => Err(ExpressionError::unsupported(
+                "Lambda expressions are not supported",
+            )),
+            ast::Expr::Dict(_) => Err(ExpressionError::unsupported(
+                "Dict literals are not supported",
+            )),
+            ast::Expr::Set(_) => Err(ExpressionError::unsupported(
+                "Set literals are not supported",
+            )),
+            ast::Expr::DictComp(_) => Err(ExpressionError::unsupported(
+                "Dict comprehensions are not supported",
+            )),
+            ast::Expr::SetComp(_) => Err(ExpressionError::unsupported(
+                "Set comprehensions are not supported",
+            )),
+            ast::Expr::Generator(_) => Err(ExpressionError::unsupported(
+                "Generator expressions are not supported",
+            )),
+            ast::Expr::Await(_) => Err(ExpressionError::unsupported(
+                "Await expressions are not supported",
+            )),
+            ast::Expr::FString(_) => Err(ExpressionError::unsupported(
+                "f-strings are not supported; use string concatenation",
+            )),
+            ast::Expr::BytesLiteral(_) => Err(ExpressionError::unsupported(
+                "Byte strings are not supported",
+            )),
+            ast::Expr::EllipsisLiteral(_) => {
+                Err(ExpressionError::unsupported("Ellipsis is not supported"))
+            }
+            ast::Expr::Tuple(_) => Err(ExpressionError::unsupported(
+                "Tuple literals are not supported",
+            )),
+            ast::Expr::Named(_) => Err(ExpressionError::unsupported(
+                "Walrus operator (:=) is not supported",
+            )),
             _ => Err(ExpressionError::unsupported("Unsupported expression type")),
         }
     }
@@ -393,8 +454,12 @@ impl<'a> Evaluator<'a> {
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count += 1;
         if self.operation_count > self.operation_limit {
-            Err(ExpressionError::from_kind(ExpressionErrorKind::OperationLimitExceeded))
-        } else { Ok(()) }
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::OperationLimitExceeded,
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     /// Collect all available symbol names from all symbol tables.
@@ -411,17 +476,29 @@ impl<'a> Evaluator<'a> {
     fn track(&mut self, value: ExprValue) -> Result<ExprValue, ExpressionError> {
         // Check for infinity/NaN in float results
         if let ExprValue::Float(f) = &value {
-            if f.0.is_infinite() { return Err(ExpressionError::float_error("Float operation produced infinity")); }
-            if f.0.is_nan() { return Err(ExpressionError::float_error("Float operation produced NaN")); }
+            if f.0.is_infinite() {
+                return Err(ExpressionError::float_error(
+                    "Float operation produced infinity",
+                ));
+            }
+            if f.0.is_nan() {
+                return Err(ExpressionError::float_error("Float operation produced NaN"));
+            }
         }
         self.current_memory += value.memory_size();
-        if self.current_memory > self.peak_memory { self.peak_memory = self.current_memory; }
+        if self.current_memory > self.peak_memory {
+            self.peak_memory = self.current_memory;
+        }
         if self.current_memory > self.memory_limit {
-            Err(ExpressionError::from_kind(ExpressionErrorKind::MemoryLimitExceeded {
-                used: self.current_memory,
-                limit: self.memory_limit,
-            }))
-        } else { Ok(value) }
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::MemoryLimitExceeded {
+                    used: self.current_memory,
+                    limit: self.memory_limit,
+                },
+            ))
+        } else {
+            Ok(value)
+        }
     }
 
     fn release(&mut self, value: &ExprValue) {
@@ -429,14 +506,21 @@ impl<'a> Evaluator<'a> {
         self.current_memory = self.current_memory.saturating_sub(size);
     }
 
-    fn dispatch_with_node(&mut self, name: &str, args: Vec<ExprValue>, node: Option<&ast::Expr>) -> Result<ExprValue, ExpressionError> {
+    fn dispatch_with_node(
+        &mut self,
+        name: &str,
+        args: Vec<ExprValue>,
+        node: Option<&ast::Expr>,
+    ) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         let input_size: usize = args.iter().map(|a| a.memory_size()).sum();
         let lib = self.library;
         let result = lib.call(name, &args, self).map_err(|e| {
-            if let (Some(src), Some(n)) = (self.expr_source.as_deref(), node) {
+            if let (Some(src), Some(n)) = (self.expr_source, node) {
                 e.with_node(src, n)
-            } else { e }
+            } else {
+                e
+            }
         })?;
         self.current_memory = self.current_memory.saturating_sub(input_size);
         self.track(result)
@@ -445,14 +529,14 @@ impl<'a> Evaluator<'a> {
     fn eval_number(&mut self, n: &ast::ExprNumberLiteral) -> Result<ExprValue, ExpressionError> {
         match &n.value {
             ast::Number::Int(i) => {
-                let val: i64 = i.as_i64().ok_or_else(|| {
-                    ExpressionError::integer_overflow()
-                })?;
+                let val: i64 = i.as_i64().ok_or_else(ExpressionError::integer_overflow)?;
                 self.track(ExprValue::Int(val))
             }
             ast::Number::Float(f) => {
                 if f.is_infinite() {
-                    return Err(ExpressionError::float_error("Float operation produced infinity"));
+                    return Err(ExpressionError::float_error(
+                        "Float operation produced infinity",
+                    ));
                 }
                 if f.is_nan() {
                     return Err(ExpressionError::float_error("Float operation produced NaN"));
@@ -469,20 +553,31 @@ impl<'a> Evaluator<'a> {
                         } else {
                             Some(s.to_string())
                         }
-                    } else { None }
+                    } else {
+                        None
+                    }
                 });
-                self.track(ExprValue::Float(if let Some(s) = original { Float64::with_str(*f, s)? } else { Float64::new(*f)? }))
+                self.track(ExprValue::Float(if let Some(s) = original {
+                    Float64::with_str(*f, s)?
+                } else {
+                    Float64::new(*f)?
+                }))
             }
-            ast::Number::Complex { .. } => Err(ExpressionError::unsupported("Complex numbers are not supported")),
+            ast::Number::Complex { .. } => Err(ExpressionError::unsupported(
+                "Complex numbers are not supported",
+            )),
         }
     }
 
     fn eval_string(&mut self, s: &ast::ExprStringLiteral) -> Result<ExprValue, ExpressionError> {
         // Reject u'...' prefix (Python 2 compat, not supported in EXPR)
         for part in &s.value {
-            if matches!(part.flags.prefix(), ast::str_prefix::StringLiteralPrefix::Unicode) {
+            if matches!(
+                part.flags.prefix(),
+                ast::str_prefix::StringLiteralPrefix::Unicode
+            ) {
                 return Err(ExpressionError::new(
-                    "Unicode string prefix u'...' is not supported. Use '...' or \"...\" instead."
+                    "Unicode string prefix u'...' is not supported. Use '...' or \"...\" instead.",
                 ));
             }
         }
@@ -517,27 +612,32 @@ impl<'a> Evaluator<'a> {
         }
         for symtab in self.symtabs.iter().rev() {
             if let Some(val) = symtab.get_value(name) {
-                self.check_path_format(&val, name)?;
+                self.check_path_format(val, name)?;
                 return self.track(val.clone());
             }
         }
         let available = self.collect_symbol_names();
-        let suggestion = crate::edit_distance::suggest_closest(name, &available.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        Err(ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable {
-            name: name.to_string(),
-            suggestion,
-        }))
+        let suggestion = crate::edit_distance::suggest_closest(
+            name,
+            &available.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        );
+        Err(ExpressionError::from_kind(
+            ExpressionErrorKind::UndefinedVariable {
+                name: name.to_string(),
+                suggestion,
+            },
+        ))
     }
 
     fn eval_attribute(&mut self, a: &ast::ExprAttribute) -> Result<ExprValue, ExpressionError> {
         // Try full dotted path lookup, resolving keyword renames
         let dotted_path = build_dotted_name(&ast::Expr::Attribute(a.clone()));
         if let Some(ref path) = dotted_path {
-            let resolved = resolve_keyword_renames(path, &self.keyword_renames);
+            let resolved = resolve_keyword_renames(path, self.keyword_renames);
             for symtab in self.symtabs.iter().rev() {
                 if let Some(val) = symtab.get_value(&resolved) {
                     self.count_op()?;
-                    self.check_path_format(&val, &resolved)?;
+                    self.check_path_format(val, &resolved)?;
                     return self.track(val.clone());
                 }
             }
@@ -551,14 +651,18 @@ impl<'a> Evaluator<'a> {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
                 let suggestion = crate::edit_distance::suggest_closest(
-                    path, &available.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+                    path,
+                    &available.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 );
-                let src = self.expr_source.as_deref().unwrap_or("");
+                let src = self.expr_source.unwrap_or("");
                 let attr_node = ast::Expr::Attribute(a.clone());
-                return Err(ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable {
-                    name: path.clone(),
-                    suggestion,
-                }).with_node(src, &attr_node));
+                return Err(
+                    ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable {
+                        name: path.clone(),
+                        suggestion,
+                    })
+                    .with_node(src, &attr_node),
+                );
             }
             Err(e) => return Err(e),
         };
@@ -568,11 +672,15 @@ impl<'a> Evaluator<'a> {
         match self.dispatch_with_node(&prop_name, vec![value.clone()], Some(&attr_node)) {
             Ok(v) => Ok(v),
             Err(_) => {
-                let src = self.expr_source.as_deref().unwrap_or("");
+                let src = self.expr_source.unwrap_or("");
                 let val_type = value.expr_type();
-                let val_type_str = if val_type.code == crate::types::TypeCode::Unresolved && !val_type.params.is_empty() {
+                let val_type_str = if val_type.code == crate::types::TypeCode::Unresolved
+                    && !val_type.params.is_empty()
+                {
                     val_type.params[0].to_string()
-                } else { val_type.to_string() };
+                } else {
+                    val_type.to_string()
+                };
 
                 // Check if attr is a known method (not a property)
                 {
@@ -580,18 +688,23 @@ impl<'a> Evaluator<'a> {
                     if !lib.get_signatures(attr).is_empty() {
                         return Err(ExpressionError::new(format!(
                             "'{attr}' is a method, not a property. Did you mean {attr}()?"
-                        )).with_node(src, &attr_node));
+                        ))
+                        .with_node(src, &attr_node));
                     }
                 }
 
                 // Show available types for this property
                 {
                     let lib = self.library;
-                    let valid_types: Vec<String> = lib.get_signatures(&prop_name).iter()
+                    let valid_types: Vec<String> = lib
+                        .get_signatures(&prop_name)
+                        .iter()
                         .filter_map(|e| e.signature.sig_params().first())
                         .filter(|t: &&crate::types::ExprType| !t.is_symbolic())
                         .map(|t: &crate::types::ExprType| t.to_string())
-                        .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
                     if !valid_types.is_empty() {
                         return Err(ExpressionError::new(format!(
                             "'{attr}' property is not available for {val_type_str}. Available for: {}",
@@ -602,7 +715,8 @@ impl<'a> Evaluator<'a> {
 
                 Err(ExpressionError::new(format!(
                     "Cannot access attribute '{attr}' on {val_type_str}"
-                )).with_node(src, &attr_node))
+                ))
+                .with_node(src, &attr_node))
             }
         }
     }
@@ -617,24 +731,53 @@ impl<'a> Evaluator<'a> {
             ast::Operator::FloorDiv => "__floordiv__",
             ast::Operator::Mod => "__mod__",
             ast::Operator::Pow => "__pow__",
-            ast::Operator::BitAnd => return Err(ExpressionError::unsupported("Bitwise AND (&) is not supported")),
-            ast::Operator::BitOr => return Err(ExpressionError::unsupported("Bitwise OR (|) is not supported")),
-            ast::Operator::BitXor => return Err(ExpressionError::unsupported("Bitwise XOR (^) is not supported")),
-            ast::Operator::LShift => return Err(ExpressionError::unsupported("Left shift (<<) is not supported")),
-            ast::Operator::RShift => return Err(ExpressionError::unsupported("Right shift (>>) is not supported")),
-            ast::Operator::MatMult => return Err(ExpressionError::unsupported("Matrix multiply (@) is not supported")),
+            ast::Operator::BitAnd => {
+                return Err(ExpressionError::unsupported(
+                    "Bitwise AND (&) is not supported",
+                ))
+            }
+            ast::Operator::BitOr => {
+                return Err(ExpressionError::unsupported(
+                    "Bitwise OR (|) is not supported",
+                ))
+            }
+            ast::Operator::BitXor => {
+                return Err(ExpressionError::unsupported(
+                    "Bitwise XOR (^) is not supported",
+                ))
+            }
+            ast::Operator::LShift => {
+                return Err(ExpressionError::unsupported(
+                    "Left shift (<<) is not supported",
+                ))
+            }
+            ast::Operator::RShift => {
+                return Err(ExpressionError::unsupported(
+                    "Right shift (>>) is not supported",
+                ))
+            }
+            ast::Operator::MatMult => {
+                return Err(ExpressionError::unsupported(
+                    "Matrix multiply (@) is not supported",
+                ))
+            }
         };
 
         let left = self.evaluate(&b.left)?;
         let right = self.evaluate(&b.right)?;
-        self.dispatch_with_node(op_name, vec![left, right], Some(&ast::Expr::BinOp(b.clone())))
+        self.dispatch_with_node(
+            op_name,
+            vec![left, right],
+            Some(&ast::Expr::BinOp(b.clone())),
+        )
     }
 
     fn eval_unaryop(&mut self, u: &ast::ExprUnaryOp) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        match u.op {
-            ast::UnaryOp::Invert => return Err(ExpressionError::unsupported("Bitwise NOT (~) is not supported")),
-            _ => {}
+        if u.op == ast::UnaryOp::Invert {
+            return Err(ExpressionError::unsupported(
+                "Bitwise NOT (~) is not supported",
+            ));
         }
         // Fold -<int literal> to handle INT64_MIN which can't be represented
         // as a positive literal followed by negation (matching Python trick)
@@ -643,9 +786,10 @@ impl<'a> Evaluator<'a> {
                 if let ast::Number::Int(i) = &n.value {
                     // Try positive first, then negate
                     if let Some(pos) = i.as_i64() {
-                        return self.track(ExprValue::Int(pos.checked_neg().ok_or_else(|| {
-                            ExpressionError::integer_overflow()
-                        })?));
+                        return self.track(ExprValue::Int(
+                            pos.checked_neg()
+                                .ok_or_else(ExpressionError::integer_overflow)?,
+                        ));
                     }
                     // Handle i64::MAX + 1 = 9223372036854775808 → -i64::MIN
                     if let Some(pos) = i.as_u64() {
@@ -669,7 +813,10 @@ impl<'a> Evaluator<'a> {
 
     fn eval_boolop(&mut self, b: &ast::ExprBoolOp) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        let mut last = ExprValue::Bool(match b.op { ast::BoolOp::And => true, ast::BoolOp::Or => false });
+        let mut last = ExprValue::Bool(match b.op {
+            ast::BoolOp::And => true,
+            ast::BoolOp::Or => false,
+        });
         let mut seen_unresolved = false;
         for node in &b.values {
             if seen_unresolved {
@@ -677,16 +824,18 @@ impl<'a> Evaluator<'a> {
                 // (the unresolved value might short-circuit at runtime).
                 // But if a subsequent operand determines the result, return it.
                 match self.evaluate(node) {
-                    Ok(val) => {
-                        match b.op {
-                            ast::BoolOp::And => {
-                                if matches!(&val, ExprValue::Null | ExprValue::Bool(false)) { return Ok(val); }
-                            }
-                            ast::BoolOp::Or => {
-                                if !matches!(&val, ExprValue::Null | ExprValue::Bool(false)) { return Ok(val); }
+                    Ok(val) => match b.op {
+                        ast::BoolOp::And => {
+                            if matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
+                                return Ok(val);
                             }
                         }
-                    }
+                        ast::BoolOp::Or => {
+                            if !matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
+                                return Ok(val);
+                            }
+                        }
+                    },
                     Err(_) => { /* suppressed — unresolved might short-circuit */ }
                 }
                 continue;
@@ -699,14 +848,20 @@ impl<'a> Evaluator<'a> {
             match b.op {
                 // EXPR semantics: and/or only short-circuit on null and bool false
                 ast::BoolOp::And => {
-                    if matches!(&last, ExprValue::Null | ExprValue::Bool(false)) { return Ok(last); }
+                    if matches!(&last, ExprValue::Null | ExprValue::Bool(false)) {
+                        return Ok(last);
+                    }
                 }
                 ast::BoolOp::Or => {
-                    if !matches!(&last, ExprValue::Null | ExprValue::Bool(false)) { return Ok(last); }
+                    if !matches!(&last, ExprValue::Null | ExprValue::Bool(false)) {
+                        return Ok(last);
+                    }
                 }
             }
         }
-        if seen_unresolved { return self.track(ExprValue::unresolved(ExprType::BOOL)); }
+        if seen_unresolved {
+            return self.track(ExprValue::unresolved(ExprType::BOOL));
+        }
         Ok(last)
     }
 
@@ -715,8 +870,16 @@ impl<'a> Evaluator<'a> {
         // Reject is/is not
         for op in &c.ops {
             match op {
-                ast::CmpOp::Is => return Err(ExpressionError::unsupported("'is' operator is not supported; use '=='")),
-                ast::CmpOp::IsNot => return Err(ExpressionError::unsupported("'is not' operator is not supported; use '!='")),
+                ast::CmpOp::Is => {
+                    return Err(ExpressionError::unsupported(
+                        "'is' operator is not supported; use '=='",
+                    ))
+                }
+                ast::CmpOp::IsNot => {
+                    return Err(ExpressionError::unsupported(
+                        "'is not' operator is not supported; use '!='",
+                    ))
+                }
                 _ => {}
             }
         }
@@ -738,8 +901,16 @@ impl<'a> Evaluator<'a> {
                 // For 'in'/'not in', container is first arg (right), item is second (left)
                 ast::CmpOp::In => ("__contains__", vec![right.clone(), left.clone()]),
                 ast::CmpOp::NotIn => ("__not_contains__", vec![right.clone(), left.clone()]),
-                ast::CmpOp::Is => return Err(ExpressionError::unsupported("'is' operator is not supported; use '=='")),
-                ast::CmpOp::IsNot => return Err(ExpressionError::unsupported("'is not' operator is not supported; use '!='")),
+                ast::CmpOp::Is => {
+                    return Err(ExpressionError::unsupported(
+                        "'is' operator is not supported; use '=='",
+                    ))
+                }
+                ast::CmpOp::IsNot => {
+                    return Err(ExpressionError::unsupported(
+                        "'is not' operator is not supported; use '!='",
+                    ))
+                }
             };
 
             // Build a synthetic node spanning left..right for error caret positioning
@@ -772,15 +943,17 @@ impl<'a> Evaluator<'a> {
             let is_bool_compatible = inner == ExprType::BOOL
                 || inner.code == crate::types::TypeCode::Unresolved
                 || inner.code == crate::types::TypeCode::Any
-                || (inner.code == crate::types::TypeCode::Union && inner.params.contains(&ExprType::BOOL));
+                || (inner.code == crate::types::TypeCode::Union
+                    && inner.params.contains(&ExprType::BOOL));
             if !is_bool_compatible {
-                let err = ExpressionError::new(format!(
-                    "Condition must be a boolean, got {}", inner
-                ));
+                let err =
+                    ExpressionError::new(format!("Condition must be a boolean, got {}", inner));
                 self.release(&test);
-                return Err(if let Some(src) = self.expr_source.as_deref() {
+                return Err(if let Some(src) = self.expr_source {
                     err.with_node(src, &i.test)
-                } else { err });
+                } else {
+                    err
+                });
             }
             self.release(&test);
             // Try both branches, catching errors (e.g. fail() in one branch)
@@ -798,7 +971,10 @@ impl<'a> Evaluator<'a> {
                             let caret_off = be.caret_offset().unwrap_or(0);
                             let prefix = " ".repeat(2 + col + caret_off);
                             let width = end.saturating_sub(col).saturating_sub(caret_off);
-                            msg.push_str(&format!("{prefix}^{}\n", "~".repeat(width.saturating_sub(1))));
+                            msg.push_str(&format!(
+                                "{prefix}^{}\n",
+                                "~".repeat(width.saturating_sub(1))
+                            ));
                         }
                     }
                     msg.push_str(&format!("  else-branch: {}\n", oe.message()));
@@ -808,11 +984,14 @@ impl<'a> Evaluator<'a> {
                             let caret_off = oe.caret_offset().unwrap_or(0);
                             let prefix = " ".repeat(2 + col + caret_off);
                             let width = end.saturating_sub(col).saturating_sub(caret_off);
-                            msg.push_str(&format!("{prefix}^{}", "~".repeat(width.saturating_sub(1))));
+                            msg.push_str(&format!(
+                                "{prefix}^{}",
+                                "~".repeat(width.saturating_sub(1))
+                            ));
                         }
                     }
                     let mut err = ExpressionError::new(msg);
-                    if let Some(src) = self.expr_source.as_deref() {
+                    if let Some(src) = self.expr_source {
                         use ruff_text_size::Ranged;
                         let start = i.range().start().to_usize();
                         let end = i.range().end().to_usize();
@@ -842,11 +1021,14 @@ impl<'a> Evaluator<'a> {
             // Condition must be bool
             if !matches!(&test, ExprValue::Bool(_)) {
                 let err = ExpressionError::new(format!(
-                    "Condition must be a boolean, got {}", test.expr_type()
+                    "Condition must be a boolean, got {}",
+                    test.expr_type()
                 ));
-                return Err(if let Some(src) = self.expr_source.as_deref() {
+                return Err(if let Some(src) = self.expr_source {
                     err.with_node(src, &i.test)
-                } else { err });
+                } else {
+                    err
+                });
             }
             if test.is_truthy() {
                 self.release(&test);
@@ -862,20 +1044,28 @@ impl<'a> Evaluator<'a> {
         self.count_op()?;
         // Reject keyword args and **kwargs
         if !c.arguments.keywords.is_empty() {
-            return Err(ExpressionError::unsupported("Keyword arguments are not supported"));
+            return Err(ExpressionError::unsupported(
+                "Keyword arguments are not supported",
+            ));
         }
         // Get function name and check receiver
         let mut receiver_value: Option<ExprValue> = None;
         let is_method_call;
         let func_name = match &*c.func {
-            ast::Expr::Name(n) => { is_method_call = false; Some(n.id.to_string()) }
+            ast::Expr::Name(n) => {
+                is_method_call = false;
+                Some(n.id.to_string())
+            }
             ast::Expr::Attribute(a) => {
                 let receiver = self.evaluate(&a.value)?;
                 receiver_value = Some(receiver);
                 is_method_call = true;
                 Some(a.attr.to_string())
             }
-            _ => { is_method_call = false; None }
+            _ => {
+                is_method_call = false;
+                None
+            }
         };
         // Evaluate arguments
         let mut args = Vec::new();
@@ -899,18 +1089,30 @@ impl<'a> Evaluator<'a> {
         // Dispatch through function library
         if let Some(name) = &func_name {
             if name.starts_with("__") && name.ends_with("__") {
-                return Err(ExpressionError::new(format!("Cannot call '{}' directly", name)));
+                return Err(ExpressionError::new(format!(
+                    "Cannot call '{}' directly",
+                    name
+                )));
             }
             {
                 let lib = self.library;
-                let result = if is_method_call { lib.call_method(name, &args, self) } else { lib.call(name, &args, self) };
+                let result = if is_method_call {
+                    lib.call_method(name, &args, self)
+                } else {
+                    lib.call(name, &args, self)
+                };
                 let result = result.map_err(|e| {
-                    let src = self.expr_source.as_deref().unwrap_or("");
+                    let src = self.expr_source.unwrap_or("");
                     let call_node = ast::Expr::Call(c.clone());
-                    if is_method_call && !lib.get_signatures(&format!("__property_{name}__")).is_empty() {
+                    if is_method_call
+                        && !lib
+                            .get_signatures(&format!("__property_{name}__"))
+                            .is_empty()
+                    {
                         return ExpressionError::new(format!(
                             "'{name}' is a property, not a method. Use .{name} instead of .{name}()"
-                        )).with_node(src, &call_node);
+                        ))
+                        .with_node(src, &call_node);
                     }
                     e.with_node(src, &call_node)
                 })?;
@@ -956,7 +1158,7 @@ impl<'a> Evaluator<'a> {
             if let Some(inner) = t.list_element_type() {
                 if inner.list_element_type().is_some() {
                     return Err(ExpressionError::new(
-                        "Lists may be nested at most 2 levels deep"
+                        "Lists may be nested at most 2 levels deep",
                     ));
                 }
             }
@@ -968,11 +1170,18 @@ impl<'a> Evaluator<'a> {
                 for (_i, e) in elements.iter().enumerate().skip(1) {
                     let t = unwrap_unresolved(&e.expr_type());
                     // Allow int/float and path/string mixing
-                    if (first_type == ExprType::INT && t == ExprType::FLOAT) ||
-                       (first_type == ExprType::FLOAT && t == ExprType::INT) ||
-                       (first_type == ExprType::PATH && t == ExprType::STRING) ||
-                       (first_type == ExprType::STRING && t == ExprType::PATH) { continue; }
-                    if t.code == crate::types::TypeCode::Unresolved || first_type.code == crate::types::TypeCode::Unresolved { continue; }
+                    if (first_type == ExprType::INT && t == ExprType::FLOAT)
+                        || (first_type == ExprType::FLOAT && t == ExprType::INT)
+                        || (first_type == ExprType::PATH && t == ExprType::STRING)
+                        || (first_type == ExprType::STRING && t == ExprType::PATH)
+                    {
+                        continue;
+                    }
+                    if t.code == crate::types::TypeCode::Unresolved
+                        || first_type.code == crate::types::TypeCode::Unresolved
+                    {
+                        continue;
+                    }
                     if t != first_type {
                         return Err(ExpressionError::new(format!(
                             "List literal contains incompatible types: {first_type}, {t}"
@@ -987,11 +1196,20 @@ impl<'a> Evaluator<'a> {
                 let mut result = unwrap_unresolved(&elements[0].expr_type());
                 for e in elements.iter().skip(1) {
                     let t = unwrap_unresolved(&e.expr_type());
-                    if t.code == crate::types::TypeCode::Unresolved { continue; }
-                    if result.code == crate::types::TypeCode::Unresolved { result = t; continue; }
-                    if (result == ExprType::INT && t == ExprType::FLOAT) || (result == ExprType::FLOAT && t == ExprType::INT) {
+                    if t.code == crate::types::TypeCode::Unresolved {
+                        continue;
+                    }
+                    if result.code == crate::types::TypeCode::Unresolved {
+                        result = t;
+                        continue;
+                    }
+                    if (result == ExprType::INT && t == ExprType::FLOAT)
+                        || (result == ExprType::FLOAT && t == ExprType::INT)
+                    {
                         result = ExprType::FLOAT;
-                    } else if (result == ExprType::PATH && t == ExprType::STRING) || (result == ExprType::STRING && t == ExprType::PATH) {
+                    } else if (result == ExprType::PATH && t == ExprType::STRING)
+                        || (result == ExprType::STRING && t == ExprType::PATH)
+                    {
                         result = ExprType::STRING;
                     }
                 }
@@ -1001,9 +1219,12 @@ impl<'a> Evaluator<'a> {
         }
         // If we have a list element target, coerce each element and skip homogeneity check
         if let Some(ref elem_t) = list_elem_target {
-            let coerced: Result<Vec<ExprValue>, _> = elements.into_iter()
-                .map(|e| e.coerce(elem_t, self.path_format)
-                    .map_err(|msg| ExpressionError::new(msg)))
+            let coerced: Result<Vec<ExprValue>, _> = elements
+                .into_iter()
+                .map(|e| {
+                    e.coerce(elem_t, self.path_format)
+                        .map_err(ExpressionError::new)
+                })
                 .collect();
             return self.track(ExprValue::make_list(coerced?, elem_t.clone())?);
         }
@@ -1012,21 +1233,26 @@ impl<'a> Evaluator<'a> {
             let mut seen_types: Vec<ExprType> = Vec::new();
             for e in elements.iter() {
                 let t = e.expr_type();
-                if !seen_types.iter().any(|s| *s == t) { seen_types.push(t); }
+                if !seen_types.contains(&t) {
+                    seen_types.push(t);
+                }
             }
             // Check compatibility: allow int/float mixing and path/string mixing
-            let dominated: Vec<&ExprType> = seen_types.iter().filter(|t| {
-                // nulltype is compatible with anything
-                t.code == crate::types::TypeCode::Null ||
+            let dominated: Vec<&ExprType> = seen_types
+                .iter()
+                .filter(|t| {
+                    // nulltype is compatible with anything
+                    t.code == crate::types::TypeCode::Null ||
                 // int is compatible if float is also present (promotion)
-                (**t == ExprType::INT && seen_types.iter().any(|s| *s == ExprType::FLOAT)) ||
+                (**t == ExprType::INT && seen_types.contains(&ExprType::FLOAT)) ||
                 // float is compatible if int is also present (promotion)
-                (**t == ExprType::FLOAT && seen_types.iter().any(|s| *s == ExprType::INT)) ||
+                (**t == ExprType::FLOAT && seen_types.contains(&ExprType::INT)) ||
                 // path is compatible if string is also present
-                (**t == ExprType::PATH && seen_types.iter().any(|s| *s == ExprType::STRING)) ||
+                (**t == ExprType::PATH && seen_types.contains(&ExprType::STRING)) ||
                 // string is compatible if path is also present
-                (**t == ExprType::STRING && seen_types.iter().any(|s| *s == ExprType::PATH))
-            }).collect();
+                (**t == ExprType::STRING && seen_types.contains(&ExprType::PATH))
+                })
+                .collect();
             // If all types are in compatible pairs, it's fine; otherwise error
             let compatible = dominated.len() == seen_types.len() ||
                 seen_types.len() == 1 ||
@@ -1035,16 +1261,23 @@ impl<'a> Evaluator<'a> {
             if !compatible {
                 let type_strs: Vec<String> = seen_types.iter().map(|t| t.to_string()).collect();
                 let msg = if type_strs.len() == 2 {
-                    format!("List literal contains incompatible types: {} and {}", type_strs[0], type_strs[1])
+                    format!(
+                        "List literal contains incompatible types: {} and {}",
+                        type_strs[0], type_strs[1]
+                    )
                 } else {
                     let last = type_strs.last().unwrap();
-                    let rest = type_strs[..type_strs.len()-1].join(", ");
+                    let rest = type_strs[..type_strs.len() - 1].join(", ");
                     format!("List literal contains incompatible types: {rest}, and {last}")
                 };
                 return Err(ExpressionError::new(msg));
             }
         }
-        let elem_type = if elements.is_empty() { ExprType::NULLTYPE } else { elements[0].expr_type() };
+        let elem_type = if elements.is_empty() {
+            ExprType::NULLTYPE
+        } else {
+            elements[0].expr_type()
+        };
         self.track(ExprValue::make_list(elements, elem_type)?)
     }
 
@@ -1054,7 +1287,9 @@ impl<'a> Evaluator<'a> {
 
         // Reject subscript on path type
         if matches!(&value, ExprValue::Path { .. }) {
-            return Err(ExpressionError::new(format!("Cannot subscript type path")));
+            return Err(ExpressionError::new(
+                "Cannot subscript type path".to_string(),
+            ));
         }
 
         // Handle slice syntax: value[start:stop:step]
@@ -1085,9 +1320,8 @@ impl<'a> Evaluator<'a> {
             }
 
             // If any slice bound is unresolved, propagate unresolved
-            let any_bound_unresolved = start.is_unresolved()
-                || stop.is_unresolved()
-                || step.is_unresolved();
+            let any_bound_unresolved =
+                start.is_unresolved() || stop.is_unresolved() || step.is_unresolved();
             if any_bound_unresolved {
                 if value.is_list() {
                     let elem_type = value.list_elem_type().unwrap();
@@ -1099,7 +1333,11 @@ impl<'a> Evaluator<'a> {
 
             // Dispatch 4-arg __getitem__ through the library
             let node = ast::Expr::Subscript(s.clone());
-            return self.dispatch_with_node("__getitem__", vec![value, start, stop, step], Some(&node));
+            return self.dispatch_with_node(
+                "__getitem__",
+                vec![value, start, stop, step],
+                Some(&node),
+            );
         }
 
         let slice = self.evaluate(&s.slice)?;
@@ -1107,9 +1345,12 @@ impl<'a> Evaluator<'a> {
         // Check index type for unresolved values
         if slice.is_unresolved() {
             let inner = unwrap_unresolved(&slice.expr_type());
-            if inner != ExprType::INT && inner.code != crate::types::TypeCode::Unresolved && inner.code != crate::types::TypeCode::Any {
+            if inner != ExprType::INT
+                && inner.code != crate::types::TypeCode::Unresolved
+                && inner.code != crate::types::TypeCode::Any
+            {
                 let mut err = ExpressionError::new("Index must be an integer");
-                if let Some(src) = self.expr_source.as_deref() {
+                if let Some(src) = self.expr_source {
                     use ruff_text_size::Ranged;
                     let start = s.value.range().start().to_usize();
                     let end = s.range().end().to_usize();
@@ -1121,41 +1362,60 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
-        self.dispatch_with_node("__getitem__", vec![value, slice], Some(&ast::Expr::Subscript(s.clone())))
+        self.dispatch_with_node(
+            "__getitem__",
+            vec![value, slice],
+            Some(&ast::Expr::Subscript(s.clone())),
+        )
     }
 }
 
 /// Try to build a dotted name from an attribute chain.
 /// Applies keyword renames to restore original names.
 impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
-    fn path_format(&self) -> PathFormat { self.path_format }
+    fn path_format(&self) -> PathFormat {
+        self.path_format
+    }
     fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule] {
-        &self.path_mapping_rules
+        self.path_mapping_rules
     }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count += 1;
         if self.operation_count > self.operation_limit {
-            Err(ExpressionError::from_kind(ExpressionErrorKind::OperationLimitExceeded))
-        } else { Ok(()) }
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::OperationLimitExceeded,
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError> {
         self.operation_count += n;
         if self.operation_count > self.operation_limit {
-            Err(ExpressionError::from_kind(ExpressionErrorKind::OperationLimitExceeded))
-        } else { Ok(()) }
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::OperationLimitExceeded,
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError> {
-        let ops = (len + 255) / 256;
+        let ops = len.div_ceil(256);
         self.operation_count += ops;
         if self.operation_count > self.operation_limit {
-            Err(ExpressionError::from_kind(ExpressionErrorKind::OperationLimitExceeded))
-        } else { Ok(()) }
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::OperationLimitExceeded,
+            ))
+        } else {
+            Ok(())
+        }
     }
     fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
         if let Some(re) = self.regex_cache.get(pattern) {
             return Ok(re.clone());
         }
-        let re = regex::Regex::new(pattern).map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))?;
+        let re = regex::Regex::new(pattern)
+            .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))?;
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     }
@@ -1175,8 +1435,14 @@ fn build_dotted_name(expr: &ast::Expr) -> Option<String> {
     let mut current = expr;
     loop {
         match current {
-            ast::Expr::Name(n) => { parts.push(n.id.as_str()); break; }
-            ast::Expr::Attribute(a) => { parts.push(a.attr.as_str()); current = &a.value; }
+            ast::Expr::Name(n) => {
+                parts.push(n.id.as_str());
+                break;
+            }
+            ast::Expr::Attribute(a) => {
+                parts.push(a.attr.as_str());
+                current = &a.value;
+            }
             _ => return None,
         }
     }
@@ -1184,8 +1450,13 @@ fn build_dotted_name(expr: &ast::Expr) -> Option<String> {
     Some(parts.join("."))
 }
 
-fn resolve_keyword_renames(name: &str, renames: &std::collections::HashMap<String, String>) -> String {
-    if renames.is_empty() { return name.to_string(); }
+fn resolve_keyword_renames(
+    name: &str,
+    renames: &std::collections::HashMap<String, String>,
+) -> String {
+    if renames.is_empty() {
+        return name.to_string();
+    }
     let mut result = name.to_string();
     for (replacement, original) in renames {
         // Replace .replacement with .original in dotted paths
@@ -1199,6 +1470,4 @@ fn resolve_keyword_renames(name: &str, renames: &std::collections::HashMap<Strin
 use crate::types::ExprType;
 
 // Re-export for backward compatibility
-pub use crate::uri_path::{UriParts, parse as parse_uri_parts};
-
-
+pub use crate::uri_path::{parse as parse_uri_parts, UriParts};

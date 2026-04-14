@@ -32,8 +32,15 @@ pub struct EnvironmentScriptRunner {
 }
 
 impl EnvironmentScriptRunner {
-    pub fn new(session_id: &str, working_directory: PathBuf, files_directory: PathBuf, user: Option<Arc<dyn SessionUser>>) -> Self {
-        Self { base: ScriptRunnerBase::new(session_id, working_directory, files_directory, user) }
+    pub fn new(
+        session_id: &str,
+        working_directory: PathBuf,
+        files_directory: PathBuf,
+        user: Option<Arc<dyn SessionUser>>,
+    ) -> Self {
+        Self {
+            base: ScriptRunnerBase::new(session_id, working_directory, files_directory, user),
+        }
     }
 
     pub fn with_redactions(mut self, enabled: bool) -> Self {
@@ -51,7 +58,10 @@ impl EnvironmentScriptRunner {
         self
     }
 
-    pub fn with_cancel_request_rx(mut self, rx: tokio::sync::watch::Receiver<Option<Duration>>) -> Self {
+    pub fn with_cancel_request_rx(
+        mut self,
+        rx: tokio::sync::watch::Receiver<Option<Duration>>,
+    ) -> Self {
         self.base.cancel_request_rx = Some(rx);
         self
     }
@@ -81,8 +91,10 @@ impl EnvironmentScriptRunner {
             .script
             .as_ref()
             .and_then(|s| s.actions.on_enter.as_ref());
-        self.run_env_action(env, action, symtab, library, rules, env_vars, message_tx, None)
-            .await
+        self.run_env_action(
+            env, action, symtab, library, rules, env_vars, message_tx, None,
+        )
+        .await
     }
 
     /// Run the environment's onExit action.
@@ -95,12 +107,18 @@ impl EnvironmentScriptRunner {
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
     ) -> Result<SubprocessResult, SessionError> {
-        let action = env
-            .script
-            .as_ref()
-            .and_then(|s| s.actions.on_exit.as_ref());
-        self.run_env_action(env, action, symtab, library, rules, env_vars, message_tx, Some(ENV_EXIT_DEFAULT_TIMEOUT))
-            .await
+        let action = env.script.as_ref().and_then(|s| s.actions.on_exit.as_ref());
+        self.run_env_action(
+            env,
+            action,
+            symtab,
+            library,
+            rules,
+            env_vars,
+            message_tx,
+            Some(ENV_EXIT_DEFAULT_TIMEOUT),
+        )
+        .await
     }
 
     pub fn cancel(&self) {
@@ -141,26 +159,37 @@ impl EnvironmentScriptRunner {
         let final_symtab = match (let_bindings, embedded_files) {
             (Some(bindings), Some(files)) => {
                 let mut st = symtab.clone();
-                let mut ef = EmbeddedFiles::new(EmbeddedFilesScope::Env, self.base.files_directory.clone(), &self.base.session_id)
-                    .with_user(self.base.user.clone());
+                let mut ef = EmbeddedFiles::new(
+                    EmbeddedFilesScope::Env,
+                    self.base.files_directory.clone(),
+                    &self.base.session_id,
+                )
+                .with_user(self.base.user.clone());
                 ef.allocate_file_paths(files, &mut st)?;
-                let st = evaluate_let_bindings(bindings, &st, library, openjd_expr::PathFormat::host()).map_err(|e| SessionError::FormatString {
-                    context: "let bindings".into(),
-                    reason: e.to_string(),
-                })?;
+                let st =
+                    evaluate_let_bindings(bindings, &st, library, openjd_expr::PathFormat::host())
+                        .map_err(|e| SessionError::FormatString {
+                            context: "let bindings".into(),
+                            reason: e.to_string(),
+                        })?;
                 ef.write_file_contents(&st, library, rules)?;
                 st
             }
             (Some(bindings), None) => {
-                evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host()).map_err(|e| SessionError::FormatString {
-                    context: "let bindings".into(),
-                    reason: e.to_string(),
-                })?
+                evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host())
+                    .map_err(|e| SessionError::FormatString {
+                        context: "let bindings".into(),
+                        reason: e.to_string(),
+                    })?
             }
             (None, Some(files)) => {
                 let mut st = symtab.clone();
-                let mut ef = EmbeddedFiles::new(EmbeddedFilesScope::Env, self.base.files_directory.clone(), &self.base.session_id)
-                    .with_user(self.base.user.clone());
+                let mut ef = EmbeddedFiles::new(
+                    EmbeddedFilesScope::Env,
+                    self.base.files_directory.clone(),
+                    &self.base.session_id,
+                )
+                .with_user(self.base.user.clone());
                 ef.allocate_file_paths(files, &mut st)?;
                 ef.write_file_contents(&st, library, rules)?;
                 st
@@ -168,7 +197,17 @@ impl EnvironmentScriptRunner {
             (None, None) => symtab.clone(),
         };
 
-        self.base.run_action(action, &final_symtab, library, rules, env_vars, message_tx, default_timeout, Duration::from_secs(30))
+        self.base
+            .run_action(
+                action,
+                &final_symtab,
+                library,
+                rules,
+                env_vars,
+                message_tx,
+                default_timeout,
+                Duration::from_secs(30),
+            )
             .await
     }
 }

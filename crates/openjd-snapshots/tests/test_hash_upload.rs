@@ -6,9 +6,9 @@
 //! special entries (symlinks, deleted), validation, cache integration, and deduplication.
 
 use openjd_snapshots::{
-    hash_upload_abs_manifest, AbsManifest, AbsSnapshot, AbsSnapshotDiff,
-    AsyncDataCache, DirEntry, FileEntry, FileSystemDataCache, HashAlgorithm, HashCache,
-    HashUploadOptions, Manifest, DEFAULT_FILE_CHUNK_SIZE,
+    hash_upload_abs_manifest, AbsManifest, AbsSnapshot, AbsSnapshotDiff, AsyncDataCache, DirEntry,
+    FileEntry, FileSystemDataCache, HashAlgorithm, HashCache, HashUploadOptions, Manifest,
+    DEFAULT_FILE_CHUNK_SIZE,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -28,7 +28,11 @@ fn make_test_file(dir: &Path, name: &str, content: &[u8]) -> (String, u64, u64) 
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_micros() as u64;
-    (p.to_string_lossy().into_owned(), content.len() as u64, mtime)
+    (
+        p.to_string_lossy().into_owned(),
+        content.len() as u64,
+        mtime,
+    )
 }
 
 fn make_snapshot(files: Vec<FileEntry>) -> AbsSnapshot {
@@ -50,9 +54,12 @@ fn empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(result.manifest.files().len(), 0);
     assert_eq!(result.statistics.total_files, 0);
 }
@@ -65,17 +72,26 @@ fn single_file_hashed_and_stored() {
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let f = &result.manifest.files()[0];
     let hash = f.hash.as_ref().unwrap();
     assert!(!hash.is_empty());
     assert_eq!(hash.len(), 32); // xxh128 hex
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     assert!(rt.block_on(dc.object_exists(hash, "xxh128")).unwrap());
-    assert_eq!(rt.block_on(dc.get_object(hash, "xxh128")).unwrap(), b"Hello, World!");
+    assert_eq!(
+        rt.block_on(dc.get_object(hash, "xxh128")).unwrap(),
+        b"Hello, World!"
+    );
     assert_eq!(result.statistics.uploaded_files, 1);
     assert_eq!(result.statistics.uploaded_bytes, size);
 }
@@ -94,9 +110,12 @@ fn multiple_files() {
         FileEntry::file(&p2, s2, m2),
         FileEntry::file(&p3, s3, m3),
     ]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     for f in result.manifest.files() {
         assert!(f.hash.is_some());
@@ -109,14 +128,20 @@ fn multiple_files() {
 fn hash_matches_direct_hash() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
-    let (path, size, mtime) =
-        make_test_file(tmp.path(), "test.txt", b"Test content for hash verification");
+    let (path, size, mtime) = make_test_file(
+        tmp.path(),
+        "test.txt",
+        b"Test content for hash verification",
+    );
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let expected = openjd_snapshots::hash::hash_file(Path::new(&path)).unwrap();
     assert_eq!(result.manifest.files()[0].hash.as_ref().unwrap(), &expected);
@@ -130,9 +155,12 @@ fn preserves_metadata() {
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let f = &result.manifest.files()[0];
     assert_eq!(f.size, Some(size));
@@ -149,9 +177,12 @@ fn preserves_runnable_flag_true() {
 
     let mut entry = FileEntry::file(&path, size, mtime);
     entry.runnable = true;
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(make_snapshot(vec![entry])), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![entry])),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert!(result.manifest.files()[0].runnable);
     assert!(result.manifest.files()[0].hash.is_some());
@@ -165,9 +196,12 @@ fn preserves_runnable_flag_false() {
     let dc = new_data_cache(&cache_dir);
 
     let entry = FileEntry::file(&path, size, mtime);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(make_snapshot(vec![entry])), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![entry])),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert!(!result.manifest.files()[0].runnable);
     assert!(result.manifest.files()[0].hash.is_some());
@@ -183,9 +217,12 @@ fn returns_snapshot_for_snapshot_input() {
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
     assert!(matches!(result.manifest, AbsManifest::Snapshot(_)));
 }
 
@@ -199,7 +236,8 @@ fn returns_diff_for_diff_input() {
     let manifest = make_diff(vec![FileEntry::file(&path, size, mtime)])
         .with_parent_hash(Some("abc123".into()));
     let result =
-        hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default()).unwrap();
+        hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default())
+            .unwrap();
     assert!(matches!(result.manifest, AbsManifest::Diff(_)));
     assert_eq!(result.manifest.parent_manifest_hash(), Some("abc123"));
 }
@@ -217,13 +255,22 @@ fn symlinks_pass_through_unchanged() {
         FileEntry::file(&path, size, mtime),
         FileEntry::symlink("/tmp/link.txt", "/tmp/target.txt"),
     ]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     let files = result.manifest.files();
-    let regular: Vec<_> = files.iter().filter(|f| f.symlink_target.is_none()).collect();
-    let symlinks: Vec<_> = files.iter().filter(|f| f.symlink_target.is_some()).collect();
+    let regular: Vec<_> = files
+        .iter()
+        .filter(|f| f.symlink_target.is_none())
+        .collect();
+    let symlinks: Vec<_> = files
+        .iter()
+        .filter(|f| f.symlink_target.is_some())
+        .collect();
 
     assert_eq!(regular.len(), 1);
     assert_eq!(symlinks.len(), 1);
@@ -239,7 +286,8 @@ fn deleted_entries_pass_through() {
 
     let manifest = make_diff(vec![FileEntry::deleted("/some/deleted/file.txt")]);
     let result =
-        hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default()).unwrap();
+        hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default())
+            .unwrap();
 
     assert_eq!(result.manifest.files().len(), 1);
     assert!(result.manifest.files()[0].deleted);
@@ -256,9 +304,12 @@ fn directories_pass_through() {
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)])
         .with_dirs(vec![DirEntry::new("/tmp/somedir")]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(result.manifest.dirs().len(), 1);
     assert_eq!(result.statistics.uploaded_files, 1);
@@ -276,9 +327,12 @@ fn rejects_already_hashed_files() {
     let mut entry = FileEntry::file(&path, size, mtime);
     entry.hash = Some("existing_hash".into());
     let manifest = make_snapshot(vec![entry]);
-    let err =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap_err();
+    let err = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("already has hashes set"));
 }
 
@@ -292,9 +346,12 @@ fn rejects_already_chunk_hashed_files() {
     let mut entry = FileEntry::file(&path, size, mtime);
     entry.chunk_hashes = Some(vec!["h1".into()]);
     let manifest = make_snapshot(vec![entry]);
-    let err =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap_err();
+    let err = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("already has hashes set"));
 }
 
@@ -312,12 +369,15 @@ fn duplicate_content_stored_once() {
         FileEntry::file(&p1, s1, m1),
         FileEntry::file(&p2, s2, m2),
     ]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
             max_workers: Some(1),
             ..Default::default()
-        })
-            .unwrap();
+        },
+    )
+    .unwrap();
 
     let files = result.manifest.files();
     assert_eq!(files[0].hash, files[1].hash);
@@ -334,13 +394,19 @@ fn second_upload_skips_existing() {
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let _ =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), Default::default())
-            .unwrap();
+    let _ = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest.clone()),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let r2 = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(r2.statistics.uploaded_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.hashed_files, 1); // still hashed, just not uploaded
@@ -391,19 +457,26 @@ fn hash_cache_enables_full_skip() {
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
 
     // First upload populates both caches
-    let _ =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), HashUploadOptions {
+    let _ = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest.clone()),
+        dc.clone(),
+        HashUploadOptions {
             hash_cache: Some(hc.clone()),
             ..Default::default()
-        })
-            .unwrap();
+        },
+    )
+    .unwrap();
 
     // Second upload: hash cache hit + data cache hit => full skip
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
+    let r2 = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
             hash_cache: Some(hc),
             ..Default::default()
-        }).unwrap();
+        },
+    )
+    .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.uploaded_files, 0);
@@ -419,11 +492,15 @@ fn hash_cache_miss_on_mtime_change() {
     let hc = Arc::new(HashCache::new(hc_dir.path()).unwrap());
 
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r1 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
+    let r1 = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
             hash_cache: Some(hc.clone()),
             ..Default::default()
-        }).unwrap();
+        },
+    )
+    .unwrap();
 
     // Modify file
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -438,16 +515,17 @@ fn hash_cache_miss_on_mtime_change() {
     let new_size = 16u64;
 
     let manifest2 = make_snapshot(vec![FileEntry::file(&path, new_size, new_mtime)]);
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), HashUploadOptions {
+    let r2 = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest2),
+        dc.clone(),
+        HashUploadOptions {
             hash_cache: Some(hc),
             ..Default::default()
-        }).unwrap();
+        },
+    )
+    .unwrap();
 
-    assert_ne!(
-        r1.manifest.files()[0].hash,
-        r2.manifest.files()[0].hash
-    );
+    assert_ne!(r1.manifest.files()[0].hash, r2.manifest.files()[0].hash);
     assert_eq!(r2.statistics.hashed_files, 1);
 }
 
@@ -465,8 +543,8 @@ fn force_rehash_bypasses_hash_cache() {
         hash_cache: Some(hc.clone()),
         ..Default::default()
     };
-    let _ =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), opts).unwrap();
+    let _ = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), opts)
+        .unwrap();
 
     // With force_rehash, should re-hash even though cache has entry
     let opts2 = HashUploadOptions {
@@ -474,8 +552,7 @@ fn force_rehash_bypasses_hash_cache() {
         force_rehash: true,
         ..Default::default()
     };
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), opts2).unwrap();
+    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), opts2).unwrap();
     assert_eq!(r2.statistics.hashed_files, 1);
 }
 
@@ -490,8 +567,8 @@ fn chunked_upload_produces_chunk_hashes() {
     let dc = new_data_cache(&cache_dir);
 
     let chunk_size = 16i64;
-    let manifest: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![FileEntry::file(&path, size, mtime)]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![FileEntry::file(&path, size, mtime)]);
 
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -507,7 +584,10 @@ fn chunked_upload_produces_chunk_hashes() {
     assert!(f.hash.is_none());
     let chunks = f.chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 4);
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     for h in chunks {
         assert!(rt.block_on(dc.object_exists(h, "xxh128")).unwrap());
         assert_eq!(rt.block_on(dc.get_object(h, "xxh128")).unwrap().len(), 16);
@@ -528,9 +608,12 @@ fn statistics_are_accurate() {
         FileEntry::file(&p1, s1, m1),
         FileEntry::file(&p2, s2, m2),
     ]);
-    let result =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), Default::default())
-            .unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
 
     assert_eq!(result.statistics.total_files, 2);
     assert_eq!(result.statistics.total_bytes, 6);
@@ -640,7 +723,12 @@ fn parallel_upload_produces_same_results() {
     )
     .unwrap();
 
-    for (a, b) in r_seq.manifest.files().iter().zip(r_par.manifest.files().iter()) {
+    for (a, b) in r_seq
+        .manifest
+        .files()
+        .iter()
+        .zip(r_par.manifest.files().iter())
+    {
         assert_eq!(a.hash, b.hash);
     }
 }
@@ -674,9 +762,11 @@ fn statistics_include_hash_counts() {
 fn upload_file_not_found_error() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
-    let manifest = make_snapshot(vec![
-        FileEntry::file("/nonexistent/path/file.txt", 100, 1000),
-    ]);
+    let manifest = make_snapshot(vec![FileEntry::file(
+        "/nonexistent/path/file.txt",
+        100,
+        1000,
+    )]);
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -743,10 +833,13 @@ fn concurrent_dedup_identical_files() {
             max_workers: Some(4),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     // All files should have the same hash
-    let hashes: std::collections::HashSet<_> = result.manifest.files()
+    let hashes: std::collections::HashSet<_> = result
+        .manifest
+        .files()
         .iter()
         .map(|f| f.hash.as_ref().unwrap().as_str())
         .collect();
@@ -785,7 +878,8 @@ fn concurrent_dedup_mixed_content() {
             max_workers: Some(4),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     // a, b, d should have same hash; c different
     let files = result.manifest.files();
@@ -822,12 +916,16 @@ fn concurrent_dedup_chunked_identical_chunks() {
             max_workers: Some(4),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 4);
     // All chunks identical
-    assert_eq!(std::collections::HashSet::<&String>::from_iter(chunks.iter()).len(), 1);
+    assert_eq!(
+        std::collections::HashSet::<&String>::from_iter(chunks.iter()).len(),
+        1
+    );
 
     // Only 1 chunk file in cache
     let cache_files: Vec<_> = std::fs::read_dir(cache_dir.path().join("data"))
@@ -863,7 +961,8 @@ fn concurrent_dedup_chunked_mixed_chunks() {
             max_workers: Some(4),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 4);
@@ -891,7 +990,12 @@ fn upload_progress_fields_populated() {
     let (p, s, m) = make_test_file(tmp.path(), "a.txt", b"hello world");
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
     assert!(result.statistics.total_time > 0.0);
     assert!(result.statistics.rate >= 0.0);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
@@ -902,7 +1006,12 @@ fn upload_progress_zero_for_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
     assert_eq!(result.statistics.total_files, 0);
     assert_eq!(result.statistics.progress, 0.0);
 }
@@ -914,23 +1023,37 @@ fn upload_progress_callback_receives_timing() {
     let dc = new_data_cache(&cache_dir);
     let mut files = Vec::new();
     for i in 0..5 {
-        let (p, s, m) = make_test_file(tmp.path(), &format!("f{i}.txt"), format!("content{i}").repeat(100).as_bytes());
+        let (p, s, m) = make_test_file(
+            tmp.path(),
+            &format!("f{i}.txt"),
+            format!("content{i}").repeat(100).as_bytes(),
+        );
         files.push(FileEntry::file(&p, s, m));
     }
     let manifest = make_snapshot(files);
     let times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let t = times.clone();
-    let _ = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
-        on_progress: Some(Box::new(move |stats| {
-            t.lock().unwrap().push(stats.total_time);
-            true
-        })),
-        ..Default::default()
-    }).unwrap();
+    let _ = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
+            on_progress: Some(Box::new(move |stats| {
+                t.lock().unwrap().push(stats.total_time);
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
     for i in 1..t.len() {
-        assert!(t[i] >= t[i-1], "total_time not monotonic: {} < {}", t[i], t[i-1]);
+        assert!(
+            t[i] >= t[i - 1],
+            "total_time not monotonic: {} < {}",
+            t[i],
+            t[i - 1]
+        );
     }
 }
 
@@ -941,7 +1064,12 @@ fn upload_progress_rate_positive() {
     let (p, s, m) = make_test_file(tmp.path(), "big.txt", &vec![0u8; 10000]);
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
     assert!(result.statistics.rate > 0.0);
 }
 
@@ -955,15 +1083,25 @@ fn upload_progress_with_cache_skip() {
     let cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
     // First upload
-    let _ = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), HashUploadOptions {
-        hash_cache: Some(cache.clone()),
-        ..Default::default()
-    }).unwrap();
+    let _ = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest.clone()),
+        dc.clone(),
+        HashUploadOptions {
+            hash_cache: Some(cache.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     // Second upload - full skip
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
-        hash_cache: Some(cache),
-        ..Default::default()
-    }).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
+            hash_cache: Some(cache),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(result.statistics.skipped_files, 1);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
@@ -976,9 +1114,19 @@ fn upload_progress_upload_skip_on_data_cache_hit() {
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
     // First upload
-    let _ = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), HashUploadOptions::default()).unwrap();
+    let _ = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest.clone()),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
     // Second upload - data already in cache, upload skipped but still hashed
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
     assert_eq!(result.statistics.uploaded_files, 0);
     assert_eq!(result.statistics.skipped_files, 1);
 }
@@ -1049,15 +1197,24 @@ fn force_rehash_false_uses_cache() {
     let _ = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // force_rehash defaults to false; second run should skip hashing via cache
     let r2 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc), force_rehash: false, ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc),
+            force_rehash: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
 }
@@ -1075,14 +1232,22 @@ fn statistics_count_skipped_bytes() {
     let _ = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let r2 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(r2.statistics.skipped_bytes, size);
     assert_eq!(r2.statistics.hashed_bytes, 0);
 }
@@ -1104,8 +1269,13 @@ fn chunked_file_with_some_duplicate_chunks() {
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(chunk_size), max_workers: Some(1), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            max_workers: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 3);
@@ -1138,8 +1308,12 @@ fn upload_progress_with_hash_cache_hits() {
     let _ = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Second run: progress callback should fire and report skipped file
     let saw_skip = Arc::new(AtomicUsize::new(0));
@@ -1150,12 +1324,15 @@ fn upload_progress_with_hash_cache_hits() {
         HashUploadOptions {
             hash_cache: Some(hc),
             on_progress: Some(Box::new(move |stats| {
-                if stats.skipped_files > 0 { ss.fetch_add(1, Ordering::Relaxed); }
+                if stats.skipped_files > 0 {
+                    ss.fetch_add(1, Ordering::Relaxed);
+                }
                 true
             })),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     // The final progress callback should have reported the skip
     assert!(saw_skip.load(Ordering::Relaxed) >= 1);
@@ -1169,7 +1346,11 @@ fn upload_progress_total_time_increases_monotonically() {
 
     let mut files = Vec::new();
     for i in 0..5 {
-        let (p, s, m) = make_test_file(tmp.path(), &format!("m{i}.txt"), format!("mono{i}").repeat(50).as_bytes());
+        let (p, s, m) = make_test_file(
+            tmp.path(),
+            &format!("m{i}.txt"),
+            format!("mono{i}").repeat(50).as_bytes(),
+        );
         files.push(FileEntry::file(&p, s, m));
     }
     let manifest = make_snapshot(files);
@@ -1187,12 +1368,18 @@ fn upload_progress_total_time_increases_monotonically() {
             max_workers: Some(1),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
     for i in 1..t.len() {
-        assert!(t[i] >= t[i - 1], "total_time not monotonic: {} < {}", t[i], t[i - 1]);
+        assert!(
+            t[i] >= t[i - 1],
+            "total_time not monotonic: {} < {}",
+            t[i],
+            t[i - 1]
+        );
     }
 }
 
@@ -1205,15 +1392,36 @@ fn upload_progress_message_uses_files_for_whole_file_mode() {
     let dc = new_data_cache(&cache_dir);
     let mut files = Vec::new();
     for i in 0..3 {
-        let (p, s, m) = make_test_file(tmp.path(), &format!("f{i}.txt"), format!("content{i}").as_bytes());
+        let (p, s, m) = make_test_file(
+            tmp.path(),
+            &format!("f{i}.txt"),
+            format!("content{i}").as_bytes(),
+        );
         files.push(FileEntry::file(&p, s, m));
     }
     let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, -1) // WHOLE_FILE
         .with_files(files);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
-    assert!(result.statistics.progress_message.contains("files"), "message: {}", result.statistics.progress_message);
-    assert!(!result.statistics.progress_message.contains("chunks"), "message: {}", result.statistics.progress_message);
-    assert!(result.statistics.progress_message.contains("(3 files)"), "message: {}", result.statistics.progress_message);
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        result.statistics.progress_message.contains("files"),
+        "message: {}",
+        result.statistics.progress_message
+    );
+    assert!(
+        !result.statistics.progress_message.contains("chunks"),
+        "message: {}",
+        result.statistics.progress_message
+    );
+    assert!(
+        result.statistics.progress_message.contains("(3 files)"),
+        "message: {}",
+        result.statistics.progress_message
+    );
 }
 
 #[test]
@@ -1221,17 +1429,30 @@ fn upload_progress_message_uses_chunks_for_chunked_mode() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
-    let (p, s, m) = make_test_file(tmp.path(), "large.txt", &vec![b'x'; 100]);
+    let (p, s, m) = make_test_file(tmp.path(), "large.txt", &[b'x'; 100]);
     let chunk_size = 32i64;
     let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
         .with_files(vec![FileEntry::file(&p, s, m)]);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions {
-        file_chunk_size_bytes: Some(chunk_size),
-        ..Default::default()
-    }).unwrap();
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     // The message should say "chunks" not "files" since chunk_size > 0
-    assert!(result.statistics.progress_message.contains("chunks"), "message: {}", result.statistics.progress_message);
-    assert!(!result.statistics.progress_message.contains("files"), "message: {}", result.statistics.progress_message);
+    assert!(
+        result.statistics.progress_message.contains("chunks"),
+        "message: {}",
+        result.statistics.progress_message
+    );
+    assert!(
+        !result.statistics.progress_message.contains("files"),
+        "message: {}",
+        result.statistics.progress_message
+    );
 }
 
 #[test]
@@ -1241,8 +1462,17 @@ fn upload_progress_message_contains_rate() {
     let dc = new_data_cache(&cache_dir);
     let (p, s, m) = make_test_file(tmp.path(), "test.txt", b"rate test content");
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
-    let result = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), HashUploadOptions::default()).unwrap();
-    assert!(result.statistics.progress_message.contains("/s)"), "message: {}", result.statistics.progress_message);
+    let result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        HashUploadOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        result.statistics.progress_message.contains("/s)"),
+        "message: {}",
+        result.statistics.progress_message
+    );
 }
 
 // ===== Memory and chunking boundary tests =====
@@ -1287,11 +1517,11 @@ fn hash_upload_chunked_boundary_sizes() {
     let chunk_size = 32i64;
 
     // Exactly 1 chunk boundary (32 bytes)
-    let (p1, s1, m1) = make_test_file(tmp.path(), "exact1.bin", &vec![b'a'; 32]);
+    let (p1, s1, m1) = make_test_file(tmp.path(), "exact1.bin", &[b'a'; 32]);
     // Exactly 2 chunks (64 bytes)
-    let (p2, s2, m2) = make_test_file(tmp.path(), "exact2.bin", &vec![b'b'; 64]);
+    let (p2, s2, m2) = make_test_file(tmp.path(), "exact2.bin", &[b'b'; 64]);
     // 1 byte over boundary (33 bytes -> 2 chunks)
-    let (p3, s3, m3) = make_test_file(tmp.path(), "over.bin", &vec![b'c'; 33]);
+    let (p3, s3, m3) = make_test_file(tmp.path(), "over.bin", &[b'c'; 33]);
 
     // File at exactly chunk_size is NOT chunked (use_chunks requires file_size > chunk_size)
     let manifest1: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
@@ -1299,8 +1529,12 @@ fn hash_upload_chunked_boundary_sizes() {
     let r1 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest1),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(chunk_size), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     // 32 bytes == chunk_size, so NOT chunked (use_chunks = file_size > chunk_size)
     assert!(r1.manifest.files()[0].hash.is_some());
     assert!(r1.manifest.files()[0].chunk_hashes.is_none());
@@ -1311,9 +1545,16 @@ fn hash_upload_chunked_boundary_sizes() {
     let r2 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest2),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(chunk_size), ..Default::default() },
-    ).unwrap();
-    assert_eq!(r2.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(), 2);
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        r2.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(),
+        2
+    );
 
     // 33 bytes > chunk_size -> chunked into 2 chunks (32 + 1)
     let manifest3: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
@@ -1321,9 +1562,16 @@ fn hash_upload_chunked_boundary_sizes() {
     let r3 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest3),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(chunk_size), ..Default::default() },
-    ).unwrap();
-    assert_eq!(r3.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(), 2);
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        r3.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(),
+        2
+    );
 }
 
 #[test]
@@ -1336,18 +1584,21 @@ fn hash_upload_mixed_small_and_large_files() {
     // Small file (below chunk_size) -> whole-file hash
     let (p1, s1, m1) = make_test_file(tmp.path(), "small.txt", b"tiny");
     // Large file (above chunk_size) -> chunked
-    let (p2, s2, m2) = make_test_file(tmp.path(), "large.bin", &vec![b'x'; 200]);
+    let (p2, s2, m2) = make_test_file(tmp.path(), "large.bin", &[b'x'; 200]);
 
-    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-        .with_files(vec![
-            FileEntry::file(&p1, s1, m1),
-            FileEntry::file(&p2, s2, m2),
-        ]);
+    let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![
+        FileEntry::file(&p1, s1, m1),
+        FileEntry::file(&p2, s2, m2),
+    ]);
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
-        HashUploadOptions { file_chunk_size_bytes: Some(chunk_size), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            file_chunk_size_bytes: Some(chunk_size),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let files = result.manifest.files();
     // Small file: whole-file hash
@@ -1376,8 +1627,12 @@ fn some_files_cached_others_not() {
     let r1 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest1),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let hash1_first = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Second run: both files
@@ -1388,8 +1643,12 @@ fn some_files_cached_others_not() {
     let r2 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest2),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let files = r2.manifest.files();
     assert!(files[0].hash.is_some());
@@ -1420,7 +1679,8 @@ fn some_chunks_cached_others_not() {
             file_chunk_size_bytes: Some(chunk_size),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
     let chunks1 = r1.manifest.files()[0].chunk_hashes.clone().unwrap();
 
     // Second run should use cached chunk hashes
@@ -1434,7 +1694,8 @@ fn some_chunks_cached_others_not() {
             file_chunk_size_bytes: Some(chunk_size),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
     let chunks2 = r2.manifest.files()[0].chunk_hashes.clone().unwrap();
 
     assert_eq!(chunks1, chunks2);
@@ -1461,7 +1722,8 @@ fn hash_cache_stores_chunk_ranges() {
             file_chunk_size_bytes: Some(chunk_size),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 4);
@@ -1498,7 +1760,8 @@ fn hash_cache_hit_for_chunked_file() {
             file_chunk_size_bytes: Some(chunk_size),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
     let chunks1 = r1.manifest.files()[0].chunk_hashes.clone().unwrap();
 
     // Second run: hash cache + data cache hit => full skip
@@ -1512,7 +1775,8 @@ fn hash_cache_hit_for_chunked_file() {
             file_chunk_size_bytes: Some(chunk_size),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
     let chunks2 = r2.manifest.files()[0].chunk_hashes.clone().unwrap();
 
     assert_eq!(chunks1, chunks2);
@@ -1535,8 +1799,12 @@ fn three_passes_with_same_unhashed_manifest() {
         let result = hash_upload_abs_manifest(
             &AbsManifest::Snapshot(manifest),
             dc.clone(),
-            HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-        ).unwrap();
+            HashUploadOptions {
+                hash_cache: Some(hc.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         hashes.push(result.manifest.files()[0].hash.clone().unwrap());
     }
 
@@ -1558,12 +1826,19 @@ fn data_cache_miss_after_hash_cache_hit_reuploads() {
     let r1 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest1),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc.clone()), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Delete the file from data cache
-    let data_path = cache_dir.path().join("data").join(format!("{hash1}.xxh128"));
+    let data_path = cache_dir
+        .path()
+        .join("data")
+        .join(format!("{hash1}.xxh128"));
     std::fs::remove_file(&data_path).unwrap();
 
     // Second run: hash cache hits but data cache misses → re-hash and re-upload
@@ -1571,8 +1846,12 @@ fn data_cache_miss_after_hash_cache_hit_reuploads() {
     let r2 = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest2),
         dc.clone(),
-        HashUploadOptions { hash_cache: Some(hc), ..Default::default() },
-    ).unwrap();
+        HashUploadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
     assert_eq!(hash1, hash2);
@@ -1584,7 +1863,7 @@ fn streaming_file_with_hash_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
-    let (path, size, mtime) = make_test_file(tmp.path(), "stream.bin", &vec![0xABu8; 100]);
+    let (path, size, mtime) = make_test_file(tmp.path(), "stream.bin", &[0xABu8; 100]);
     let dc = new_data_cache(&cache_dir);
     let hc = Arc::new(HashCache::new(hc_dir.path()).unwrap());
 
@@ -1597,12 +1876,14 @@ fn streaming_file_with_hash_cache() {
 
     // First run
     let manifest1 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r1 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
+    let r1 =
+        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Second run: hash cache hit
     let manifest2 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
+    let r2 =
+        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
     assert_eq!(hash1, hash2);
@@ -1613,7 +1894,7 @@ fn streaming_file_skipped_when_exists_in_data_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
-    let (path, size, mtime) = make_test_file(tmp.path(), "stream.bin", &vec![0xCDu8; 100]);
+    let (path, size, mtime) = make_test_file(tmp.path(), "stream.bin", &[0xCDu8; 100]);
     let dc = new_data_cache(&cache_dir);
     let hc = Arc::new(HashCache::new(hc_dir.path()).unwrap());
 
@@ -1626,12 +1907,14 @@ fn streaming_file_skipped_when_exists_in_data_cache() {
 
     // First run uploads
     let manifest1 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r1 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
+    let r1 =
+        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Second run: hash cache + data cache hit => full skip
     let manifest2 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
+    let r2 =
+        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
     assert_eq!(hash1, hash2);

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 fn helper_path() -> PathBuf {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/helper/target/release/openjd_helper");
+    let p =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/helper/target/release/openjd_helper");
     if !p.exists() {
         panic!(
             "Helper binary not found at {}. Build it first: cd crates/openjd-sessions/src/helper && cargo build --release",
@@ -33,7 +33,11 @@ impl Helper {
             .expect("failed to spawn helper");
         let stdin = child.stdin.take().unwrap();
         let reader = BufReader::new(child.stdout.take().unwrap());
-        Self { child, stdin, reader }
+        Self {
+            child,
+            stdin,
+            reader,
+        }
     }
 
     fn send(&mut self, msg: &str) {
@@ -43,7 +47,9 @@ impl Helper {
 
     fn read_line(&mut self) -> serde_json::Value {
         let mut line = String::new();
-        self.reader.read_line(&mut line).expect("read from helper stdout");
+        self.reader
+            .read_line(&mut line)
+            .expect("read from helper stdout");
         serde_json::from_str(line.trim()).expect("parse helper response JSON")
     }
 
@@ -81,15 +87,26 @@ fn test_helper_sequential_commands() {
     // First command
     h.send(r#"{"command": "echo", "args": ["hello"], "env": {}, "cwd": "/tmp"}"#);
     let resp = h.read_until_done();
-    assert!(resp.iter().any(|v| v.get("pid").is_some()), "should get pid");
-    assert!(resp.iter().any(|v| v.get("out") == Some(&serde_json::json!("hello"))), "should get hello output");
+    assert!(
+        resp.iter().any(|v| v.get("pid").is_some()),
+        "should get pid"
+    );
+    assert!(
+        resp.iter()
+            .any(|v| v.get("out") == Some(&serde_json::json!("hello"))),
+        "should get hello output"
+    );
     let last = resp.last().unwrap();
     assert_eq!(last["exited"], 0, "first command should exit 0");
 
     // Second command
     h.send(r#"{"command": "echo", "args": ["world"], "env": {}, "cwd": "/tmp"}"#);
     let resp = h.read_until_done();
-    assert!(resp.iter().any(|v| v.get("out") == Some(&serde_json::json!("world"))), "should get world output");
+    assert!(
+        resp.iter()
+            .any(|v| v.get("out") == Some(&serde_json::json!("world"))),
+        "should get world output"
+    );
     let last = resp.last().unwrap();
     assert_eq!(last["exited"], 0, "second command should exit 0");
 
@@ -111,8 +128,14 @@ fn test_helper_cancel_during_execution() {
 
     let resp = h.read_until_done();
     let last = resp.last().unwrap();
-    assert!(last.get("exited").is_some(), "should get exited after cancel");
-    assert_ne!(last["exited"], 0, "cancelled process should have non-zero exit code");
+    assert!(
+        last.get("exited").is_some(),
+        "should get exited after cancel"
+    );
+    assert_ne!(
+        last["exited"], 0,
+        "cancelled process should have non-zero exit code"
+    );
 
     let status = h.shutdown();
     assert!(status.success());
@@ -138,7 +161,10 @@ fn test_helper_command_not_found() {
     h.send(r#"{"command": "nonexistent_binary_xyz_12345", "args": [], "env": {}, "cwd": "/tmp"}"#);
     let resp = h.read_until_done();
     let last = resp.last().unwrap();
-    assert!(last.get("error").is_some(), "should get error for nonexistent binary");
+    assert!(
+        last.get("error").is_some(),
+        "should get error for nonexistent binary"
+    );
 
     let status = h.shutdown();
     assert!(status.success());
@@ -172,16 +198,28 @@ fn test_helper_protocol_error() {
     // Send malformed JSON
     h.send("this is not json");
     let resp = h.read_line();
-    assert!(resp.get("error").is_some(), "should get error for malformed JSON");
+    assert!(
+        resp.get("error").is_some(),
+        "should get error for malformed JSON"
+    );
     let err_msg = resp["error"].as_str().unwrap();
-    assert!(err_msg.starts_with("parse error:"), "error should start with 'parse error:', got: {}", err_msg);
+    assert!(
+        err_msg.starts_with("parse error:"),
+        "error should start with 'parse error:', got: {}",
+        err_msg
+    );
 
     // Helper should still work after protocol error
     h.send(r#"{"command": "echo", "args": ["still_alive"], "env": {}, "cwd": "/tmp"}"#);
     let resp = h.read_until_done();
-    assert!(resp.iter().any(|v| v.get("out") == Some(&serde_json::json!("still_alive"))));
+    assert!(resp
+        .iter()
+        .any(|v| v.get("out") == Some(&serde_json::json!("still_alive"))));
     let last = resp.last().unwrap();
-    assert_eq!(last["exited"], 0, "command after protocol error should succeed");
+    assert_eq!(
+        last["exited"], 0,
+        "command after protocol error should succeed"
+    );
 
     let status = h.shutdown();
     assert!(status.success());
@@ -205,14 +243,15 @@ fn test_helper_crash_during_execution() {
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(helper_pid as i32),
         nix::sys::signal::Signal::SIGKILL,
-    ).expect("kill helper");
+    )
+    .expect("kill helper");
 
     // Reading should now return EOF or error, not hang
     let mut line = String::new();
     let result = h.reader.read_line(&mut line);
     match result {
-        Ok(0) => {} // EOF — correct behavior
-        Ok(_) => {} // Got a partial response — acceptable
+        Ok(0) => {}  // EOF — correct behavior
+        Ok(_) => {}  // Got a partial response — acceptable
         Err(_) => {} // IO error — acceptable
     }
     // The key assertion: we got here without hanging

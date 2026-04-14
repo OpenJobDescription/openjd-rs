@@ -212,10 +212,7 @@ fn v2023_canonical_json_sorted_keys() {
 
 #[test]
 fn v2023_paths_sorted_by_utf16_be() {
-    let snap = make_snapshot(vec![
-        file("b.txt", "h2", 20, 2),
-        file("a.txt", "h1", 10, 1),
-    ]);
+    let snap = make_snapshot(vec![file("b.txt", "h2", 20, 2), file("a.txt", "h1", 10, 1)]);
     let json = encode_snapshot_v2023(&snap).unwrap();
     let a_pos = json.find("\"a.txt\"").unwrap();
     let b_pos = json.find("\"b.txt\"").unwrap();
@@ -237,7 +234,10 @@ fn v2025_snapshot_roundtrip() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(snap2.files.len(), 2);
     assert_eq!(snap2.total_size, 3000);
@@ -258,7 +258,10 @@ fn v2025_abs_snapshot_roundtrip() {
             assert_eq!(s.files.len(), 1);
             assert_eq!(s.files[0].path, "/tmp/a.txt");
         }
-        other => panic!("expected AbsSnapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected AbsSnapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 
@@ -334,7 +337,10 @@ fn v2025_symlinks_preserved() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
 
     let link = snap2.files.iter().find(|f| f.path == "link.txt").unwrap();
@@ -351,7 +357,10 @@ fn v2025_chunkhashes_preserved() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
 
     assert_eq!(
@@ -413,7 +422,10 @@ fn v2025_runnable_preserved() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert!(snap2.files[0].runnable);
 }
@@ -430,7 +442,10 @@ fn auto_detect_v2023() {
         DecodedManifest::Snapshot(s) => {
             assert_eq!(s.files.len(), 1);
         }
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 
@@ -444,7 +459,10 @@ fn auto_detect_v2025() {
         DecodedManifest::Snapshot(s) => {
             assert_eq!(s.files.len(), 1);
         }
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 
@@ -473,7 +491,10 @@ fn v2025_dirs_with_explicit_entries_preserved() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert!(snap2.dirs.iter().any(|d| d.path == "mydir"));
 }
@@ -490,7 +511,10 @@ fn v2025_deep_nesting_compression() {
     let decoded = decode_v2025(&json).unwrap();
     let snap2 = match decoded {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(snap2.files.len(), 2);
     let by_path: std::collections::HashMap<&str, &FileEntry> =
@@ -504,9 +528,8 @@ fn v2025_deep_nesting_compression() {
 #[test]
 fn v2025_default_chunk_size_included_in_json() {
     use openjd_snapshots::DEFAULT_FILE_CHUNK_SIZE;
-    let snap: Snapshot =
-        Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_v2025(&snap).unwrap();
     assert!(
         json.contains("\"fileChunkSizeBytes\":268435456"),
@@ -517,9 +540,8 @@ fn v2025_default_chunk_size_included_in_json() {
 #[test]
 fn v2025_non_default_chunk_size_included_in_json() {
     let chunk_size = 128 * 1024 * 1024i64;
-    let snap: Snapshot =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_v2025(&snap).unwrap();
     assert!(
         json.contains("\"fileChunkSizeBytes\":134217728"),
@@ -529,9 +551,8 @@ fn v2025_non_default_chunk_size_included_in_json() {
 
 #[test]
 fn v2025_whole_file_chunk_size_included_in_json() {
-    let snap: Snapshot =
-        Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_v2025(&snap).unwrap();
     assert!(
         json.contains("\"fileChunkSizeBytes\":-1"),
@@ -542,26 +563,30 @@ fn v2025_whole_file_chunk_size_included_in_json() {
 #[test]
 fn v2025_chunk_size_round_trip_non_default() {
     let chunk_size = 128 * 1024 * 1024i64;
-    let snap: Snapshot =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_v2025(&snap).unwrap();
     let decoded = match decode_v2025(&json).unwrap() {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, chunk_size);
 }
 
 #[test]
 fn v2025_chunk_size_round_trip_whole_file() {
-    let snap: Snapshot =
-        Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_v2025(&snap).unwrap();
     let decoded = match decode_v2025(&json).unwrap() {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, WHOLE_FILE_CHUNK_SIZE);
 }
@@ -573,7 +598,10 @@ fn v2025_missing_chunk_size_defaults_to_default() {
     let json = r#"{"dirs":[],"files":[{"hash":"abc","mtime":1,"name":"a.txt","size":10}],"hashAlg":"xxh128","specificationVersion":"relative-manifest-snapshot-beta-2025-12","totalSize":10}"#;
     let decoded = match decode_v2025(json).unwrap() {
         DecodedManifest::Snapshot(s) => s,
-        other => panic!("expected Snapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Snapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, DEFAULT_FILE_CHUNK_SIZE);
 }
@@ -581,13 +609,15 @@ fn v2025_missing_chunk_size_defaults_to_default() {
 #[test]
 fn v2025_chunk_size_round_trip_abs_snapshot() {
     let chunk_size = 64 * 1024 * 1024i64;
-    let snap: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![file("/tmp/a.txt", "abc", 10, 1)]);
+    let snap: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![file("/tmp/a.txt", "abc", 10, 1)]);
     let json = encode_abs_snapshot_v2025(&snap).unwrap();
     let decoded = match decode_v2025(&json).unwrap() {
         DecodedManifest::AbsSnapshot(s) => s,
-        other => panic!("expected AbsSnapshot, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected AbsSnapshot, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, chunk_size);
 }
@@ -595,13 +625,15 @@ fn v2025_chunk_size_round_trip_abs_snapshot() {
 #[test]
 fn v2025_chunk_size_round_trip_snapshot_diff() {
     let chunk_size = 512 * 1024 * 1024i64;
-    let diff: SnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![file("a.txt", "abc", 10, 1)]);
+    let diff: SnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![file("a.txt", "abc", 10, 1)]);
     let json = encode_snapshot_diff_v2025(&diff).unwrap();
     let decoded = match decode_v2025(&json).unwrap() {
         DecodedManifest::SnapshotDiff(s) => s,
-        other => panic!("expected SnapshotDiff, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected SnapshotDiff, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, chunk_size);
 }
@@ -609,13 +641,15 @@ fn v2025_chunk_size_round_trip_snapshot_diff() {
 #[test]
 fn v2025_chunk_size_round_trip_abs_snapshot_diff() {
     let chunk_size = 32 * 1024 * 1024i64;
-    let diff: AbsSnapshotDiff =
-        Manifest::new(HashAlgorithm::Xxh128, chunk_size)
-            .with_files(vec![file("/tmp/a.txt", "abc", 10, 1)]);
+    let diff: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, chunk_size)
+        .with_files(vec![file("/tmp/a.txt", "abc", 10, 1)]);
     let json = encode_abs_snapshot_diff_v2025(&diff).unwrap();
     let decoded = match decode_v2025(&json).unwrap() {
         DecodedManifest::AbsSnapshotDiff(s) => s,
-        other => panic!("expected AbsSnapshotDiff, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected AbsSnapshotDiff, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
     assert_eq!(decoded.file_chunk_size_bytes, chunk_size);
 }
@@ -625,8 +659,8 @@ fn v2025_chunk_size_round_trip_abs_snapshot_diff() {
 #[test]
 fn v2023_implied_directories_no_warning() {
     // Dir 'foo' is implied by file 'foo/bar.txt'. Encoding should succeed without warning.
-    let snap = make_snapshot(vec![file("foo/bar.txt", "h1", 10, 1)])
-        .with_dirs(vec![DirEntry::new("foo")]);
+    let snap =
+        make_snapshot(vec![file("foo/bar.txt", "h1", 10, 1)]).with_dirs(vec![DirEntry::new("foo")]);
 
     let json = encode_snapshot_v2023(&snap).unwrap();
     let decoded = decode_v2023(&json).unwrap();

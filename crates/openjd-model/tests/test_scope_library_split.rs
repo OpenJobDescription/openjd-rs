@@ -16,7 +16,8 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect(&format!("Expected success for: {s}"));
+    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_err(s: &str, expected: &[&str]) {
@@ -25,19 +26,24 @@ fn check_err(s: &str, expected: &[&str]) {
         .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
 /// Helper: a job template with a PATH param and an expression in the given field.
 fn job_with_path_param(name_expr: &str, step_body: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": {name_expr},
         "parameterDefinitions": [{{"name": "Val", "type": "PATH"}}],
         "steps": [{step_body}]
-    }}"#)
+    }}"#
+    )
 }
 
 fn simple_step(script_body: &str) -> String {
@@ -45,11 +51,13 @@ fn simple_step(script_body: &str) -> String {
 }
 
 fn step_with_hr(hr: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
         "name": "S",
         "hostRequirements": {hr},
         "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
-    }}"#)
+    }}"#
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -69,7 +77,9 @@ fn template_scope_job_name_rejects_apply_path_mapping() {
 fn template_scope_host_req_amount_rejects_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &step_with_hr(r#"{"amounts": [{"name": "amount.worker.vcpu", "min": "{{len(apply_path_mapping(Param.Val))}}"}]}"#),
+        &step_with_hr(
+            r#"{"amounts": [{"name": "amount.worker.vcpu", "min": "{{len(apply_path_mapping(Param.Val))}}"}]}"#,
+        ),
     );
     check_err(&t, &["apply_path_mapping"]);
 }
@@ -78,11 +88,11 @@ fn template_scope_host_req_amount_rejects_apply_path_mapping() {
 fn template_scope_step_let_binding_rejects_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &format!(r#"{{
+        r#"{
             "name": "S",
             "let": ["mapped = apply_path_mapping(Param.Val)"],
-            "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
-        }}"#),
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }"#,
     );
     check_err(&t, &["apply_path_mapping"]);
 }
@@ -104,7 +114,9 @@ fn task_scope_action_command_accepts_apply_path_mapping() {
 fn task_scope_action_args_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{"actions": {"onRun": {"command": "run", "args": ["{{apply_path_mapping(Param.Val)}}"]}}}"#),
+        &simple_step(
+            r#"{"actions": {"onRun": {"command": "run", "args": ["{{apply_path_mapping(Param.Val)}}"]}}}"#,
+        ),
     );
     decode_ok(&t);
 }
@@ -113,7 +125,9 @@ fn task_scope_action_args_accepts_apply_path_mapping() {
 fn task_scope_action_timeout_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{"actions": {"onRun": {"command": "run", "timeout": "{{len(apply_path_mapping(Param.Val))}}"}}}"#),
+        &simple_step(
+            r#"{"actions": {"onRun": {"command": "run", "timeout": "{{len(apply_path_mapping(Param.Val))}}"}}}"#,
+        ),
     );
     decode_ok(&t);
 }
@@ -122,7 +136,9 @@ fn task_scope_action_timeout_accepts_apply_path_mapping() {
 fn task_scope_cancelation_notify_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{"actions": {"onRun": {"command": "run", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{len(apply_path_mapping(Param.Val))}}"}}}}"#),
+        &simple_step(
+            r#"{"actions": {"onRun": {"command": "run", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{len(apply_path_mapping(Param.Val))}}"}}}}"#,
+        ),
     );
     decode_ok(&t);
 }
@@ -131,10 +147,12 @@ fn task_scope_cancelation_notify_accepts_apply_path_mapping() {
 fn task_scope_embedded_file_data_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{
+        &simple_step(
+            r#"{
             "embeddedFiles": [{"name": "f", "type": "TEXT", "data": "{{apply_path_mapping(Param.Val)}}"}],
             "actions": {"onRun": {"command": "run"}}
-        }"#),
+        }"#,
+        ),
     );
     decode_ok(&t);
 }
@@ -143,10 +161,12 @@ fn task_scope_embedded_file_data_accepts_apply_path_mapping() {
 fn task_scope_embedded_file_filename_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{
+        &simple_step(
+            r#"{
             "embeddedFiles": [{"name": "f", "type": "TEXT", "filename": "{{apply_path_mapping(Param.Val)}}", "data": "x"}],
             "actions": {"onRun": {"command": "run"}}
-        }"#),
+        }"#,
+        ),
     );
     decode_ok(&t);
 }
@@ -155,43 +175,47 @@ fn task_scope_embedded_file_filename_accepts_apply_path_mapping() {
 fn task_scope_script_let_binding_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &simple_step(r#"{
+        &simple_step(
+            r#"{
             "let": ["mapped = apply_path_mapping(Param.Val)"],
             "actions": {"onRun": {"command": "echo", "args": ["{{mapped}}"]}}
-        }"#),
+        }"#,
+        ),
     );
     decode_ok(&t);
 }
 
 #[test]
 fn session_scope_job_env_variable_accepts_apply_path_mapping() {
-    let t = format!(r#"{{
+    let t = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "test",
-        "parameterDefinitions": [{{"name": "Val", "type": "PATH"}}],
-        "jobEnvironments": [{{
+        "parameterDefinitions": [{"name": "Val", "type": "PATH"}],
+        "jobEnvironments": [{
             "name": "E",
-            "variables": {{"MAPPED": "{{{{apply_path_mapping(Param.Val)}}}}"}}
-        }}],
-        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}}}]
-    }}"#);
+            "variables": {"MAPPED": "{{apply_path_mapping(Param.Val)}}"}
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#
+    .to_string();
     decode_ok(&t);
 }
 
 #[test]
 fn session_scope_job_env_action_accepts_apply_path_mapping() {
-    let t = format!(r#"{{
+    let t = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "test",
-        "parameterDefinitions": [{{"name": "Val", "type": "PATH"}}],
-        "jobEnvironments": [{{
+        "parameterDefinitions": [{"name": "Val", "type": "PATH"}],
+        "jobEnvironments": [{
             "name": "E",
-            "script": {{"actions": {{"onEnter": {{"command": "{{{{apply_path_mapping(Param.Val)}}}}"}}}}}}
-        }}],
-        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}}}]
-    }}"#);
+            "script": {"actions": {"onEnter": {"command": "{{apply_path_mapping(Param.Val)}}"}}}
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#
+    .to_string();
     decode_ok(&t);
 }
 
@@ -199,33 +223,33 @@ fn session_scope_job_env_action_accepts_apply_path_mapping() {
 fn session_scope_step_env_action_accepts_apply_path_mapping() {
     let t = job_with_path_param(
         r#""test""#,
-        &format!(r#"{{
+        r#"{
             "name": "S",
-            "stepEnvironments": [{{
+            "stepEnvironments": [{
                 "name": "SE",
-                "script": {{"actions": {{"onEnter": {{"command": "{{{{apply_path_mapping(Param.Val)}}}}"}}}}}}
-            }}],
-            "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}
-        }}"#),
+                "script": {"actions": {"onEnter": {"command": "{{apply_path_mapping(Param.Val)}}"}}}
+            }],
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }"#,
     );
     decode_ok(&t);
 }
 
 #[test]
 fn session_scope_env_embedded_file_accepts_apply_path_mapping() {
-    let t = format!(r#"{{
+    let t = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "test",
-        "parameterDefinitions": [{{"name": "Val", "type": "PATH"}}],
-        "jobEnvironments": [{{
+        "parameterDefinitions": [{"name": "Val", "type": "PATH"}],
+        "jobEnvironments": [{
             "name": "E",
-            "script": {{
-                "embeddedFiles": [{{"name": "f", "type": "TEXT", "data": "{{{{apply_path_mapping(Param.Val)}}}}"}}],
-                "actions": {{"onEnter": {{"command": "bash"}}}}
-            }}
-        }}],
-        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "run"}}}}}}}}]
-    }}"#);
+            "script": {
+                "embeddedFiles": [{"name": "f", "type": "TEXT", "data": "{{apply_path_mapping(Param.Val)}}"}],
+                "actions": {"onEnter": {"command": "bash"}}
+            }
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#.to_string();
     decode_ok(&t);
 }

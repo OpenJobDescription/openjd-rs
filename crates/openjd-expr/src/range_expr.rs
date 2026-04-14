@@ -19,17 +19,31 @@ pub struct RangeExprError {
 
 impl RangeExprError {
     pub fn new(expr: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { expr: expr.into(), message: message.into(), position: None }
+        Self {
+            expr: expr.into(),
+            message: message.into(),
+            position: None,
+        }
     }
     pub fn at(expr: impl Into<String>, message: impl Into<String>, position: usize) -> Self {
-        Self { expr: expr.into(), message: message.into(), position: Some(position) }
+        Self {
+            expr: expr.into(),
+            message: message.into(),
+            position: Some(position),
+        }
     }
 }
 
 impl fmt::Display for RangeExprError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(pos) = self.position {
-            write!(f, "{} in '{}' after '{}'", self.message, self.expr, &self.expr[..pos])
+            write!(
+                f,
+                "{} in '{}' after '{}'",
+                self.message,
+                self.expr,
+                &self.expr[..pos]
+            )
         } else {
             write!(f, "{}: '{}'", self.message, self.expr)
         }
@@ -39,7 +53,9 @@ impl fmt::Display for RangeExprError {
 impl std::error::Error for RangeExprError {}
 
 impl From<RangeExprError> for ExpressionError {
-    fn from(e: RangeExprError) -> Self { ExpressionError::new(e.to_string()) }
+    fn from(e: RangeExprError) -> Self {
+        ExpressionError::new(e.to_string())
+    }
 }
 
 /// A single contiguous range of integers with a step.
@@ -58,21 +74,33 @@ impl IntRange {
             return Err(ExpressionError::new("Range: step must not be zero"));
         }
         if step > 0 && start > end {
-            return Err(ExpressionError::new("Range: a descending range must have a negative step"));
+            return Err(ExpressionError::new(
+                "Range: a descending range must have a negative step",
+            ));
         }
         if step < 0 && start < end {
-            return Err(ExpressionError::new("Range: an ascending range must have a positive step"));
+            return Err(ExpressionError::new(
+                "Range: an ascending range must have a positive step",
+            ));
         }
         if step < 0 {
             // Normalize descending to ascending form (matching Python _IntRange)
             let count = ((start - end) / (-step)) + 1;
             let last = start + (count - 1) * step; // smallest value
-            Ok(Self { start: last, end: start, step: -step })
+            Ok(Self {
+                start: last,
+                end: start,
+                step: -step,
+            })
         } else {
             // Normalize end to actual last value in the range
             let count = (end - start) / step + 1;
             let actual_end = start + (count - 1) * step;
-            Ok(Self { start, end: actual_end, step })
+            Ok(Self {
+                start,
+                end: actual_end,
+                step,
+            })
         }
     }
 
@@ -89,7 +117,9 @@ impl IntRange {
 
     /// Test whether `value` is a member of this range.
     pub fn contains(&self, value: i64) -> bool {
-        if value < self.start || value > self.end { return false; }
+        if value < self.start || value > self.end {
+            return false;
+        }
         (value - self.start) % self.step == 0
     }
 
@@ -188,7 +218,13 @@ impl RangeExpr {
 
     /// Create a RangeExpr from a list of individual values.
     pub fn from_values(mut values: Vec<i64>) -> Self {
-        if values.is_empty() { return Self { ranges: Vec::new(), cumulative_lengths: Vec::new(), length: 0 }; }
+        if values.is_empty() {
+            return Self {
+                ranges: Vec::new(),
+                cumulative_lengths: Vec::new(),
+                length: 0,
+            };
+        }
         // Sort and deduplicate (matching Python from_list)
         values.sort();
         values.dedup();
@@ -202,7 +238,9 @@ impl RangeExpr {
                 let step = values[i + 1] - values[i];
                 if step != 0 {
                     let mut j = i + 1;
-                    while j < values.len() && values[j] == start + (j - i) as i64 * step { j += 1; }
+                    while j < values.len() && values[j] == start + (j - i) as i64 * step {
+                        j += 1;
+                    }
                     if j > i + 1 {
                         let end = values[j - 1];
                         ranges.push(IntRange { start, end, step });
@@ -211,11 +249,19 @@ impl RangeExpr {
                     }
                 }
             }
-            ranges.push(IntRange { start, end: start, step: 1 });
+            ranges.push(IntRange {
+                start,
+                end: start,
+                step: 1,
+            });
             i += 1;
         }
         let cumulative_lengths = build_cumulative(&ranges);
-        Self { ranges, cumulative_lengths, length }
+        Self {
+            ranges,
+            cumulative_lengths,
+            length,
+        }
     }
 
     /// Create from pre-built `IntRange`s. Sorts, merges adjacent ranges, and validates no overlaps.
@@ -233,7 +279,11 @@ impl RangeExpr {
                 let new_end = r.end;
                 let last_start = last.start;
                 let step = last.step;
-                *merged.last_mut().unwrap() = IntRange { start: last_start, end: new_end, step };
+                *merged.last_mut().unwrap() = IntRange {
+                    start: last_start,
+                    end: new_end,
+                    step,
+                };
             } else {
                 merged.push(r.clone());
             }
@@ -243,13 +293,18 @@ impl RangeExpr {
             if merged[i].start <= merged[i - 1].end {
                 return Err(ExpressionError::new(format!(
                     "Range expression has overlapping ranges: {} and {}",
-                    merged[i - 1], merged[i]
+                    merged[i - 1],
+                    merged[i]
                 )));
             }
         }
         let length = merged.iter().map(|r| r.len()).sum();
         let cumulative_lengths = build_cumulative(&merged);
-        Ok(Self { ranges: merged, cumulative_lengths, length })
+        Ok(Self {
+            ranges: merged,
+            cumulative_lengths,
+            length,
+        })
     }
 
     /// Total number of integers across all sub-ranges.
@@ -273,10 +328,16 @@ impl RangeExpr {
     pub fn get(&self, index: i64) -> Option<i64> {
         let len = self.length & LENGTH_MASK;
         let idx = if index < 0 { len as i64 + index } else { index } as usize;
-        if idx >= len { return None; }
+        if idx >= len {
+            return None;
+        }
         // Binary search on cumulative lengths (mirrors Python's bisect on _range_length_indices)
         let range_idx = self.cumulative_lengths.partition_point(|&cum| cum <= idx);
-        let offset = if range_idx == 0 { idx } else { idx - self.cumulative_lengths[range_idx - 1] };
+        let offset = if range_idx == 0 {
+            idx
+        } else {
+            idx - self.cumulative_lengths[range_idx - 1]
+        };
         self.ranges[range_idx].get(offset)
     }
 
@@ -309,14 +370,20 @@ impl RangeExpr {
     /// descending sequences.
     pub fn slice(&self, start: i64, stop: i64, step: i64) -> Result<RangeExpr, ExpressionError> {
         if step <= 0 {
-            return Err(ExpressionError::new("RangeExpr::slice requires a positive step"));
+            return Err(ExpressionError::new(
+                "RangeExpr::slice requires a positive step",
+            ));
         }
         let total_len = self.len() as i64;
         // Clamp to valid range
         let start = start.max(0).min(total_len);
         let stop = stop.max(0).min(total_len);
         if start >= stop {
-            return Ok(RangeExpr { ranges: Vec::new(), cumulative_lengths: Vec::new(), length: 0 });
+            return Ok(RangeExpr {
+                ranges: Vec::new(),
+                cumulative_lengths: Vec::new(),
+                length: 0,
+            });
         }
 
         let mut result_ranges = Vec::new();
@@ -363,20 +430,36 @@ impl RangeExpr {
             let new_step = r.step * step;
 
             if count == 1 {
-                result_ranges.push(IntRange { start: new_start, end: new_start, step: 1 });
+                result_ranges.push(IntRange {
+                    start: new_start,
+                    end: new_start,
+                    step: 1,
+                });
             } else {
-                result_ranges.push(IntRange { start: new_start, end: new_end, step: new_step });
+                result_ranges.push(IntRange {
+                    start: new_start,
+                    end: new_end,
+                    step: new_step,
+                });
             }
 
             cum_start = cum_end;
         }
 
         if result_ranges.is_empty() {
-            return Ok(RangeExpr { ranges: Vec::new(), cumulative_lengths: Vec::new(), length: 0 });
+            return Ok(RangeExpr {
+                ranges: Vec::new(),
+                cumulative_lengths: Vec::new(),
+                length: 0,
+            });
         }
         let length = result_ranges.iter().map(|r| r.len()).sum();
         let cumulative_lengths = build_cumulative(&result_ranges);
-        Ok(RangeExpr { ranges: result_ranges, cumulative_lengths, length })
+        Ok(RangeExpr {
+            ranges: result_ranges,
+            cumulative_lengths,
+            length,
+        })
     }
 
     /// Heap allocation size (for memory tracking).
@@ -390,7 +473,10 @@ impl RangeExpr {
 fn build_cumulative(ranges: &[IntRange]) -> Vec<usize> {
     let mut cum = Vec::with_capacity(ranges.len());
     let mut total = 0;
-    for r in ranges { total += r.len(); cum.push(total); }
+    for r in ranges {
+        total += r.len();
+        cum.push(total);
+    }
     cum
 }
 
@@ -426,14 +512,18 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
 
     loop {
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
         if pos >= bytes.len() {
             // If we got here after a comma, that's a trailing comma error
             if !ranges.is_empty() && pos > 0 {
                 // Check if the last non-whitespace char before end was a comma
                 let last_content = expr.trim_end();
                 if last_content.ends_with(',') {
-                    return Err(ExpressionError::new(format!("Trailing comma in range expression: '{expr}'")));
+                    return Err(ExpressionError::new(format!(
+                        "Trailing comma in range expression: '{expr}'"
+                    )));
                 }
             }
             break;
@@ -443,29 +533,38 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
         let start = parse_integer(expr, &mut pos)?;
 
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
 
         if pos >= bytes.len() || bytes[pos] == b',' {
             // Single value
             ranges.push(IntRange::new(start, start, 1)?);
-            if pos < bytes.len() { pos += 1; } // skip comma
+            if pos < bytes.len() {
+                pos += 1;
+            } // skip comma
             continue;
         }
 
         if bytes[pos] != b'-' {
             return Err(ExpressionError::new(format!(
-                "Unexpected '{}' in '{expr}'", bytes[pos] as char
+                "Unexpected '{}' in '{expr}'",
+                bytes[pos] as char
             )));
         }
         pos += 1; // skip '-'
 
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
 
         let end = parse_integer(expr, &mut pos)?;
 
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
 
         if pos >= bytes.len() || bytes[pos] == b',' {
             // Range without step
@@ -477,7 +576,9 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
                     "Descending range {start}-{end} requires a negative step"
                 )));
             }
-            if pos < bytes.len() { pos += 1; } // skip comma
+            if pos < bytes.len() {
+                pos += 1;
+            } // skip comma
             continue;
         }
 
@@ -489,7 +590,9 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
         pos += 1; // skip ':'
 
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
 
         let step = parse_integer(expr, &mut pos)?;
         if step == 0 {
@@ -499,14 +602,17 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
         ranges.push(IntRange::new(start, end, step)?);
 
         // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() { pos += 1; }
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
 
         if pos < bytes.len() {
             if bytes[pos] == b',' {
                 pos += 1;
             } else {
                 return Err(ExpressionError::new(format!(
-                    "Unexpected '{}' in '{expr}'", bytes[pos] as char
+                    "Unexpected '{}' in '{expr}'",
+                    bytes[pos] as char
                 )));
             }
         }
@@ -522,11 +628,15 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
 fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
     let bytes = expr.as_bytes();
     if *pos >= bytes.len() {
-        return Err(ExpressionError::new(format!("Unexpected end of expression: '{expr}'")));
+        return Err(ExpressionError::new(format!(
+            "Unexpected end of expression: '{expr}'"
+        )));
     }
 
     let negative = bytes[*pos] == b'-';
-    if negative { *pos += 1; }
+    if negative {
+        *pos += 1;
+    }
 
     if *pos >= bytes.len() || !bytes[*pos].is_ascii_digit() {
         return Err(ExpressionError::new(format!(
@@ -535,12 +645,14 @@ fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
     }
 
     let start = *pos;
-    while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+    while *pos < bytes.len() && bytes[*pos].is_ascii_digit() {
+        *pos += 1;
+    }
 
     let num_str = &expr[start..*pos];
-    let value: i64 = num_str.parse().map_err(|_| {
-        ExpressionError::new(format!("Invalid integer '{num_str}' in '{expr}'"))
-    })?;
+    let value: i64 = num_str
+        .parse()
+        .map_err(|_| ExpressionError::new(format!("Invalid integer '{num_str}' in '{expr}'")))?;
 
     Ok(if negative { -value } else { value })
 }
@@ -667,22 +779,54 @@ mod tests {
     #[test]
     fn slice_large_range_no_materialization() {
         // 1 billion elements — should complete instantly
-        let r = RangeExpr::from_ranges(vec![IntRange { start: 1, end: 1_000_000_000, step: 1 }]).unwrap();
+        let r = RangeExpr::from_ranges(vec![IntRange {
+            start: 1,
+            end: 1_000_000_000,
+            step: 1,
+        }])
+        .unwrap();
         assert_eq!(r.slice(0, 3, 1).unwrap().to_vec(), vec![1, 2, 3]);
     }
 
     #[test]
     fn slice_large_range_tail() {
-        let r = RangeExpr::from_ranges(vec![IntRange { start: 1, end: 1_000_000_000, step: 1 }]).unwrap();
+        let r = RangeExpr::from_ranges(vec![IntRange {
+            start: 1,
+            end: 1_000_000_000,
+            step: 1,
+        }])
+        .unwrap();
         let len = r.len() as i64;
-        assert_eq!(r.slice(len - 3, len, 1).unwrap().to_vec(), vec![999_999_998, 999_999_999, 1_000_000_000]);
+        assert_eq!(
+            r.slice(len - 3, len, 1).unwrap().to_vec(),
+            vec![999_999_998, 999_999_999, 1_000_000_000]
+        );
     }
 
     #[test]
     fn slice_large_range_with_step() {
-        let r = RangeExpr::from_ranges(vec![IntRange { start: 1, end: 1_000_000_000, step: 1 }]).unwrap();
+        let r = RangeExpr::from_ranges(vec![IntRange {
+            start: 1,
+            end: 1_000_000_000,
+            step: 1,
+        }])
+        .unwrap();
         // Every 100 millionth element, first 3
-        assert_eq!(r.slice(0, 1_000_000_000, 100_000_000).unwrap().to_vec(), vec![1, 100_000_001, 200_000_001, 300_000_001, 400_000_001, 500_000_001, 600_000_001, 700_000_001, 800_000_001, 900_000_001]);
+        assert_eq!(
+            r.slice(0, 1_000_000_000, 100_000_000).unwrap().to_vec(),
+            vec![
+                1,
+                100_000_001,
+                200_000_001,
+                300_000_001,
+                400_000_001,
+                500_000_001,
+                600_000_001,
+                700_000_001,
+                800_000_001,
+                900_000_001
+            ]
+        );
     }
 
     #[test]

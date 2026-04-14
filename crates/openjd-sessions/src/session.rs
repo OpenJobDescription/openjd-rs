@@ -8,23 +8,23 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use openjd_expr::path_mapping::PathMappingRule;
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_model::symbol_table::SymbolTable;
+use openjd_expr::path_mapping::PathMappingRule;
 use openjd_model::job::{Environment, StepScript};
+use openjd_model::symbol_table::SymbolTable;
 use openjd_model::types::JobParameterValues;
 use tokio_util::sync::CancellationToken;
 
 use crate::action::{ActionMessage, ActionResult, ActionState};
 use crate::action_status::ActionStatus;
+#[cfg(unix)]
+use crate::cross_user_helper::{run_via_helper, CrossUserHelper};
 use crate::error::SessionError;
-use crate::logging::{LogContent, log_section_banner};
+use crate::logging::{log_section_banner, LogContent};
 use crate::runner::env_script::EnvironmentScriptRunner;
 use crate::runner::step_script::StepScriptRunner;
 use crate::session_log;
 use crate::session_user::SessionUser;
-#[cfg(unix)]
-use crate::cross_user_helper::{CrossUserHelper, run_via_helper};
 
 /// Session lifecycle state.
 ///
@@ -70,7 +70,8 @@ pub struct SessionConfig {
     pub callback: Option<SessionCallbackType>,
     pub os_env_vars: Option<HashMap<String, String>>,
     pub session_root_directory: Option<PathBuf>,
-    pub user: Option<Arc<dyn SessionUser>>,    pub revision_extensions: Option<openjd_model::types::ValidationContext>,
+    pub user: Option<Arc<dyn SessionUser>>,
+    pub revision_extensions: Option<openjd_model::types::ValidationContext>,
     /// Optional external cancellation token. When cancelled, all running and
     /// future actions will be cancelled via the spec's cancellation sequence.
     pub cancel_token: Option<CancellationToken>,
@@ -81,9 +82,13 @@ pub struct SessionConfig {
 /// to avoid undefined behavior from mixed-case duplicates in the Win32 API.
 fn normalize_env_key(name: &str) -> String {
     #[cfg(windows)]
-    { name.to_uppercase() }
+    {
+        name.to_uppercase()
+    }
     #[cfg(not(windows))]
-    { name.to_string() }
+    {
+        name.to_string()
+    }
 }
 
 /// Tracks env var changes made during an environment's lifecycle.
@@ -198,8 +203,16 @@ impl Session {
         #[cfg(unix)]
         crate::tempdir::validate_sticky_bit(&root_dir);
 
-        let working_dir = crate::tempdir::TempDir::new(Some(&root_dir), Some(&config.session_id), config.user.as_deref())?;
-        let files_dir = crate::tempdir::TempDir::new(Some(working_dir.path()), Some("embedded_files"), config.user.as_deref())?;
+        let working_dir = crate::tempdir::TempDir::new(
+            Some(&root_dir),
+            Some(&config.session_id),
+            config.user.as_deref(),
+        )?;
+        let files_dir = crate::tempdir::TempDir::new(
+            Some(working_dir.path()),
+            Some("embedded_files"),
+            config.user.as_deref(),
+        )?;
 
         let working_directory = working_dir.path().to_path_buf();
         let files_directory = files_dir.path().to_path_buf();
@@ -213,7 +226,8 @@ impl Session {
         #[cfg(unix)]
         let (helper, cancel_writer) = if let Some(ref user) = config.user {
             if !user.is_process_user() {
-                let helper_path = crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
+                let helper_path =
+                    crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
                 let (h, cw) = CrossUserHelper::spawn(&helper_path, user.as_ref())?;
                 (Some(h), Some(cw))
             } else {
@@ -224,12 +238,42 @@ impl Session {
         };
 
         // Log host info (mirrors Python Session.__init__)
-        session_log!(info, &config.session_id, LogContent::HOST_INFO, "openjd-sessions Library Version: {}", env!("CARGO_PKG_VERSION"));
-        session_log!(info, &config.session_id, LogContent::HOST_INFO, "Platform: {}", std::env::consts::OS);
-        session_log!(info, &config.session_id, LogContent::HOST_INFO, "Architecture: {}", std::env::consts::ARCH);
+        session_log!(
+            info,
+            &config.session_id,
+            LogContent::HOST_INFO,
+            "openjd-sessions Library Version: {}",
+            env!("CARGO_PKG_VERSION")
+        );
+        session_log!(
+            info,
+            &config.session_id,
+            LogContent::HOST_INFO,
+            "Platform: {}",
+            std::env::consts::OS
+        );
+        session_log!(
+            info,
+            &config.session_id,
+            LogContent::HOST_INFO,
+            "Architecture: {}",
+            std::env::consts::ARCH
+        );
         log::info!(target: "openjd.sessions", session_id = config.session_id.as_str(); "Initializing Open Job Description Session: {}", &config.session_id);
-        session_log!(info, &config.session_id, LogContent::FILE_PATH, "Session Working Directory: {}", working_directory.display());
-        session_log!(info, &config.session_id, LogContent::FILE_PATH, "Session's Embedded Files Directory: {}", files_directory.display());
+        session_log!(
+            info,
+            &config.session_id,
+            LogContent::FILE_PATH,
+            "Session Working Directory: {}",
+            working_directory.display()
+        );
+        session_log!(
+            info,
+            &config.session_id,
+            LogContent::FILE_PATH,
+            "Session's Embedded Files Directory: {}",
+            files_directory.display()
+        );
 
         Ok(Self {
             session_id: config.session_id,
@@ -338,7 +382,11 @@ impl Session {
     pub fn get_enabled_extensions(&self) -> Vec<String> {
         match &self.revision_extensions {
             Some(ctx) => {
-                let mut exts: Vec<String> = ctx.extensions.iter().map(|e| e.as_str().to_string()).collect();
+                let mut exts: Vec<String> = ctx
+                    .extensions
+                    .iter()
+                    .map(|e| e.as_str().to_string())
+                    .collect();
                 exts.sort();
                 exts
             }
@@ -346,11 +394,21 @@ impl Session {
         }
     }
 
-    pub fn session_id(&self) -> &str { &self.session_id }
-    pub fn state(&self) -> SessionState { self.state }
-    pub fn working_directory(&self) -> &Path { &self.working_directory }
-    pub fn files_directory(&self) -> &Path { &self.files_directory }
-    pub fn environments_entered(&self) -> &[EnvironmentIdentifier] { &self.environments_entered }
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+    pub fn working_directory(&self) -> &Path {
+        &self.working_directory
+    }
+    pub fn files_directory(&self) -> &Path {
+        &self.files_directory
+    }
+    pub fn environments_entered(&self) -> &[EnvironmentIdentifier] {
+        &self.environments_entered
+    }
 
     /// Get the current action status, if any action has been run.
     pub fn action_status(&self) -> Option<ActionStatus> {
@@ -439,7 +497,13 @@ impl Session {
                 helper.shutdown();
             }
 
-            session_log!(info, &self.session_id, LogContent::FILE_PATH, "Deleting working directory: {}", self.working_directory.display());
+            session_log!(
+                info,
+                &self.session_id,
+                LogContent::FILE_PATH,
+                "Deleting working directory: {}",
+                self.working_directory.display()
+            );
 
             // Cross-user cleanup: delete files owned by session user first,
             // since files created via sudo may not be deletable by the process owner.
@@ -453,8 +517,11 @@ impl Session {
                             .collect();
                         if !files.is_empty() {
                             let mut args = vec![
-                                "-u".to_string(), user.user().to_string(),
-                                "-i".to_string(), "rm".to_string(), "-rf".to_string(),
+                                "-u".to_string(),
+                                user.user().to_string(),
+                                "-i".to_string(),
+                                "rm".to_string(),
+                                "-rf".to_string(),
                             ];
                             args.extend(files);
                             let _ = std::process::Command::new("sudo")
@@ -481,8 +548,6 @@ impl Session {
         self.state = SessionState::Ended;
     }
 
-
-
     /// Enter an environment asynchronously (non-blocking).
     /// Returns the environment identifier on success.
     pub async fn enter_environment(
@@ -492,7 +557,9 @@ impl Session {
         identifier: Option<&str>,
         os_env_vars: Option<&HashMap<String, String>>,
     ) -> Result<String, SessionError> {
-        let (id, _stdout) = self.enter_environment_with_output(env, resolved_symtab, identifier, os_env_vars).await?;
+        let (id, _stdout) = self
+            .enter_environment_with_output(env, resolved_symtab, identifier, os_env_vars)
+            .await?;
         Ok(id)
     }
 
@@ -516,9 +583,9 @@ impl Session {
         let identifier = match identifier {
             Some(id) => {
                 if self.environments.contains_key(id) {
-                    return Err(SessionError::Runtime(
-                        format!("Environment {id} has already been entered in this Session."),
-                    ));
+                    return Err(SessionError::Runtime(format!(
+                        "Environment {id} has already been entered in this Session."
+                    )));
                 }
                 id.to_string()
             }
@@ -526,7 +593,8 @@ impl Session {
         };
         self.environments.insert(identifier.clone(), env.clone());
         self.environments_entered.push(identifier.clone());
-        self.created_env_vars.insert(identifier.clone(), HashMap::new());
+        self.created_env_vars
+            .insert(identifier.clone(), HashMap::new());
 
         // Set static variables
         if let Some(vars) = &env.variables {
@@ -561,7 +629,10 @@ impl Session {
             self.state = SessionState::Running;
             self.notify_callback();
 
-            log_section_banner(&self.session_id, &format!("Entering Environment: {}", env.name));
+            log_section_banner(
+                &self.session_id,
+                &format!("Entering Environment: {}", env.name),
+            );
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
@@ -572,12 +643,16 @@ impl Session {
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
             #[allow(unused_mut)]
-            let mut runner =
-                EnvironmentScriptRunner::new(&self.session_id, self.working_directory.clone(), self.files_directory.clone(), self.user.clone())
-                    .with_redactions(self.redactions_enabled())
-                    .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-                    .with_cancel_token(cancel_token)
-                    .with_cancel_request_rx(cancel_rx);
+            let mut runner = EnvironmentScriptRunner::new(
+                &self.session_id,
+                self.working_directory.clone(),
+                self.files_directory.clone(),
+                self.user.clone(),
+            )
+            .with_redactions(self.redactions_enabled())
+            .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
+            .with_cancel_token(cancel_token)
+            .with_cancel_request_rx(cancel_rx);
             #[cfg(unix)]
             let mut runner = match self.helper.take() {
                 Some(h) => runner.with_helper(h),
@@ -588,12 +663,13 @@ impl Session {
 
             let lib = self.library.clone();
             let rules = self.path_mapping_rules.clone();
-            let runner_fut = runner.enter(
-                env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx,
-            );
+            let runner_fut =
+                runner.enter(env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, &identifier).await;
             #[cfg(unix)]
-            { self.helper = runner.take_helper(); }
+            {
+                self.helper = runner.take_helper();
+            }
             let result = result?;
 
             if result.state != ActionState::Success {
@@ -613,7 +689,10 @@ impl Session {
             self.action_fail_message = None;
             self.action_exit_code = None;
 
-            log_section_banner(&self.session_id, &format!("Entering Environment: {}", env.name));
+            log_section_banner(
+                &self.session_id,
+                &format!("Entering Environment: {}", env.name),
+            );
 
             self.action_ended_at = Some(std::time::SystemTime::now());
 
@@ -652,10 +731,12 @@ impl Session {
         }
 
         // Validate identifier exists
-        let env = self.environments.get(identifier)
-            .ok_or_else(|| SessionError::Runtime(
-                format!("Unknown environment identifier: {identifier}"),
-            ))?
+        let env = self
+            .environments
+            .get(identifier)
+            .ok_or_else(|| {
+                SessionError::Runtime(format!("Unknown environment identifier: {identifier}"))
+            })?
             .clone();
 
         // Validate LIFO order
@@ -667,7 +748,6 @@ impl Session {
                 ),
             ));
         }
-
 
         let symtab = self.build_symbol_table(None, resolved_symtab)?;
 
@@ -690,7 +770,10 @@ impl Session {
             self.state = SessionState::Running;
             self.notify_callback();
 
-            log_section_banner(&self.session_id, &format!("Exiting Environment: {}", env.name));
+            log_section_banner(
+                &self.session_id,
+                &format!("Exiting Environment: {}", env.name),
+            );
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
@@ -700,12 +783,16 @@ impl Session {
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
             #[allow(unused_mut)]
-            let mut runner =
-                EnvironmentScriptRunner::new(&self.session_id, self.working_directory.clone(), self.files_directory.clone(), self.user.clone())
-                    .with_redactions(self.redactions_enabled())
-                    .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-                    .with_cancel_token(cancel_token)
-                    .with_cancel_request_rx(cancel_rx);
+            let mut runner = EnvironmentScriptRunner::new(
+                &self.session_id,
+                self.working_directory.clone(),
+                self.files_directory.clone(),
+                self.user.clone(),
+            )
+            .with_redactions(self.redactions_enabled())
+            .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
+            .with_cancel_token(cancel_token)
+            .with_cancel_request_rx(cancel_rx);
             #[cfg(unix)]
             let mut runner = match self.helper.take() {
                 Some(h) => runner.with_helper(h),
@@ -716,12 +803,13 @@ impl Session {
 
             let lib = self.library.clone();
             let rules = self.path_mapping_rules.clone();
-            let runner_fut = runner.exit(
-                &env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx,
-            );
+            let runner_fut =
+                runner.exit(&env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, identifier).await;
             #[cfg(unix)]
-            { self.helper = runner.take_helper(); }
+            {
+                self.helper = runner.take_helper();
+            }
             let result = result?;
 
             if result.state != ActionState::Success {
@@ -742,9 +830,16 @@ impl Session {
             self.action_status_message = None;
             self.action_fail_message = None;
             self.action_exit_code = None;
-            self.state = if self.ending_only { SessionState::ReadyEnding } else { SessionState::Ready };
+            self.state = if self.ending_only {
+                SessionState::ReadyEnding
+            } else {
+                SessionState::Ready
+            };
 
-            log_section_banner(&self.session_id, &format!("Exiting Environment: {}", env.name));
+            log_section_banner(
+                &self.session_id,
+                &format!("Exiting Environment: {}", env.name),
+            );
 
             self.action_ended_at = Some(std::time::SystemTime::now());
 
@@ -813,12 +908,16 @@ impl Session {
         let mut action_symtab = symtab.clone();
         self.materialize_path_mapping(&mut action_symtab)?;
         #[allow(unused_mut)]
-        let mut runner =
-            StepScriptRunner::new(&self.session_id, self.working_directory.clone(), self.files_directory.clone(), self.user.clone())
-                .with_redactions(self.redactions_enabled())
-                .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-                .with_cancel_token(cancel_token)
-                .with_cancel_request_rx(cancel_rx);
+        let mut runner = StepScriptRunner::new(
+            &self.session_id,
+            self.working_directory.clone(),
+            self.files_directory.clone(),
+            self.user.clone(),
+        )
+        .with_redactions(self.redactions_enabled())
+        .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
+        .with_cancel_token(cancel_token)
+        .with_cancel_request_rx(cancel_rx);
         #[cfg(unix)]
         let mut runner = match self.helper.take() {
             Some(h) => runner.with_helper(h),
@@ -831,11 +930,20 @@ impl Session {
         let lib = self.library.clone();
         let rules = self.path_mapping_rules.clone();
         let runner_fut = runner.run(
-            script, &action_symtab, lib.as_deref(), &rules, &env_vars, tx,
+            script,
+            &action_symtab,
+            lib.as_deref(),
+            &rules,
+            &env_vars,
+            tx,
         );
-        let result = self.drive_action(runner_fut, &mut rx, &step_identifier).await;
+        let result = self
+            .drive_action(runner_fut, &mut rx, &step_identifier)
+            .await;
         #[cfg(unix)]
-        { self.helper = runner.take_helper(); }
+        {
+            self.helper = runner.take_helper();
+        }
         let result = result?;
 
         Ok(ActionResult {
@@ -867,7 +975,9 @@ impl Session {
             });
         }
         if command.is_empty() || command.trim().is_empty() {
-            return Err(SessionError::Runtime("command must be a non-empty string".into()));
+            return Err(SessionError::Runtime(
+                "command must be a non-empty string".into(),
+            ));
         }
         if let Some(t) = timeout {
             if t.is_zero() {
@@ -892,21 +1002,30 @@ impl Session {
         let env_vars = if use_session_env_vars {
             self.evaluate_env_vars(os_env_vars)
         } else {
-            let mut result: HashMap<String, Option<String>> = self.process_env.iter()
-                .map(|(k, v)| (k.clone(), Some(v.clone()))).collect();
+            let mut result: HashMap<String, Option<String>> = self
+                .process_env
+                .iter()
+                .map(|(k, v)| (k.clone(), Some(v.clone())))
+                .collect();
             if let Some(extra) = os_env_vars {
-                for (k, v) in extra { result.insert(k.clone(), Some(v.clone())); }
+                for (k, v) in extra {
+                    result.insert(k.clone(), Some(v.clone()));
+                }
             }
             result
         };
 
         let mut cmd_args = vec![command.to_string()];
-        if let Some(a) = args { cmd_args.extend(a.iter().cloned()); }
+        if let Some(a) = args {
+            cmd_args.extend(a.iter().cloned());
+        }
 
         // Route through the persistent helper process when cross-user helper is active.
         #[cfg(unix)]
         if self.helper.is_some() {
-            return self.run_subprocess_via_helper(&cmd_args, env_vars, timeout).await;
+            return self
+                .run_subprocess_via_helper(&cmd_args, env_vars, timeout)
+                .await;
         }
 
         let cancel_token = self.new_action_cancel_token();
@@ -915,17 +1034,26 @@ impl Session {
         self.cancel_request_tx = Some(cancel_tx);
 
         let config = crate::subprocess::SubprocessConfig {
-            args: cmd_args, env_vars, working_dir: Some(self.working_directory.clone()),
-            timeout, user: self.user.clone(),
+            args: cmd_args,
+            env_vars,
+            working_dir: Some(self.working_directory.clone()),
+            timeout,
+            user: self.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
         };
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
-        let subprocess_identifier = format!("{}:subprocess:{}", self.session_id, uuid::Uuid::new_v4().simple());
+        let subprocess_identifier = format!(
+            "{}:subprocess:{}",
+            self.session_id,
+            uuid::Uuid::new_v4().simple()
+        );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let sid = self.session_id.clone();
-        let runner_fut = crate::subprocess::run_subprocess(config, &mut filter, &sid, tx, cancel_token);
-        self.drive_action(runner_fut, &mut rx, &subprocess_identifier).await
+        let runner_fut =
+            crate::subprocess::run_subprocess(config, &mut filter, &sid, tx, cancel_token);
+        self.drive_action(runner_fut, &mut rx, &subprocess_identifier)
+            .await
     }
 
     /// Execute a subprocess via the persistent cross-user helper process.
@@ -941,7 +1069,11 @@ impl Session {
     ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let subprocess_identifier = format!("{}:subprocess:{}", self.session_id, uuid::Uuid::new_v4().simple());
+        let subprocess_identifier = format!(
+            "{}:subprocess:{}",
+            self.session_id,
+            uuid::Uuid::new_v4().simple()
+        );
 
         let config = crate::subprocess::SubprocessConfig {
             args: args.to_vec(),
@@ -953,10 +1085,20 @@ impl Session {
             cancel_request_rx: None,
         };
 
-        let helper = self.helper.as_mut().expect("caller checked helper.is_some()");
+        let helper = self
+            .helper
+            .as_mut()
+            .expect("caller checked helper.is_some()");
         let sid = self.session_id.clone();
         let result = tokio::task::block_in_place(|| {
-            run_via_helper(helper, &config, &mut filter, &sid, tx, self.cancel_writer.as_ref())
+            run_via_helper(
+                helper,
+                &config,
+                &mut filter,
+                &sid,
+                tx,
+                self.cancel_writer.as_ref(),
+            )
         });
 
         // Drain any messages sent during the blocking loop.
@@ -971,7 +1113,11 @@ impl Session {
         self.cancel_token = None;
         self.cancel_request_tx = None;
         self.mark_action_failed = false;
-        self.state = if r.state == ActionState::Success { SessionState::Ready } else { SessionState::ReadyEnding };
+        self.state = if r.state == ActionState::Success {
+            SessionState::Ready
+        } else {
+            SessionState::ReadyEnding
+        };
         self.notify_callback();
         Ok(r)
     }
@@ -1123,42 +1269,69 @@ impl Session {
     fn materialize_path_mapping(&self, symtab: &mut SymbolTable) -> Result<(), SessionError> {
         let has_rules = !self.path_mapping_rules.is_empty();
         let rules_json = if has_rules {
-            let rules: Vec<serde_json::Value> = self.path_mapping_rules.iter().map(|rule| {
-                serde_json::json!({
-                    "source_path_format": match rule.source_path_format {
-                        openjd_expr::path_mapping::PathFormat::Posix => "POSIX",
-                        openjd_expr::path_mapping::PathFormat::Windows => "WINDOWS",
-                        openjd_expr::path_mapping::PathFormat::Uri => "URI",
-                    },
-                    "source_path": &rule.source_path,
-                    "destination_path": &rule.destination_path,
+            let rules: Vec<serde_json::Value> = self
+                .path_mapping_rules
+                .iter()
+                .map(|rule| {
+                    serde_json::json!({
+                        "source_path_format": match rule.source_path_format {
+                            openjd_expr::path_mapping::PathFormat::Posix => "POSIX",
+                            openjd_expr::path_mapping::PathFormat::Windows => "WINDOWS",
+                            openjd_expr::path_mapping::PathFormat::Uri => "URI",
+                        },
+                        "source_path": &rule.source_path,
+                        "destination_path": &rule.destination_path,
+                    })
                 })
-            }).collect();
-            serde_json::json!({"version": "pathmapping-1.0", "path_mapping_rules": rules}).to_string()
+                .collect();
+            serde_json::json!({"version": "pathmapping-1.0", "path_mapping_rules": rules})
+                .to_string()
         } else {
             serde_json::json!({}).to_string()
         };
 
-        symtab.set("Session.HasPathMappingRules", openjd_expr::ExprValue::Bool(has_rules))
-            .map_err(|e| SessionError::Runtime(format!("Failed to set HasPathMappingRules: {e}")))?;
+        symtab
+            .set(
+                "Session.HasPathMappingRules",
+                openjd_expr::ExprValue::Bool(has_rules),
+            )
+            .map_err(|e| {
+                SessionError::Runtime(format!("Failed to set HasPathMappingRules: {e}"))
+            })?;
 
-        let filename = self.working_directory.join(format!("pathmapping_{}.json", uuid::Uuid::new_v4().simple()));
+        let filename = self.working_directory.join(format!(
+            "pathmapping_{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
         std::fs::write(&filename, &rules_json).map_err(|e| SessionError::WorkingDirectory {
-            path: filename.clone(), source: e,
+            path: filename.clone(),
+            source: e,
         })?;
 
-        symtab.set("Session.PathMappingRulesFile", openjd_expr::ExprValue::Path {
-            value: filename.to_string_lossy().to_string(),
-            format: openjd_expr::path_mapping::PathFormat::host(),
-        }).map_err(|e| SessionError::Runtime(format!("Failed to set PathMappingRulesFile: {e}")))?;
+        symtab
+            .set(
+                "Session.PathMappingRulesFile",
+                openjd_expr::ExprValue::Path {
+                    value: filename.to_string_lossy().to_string(),
+                    format: openjd_expr::path_mapping::PathFormat::host(),
+                },
+            )
+            .map_err(|e| {
+                SessionError::Runtime(format!("Failed to set PathMappingRulesFile: {e}"))
+            })?;
 
         Ok(())
     }
 
     /// Evaluate the cumulative env vars from process_env + extra + per-environment changes.
     /// Mirrors Python `_evaluate_current_session_env_vars`.
-    pub fn evaluate_env_vars(&self, extra: Option<&HashMap<String, String>>) -> HashMap<String, Option<String>> {
-        let mut result: HashMap<String, Option<String>> = self.process_env.iter()
+    pub fn evaluate_env_vars(
+        &self,
+        extra: Option<&HashMap<String, String>>,
+    ) -> HashMap<String, Option<String>> {
+        let mut result: HashMap<String, Option<String>> = self
+            .process_env
+            .iter()
             .map(|(k, v)| (normalize_env_key(k), Some(v.clone())))
             .collect();
         if let Some(extra) = extra {
@@ -1198,8 +1371,11 @@ impl Session {
         let mut symtab = if let Some(base) = base {
             // Deserialize with host path format — this is the template→session boundary.
             // Path values stored as Posix in template scope get normalized to host format.
-            let mut s = base.to_symtab(openjd_expr::path_mapping::PathFormat::host())
-                .map_err(|e| SessionError::Runtime(format!("Failed to deserialize resolved_symtab: {e}")))?;
+            let mut s = base
+                .to_symtab(openjd_expr::path_mapping::PathFormat::host())
+                .map_err(|e| {
+                    SessionError::Runtime(format!("Failed to deserialize resolved_symtab: {e}"))
+                })?;
             // Re-apply path mapping to Param.* PATH values from the base symtab.
             // The base (resolved_symtab from create_job) has unmapped paths; the session
             // knows the worker's path mapping rules.
@@ -1214,20 +1390,39 @@ impl Session {
                         };
                         let mapped = self.apply_path_mapping_to_string(raw);
                         let key = format!("Param.{name}");
-                        s.set(&key, openjd_expr::ExprValue::Path {
-                            value: mapped,
-                            format: openjd_expr::path_mapping::PathFormat::host(),
-                        }).map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
+                        s.set(
+                            &key,
+                            openjd_expr::ExprValue::Path {
+                                value: mapped,
+                                format: openjd_expr::path_mapping::PathFormat::host(),
+                            },
+                        )
+                        .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
                     }
                     JobParameterType::ListPath => {
                         if let openjd_expr::ExprValue::ListString(ref elements, _) = param.value {
-                            let mapped: Vec<openjd_expr::ExprValue> = elements.iter().map(|s| {
-                                let m = self.apply_path_mapping_to_string(s);
-                                openjd_expr::ExprValue::Path { value: m, format: openjd_expr::path_mapping::PathFormat::host() }
-                            }).collect();
+                            let mapped: Vec<openjd_expr::ExprValue> = elements
+                                .iter()
+                                .map(|s| {
+                                    let m = self.apply_path_mapping_to_string(s);
+                                    openjd_expr::ExprValue::Path {
+                                        value: m,
+                                        format: openjd_expr::path_mapping::PathFormat::host(),
+                                    }
+                                })
+                                .collect();
                             let key = format!("Param.{name}");
-                            s.set(&key, openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap())
-                                .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
+                            s.set(
+                                &key,
+                                openjd_expr::ExprValue::make_list(
+                                    mapped,
+                                    openjd_expr::ExprType::PATH,
+                                )
+                                .unwrap(),
+                            )
+                            .map_err(|e| {
+                                SessionError::Runtime(format!("Failed to set {key}: {e}"))
+                            })?;
                         }
                     }
                     _ => {}
@@ -1255,18 +1450,23 @@ impl Session {
                             format: openjd_expr::path_mapping::PathFormat::host(),
                         }
                     }
-                    JobParameterType::ListPath => {
-                        match &param.value {
-                            openjd_expr::ExprValue::ListString(elements, _) => {
-                                let mapped: Vec<openjd_expr::ExprValue> = elements.iter().map(|s| {
+                    JobParameterType::ListPath => match &param.value {
+                        openjd_expr::ExprValue::ListString(elements, _) => {
+                            let mapped: Vec<openjd_expr::ExprValue> = elements
+                                .iter()
+                                .map(|s| {
                                     let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::Path { value: m, format: openjd_expr::path_mapping::PathFormat::host() }
-                                }).collect();
-                                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
-                            }
-                            other => self.apply_path_mapping_to_value(other),
+                                    openjd_expr::ExprValue::Path {
+                                        value: m,
+                                        format: openjd_expr::path_mapping::PathFormat::host(),
+                                    }
+                                })
+                                .collect();
+                            openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
+                                .unwrap()
                         }
-                    }
+                        other => self.apply_path_mapping_to_value(other),
+                    },
                     _ => self.apply_path_mapping_to_value(&param.value),
                 };
                 s.set(&key, mapped_value)
@@ -1276,16 +1476,22 @@ impl Session {
         };
 
         let host_path_format = openjd_expr::path_mapping::PathFormat::host();
-        symtab.set("Session.WorkingDirectory", openjd_expr::ExprValue::Path {
-            value: self.working_directory.to_string_lossy().to_string(),
-            format: host_path_format,
-        }).map_err(|e| SessionError::Runtime(format!("Failed to set WorkingDirectory: {e}")))?;
+        symtab
+            .set(
+                "Session.WorkingDirectory",
+                openjd_expr::ExprValue::Path {
+                    value: self.working_directory.to_string_lossy().to_string(),
+                    format: host_path_format,
+                },
+            )
+            .map_err(|e| SessionError::Runtime(format!("Failed to set WorkingDirectory: {e}")))?;
 
         if let Some(task_params) = task_parameter_values {
             for (name, tv) in task_params {
                 // Task.RawParam.* — raw string value
                 let raw_key = format!("Task.RawParam.{name}");
-                symtab.set(&raw_key, tv.value.clone())
+                symtab
+                    .set(&raw_key, tv.value.clone())
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
 
                 // Task.Param.* — typed value with path mapping applied for PATH types
@@ -1305,7 +1511,8 @@ impl Session {
                     }
                     _ => tv.value.clone(),
                 };
-                symtab.set(&key, param_value)
+                symtab
+                    .set(&key, param_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
             }
         }
@@ -1324,9 +1531,15 @@ impl Session {
     }
 
     /// Apply path mapping rules to a value if it's a Path or ListPath type.
-    fn apply_path_mapping_to_value(&self, value: &openjd_expr::ExprValue) -> openjd_expr::ExprValue {
+    fn apply_path_mapping_to_value(
+        &self,
+        value: &openjd_expr::ExprValue,
+    ) -> openjd_expr::ExprValue {
         match value {
-            openjd_expr::ExprValue::Path { value: path_str, format } => {
+            openjd_expr::ExprValue::Path {
+                value: path_str,
+                format,
+            } => {
                 for rule in self.path_mapping_rules.iter() {
                     if let Some(mapped) = rule.apply(path_str) {
                         return openjd_expr::ExprValue::Path {
@@ -1338,10 +1551,17 @@ impl Session {
                 value.clone()
             }
             openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
-                let mapped: Vec<openjd_expr::ExprValue> = elements.iter().map(|s| {
-                    let mapped_s = openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
-                    openjd_expr::ExprValue::Path { value: mapped_s, format: *fmt }
-                }).collect();
+                let mapped: Vec<openjd_expr::ExprValue> = elements
+                    .iter()
+                    .map(|s| {
+                        let mapped_s =
+                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
+                        openjd_expr::ExprValue::Path {
+                            value: mapped_s,
+                            format: *fmt,
+                        }
+                    })
+                    .collect();
                 openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
             }
             _ => value.clone(),
@@ -1364,4 +1584,3 @@ impl Drop for Session {
         }
     }
 }
-

@@ -8,9 +8,12 @@
 use std::str::FromStr;
 
 use crate::error::OpenJdError;
-use crate::template::{JobTemplate, EnvironmentTemplate};
-use crate::types::{TemplateSpecificationVersion, ValidationContext, SpecificationRevision, Extensions, KnownExtension};
 use crate::template::validate_v2023_09 as validate;
+use crate::template::{EnvironmentTemplate, JobTemplate};
+use crate::types::{
+    Extensions, KnownExtension, SpecificationRevision, TemplateSpecificationVersion,
+    ValidationContext,
+};
 
 /// Document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,25 +29,24 @@ pub fn document_string_to_object(
 ) -> Result<serde_yaml::Value, OpenJdError> {
     let parsed = match doc_type {
         DocumentType::Json => {
-            let v: serde_json::Value = serde_json::from_str(document)
-                .map_err(|e| OpenJdError::DecodeValidation(format!(
+            let v: serde_json::Value = serde_json::from_str(document).map_err(|e| {
+                OpenJdError::DecodeValidation(format!(
                     "The document is not a valid JSON document consisting of key-value pairs. {e}"
-                )))?;
-            serde_yaml::to_value(v)
-                .map_err(|e| OpenJdError::DecodeValidation(e.to_string()))?
+                ))
+            })?;
+            serde_yaml::to_value(v).map_err(|e| OpenJdError::DecodeValidation(e.to_string()))?
         }
-        DocumentType::Yaml => {
-            serde_yaml::from_str(document)
-                .map_err(|e| OpenJdError::DecodeValidation(format!(
-                    "The document is not a valid YAML document consisting of key-value pairs. {e}"
-                )))?
-        }
+        DocumentType::Yaml => serde_yaml::from_str(document).map_err(|e| {
+            OpenJdError::DecodeValidation(format!(
+                "The document is not a valid YAML document consisting of key-value pairs. {e}"
+            ))
+        })?,
     };
 
     if !parsed.is_mapping() {
-        return Err(OpenJdError::DecodeValidation(
-            format!("The document is not a valid {doc_type:?} document consisting of key-value pairs.")
-        ));
+        return Err(OpenJdError::DecodeValidation(format!(
+            "The document is not a valid {doc_type:?} document consisting of key-value pairs."
+        )));
     }
 
     Ok(parsed)
@@ -60,9 +62,12 @@ pub fn decode_job_template(
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| OpenJdError::DecodeValidation(
-            "Template is missing Open Job Description schema version key: specificationVersion".to_string()
-        ))?;
+        .ok_or_else(|| {
+            OpenJdError::DecodeValidation(
+                "Template is missing Open Job Description schema version key: specificationVersion"
+                    .to_string(),
+            )
+        })?;
 
     let version = TemplateSpecificationVersion::from_str(&version_str)
         .map_err(|_| {
@@ -80,8 +85,9 @@ pub fn decode_job_template(
         )));
     }
 
-    let jt: JobTemplate = serde_yaml::from_value(template)
-        .map_err(|e| OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
+    let jt: JobTemplate = serde_yaml::from_value(template).map_err(|e| {
+        OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
+    })?;
 
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
@@ -99,13 +105,15 @@ pub fn decode_job_template(
                 )));
             }
             match KnownExtension::from_str(ext_str) {
-                            Ok(known) => { extensions.insert(known); }
-                            Err(_) => {
-                                return Err(OpenJdError::DecodeValidation(format!(
-                                    "Unknown or unsupported extension: {ext_str}"
-                                )));
-                            }
-                        }
+                Ok(known) => {
+                    extensions.insert(known);
+                }
+                Err(_) => {
+                    return Err(OpenJdError::DecodeValidation(format!(
+                        "Unknown or unsupported extension: {ext_str}"
+                    )));
+                }
+            }
         }
     }
 
@@ -124,17 +132,19 @@ pub fn decode_environment_template(
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| OpenJdError::DecodeValidation(
-            "Template is missing Open Job Description schema version key: specificationVersion".to_string()
-        ))?;
-
-    let version = TemplateSpecificationVersion::from_str(&version_str)
-        .map_err(|_| {
-            let allowed = TemplateSpecificationVersion::Environment2023_09.as_str();
-            OpenJdError::DecodeValidation(format!(
-                "Unknown template version: {version_str}. Allowed values are: {allowed}"
-            ))
+        .ok_or_else(|| {
+            OpenJdError::DecodeValidation(
+                "Template is missing Open Job Description schema version key: specificationVersion"
+                    .to_string(),
+            )
         })?;
+
+    let version = TemplateSpecificationVersion::from_str(&version_str).map_err(|_| {
+        let allowed = TemplateSpecificationVersion::Environment2023_09.as_str();
+        OpenJdError::DecodeValidation(format!(
+            "Unknown template version: {version_str}. Allowed values are: {allowed}"
+        ))
+    })?;
 
     if !version.is_environment_template() {
         let allowed = TemplateSpecificationVersion::Environment2023_09.as_str();
@@ -144,15 +154,16 @@ pub fn decode_environment_template(
         )));
     }
 
-    let et: EnvironmentTemplate = serde_yaml::from_value(template)
-        .map_err(|e| OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
+    let et: EnvironmentTemplate = serde_yaml::from_value(template).map_err(|e| {
+        OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
+    })?;
 
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
     if let Some(template_exts) = &et.extensions {
         if template_exts.is_empty() {
             return Err(OpenJdError::DecodeValidation(
-                "extensions, if provided, must be a non-empty list.".to_string()
+                "extensions, if provided, must be a non-empty list.".to_string(),
             ));
         }
         let supported: std::collections::HashSet<&str> = supported_extensions
@@ -168,13 +179,15 @@ pub fn decode_environment_template(
                 )));
             }
             match KnownExtension::from_str(ext_str) {
-                            Ok(known) => { extensions.insert(known); }
-                            Err(_) => {
-                                return Err(OpenJdError::DecodeValidation(format!(
-                                    "Unknown or unsupported extension: {ext_str}"
-                                )));
-                            }
-                        }
+                Ok(known) => {
+                    extensions.insert(known);
+                }
+                Err(_) => {
+                    return Err(OpenJdError::DecodeValidation(format!(
+                        "Unknown or unsupported extension: {ext_str}"
+                    )));
+                }
+            }
         }
     }
 
@@ -185,6 +198,8 @@ pub fn decode_environment_template(
 }
 
 /// Auto-detect template type and decode.
+// Both variants are large structs only used as return values, not stored in collections.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum DecodedTemplate {
     Job(JobTemplate),
@@ -200,19 +215,24 @@ pub fn decode_template(
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| OpenJdError::DecodeValidation(
-            "Template is missing Open Job Description schema version key: specificationVersion".to_string()
-        ))?;
+        .ok_or_else(|| {
+            OpenJdError::DecodeValidation(
+                "Template is missing Open Job Description schema version key: specificationVersion"
+                    .to_string(),
+            )
+        })?;
 
-    let version = version_str.parse::<TemplateSpecificationVersion>()
-        .map_err(|_| OpenJdError::DecodeValidation(format!(
-            "Unknown template version: {version_str}"
-        )))?;
+    let version = version_str
+        .parse::<TemplateSpecificationVersion>()
+        .map_err(|_| {
+            OpenJdError::DecodeValidation(format!("Unknown template version: {version_str}"))
+        })?;
 
     if version.is_job_template() {
         decode_job_template(template, supported_extensions).map(DecodedTemplate::Job)
     } else {
-        decode_environment_template(template, supported_extensions).map(DecodedTemplate::Environment)
+        decode_environment_template(template, supported_extensions)
+            .map(DecodedTemplate::Environment)
     }
 }
 
@@ -280,11 +300,13 @@ mod tests {
 
     #[test]
     fn test_decode_job_template_success() {
-        let v = yaml_val(r#"{
+        let v = yaml_val(
+            r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "name",
             "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-        }"#);
+        }"#,
+        );
         let jt = decode_job_template(v, None).unwrap();
         assert_eq!(jt.specification_version, "jobtemplate-2023-09");
     }
@@ -311,14 +333,16 @@ mod tests {
 
     #[test]
     fn test_decode_env_template_success() {
-        let v = yaml_val(r#"{
+        let v = yaml_val(
+            r#"{
             "specificationVersion": "environment-2023-09",
             "environment": {
                 "name": "FooEnv",
                 "description": "A description",
                 "script": {"actions": {"onEnter": {"command": "echo", "args": ["Hello", "World"]}}}
             }
-        }"#);
+        }"#,
+        );
         let et = decode_environment_template(v, None).unwrap();
         assert_eq!(et.specification_version, "environment-2023-09");
     }
@@ -327,25 +351,35 @@ mod tests {
 
     #[test]
     fn test_decode_template_auto_detect_job() {
-        let v = yaml_val(r#"{
+        let v = yaml_val(
+            r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "name",
             "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
-        }"#);
-        assert!(matches!(decode_template(v, None).unwrap(), DecodedTemplate::Job(_)));
+        }"#,
+        );
+        assert!(matches!(
+            decode_template(v, None).unwrap(),
+            DecodedTemplate::Job(_)
+        ));
     }
 
     #[test]
     fn test_decode_template_auto_detect_env() {
-        let v = yaml_val(r#"{
+        let v = yaml_val(
+            r#"{
             "specificationVersion": "environment-2023-09",
             "environment": {
                 "name": "FooEnv",
                 "description": "A description",
                 "script": {"actions": {"onEnter": {"command": "echo", "args": ["Hello", "World"]}}}
             }
-        }"#);
-        assert!(matches!(decode_template(v, None).unwrap(), DecodedTemplate::Environment(_)));
+        }"#,
+        );
+        assert!(matches!(
+            decode_template(v, None).unwrap(),
+            DecodedTemplate::Environment(_)
+        ));
     }
 
     #[test]

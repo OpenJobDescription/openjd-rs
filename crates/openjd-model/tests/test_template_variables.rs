@@ -15,19 +15,20 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).expect(&format!("Expected success for: {s}"));
+    decode_job_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 #[allow(dead_code)]
 fn check_err_count(s: &str, expected_count: usize) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     // Count error lines (each error starts with a path followed by \n\t)
     let actual = msg.matches("\n\t").count();
-    assert_eq!(actual, expected_count,
-        "Expected {expected_count} errors, got {actual}.\nFull error:\n{msg}");
+    assert_eq!(
+        actual, expected_count,
+        "Expected {expected_count} errors, got {actual}.\nFull error:\n{msg}"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -36,7 +37,8 @@ fn check_err_count(s: &str, expected_count: usize) {
 
 #[test]
 fn minimum_int_parameter() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{Param.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "INT"}],
@@ -44,12 +46,14 @@ fn minimum_int_parameter() {
             "command": "foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}",
             "args": ["foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}"]
         }}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn minimum_path_parameter() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{RawParam.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
@@ -57,7 +61,8 @@ fn minimum_path_parameter() {
             "command": "foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}",
             "args": ["foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}"]
         }}}}]
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -66,22 +71,26 @@ fn minimum_path_parameter() {
 
 #[test]
 fn session_working_directory_not_in_name_scope() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{Session.WorkingDirectory}}",
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#);
+    }"#,
+    );
     assert!(decode_job_template(v, None).is_err());
 }
 
 #[test]
 fn path_parameter_not_in_name_scope() {
-    let v = yaml_val(r#"{
+    let v = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo {{Param.Foo}}",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#);
+    }"#,
+    );
     assert!(decode_job_template(v, None).is_err());
 }
 
@@ -91,34 +100,40 @@ fn path_parameter_not_in_name_scope() {
 
 fn decode_ok_expr(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect(&format!("Expected success for: {s}"));
+    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 #[test]
 fn job_name_in_job_environment_variable() {
-    decode_ok_expr(r#"{
+    decode_ok_expr(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
         "jobEnvironments": [{"name": "E", "variables": {"JOB": "{{Job.Name}}"}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn job_name_in_job_environment_script() {
-    decode_ok_expr(r#"{
+    decode_ok_expr(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
         "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{Job.Name}}"]}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn job_name_in_host_requirements() {
-    decode_ok_expr(r#"{
+    decode_ok_expr(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
@@ -127,7 +142,8 @@ fn job_name_in_host_requirements() {
             "hostRequirements": {"attributes": [{"name": "attr.worker.os.family", "allOf": ["{{jn}}"]}]},
             "script": {"actions": {"onRun": {"command": "echo"}}}
         }]
-    }"#);
+    }"#,
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -137,7 +153,8 @@ fn job_name_in_host_requirements() {
 
 #[test]
 fn step_name_in_host_requirements() {
-    decode_ok_expr(r#"{
+    decode_ok_expr(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
@@ -146,12 +163,14 @@ fn step_name_in_host_requirements() {
             "hostRequirements": {"attributes": [{"name": "attr.worker.os.family", "allOf": ["{{sn}}"]}]},
             "script": {"actions": {"onRun": {"command": "echo"}}}
         }]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn step_name_in_parameter_space_range() {
-    decode_ok_expr(r#"{
+    decode_ok_expr(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "MyJob",
@@ -161,5 +180,6 @@ fn step_name_in_parameter_space_range() {
             ]},
             "script": {"actions": {"onRun": {"command": "echo"}}}
         }]
-    }"#);
+    }"#,
+    );
 }

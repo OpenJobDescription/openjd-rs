@@ -139,7 +139,10 @@ fn abs_parent_manifest_hash_optional() {
 #[test]
 fn abs_new_directory_included() {
     let parent = abs(vec![], vec![DirEntry::new("/old_dir")]);
-    let current = abs(vec![], vec![DirEntry::new("/old_dir"), DirEntry::new("/new_dir")]);
+    let current = abs(
+        vec![],
+        vec![DirEntry::new("/old_dir"), DirEntry::new("/new_dir")],
+    );
     let diff = diff_snapshots(&parent, &current, &opts()).unwrap();
     let dir_paths: Vec<&str> = diff.dirs.iter().map(|d| d.path.as_str()).collect();
     assert!(dir_paths.contains(&"/new_dir"));
@@ -159,12 +162,21 @@ fn abs_deleted_directory_has_marker() {
 
 #[test]
 fn abs_symlink_change_detected() {
-    let parent = abs(vec![FileEntry::symlink("/link.txt", "/old_target.txt")], vec![]);
-    let current = abs(vec![FileEntry::symlink("/link.txt", "/new_target.txt")], vec![]);
+    let parent = abs(
+        vec![FileEntry::symlink("/link.txt", "/old_target.txt")],
+        vec![],
+    );
+    let current = abs(
+        vec![FileEntry::symlink("/link.txt", "/new_target.txt")],
+        vec![],
+    );
     let diff = diff_snapshots(&parent, &current, &opts()).unwrap();
     assert_eq!(diff.files.len(), 1);
     assert_eq!(diff.files[0].path, "/link.txt");
-    assert_eq!(diff.files[0].symlink_target.as_deref(), Some("/new_target.txt"));
+    assert_eq!(
+        diff.files[0].symlink_target.as_deref(),
+        Some("/new_target.txt")
+    );
 }
 
 #[test]
@@ -384,7 +396,10 @@ fn entries_differ_ignore_hashes_skips_chunkhashes() {
 fn ignore_hashes_same_metadata_not_modified() {
     let parent = abs(vec![hfile("/file.txt", "hash1", 100, 1000)], vec![]);
     let current = abs(vec![hfile("/file.txt", "hash2", 100, 1000)], vec![]);
-    let o = DiffOptions { ignore_hashes: true, ..opts() };
+    let o = DiffOptions {
+        ignore_hashes: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 0);
 }
@@ -393,7 +408,10 @@ fn ignore_hashes_same_metadata_not_modified() {
 fn ignore_hashes_different_mtime_is_modified() {
     let parent = abs(vec![hfile("/file.txt", "hash1", 100, 1000)], vec![]);
     let current = abs(vec![hfile("/file.txt", "hash1", 100, 2000)], vec![]);
-    let o = DiffOptions { ignore_hashes: true, ..opts() };
+    let o = DiffOptions {
+        ignore_hashes: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 1);
     assert_eq!(diff.files[0].path, "/file.txt");
@@ -403,7 +421,10 @@ fn ignore_hashes_different_mtime_is_modified() {
 fn ignore_hashes_different_size_is_modified() {
     let parent = abs(vec![hfile("/file.txt", "hash1", 100, 1000)], vec![]);
     let current = abs(vec![hfile("/file.txt", "hash1", 200, 1000)], vec![]);
-    let o = DiffOptions { ignore_hashes: true, ..opts() };
+    let o = DiffOptions {
+        ignore_hashes: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 1);
     assert_eq!(diff.files[0].path, "/file.txt");
@@ -417,7 +438,10 @@ fn preserve_runnable_copies_from_parent() {
     pf.runnable = true;
     let parent = abs(vec![pf], vec![]);
     let current = abs(vec![hfile("/script.sh", "hash2", 100, 2000)], vec![]);
-    let o = DiffOptions { preserve_runnable: true, ..opts() };
+    let o = DiffOptions {
+        preserve_runnable: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 1);
     assert!(diff.files[0].runnable);
@@ -429,7 +453,10 @@ fn preserve_runnable_does_not_affect_new_files() {
     let mut f = hfile("/script.sh", "hash1", 100, 1000);
     f.runnable = true;
     let current = abs(vec![f], vec![]);
-    let o = DiffOptions { preserve_runnable: true, ..opts() };
+    let o = DiffOptions {
+        preserve_runnable: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 1);
     assert!(diff.files[0].runnable);
@@ -449,10 +476,20 @@ fn deleted_directory_includes_contained_files() {
     );
     let current = abs(vec![hfile("/keep.txt", "h1", 100, 1000)], vec![]);
     let diff = diff_snapshots(&parent, &current, &opts()).unwrap();
-    let deleted_files: Vec<&str> = diff.files.iter().filter(|f| f.deleted).map(|f| f.path.as_str()).collect();
+    let deleted_files: Vec<&str> = diff
+        .files
+        .iter()
+        .filter(|f| f.deleted)
+        .map(|f| f.path.as_str())
+        .collect();
     assert!(deleted_files.contains(&"/deleted_dir/file1.txt"));
     assert!(deleted_files.contains(&"/deleted_dir/file2.txt"));
-    let deleted_dirs: Vec<&str> = diff.dirs.iter().filter(|d| d.deleted).map(|d| d.path.as_str()).collect();
+    let deleted_dirs: Vec<&str> = diff
+        .dirs
+        .iter()
+        .filter(|d| d.deleted)
+        .map(|d| d.path.as_str())
+        .collect();
     assert!(deleted_dirs.contains(&"/deleted_dir"));
 }
 
@@ -460,11 +497,19 @@ fn deleted_directory_includes_contained_files() {
 fn deleted_directory_includes_subdirectories() {
     let parent = abs(
         vec![],
-        vec![DirEntry::new("/deleted_dir"), DirEntry::new("/deleted_dir/subdir")],
+        vec![
+            DirEntry::new("/deleted_dir"),
+            DirEntry::new("/deleted_dir/subdir"),
+        ],
     );
     let current = abs(vec![], vec![]);
     let diff = diff_snapshots(&parent, &current, &opts()).unwrap();
-    let deleted_dirs: Vec<&str> = diff.dirs.iter().filter(|d| d.deleted).map(|d| d.path.as_str()).collect();
+    let deleted_dirs: Vec<&str> = diff
+        .dirs
+        .iter()
+        .filter(|d| d.deleted)
+        .map(|d| d.path.as_str())
+        .collect();
     assert!(deleted_dirs.contains(&"/deleted_dir"));
     assert!(deleted_dirs.contains(&"/deleted_dir/subdir"));
 }
@@ -513,7 +558,10 @@ fn hash_state_unhashed_vs_hashed_errors() {
 fn hash_state_ignore_hashes_bypasses_validation() {
     let parent = abs(vec![hfile("/file.txt", "hash1", 100, 1000)], vec![]);
     let current = abs(vec![FileEntry::file("/file.txt", 100, 2000)], vec![]);
-    let o = DiffOptions { ignore_hashes: true, ..opts() };
+    let o = DiffOptions {
+        ignore_hashes: true,
+        ..opts()
+    };
     let diff = diff_snapshots(&parent, &current, &o).unwrap();
     assert_eq!(diff.files.len(), 1);
 }

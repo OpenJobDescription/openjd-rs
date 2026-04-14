@@ -14,28 +14,32 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).expect(&format!("Expected success for: {s}"));
+    decode_job_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 /// For validation-pipeline errors (path + message format).
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
 /// For serde-level errors (rejected during deserialization).
 fn check_serde_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
@@ -98,61 +102,93 @@ fn identifier_512_chars_succeeds_at_type_level() {
 #[test]
 fn identifier_513_chars_fails() {
     let err = Identifier::new(&"a".repeat(513)).unwrap_err();
-    assert!(err.to_string().contains("Identifier length must be 1..=512, got 513"), "Got: {err}");
+    assert!(
+        err.to_string()
+            .contains("Identifier length must be 1..=512, got 513"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_empty() {
     let err = Identifier::new("").unwrap_err();
-    assert!(err.to_string().contains("Identifier length must be 1..=512, got 0"), "Got: {err}");
+    assert!(
+        err.to_string()
+            .contains("Identifier length must be 1..=512, got 0"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_starts_with_digit_0() {
     let err = Identifier::new("0").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_starts_with_digit_9() {
     let err = Identifier::new("9").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_leading_space() {
     let err = Identifier::new(" a").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_trailing_space() {
     let err = Identifier::new("a ").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_starts_with_bang() {
     let err = Identifier::new("!foo").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_only_alphanum_bang() {
     let err = Identifier::new("F!").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_with_hyphen() {
     let err = Identifier::new("foo-bar").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn identifier_with_dot() {
     let err = Identifier::new("foo.bar").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 // Test disallowed printable characters (from Python's parametrized list)
@@ -202,7 +238,10 @@ fn description_printable_ranges() {
 #[test]
 fn description_too_long() {
     let err = Description::new(&"a".repeat(2049)).unwrap_err();
-    assert!(err.to_string().contains("exceeds 2048 characters"), "Got: {err}");
+    assert!(
+        err.to_string().contains("exceeds 2048 characters"),
+        "Got: {err}"
+    );
 }
 
 #[test]
@@ -251,43 +290,64 @@ fn extension_name_valid() {
 #[test]
 fn extension_name_too_short() {
     let err = ExtensionName::new("AB").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_single_char() {
     let err = ExtensionName::new("A").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_empty() {
     let err = ExtensionName::new("").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_lowercase() {
     let err = ExtensionName::new("expr").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_mixed_case() {
     let err = ExtensionName::new("ExPr").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_with_spaces() {
     let err = ExtensionName::new("FOO BAR").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 #[test]
 fn extension_name_with_hyphen() {
     let err = ExtensionName::new("FOO-BAR").unwrap_err();
-    assert!(err.to_string().contains("does not match pattern"), "Got: {err}");
+    assert!(
+        err.to_string().contains("does not match pattern"),
+        "Got: {err}"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -298,281 +358,332 @@ fn extension_name_with_hyphen() {
 
 #[test]
 fn job_name_valid_shortest() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "A",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn job_name_empty() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["name:\n\tmust not be empty."],
+    );
 }
 
 #[test]
 fn job_name_too_long() {
     let name = "a".repeat(513);
-    let tmpl = format!(r#"{{
+    let tmpl = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{name}",
         "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
-    }}"#);
+    }}"#
+    );
     check_err(&tmpl, &["name:\n\texceeds 128 characters."]);
 }
 
 #[test]
 fn job_name_with_control_char_null() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "a\u0000b",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["name:\n\tcontains control characters."],
+    );
 }
 
 #[test]
 fn job_name_with_control_char_1f() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job\u001fName",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["name:\n\tcontains control characters."],
+    );
 }
 
 #[test]
 fn job_name_with_control_char_del() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "a\u007fb",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["name:\n\tcontains control characters."],
+    );
 }
 
 #[test]
 fn job_name_with_control_char_9f() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "a\u009fb",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["name:\n\tcontains control characters."],
+    );
 }
 
 #[test]
 fn job_name_with_newline() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "a\nb",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["name:\n\tcontains control characters."],
+    );
 }
 
 // --- Step name ---
 
 #[test]
 fn step_name_valid_shortest() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{"name": "A", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn step_name_empty() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{"name": "", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "steps[0] -> name:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["steps[0] -> name:\n\tmust not be empty."],
+    );
 }
 
 #[test]
 fn step_name_too_long() {
     let name = "a".repeat(513);
-    let tmpl = format!(r#"{{
+    let tmpl = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{{"name": "{name}", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
-    }}"#);
+    }}"#
+    );
     check_err(&tmpl, &["steps[0] -> name:\n\texceeds 64 characters."]);
 }
 
 #[test]
 fn step_name_with_control_char() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{"name": "Step\u001fName", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &[
-        "steps[0] -> name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["steps[0] -> name:\n\tcontains control characters."],
+    );
 }
 
 // --- Environment name ---
 
 #[test]
 fn env_name_with_control_char() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "jobEnvironments": [{"name": "Env\u001fName", "script": {"actions": {"onEnter": {"command": "foo"}}}}]
-    }"#, &[
-        "jobEnvironments[0] -> name:\n\tcontains control characters.",
-    ]);
+    }"#,
+        &["jobEnvironments[0] -> name:\n\tcontains control characters."],
+    );
 }
 
 // --- Command ---
 
 #[test]
 fn command_empty() {
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": ""}}}}]
-    }"#, &[
-        "steps[0] -> script -> actions -> onRun -> command:\n\tmust not be empty.",
-    ]);
+    }"#,
+        &["steps[0] -> script -> actions -> onRun -> command:\n\tmust not be empty."],
+    );
 }
 
 // --- Description through template ---
 
 #[test]
 fn description_with_newlines_in_template_ok() {
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "Line1\nLine2\nLine3",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn description_too_long_in_template() {
     let desc = "a".repeat(2049);
-    let tmpl = format!(r#"{{
+    let tmpl = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "{desc}",
         "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
-    }}"#);
+    }}"#
+    );
     check_serde_err(&tmpl, &["Description exceeds 2048 characters"]);
 }
 
 #[test]
 fn description_control_char_null_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "\u0000",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Description contains control characters"]);
+    }"#,
+        &["Description contains control characters"],
+    );
 }
 
 #[test]
 fn description_control_char_1f_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "\u001f",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Description contains control characters"]);
+    }"#,
+        &["Description contains control characters"],
+    );
 }
 
 #[test]
 fn description_control_char_del_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "\u007f",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Description contains control characters"]);
+    }"#,
+        &["Description contains control characters"],
+    );
 }
 
 #[test]
 fn description_control_char_9f_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
         "description": "\u009f",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Description contains control characters"]);
+    }"#,
+        &["Description contains control characters"],
+    );
 }
 
 // --- Identifier through template (serde-level via task parameter name) ---
 
 #[test]
 fn identifier_empty_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "parameterSpace": {"taskParameterDefinitions": [{"name": "", "type": "INT", "range": [1]}]}, "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Identifier length must be 1..=512, got 0"]);
+    }"#,
+        &["Identifier length must be 1..=512, got 0"],
+    );
 }
 
 #[test]
 fn identifier_starts_with_digit_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "parameterSpace": {"taskParameterDefinitions": [{"name": "1foo", "type": "INT", "range": [1]}]}, "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn identifier_with_hyphen_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "parameterSpace": {"taskParameterDefinitions": [{"name": "foo-bar", "type": "INT", "range": [1]}]}, "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn identifier_with_bang_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "parameterSpace": {"taskParameterDefinitions": [{"name": "F!", "type": "INT", "range": [1]}]}, "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn identifier_leading_space_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "parameterSpace": {"taskParameterDefinitions": [{"name": " a", "type": "INT", "range": [1]}]}, "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 // Identifier exceeds 64 chars — validation pipeline error
 #[test]
 fn identifier_too_long_in_template() {
     let name = "a".repeat(65);
-    let tmpl = format!(r#"{{
+    let tmpl = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{{"name": "S", "parameterSpace": {{"taskParameterDefinitions": [{{"name": "{name}", "type": "INT", "range": [1]}}]}}, "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
-    }}"#);
+    }}"#
+    );
     check_err(&tmpl, &[
         "steps[0] -> parameterSpace -> taskParameterDefinitions[0]:\n\tname exceeds 64 characters.",
     ]);
@@ -582,68 +693,86 @@ fn identifier_too_long_in_template() {
 
 #[test]
 fn extension_name_lowercase_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "extensions": ["expr"]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn extension_name_too_short_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "extensions": ["AB"]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn extension_name_with_spaces_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "extensions": ["FOO BAR"]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 // --- Identifier through job parameter name (serde-level) ---
 
 #[test]
 fn param_name_empty_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "", "type": "INT"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["Identifier length must be 1..=512, got 0"]);
+    }"#,
+        &["Identifier length must be 1..=512, got 0"],
+    );
 }
 
 #[test]
 fn param_name_starts_with_digit_in_template() {
-    check_serde_err(r#"{
+    check_serde_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "0foo", "type": "INT"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
-    }"#, &["does not match pattern"]);
+    }"#,
+        &["does not match pattern"],
+    );
 }
 
 #[test]
 fn description_max_length_multibyte_unicode() {
     // 2048 CJK characters (3 bytes each in UTF-8) must be accepted.
     // The limit is 2048 characters, not 2048 bytes.
-    let desc: String = std::iter::repeat('一').take(2048).collect();
+    let desc: String = std::iter::repeat_n('一', 2048).collect();
     assert_eq!(desc.chars().count(), 2048);
     Description::new(&desc).unwrap();
 }
 
 #[test]
 fn description_too_long_multibyte_unicode() {
-    let desc: String = std::iter::repeat('一').take(2049).collect();
+    let desc: String = std::iter::repeat_n('一', 2049).collect();
     let err = Description::new(&desc).unwrap_err();
-    assert!(err.to_string().contains("exceeds 2048 characters"), "Got: {err}");
+    assert!(
+        err.to_string().contains("exceeds 2048 characters"),
+        "Got: {err}"
+    );
 }

@@ -30,9 +30,9 @@
 //! ].into_iter().collect();
 //! ```
 
-use std::collections::HashMap;
-use crate::value::ExprValue;
 use crate::types::ExprType;
+use crate::value::ExprValue;
+use std::collections::HashMap;
 
 /// Error returned when a [`SymbolTable::set`] call conflicts with an existing entry.
 ///
@@ -45,7 +45,11 @@ pub struct SymbolTableError {
 
 impl std::fmt::Display for SymbolTableError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cannot set '{}': '{}' is not a table", self.key, self.conflict)
+        write!(
+            f,
+            "Cannot set '{}': '{}' is not a table",
+            self.key, self.conflict
+        )
     }
 }
 
@@ -69,19 +73,24 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new() -> Self {
-        Self { table: HashMap::new() }
+        Self {
+            table: HashMap::new(),
+        }
     }
 
     /// Construct from a list of (dotted_key, value) pairs.
     pub fn from_pairs(pairs: Vec<(&str, ExprValue)>) -> Result<Self, SymbolTableError> {
         let mut st = Self::new();
-        for (k, v) in pairs { st.set(k, v)?; }
+        for (k, v) in pairs {
+            st.set(k, v)?;
+        }
         Ok(st)
     }
 
     /// Set a nested SymbolTable at a key (for dict-like nesting).
     pub fn set_table(&mut self, key: &str, subtable: SymbolTable) {
-        self.table.insert(key.to_string(), SymbolTableEntry::Table(subtable));
+        self.table
+            .insert(key.to_string(), SymbolTableEntry::Table(subtable));
     }
 
     /// Get a subtable at a key, or None.
@@ -114,27 +123,37 @@ impl SymbolTable {
         let parts: Vec<&str> = key.split('.').collect();
         if parts.len() == 1 {
             if matches!(self.table.get(key), Some(SymbolTableEntry::Table(_))) {
-                return Err(SymbolTableError { key: key.to_string(), conflict: key.to_string() });
+                return Err(SymbolTableError {
+                    key: key.to_string(),
+                    conflict: key.to_string(),
+                });
             }
-            self.table.insert(key.to_string(), SymbolTableEntry::Value(value));
+            self.table
+                .insert(key.to_string(), SymbolTableEntry::Value(value));
             return Ok(());
         }
         let mut current = self;
         for &part in &parts[..parts.len() - 1] {
-            let entry = current.table
+            let entry = current
+                .table
                 .entry(part.to_string())
                 .or_insert_with(|| SymbolTableEntry::Table(SymbolTable::new()));
             current = match entry {
                 SymbolTableEntry::Table(t) => t,
-                _ => return Err(SymbolTableError {
-                    key: key.to_string(),
-                    conflict: part.to_string(),
-                }),
+                _ => {
+                    return Err(SymbolTableError {
+                        key: key.to_string(),
+                        conflict: part.to_string(),
+                    })
+                }
             };
         }
         let last = parts.last().unwrap().to_string();
         if matches!(current.table.get(&last), Some(SymbolTableEntry::Table(_))) {
-            return Err(SymbolTableError { key: key.to_string(), conflict: last });
+            return Err(SymbolTableError {
+                key: key.to_string(),
+                conflict: last,
+            });
         }
         current.table.insert(last, SymbolTableEntry::Value(value));
         Ok(())
@@ -188,7 +207,11 @@ impl SymbolTable {
     /// Collect all leaf symbol paths (dotted names) in this table.
     pub fn all_paths(&self, prefix: &str, out: &mut Vec<String>) {
         for (key, entry) in &self.table {
-            let path = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
             match entry {
                 SymbolTableEntry::Value(_) => out.push(path),
                 SymbolTableEntry::Table(sub) => sub.all_paths(&path, out),
@@ -201,14 +224,16 @@ impl SymbolTable {
         for (key, entry) in &other.table {
             match entry {
                 SymbolTableEntry::Value(v) => {
-                    self.table.insert(key.clone(), SymbolTableEntry::Value(v.clone()));
+                    self.table
+                        .insert(key.clone(), SymbolTableEntry::Value(v.clone()));
                 }
-                SymbolTableEntry::Table(sub) => {
-                    match self.table.get_mut(key) {
-                        Some(SymbolTableEntry::Table(existing)) => existing.merge_from(sub),
-                        _ => { self.table.insert(key.clone(), SymbolTableEntry::Table(sub.clone())); }
+                SymbolTableEntry::Table(sub) => match self.table.get_mut(key) {
+                    Some(SymbolTableEntry::Table(existing)) => existing.merge_from(sub),
+                    _ => {
+                        self.table
+                            .insert(key.clone(), SymbolTableEntry::Table(sub.clone()));
                     }
-                }
+                },
             }
         }
     }
@@ -220,10 +245,17 @@ impl serde::Serialize for SymbolTable {
         let mut paths = Vec::new();
         self.all_paths("", &mut paths);
         // Collect only resolved values — skip Unresolved entries
-        let entries: Vec<_> = paths.iter()
-            .filter_map(|p| self.get_value(p).and_then(|v| {
-                if matches!(v, ExprValue::Unresolved(_)) { None } else { Some((p, v)) }
-            }))
+        let entries: Vec<_> = paths
+            .iter()
+            .filter_map(|p| {
+                self.get_value(p).and_then(|v| {
+                    if matches!(v, ExprValue::Unresolved(_)) {
+                        None
+                    } else {
+                        Some((p, v))
+                    }
+                })
+            })
             .collect();
         let mut seq = s.serialize_seq(Some(entries.len()))?;
         for (path, value) in entries {
@@ -242,16 +274,24 @@ impl<'de> serde::Deserialize<'de> for SymbolTable {
         let arr: Vec<serde_json::Value> = serde::Deserialize::deserialize(d)?;
         let mut st = SymbolTable::new();
         for entry in &arr {
-            let name = entry.get("name").and_then(|n| n.as_str())
+            let name = entry
+                .get("name")
+                .and_then(|n| n.as_str())
                 .ok_or_else(|| serde::de::Error::missing_field("name"))?;
-            let type_str = entry.get("type").and_then(|t| t.as_str())
+            let type_str = entry
+                .get("type")
+                .and_then(|t| t.as_str())
                 .ok_or_else(|| serde::de::Error::missing_field("type"))?;
             let binding_type = ExprType::parse(type_str).map_err(serde::de::Error::custom)?;
-            let raw_value = entry.get("value")
+            let raw_value = entry
+                .get("value")
                 .ok_or_else(|| serde::de::Error::missing_field("value"))?;
             let value = ExprValue::from_transport_value(
-                raw_value, &binding_type, crate::path_mapping::PathFormat::Posix,
-            ).map_err(serde::de::Error::custom)?;
+                raw_value,
+                &binding_type,
+                crate::path_mapping::PathFormat::Posix,
+            )
+            .map_err(serde::de::Error::custom)?;
             st.set(name, value).map_err(serde::de::Error::custom)?;
         }
         Ok(st)
@@ -267,7 +307,10 @@ impl<'de> serde::Deserialize<'de> for SymbolTable {
 impl<'a> FromIterator<(&'a str, ExprValue)> for SymbolTable {
     fn from_iter<I: IntoIterator<Item = (&'a str, ExprValue)>>(iter: I) -> Self {
         let mut st = Self::new();
-        for (k, v) in iter { st.set(k, v).expect("SymbolTable path conflict in FromIterator"); }
+        for (k, v) in iter {
+            st.set(k, v)
+                .expect("SymbolTable path conflict in FromIterator");
+        }
         st
     }
 }
@@ -290,7 +333,9 @@ pub struct SerializedSymbolTable(serde_json::Value);
 
 impl SerializedSymbolTable {
     /// Create from a `serde_json::Value` (already-parsed JSON array).
-    pub fn from_value(v: serde_json::Value) -> Self { Self(v) }
+    pub fn from_value(v: serde_json::Value) -> Self {
+        Self(v)
+    }
 
     /// Create from a JSON string.
     pub fn from_json_str(s: &str) -> Result<Self, serde_json::Error> {
@@ -307,27 +352,41 @@ impl SerializedSymbolTable {
     /// Path values in the transport format are plain strings; this method
     /// reconstructs them as `ExprValue::Path` with separators normalized
     /// to the specified format.
-    pub fn to_symtab(&self, path_format: crate::path_mapping::PathFormat) -> Result<SymbolTable, String> {
-        let arr = self.0.as_array().ok_or("SerializedSymbolTable: expected JSON array")?;
+    pub fn to_symtab(
+        &self,
+        path_format: crate::path_mapping::PathFormat,
+    ) -> Result<SymbolTable, String> {
+        let arr = self
+            .0
+            .as_array()
+            .ok_or("SerializedSymbolTable: expected JSON array")?;
         let mut st = SymbolTable::new();
         for entry in arr {
-            let name = entry.get("name").and_then(|n| n.as_str())
+            let name = entry
+                .get("name")
+                .and_then(|n| n.as_str())
                 .ok_or("SerializedSymbolTable: missing 'name' field")?;
-            let type_str = entry.get("type").and_then(|t| t.as_str())
+            let type_str = entry
+                .get("type")
+                .and_then(|t| t.as_str())
                 .ok_or("SerializedSymbolTable: missing 'type' field")?;
             let binding_type = ExprType::parse(type_str)
                 .map_err(|e| format!("SerializedSymbolTable: bad type '{type_str}': {e}"))?;
-            let raw_value = entry.get("value")
+            let raw_value = entry
+                .get("value")
                 .ok_or("SerializedSymbolTable: missing 'value' field")?;
             let value = ExprValue::from_transport_value(raw_value, &binding_type, path_format)
                 .map_err(|e| format!("SerializedSymbolTable: {e}"))?;
-            st.set(name, value).map_err(|e| format!("SerializedSymbolTable: {e}"))?;
+            st.set(name, value)
+                .map_err(|e| format!("SerializedSymbolTable: {e}"))?;
         }
         Ok(st)
     }
 
     /// Get the underlying JSON value.
-    pub fn as_value(&self) -> &serde_json::Value { &self.0 }
+    pub fn as_value(&self) -> &serde_json::Value {
+        &self.0
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for SerializedSymbolTable {

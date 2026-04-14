@@ -22,12 +22,16 @@ fn check_err(s: &str, expected: &[&str]) {
         .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
 fn job_with_step_let(let_bindings: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -36,11 +40,13 @@ fn job_with_step_let(let_bindings: &str) -> String {
             "let": [{let_bindings}],
             "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}
         }}]
-    }}"#)
+    }}"#
+    )
 }
 
 fn job_with_script_let(let_bindings: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -51,7 +57,8 @@ fn job_with_script_let(let_bindings: &str) -> String {
                 "actions": {{"onRun": {{"command": "foo"}}}}
             }}
         }}]
-    }}"#)
+    }}"#
+    )
 }
 
 // === Valid let bindings ===
@@ -95,89 +102,101 @@ fn test_let_in_script() {
 
 #[test]
 fn test_let_no_equals() {
-    check_err(&job_with_step_let(r#""x""#), &[
-        "steps[0] -> let[0]:\n\tmissing '=' in 'x'.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x""#),
+        &["steps[0] -> let[0]:\n\tmissing '=' in 'x'."],
+    );
 }
 
 #[test]
 fn test_let_no_name() {
-    check_err(&job_with_step_let(r#""= 1""#), &[
-        "steps[0] -> let[0]:\n\thas empty name.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""= 1""#),
+        &["steps[0] -> let[0]:\n\thas empty name."],
+    );
 }
 
 #[test]
 fn test_let_no_expression() {
-    check_err(&job_with_step_let(r#""x =""#), &[
-        "steps[0] -> let[0]:\n\tbinding 'x' has no expression after '='.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x =""#),
+        &["steps[0] -> let[0]:\n\tbinding 'x' has no expression after '='."],
+    );
 }
 
 #[test]
 fn test_let_uppercase_start() {
-    check_err(&job_with_step_let(r#""Param = 1""#), &[
-        "steps[0] -> let[0]:\n\tname 'Param' must start with lowercase letter or underscore.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""Param = 1""#),
+        &["steps[0] -> let[0]:\n\tname 'Param' must start with lowercase letter or underscore."],
+    );
 }
 
 #[test]
 fn test_let_digit_start() {
-    check_err(&job_with_step_let(r#""1x = 1""#), &[
-        "steps[0] -> let[0]:\n\tname '1x' must start with lowercase letter or underscore.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""1x = 1""#),
+        &["steps[0] -> let[0]:\n\tname '1x' must start with lowercase letter or underscore."],
+    );
 }
 
 #[test]
 fn test_let_duplicate_names() {
-    check_err(&job_with_step_let(r#""x = 1", "x = 2""#), &[
-        "steps[0] -> let[1]:\n\tduplicate name 'x'.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = 1", "x = 2""#),
+        &["steps[0] -> let[1]:\n\tduplicate name 'x'."],
+    );
 }
 
 #[test]
 fn test_let_empty_step() {
-    check_err(&job_with_step_let(""), &[
-        "steps[0] -> let:\n\tif provided, must not be empty.",
-    ]);
+    check_err(
+        &job_with_step_let(""),
+        &["steps[0] -> let:\n\tif provided, must not be empty."],
+    );
 }
 
 #[test]
 fn test_let_self_reference_step() {
-    check_err(&job_with_step_let(r#""x = x + 1""#), &[
-        "steps[0] -> let[0]:\n\t'x' references itself.",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = x + 1""#),
+        &["steps[0] -> let[0]:\n\t'x' references itself."],
+    );
 }
 
 #[test]
 fn test_let_max_50_step() {
     let bindings: Vec<String> = (0..51).map(|i| format!(r#""x{i} = {i}""#)).collect();
-    check_err(&job_with_step_let(&bindings.join(", ")), &[
-        "steps[0] -> let:\n\tmust not contain more than 50 bindings.",
-    ]);
+    check_err(
+        &job_with_step_let(&bindings.join(", ")),
+        &["steps[0] -> let:\n\tmust not contain more than 50 bindings."],
+    );
 }
 
 // === Invalid let bindings — script-level ===
 
 #[test]
 fn test_let_no_equals_script() {
-    check_err(&job_with_script_let(r#""x""#), &[
-        "steps[0] -> script -> let[0]:\n\tmissing '=' in 'x'.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x""#),
+        &["steps[0] -> script -> let[0]:\n\tmissing '=' in 'x'."],
+    );
 }
 
 #[test]
 fn test_let_no_name_script() {
-    check_err(&job_with_script_let(r#""= 1""#), &[
-        "steps[0] -> script -> let[0]:\n\thas empty name.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""= 1""#),
+        &["steps[0] -> script -> let[0]:\n\thas empty name."],
+    );
 }
 
 #[test]
 fn test_let_no_expression_script() {
-    check_err(&job_with_script_let(r#""x =""#), &[
-        "steps[0] -> script -> let[0]:\n\tbinding 'x' has no expression after '='.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x =""#),
+        &["steps[0] -> script -> let[0]:\n\tbinding 'x' has no expression after '='."],
+    );
 }
 
 #[test]
@@ -196,38 +215,43 @@ fn test_let_digit_start_script() {
 
 #[test]
 fn test_let_duplicate_names_script() {
-    check_err(&job_with_script_let(r#""x = 1", "x = 2""#), &[
-        "steps[0] -> script -> let[1]:\n\tduplicate name 'x'.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x = 1", "x = 2""#),
+        &["steps[0] -> script -> let[1]:\n\tduplicate name 'x'."],
+    );
 }
 
 #[test]
 fn test_let_empty_script() {
-    check_err(&job_with_script_let(""), &[
-        "steps[0] -> script -> let:\n\tif provided, must not be empty.",
-    ]);
+    check_err(
+        &job_with_script_let(""),
+        &["steps[0] -> script -> let:\n\tif provided, must not be empty."],
+    );
 }
 
 #[test]
 fn test_let_self_reference_script() {
-    check_err(&job_with_script_let(r#""x = x + 1""#), &[
-        "steps[0] -> script -> let[0]:\n\t'x' references itself.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x = x + 1""#),
+        &["steps[0] -> script -> let[0]:\n\t'x' references itself."],
+    );
 }
 
 #[test]
 fn test_let_max_50_script() {
     let bindings: Vec<String> = (0..51).map(|i| format!(r#""x{i} = {i}""#)).collect();
-    check_err(&job_with_script_let(&bindings.join(", ")), &[
-        "steps[0] -> script -> let:\n\tmust not contain more than 50 bindings.",
-    ]);
+    check_err(
+        &job_with_script_let(&bindings.join(", ")),
+        &["steps[0] -> script -> let:\n\tmust not contain more than 50 bindings."],
+    );
 }
 
 #[test]
 fn test_no_shadowing_same_block() {
-    check_err(&job_with_script_let(r#""x = 32", "y = x * 5", "x = -1""#), &[
-        "steps[0] -> script -> let[2]:\n\tduplicate name 'x'.",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x = 32", "y = x * 5", "x = -1""#),
+        &["steps[0] -> script -> let[2]:\n\tduplicate name 'x'."],
+    );
 }
 
 // === Let bindings require EXPR extension ===
@@ -236,38 +260,43 @@ fn test_no_shadowing_same_block() {
 
 #[test]
 fn test_let_syntax_error_step() {
-    check_err(&job_with_step_let(r#""x = 1 +""#), &[
-        "steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = 1 +""#),
+        &["steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"],
+    );
 }
 
 #[test]
 fn test_let_syntax_error_script() {
-    check_err(&job_with_script_let(r#""x = 1 +""#), &[
-        "steps[0] -> script -> let[0]:\n\tInvalid expression in let binding 'x':",
-    ]);
+    check_err(
+        &job_with_script_let(r#""x = 1 +""#),
+        &["steps[0] -> script -> let[0]:\n\tInvalid expression in let binding 'x':"],
+    );
 }
 
 #[test]
 fn test_let_undefined_symbol() {
-    check_err(&job_with_step_let(r#""x = undefined_var""#), &[
-        "steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = undefined_var""#),
+        &["steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"],
+    );
 }
 
 #[test]
 fn test_let_type_error_int_plus_string() {
-    check_err(&job_with_step_let(r#""x = 1 + 'hello'""#), &[
-        "steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = 1 + 'hello'""#),
+        &["steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"],
+    );
 }
 
 #[test]
 fn test_let_type_propagation_to_later_binding() {
     // x is inferred as int, y = x + "hello" should fail because int + string is a type error
-    check_err(&job_with_step_let(r#""x = 42", "y = x + 'hello'""#), &[
-        "steps[0] -> let[1]:\n\tInvalid expression in let binding 'y':",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = 42", "y = x + 'hello'""#),
+        &["steps[0] -> let[1]:\n\tInvalid expression in let binding 'y':"],
+    );
 }
 
 #[test]
@@ -312,11 +341,13 @@ fn test_let_type_propagation_across_scopes_type_error() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> script -> let[0]:\n\tInvalid expression in let binding 'y':"),
-        "Missing expected error.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> script -> let[0]:\n\tInvalid expression in let binding 'y':"),
+        "Missing expected error.\nGot:\n{msg}"
+    );
 }
 
 #[test]
@@ -351,11 +382,13 @@ fn test_let_param_type_mismatch() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"),
-        "Missing expected error.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"),
+        "Missing expected error.\nGot:\n{msg}"
+    );
 }
 
 #[test]
@@ -378,9 +411,10 @@ fn test_let_inferred_type_used_in_format_string() {
 fn test_let_error_does_not_cascade() {
     // First binding has a syntax error, second binding should still be checked
     // (first gets ANY type so second doesn't cascade)
-    check_err(&job_with_step_let(r#""x = 1 +", "y = 2""#), &[
-        "steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':",
-    ]);
+    check_err(
+        &job_with_step_let(r#""x = 1 +", "y = 2""#),
+        &["steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"],
+    );
 }
 
 // === Let binding scope-appropriate library selection ===
@@ -399,11 +433,13 @@ fn test_let_apply_path_mapping_rejected_in_step_scope() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'mapped':"),
-        "Step-level let should reject apply_path_mapping.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'mapped':"),
+        "Step-level let should reject apply_path_mapping.\nGot:\n{msg}"
+    );
 }
 
 #[test]
@@ -459,8 +495,10 @@ fn test_let_without_expr_extension_step() {
     let v = yaml_val(s);
     let err = decode_job_template(v, None).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> let:\n\t'let' requires the EXPR extension."),
-        "Missing expected error.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> let:\n\t'let' requires the EXPR extension."),
+        "Missing expected error.\nGot:\n{msg}"
+    );
 }
 
 #[test]
@@ -479,8 +517,10 @@ fn test_let_without_expr_extension_script() {
     let v = yaml_val(s);
     let err = decode_job_template(v, None).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> script -> let:\n\t'let' requires the EXPR extension."),
-        "Missing expected error.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> script -> let:\n\t'let' requires the EXPR extension."),
+        "Missing expected error.\nGot:\n{msg}"
+    );
 }
 
 // === Let bindings in environment scripts ===
@@ -539,11 +579,13 @@ fn test_step_and_script_let_same_name_error() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("steps[0] -> script -> let[0]:\n\t'x' shadows enclosing scope."),
-        "Missing expected error.\nGot:\n{msg}");
+    assert!(
+        msg.contains("steps[0] -> script -> let[0]:\n\t'x' shadows enclosing scope."),
+        "Missing expected error.\nGot:\n{msg}"
+    );
 }
 
 // === File reference types are PATH (not STRING) ===
@@ -623,11 +665,13 @@ fn test_typo_in_param_reference_suggests_correction() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("Did you mean: Param.Frame"),
-        "Expected 'Did you mean: Param.Frame' in:\n{msg}");
+    assert!(
+        msg.contains("Did you mean: Param.Frame"),
+        "Expected 'Did you mean: Param.Frame' in:\n{msg}"
+    );
 }
 
 #[test]
@@ -645,13 +689,14 @@ fn test_typo_in_let_binding_suggests_correction() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("Did you mean: Param.Scene"),
-        "Expected 'Did you mean: Param.Scene' in:\n{msg}");
+    assert!(
+        msg.contains("Did you mean: Param.Scene"),
+        "Expected 'Did you mean: Param.Scene' in:\n{msg}"
+    );
 }
-
 
 // === Let binding with list comprehension ===
 
@@ -843,11 +888,13 @@ fn test_script_let_type_error_with_session_symbol() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected error");
+    let err =
+        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
     let msg = err.to_string();
-    assert!(msg.contains("Cannot use '+' operator with path and int"),
-        "Expected type error in:\n{msg}");
+    assert!(
+        msg.contains("Cannot use '+' operator with path and int"),
+        "Expected type error in:\n{msg}"
+    );
 }
 
 #[test]
@@ -881,7 +928,8 @@ fn test_script_let_chained_with_session_symbol() {
 fn step_let_rejects_path_param() {
     // Param.BasePath is a PATH type — not available in template scope.
     // Step-level let bindings are template scope, so this must fail.
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -891,13 +939,16 @@ fn step_let_rejects_path_param() {
             "let": ["p = Param.BasePath"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{p}}"]}}}
         }]
-    }"#, &["Undefined variable: 'Param.BasePath'"]);
+    }"#,
+        &["Undefined variable: 'Param.BasePath'"],
+    );
 }
 
 #[test]
 fn step_let_rejects_session_working_directory() {
     // Session.WorkingDirectory is host-context only.
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -906,13 +957,16 @@ fn step_let_rejects_session_working_directory() {
             "let": ["d = Session.WorkingDirectory"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{d}}"]}}}
         }]
-    }"#, &["Undefined variable: 'Session.WorkingDirectory'"]);
+    }"#,
+        &["Undefined variable: 'Session.WorkingDirectory'"],
+    );
 }
 
 #[test]
 fn step_let_rejects_apply_path_mapping() {
     // apply_path_mapping() is a host-context function, not available in template scope.
-    check_err(r#"{
+    check_err(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -922,13 +976,16 @@ fn step_let_rejects_apply_path_mapping() {
             "let": ["mapped = apply_path_mapping(Param.Input)"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{mapped}}"]}}}
         }]
-    }"#, &["apply_path_mapping"]);
+    }"#,
+        &["apply_path_mapping"],
+    );
 }
 
 #[test]
 fn step_let_allows_non_path_params() {
     // Non-PATH params (INT, STRING, etc.) should work fine in step let bindings.
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -941,13 +998,15 @@ fn step_let_allows_non_path_params() {
             "let": ["doubled = Param.Count * 2", "msg = Param.Label + '_world'"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{doubled}} {{msg}}"]}}}
         }]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn step_let_allows_raw_path_param_as_string() {
     // RawParam.BasePath is STRING type even for PATH params — available in template scope.
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -957,7 +1016,8 @@ fn step_let_allows_raw_path_param_as_string() {
             "let": ["raw = RawParam.BasePath"],
             "script": {"actions": {"onRun": {"command": "echo", "args": ["{{raw}}"]}}}
         }]
-    }"#);
+    }"#,
+    );
 }
 
 // === Script-level let bindings SHOULD have host-context symbols (as unresolved) ===
@@ -965,7 +1025,8 @@ fn step_let_allows_raw_path_param_as_string() {
 #[test]
 fn script_let_allows_path_param_unresolved() {
     // Param.BasePath is available in script-level let bindings (host/session scope).
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -977,13 +1038,15 @@ fn script_let_allows_path_param_unresolved() {
                 "actions": {"onRun": {"command": "echo", "args": ["{{p}}"]}}
             }
         }]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn script_let_allows_session_working_directory() {
     // Session.WorkingDirectory is available in script-level let bindings.
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -994,13 +1057,15 @@ fn script_let_allows_session_working_directory() {
                 "actions": {"onRun": {"command": "echo", "args": ["{{d}}"]}}
             }
         }]
-    }"#);
+    }"#,
+    );
 }
 
 #[test]
 fn script_let_allows_apply_path_mapping() {
     // apply_path_mapping() is available in script-level let bindings (host context).
-    decode_ok(r#"{
+    decode_ok(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": ["EXPR"],
@@ -1012,5 +1077,6 @@ fn script_let_allows_apply_path_mapping() {
                 "actions": {"onRun": {"command": "echo", "args": ["{{mapped}}"]}}
             }
         }]
-    }"#);
+    }"#,
+    );
 }

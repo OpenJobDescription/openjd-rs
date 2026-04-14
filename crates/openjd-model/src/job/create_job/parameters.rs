@@ -10,8 +10,11 @@ use indexmap::IndexMap;
 use openjd_expr::symbol_table::SymbolTable;
 
 use crate::error::OpenJdError;
-use crate::template::{JobTemplate, EnvironmentTemplate, JobParameterDefinition};
-use crate::types::{DataFlow, JobParameterInputValues, JobParameterValues, JobParameterValue, JobParameterType, ObjectType};
+use crate::template::{EnvironmentTemplate, JobParameterDefinition, JobTemplate};
+use crate::types::{
+    DataFlow, JobParameterInputValues, JobParameterType, JobParameterValue, JobParameterValues,
+    ObjectType,
+};
 
 /// Merge parameter definitions from environment templates and the job template.
 ///
@@ -30,7 +33,9 @@ pub fn merge_job_parameter_definitions(
             if existing.param_type != p.job_param_type() {
                 return Err(OpenJdError::Compatibility(format!(
                     "Parameter '{name}' has conflicting types: '{}' in {} and '{}' in {source}",
-                    existing.param_type, existing.source, p.type_name()
+                    existing.param_type,
+                    existing.source,
+                    p.type_name()
                 )));
             }
             if existing.param_type == JobParameterType::Path {
@@ -60,28 +65,42 @@ pub fn merge_job_parameter_definitions(
         let default = p.default_value();
         let (ot, df) = p.path_properties();
         let src = source.to_string();
-        merged.entry(name.clone()).and_modify(|m| {
-            if let Some(d) = &default { m.default = Some(d.clone()); }
-            if let Some(v) = ot { m.object_type = Some(v); }
-            if let Some(v) = df { m.data_flow = Some(v); }
-            m.source = src.clone();
-            m.merge_constraints(p);
-        }).or_insert_with(|| {
-            let mut m = MergedParameterDefinition {
-                name: name.clone(),
-                param_type: p.job_param_type(),
-                default,
-                object_type: ot,
-                data_flow: df,
-                source: src,
-                min_value_i64: None, max_value_i64: None,
-                min_value_f64: None, max_value_f64: None,
-                min_length: None, max_length: None,
-                allowed_values_int: None, allowed_values_float: None, allowed_values_str: None,
-            };
-            m.merge_constraints(p);
-            m
-        });
+        merged
+            .entry(name.clone())
+            .and_modify(|m| {
+                if let Some(d) = &default {
+                    m.default = Some(d.clone());
+                }
+                if let Some(v) = ot {
+                    m.object_type = Some(v);
+                }
+                if let Some(v) = df {
+                    m.data_flow = Some(v);
+                }
+                m.source = src.clone();
+                m.merge_constraints(p);
+            })
+            .or_insert_with(|| {
+                let mut m = MergedParameterDefinition {
+                    name: name.clone(),
+                    param_type: p.job_param_type(),
+                    default,
+                    object_type: ot,
+                    data_flow: df,
+                    source: src,
+                    min_value_i64: None,
+                    max_value_i64: None,
+                    min_value_f64: None,
+                    max_value_f64: None,
+                    min_length: None,
+                    max_length: None,
+                    allowed_values_int: None,
+                    allowed_values_float: None,
+                    allowed_values_str: None,
+                };
+                m.merge_constraints(p);
+                m
+            });
         Ok(())
     };
 
@@ -164,9 +183,13 @@ impl MergedParameterDefinition {
             });
         }
         if let Some(new_vals) = def.allowed_values_f64() {
-            let new_bits: std::collections::HashSet<u64> = new_vals.iter().map(|f| f.to_bits()).collect();
+            let new_bits: std::collections::HashSet<u64> =
+                new_vals.iter().map(|f| f.to_bits()).collect();
             self.allowed_values_float = Some(match self.allowed_values_float.take() {
-                Some(cur) => cur.into_iter().filter(|v| new_bits.contains(&v.to_bits())).collect(),
+                Some(cur) => cur
+                    .into_iter()
+                    .filter(|v| new_bits.contains(&v.to_bits()))
+                    .collect(),
                 None => new_vals,
             });
         }
@@ -196,25 +219,33 @@ impl MergedParameterDefinition {
         if let Some(allowed) = &self.allowed_values_str {
             if allowed.is_empty() {
                 return Err(OpenJdError::Compatibility(format!(
-                    "Parameter '{}': merged {} allowedValues have no common values", self.name, self.param_type)));
+                    "Parameter '{}': merged {} allowedValues have no common values",
+                    self.name, self.param_type
+                )));
             }
             if let Some(def) = &self.default {
                 if !allowed.iter().any(|a| a == def) {
                     return Err(OpenJdError::Compatibility(format!(
-                        "Parameter '{}': default '{}' not in merged allowedValues", self.name, def)));
+                        "Parameter '{}': default '{}' not in merged allowedValues",
+                        self.name, def
+                    )));
                 }
             }
         }
         if let Some(allowed) = &self.allowed_values_int {
             if allowed.is_empty() {
                 return Err(OpenJdError::Compatibility(format!(
-                    "Parameter '{}': merged INT allowedValues have no common values", self.name)));
+                    "Parameter '{}': merged INT allowedValues have no common values",
+                    self.name
+                )));
             }
         }
         if let Some(allowed) = &self.allowed_values_float {
             if allowed.is_empty() {
                 return Err(OpenJdError::Compatibility(format!(
-                    "Parameter '{}': merged FLOAT allowedValues have no common values", self.name)));
+                    "Parameter '{}': merged FLOAT allowedValues have no common values",
+                    self.name
+                )));
             }
         }
         Ok(())
@@ -227,19 +258,25 @@ impl MergedParameterDefinition {
                 if let Some(min) = self.min_value_i64 {
                     if *v < min {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {v} is less than minimum {min}", self.name)));
+                            "Parameter '{}': value {v} is less than minimum {min}",
+                            self.name
+                        )));
                     }
                 }
                 if let Some(max) = self.max_value_i64 {
                     if *v > max {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {v} exceeds maximum {max}", self.name)));
+                            "Parameter '{}': value {v} exceeds maximum {max}",
+                            self.name
+                        )));
                     }
                 }
                 if let Some(allowed) = &self.allowed_values_int {
                     if !allowed.contains(v) {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {v} is not in allowed values", self.name)));
+                            "Parameter '{}': value {v} is not in allowed values",
+                            self.name
+                        )));
                     }
                 }
             }
@@ -248,19 +285,25 @@ impl MergedParameterDefinition {
                 if let Some(min) = self.min_value_f64 {
                     if f < min {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {f} is less than minimum {min}", self.name)));
+                            "Parameter '{}': value {f} is less than minimum {min}",
+                            self.name
+                        )));
                     }
                 }
                 if let Some(max) = self.max_value_f64 {
                     if f > max {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {f} exceeds maximum {max}", self.name)));
+                            "Parameter '{}': value {f} exceeds maximum {max}",
+                            self.name
+                        )));
                     }
                 }
                 if let Some(allowed) = &self.allowed_values_float {
-                    if !allowed.iter().any(|a| *a == f) {
+                    if !allowed.contains(&f) {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value {f} is not in allowed values", self.name)));
+                            "Parameter '{}': value {f} is not in allowed values",
+                            self.name
+                        )));
                     }
                 }
             }
@@ -268,19 +311,27 @@ impl MergedParameterDefinition {
                 if let Some(min) = self.min_length {
                     if v.len() < min {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} is less than minimum {min}", self.name, v.len())));
+                            "Parameter '{}': value length {} is less than minimum {min}",
+                            self.name,
+                            v.len()
+                        )));
                     }
                 }
                 if let Some(max) = self.max_length {
                     if v.len() > max {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} exceeds maximum {max}", self.name, v.len())));
+                            "Parameter '{}': value length {} exceeds maximum {max}",
+                            self.name,
+                            v.len()
+                        )));
                     }
                 }
                 if let Some(allowed) = &self.allowed_values_str {
                     if !allowed.iter().any(|a| a == v) {
                         return Err(OpenJdError::DecodeValidation(format!(
-                            "Parameter '{}': value '{}' is not in allowed values", self.name, v)));
+                            "Parameter '{}': value '{}' is not in allowed values",
+                            self.name, v
+                        )));
                     }
                 }
             }
@@ -291,7 +342,10 @@ impl MergedParameterDefinition {
 }
 
 /// Coerce an `ExprValue` to the target `JobParameterType`.
-pub(super) fn coerce_to_type(value: &openjd_expr::ExprValue, param_type: JobParameterType) -> Result<openjd_expr::ExprValue, String> {
+pub(super) fn coerce_to_type(
+    value: &openjd_expr::ExprValue,
+    param_type: JobParameterType,
+) -> Result<openjd_expr::ExprValue, String> {
     use openjd_expr::ExprValue;
 
     if value_matches_type(value, param_type) {
@@ -300,59 +354,85 @@ pub(super) fn coerce_to_type(value: &openjd_expr::ExprValue, param_type: JobPara
 
     match (value, param_type) {
         (ExprValue::Int(i), JobParameterType::Float) => {
-            return Ok(ExprValue::Float(openjd_expr::value::Float64::new(*i as f64).unwrap()));
+            return Ok(ExprValue::Float(
+                openjd_expr::value::Float64::new(*i as f64).unwrap(),
+            ));
         }
         (ExprValue::Float(f), JobParameterType::Int) => {
             let v = f.value();
-            if v.fract() == 0.0 { return Ok(ExprValue::Int(v as i64)); }
+            if v.fract() == 0.0 {
+                return Ok(ExprValue::Int(v as i64));
+            }
         }
         _ => {}
     }
 
     let s = match value {
         ExprValue::String(s) => s.as_str(),
-        ExprValue::Int(i) => { return coerce_from_str(&i.to_string(), param_type); }
-        ExprValue::Float(f) => { return coerce_from_str(&f.to_string(), param_type); }
-        ExprValue::Bool(b) => { return coerce_from_str(if *b { "true" } else { "false" }, param_type); }
-        other => { return Err(format!("Cannot coerce {} to {}", other.type_name(), param_type.as_spec_str())); }
+        ExprValue::Int(i) => {
+            return coerce_from_str(&i.to_string(), param_type);
+        }
+        ExprValue::Float(f) => {
+            return coerce_from_str(&f.to_string(), param_type);
+        }
+        ExprValue::Bool(b) => {
+            return coerce_from_str(if *b { "true" } else { "false" }, param_type);
+        }
+        other => {
+            return Err(format!(
+                "Cannot coerce {} to {}",
+                other.type_name(),
+                param_type.as_spec_str()
+            ));
+        }
     };
     coerce_from_str(s, param_type)
 }
 
 /// Coerce a string value to the target type.
-pub(super) fn coerce_from_str(s: &str, param_type: JobParameterType) -> Result<openjd_expr::ExprValue, String> {
+pub(super) fn coerce_from_str(
+    s: &str,
+    param_type: JobParameterType,
+) -> Result<openjd_expr::ExprValue, String> {
     use openjd_expr::ExprValue;
     Ok(match param_type {
-        JobParameterType::Int => {
-            s.parse::<i64>().map(ExprValue::Int)
-                .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?
-        }
-        JobParameterType::Float => {
-            s.parse::<f64>().map(|f| ExprValue::Float(openjd_expr::value::Float64::with_str(f, s.to_string()).unwrap()))
-                .map_err(|_| format!("Value '{s}' is not a valid float."))?
-        }
-        JobParameterType::Bool => {
-            match s.to_lowercase().as_str() {
-                "true" | "yes" | "on" | "1" => ExprValue::Bool(true),
-                "false" | "no" | "off" | "0" => ExprValue::Bool(false),
-                _ => return Err(format!("Value '{}' is not a valid boolean. Accepted: true/false, 1/0, yes/no, on/off.", s)),
+        JobParameterType::Int => s
+            .parse::<i64>()
+            .map(ExprValue::Int)
+            .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?,
+        JobParameterType::Float => s
+            .parse::<f64>()
+            .map(|f| {
+                ExprValue::Float(openjd_expr::value::Float64::with_str(f, s.to_string()).unwrap())
+            })
+            .map_err(|_| format!("Value '{s}' is not a valid float."))?,
+        JobParameterType::Bool => match s.to_lowercase().as_str() {
+            "true" | "yes" | "on" | "1" => ExprValue::Bool(true),
+            "false" | "no" | "off" | "0" => ExprValue::Bool(false),
+            _ => {
+                return Err(format!(
+                    "Value '{}' is not a valid boolean. Accepted: true/false, 1/0, yes/no, on/off.",
+                    s
+                ))
             }
-        }
-        JobParameterType::RangeExpr => {
-            match s.parse::<openjd_expr::RangeExpr>() {
-                Ok(r) => ExprValue::RangeExpr(r),
-                Err(e) => return Err(format!("Value '{s}' is not a valid range expression: {e}")),
-            }
-        }
-        JobParameterType::Path | JobParameterType::String => {
-            ExprValue::String(s.to_string())
-        }
-        JobParameterType::ListString | JobParameterType::ListInt | JobParameterType::ListFloat
-        | JobParameterType::ListPath | JobParameterType::ListBool | JobParameterType::ListListInt => {
+        },
+        JobParameterType::RangeExpr => match s.parse::<openjd_expr::RangeExpr>() {
+            Ok(r) => ExprValue::RangeExpr(r),
+            Err(e) => return Err(format!("Value '{s}' is not a valid range expression: {e}")),
+        },
+        JobParameterType::Path | JobParameterType::String => ExprValue::String(s.to_string()),
+        JobParameterType::ListString
+        | JobParameterType::ListInt
+        | JobParameterType::ListFloat
+        | JobParameterType::ListPath
+        | JobParameterType::ListBool
+        | JobParameterType::ListListInt => {
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
                 json_to_expr_value(&json_val)
             } else {
-                return Err(format!("Value '{s}' is not valid JSON for a list parameter."));
+                return Err(format!(
+                    "Value '{s}' is not valid JSON for a list parameter."
+                ));
             }
         }
     })
@@ -360,17 +440,23 @@ pub(super) fn coerce_from_str(s: &str, param_type: JobParameterType) -> Result<o
 
 fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterType) -> bool {
     use openjd_expr::ExprValue;
-    matches!((value, param_type),
-        (ExprValue::String(_), JobParameterType::String | JobParameterType::Path) |
-        (ExprValue::Int(_), JobParameterType::Int) |
-        (ExprValue::Float(_), JobParameterType::Float) |
-        (ExprValue::Bool(_), JobParameterType::Bool) |
-        (ExprValue::RangeExpr(_), JobParameterType::RangeExpr) |
-        (ExprValue::ListString(_, _), JobParameterType::ListString | JobParameterType::ListPath) |
-        (ExprValue::ListInt(_), JobParameterType::ListInt) |
-        (ExprValue::ListFloat(_), JobParameterType::ListFloat) |
-        (ExprValue::ListBool(_), JobParameterType::ListBool) |
-        (ExprValue::ListList(_, _, _), JobParameterType::ListListInt)
+    matches!(
+        (value, param_type),
+        (
+            ExprValue::String(_),
+            JobParameterType::String | JobParameterType::Path
+        ) | (ExprValue::Int(_), JobParameterType::Int)
+            | (ExprValue::Float(_), JobParameterType::Float)
+            | (ExprValue::Bool(_), JobParameterType::Bool)
+            | (ExprValue::RangeExpr(_), JobParameterType::RangeExpr)
+            | (
+                ExprValue::ListString(_, _),
+                JobParameterType::ListString | JobParameterType::ListPath
+            )
+            | (ExprValue::ListInt(_), JobParameterType::ListInt)
+            | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
+            | (ExprValue::ListBool(_), JobParameterType::ListBool)
+            | (ExprValue::ListList(_, _, _), JobParameterType::ListListInt)
     )
 }
 
@@ -408,7 +494,9 @@ pub fn preprocess_job_parameters(
     let mut result = JobParameterValues::new();
     let mut missing = Vec::new();
 
-    let uri_aware = job_template.extensions.as_ref()
+    let uri_aware = job_template
+        .extensions
+        .as_ref()
         .map(|exts| exts.iter().any(|e| e.as_str() == "EXPR"))
         .unwrap_or(false);
 
@@ -417,21 +505,33 @@ pub fn preprocess_job_parameters(
         if let Some(input_val) = input_values.get(&param.name) {
             let coerced = if param.param_type == JobParameterType::Path {
                 let s = input_val.as_str_repr();
-                if !s.is_empty()
-                    && !(uri_aware && openjd_expr::uri_path::is_uri(&s))
-                    && !std::path::Path::new(s.as_ref()).is_absolute()
+                if !(s.is_empty()
+                    || (uri_aware && openjd_expr::uri_path::is_uri(&s))
+                    || std::path::Path::new(s.as_ref()).is_absolute())
                 {
-                    openjd_expr::ExprValue::String(current_working_dir.join(s.as_ref()).to_string_lossy().to_string())
+                    openjd_expr::ExprValue::String(
+                        current_working_dir
+                            .join(s.as_ref())
+                            .to_string_lossy()
+                            .to_string(),
+                    )
                 } else {
                     input_val.clone()
                 }
             } else {
                 input_val.clone()
             };
-            let expr_value = coerce_to_type(&coerced, param_type)
-                .map_err(|e| OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name)))?;
+            let expr_value = coerce_to_type(&coerced, param_type).map_err(|e| {
+                OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
+            })?;
             param.check_constraints(&expr_value)?;
-            result.insert(param.name.clone(), JobParameterValue { param_type, value: expr_value });
+            result.insert(
+                param.name.clone(),
+                JobParameterValue {
+                    param_type,
+                    value: expr_value,
+                },
+            );
         } else if let Some(default) = &param.default {
             let value_str = if param.param_type == JobParameterType::Path
                 && !default.is_empty()
@@ -466,9 +566,16 @@ pub fn preprocess_job_parameters(
             } else {
                 default.clone()
             };
-            let expr_value = coerce_from_str(&value_str, param_type)
-                .map_err(|e| OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name)))?;
-            result.insert(param.name.clone(), JobParameterValue { param_type, value: expr_value });
+            let expr_value = coerce_from_str(&value_str, param_type).map_err(|e| {
+                OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
+            })?;
+            result.insert(
+                param.name.clone(),
+                JobParameterValue {
+                    param_type,
+                    value: expr_value,
+                },
+            );
         } else {
             missing.push(param.name.clone());
         }
@@ -477,7 +584,8 @@ pub fn preprocess_job_parameters(
     if !missing.is_empty() {
         missing.sort();
         return Err(OpenJdError::DecodeValidation(format!(
-            "Values missing for required job parameters: {}", missing.join(", ")
+            "Values missing for required job parameters: {}",
+            missing.join(", ")
         )));
     }
 
@@ -488,7 +596,9 @@ fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
         match component {
-            std::path::Component::ParentDir => { components.pop(); }
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
             std::path::Component::CurDir => {}
             c => components.push(c),
         }
@@ -502,13 +612,18 @@ pub(super) fn json_to_expr_value(val: &serde_json::Value) -> openjd_expr::ExprVa
         serde_json::Value::Null => openjd_expr::ExprValue::Null,
         serde_json::Value::Bool(b) => openjd_expr::ExprValue::Bool(*b),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { openjd_expr::ExprValue::Int(i) }
-            else if let Some(f) = n.as_f64() { openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(f).unwrap()) }
-            else { openjd_expr::ExprValue::String(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                openjd_expr::ExprValue::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(f).unwrap())
+            } else {
+                openjd_expr::ExprValue::String(n.to_string())
+            }
         }
         serde_json::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
         serde_json::Value::Array(arr) => {
-            let elements: Vec<openjd_expr::ExprValue> = arr.iter().map(json_to_expr_value).collect();
+            let elements: Vec<openjd_expr::ExprValue> =
+                arr.iter().map(json_to_expr_value).collect();
             // hint_type is only used by make_list for empty lists; for non-empty
             // lists it infers the type from elements (with int→float promotion etc.)
             openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE).unwrap()
@@ -518,26 +633,27 @@ pub(super) fn json_to_expr_value(val: &serde_json::Value) -> openjd_expr::ExprVa
 }
 
 /// Build a symbol table from processed job parameter values.
-pub fn build_symbol_table(
-    params: &JobParameterValues,
-) -> Result<SymbolTable, OpenJdError> {
+pub fn build_symbol_table(params: &JobParameterValues) -> Result<SymbolTable, OpenJdError> {
     let mut symtab = SymbolTable::new();
     for (name, pv) in params {
         // PATH and LIST[PATH] Param.* are excluded from the template-scope symtab.
         // They are host-context only (concrete values depend on session-time path mapping).
-        let is_path = matches!(pv.param_type, JobParameterType::Path | JobParameterType::ListPath);
+        let is_path = matches!(
+            pv.param_type,
+            JobParameterType::Path | JobParameterType::ListPath
+        );
         if !is_path {
             symtab.set(&format!("Param.{name}"), pv.value.clone())?;
         }
 
         let raw_value = match pv.param_type {
-            JobParameterType::Path => {
-                match &pv.value {
-                    openjd_expr::ExprValue::String(s) => openjd_expr::ExprValue::String(s.clone()),
-                    openjd_expr::ExprValue::Path { value, .. } => openjd_expr::ExprValue::String(value.clone()),
-                    _ => pv.value.clone(),
+            JobParameterType::Path => match &pv.value {
+                openjd_expr::ExprValue::String(s) => openjd_expr::ExprValue::String(s.clone()),
+                openjd_expr::ExprValue::Path { value, .. } => {
+                    openjd_expr::ExprValue::String(value.clone())
                 }
-            }
+                _ => pv.value.clone(),
+            },
             JobParameterType::ListPath => {
                 if let openjd_expr::ExprValue::ListString(ref elements, _) = pv.value {
                     openjd_expr::ExprValue::ListString(elements.clone(), 0)

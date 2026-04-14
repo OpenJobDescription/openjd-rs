@@ -84,7 +84,11 @@ impl StepDependencyGraph {
             }
         }
 
-        Ok(Self { nodes, edges, name_to_index })
+        Ok(Self {
+            nodes,
+            edges,
+            name_to_index,
+        })
     }
 
     /// Get a node by step name.
@@ -94,12 +98,20 @@ impl StepDependencyGraph {
 
     /// Maximum in-degree (max number of dependencies any step has).
     pub fn max_indegree(&self) -> usize {
-        self.nodes.iter().map(|n| n.in_edges.len()).max().unwrap_or(0)
+        self.nodes
+            .iter()
+            .map(|n| n.in_edges.len())
+            .max()
+            .unwrap_or(0)
     }
 
     /// Maximum out-degree (max number of steps that depend on any single step).
     pub fn max_outdegree(&self) -> usize {
-        self.nodes.iter().map(|n| n.out_edges.len()).max().unwrap_or(0)
+        self.nodes
+            .iter()
+            .map(|n| n.out_edges.len())
+            .max()
+            .unwrap_or(0)
     }
 
     /// Stable topological sort matching the Python implementation.
@@ -145,7 +157,8 @@ impl StepDependencyGraph {
                                 2 => {} // already done
                                 1 => {
                                     // Build cycle path from the stack
-                                    let cycle: Vec<&str> = stack.iter()
+                                    let cycle: Vec<&str> = stack
+                                        .iter()
                                         .filter(|&&idx| state[idx] == 1)
                                         .map(|&idx| self.nodes[idx].name.as_str())
                                         .collect();
@@ -169,7 +182,10 @@ impl StepDependencyGraph {
     /// Convenience: topological sort returning step names.
     pub fn topo_sorted_names(&self) -> Result<Vec<String>, OpenJdError> {
         self.topo_sorted().map(|indices| {
-            indices.into_iter().map(|i| self.nodes[i].name.clone()).collect()
+            indices
+                .into_iter()
+                .map(|i| self.nodes[i].name.clone())
+                .collect()
         })
     }
 }

@@ -12,12 +12,14 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 }
 
 fn job_with_param(param_json: &str) -> String {
-    format!(r#"{{
+    format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{param_json}],
         "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
-    }}"#)
+    }}"#
+    )
 }
 
 fn decode_ok(s: &str) {
@@ -27,11 +29,13 @@ fn decode_ok(s: &str) {
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None)
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
-        assert!(msg.contains(line), "Missing in error output: {line:?}\nGot:\n{msg}");
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
     }
 }
 
@@ -46,52 +50,72 @@ fn test_string_param_minimal() {
 
 #[test]
 fn test_string_param_with_default() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "some value"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "default": "some value"}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_with_min_max_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": 1, "maxLength": 10}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "minLength": 1, "maxLength": 10}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_min_eq_max() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": 1, "maxLength": 1}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "minLength": 1, "maxLength": 1}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_with_allowed_values() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["a", "b"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["a", "b"]}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_default_in_allowed() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "a", "allowedValues": ["a", "b"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "default": "a", "allowedValues": ["a", "b"]}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_default_is_min_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "aa", "minLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "default": "aa", "minLength": 2}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_default_is_max_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "aa", "maxLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "default": "aa", "maxLength": 2}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_allowed_is_min_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["aa"], "minLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["aa"], "minLength": 2}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_allowed_is_max_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["aa"], "maxLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["aa"], "maxLength": 2}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_minlength_zero() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": 0}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "minLength": 0}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -100,23 +124,28 @@ fn test_string_param_minlength_zero() {
 
 #[test]
 fn test_string_param_empty_allowed_values() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": []}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": []}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty."],
+    );
 }
 
 #[test]
 fn test_string_param_min_greater_than_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": 10, "maxLength": 1}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': minLength (10) > maxLength (1).",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": 10, "maxLength": 1}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': minLength (10) > maxLength (1)."],
+    );
 }
 
 #[test]
 fn test_string_param_default_not_in_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "c", "allowedValues": ["a", "b"]}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default 'c' is not in allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "default": "c", "allowedValues": ["a", "b"]}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default 'c' is not in allowedValues."],
+    );
 }
 
 #[test]
@@ -128,23 +157,28 @@ fn test_string_param_default_too_short() {
 
 #[test]
 fn test_string_param_default_too_long() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "default": "abcdef", "maxLength": 3}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default length 6 exceeds maxLength 3.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "default": "abcdef", "maxLength": 3}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default length 6 exceeds maxLength 3."],
+    );
 }
 
 #[test]
 fn test_string_param_maxlength_zero() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "maxLength": 0}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': maxLength must be > 0.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "STRING", "maxLength": 0}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': maxLength must be > 0."],
+    );
 }
 
 #[test]
 fn test_string_param_negative_minlength() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": -1}"#), &[
-        "invalid value: integer `-1`, expected usize",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "STRING", "minLength": -1}"#),
+        &["invalid value: integer `-1`, expected usize"],
+    );
 }
 
 #[test]
@@ -172,42 +206,58 @@ fn test_int_param_minimal() {
 
 #[test]
 fn test_int_param_with_default() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": "5"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": "5"}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_with_default_int() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": 5}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": 5}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_with_min_max() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "minValue": 0, "maxValue": 100}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "minValue": 0, "maxValue": 100}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_min_eq_max() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "minValue": 1, "maxValue": 1}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "minValue": 1, "maxValue": 1}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_with_allowed_values() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "allowedValues": [1, 2, 3]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "allowedValues": [1, 2, 3]}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_default_is_min_value() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": 2, "minValue": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": 2, "minValue": 2}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_default_is_max_value() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": 2, "maxValue": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": 2, "maxValue": 2}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_default_in_allowed() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": 2, "allowedValues": [1, "2"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": 2, "allowedValues": [1, "2"]}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -216,44 +266,52 @@ fn test_int_param_default_in_allowed() {
 
 #[test]
 fn test_int_param_empty_allowed_values() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "allowedValues": []}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "allowedValues": []}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty."],
+    );
 }
 
 #[test]
 fn test_int_param_default_not_int() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": "nine"}"#), &[
-        "Cannot parse 'nine' as integer",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "default": "nine"}"#),
+        &["Cannot parse 'nine' as integer"],
+    );
 }
 
 #[test]
 fn test_int_param_min_greater_than_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "minValue": 100, "maxValue": 1}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': minValue (100) > maxValue (1).",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "minValue": 100, "maxValue": 1}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': minValue (100) > maxValue (1)."],
+    );
 }
 
 #[test]
 fn test_int_param_default_below_min() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": "0", "minValue": 5}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 0 is less than minimum 5",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "default": "0", "minValue": 5}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 0 is less than minimum 5"],
+    );
 }
 
 #[test]
 fn test_int_param_default_above_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": "100", "maxValue": 50}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 100 exceeds maximum 50",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "default": "100", "maxValue": 50}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 100 exceeds maximum 50"],
+    );
 }
 
 #[test]
 fn test_int_param_default_not_in_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": "5", "allowedValues": [1, 2, 3]}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 5 is not in allowed values",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "INT", "default": "5", "allowedValues": [1, 2, 3]}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 5 is not in allowed values"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -267,42 +325,58 @@ fn test_float_param_minimal() {
 
 #[test]
 fn test_float_param_with_default() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "1.5"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "default": "1.5"}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_with_default_float() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": 1.5}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "default": 1.5}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_with_min_max() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "minValue": 0.0, "maxValue": 100.0}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "minValue": 0.0, "maxValue": 100.0}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_min_eq_max() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "minValue": 1, "maxValue": 1}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "minValue": 1, "maxValue": 1}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_with_allowed_values() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "allowedValues": [1.2]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "allowedValues": [1.2]}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_default_is_min_value() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": 2, "minValue": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "default": 2, "minValue": 2}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_default_is_max_value() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": 2, "maxValue": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "default": 2, "maxValue": 2}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_default_in_allowed() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": 2, "allowedValues": [1, "2"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "default": 2, "allowedValues": [1, "2"]}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -311,44 +385,52 @@ fn test_float_param_default_in_allowed() {
 
 #[test]
 fn test_float_param_empty_allowed_values() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "allowedValues": []}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "allowedValues": []}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty."],
+    );
 }
 
 #[test]
 fn test_float_param_default_not_float() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "abc"}"#), &[
-        "Cannot parse 'abc' as float",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "abc"}"#),
+        &["Cannot parse 'abc' as float"],
+    );
 }
 
 #[test]
 fn test_float_param_min_greater_than_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "minValue": 100.0, "maxValue": 1.0}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': minValue (100) > maxValue (1).",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "minValue": 100.0, "maxValue": 1.0}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': minValue (100) > maxValue (1)."],
+    );
 }
 
 #[test]
 fn test_float_param_default_below_min() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "0", "minValue": 5.0}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 0 is less than minimum 5",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "0", "minValue": 5.0}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 0 is less than minimum 5"],
+    );
 }
 
 #[test]
 fn test_float_param_default_above_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "100", "maxValue": 50.0}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 100 exceeds maximum 50",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "100", "maxValue": 50.0}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 100 exceeds maximum 50"],
+    );
 }
 
 #[test]
 fn test_float_param_default_not_in_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "default": "5", "allowedValues": [1, 2, 3]}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': value 5 is not in allowed values",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "default": "5", "allowedValues": [1, 2, 3]}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': value 5 is not in allowed values"],
+    );
 }
 
 #[test]
@@ -376,57 +458,79 @@ fn test_path_param_minimal() {
 
 #[test]
 fn test_path_param_with_default() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "/tmp/foo"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "default": "/tmp/foo"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_object_type_file() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "FILE"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "objectType": "FILE"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_object_type_directory() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "DIRECTORY"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "objectType": "DIRECTORY"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_data_flow_in() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "IN"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "dataFlow": "IN"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_data_flow_out() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "OUT"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "dataFlow": "OUT"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_data_flow_inout() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "INOUT"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "dataFlow": "INOUT"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_data_flow_none() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "NONE"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "dataFlow": "NONE"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_with_allowed_values() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "allowedValues": ["/a"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "allowedValues": ["/a"]}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_default_in_allowed() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "aa", "allowedValues": ["aa", "bb"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "default": "aa", "allowedValues": ["aa", "bb"]}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_default_is_min_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "aa", "minLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "default": "aa", "minLength": 2}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_default_is_max_length() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "aa", "maxLength": 2}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "default": "aa", "maxLength": 2}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -435,65 +539,80 @@ fn test_path_param_default_is_max_length() {
 
 #[test]
 fn test_path_param_invalid_object_type() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "UNSUPPORTED"}"#), &[
-        "unknown variant `UNSUPPORTED`, expected `FILE` or `DIRECTORY`",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "UNSUPPORTED"}"#),
+        &["unknown variant `UNSUPPORTED`, expected `FILE` or `DIRECTORY`"],
+    );
 }
 
 #[test]
 fn test_path_param_invalid_data_flow() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "UNSUPPORTED"}"#), &[
-        "unknown variant `UNSUPPORTED`, expected one of `NONE`, `IN`, `OUT`, `INOUT`",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "dataFlow": "UNSUPPORTED"}"#),
+        &["unknown variant `UNSUPPORTED`, expected one of `NONE`, `IN`, `OUT`, `INOUT`"],
+    );
 }
 
 #[test]
 fn test_path_param_empty_allowed_values() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "allowedValues": []}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "allowedValues": []}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues must not be empty."],
+    );
 }
 
 #[test]
 fn test_path_param_min_greater_than_max() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "minLength": 10, "maxLength": 1}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': minLength (10) > maxLength (1).",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "minLength": 10, "maxLength": 1}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': minLength (10) > maxLength (1)."],
+    );
 }
 
 #[test]
 fn test_path_param_default_not_in_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "c", "allowedValues": ["a", "b"]}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default 'c' is not in allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "default": "c", "allowedValues": ["a", "b"]}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default 'c' is not in allowedValues."],
+    );
 }
 
 #[test]
 fn test_path_param_default_too_short() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "a", "minLength": 5}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default length 1 < minLength 5.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "a", "minLength": 5}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default length 1 < minLength 5."],
+    );
 }
 
 #[test]
 fn test_path_param_default_too_long() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "abcdef", "maxLength": 3}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default length 6 > maxLength 3.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "default": "abcdef", "maxLength": 3}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default length 6 > maxLength 3."],
+    );
 }
 
 #[test]
 fn test_path_param_allowed_less_than_min_length() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "allowedValues": ["aa"], "minLength": 3}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues[0] length 2 < minLength 3.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "allowedValues": ["aa"], "minLength": 3}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues[0] length 2 < minLength 3."],
+    );
 }
 
 #[test]
 fn test_path_param_allowed_exceeds_max_length() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "allowedValues": ["aa"], "maxLength": 1}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues[0] length 2 > maxLength 1.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "allowedValues": ["aa"], "maxLength": 1}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': allowedValues[0] length 2 > maxLength 1."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -502,24 +621,27 @@ fn test_path_param_allowed_exceeds_max_length() {
 
 #[test]
 fn test_param_name_empty() {
-    check_err(&job_with_param(r#"{"name": "", "type": "STRING"}"#), &[
-        "Identifier length must be 1..=512, got 0",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "", "type": "STRING"}"#),
+        &["Identifier length must be 1..=512, got 0"],
+    );
 }
 
 #[test]
 fn test_param_name_too_long() {
     let long_name = "A".repeat(65);
-    check_err(&job_with_param(&format!(r#"{{"name": "{long_name}", "type": "STRING"}}"#)), &[
-        "parameterDefinitions[0]:\n\tname exceeds 64 characters.",
-    ]);
+    check_err(
+        &job_with_param(&format!(r#"{{"name": "{long_name}", "type": "STRING"}}"#)),
+        &["parameterDefinitions[0]:\n\tname exceeds 64 characters."],
+    );
 }
 
 #[test]
 fn test_param_name_with_spaces() {
-    check_err(&job_with_param(r#"{"name": "Foo Bar", "type": "STRING"}"#), &[
-        "Identifier 'Foo Bar' does not match pattern",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo Bar", "type": "STRING"}"#),
+        &["Identifier 'Foo Bar' does not match pattern"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -528,18 +650,19 @@ fn test_param_name_with_spaces() {
 
 #[test]
 fn test_missing_type() {
-    check_err(&job_with_param(r#"{"name": "Foo"}"#), &[
-        "missing 'type' field in parameter definition",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo"}"#),
+        &["missing 'type' field in parameter definition"],
+    );
 }
 
 #[test]
 fn test_unknown_type() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "UNKNOWN"}"#), &[
-        "unknown parameter type: 'UNKNOWN'",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "UNKNOWN"}"#),
+        &["unknown parameter type: 'UNKNOWN'"],
+    );
 }
-
 
 // ══════════════════════════════════════════════════════════════
 // STRING parameter — userInterface tests
@@ -547,27 +670,37 @@ fn test_unknown_type() {
 
 #[test]
 fn test_string_param_ui_line_edit() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "LINE_EDIT"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "LINE_EDIT"}}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_ui_hidden() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "HIDDEN"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "HIDDEN"}}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_ui_dropdown_list() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": ["a"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": ["a"]}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_description() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "description": "some test"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "description": "some test"}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_description_with_newlines() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "description": "aa\nbb\ncc"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "description": "aa\nbb\ncc"}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -576,42 +709,58 @@ fn test_string_param_description_with_newlines() {
 
 #[test]
 fn test_int_param_ui_spin_box() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX"}}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_ui_hidden() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "HIDDEN"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "HIDDEN"}}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_ui_dropdown_list() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": [1]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": [1]}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_description() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "description": "some text"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "description": "some text"}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_negative_default() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "default": -1}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "default": -1}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_min_value_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "minValue": "1"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "minValue": "1"}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_max_value_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "maxValue": "1"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "maxValue": "1"}"#,
+    ));
 }
 
 #[test]
 fn test_int_param_allowed_values_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "INT", "allowedValues": ["1"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "INT", "allowedValues": ["1"]}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -620,37 +769,51 @@ fn test_int_param_allowed_values_as_string() {
 
 #[test]
 fn test_float_param_ui_spin_box() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SPIN_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SPIN_BOX"}}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_ui_hidden() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "HIDDEN"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "HIDDEN"}}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_ui_dropdown_list() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": [1]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": [1]}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_description() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "description": "some text"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "description": "some text"}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_min_value_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "minValue": "1.2"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "minValue": "1.2"}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_max_value_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "maxValue": "1.2"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "maxValue": "1.2"}"#,
+    ));
 }
 
 #[test]
 fn test_float_param_allowed_values_as_string() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "allowedValues": ["1.2"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "FLOAT", "allowedValues": ["1.2"]}"#,
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -659,37 +822,51 @@ fn test_float_param_allowed_values_as_string() {
 
 #[test]
 fn test_path_param_ui_choose_input_file() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE"}}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_ui_choose_output_file() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_OUTPUT_FILE"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_OUTPUT_FILE"}}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_ui_choose_directory() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "CHOOSE_DIRECTORY"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "CHOOSE_DIRECTORY"}}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_ui_hidden() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "HIDDEN"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "HIDDEN"}}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_ui_dropdown_list() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": ["/aa/bb"]}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "DROPDOWN_LIST"}, "allowedValues": ["/aa/bb"]}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_description() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "description": "some test"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "description": "some test"}"#,
+    ));
 }
 
 #[test]
 fn test_path_param_description_with_newlines() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "description": "aa\nbb\ncc"}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "description": "aa\nbb\ncc"}"#,
+    ));
 }
 
 // Note: Python tests for INT allowedValues vs minValue/maxValue validation
@@ -717,9 +894,12 @@ fn test_string_param_allowed_value_exceeds_1024() {
 #[test]
 fn test_string_param_default_exceeds_1024() {
     let long = "x".repeat(1025);
-    check_err(&job_with_param(&format!(r#"{{"name": "Foo", "type": "STRING", "default": "{long}"}}"#)), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default exceeds 1024 characters.",
-    ]);
+    check_err(
+        &job_with_param(&format!(
+            r#"{{"name": "Foo", "type": "STRING", "default": "{long}"}}"#
+        )),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default exceeds 1024 characters."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -742,16 +922,22 @@ fn test_string_param_ui_multiline_edit_with_allowed_values() {
 
 #[test]
 fn test_string_param_ui_dropdown_without_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "DROPDOWN_LIST"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "DROPDOWN_LIST"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues."],
+    );
 }
 
 #[test]
 fn test_string_param_ui_checkbox_without_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "CHECK_BOX"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': CHECK_BOX requires allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "CHECK_BOX"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': CHECK_BOX requires allowedValues."],
+    );
 }
 
 #[test]
@@ -771,49 +957,70 @@ fn test_string_param_ui_checkbox_invalid_pair() {
 #[test]
 fn test_string_param_ui_checkbox_valid_pairs() {
     // true/false
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["True", "False"], "userInterface": {"control": "CHECK_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["True", "False"], "userInterface": {"control": "CHECK_BOX"}}"#,
+    ));
     // yes/no
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["YES", "NO"], "userInterface": {"control": "CHECK_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["YES", "NO"], "userInterface": {"control": "CHECK_BOX"}}"#,
+    ));
     // on/off
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["on", "off"], "userInterface": {"control": "CHECK_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["on", "off"], "userInterface": {"control": "CHECK_BOX"}}"#,
+    ));
     // 1/0
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["0", "1"], "userInterface": {"control": "CHECK_BOX"}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "STRING", "allowedValues": ["0", "1"], "userInterface": {"control": "CHECK_BOX"}}"#,
+    ));
 }
 
 #[test]
 fn test_string_param_ui_unknown_control() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "SLIDER"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "userInterface": {"control": "SLIDER"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'."],
+    );
 }
 
 #[test]
 fn test_string_param_ui_label_empty() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"label": ""}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"label": ""}}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty."],
+    );
 }
 
 #[test]
 fn test_string_param_ui_label_too_long() {
     let long_label = "x".repeat(65);
-    check_err(&job_with_param(&format!(r#"{{"name": "Foo", "type": "STRING", "userInterface": {{"label": "{long_label}"}}}}"#)), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label exceeds 64 characters.",
-    ]);
+    check_err(
+        &job_with_param(&format!(
+            r#"{{"name": "Foo", "type": "STRING", "userInterface": {{"label": "{long_label}"}}}}"#
+        )),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label exceeds 64 characters."],
+    );
 }
 
 #[test]
 fn test_string_param_ui_label_control_chars() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"label": "ab\u0001cd"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label contains control characters.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "userInterface": {"label": "ab\u0001cd"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label contains control characters."],
+    );
 }
 
 #[test]
 fn test_string_param_ui_group_label_empty() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "STRING", "userInterface": {"groupLabel": ""}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': groupLabel must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "STRING", "userInterface": {"groupLabel": ""}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': groupLabel must not be empty."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -829,9 +1036,12 @@ fn test_int_param_ui_spin_box_with_allowed() {
 
 #[test]
 fn test_int_param_ui_dropdown_without_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "DROPDOWN_LIST"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "DROPDOWN_LIST"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues."],
+    );
 }
 
 #[test]
@@ -850,30 +1060,40 @@ fn test_int_param_ui_hidden_with_single_step_delta() {
 
 #[test]
 fn test_int_param_ui_unknown_control() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SLIDER"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SLIDER"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'."],
+    );
 }
 
 #[test]
 fn test_int_param_ui_single_step_delta_negative() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": -1}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": -1}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive."],
+    );
 }
 
 #[test]
 fn test_int_param_ui_single_step_delta_zero() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": 0}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": 0}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive."],
+    );
 }
 
 #[test]
 fn test_int_param_ui_label_empty() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"label": ""}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "INT", "userInterface": {"label": ""}}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -889,16 +1109,22 @@ fn test_float_param_ui_spin_box_with_allowed() {
 
 #[test]
 fn test_float_param_ui_dropdown_without_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "DROPDOWN_LIST"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "DROPDOWN_LIST"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues."],
+    );
 }
 
 #[test]
 fn test_float_param_ui_dropdown_with_decimals() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "allowedValues": [1.0], "userInterface": {"control": "DROPDOWN_LIST", "decimals": 2}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': decimals is only valid with SPIN_BOX.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "allowedValues": [1.0], "userInterface": {"control": "DROPDOWN_LIST", "decimals": 2}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': decimals is only valid with SPIN_BOX."],
+    );
 }
 
 #[test]
@@ -910,9 +1136,12 @@ fn test_float_param_ui_dropdown_with_single_step_delta() {
 
 #[test]
 fn test_float_param_ui_hidden_with_decimals() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "HIDDEN", "decimals": 2}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': decimals is not valid with HIDDEN.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "HIDDEN", "decimals": 2}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': decimals is not valid with HIDDEN."],
+    );
 }
 
 #[test]
@@ -924,23 +1153,30 @@ fn test_float_param_ui_hidden_with_single_step_delta() {
 
 #[test]
 fn test_float_param_ui_unknown_control() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SLIDER"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SLIDER"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'."],
+    );
 }
 
 #[test]
 fn test_float_param_ui_single_step_delta_negative() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": -0.1}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SPIN_BOX", "singleStepDelta": -0.1}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': singleStepDelta must be positive."],
+    );
 }
 
 #[test]
 fn test_float_param_ui_label_empty() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"label": ""}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "FLOAT", "userInterface": {"label": ""}}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -984,23 +1220,30 @@ fn test_path_param_ui_choose_directory_with_file_type() {
 
 #[test]
 fn test_path_param_ui_dropdown_without_allowed() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "DROPDOWN_LIST"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "DROPDOWN_LIST"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': DROPDOWN_LIST requires allowedValues."],
+    );
 }
 
 #[test]
 fn test_path_param_ui_unknown_control() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "SLIDER"}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "userInterface": {"control": "SLIDER"}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': unknown control 'SLIDER'."],
+    );
 }
 
 #[test]
 fn test_path_param_ui_label_empty() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"label": ""}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(r#"{"name": "Foo", "type": "PATH", "userInterface": {"label": ""}}"#),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': label must not be empty."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1016,9 +1259,12 @@ fn test_path_param_file_filters_on_non_file_chooser() {
 
 #[test]
 fn test_path_param_file_filter_empty_patterns() {
-    check_err(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE", "fileFilters": [{"label": "All", "patterns": []}]}}"#), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': fileFilter patterns must not be empty.",
-    ]);
+    check_err(
+        &job_with_param(
+            r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE", "fileFilters": [{"label": "All", "patterns": []}]}}"#,
+        ),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': fileFilter patterns must not be empty."],
+    );
 }
 
 #[test]
@@ -1053,7 +1299,9 @@ fn test_path_param_file_filter_pattern_too_long() {
 
 #[test]
 fn test_path_param_file_filter_valid_patterns() {
-    decode_ok(&job_with_param(r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE", "fileFilters": [{"label": "All", "patterns": ["*", "*.*", "*.txt"]}]}}"#));
+    decode_ok(&job_with_param(
+        r#"{"name": "Foo", "type": "PATH", "objectType": "FILE", "userInterface": {"control": "CHOOSE_INPUT_FILE", "fileFilters": [{"label": "All", "patterns": ["*", "*.*", "*.txt"]}]}}"#,
+    ));
 }
 
 #[test]
@@ -1078,9 +1326,12 @@ fn test_path_param_allowed_value_exceeds_1024() {
 #[test]
 fn test_path_param_default_exceeds_1024() {
     let long = "x".repeat(1025);
-    check_err(&job_with_param(&format!(r#"{{"name": "Foo", "type": "PATH", "default": "{long}"}}"#)), &[
-        "parameterDefinitions[0]:\n\tParameter 'Foo': default exceeds 1024 characters.",
-    ]);
+    check_err(
+        &job_with_param(&format!(
+            r#"{{"name": "Foo", "type": "PATH", "default": "{long}"}}"#
+        )),
+        &["parameterDefinitions[0]:\n\tParameter 'Foo': default exceeds 1024 characters."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1090,17 +1341,24 @@ fn test_path_param_default_exceeds_1024() {
 #[test]
 fn float_param_large_value_roundtrip() {
     let td = tempfile::TempDir::new().unwrap();
-    let template = yaml_val(r#"{
+    let template = yaml_val(
+        r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "test",
         "parameterDefinitions": [{"name": "Big", "type": "FLOAT", "default": "1e20"}],
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#);
+    }"#,
+    );
     let jt = decode_job_template(template, None).unwrap();
     let result = openjd_model::preprocess_job_parameters(
-        &jt, &openjd_model::JobParameterInputValues::new(), &[],
-        td.path(), td.path(), false,
-    ).unwrap();
+        &jt,
+        &openjd_model::JobParameterInputValues::new(),
+        &[],
+        td.path(),
+        td.path(),
+        false,
+    )
+    .unwrap();
     match &result["Big"].value {
         openjd_expr::ExprValue::Float(f) => {
             let reparsed: f64 = f.to_string().parse().unwrap();

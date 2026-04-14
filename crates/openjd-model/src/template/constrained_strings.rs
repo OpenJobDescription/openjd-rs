@@ -4,8 +4,8 @@
 //! Constrained string types per spec §7.
 
 use crate::error::OpenJdError;
-use serde::de::{self, Deserializer};
 use regex::Regex;
+use serde::de::{self, Deserializer};
 use std::sync::LazyLock;
 
 /// §7.1 Identifier: `[A-Za-z_][A-Za-z0-9_]*`, length 1..=512 (64 base, 512 with FEATURE_BUNDLE_1)
@@ -62,10 +62,16 @@ pub struct Description(pub String);
 impl Description {
     pub fn new(s: &str) -> Result<Self, OpenJdError> {
         if s.chars().count() > 2048 {
-            return Err(OpenJdError::DecodeValidation("Description exceeds 2048 characters".into()));
+            return Err(OpenJdError::DecodeValidation(
+                "Description exceeds 2048 characters".into(),
+            ));
         }
-        if s.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
-            return Err(OpenJdError::DecodeValidation("Description contains control characters".into()));
+        if s.chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+        {
+            return Err(OpenJdError::DecodeValidation(
+                "Description contains control characters".into(),
+            ));
         }
         Ok(Self(s.to_string()))
     }

@@ -7,26 +7,37 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 
 fn friendly_op_name(name: &str) -> Option<&'static str> {
     match name {
-        "__add__" => Some("+"), "__sub__" => Some("-"), "__mul__" => Some("*"),
-        "__truediv__" => Some("/"), "__floordiv__" => Some("//"), "__mod__" => Some("%"),
-        "__pow__" => Some("**"), "__neg__" => Some("-"), "__pos__" => Some("+"),
-        "__eq__" => Some("=="), "__ne__" => Some("!="),
-        "__lt__" => Some("<"), "__le__" => Some("<="),
-        "__gt__" => Some(">"), "__ge__" => Some(">="),
-        "__contains__" => Some("in"), "__not_contains__" => Some("not in"),
+        "__add__" => Some("+"),
+        "__sub__" => Some("-"),
+        "__mul__" => Some("*"),
+        "__truediv__" => Some("/"),
+        "__floordiv__" => Some("//"),
+        "__mod__" => Some("%"),
+        "__pow__" => Some("**"),
+        "__neg__" => Some("-"),
+        "__pos__" => Some("+"),
+        "__eq__" => Some("=="),
+        "__ne__" => Some("!="),
+        "__lt__" => Some("<"),
+        "__le__" => Some("<="),
+        "__gt__" => Some(">"),
+        "__ge__" => Some(">="),
+        "__contains__" => Some("in"),
+        "__not_contains__" => Some("not in"),
         _ => None,
     }
 }
 
-use std::collections::HashMap;
 use crate::types::ExprType;
 use crate::value::ExprValue;
+use std::collections::HashMap;
 
 /// A registered function overload.
 #[derive(Clone)]
 pub struct FunctionEntry {
     pub signature: ExprType, // TypeCode::Signature
-    pub implementation: fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
+    pub implementation:
+        fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
 }
 
 /// Trait for the evaluator context that function implementations can access.
@@ -50,7 +61,10 @@ pub struct FunctionLibrary {
 
 impl FunctionLibrary {
     pub fn new() -> Self {
-        Self { functions: HashMap::new(), host_context_enabled: false }
+        Self {
+            functions: HashMap::new(),
+            host_context_enabled: false,
+        }
     }
 
     /// Return a copy with host-only functions (like `apply_path_mapping`) enabled.
@@ -80,12 +94,18 @@ impl FunctionLibrary {
         &mut self,
         name: &str,
         signature: ExprType,
-        implementation: fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
+        implementation: fn(
+            &mut dyn EvalContext,
+            &[ExprValue],
+        ) -> Result<ExprValue, ExpressionError>,
     ) {
-        self.functions.entry(name.to_string()).or_default().push(FunctionEntry {
-            signature,
-            implementation,
-        });
+        self.functions
+            .entry(name.to_string())
+            .or_default()
+            .push(FunctionEntry {
+                signature,
+                implementation,
+            });
     }
 
     /// Register from spec notation: `lib.register_sig("len", "(list[T1]) -> int", len_list)`
@@ -93,15 +113,22 @@ impl FunctionLibrary {
         &mut self,
         name: &str,
         sig_str: &str,
-        implementation: fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
+        implementation: fn(
+            &mut dyn EvalContext,
+            &[ExprValue],
+        ) -> Result<ExprValue, ExpressionError>,
     ) {
-        let signature = ExprType::parse(sig_str).unwrap_or_else(|e| panic!("Bad signature '{sig_str}': {e}"));
+        let signature =
+            ExprType::parse(sig_str).unwrap_or_else(|e| panic!("Bad signature '{sig_str}': {e}"));
         self.register(name, signature, implementation);
     }
 
     /// Get all entries for a function name.
     pub fn get_signatures(&self, name: &str) -> &[FunctionEntry] {
-        self.functions.get(name).map(|v| v.as_slice()).unwrap_or(&[])
+        self.functions
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Merge another library's registrations into this one.
@@ -147,20 +174,31 @@ impl FunctionLibrary {
     ) -> Result<ExprValue, ExpressionError> {
         let entries = self.get_signatures(name);
         if entries.is_empty() {
-            return Err(ExpressionError::from_kind(ExpressionErrorKind::UnknownFunction { name: name.to_string() }));
+            return Err(ExpressionError::from_kind(
+                ExpressionErrorKind::UnknownFunction {
+                    name: name.to_string(),
+                },
+            ));
         }
-        let arg_types: Vec<ExprType> = args.iter().map(|a| {
-            let t = a.expr_type();
-            if t.code == crate::types::TypeCode::Unresolved && !t.params.is_empty() {
-                t.params[0].clone() // unwrap unresolved for matching
-            } else { t }
-        }).collect();
+        let arg_types: Vec<ExprType> = args
+            .iter()
+            .map(|a| {
+                let t = a.expr_type();
+                if t.code == crate::types::TypeCode::Unresolved && !t.params.is_empty() {
+                    t.params[0].clone() // unwrap unresolved for matching
+                } else {
+                    t
+                }
+            })
+            .collect();
         let any_unresolved = args.iter().any(|a| a.is_unresolved());
 
         // Phase 1: exact match (non-generic)
         for entry in entries {
-            if entry.signature.is_symbolic() { continue; }
-            if let Some(_) = entry.signature.match_call(&arg_types) {
+            if entry.signature.is_symbolic() {
+                continue;
+            }
+            if entry.signature.match_call(&arg_types).is_some() {
                 if any_unresolved {
                     let ret = entry.signature.sig_return().clone();
                     return Ok(ExprValue::unresolved(ret));
@@ -171,20 +209,35 @@ impl FunctionLibrary {
 
         // Phase 2: coerced match (non-generic)
         for entry in entries {
-            if entry.signature.is_symbolic() { continue; }
+            if entry.signature.is_symbolic() {
+                continue;
+            }
             if any_unresolved {
-                if let Some(_) = try_coerce_types(&arg_types, entry.signature.sig_params(), skip_receiver_coercion) {
+                if try_coerce_types(
+                    &arg_types,
+                    entry.signature.sig_params(),
+                    skip_receiver_coercion,
+                )
+                .is_some()
+                {
                     let ret = entry.signature.sig_return().clone();
                     return Ok(ExprValue::unresolved(ret));
                 }
-            } else if let Some(coerced) = try_coerce_args(args, &arg_types, entry.signature.sig_params(), skip_receiver_coercion) {
+            } else if let Some(coerced) = try_coerce_args(
+                args,
+                &arg_types,
+                entry.signature.sig_params(),
+                skip_receiver_coercion,
+            ) {
                 return (entry.implementation)(ctx, &coerced);
             }
         }
 
         // Phase 3: generic match
         for entry in entries {
-            if !entry.signature.is_symbolic() { continue; }
+            if !entry.signature.is_symbolic() {
+                continue;
+            }
             if let Some(bindings) = entry.signature.match_call(&arg_types) {
                 if any_unresolved {
                     let ret = entry.signature.sig_return().substitute(&bindings);
@@ -193,7 +246,11 @@ impl FunctionLibrary {
                 return (entry.implementation)(ctx, args);
             }
             // Try with coercion for generics too
-            if let Some(coerced_types) = try_coerce_types(&arg_types, entry.signature.sig_params(), skip_receiver_coercion) {
+            if let Some(coerced_types) = try_coerce_types(
+                &arg_types,
+                entry.signature.sig_params(),
+                skip_receiver_coercion,
+            ) {
                 if let Some(bindings) = entry.signature.match_call(&coerced_types) {
                     let coerced = coerce_values(args, &coerced_types);
                     if any_unresolved {
@@ -207,18 +264,29 @@ impl FunctionLibrary {
 
         // Build helpful error message
         let n_args = arg_types.len();
-        let valid_arities: Vec<usize> = entries.iter()
+        let valid_arities: Vec<usize> = entries
+            .iter()
             .map(|e| e.signature.sig_params().len())
-            .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
 
         // Check if it's a wrong arg count issue
         if !valid_arities.contains(&n_args) {
             let arity_str = if valid_arities.len() == 1 {
                 format!("{}", valid_arities[0])
             } else {
-                valid_arities.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
+                valid_arities
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
-            let plural = if valid_arities.len() > 1 { "arguments" } else { "argument(s)" };
+            let plural = if valid_arities.len() > 1 {
+                "arguments"
+            } else {
+                "argument(s)"
+            };
             return Err(ExpressionError::new(format!(
                 "{name}() takes {arity_str} {plural}, but {n_args} were given"
             )));
@@ -227,13 +295,20 @@ impl FunctionLibrary {
         // Check if it's a receiver type mismatch (method on wrong type)
         if skip_receiver_coercion && !arg_types.is_empty() {
             let receiver_type = &arg_types[0];
-            let valid_types: Vec<String> = entries.iter()
+            let valid_types: Vec<String> = entries
+                .iter()
                 .filter(|e| e.signature.sig_params().len() == n_args)
                 .filter_map(|e| {
                     let first = e.signature.sig_params().first()?;
-                    if first.is_symbolic() { None } else { Some(first.to_string()) }
+                    if first.is_symbolic() {
+                        None
+                    } else {
+                        Some(first.to_string())
+                    }
                 })
-                .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
             if !valid_types.is_empty() {
                 return Err(ExpressionError::new(format!(
                     "{name}() is not available for {receiver_type}. Available for: {}",
@@ -245,9 +320,17 @@ impl FunctionLibrary {
         let type_strs: Vec<String> = arg_types.iter().map(|t| t.to_string()).collect();
         let display_name = friendly_op_name(name);
         if let Some(op) = display_name {
-            Err(ExpressionError::new(format!("Cannot use '{}' operator with {}", op, type_strs.join(" and "))))
+            Err(ExpressionError::new(format!(
+                "Cannot use '{}' operator with {}",
+                op,
+                type_strs.join(" and ")
+            )))
         } else {
-            Err(ExpressionError::new(format!("No matching signature for {}({})", name, type_strs.join(", "))))
+            Err(ExpressionError::new(format!(
+                "No matching signature for {}({})",
+                name,
+                type_strs.join(", ")
+            )))
         }
     }
 
@@ -255,7 +338,9 @@ impl FunctionLibrary {
     /// Accepts union types in arg_types and returns a union of all possible return types.
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
-        let has_unions = arg_types.iter().any(|t| t.code == crate::types::TypeCode::Union);
+        let has_unions = arg_types
+            .iter()
+            .any(|t| t.code == crate::types::TypeCode::Union);
         if !has_unions {
             for entry in self.get_signatures(name) {
                 if let Some(bindings) = entry.signature.match_call(arg_types) {
@@ -264,7 +349,9 @@ impl FunctionLibrary {
             }
             // Try coercion
             for entry in self.get_signatures(name) {
-                if let Some(coerced) = try_coerce_types(arg_types, entry.signature.sig_params(), false) {
+                if let Some(coerced) =
+                    try_coerce_types(arg_types, entry.signature.sig_params(), false)
+                {
                     if let Some(bindings) = entry.signature.match_call(&coerced) {
                         return Some(entry.signature.sig_return().substitute(&bindings));
                     }
@@ -289,7 +376,9 @@ impl FunctionLibrary {
             }
             if !found {
                 for entry in self.get_signatures(name) {
-                    if let Some(coerced) = try_coerce_types(concrete_args, entry.signature.sig_params(), false) {
+                    if let Some(coerced) =
+                        try_coerce_types(concrete_args, entry.signature.sig_params(), false)
+                    {
                         if let Some(bindings) = entry.signature.match_call(&coerced) {
                             result_types.push(entry.signature.sig_return().substitute(&bindings));
                             break;
@@ -302,7 +391,7 @@ impl FunctionLibrary {
         if result_types.is_empty() {
             return None;
         }
-        result_types.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        result_types.sort_by_key(|a| a.to_string());
         result_types.dedup();
         if result_types.len() == 1 {
             Some(result_types.into_iter().next().unwrap())
@@ -313,7 +402,10 @@ impl FunctionLibrary {
 
     /// Get the type of a property access.
     pub fn get_property_type(&self, base_type: &ExprType, property_name: &str) -> Option<ExprType> {
-        self.derive_return_type(&format!("__property_{property_name}__"), &[base_type.clone()])
+        self.derive_return_type(
+            &format!("__property_{property_name}__"),
+            std::slice::from_ref(base_type),
+        )
     }
 }
 
@@ -347,8 +439,14 @@ fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
 }
 
 /// Try to coerce argument types to match parameter types.
-fn try_coerce_types(arg_types: &[ExprType], param_types: &[ExprType], skip_first: bool) -> Option<Vec<ExprType>> {
-    if arg_types.len() != param_types.len() { return None; }
+fn try_coerce_types(
+    arg_types: &[ExprType],
+    param_types: &[ExprType],
+    skip_first: bool,
+) -> Option<Vec<ExprType>> {
+    if arg_types.len() != param_types.len() {
+        return None;
+    }
     let mut coerced = Vec::with_capacity(arg_types.len());
     for (i, (at, pt)) in arg_types.iter().zip(param_types.iter()).enumerate() {
         if at == pt || pt.code == crate::types::TypeCode::Any {
@@ -365,8 +463,15 @@ fn try_coerce_types(arg_types: &[ExprType], param_types: &[ExprType], skip_first
 }
 
 /// Try to coerce argument values to match parameter types.
-fn try_coerce_args(args: &[ExprValue], arg_types: &[ExprType], param_types: &[ExprType], skip_first: bool) -> Option<Vec<ExprValue>> {
-    if args.len() != param_types.len() { return None; }
+fn try_coerce_args(
+    args: &[ExprValue],
+    arg_types: &[ExprType],
+    param_types: &[ExprType],
+    skip_first: bool,
+) -> Option<Vec<ExprValue>> {
+    if args.len() != param_types.len() {
+        return None;
+    }
     let mut coerced = Vec::with_capacity(args.len());
     let mut any_changed = false;
     for (i, (at, pt)) in arg_types.iter().zip(param_types.iter()).enumerate() {
@@ -376,7 +481,9 @@ fn try_coerce_args(args: &[ExprValue], arg_types: &[ExprType], param_types: &[Ex
             any_changed = true;
             match (&args[i], pt.code) {
                 (ExprValue::Int(v), crate::types::TypeCode::Float) => {
-                    coerced.push(ExprValue::Float(crate::value::Float64::new(*v as f64).unwrap()));
+                    coerced.push(ExprValue::Float(
+                        crate::value::Float64::new(*v as f64).unwrap(),
+                    ));
                 }
                 (ExprValue::Path { value, .. }, crate::types::TypeCode::String) => {
                     coerced.push(ExprValue::String(value.clone()));
@@ -387,20 +494,33 @@ fn try_coerce_args(args: &[ExprValue], arg_types: &[ExprType], param_types: &[Ex
             return None;
         }
     }
-    if any_changed { Some(coerced) } else { None }
+    if any_changed {
+        Some(coerced)
+    } else {
+        None
+    }
 }
 
 /// Coerce values to match target types (for generic dispatch after type matching).
 fn coerce_values(args: &[ExprValue], target_types: &[ExprType]) -> Vec<ExprValue> {
-    args.iter().zip(target_types.iter()).map(|(a, t)| {
-        if can_coerce(&a.expr_type(), t) {
-            match (a, t.code) {
-                (ExprValue::Int(v), crate::types::TypeCode::Float) => ExprValue::Float(crate::value::Float64::new(*v as f64).unwrap()),
-                (ExprValue::Path { value, .. }, crate::types::TypeCode::String) => ExprValue::String(value.clone()),
-                _ => a.clone(),
+    args.iter()
+        .zip(target_types.iter())
+        .map(|(a, t)| {
+            if can_coerce(&a.expr_type(), t) {
+                match (a, t.code) {
+                    (ExprValue::Int(v), crate::types::TypeCode::Float) => {
+                        ExprValue::Float(crate::value::Float64::new(*v as f64).unwrap())
+                    }
+                    (ExprValue::Path { value, .. }, crate::types::TypeCode::String) => {
+                        ExprValue::String(value.clone())
+                    }
+                    _ => a.clone(),
+                }
+            } else {
+                a.clone()
             }
-        } else { a.clone() }
-    }).collect()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -408,7 +528,10 @@ mod tests {
     use super::*;
     use crate::types::ExprType;
 
-    fn dummy_impl(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+    fn dummy_impl(
+        _ctx: &mut dyn EvalContext,
+        args: &[ExprValue],
+    ) -> Result<ExprValue, ExpressionError> {
         Ok(args.first().cloned().unwrap_or(ExprValue::Null))
     }
 
@@ -456,28 +579,49 @@ mod tests {
 
     struct MockCtx;
     impl EvalContext for MockCtx {
-        fn path_format(&self) -> crate::path_mapping::PathFormat { crate::path_mapping::PathFormat::Posix }
-        fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule] { &[] }
-        fn count_op(&mut self) -> Result<(), ExpressionError> { Ok(()) }
-        fn count_ops(&mut self, _n: usize) -> Result<(), ExpressionError> { Ok(()) }
-        fn count_string_ops(&mut self, _len: usize) -> Result<(), ExpressionError> { Ok(()) }
+        fn path_format(&self) -> crate::path_mapping::PathFormat {
+            crate::path_mapping::PathFormat::Posix
+        }
+        fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule] {
+            &[]
+        }
+        fn count_op(&mut self) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+        fn count_ops(&mut self, _n: usize) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+        fn count_string_ops(&mut self, _len: usize) -> Result<(), ExpressionError> {
+            Ok(())
+        }
     }
 
-    fn add_int(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+    fn add_int(
+        _ctx: &mut dyn EvalContext,
+        args: &[ExprValue],
+    ) -> Result<ExprValue, ExpressionError> {
         match (&args[0], &args[1]) {
             (ExprValue::Int(a), ExprValue::Int(b)) => Ok(ExprValue::Int(a + b)),
             _ => Err(ExpressionError::type_error("type error")),
         }
     }
 
-    fn add_float(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+    fn add_float(
+        _ctx: &mut dyn EvalContext,
+        args: &[ExprValue],
+    ) -> Result<ExprValue, ExpressionError> {
         match (&args[0], &args[1]) {
-            (ExprValue::Float(a), ExprValue::Float(b)) => Ok(ExprValue::Float(crate::value::Float64::new(a.0 + b.0)?)),
+            (ExprValue::Float(a), ExprValue::Float(b)) => {
+                Ok(ExprValue::Float(crate::value::Float64::new(a.0 + b.0)?))
+            }
             _ => Err(ExpressionError::type_error("type error")),
         }
     }
 
-    fn list_len(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+    fn list_len(
+        _ctx: &mut dyn EvalContext,
+        args: &[ExprValue],
+    ) -> Result<ExprValue, ExpressionError> {
         Ok(ExprValue::Int(args[0].list_len().unwrap_or(0) as i64))
     }
 
@@ -487,7 +631,9 @@ mod tests {
         lib.register_sig("__add__", "(int, int) -> int", add_int);
         lib.register_sig("__add__", "(float, float) -> float", add_float);
         let mut ctx = MockCtx;
-        let r = lib.call("__add__", &[ExprValue::Int(2), ExprValue::Int(3)], &mut ctx).unwrap();
+        let r = lib
+            .call("__add__", &[ExprValue::Int(2), ExprValue::Int(3)], &mut ctx)
+            .unwrap();
         assert_eq!(r, ExprValue::Int(5));
     }
 
@@ -497,7 +643,16 @@ mod tests {
         lib.register_sig("__add__", "(float, float) -> float", add_float);
         let mut ctx = MockCtx;
         // int + float → coerce int to float
-        let r = lib.call("__add__", &[ExprValue::Int(2), ExprValue::Float(crate::value::Float64::new(3.0).unwrap())], &mut ctx).unwrap();
+        let r = lib
+            .call(
+                "__add__",
+                &[
+                    ExprValue::Int(2),
+                    ExprValue::Float(crate::value::Float64::new(3.0).unwrap()),
+                ],
+                &mut ctx,
+            )
+            .unwrap();
         assert!(matches!(r, ExprValue::Float(_)));
     }
 
@@ -506,7 +661,8 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("len", "(list[T1]) -> int", list_len);
         let mut ctx = MockCtx;
-        let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+        let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT)
+            .unwrap();
         let r = lib.call("len", &[list], &mut ctx).unwrap();
         assert_eq!(r, ExprValue::Int(2));
     }
@@ -516,7 +672,13 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__add__", "(int, int) -> int", add_int);
         let mut ctx = MockCtx;
-        let r = lib.call("__add__", &[ExprValue::unresolved(ExprType::INT), ExprValue::Int(1)], &mut ctx).unwrap();
+        let r = lib
+            .call(
+                "__add__",
+                &[ExprValue::unresolved(ExprType::INT), ExprValue::Int(1)],
+                &mut ctx,
+            )
+            .unwrap();
         assert!(r.is_unresolved());
         assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::INT));
     }
@@ -526,7 +688,11 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__add__", "(int, int) -> int", add_int);
         let mut ctx = MockCtx;
-        let r = lib.call("__add__", &[ExprValue::String("a".into()), ExprValue::Int(1)], &mut ctx);
+        let r = lib.call(
+            "__add__",
+            &[ExprValue::String("a".into()), ExprValue::Int(1)],
+            &mut ctx,
+        );
         assert!(r.is_err());
     }
 
@@ -542,14 +708,23 @@ mod tests {
     fn derive_return_type_exact() {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__add__", "(int, int) -> int", add_int);
-        assert_eq!(lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]), Some(ExprType::INT));
+        assert_eq!(
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
+            Some(ExprType::INT)
+        );
     }
 
     #[test]
     fn derive_return_type_generic() {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__getitem__", "(list[T1], int) -> T1", dummy_impl);
-        assert_eq!(lib.derive_return_type("__getitem__", &[ExprType::list(ExprType::STRING), ExprType::INT]), Some(ExprType::STRING));
+        assert_eq!(
+            lib.derive_return_type(
+                "__getitem__",
+                &[ExprType::list(ExprType::STRING), ExprType::INT]
+            ),
+            Some(ExprType::STRING)
+        );
     }
 
     #[test]
@@ -557,7 +732,10 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__add__", "(float, float) -> float", add_float);
         // int + float → coerce → float
-        assert_eq!(lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]), Some(ExprType::FLOAT));
+        assert_eq!(
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
+            Some(ExprType::FLOAT)
+        );
     }
 
     #[test]
@@ -567,8 +745,13 @@ mod tests {
         lib.register_sig("__add__", "(float, float) -> float", add_float);
         // (int | float) + int → int (from int+int) | float (from float coerced)
         let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]);
-        let result = lib.derive_return_type("__add__", &[union_arg, ExprType::INT]).unwrap();
-        assert_eq!(result, ExprType::union(vec![ExprType::INT, ExprType::FLOAT]));
+        let result = lib
+            .derive_return_type("__add__", &[union_arg, ExprType::INT])
+            .unwrap();
+        assert_eq!(
+            result,
+            ExprType::union(vec![ExprType::INT, ExprType::FLOAT])
+        );
     }
 
     #[test]
@@ -578,7 +761,10 @@ mod tests {
         lib.register_sig("len", "(list[T1]) -> int", dummy_impl);
         // len(string | list[int]) → int (both return int)
         let union_arg = ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::INT)]);
-        assert_eq!(lib.derive_return_type("len", &[union_arg]), Some(ExprType::INT));
+        assert_eq!(
+            lib.derive_return_type("len", &[union_arg]),
+            Some(ExprType::INT)
+        );
     }
 
     #[test]
@@ -586,8 +772,14 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("__property_name__", "(path) -> string", dummy_impl);
         lib.register_sig("__property_parent__", "(path) -> path", dummy_impl);
-        assert_eq!(lib.get_property_type(&ExprType::PATH, "name"), Some(ExprType::STRING));
-        assert_eq!(lib.get_property_type(&ExprType::PATH, "parent"), Some(ExprType::PATH));
+        assert_eq!(
+            lib.get_property_type(&ExprType::PATH, "name"),
+            Some(ExprType::STRING)
+        );
+        assert_eq!(
+            lib.get_property_type(&ExprType::PATH, "parent"),
+            Some(ExprType::PATH)
+        );
         assert_eq!(lib.get_property_type(&ExprType::INT, "name"), None);
     }
 }

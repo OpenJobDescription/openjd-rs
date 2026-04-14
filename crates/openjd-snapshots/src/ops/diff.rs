@@ -1,20 +1,11 @@
-use crate::manifest::{DirEntry, Diff, FileEntry, Full, Manifest};
+use crate::manifest::{Diff, DirEntry, FileEntry, Full, Manifest};
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct DiffOptions {
     pub parent_manifest_hash: Option<String>,
     pub ignore_hashes: bool,
     pub preserve_runnable: bool,
-}
-
-impl Default for DiffOptions {
-    fn default() -> Self {
-        Self {
-            parent_manifest_hash: None,
-            ignore_hashes: false,
-            preserve_runnable: false,
-        }
-    }
 }
 
 /// Compares two file entries to determine if they differ.
@@ -44,7 +35,8 @@ pub fn entries_differ(
     if parent.size != current.size || parent.mtime != current.mtime {
         return true;
     }
-    if !ignore_hashes && (parent.hash != current.hash || parent.chunk_hashes != current.chunk_hashes)
+    if !ignore_hashes
+        && (parent.hash != current.hash || parent.chunk_hashes != current.chunk_hashes)
     {
         return true;
     }
@@ -64,7 +56,11 @@ fn has_hashed_files<P, K>(manifest: &Manifest<P, K>) -> Option<bool> {
     if regular_files.is_empty() {
         return None;
     }
-    Some(regular_files.iter().any(|f| f.hash.is_some() || f.chunk_hashes.is_some()))
+    Some(
+        regular_files
+            .iter()
+            .any(|f| f.hash.is_some() || f.chunk_hashes.is_some()),
+    )
 }
 
 /// Computes the difference between two snapshot manifests.
@@ -112,7 +108,7 @@ pub fn diff_snapshots<P: Clone>(
             Some(pf) => {
                 if entries_differ(pf, cf, options.ignore_hashes, options.preserve_runnable) {
                     let mut entry = cf.clone();
-                    if options.preserve_runnable && !cf.symlink_target.is_some() {
+                    if options.preserve_runnable && cf.symlink_target.is_none() {
                         entry.runnable = pf.runnable;
                     }
                     files.push(entry);
@@ -173,22 +169,18 @@ pub fn diff_snapshots<P: Clone>(
     }
 
     // Sort: non-deleted files first (by path), then deleted files (by path)
-    files.sort_by(|a, b| {
-        match (a.deleted, b.deleted) {
-            (false, true) => std::cmp::Ordering::Less,
-            (true, false) => std::cmp::Ordering::Greater,
-            _ => a.path.cmp(&b.path),
-        }
+    files.sort_by(|a, b| match (a.deleted, b.deleted) {
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        _ => a.path.cmp(&b.path),
     });
 
     // Sort: non-deleted dirs first (by path), then deleted dirs (deepest-first, then by path)
-    dirs.sort_by(|a, b| {
-        match (a.deleted, b.deleted) {
-            (false, true) => std::cmp::Ordering::Less,
-            (true, false) => std::cmp::Ordering::Greater,
-            (false, false) => a.path.cmp(&b.path),
-            (true, true) => b.path.len().cmp(&a.path.len()).then(a.path.cmp(&b.path)),
-        }
+    dirs.sort_by(|a, b| match (a.deleted, b.deleted) {
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        (false, false) => a.path.cmp(&b.path),
+        (true, true) => b.path.len().cmp(&a.path.len()).then(a.path.cmp(&b.path)),
     });
 
     let mut result = Manifest::new(parent.hash_alg, parent.file_chunk_size_bytes);
@@ -203,8 +195,8 @@ pub fn diff_snapshots<P: Clone>(
 mod tests {
     use super::*;
     use crate::hash::HashAlgorithm;
-    use crate::{DirEntry, FileEntry, Manifest, DEFAULT_FILE_CHUNK_SIZE};
     use crate::manifest::{Full, Rel};
+    use crate::{DirEntry, FileEntry, Manifest, DEFAULT_FILE_CHUNK_SIZE};
 
     type RelSnapshot = Manifest<Rel, Full>;
 
@@ -298,7 +290,10 @@ mod tests {
         };
         let diff = diff_snapshots(&parent, &current, &opts).unwrap();
         assert_eq!(diff.files.len(), 1);
-        assert!(diff.files[0].runnable, "runnable should be copied from parent");
+        assert!(
+            diff.files[0].runnable,
+            "runnable should be copied from parent"
+        );
     }
 
     #[test]
@@ -352,7 +347,10 @@ mod tests {
         pf.hash = Some("aaa".into());
         let parent = make(vec![pf], vec![]);
         let current = make(vec![FileEntry::file("a.txt", 100, 1000)], vec![]);
-        let opts = DiffOptions { ignore_hashes: true, ..default_opts() };
+        let opts = DiffOptions {
+            ignore_hashes: true,
+            ..default_opts()
+        };
         assert!(diff_snapshots(&parent, &current, &opts).is_ok());
     }
 
@@ -388,14 +386,18 @@ mod tests {
         let current = make(vec![], vec![]);
         let diff = diff_snapshots(&parent, &current, &default_opts()).unwrap();
         // All files under deleted dirs should have deletion markers
-        let deleted_files: Vec<&str> = diff.files.iter()
+        let deleted_files: Vec<&str> = diff
+            .files
+            .iter()
             .filter(|f| f.deleted)
             .map(|f| f.path.as_str())
             .collect();
         assert!(deleted_files.contains(&"dir/a.txt"));
         assert!(deleted_files.contains(&"dir/sub/b.txt"));
         // Deleted dirs should also be present
-        let deleted_dirs: Vec<&str> = diff.dirs.iter()
+        let deleted_dirs: Vec<&str> = diff
+            .dirs
+            .iter()
             .filter(|d| d.deleted)
             .map(|d| d.path.as_str())
             .collect();

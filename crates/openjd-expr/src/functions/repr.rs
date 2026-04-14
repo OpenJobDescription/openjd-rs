@@ -11,7 +11,11 @@ type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
 fn repr_string_len(a: &ExprValue) -> usize {
-    match a { ExprValue::String(s) => s.len(), ExprValue::Path { value, .. } => value.len(), _ => 0 }
+    match a {
+        ExprValue::String(s) => s.len(),
+        ExprValue::Path { value, .. } => value.len(),
+        _ => 0,
+    }
 }
 
 pub fn repr_py_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -25,7 +29,9 @@ pub fn repr_json_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 }
 
 pub fn repr_sh_fn(ctx: Ctx, a: &[ExprValue]) -> R {
-    if a[0].is_list() { ctx.count_ops(a[0].list_len().unwrap_or(0))?; }
+    if a[0].is_list() {
+        ctx.count_ops(a[0].list_len().unwrap_or(0))?;
+    }
     ctx.count_string_ops(repr_string_len(&a[0]))?;
     Ok(ExprValue::String(repr_sh(&a[0])))
 }
@@ -46,12 +52,23 @@ fn repr_py(val: &ExprValue) -> String {
         ExprValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         ExprValue::Null => "None".to_string(),
         ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => if f.0.fract() == 0.0 { format!("{:.1}", f) } else { f.to_string() },
+        ExprValue::Float(f) => {
+            if f.0.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            }
+        }
         val if val.is_list() => {
             let iter = val.list_iter().expect("is_list() was true");
-            format!("[{}]", iter.map(|e| repr_py(&e)).collect::<Vec<_>>().join(", "))
+            format!(
+                "[{}]",
+                iter.map(|e| repr_py(&e)).collect::<Vec<_>>().join(", ")
+            )
         }
-        ExprValue::Path { value, .. } => format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'")),
+        ExprValue::Path { value, .. } => {
+            format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+        }
         ExprValue::RangeExpr(r) => format!("'{r}'"),
         _ => val.to_display_string(),
     }
@@ -71,7 +88,9 @@ fn json_escape(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => { let _ = write!(out, "\\u{:04x}", c as u32); }
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c if c.is_ascii() => out.push(c),
             c => {
                 let mut buf = [0u16; 2];
@@ -90,10 +109,19 @@ fn repr_json(val: &ExprValue) -> String {
         ExprValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         ExprValue::Null => "null".to_string(),
         ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => if f.0.fract() == 0.0 { format!("{:.1}", f) } else { f.to_string() },
+        ExprValue::Float(f) => {
+            if f.0.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            }
+        }
         val if val.is_list() => {
             let iter = val.list_iter().expect("guard ensures list");
-            format!("[{}]", iter.map(|e| repr_json(&e)).collect::<Vec<_>>().join(", "))
+            format!(
+                "[{}]",
+                iter.map(|e| repr_json(&e)).collect::<Vec<_>>().join(", ")
+            )
         }
         ExprValue::Path { value, .. } => format!("\"{}\"", json_escape(value)),
         ExprValue::RangeExpr(r) => format!("\"{r}\""),
@@ -103,17 +131,31 @@ fn repr_json(val: &ExprValue) -> String {
 
 fn repr_sh(val: &ExprValue) -> String {
     match val {
-        ExprValue::String(s) => shlex::try_quote(s).map(|c| c.into_owned()).unwrap_or_default(),
+        ExprValue::String(s) => shlex::try_quote(s)
+            .map(|c| c.into_owned())
+            .unwrap_or_default(),
         ExprValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         ExprValue::Null => "''".to_string(),
         ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => if f.0.fract() == 0.0 { format!("{:.1}", f) } else { f.to_string() },
-        ExprValue::Path { value, .. } => shlex::try_quote(value).map(|c| c.into_owned()).unwrap_or_default(),
+        ExprValue::Float(f) => {
+            if f.0.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            }
+        }
+        ExprValue::Path { value, .. } => shlex::try_quote(value)
+            .map(|c| c.into_owned())
+            .unwrap_or_default(),
         val if val.is_list() => {
-            let strs: Vec<String> = val.list_iter().expect("guard ensures list").map(|e| match &e {
-                ExprValue::String(s) | ExprValue::Path { value: s, .. } => s.clone(),
-                other => other.to_display_string(),
-            }).collect();
+            let strs: Vec<String> = val
+                .list_iter()
+                .expect("guard ensures list")
+                .map(|e| match &e {
+                    ExprValue::String(s) | ExprValue::Path { value: s, .. } => s.clone(),
+                    other => other.to_display_string(),
+                })
+                .collect();
             shlex::try_join(strs.iter().map(|s| s.as_str())).unwrap_or_default()
         }
         _ => val.to_display_string(),
@@ -126,14 +168,23 @@ fn repr_cmd(val: &ExprValue) -> String {
         ExprValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         ExprValue::Null => "\"\"".to_string(),
         ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => if f.0.fract() == 0.0 { format!("{:.1}", f) } else { f.to_string() },
+        ExprValue::Float(f) => {
+            if f.0.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            }
+        }
         ExprValue::Path { value, .. } => cmd_quote(value),
-        val if val.is_list() => {
-            val.list_iter().expect("guard ensures list").map(|e| match &e {
+        val if val.is_list() => val
+            .list_iter()
+            .expect("guard ensures list")
+            .map(|e| match &e {
                 ExprValue::String(s) | ExprValue::Path { value: s, .. } => cmd_quote(s),
                 other => other.to_display_string(),
-            }).collect::<Vec<_>>().join(" ")
-        }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => val.to_display_string(),
     }
 }
@@ -144,16 +195,28 @@ fn repr_pwsh(val: &ExprValue) -> String {
         ExprValue::Bool(b) => if *b { "$true" } else { "$false" }.to_string(),
         ExprValue::Null => "$null".to_string(),
         ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => if f.0.fract() == 0.0 { format!("{:.1}", f) } else { f.to_string() },
+        ExprValue::Float(f) => {
+            if f.0.fract() == 0.0 {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            }
+        }
         ExprValue::Path { value, .. } => format!("'{}'", value.replace('\'', "''")),
         val if val.is_list() => {
-            let items: Vec<String> = val.list_iter().expect("guard ensures list").map(|e| match &e {
-                ExprValue::String(s) | ExprValue::Path { value: s, .. } => format!("'{}'", s.replace('\'', "''")),
-                ExprValue::Bool(b) => if *b { "$true" } else { "$false" }.to_string(),
-                ExprValue::Null => "$null".to_string(),
-                ExprValue::Int(i) => i.to_string(),
-                other => other.to_display_string(),
-            }).collect();
+            let items: Vec<String> = val
+                .list_iter()
+                .expect("guard ensures list")
+                .map(|e| match &e {
+                    ExprValue::String(s) | ExprValue::Path { value: s, .. } => {
+                        format!("'{}'", s.replace('\'', "''"))
+                    }
+                    ExprValue::Bool(b) => if *b { "$true" } else { "$false" }.to_string(),
+                    ExprValue::Null => "$null".to_string(),
+                    ExprValue::Int(i) => i.to_string(),
+                    other => other.to_display_string(),
+                })
+                .collect();
             format!("@({})", items.join(", "))
         }
         ExprValue::RangeExpr(r) => format!("'{r}'"),
@@ -166,10 +229,17 @@ fn cmd_quote(s: &str) -> String {
     if !s.is_empty() && !s.chars().any(|c| NEEDS_QUOTING.contains(c)) {
         return s.to_string();
     }
-    let escaped: String = s.chars().map(|c| {
-        if c == '^' || c == '"' { format!("^{c}") }
-        else if c == '%' { "%%".to_string() }
-        else { c.to_string() }
-    }).collect();
+    let escaped: String = s
+        .chars()
+        .map(|c| {
+            if c == '^' || c == '"' {
+                format!("^{c}")
+            } else if c == '%' {
+                "%%".to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect();
     format!("\"{escaped}\"")
 }

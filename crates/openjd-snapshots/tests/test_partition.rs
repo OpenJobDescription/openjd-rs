@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 
 use openjd_snapshots::{
-    AbsSnapshot, DirEntry, FileEntry, HashAlgorithm, Manifest, Snapshot, SymlinkPolicy,
-    DEFAULT_FILE_CHUNK_SIZE, partition_manifest, PartitionOptions,
+    partition_manifest, AbsSnapshot, DirEntry, FileEntry, HashAlgorithm, Manifest,
+    PartitionOptions, Snapshot, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
 };
 
 // --- Helpers ---
@@ -106,7 +106,10 @@ fn explicit_roots_partition_correctly() {
 
 #[test]
 fn empty_partition_for_explicit_root_with_no_entries() {
-    let m = abs(vec![hf("/assets/textures/wood.png", "h1", 100, 1000)], vec![]);
+    let m = abs(
+        vec![hf("/assets/textures/wood.png", "h1", 100, 1000)],
+        vec![],
+    );
     let opts = opts_with_roots(&["/assets/textures", "/assets/models"]);
     let result = partition_manifest(&m, &opts).unwrap();
     assert_eq!(result.len(), 2);
@@ -188,7 +191,12 @@ fn many_remainder_paths_same_toplevel_find_deepest_common() {
 fn remainder_with_nested_explicit_root() {
     let m = abs(
         vec![
-            hf("/projects/client/job/scene/assets/model.blend", "h1", 100, 1000),
+            hf(
+                "/projects/client/job/scene/assets/model.blend",
+                "h1",
+                100,
+                1000,
+            ),
             hf("/shared/lib/utils.py", "h2", 200, 2000),
             hf("/tmp/cache/data.bin", "h3", 300, 3000),
         ],
@@ -426,7 +434,12 @@ fn preserves_symlinks_within_partition() {
     let opts = opts_with_roots(&["/project"]);
     let result = partition_manifest(&m, &opts).unwrap();
     assert_eq!(result.len(), 1);
-    let link = result[0].1.files.iter().find(|f| f.path == "src/link").unwrap();
+    let link = result[0]
+        .1
+        .files
+        .iter()
+        .find(|f| f.path == "src/link")
+        .unwrap();
     assert_eq!(link.symlink_target.as_deref(), Some("src/main.py"));
 }
 
@@ -451,7 +464,12 @@ fn escaping_symlink_collapsed() {
     };
     let result = partition_manifest(&m, &opts).unwrap();
     let project = result.iter().find(|(r, _)| r == "/project").unwrap();
-    let link = project.1.files.iter().find(|f| f.path == "src/link").unwrap();
+    let link = project
+        .1
+        .files
+        .iter()
+        .find(|f| f.path == "src/link")
+        .unwrap();
     assert!(link.symlink_target.is_none());
     assert_eq!(link.hash.as_deref(), Some("h2"));
 }
@@ -517,7 +535,12 @@ fn non_escaping_symlink_preserved_with_exclude_escaping() {
         ..Default::default()
     };
     let result = partition_manifest(&m, &opts).unwrap();
-    let link = result[0].1.files.iter().find(|f| f.path == "src/link").unwrap();
+    let link = result[0]
+        .1
+        .files
+        .iter()
+        .find(|f| f.path == "src/link")
+        .unwrap();
     assert_eq!(link.symlink_target.as_deref(), Some("src/main.py"));
 }
 
@@ -543,7 +566,10 @@ fn exclude_escaping_vs_collapse_escaping() {
         ..Default::default()
     };
     let result_exclude = partition_manifest(&m, &opts_exclude).unwrap();
-    let project_exclude = result_exclude.iter().find(|(r, _)| r == "/project").unwrap();
+    let project_exclude = result_exclude
+        .iter()
+        .find(|(r, _)| r == "/project")
+        .unwrap();
     assert!(!file_paths(&project_exclude.1).contains("src/link"));
 
     // COLLAPSE_ESCAPING: symlink collapsed to real file
@@ -553,8 +579,16 @@ fn exclude_escaping_vs_collapse_escaping() {
         ..Default::default()
     };
     let result_collapse = partition_manifest(&m, &opts_collapse).unwrap();
-    let project_collapse = result_collapse.iter().find(|(r, _)| r == "/project").unwrap();
-    let link = project_collapse.1.files.iter().find(|f| f.path == "src/link").unwrap();
+    let project_collapse = result_collapse
+        .iter()
+        .find(|(r, _)| r == "/project")
+        .unwrap();
+    let link = project_collapse
+        .1
+        .files
+        .iter()
+        .find(|f| f.path == "src/link")
+        .unwrap();
     assert!(link.symlink_target.is_none());
     assert_eq!(link.hash.as_deref(), Some("h2"));
 }
@@ -668,7 +702,8 @@ fn root_level_files_returns_dot_root() {
         ],
         vec![],
     );
-    let result = openjd_snapshots::partition_rel_manifest(&m, &PartitionOptions::default()).unwrap();
+    let result =
+        openjd_snapshots::partition_rel_manifest(&m, &PartitionOptions::default()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0, ".");
     assert_eq!(result[0].1.files.len(), 2);
@@ -676,30 +711,21 @@ fn root_level_files_returns_dot_root() {
 
 #[test]
 fn relative_root_with_absolute_manifest_raises_error() {
-    let m = abs(
-        vec![hf("/home/user/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = abs(vec![hf("/home/user/file.txt", "h1", 100, 1000)], vec![]);
     let opts = opts_with_roots(&["subdir"]);
     assert!(partition_manifest(&m, &opts).is_err());
 }
 
 #[test]
 fn absolute_root_with_relative_manifest_raises_error() {
-    let m = rel(
-        vec![hf("assets/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("assets/file.txt", "h1", 100, 1000)], vec![]);
     let opts = opts_with_roots(&["/root"]);
     assert!(openjd_snapshots::partition_rel_manifest(&m, &opts).is_err());
 }
 
 #[test]
 fn referenced_paths_style_mismatch_raises_error() {
-    let m = rel(
-        vec![hf("assets/file.txt", "h1", 100, 1000)],
-        vec![],
-    );
+    let m = rel(vec![hf("assets/file.txt", "h1", 100, 1000)], vec![]);
     let opts = PartitionOptions {
         referenced_paths: Some(vec!["/absolute/output".into()]),
         ..Default::default()

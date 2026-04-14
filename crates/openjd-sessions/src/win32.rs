@@ -8,18 +8,12 @@
 use std::collections::HashMap;
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, BOOL};
-use windows::Win32::Security::Authentication::Identity::{
-    GetUserNameExW, NameSamCompatible,
-};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE};
+use windows::Win32::Security::Authentication::Identity::{GetUserNameExW, NameSamCompatible};
+use windows::Win32::Security::{LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
+use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::Win32::Security::{
-    LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-};
-use windows::Win32::System::Environment::{
-    CreateEnvironmentBlock, DestroyEnvironmentBlock,
-};
 
 /// Returns the current process user in SAM-compatible format (DOMAIN\user).
 pub fn get_process_user() -> Result<String, windows::core::Error> {
@@ -33,13 +27,9 @@ pub fn get_process_user() -> Result<String, windows::core::Error> {
     }
     let mut buf = vec![0u16; size as usize];
     unsafe {
-        GetUserNameExW(
-            NameSamCompatible,
-            PWSTR(buf.as_mut_ptr()),
-            &mut size,
-        )
-        .ok()
-        .map_err(|_| windows::core::Error::from_win32())?;
+        GetUserNameExW(NameSamCompatible, PWSTR(buf.as_mut_ptr()), &mut size)
+            .ok()
+            .map_err(|_| windows::core::Error::from_win32())?;
     }
     Ok(String::from_utf16_lossy(&buf[..size as usize]))
 }
@@ -75,7 +65,9 @@ impl LogonToken {
 impl Drop for LogonToken {
     fn drop(&mut self) {
         if !self.handle.is_invalid() {
-            unsafe { let _ = CloseHandle(self.handle); }
+            unsafe {
+                let _ = CloseHandle(self.handle);
+            }
         }
     }
 }
@@ -103,7 +95,9 @@ pub fn logon_user(username: &str, password: &str) -> Result<LogonToken, windows:
 }
 
 /// Create an environment block for a logon token and return it as a HashMap.
-pub fn environment_for_user(token: HANDLE) -> Result<HashMap<String, String>, windows::core::Error> {
+pub fn environment_for_user(
+    token: HANDLE,
+) -> Result<HashMap<String, String>, windows::core::Error> {
     let mut block_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
     unsafe {
         CreateEnvironmentBlock(&mut block_ptr, token, BOOL(0))?;
@@ -168,10 +162,9 @@ use windows::Win32::Foundation::{SetHandleInformation, HANDLE_FLAGS, HANDLE_FLAG
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
-    CreateProcessAsUserW, CreateProcessWithLogonW,
-    PROCESS_INFORMATION, STARTUPINFOW, STARTUPINFOW_FLAGS,
-    CREATE_NEW_PROCESS_GROUP, CREATE_UNICODE_ENVIRONMENT,
-    LOGON_WITH_PROFILE,
+    CreateProcessAsUserW, CreateProcessWithLogonW, CREATE_NEW_PROCESS_GROUP,
+    CREATE_UNICODE_ENVIRONMENT, LOGON_WITH_PROFILE, PROCESS_INFORMATION, STARTUPINFOW,
+    STARTUPINFOW_FLAGS,
 };
 
 /// Result of spawning a cross-user process.
@@ -190,8 +183,8 @@ fn merge_environment(
     token: HANDLE,
     extra: &HashMap<String, Option<String>>,
 ) -> Result<Vec<u16>, String> {
-    let user_env = environment_for_user(token)
-        .map_err(|e| format!("CreateEnvironmentBlock failed: {e}"))?;
+    let user_env =
+        environment_for_user(token).map_err(|e| format!("CreateEnvironmentBlock failed: {e}"))?;
 
     let mut merged: HashMap<String, String> = user_env
         .into_iter()
@@ -200,8 +193,12 @@ fn merge_environment(
 
     for (k, v) in extra {
         match v {
-            Some(val) => { merged.insert(k.to_uppercase(), val.clone()); }
-            None => { merged.remove(&k.to_uppercase()); }
+            Some(val) => {
+                merged.insert(k.to_uppercase(), val.clone());
+            }
+            None => {
+                merged.remove(&k.to_uppercase());
+            }
         }
     }
 
@@ -247,13 +244,23 @@ pub fn spawn_as_user(
 
     // Build command line
     let cmdline_str = args_to_cmdline(args);
-    let mut cmdline: Vec<u16> = cmdline_str.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut cmdline: Vec<u16> = cmdline_str
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     let cwd = working_dir.map(|d| {
-        let s: Vec<u16> = d.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let s: Vec<u16> = d
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         s
     });
-    let cwd_ptr = cwd.as_ref().map(|s| PCWSTR(s.as_ptr())).unwrap_or(PCWSTR::null());
+    let cwd_ptr = cwd
+        .as_ref()
+        .map(|s| PCWSTR(s.as_ptr()))
+        .unwrap_or(PCWSTR::null());
 
     // STARTUPINFOW: redirect stdout+stderr to our pipe
     let mut si = STARTUPINFOW::default();
@@ -272,8 +279,7 @@ pub fn spawn_as_user(
         let pw_w: Vec<u16> = pw.encode_utf16().chain(std::iter::once(0)).collect();
 
         // For password path, logon to get env block, then call CreateProcessWithLogonW
-        let token = logon_user(username, pw)
-            .map_err(|e| format!("LogonUser failed: {e}"))?;
+        let token = logon_user(username, pw).map_err(|e| format!("LogonUser failed: {e}"))?;
         let mut env_block = merge_environment(token.as_handle(), env_vars)?;
 
         unsafe {
@@ -314,15 +320,21 @@ pub fn spawn_as_user(
     };
 
     // Close the write end of the pipe (child has it now)
-    unsafe { let _ = CloseHandle(stdout_write); }
+    unsafe {
+        let _ = CloseHandle(stdout_write);
+    }
 
     result.map_err(|e| format!("CreateProcess failed: {e}"))?;
 
     // Close the thread handle (we only need the process handle)
-    unsafe { let _ = CloseHandle(pi.hThread); }
+    unsafe {
+        let _ = CloseHandle(pi.hThread);
+    }
 
     let stdout_owned = unsafe {
-        std::os::windows::io::OwnedHandle::from_raw_handle(stdout_read.0 as std::os::windows::io::RawHandle)
+        std::os::windows::io::OwnedHandle::from_raw_handle(
+            stdout_read.0 as std::os::windows::io::RawHandle,
+        )
     };
 
     Ok(SpawnedProcess {

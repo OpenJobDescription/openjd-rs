@@ -3,9 +3,9 @@
 
 //! Expression parsing using the ruff Python parser.
 
+use crate::error::ExpressionError;
 use ruff_python_ast as ast;
 use ruff_python_parser;
-use crate::error::ExpressionError;
 use std::collections::HashMap;
 
 /// A parsed expression ready for evaluation.
@@ -26,10 +26,10 @@ use std::collections::HashSet;
 
 /// Python keywords that may appear as attribute names in OpenJD expressions.
 const PYTHON_KEYWORDS: &[&str] = &[
-    "False", "None", "True", "and", "as", "assert", "async", "await", "break",
-    "class", "continue", "def", "del", "elif", "else", "except", "finally",
-    "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
-    "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+    "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+    "with", "yield",
 ];
 
 /// Generate a same-length replacement identifier that doesn't appear in the source.
@@ -45,7 +45,10 @@ fn make_replacement(keyword: &str, source: &str) -> String {
             // Use the original chars but shifted, to maintain length
             replacement.push(if c.is_alphabetic() { c } else { 'x' });
         }
-        if replacement.len() == len && !source.contains(&replacement) && !PYTHON_KEYWORDS.contains(&replacement.as_str()) {
+        if replacement.len() == len
+            && !source.contains(&replacement)
+            && !PYTHON_KEYWORDS.contains(&replacement.as_str())
+        {
             return replacement;
         }
     }
@@ -64,89 +67,104 @@ fn make_replacement(keyword: &str, source: &str) -> String {
 /// 5. After success, record renames so evaluator can map back
 impl ParsedExpression {
     pub fn new(expr: &str) -> Result<ParsedExpression, ExpressionError> {
-    let expr_str = expr.trim();
-    if expr_str.is_empty() {
-        return Err(ExpressionError::new("Empty expression"));
-    }
+        let expr_str = expr.trim();
+        if expr_str.is_empty() {
+            return Err(ExpressionError::new("Empty expression"));
+        }
 
-    let mut source = expr_str.to_string();
-    let mut keyword_renames: HashMap<String, String> = HashMap::new();
+        let mut source = expr_str.to_string();
+        let mut keyword_renames: HashMap<String, String> = HashMap::new();
 
-    // Wrap multi-line expressions in parentheses for implicit line continuation
-    let is_multiline = source.contains('\n');
+        // Wrap multi-line expressions in parentheses for implicit line continuation
+        let is_multiline = source.contains('\n');
 
-    loop {
-        let to_parse = if is_multiline { format!("({})", source) } else { source.clone() };
+        loop {
+            let to_parse = if is_multiline {
+                format!("({})", source)
+            } else {
+                source.clone()
+            };
 
-        match ruff_python_parser::parse_expression(&to_parse) {
-            Ok(parsed) => {
-                let expr_node = parsed.into_expr();
-                // Structural validation (matches Python implementation)
-                validate_structure(&expr_node, expr_str)?;
-                let mut accessed_symbols = HashSet::new();
-                let mut called_functions = HashSet::new();
-                let mut local_bindings = HashSet::new();
-                collect_symbols(&expr_node, &keyword_renames, &mut accessed_symbols, &mut called_functions, &mut local_bindings);
-                // Check for nested comprehension variable shadowing
-                check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
-                return Ok(ParsedExpression {
-                    ast: expr_node,
-                    source: expr.to_string(),
-                    expr: expr_str.to_string(),
-                    keyword_renames,
-                    accessed_symbols,
-                    called_functions,
-                    local_bindings,
-                    peak_memory_usage: 0,
-                    operation_count: 0,
-                });
-            }
-            Err(e) => {
-                // Try to find a keyword after '.' that caused the error
-                // Look for patterns like ".if", ".def", ".in" etc. in the source
-                let mut found = false;
-                for kw in PYTHON_KEYWORDS {
-                    let pattern = format!(".{kw}");
-                    if let Some(pos) = source.find(&pattern) {
-                        // Check that the keyword is followed by a non-identifier char
-                        let after_pos = pos + 1 + kw.len();
-                        let after_char = source.chars().nth(after_pos);
-                        if after_char.map_or(true, |c| !c.is_alphanumeric() && c != '_') {
-                            let replacement = keyword_renames
-                                .iter()
-                                .find(|(_, v)| v.as_str() == *kw)
-                                .map(|(k, _)| k.clone())
-                                .unwrap_or_else(|| {
-                                    let r = make_replacement(kw, &source);
-                                    keyword_renames.insert(r.clone(), kw.to_string());
-                                    r
-                                });
-                            // Replace in source — same length, preserves positions
-                            source = format!("{}.{}{}", &source[..pos], replacement, &source[after_pos..]);
-                            found = true;
-                            break;
+            match ruff_python_parser::parse_expression(&to_parse) {
+                Ok(parsed) => {
+                    let expr_node = parsed.into_expr();
+                    // Structural validation (matches Python implementation)
+                    validate_structure(&expr_node, expr_str)?;
+                    let mut accessed_symbols = HashSet::new();
+                    let mut called_functions = HashSet::new();
+                    let mut local_bindings = HashSet::new();
+                    collect_symbols(
+                        &expr_node,
+                        &keyword_renames,
+                        &mut accessed_symbols,
+                        &mut called_functions,
+                        &mut local_bindings,
+                    );
+                    // Check for nested comprehension variable shadowing
+                    check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
+                    return Ok(ParsedExpression {
+                        ast: expr_node,
+                        source: expr.to_string(),
+                        expr: expr_str.to_string(),
+                        keyword_renames,
+                        accessed_symbols,
+                        called_functions,
+                        local_bindings,
+                        peak_memory_usage: 0,
+                        operation_count: 0,
+                    });
+                }
+                Err(e) => {
+                    // Try to find a keyword after '.' that caused the error
+                    // Look for patterns like ".if", ".def", ".in" etc. in the source
+                    let mut found = false;
+                    for kw in PYTHON_KEYWORDS {
+                        let pattern = format!(".{kw}");
+                        if let Some(pos) = source.find(&pattern) {
+                            // Check that the keyword is followed by a non-identifier char
+                            let after_pos = pos + 1 + kw.len();
+                            let after_char = source.chars().nth(after_pos);
+                            if after_char.is_none_or(|c| !c.is_alphanumeric() && c != '_') {
+                                let replacement = keyword_renames
+                                    .iter()
+                                    .find(|(_, v)| v.as_str() == *kw)
+                                    .map(|(k, _)| k.clone())
+                                    .unwrap_or_else(|| {
+                                        let r = make_replacement(kw, &source);
+                                        keyword_renames.insert(r.clone(), kw.to_string());
+                                        r
+                                    });
+                                // Replace in source — same length, preserves positions
+                                source = format!(
+                                    "{}.{}{}",
+                                    &source[..pos],
+                                    replacement,
+                                    &source[after_pos..]
+                                );
+                                found = true;
+                                break;
+                            }
                         }
                     }
-                }
-                if !found {
-                    let msg = format!("Syntax error: {}", e.error);
-                    let start = e.location.start().to_usize();
-                    let end = e.location.end().to_usize();
-                    // For zero-width ranges (like EOF), point at the last char
-                    let (col, end_col) = if start == end && !source.is_empty() {
-                        (0, source.len())
-                    } else {
-                        (start.min(source.len()), end.min(source.len()))
-                    };
-                    let mut err = ExpressionError::new(msg);
-                    if !source.is_empty() {
-                        err = err.with_span(&source, col, end_col.max(col + 1));
+                    if !found {
+                        let msg = format!("Syntax error: {}", e.error);
+                        let start = e.location.start().to_usize();
+                        let end = e.location.end().to_usize();
+                        // For zero-width ranges (like EOF), point at the last char
+                        let (col, end_col) = if start == end && !source.is_empty() {
+                            (0, source.len())
+                        } else {
+                            (start.min(source.len()), end.min(source.len()))
+                        };
+                        let mut err = ExpressionError::new(msg);
+                        if !source.is_empty() {
+                            err = err.with_span(&source, col, end_col.max(col + 1));
+                        }
+                        return Err(err);
                     }
-                    return Err(err);
                 }
             }
         }
-    }
     }
 
     /// Evaluate this parsed expression.
@@ -171,7 +189,10 @@ impl ParsedExpression {
     /// state (keyword renames, source context). Callers can further customize
     /// with `.with_path_format()`, `.with_library()`, etc. before calling
     /// `evaluator.evaluate(&parsed.ast)`.
-    pub fn evaluator<'a>(&'a self, symtabs: &'a [&'a crate::symbol_table::SymbolTable]) -> crate::eval::Evaluator<'a> {
+    pub fn evaluator<'a>(
+        &'a self,
+        symtabs: &'a [&'a crate::symbol_table::SymbolTable],
+    ) -> crate::eval::Evaluator<'a> {
         crate::eval::Evaluator::new(symtabs)
             .with_keyword_renames(&self.keyword_renames)
             .with_expr_source(&self.expr)
@@ -199,12 +220,20 @@ fn build_symbol_name(expr: &ast::Expr, renames: &HashMap<String, String>) -> Opt
     match expr {
         ast::Expr::Name(n) => {
             let name = n.id.as_str();
-            Some(renames.get(name).cloned().unwrap_or_else(|| name.to_string()))
+            Some(
+                renames
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.to_string()),
+            )
         }
         ast::Expr::Attribute(a) => {
             let base = build_symbol_name(&a.value, renames)?;
             let attr = a.attr.as_str();
-            let attr_resolved = renames.get(attr).cloned().unwrap_or_else(|| attr.to_string());
+            let attr_resolved = renames
+                .get(attr)
+                .cloned()
+                .unwrap_or_else(|| attr.to_string());
             Some(format!("{base}.{attr_resolved}"))
         }
         _ => None,
@@ -221,13 +250,15 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
             if lc.generators.len() > 1 {
                 return Err(ExpressionError::new(
                     "Multiple 'for' clauses in list comprehensions are not supported",
-                ).with_span(source, 0, source.len()));
+                )
+                .with_span(source, 0, source.len()));
             }
             for gen in &lc.generators {
                 if matches!(&gen.target, ast::Expr::Tuple(_)) {
                     return Err(ExpressionError::new(
                         "Tuple unpacking in list comprehension is not supported",
-                    ).with_node(source, &gen.target));
+                    )
+                    .with_node(source, &gen.target));
                 }
                 if gen.ifs.len() > 1 {
                     return Err(ExpressionError::new(
@@ -237,9 +268,11 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
                 if let ast::Expr::Name(n) = &gen.target {
                     let name = n.id.as_str();
                     if !name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
-                        return Err(ExpressionError::new(
-                            format!("Loop variable '{}' must start with a lowercase letter or underscore", name),
-                        ).with_node(source, &gen.target));
+                        return Err(ExpressionError::new(format!(
+                            "Loop variable '{}' must start with a lowercase letter or underscore",
+                            name
+                        ))
+                        .with_node(source, &gen.target));
                     }
                 }
             }
@@ -253,12 +286,24 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
         }
         ast::Expr::BinOp(b) => {
             match b.op {
-                ast::Operator::BitAnd => return err("Bitwise AND (&) is not supported", source, node),
-                ast::Operator::BitOr => return err("Bitwise OR (|) is not supported", source, node),
-                ast::Operator::BitXor => return err("Bitwise XOR (^) is not supported", source, node),
-                ast::Operator::LShift => return err("Left shift (<<) is not supported", source, node),
-                ast::Operator::RShift => return err("Right shift (>>) is not supported", source, node),
-                ast::Operator::MatMult => return err("Matrix multiply (@) is not supported", source, node),
+                ast::Operator::BitAnd => {
+                    return err("Bitwise AND (&) is not supported", source, node)
+                }
+                ast::Operator::BitOr => {
+                    return err("Bitwise OR (|) is not supported", source, node)
+                }
+                ast::Operator::BitXor => {
+                    return err("Bitwise XOR (^) is not supported", source, node)
+                }
+                ast::Operator::LShift => {
+                    return err("Left shift (<<) is not supported", source, node)
+                }
+                ast::Operator::RShift => {
+                    return err("Right shift (>>) is not supported", source, node)
+                }
+                ast::Operator::MatMult => {
+                    return err("Matrix multiply (@) is not supported", source, node)
+                }
                 _ => {}
             }
             validate_structure(&b.left, source)?;
@@ -270,17 +315,27 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
             }
             validate_structure(&u.operand, source)?;
         }
-        ast::Expr::BoolOp(b) => { for v in &b.values { validate_structure(v, source)?; } }
+        ast::Expr::BoolOp(b) => {
+            for v in &b.values {
+                validate_structure(v, source)?;
+            }
+        }
         ast::Expr::Compare(c) => {
             for op in &c.ops {
                 match op {
-                    ast::CmpOp::Is => return err("'is' operator is not supported; use '=='", source, node),
-                    ast::CmpOp::IsNot => return err("'is not' operator is not supported; use '!='", source, node),
+                    ast::CmpOp::Is => {
+                        return err("'is' operator is not supported; use '=='", source, node)
+                    }
+                    ast::CmpOp::IsNot => {
+                        return err("'is not' operator is not supported; use '!='", source, node)
+                    }
                     _ => {}
                 }
             }
             validate_structure(&c.left, source)?;
-            for comp in &c.comparators { validate_structure(comp, source)?; }
+            for comp in &c.comparators {
+                validate_structure(comp, source)?;
+            }
         }
         ast::Expr::If(i) => {
             validate_structure(&i.test, source)?;
@@ -289,16 +344,28 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
         }
         ast::Expr::Call(c) => {
             validate_structure(&c.func, source)?;
-            for arg in &c.arguments.args { validate_structure(arg, source)?; }
+            for arg in &c.arguments.args {
+                validate_structure(arg, source)?;
+            }
             if !c.arguments.keywords.is_empty() {
                 return err("Keyword arguments are not supported", source, node);
             }
         }
-        ast::Expr::List(l) => { for elt in &l.elts { validate_structure(elt, source)?; } }
-        ast::Expr::Subscript(s) => { validate_structure(&s.value, source)?; validate_structure(&s.slice, source)?; }
+        ast::Expr::List(l) => {
+            for elt in &l.elts {
+                validate_structure(elt, source)?;
+            }
+        }
+        ast::Expr::Subscript(s) => {
+            validate_structure(&s.value, source)?;
+            validate_structure(&s.slice, source)?;
+        }
         ast::Expr::StringLiteral(s) => {
             for part in &s.value {
-                if matches!(part.flags.prefix(), ruff_python_ast::str_prefix::StringLiteralPrefix::Unicode) {
+                if matches!(
+                    part.flags.prefix(),
+                    ruff_python_ast::str_prefix::StringLiteralPrefix::Unicode
+                ) {
                     return Err(ExpressionError::new(
                         "Unicode string prefix u'...' is not supported. Use '...' or \"...\" instead."
                     ).with_node(source, &ast::Expr::StringLiteral(s.clone())));
@@ -307,20 +374,53 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
         }
         ast::Expr::BytesLiteral(b) => {
             return Err(ExpressionError::new(
-                "Byte strings (b'...') are not supported. Use '...' or \"...\" instead."
-            ).with_node(source, &ast::Expr::BytesLiteral(b.clone())));
+                "Byte strings (b'...') are not supported. Use '...' or \"...\" instead.",
+            )
+            .with_node(source, &ast::Expr::BytesLiteral(b.clone())));
         }
         // Unsupported expression types
         ast::Expr::Named(_) => return err("Walrus operator (:=) is not supported", source, node),
         ast::Expr::Lambda(_) => return err("Lambda expressions are not supported", source, node),
-        ast::Expr::Tuple(_) => return err("Tuple literals are not supported; use a list instead", source, node),
+        ast::Expr::Tuple(_) => {
+            return err(
+                "Tuple literals are not supported; use a list instead",
+                source,
+                node,
+            )
+        }
         ast::Expr::Dict(_) => return err("Dict literals are not supported", source, node),
         ast::Expr::Set(_) => return err("Set literals are not supported", source, node),
-        ast::Expr::DictComp(_) => return err("Dict comprehensions are not supported; only list comprehensions are allowed", source, node),
-        ast::Expr::SetComp(_) => return err("Set comprehensions are not supported; only list comprehensions are allowed", source, node),
-        ast::Expr::Generator(_) => return err("Generator expressions are not supported; use a list comprehension", source, node),
-        ast::Expr::FString(_) => return err("f-strings are not supported; use string concatenation", source, node),
-        ast::Expr::EllipsisLiteral(_) => return err("Ellipsis (...) is not supported", source, node),
+        ast::Expr::DictComp(_) => {
+            return err(
+                "Dict comprehensions are not supported; only list comprehensions are allowed",
+                source,
+                node,
+            )
+        }
+        ast::Expr::SetComp(_) => {
+            return err(
+                "Set comprehensions are not supported; only list comprehensions are allowed",
+                source,
+                node,
+            )
+        }
+        ast::Expr::Generator(_) => {
+            return err(
+                "Generator expressions are not supported; use a list comprehension",
+                source,
+                node,
+            )
+        }
+        ast::Expr::FString(_) => {
+            return err(
+                "f-strings are not supported; use string concatenation",
+                source,
+                node,
+            )
+        }
+        ast::Expr::EllipsisLiteral(_) => {
+            return err("Ellipsis (...) is not supported", source, node)
+        }
         ast::Expr::Starred(_) => return err("Star expressions are not supported", source, node),
         ast::Expr::Await(_) => return err("Await expressions are not supported", source, node),
         _ => {}
@@ -329,7 +429,11 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
 }
 
 /// Check that nested comprehensions don't shadow outer comprehension variables.
-fn check_comprehension_shadowing(node: &ast::Expr, outer_scope: &HashSet<String>, source: &str) -> Result<(), ExpressionError> {
+fn check_comprehension_shadowing(
+    node: &ast::Expr,
+    outer_scope: &HashSet<String>,
+    source: &str,
+) -> Result<(), ExpressionError> {
     match node {
         ast::Expr::ListComp(lc) => {
             let mut comp_bindings = HashSet::new();
@@ -357,11 +461,19 @@ fn check_comprehension_shadowing(node: &ast::Expr, outer_scope: &HashSet<String>
             check_comprehension_shadowing(&b.left, outer_scope, source)?;
             check_comprehension_shadowing(&b.right, outer_scope, source)?;
         }
-        ast::Expr::UnaryOp(u) => { check_comprehension_shadowing(&u.operand, outer_scope, source)?; }
-        ast::Expr::BoolOp(b) => { for v in &b.values { check_comprehension_shadowing(v, outer_scope, source)?; } }
+        ast::Expr::UnaryOp(u) => {
+            check_comprehension_shadowing(&u.operand, outer_scope, source)?;
+        }
+        ast::Expr::BoolOp(b) => {
+            for v in &b.values {
+                check_comprehension_shadowing(v, outer_scope, source)?;
+            }
+        }
         ast::Expr::Compare(c) => {
             check_comprehension_shadowing(&c.left, outer_scope, source)?;
-            for comp in &c.comparators { check_comprehension_shadowing(comp, outer_scope, source)?; }
+            for comp in &c.comparators {
+                check_comprehension_shadowing(comp, outer_scope, source)?;
+            }
         }
         ast::Expr::If(i) => {
             check_comprehension_shadowing(&i.test, outer_scope, source)?;
@@ -370,9 +482,15 @@ fn check_comprehension_shadowing(node: &ast::Expr, outer_scope: &HashSet<String>
         }
         ast::Expr::Call(c) => {
             check_comprehension_shadowing(&c.func, outer_scope, source)?;
-            for arg in &c.arguments.args { check_comprehension_shadowing(arg, outer_scope, source)?; }
+            for arg in &c.arguments.args {
+                check_comprehension_shadowing(arg, outer_scope, source)?;
+            }
         }
-        ast::Expr::List(l) => { for elt in &l.elts { check_comprehension_shadowing(elt, outer_scope, source)?; } }
+        ast::Expr::List(l) => {
+            for elt in &l.elts {
+                check_comprehension_shadowing(elt, outer_scope, source)?;
+            }
+        }
         ast::Expr::Subscript(s) => {
             check_comprehension_shadowing(&s.value, outer_scope, source)?;
             check_comprehension_shadowing(&s.slice, outer_scope, source)?;
@@ -393,10 +511,20 @@ fn collect_symbols(
 ) {
     match node {
         ast::Expr::Name(n) => {
-            let name = renames.get(n.id.as_str()).cloned().unwrap_or_else(|| n.id.to_string());
+            let name = renames
+                .get(n.id.as_str())
+                .cloned()
+                .unwrap_or_else(|| n.id.to_string());
             // Constants are not symbols
-            if name == "True" || name == "False" || name == "None"
-                || name == "true" || name == "false" || name == "null" { return; }
+            if name == "True"
+                || name == "False"
+                || name == "None"
+                || name == "true"
+                || name == "false"
+                || name == "null"
+            {
+                return;
+            }
             if !locals.contains(&name) {
                 symbols.insert(name);
             }
@@ -406,8 +534,12 @@ fn collect_symbols(
             if let Some(full_name) = build_symbol_name(node, renames) {
                 let base = full_name.split('.').next().unwrap_or("");
                 if !locals.contains(base)
-                    && base != "True" && base != "False" && base != "None"
-                    && base != "true" && base != "false" && base != "null"
+                    && base != "True"
+                    && base != "False"
+                    && base != "None"
+                    && base != "true"
+                    && base != "false"
+                    && base != "null"
                 {
                     symbols.insert(full_name);
                 }
@@ -421,13 +553,19 @@ fn collect_symbols(
             match &*c.func {
                 ast::Expr::Name(n) => {
                     // Bare function call: name is a function, not a symbol
-                    let name = renames.get(n.id.as_str()).cloned().unwrap_or_else(|| n.id.to_string());
+                    let name = renames
+                        .get(n.id.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| n.id.to_string());
                     functions.insert(name);
                 }
                 ast::Expr::Attribute(a) => {
                     // Method call: collect method name as function, recurse into receiver as symbol
                     let method = a.attr.as_str();
-                    let method_resolved = renames.get(method).cloned().unwrap_or_else(|| method.to_string());
+                    let method_resolved = renames
+                        .get(method)
+                        .cloned()
+                        .unwrap_or_else(|| method.to_string());
                     functions.insert(method_resolved);
                     // The receiver (a.value) IS a symbol reference
                     collect_symbols(&a.value, renames, symbols, functions, locals);
@@ -446,11 +584,15 @@ fn collect_symbols(
             collect_symbols(&u.operand, renames, symbols, functions, locals);
         }
         ast::Expr::BoolOp(b) => {
-            for v in &b.values { collect_symbols(v, renames, symbols, functions, locals); }
+            for v in &b.values {
+                collect_symbols(v, renames, symbols, functions, locals);
+            }
         }
         ast::Expr::Compare(c) => {
             collect_symbols(&c.left, renames, symbols, functions, locals);
-            for comp in &c.comparators { collect_symbols(comp, renames, symbols, functions, locals); }
+            for comp in &c.comparators {
+                collect_symbols(comp, renames, symbols, functions, locals);
+            }
         }
         ast::Expr::If(i) => {
             collect_symbols(&i.test, renames, symbols, functions, locals);
@@ -458,16 +600,24 @@ fn collect_symbols(
             collect_symbols(&i.orelse, renames, symbols, functions, locals);
         }
         ast::Expr::List(l) => {
-            for elt in &l.elts { collect_symbols(elt, renames, symbols, functions, locals); }
+            for elt in &l.elts {
+                collect_symbols(elt, renames, symbols, functions, locals);
+            }
         }
         ast::Expr::Subscript(s) => {
             collect_symbols(&s.value, renames, symbols, functions, locals);
             collect_symbols(&s.slice, renames, symbols, functions, locals);
         }
         ast::Expr::Slice(s) => {
-            if let Some(l) = &s.lower { collect_symbols(l, renames, symbols, functions, locals); }
-            if let Some(u) = &s.upper { collect_symbols(u, renames, symbols, functions, locals); }
-            if let Some(st) = &s.step { collect_symbols(st, renames, symbols, functions, locals); }
+            if let Some(l) = &s.lower {
+                collect_symbols(l, renames, symbols, functions, locals);
+            }
+            if let Some(u) = &s.upper {
+                collect_symbols(u, renames, symbols, functions, locals);
+            }
+            if let Some(st) = &s.step {
+                collect_symbols(st, renames, symbols, functions, locals);
+            }
         }
         ast::Expr::ListComp(lc) => {
             // Visit iterables first (before adding loop vars)
@@ -494,9 +644,12 @@ fn collect_symbols(
             collect_symbols(&s.value, renames, symbols, functions, locals);
         }
         // Literals — no symbols
-        ast::Expr::NumberLiteral(_) | ast::Expr::StringLiteral(_) |
-        ast::Expr::BooleanLiteral(_) | ast::Expr::NoneLiteral(_) |
-        ast::Expr::EllipsisLiteral(_) | ast::Expr::BytesLiteral(_) => {}
+        ast::Expr::NumberLiteral(_)
+        | ast::Expr::StringLiteral(_)
+        | ast::Expr::BooleanLiteral(_)
+        | ast::Expr::NoneLiteral(_)
+        | ast::Expr::EllipsisLiteral(_)
+        | ast::Expr::BytesLiteral(_) => {}
         _ => {}
     }
 }
@@ -543,17 +696,26 @@ mod tests {
     }
 
     #[test]
-    fn parse_empty_error() { assert!(ParsedExpression::new("").is_err()); }
+    fn parse_empty_error() {
+        assert!(ParsedExpression::new("").is_err());
+    }
 
     #[test]
-    fn parse_syntax_error() { assert!(ParsedExpression::new("1 +").is_err()); }
+    fn parse_syntax_error() {
+        assert!(ParsedExpression::new("1 +").is_err());
+    }
 
     #[test]
     fn keyword_replacement_same_length() {
         let parsed = ParsedExpression::new("Param.if").unwrap();
         for (replacement, original) in &parsed.keyword_renames {
-            assert_eq!(replacement.len(), original.len(),
-                "Replacement '{}' must be same length as original '{}'", replacement, original);
+            assert_eq!(
+                replacement.len(),
+                original.len(),
+                "Replacement '{}' must be same length as original '{}'",
+                replacement,
+                original
+            );
         }
     }
 }

@@ -31,7 +31,10 @@ impl CrossUserHelper {
     /// Returns `(helper, cancel_writer)` where `cancel_writer` is a dup'd copy
     /// of the helper's stdin fd. This allows sending cancel commands even while
     /// the helper struct is moved to a runner during action execution.
-    pub fn spawn(helper_path: &Path, user: &dyn SessionUser) -> Result<(Self, std::fs::File), SessionError> {
+    pub fn spawn(
+        helper_path: &Path,
+        user: &dyn SessionUser,
+    ) -> Result<(Self, std::fs::File), SessionError> {
         let mut child = std::process::Command::new("sudo")
             .args(["-u", user.user(), "-i", &helper_path.to_string_lossy()])
             .stdin(std::process::Stdio::piped())
@@ -56,7 +59,14 @@ impl CrossUserHelper {
         let stdin = std::io::BufWriter::new(child_stdin);
         let stdout = std::io::BufReader::new(child.stdout.take().expect("stdout was piped"));
 
-        Ok((Self { child, stdin, stdout }, cancel_writer))
+        Ok((
+            Self {
+                child,
+                stdin,
+                stdout,
+            },
+            cancel_writer,
+        ))
     }
 
     /// Send a JSON command to the helper (writes JSON + newline, then flushes).
@@ -64,9 +74,11 @@ impl CrossUserHelper {
         use std::io::Write;
         serde_json::to_writer(&mut self.stdin, cmd)
             .map_err(|e| SessionError::Runtime(format!("Failed to write to helper stdin: {e}")))?;
-        self.stdin.write_all(b"\n")
-            .map_err(|e| SessionError::Runtime(format!("Failed to write newline to helper: {e}")))?;
-        self.stdin.flush()
+        self.stdin.write_all(b"\n").map_err(|e| {
+            SessionError::Runtime(format!("Failed to write newline to helper: {e}"))
+        })?;
+        self.stdin
+            .flush()
             .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
         Ok(())
     }
@@ -75,10 +87,13 @@ impl CrossUserHelper {
     pub fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
         use std::io::BufRead;
         let mut line = String::new();
-        self.stdout.read_line(&mut line)
-            .map_err(|e| SessionError::Runtime(format!("Failed to read from helper stdout: {e}")))?;
+        self.stdout.read_line(&mut line).map_err(|e| {
+            SessionError::Runtime(format!("Failed to read from helper stdout: {e}"))
+        })?;
         if line.is_empty() {
-            return Err(SessionError::Runtime("Helper process closed stdout unexpectedly".into()));
+            return Err(SessionError::Runtime(
+                "Helper process closed stdout unexpectedly".into(),
+            ));
         }
         serde_json::from_str(line.trim_end())
             .map_err(|e| SessionError::Runtime(format!("Failed to parse helper response: {e}")))
@@ -125,7 +140,8 @@ pub(crate) fn run_via_helper(
     let done = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
     let _timeout_guard = if let (Some(timeout), Some(writer)) = (config.timeout, cancel_writer) {
         use std::io::Write;
-        let mut writer = writer.try_clone()
+        let mut writer = writer
+            .try_clone()
             .map_err(|e| SessionError::Runtime(format!("Failed to clone cancel_writer: {e}")))?;
         let timed_out = timed_out.clone();
         let done = done.clone();
@@ -133,15 +149,21 @@ pub(crate) fn run_via_helper(
             let (lock, cvar) = &*done;
             let guard = lock.lock().unwrap();
             let (guard, _) = cvar.wait_timeout_while(guard, timeout, |d| !*d).unwrap();
-            if *guard { return; } // command finished before timeout
+            if *guard {
+                return;
+            } // command finished before timeout
             drop(guard);
             timed_out.store(true, std::sync::atomic::Ordering::Release);
             let _ = writeln!(writer, "{{\"cancel\":\"SIGTERM\"}}");
             let _ = writer.flush();
             // Grace period — also cancellable
             let guard = lock.lock().unwrap();
-            let (guard, _) = cvar.wait_timeout_while(guard, std::time::Duration::from_secs(5), |d| !*d).unwrap();
-            if *guard { return; }
+            let (guard, _) = cvar
+                .wait_timeout_while(guard, std::time::Duration::from_secs(5), |d| !*d)
+                .unwrap();
+            if *guard {
+                return;
+            }
             drop(guard);
             let _ = writeln!(writer, "{{\"cancel\":\"SIGKILL\"}}");
             let _ = writer.flush();
@@ -163,8 +185,13 @@ pub(crate) fn run_via_helper(
     let _done_guard = DoneGuard(done);
 
     // Build the env map (only set values; unsets are excluded).
-    let env: serde_json::Map<String, serde_json::Value> = config.env_vars.iter()
-        .filter_map(|(k, v)| v.as_ref().map(|val| (k.clone(), serde_json::Value::String(val.clone()))))
+    let env: serde_json::Map<String, serde_json::Value> = config
+        .env_vars
+        .iter()
+        .filter_map(|(k, v)| {
+            v.as_ref()
+                .map(|val| (k.clone(), serde_json::Value::String(val.clone())))
+        })
         .collect();
 
     let cmd = serde_json::json!({
@@ -177,8 +204,13 @@ pub(crate) fn run_via_helper(
     helper.send_command(&cmd)?;
 
     // Log the actual command (not the helper protocol)
-    session_log!(info, session_id, LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
-        "Running command {}", crate::subprocess::format_command_for_log(&config.args));
+    session_log!(
+        info,
+        session_id,
+        LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+        "Running command {}",
+        crate::subprocess::format_command_for_log(&config.args)
+    );
 
     let mut stdout_collected = String::new();
     let mut saw_fail = false;
@@ -187,15 +219,28 @@ pub(crate) fn run_via_helper(
         let resp = helper.read_response()?;
 
         if let Some(pid) = resp.get("pid").and_then(|v| v.as_i64()) {
-            session_log!(info, session_id, LogContent::PROCESS_CONTROL,
-                "Command started as pid: {}", pid);
+            session_log!(
+                info,
+                session_id,
+                LogContent::PROCESS_CONTROL,
+                "Command started as pid: {}",
+                pid
+            );
             continue;
         }
 
         if let Some(line) = resp.get("out").and_then(|v| v.as_str()) {
-            let line = if line.len() > 64 * 1024 { &line[..64 * 1024] } else { line };
+            let line = if line.len() > 64 * 1024 {
+                &line[..64 * 1024]
+            } else {
+                line
+            };
             let (display, pass_through) = crate::subprocess::process_line(
-                line, filter, session_id, &message_tx, &mut saw_fail,
+                line,
+                filter,
+                session_id,
+                &message_tx,
+                &mut saw_fail,
             );
             if pass_through && filter.min_log_level() <= 20 {
                 session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
@@ -207,11 +252,18 @@ pub(crate) fn run_via_helper(
 
         if let Some(code) = resp.get("exited").and_then(|v| v.as_i64()) {
             let exit_code = code as i32;
-            session_log!(info, session_id, LogContent::PROCESS_CONTROL,
-                "Process exit code: {}", exit_code);
+            session_log!(
+                info,
+                session_id,
+                LogContent::PROCESS_CONTROL,
+                "Process exit code: {}",
+                exit_code
+            );
 
             // Check if cancel was requested via the watch channel.
-            let canceled = config.cancel_request_rx.as_ref()
+            let canceled = config
+                .cancel_request_rx
+                .as_ref()
                 .is_some_and(|rx| rx.has_changed().unwrap_or(false));
 
             let state = if canceled {
@@ -226,7 +278,9 @@ pub(crate) fn run_via_helper(
                 ActionState::Failed
             };
             return Ok(crate::subprocess::SubprocessResult {
-                state, exit_code: Some(exit_code), stdout: stdout_collected,
+                state,
+                exit_code: Some(exit_code),
+                stdout: stdout_collected,
             });
         }
 
@@ -237,8 +291,9 @@ pub(crate) fn run_via_helper(
             });
         }
 
-        return Err(SessionError::Runtime(
-            format!("Unexpected helper response: {}", resp),
-        ));
+        return Err(SessionError::Runtime(format!(
+            "Unexpected helper response: {}",
+            resp
+        )));
     }
 }

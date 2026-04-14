@@ -5,8 +5,8 @@
 
 use indexmap::IndexMap;
 
-use openjd_expr::symbol_table::SymbolTable;
 use openjd_expr::path_mapping::PathFormat;
+use openjd_expr::symbol_table::SymbolTable;
 use openjd_expr::ExprValue;
 use openjd_expr::RangeExpr;
 
@@ -16,28 +16,40 @@ use crate::template;
 use crate::template::validate_v2023_09::EffectiveLimits;
 
 /// Resolve a FormatString to f64.
-pub(super) fn resolve_to_f64(fs: &openjd_expr::FormatString, symtab: &SymbolTable, context: &str) -> Result<f64, OpenJdError> {
-    let resolved = fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+pub(super) fn resolve_to_f64(
+    fs: &openjd_expr::FormatString,
+    symtab: &SymbolTable,
+    context: &str,
+) -> Result<f64, OpenJdError> {
+    let resolved = fs
+        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
         .map_err(|e| OpenJdError::FormatStringError {
             message: format!("{context}: {e}"),
             input: Some(fs.raw().to_string()),
             start: None,
             end: None,
         })?;
-    resolved.trim().parse::<f64>()
-        .map_err(|_| OpenJdError::Expression(format!("{context}: '{resolved}' is not a valid number")))
+    resolved.trim().parse::<f64>().map_err(|_| {
+        OpenJdError::Expression(format!("{context}: '{resolved}' is not a valid number"))
+    })
 }
 
 /// Resolve a list of FormatStrings to strings.
-pub(super) fn resolve_string_list(vals: &[openjd_expr::FormatString], symtab: &SymbolTable) -> Result<Vec<String>, OpenJdError> {
-    vals.iter().map(|fs| {
-        fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix).map_err(|e| OpenJdError::FormatStringError {
-            message: e.to_string(),
-            input: Some(fs.raw().to_string()),
-            start: None,
-            end: None,
+pub(super) fn resolve_string_list(
+    vals: &[openjd_expr::FormatString],
+    symtab: &SymbolTable,
+) -> Result<Vec<String>, OpenJdError> {
+    vals.iter()
+        .map(|fs| {
+            fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                .map_err(|e| OpenJdError::FormatStringError {
+                    message: e.to_string(),
+                    input: Some(fs.raw().to_string()),
+                    start: None,
+                    end: None,
+                })
         })
-    }).collect()
+        .collect()
 }
 
 /// Resolve a StepParameterSpaceDefinition into a StepParameterSpace with concrete ranges.
@@ -66,7 +78,10 @@ fn resolve_task_parameter(
     match tp {
         template::TaskParameterDefinition::INT(p) => {
             let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits)?;
-            Ok(job::TaskParameter::Int { range, chunks: None })
+            Ok(job::TaskParameter::Int {
+                range,
+                chunks: None,
+            })
         }
         template::TaskParameterDefinition::FLOAT(p) => {
             let range = resolve_float_range(&p.range, symtab, p.name.as_str(), limits)?;
@@ -85,10 +100,19 @@ fn resolve_task_parameter(
             let default_task_count = match &p.chunks.default_task_count {
                 template::IntOrFormatString::Int(n) => (*n).max(1) as usize,
                 template::IntOrFormatString::FormatString(fs) => {
-                    let resolved = fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
-                        .map_err(|e| OpenJdError::Expression(format!("chunks.defaultTaskCount: {e}")))?;
-                    resolved.trim().parse::<i64>()
-                        .map_err(|_| OpenJdError::Expression(format!("chunks.defaultTaskCount: '{resolved}' is not a valid integer")))?
+                    let resolved = fs
+                        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                        .map_err(|e| {
+                            OpenJdError::Expression(format!("chunks.defaultTaskCount: {e}"))
+                        })?;
+                    resolved
+                        .trim()
+                        .parse::<i64>()
+                        .map_err(|_| {
+                            OpenJdError::Expression(format!(
+                                "chunks.defaultTaskCount: '{resolved}' is not a valid integer"
+                            ))
+                        })?
                         .max(1) as usize
                 }
             };
@@ -126,34 +150,46 @@ fn resolve_int_range(
             if ints.len() > limits.max_task_param_range_len {
                 return Err(OpenJdError::DecodeValidation(format!(
                     "Task parameter '{}' range exceeds {} elements ({} elements)",
-                    param_name, limits.max_task_param_range_len, ints.len()
+                    param_name,
+                    limits.max_task_param_range_len,
+                    ints.len()
                 )));
             }
             Ok(job::TaskParamRange::List(ints))
         }
         template::IntRange::Expression(expr) => {
-            if let Some(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix).ok() {
+            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
                 match val {
                     ExprValue::RangeExpr(r) => {
                         if r.len() > limits.max_task_param_range_len {
                             return Err(OpenJdError::DecodeValidation(format!(
                                 "Task parameter '{}' range exceeds {} elements ({} elements)",
-                                param_name, limits.max_task_param_range_len, r.len()
+                                param_name,
+                                limits.max_task_param_range_len,
+                                r.len()
                             )));
                         }
                         return Ok(job::TaskParamRange::RangeExpr(r));
                     }
                     val if val.is_list() => {
                         let elements = val.list_elements().unwrap();
-                        let ints: Result<Vec<i64>, _> = elements.iter().map(|e| match e {
-                            ExprValue::Int(i) => Ok(*i),
-                            other => Err(OpenJdError::Expression(format!("Expected int in range, got {}", other.type_name()))),
-                        }).collect();
+                        let ints: Result<Vec<i64>, _> = elements
+                            .iter()
+                            .map(|e| match e {
+                                ExprValue::Int(i) => Ok(*i),
+                                other => Err(OpenJdError::Expression(format!(
+                                    "Expected int in range, got {}",
+                                    other.type_name()
+                                ))),
+                            })
+                            .collect();
                         let ints = ints?;
                         if ints.len() > limits.max_task_param_range_len {
                             return Err(OpenJdError::DecodeValidation(format!(
                                 "Task parameter '{}' range exceeds {} elements ({} elements)",
-                                param_name, limits.max_task_param_range_len, ints.len()
+                                param_name,
+                                limits.max_task_param_range_len,
+                                ints.len()
                             )));
                         }
                         return Ok(job::TaskParamRange::List(ints));
@@ -161,14 +197,21 @@ fn resolve_int_range(
                     _ => {}
                 }
             }
-            let resolved = expr.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+            let resolved = expr
+                .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
                 .map_err(|e| OpenJdError::Expression(e.to_string()))?;
-            let range_expr: RangeExpr = resolved.parse()
-                .map_err(|e: openjd_expr::ExpressionError| OpenJdError::Expression(e.to_string()))?;
+            let range_expr: RangeExpr =
+                resolved
+                    .parse()
+                    .map_err(|e: openjd_expr::ExpressionError| {
+                        OpenJdError::Expression(e.to_string())
+                    })?;
             if range_expr.len() > limits.max_task_param_range_len {
                 return Err(OpenJdError::DecodeValidation(format!(
                     "Task parameter '{}' range exceeds {} elements ({} elements)",
-                    param_name, limits.max_task_param_range_len, range_expr.len()
+                    param_name,
+                    limits.max_task_param_range_len,
+                    range_expr.len()
                 )));
             }
             Ok(job::TaskParamRange::RangeExpr(range_expr))
@@ -183,38 +226,53 @@ fn resolve_float_range(
     limits: &EffectiveLimits,
 ) -> Result<Vec<f64>, OpenJdError> {
     let floats: Vec<f64> = match range {
-        template::FloatRange::List(items) => {
-            items.iter().map(|v| match v {
+        template::FloatRange::List(items) => items
+            .iter()
+            .map(|v| match v {
                 template::FloatRangeItem::Float(f) => Ok(*f),
                 template::FloatRangeItem::FormatString(fs) => {
-                    let resolved = fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                    let resolved = fs
+                        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
                         .map_err(|e| OpenJdError::Expression(e.to_string()))?;
-                    resolved.parse::<f64>()
-                        .map_err(|_| OpenJdError::Expression(format!("Cannot parse '{}' as float", resolved)))
+                    resolved.parse::<f64>().map_err(|_| {
+                        OpenJdError::Expression(format!("Cannot parse '{}' as float", resolved))
+                    })
                 }
-            }).collect::<Result<Vec<_>, _>>()?
-        }
+            })
+            .collect::<Result<Vec<_>, _>>()?,
         template::FloatRange::Expression(expr) => {
-            if let Some(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix).ok() {
+            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
                 if val.is_list() {
                     let elements = val.list_elements().unwrap();
-                    elements.iter().map(|e| match e {
-                        ExprValue::Float(f) => Ok(f.value()),
-                        ExprValue::Int(i) => Ok(*i as f64),
-                        other => Err(OpenJdError::Expression(format!("Expected float in range, got {}", other.type_name()))),
-                    }).collect::<Result<Vec<_>, _>>()?
+                    elements
+                        .iter()
+                        .map(|e| match e {
+                            ExprValue::Float(f) => Ok(f.value()),
+                            ExprValue::Int(i) => Ok(*i as f64),
+                            other => Err(OpenJdError::Expression(format!(
+                                "Expected float in range, got {}",
+                                other.type_name()
+                            ))),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
                 } else {
-                    return Err(OpenJdError::Expression("Float range expression must evaluate to a list".into()));
+                    return Err(OpenJdError::Expression(
+                        "Float range expression must evaluate to a list".into(),
+                    ));
                 }
             } else {
-                return Err(OpenJdError::Expression("Float range expression must evaluate to a list".into()));
+                return Err(OpenJdError::Expression(
+                    "Float range expression must evaluate to a list".into(),
+                ));
             }
         }
     };
     if floats.len() > limits.max_task_param_range_len {
         return Err(OpenJdError::DecodeValidation(format!(
             "Task parameter '{}' range exceeds {} elements ({} elements)",
-            param_name, limits.max_task_param_range_len, floats.len()
+            param_name,
+            limits.max_task_param_range_len,
+            floats.len()
         )));
     }
     Ok(floats)
@@ -228,35 +286,46 @@ fn resolve_string_range(
     limits: &EffectiveLimits,
 ) -> Result<Vec<String>, OpenJdError> {
     let resolved: Vec<String> = match range {
-        template::StringRange::List(items) => {
-            items.iter().map(|fs| {
-                fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix).map_err(|e| OpenJdError::Expression(e.to_string()))
-            }).collect::<Result<Vec<_>, _>>()?
-        }
+        template::StringRange::List(items) => items
+            .iter()
+            .map(|fs| {
+                fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                    .map_err(|e| OpenJdError::Expression(e.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
         template::StringRange::Expression(expr) => {
-            if let Some(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix).ok() {
+            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
                 if val.is_list() {
                     let elements = val.list_elements().unwrap();
                     elements.iter().map(|e| e.to_display_string()).collect()
                 } else {
-                    return Err(OpenJdError::Expression("String range expression must evaluate to a list".into()));
+                    return Err(OpenJdError::Expression(
+                        "String range expression must evaluate to a list".into(),
+                    ));
                 }
             } else {
-                return Err(OpenJdError::Expression("String range expression must evaluate to a list".into()));
+                return Err(OpenJdError::Expression(
+                    "String range expression must evaluate to a list".into(),
+                ));
             }
         }
     };
     if resolved.len() > limits.max_task_param_range_len {
         return Err(OpenJdError::DecodeValidation(format!(
             "Task parameter '{}' range exceeds {} elements ({} elements)",
-            param_name, limits.max_task_param_range_len, resolved.len()
+            param_name,
+            limits.max_task_param_range_len,
+            resolved.len()
         )));
     }
     for (i, s) in resolved.iter().enumerate() {
         if s.len() > limits.max_task_param_string_len {
             return Err(OpenJdError::DecodeValidation(format!(
                 "Task parameter '{}' range[{}]: resolved value exceeds {} characters ({} chars)",
-                param_name, i, limits.max_task_param_string_len, s.len()
+                param_name,
+                i,
+                limits.max_task_param_string_len,
+                s.len()
             )));
         }
         if is_path && s.is_empty() {

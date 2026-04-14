@@ -8,14 +8,15 @@
 //! Uses job templates for limit enforcement (filename length) since
 //! the Rust crate enforces limits in the job template validation path.
 
-use openjd_model::{decode_job_template, decode_environment_template};
+use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
 }
 
 fn job_with_embedded(embedded_json: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [{{
@@ -25,17 +26,20 @@ fn job_with_embedded(embedded_json: &str) -> serde_yaml::Value {
                 "actions": {{"onRun": {{"command": "foo", "args": ["{{{{Task.File.Foo}}}}"]}}}}
             }}
         }}]
-    }}"#))
+    }}"#
+    ))
 }
 
 fn env_with_embedded(embedded_json: &str) -> serde_yaml::Value {
-    yaml_val(&format!(r#"{{
+    yaml_val(&format!(
+        r#"{{
         "specificationVersion": "environment-2023-09",
         "environment": {{"name": "Foo", "script": {{
             "embeddedFiles": [{embedded_json}],
             "actions": {{"onEnter": {{"command": "foo"}}}}
         }}}}
-    }}"#))
+    }}"#
+    ))
 }
 
 fn job_ok(embedded_json: &str) {
@@ -72,7 +76,9 @@ fn data_min_length() {
 #[test]
 fn data_long_length() {
     let data = "x".repeat(32 * 1024);
-    env_ok(&format!(r#"{{"name": "Foo", "type": "TEXT", "data": "{data}"}}"#));
+    env_ok(&format!(
+        r#"{{"name": "Foo", "type": "TEXT", "data": "{data}"}}"#
+    ));
 }
 
 #[test]
@@ -83,7 +89,9 @@ fn filename_min_length() {
 #[test]
 fn filename_max_length_env() {
     let name = "x".repeat(64);
-    env_ok(&format!(r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#));
+    env_ok(&format!(
+        r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#
+    ));
 }
 
 #[test]
@@ -137,11 +145,15 @@ fn filename_with_backslash() {
 #[test]
 fn filename_max_length_job() {
     let name = "x".repeat(64);
-    job_ok(&format!(r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#));
+    job_ok(&format!(
+        r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#
+    ));
 }
 
 #[test]
 fn filename_too_long_job() {
     let name = "x".repeat(65);
-    job_err(&format!(r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#));
+    job_err(&format!(
+        r#"{{"name": "Foo", "type": "TEXT", "data": "hello", "filename": "{name}"}}"#
+    ));
 }

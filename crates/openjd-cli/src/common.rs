@@ -5,7 +5,12 @@
 
 use std::fmt;
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["TASK_CHUNKING", "REDACTED_ENV_VARS", "FEATURE_BUNDLE_1", "EXPR"];
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "TASK_CHUNKING",
+    "REDACTED_ENV_VARS",
+    "FEATURE_BUNDLE_1",
+    "EXPR",
+];
 
 /// A CLI command result that can be rendered as JSON, YAML, or human-readable text.
 ///
@@ -25,8 +30,14 @@ pub trait CliResult: fmt::Display {
 /// Equivalent to Python's `@print_cli_result` decorator.
 pub fn print_cli_result(result: &dyn CliResult, format: &str) {
     match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&result.to_json_value()).unwrap()),
-        "yaml" => print!("{}", serde_yaml::to_string(&result.to_json_value()).unwrap()),
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&result.to_json_value()).unwrap()
+        ),
+        "yaml" => print!(
+            "{}",
+            serde_yaml::to_string(&result.to_json_value()).unwrap()
+        ),
         _ => println!("{result}"),
     }
 }
@@ -37,11 +48,13 @@ pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
     match arg {
         Some(ext_str) if ext_str.is_empty() => Ok(vec![]),
         Some(ext_str) => {
-            let exts: Vec<String> = ext_str.split(',')
+            let exts: Vec<String> = ext_str
+                .split(',')
                 .map(|s| s.trim().to_uppercase())
                 .filter(|s| !s.is_empty())
                 .collect();
-            let unsupported: Vec<&str> = exts.iter()
+            let unsupported: Vec<&str> = exts
+                .iter()
                 .filter(|e| !SUPPORTED_EXTENSIONS.contains(&e.as_str()))
                 .map(|e| e.as_str())
                 .collect();

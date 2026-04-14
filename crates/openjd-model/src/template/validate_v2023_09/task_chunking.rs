@@ -3,11 +3,15 @@
 
 //! Pass 6: TASK_CHUNKING — validate or reject.
 
-use crate::error::{PathElement, ValidationErrors, path_field, path_index};
+use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
-use crate::types::{ValidationContext, KnownExtension};
+use crate::types::{KnownExtension, ValidationContext};
 
-pub fn validate_task_chunking(jt: &JobTemplate, ctx: &ValidationContext, errors: &mut ValidationErrors) {
+pub fn validate_task_chunking(
+    jt: &JobTemplate,
+    ctx: &ValidationContext,
+    errors: &mut ValidationErrors,
+) {
     let active = ctx.has_extension(KnownExtension::TaskChunking);
 
     for (i, step) in jt.steps.iter().enumerate() {
@@ -25,13 +29,19 @@ pub fn validate_task_chunking(jt: &JobTemplate, ctx: &ValidationContext, errors:
                         chunk_count += 1;
                         if let Some(n) = cp.chunks.default_task_count.as_i64() {
                             if n < 1 {
-                                errors.add(&path_field(&p_path, "chunks"), "defaultTaskCount must be >= 1.");
+                                errors.add(
+                                    &path_field(&p_path, "chunks"),
+                                    "defaultTaskCount must be >= 1.",
+                                );
                             }
                         }
                         if let Some(target) = &cp.chunks.target_runtime_seconds {
                             if let Some(n) = target.as_i64() {
                                 if n < 0 {
-                                    errors.add(&path_field(&p_path, "chunks"), "targetRuntimeSeconds must be >= 0.");
+                                    errors.add(
+                                        &path_field(&p_path, "chunks"),
+                                        "targetRuntimeSeconds must be >= 0.",
+                                    );
                                 }
                             }
                         }
@@ -39,7 +49,10 @@ pub fn validate_task_chunking(jt: &JobTemplate, ctx: &ValidationContext, errors:
                 }
             }
             if active && chunk_count > 1 {
-                errors.add(&tpd_path, "only one CHUNK[INT] parameter is allowed per step.");
+                errors.add(
+                    &tpd_path,
+                    "only one CHUNK[INT] parameter is allowed per step.",
+                );
             }
             // Check chunked param not in associative combination
             if active && chunk_count > 0 {
@@ -60,11 +73,16 @@ pub fn validate_task_chunking(jt: &JobTemplate, ctx: &ValidationContext, errors:
                                         in_parens = true;
                                     }
                                     current.clear();
-                                    if ch == '(' { depth += 1; }
-                                    else if ch == ')' { depth -= 1; }
+                                    if ch == '(' {
+                                        depth += 1;
+                                    } else if ch == ')' {
+                                        depth -= 1;
+                                    }
                                 }
                             }
-                            if current == chunk_name && depth > 0 { in_parens = true; }
+                            if current == chunk_name && depth > 0 {
+                                in_parens = true;
+                            }
                             if in_parens {
                                 errors.add(&path_field(&ps_path, "combination"),
                                     format!("CHUNK[INT] parameter '{}' must not be in an associative combination.", chunk_name));
