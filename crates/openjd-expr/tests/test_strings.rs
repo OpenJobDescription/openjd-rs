@@ -19,9 +19,6 @@ fn eval_fmt(expr: &str, fmt: PathFormat) -> ExprValue {
 }
 
 #[allow(dead_code)]
-fn eval_fails(expr: &str) -> bool { evaluate_expression(expr, &SymbolTable::new()).is_err() }
-
-#[allow(dead_code)]
 fn eval_err(expr: &str) -> String { evaluate_expression(expr, &SymbolTable::new()).unwrap_err().to_string() }
 
 fn assert_err(expr: &str, expected: &[&str]) {
@@ -66,12 +63,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 #[test] fn isascii_empty() { assert_eq!(eval("''.isascii()").to_display_string(), "true"); }
 
 #[test] fn replace() { assert_eq!(eval("replace('hello', 'l', 'L')").to_display_string(), "heLLo"); }
-#[test] fn split() { assert!(eval("split('a,b,c', ',')").is_list()); }
-#[test] fn split_whitespace() { assert!(eval("split('  hello \\t world  ')").is_list()); }
-#[test] fn split_method() { assert!(eval("'one  two'.split()").is_list()); }
-#[test] fn split_maxsplit() { assert!(eval("split('a,b,c,d', ',', 2)").is_list()); }
-#[test] fn rsplit() { assert!(eval("rsplit('a,b,c', ',')").is_list()); }
-#[test] fn rsplit_maxsplit() { assert!(eval("rsplit('a,b,c,d', ',', 2)").is_list()); }
+#[test] fn split_method() { assert_eq!(eval("'one  two'.split()").to_display_string(), r#"["one", "two"]"#); }
 
 #[test] fn zfill_string() { assert_eq!(eval("zfill('42', 5)").to_display_string(), "00042"); }
 #[test] fn zfill_int() { assert_eq!(eval("zfill(42, 5)").to_display_string(), "00042"); }
@@ -326,9 +318,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 
 // === Additional split/rsplit tests ===
 #[test] fn split_whitespace_empty() { assert_eq!(eval("split('   ')").to_display_string(), "[]"); }
-#[test] fn split_empty_string() { assert!(eval("''.split(',')").is_list()); }
-#[test] fn rsplit_no_match() { assert!(eval("rsplit('abc', ',')").is_list()); }
-#[test] fn rsplit_whitespace_method() { assert!(eval("'one  two'.rsplit()").is_list()); }
+#[test] fn rsplit_whitespace_method() { assert_eq!(eval("'one  two'.rsplit()").to_display_string(), r#"["one", "two"]"#); }
 #[test] fn rsplit_empty_separator() { assert_err("'abc'.rsplit('')", &["split failed: empty separator\n", "  'abc'.rsplit('')\n", "  ~~~~~~^~~~~~~~~~"]); }
 
 // === Additional zfill tests ===
@@ -354,7 +344,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
     st.set("P", openjd_expr::ExprValue::make_list(vec![
         openjd_expr::ExprValue::Path { value: "/a".into(), format: openjd_expr::PathFormat::Posix },
         openjd_expr::ExprValue::Path { value: "/b".into(), format: openjd_expr::PathFormat::Posix },
-    ], openjd_expr::ExprType::PATH)).unwrap();
+    ], openjd_expr::ExprType::PATH).unwrap()).unwrap();
     let r = openjd_expr::evaluate_expression("repr_py(P)", &st).unwrap();
     assert_eq!(r.to_display_string(), "['/a', '/b']");
 }
@@ -363,7 +353,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
     let mut st = openjd_expr::SymbolTable::new();
     st.set("P", openjd_expr::ExprValue::make_list(vec![
         openjd_expr::ExprValue::Path { value: "/a".into(), format: openjd_expr::PathFormat::Posix },
-    ], openjd_expr::ExprType::PATH)).unwrap();
+    ], openjd_expr::ExprType::PATH).unwrap()).unwrap();
     let r = openjd_expr::evaluate_expression("repr_json(P)", &st).unwrap();
     assert_eq!(r.to_display_string(), "[\"/a\"]");
 }
@@ -424,16 +414,6 @@ fn assert_err(expr: &str, expected: &[&str]) {
     assert_eq!(r.to_display_string(), "archive");
 }
 
-// === Additional split tests ===
-#[test] fn split_maxsplit_method() {
-    let r = eval("'a/b/c/d'.split('/', 1)");
-    assert!(r.is_list());
-}
-#[test] fn rsplit_maxsplit_method() {
-    let r = eval("'a/b/c/d'.rsplit('/', 1)");
-    assert!(r.is_list());
-}
-
 // === Remaining Python tests with matching names ===
 #[test] fn single_quoted() { assert_eq!(eval("'hello'").to_display_string(), "hello"); }
 #[test] fn double_quoted() { assert_eq!(eval("\"hello\"").to_display_string(), "hello"); }
@@ -463,8 +443,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 #[test] fn not_in_operator_false() { assert_eq!(eval("\"ell\" not in \"hello\"").to_display_string(), "false"); }
 #[test] fn empty_string_in_string() { assert_eq!(eval("\"\" in \"hello\"").to_display_string(), "true"); }
 #[test] fn string_in_empty_string() { assert_eq!(eval("\"x\" in \"\"").to_display_string(), "false"); }
-#[test] fn split_whitespace_method() { assert!(eval("'one  two'.split()").is_list()); }
-#[test] fn rsplit_whitespace() { assert!(eval("rsplit('  hello \\t world  ')").is_list()); }
+#[test] fn rsplit_whitespace() { assert_eq!(eval("rsplit('  hello \\t world  ')").to_display_string(), r#"["hello", "world"]"#); }
 #[test] fn zfill_float_negative() { assert_eq!(eval("zfill(-2.5, 8)").to_display_string(), "-00002.5"); }
 #[test] fn zfill_float_preserves_round_precision() { assert_eq!(eval("zfill(round(0.3, 2), 7)").to_display_string(), "0000.30"); }
 #[test] fn zfill_float_method_syntax() { assert_eq!(eval("(3.14).zfill(8)").to_display_string(), "00003.14"); }

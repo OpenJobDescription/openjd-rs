@@ -505,5 +505,52 @@ fn windows_trailing_forward_slash_preserved_eval() {
     assert!(result.is_err(), "apply_path_mapping should reject path input, only string is allowed");
 }
 
+// ══════════════════════════════════════════════════════════════
+// BUG-3: URI scheme+authority case-insensitive, path case-sensitive
+// Per RFC 3986 §3.1 and §3.2
+// ══════════════════════════════════════════════════════════════
+
+mod uri_case_sensitivity {
+    use openjd_expr::{PathFormat, PathMappingRule};
+
+    fn uri_rule(src: &str, dst: &str) -> PathMappingRule {
+        PathMappingRule { source_path_format: PathFormat::Uri, source_path: src.into(), destination_path: dst.into() }
+    }
+
+    #[test]
+    fn uri_scheme_case_insensitive_match() {
+        let rule = uri_rule("s3://bucket/prefix", "s3://other-bucket/out");
+        // Uppercase scheme should still match
+        let result = rule.apply("S3://bucket/prefix/file.txt");
+        assert_eq!(result, Some("s3://other-bucket/out/file.txt".to_string()),
+            "URI scheme comparison should be case-insensitive");
+    }
+
+    #[test]
+    fn uri_authority_case_insensitive_match() {
+        let rule = uri_rule("s3://mybucket/prefix", "s3://other/out");
+        // Uppercase authority should still match
+        let result = rule.apply("s3://MyBucket/prefix/file.txt");
+        assert_eq!(result, Some("s3://other/out/file.txt".to_string()),
+            "URI authority comparison should be case-insensitive");
+    }
+
+    #[test]
+    fn uri_path_case_sensitive() {
+        let rule = uri_rule("s3://bucket/Prefix", "s3://other/out");
+        // Path component is case-sensitive, so lowercase 'prefix' should NOT match 'Prefix'
+        let result = rule.apply("s3://bucket/prefix/file.txt");
+        assert_eq!(result, None,
+            "URI path comparison should be case-sensitive");
+    }
+
+    #[test]
+    fn uri_exact_case_match_still_works() {
+        let rule = uri_rule("s3://bucket/prefix", "s3://other/out");
+        let result = rule.apply("s3://bucket/prefix/file.txt");
+        assert_eq!(result, Some("s3://other/out/file.txt".to_string()));
+    }
+}
+
 #[allow(dead_code)]
 fn rule_vec(r: PathMappingRule) -> Vec<PathMappingRule> { vec![r] }

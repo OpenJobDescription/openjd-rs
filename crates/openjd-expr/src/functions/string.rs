@@ -120,7 +120,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         // Whitespace split
         ctx.count_string_ops(s.len())?;
         let parts: Vec<ExprValue> = s.split_whitespace().map(|p| ExprValue::String(p.to_string())).collect();
-        return Ok(ExprValue::make_list(parts, ExprType::STRING));
+        return Ok(ExprValue::make_list(parts, ExprType::STRING)?);
     }
     let sep = get_str(&a[1])?;
     if sep.is_empty() { return Err(ExpressionError::new("split failed: empty separator")); }
@@ -130,14 +130,14 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         Some(n) => s.splitn(n + 1, sep).map(|p| ExprValue::String(p.to_string())).collect(),
         None => s.split(sep).map(|p| ExprValue::String(p.to_string())).collect(),
     };
-    Ok(ExprValue::make_list(parts, ExprType::STRING))
+    Ok(ExprValue::make_list(parts, ExprType::STRING)?)
 }
 
 pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
         let parts: Vec<ExprValue> = s.split_whitespace().map(|p| ExprValue::String(p.to_string())).collect();
-        return Ok(ExprValue::make_list(parts, ExprType::STRING));
+        return Ok(ExprValue::make_list(parts, ExprType::STRING)?);
     }
     let sep = get_str(&a[1])?;
     if sep.is_empty() { return Err(ExpressionError::new("split failed: empty separator")); }
@@ -147,7 +147,7 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         Some(n) => { let mut v: Vec<_> = s.rsplitn(n + 1, sep).map(|p| ExprValue::String(p.to_string())).collect(); v.reverse(); v }
         None => s.split(sep).map(|p| ExprValue::String(p.to_string())).collect(),
     };
-    Ok(ExprValue::make_list(parts, ExprType::STRING))
+    Ok(ExprValue::make_list(parts, ExprType::STRING)?)
 }
 
 pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R { let s = get_str(&a[0])?; ctx.count_string_ops(s.len())?; Ok(ExprValue::Bool(!s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))) }

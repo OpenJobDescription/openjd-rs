@@ -64,7 +64,7 @@ pub fn re_match_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         None => Ok(ExprValue::Null),
         Some(caps) => {
             let groups: Vec<ExprValue> = (0..caps.len()).map(|i| ExprValue::String(caps.get(i).map(|m| m.as_str().to_string()).unwrap_or_default())).collect();
-            Ok(ExprValue::make_list(groups, ExprType::STRING))
+            Ok(ExprValue::make_list(groups, ExprType::STRING)?)
         }
     }
 }
@@ -78,7 +78,7 @@ pub fn re_search_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         None => Ok(ExprValue::Null),
         Some(caps) => {
             let groups: Vec<ExprValue> = (0..caps.len()).map(|i| ExprValue::String(caps.get(i).map(|m| m.as_str().to_string()).unwrap_or_default())).collect();
-            Ok(ExprValue::make_list(groups, ExprType::STRING))
+            Ok(ExprValue::make_list(groups, ExprType::STRING)?)
         }
     }
 }
@@ -91,16 +91,16 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let num_groups = re.captures_len() - 1;
     if num_groups == 0 {
         let matches: Vec<ExprValue> = re.find_iter(&s).map(|m| ExprValue::String(m.as_str().to_string())).collect();
-        Ok(ExprValue::make_list(matches, ExprType::STRING))
+        Ok(ExprValue::make_list(matches, ExprType::STRING)?)
     } else if num_groups == 1 {
         let matches: Vec<ExprValue> = re.captures_iter(&s).map(|c| ExprValue::String(c.get(1).map(|m| m.as_str().to_string()).unwrap_or_default())).collect();
-        Ok(ExprValue::make_list(matches, ExprType::STRING))
+        Ok(ExprValue::make_list(matches, ExprType::STRING)?)
     } else {
-        let matches: Vec<ExprValue> = re.captures_iter(&s).map(|c| {
+        let matches: Result<Vec<ExprValue>, _> = re.captures_iter(&s).map(|c| {
             let groups: Vec<ExprValue> = (1..=num_groups).map(|i| ExprValue::String(c.get(i).map(|m| m.as_str().to_string()).unwrap_or_default())).collect();
             ExprValue::make_list(groups, ExprType::STRING)
         }).collect();
-        Ok(ExprValue::make_list(matches, ExprType::list(ExprType::STRING)))
+        Ok(ExprValue::make_list(matches?, ExprType::list(ExprType::STRING))?)
     }
 }
 
@@ -150,5 +150,5 @@ pub fn re_split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         Some(n) => re.splitn(&s, n + 1).map(|p| ExprValue::String(p.to_string())).collect(),
         None => re.split(&s).map(|p| ExprValue::String(p.to_string())).collect(),
     };
-    Ok(ExprValue::make_list(parts, ExprType::STRING))
+    Ok(ExprValue::make_list(parts, ExprType::STRING)?)
 }

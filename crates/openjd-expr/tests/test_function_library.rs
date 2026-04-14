@@ -120,7 +120,7 @@ fn phase3_generic_match() {
     let mut lib = FunctionLibrary::new();
     lib.register_sig("first", "(list[T1]) -> T1", first);
     let mut ctx = MockCtx;
-    let list = ExprValue::make_list(vec![ExprValue::Int(42)], ExprType::INT);
+    let list = ExprValue::make_list(vec![ExprValue::Int(42)], ExprType::INT).unwrap();
     let r = lib.call("first", &[list], &mut ctx).unwrap();
     assert_eq!(r, ExprValue::Int(42));
 }
@@ -129,7 +129,7 @@ fn phase3_generic_match() {
 fn phase3_generic_with_coercion() {
     // Generic signature where arg needs coercion before matching
     fn list_of(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
-        Ok(ExprValue::make_list(vec![args[0].clone()], args[0].expr_type()))
+        Ok(ExprValue::make_list(vec![args[0].clone()], args[0].expr_type())?)
     }
     let mut lib = FunctionLibrary::new();
     // Only accepts (float) → list[float], but we'll pass int

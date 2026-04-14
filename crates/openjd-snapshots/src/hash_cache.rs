@@ -54,7 +54,7 @@ impl HashCache {
                     let hash: String = row.get(0)?;
                     let mtime: u64 = match row.get_ref(1)?.as_str() {
                         Ok(s) => s.parse::<u64>().unwrap_or(0),
-                        Err(_) => row.get::<_, u64>(1)?,
+                        Err(_) => row.get::<_, i64>(1)? as u64,
                     };
                     Ok((hash, mtime))
                 },

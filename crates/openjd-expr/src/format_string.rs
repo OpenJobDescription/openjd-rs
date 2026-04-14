@@ -13,7 +13,7 @@ use std::fmt;
 enum Segment {
     Literal(String),
     SimpleName { start: usize, end: usize, name: String },
-    Expression { start: usize, end: usize, expr: String },
+    Expression { start: usize, end: usize, parsed: crate::eval::ParsedExpression },
 }
 
 fn is_simple_dotted_name(expr: &str) -> bool {
@@ -76,8 +76,8 @@ impl FormatString {
                         }
                     }
                 }
-                Segment::Expression { expr, .. } => {
-                    let val = self.eval_segment(expr, symtab, library, path_mapping_rules, path_format, None)?;
+                Segment::Expression { parsed, .. } => {
+                    let val = self.eval_parsed(parsed, symtab, library, path_mapping_rules, path_format, None)?;
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
                         result.push_str(&val.to_display_string());
@@ -117,7 +117,7 @@ impl FormatString {
         if self.segments.len() == 1 {
             match &self.segments[0] {
                 Segment::SimpleName { name, .. } => return self.eval_segment(name, symtab, library, path_mapping_rules, path_format, target_type),
-                Segment::Expression { expr, .. } => return self.eval_segment(expr, symtab, library, path_mapping_rules, path_format, target_type),
+                Segment::Expression { parsed, .. } => return self.eval_parsed(parsed, symtab, library, path_mapping_rules, path_format, target_type),
                 _ => {}
             }
         }
@@ -126,6 +126,10 @@ impl FormatString {
 
     fn eval_segment(&self, expr: &str, symtab: &SymbolTable, library: Option<&crate::function_library::FunctionLibrary>, path_mapping_rules: &[crate::path_mapping::PathMappingRule], path_format: crate::path_mapping::PathFormat, target_type: Option<&crate::types::ExprType>) -> Result<ExprValue, ExpressionError> {
         let parsed = crate::eval::ParsedExpression::new(expr)?;
+        self.eval_parsed(&parsed, symtab, library, path_mapping_rules, path_format, target_type)
+    }
+
+    fn eval_parsed(&self, parsed: &crate::eval::ParsedExpression, symtab: &SymbolTable, library: Option<&crate::function_library::FunctionLibrary>, path_mapping_rules: &[crate::path_mapping::PathMappingRule], path_format: crate::path_mapping::PathFormat, target_type: Option<&crate::types::ExprType>) -> Result<ExprValue, ExpressionError> {
         let symtabs = [symtab];
         let mut evaluator = parsed.evaluator(&symtabs)
             .with_path_format(path_format);
@@ -141,19 +145,32 @@ impl FormatString {
     /// type checking — just evaluate normally with unresolved types.
     pub fn validate_expressions(&self, symtab: &SymbolTable, lib: &crate::function_library::FunctionLibrary) -> Result<(), FormatStringValidationError> {
         for seg in &self.segments {
-            let (expr_str, start, end) = match seg {
+            let (parsed, start, end) = match seg {
                 Segment::Literal(_) => continue,
-                Segment::SimpleName { name, start, end } => (name.as_str(), *start, *end),
-                Segment::Expression { expr, start, end } => (expr.as_str(), *start, *end),
-            };
-            let parsed = crate::eval::ParsedExpression::new(expr_str).map_err(|e| {
-                FormatStringValidationError {
-                    message: e.to_string(),
-                    input: self.raw.clone(),
-                    start,
-                    end,
+                Segment::SimpleName { name, start, end } => {
+                    let p = crate::eval::ParsedExpression::new(name.as_str()).map_err(|e| {
+                        FormatStringValidationError {
+                            message: e.to_string(),
+                            input: self.raw.clone(),
+                            start: *start,
+                            end: *end,
+                        }
+                    })?;
+                    // Evaluate inline since SimpleName doesn't store a ParsedExpression
+                    let symtabs = [symtab];
+                    let mut evaluator = p.evaluator(&symtabs).with_library(lib);
+                    if let Err(e) = evaluator.evaluate(&p.ast) {
+                        return Err(FormatStringValidationError {
+                            message: e.to_string(),
+                            input: self.raw.clone(),
+                            start: *start,
+                            end: *end,
+                        });
+                    }
+                    continue;
                 }
-            })?;
+                Segment::Expression { parsed, start, end } => (parsed, *start, *end),
+            };
             let symtabs = [symtab];
             let mut evaluator = parsed.evaluator(&symtabs)
                 .with_library(lib);
@@ -174,14 +191,18 @@ impl FormatString {
     pub fn validate_comprehension_vars(&self, let_names: &std::collections::HashSet<String>) -> Result<(), ExpressionError> {
 
         for seg in &self.segments {
-            let expr_str = match seg {
+            let parsed = match seg {
                 Segment::Literal(_) => continue,
-                Segment::SimpleName { name, .. } => name.as_str(),
-                Segment::Expression { expr, .. } => expr.as_str(),
-            };
-            let parsed = match crate::eval::ParsedExpression::new(expr_str) {
-                Ok(p) => p,
-                Err(_) => continue,
+                Segment::SimpleName { name, .. } => {
+                    match crate::eval::ParsedExpression::new(name.as_str()) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    }
+                }
+                Segment::Expression { parsed, .. } => {
+                    check_comprehension_vars(&parsed.ast, let_names)?;
+                    continue;
+                }
             };
             check_comprehension_vars(&parsed.ast, let_names)?;
         }
@@ -219,19 +240,22 @@ impl FormatString {
         use crate::eval::ParsedExpression;
 
         for segment in &self.segments {
-            let expr_str = match segment {
-                Segment::SimpleName { name, .. } => name.as_str(),
-                Segment::Expression { expr, .. } => expr.as_str(),
+            match segment {
+                Segment::SimpleName { name, .. } => {
+                    let parsed = match ParsedExpression::new(name.as_str()) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    for symbol in &parsed.accessed_symbols {
+                        copy_symbol_value(symbol, source, dest);
+                    }
+                }
+                Segment::Expression { parsed, .. } => {
+                    for symbol in &parsed.accessed_symbols {
+                        copy_symbol_value(symbol, source, dest);
+                    }
+                }
                 Segment::Literal(_) => continue,
-            };
-
-            let parsed = match ParsedExpression::new(expr_str) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
-            for symbol in &parsed.accessed_symbols {
-                copy_symbol_value(symbol, source, dest);
             }
         }
     }
@@ -394,7 +418,8 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                         if is_simple_dotted_name(et) {
                             segments.push(Segment::SimpleName { start: op, end: be, name: et.to_string() });
                         } else {
-                            segments.push(Segment::Expression { start: op, end: be, expr: et.to_string() });
+                            let parsed = crate::eval::ParsedExpression::new(et)?;
+                            segments.push(Segment::Expression { start: op, end: be, parsed });
                         }
                         pos = be;
                     }
@@ -484,15 +509,13 @@ mod tests {
     }
     #[test]
     fn validate_catches_bitwise() {
-        let fs = FormatString::new("{{ 5 & 3 }}").unwrap();
-        let host_lib = crate::default_library::get_default_library().clone().with_host_context();
-        assert!(fs.validate_expressions(&SymbolTable::new(), &host_lib).is_err());
+        // Bitwise ops are rejected at parse time (structural validation in ParsedExpression::new)
+        assert!(FormatString::new("{{ 5 & 3 }}").is_err());
     }
     #[test]
     fn validate_catches_dict() {
-        let fs = FormatString::new("{{ {1: 2} }}").unwrap();
-        let host_lib = crate::default_library::get_default_library().clone().with_host_context();
-        assert!(fs.validate_expressions(&SymbolTable::new(), &host_lib).is_err());
+        // Dict literals are rejected at parse time (structural validation in ParsedExpression::new)
+        assert!(FormatString::new("{{ {1: 2} }}").is_err());
     }
     #[test]
     fn validate_catches_unknown_func() {
@@ -617,7 +640,6 @@ mod tests {
         let val = fs.resolve_typed(&st, None, &[], &target).unwrap();
         assert!(matches!(val, ExprValue::Path { ref value, .. } if value == "/foo/bar"));
     }
-}
 
     #[test]
     fn copy_used_symtab_values_simple() {
@@ -750,3 +772,4 @@ mod tests {
         assert_eq!(dest.get_value("Param.Frame"), Some(&ExprValue::Int(1)));
         assert!(dest.get("Param.Missing").is_none());
     }
+}

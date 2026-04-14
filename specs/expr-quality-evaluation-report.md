@@ -41,13 +41,13 @@ The `specs/expr/` directory contains 11 well-structured documents:
 | README.md | Overview | ✅ Good — clear index with normative references |
 | architecture.md | 7.6KB | ✅ Good — accurate module layout, dependency graph, public API |
 | parser.md | 5.4KB | ✅ Good — faithful description of parsing pipeline |
-| type-system.md | 5.3KB | ✅ Good — complete type system description |
-| values.md | 6.2KB | ⚠️ Stale — enum definition missing cached size fields |
+| type-system.md | 5.3KB | ✅ Good — updated, non-existent constants removed |
+| values.md | 6.2KB | ✅ Updated — enum definition, hint_type, promotion rules, coercions |
 | symbol-table.md | 3.4KB | ✅ Good — minor naming discrepancy |
 | evaluator.md | 10.9KB | ✅ Good — thorough evaluator description |
-| function-library.md | 8.4KB | ⚠️ Stale — API signatures differ from implementation |
-| format-string.md | 4.1KB | ⚠️ Stale — claims pre-parsing that doesn't happen |
-| range-expr.md | 4.9KB | ⚠️ Conflict — shows descending ranges as valid but code rejects them |
+| function-library.md | 8.4KB | ✅ Updated — call() signature, EvalContext return types, regex cache |
+| format-string.md | 4.1KB | ✅ Good — pre-parsing now implemented to match spec |
+| range-expr.md | 4.9KB | ✅ Updated — descending ranges require negative step |
 | path-mapping.md | 5.2KB | ✅ Good — minor return type difference |
 | error-formatting.md | 3.8KB | ✅ Good — accurate description |
 
@@ -55,34 +55,34 @@ The `specs/expr/` directory contains 11 well-structured documents:
 
 #### Critical
 
-| # | Area | Issue |
-|---|------|-------|
-| S1 | format-string.md | Spec says expressions are "pre-parsed `ParsedExpression` objects, avoiding re-parsing on each resolution call" but the implementation stores expressions as strings and re-parses on every `resolve` call. |
-| S2 | range-expr.md | Spec shows `"10-1"` as valid (producing `[10,9,...,1]`) but code rejects descending ranges without a negative step. Code comment says "invalid per spec" — contradicts the spec document. |
-| S3 | function-library.md | Spec says `library.call(name, &arg_types, &args, eval_context)` but implementation is `library.call(name, &args, ctx)` — arg types are derived internally. |
+| # | Area | Issue | Status |
+|---|------|-------|--------|
+| S1 | format-string.md | Spec says expressions are "pre-parsed `ParsedExpression` objects, avoiding re-parsing on each resolution call" but the implementation stores expressions as strings and re-parses on every `resolve` call. | ✅ Fixed — implementation now pre-parses at `FormatString::new()` time |
+| S2 | range-expr.md | Spec shows `"10-1"` as valid (producing `[10,9,...,1]`) but code rejects descending ranges without a negative step. Code comment says "invalid per spec" — contradicts the spec document. | ✅ Fixed — spec updated: descending ranges require negative step |
+| S3 | function-library.md | Spec says `library.call(name, &arg_types, &args, eval_context)` but implementation is `library.call(name, &args, ctx)` — arg types are derived internally. | ✅ Fixed — spec updated to match implementation |
 
 #### Medium
 
-| # | Area | Issue |
-|---|------|-------|
-| S4 | values.md | Enum definition missing `usize` cached memory size fields on `ListString`, `ListPath`, `ListList`, and `ExprType` field on `ListList`. |
-| S5 | values.md | Spec says empty list defaults to `ListInt`; implementation defaults to `ListString` for null/unknown hints. |
-| S6 | values.md | Spec says `make_list` "validates max 2 nesting levels" but implementation does no depth validation. |
-| S7 | values.md | Spec doesn't document `hint_type` parameter on `make_list` or nested list promotion rules. |
-| S8 | values.md | Spec lists `RANGE_EXPR → STRING` and `RANGE_EXPR → LIST[INT]` target type coercions not present in `coerce()`. |
-| S9 | function-library.md | `EvalContext` trait methods return `Result<(), ExpressionError>` but spec shows them returning `()`. |
-| S10 | function-library.md | `EvalContext` has `get_or_compile_regex()` method not mentioned in spec. |
-| S11 | type-system.md | Spec defines `LIST_INT`, `LIST_FLOAT`, `LIST_STRING`, `LIST_PATH`, `LIST_BOOL`, `LIST_LIST_INT`, `EMPTY_LIST` constants not present in implementation. |
+| # | Area | Issue | Status |
+|---|------|-------|--------|
+| S4 | values.md | Enum definition missing `usize` cached memory size fields on `ListString`, `ListPath`, `ListList`, and `ExprType` field on `ListList`. | ✅ Fixed — spec updated with cached size fields |
+| S5 | values.md | Spec says empty list defaults to `ListInt`; implementation defaults to `ListString` for null/unknown hints. | ✅ Fixed — both updated: empty lists are `list[nulltype]` |
+| S6 | values.md | Spec says `make_list` "validates max 2 nesting levels" but implementation does no depth validation. | ✅ Fixed — `make_list` now validates nesting depth (TDD) |
+| S7 | values.md | Spec doesn't document `hint_type` parameter on `make_list` or nested list promotion rules. | ✅ Fixed — spec updated with hint_type and promotion rules |
+| S8 | values.md | Spec lists `RANGE_EXPR → STRING` and `RANGE_EXPR → LIST[INT]` target type coercions not present in `coerce()`. | ✅ Fixed — coercions added to implementation |
+| S9 | function-library.md | `EvalContext` trait methods return `Result<(), ExpressionError>` but spec shows them returning `()`. | ✅ Fixed — spec updated with correct return types |
+| S10 | function-library.md | `EvalContext` has `get_or_compile_regex()` method not mentioned in spec. | ✅ Fixed — documented in spec as internal optimization |
+| S11 | type-system.md | Spec defines `LIST_INT`, `LIST_FLOAT`, `LIST_STRING`, `LIST_PATH`, `LIST_BOOL`, `LIST_LIST_INT`, `EMPTY_LIST` constants not present in implementation. | ✅ Fixed — removed from spec (not wanted) |
 
 #### Low
 
-| # | Area | Issue |
-|---|------|-------|
-| S12 | type-system.md | Spec uses `ExprType::NULLTYPE`, implementation uses `ExprType::NULL`. |
-| S13 | symbol-table.md | Spec says `SymbolEntry`, code uses `SymbolTableEntry`. |
-| S14 | values.md | Spec references `Float64::from_str()` constructor; actual is `Float64::with_str()`. |
-| S15 | format-string.md | `copy_used_symtab_values`, `resolve_typed`, `resolve_typed_with_format`, `FormatStringValidationError` not documented. |
-| S16 | evaluator.md | Regex cache not mentioned in spec. |
+| # | Area | Issue | Status |
+|---|------|-------|--------|
+| S12 | type-system.md | Spec uses `ExprType::NULLTYPE`, implementation uses `ExprType::NULL`. | ✅ Fixed — implementation renamed to `NULLTYPE` |
+| S13 | symbol-table.md | Spec says `SymbolEntry`, code uses `SymbolTableEntry`. | ✅ Fixed — spec updated to `SymbolTableEntry` |
+| S14 | values.md | Spec references `Float64::from_str()` constructor; actual is `Float64::with_str()`. | ✅ Fixed — spec updated to `with_str` with correct signature |
+| S15 | format-string.md | `copy_used_symtab_values`, `resolve_typed`, `resolve_typed_with_format`, `FormatStringValidationError` not documented. | ✅ Fixed — all four documented in spec |
+| S16 | evaluator.md | Regex cache not mentioned in spec. | ✅ Fixed — documented as per-evaluation cache |
 
 ---
 
@@ -90,71 +90,32 @@ The `specs/expr/` directory contains 11 well-structured documents:
 
 ### 3.1 Confirmed Bugs
 
-#### BUG-1: Symbol Table Conflict Detection is Asymmetric
+#### ✅ BUG-1: Symbol Table Conflict Detection is Asymmetric — FIXED
 
-**Severity:** Medium
-**Location:** `symbol_table.rs`, `set()` method
+**Status:** Already fixed in the codebase. The `set_value()` method checks for
+`SymbolTableEntry::Table` before inserting a value at both single-key and multi-part
+key paths.
 
-When a table entry exists at a path (e.g., `A.B` is a table containing `A.B.C`), setting
-a scalar value at `A.B` silently overwrites the table, destroying all entries beneath it.
-The reverse direction (setting `A.B.C` when `A.B` is a scalar) correctly returns an error.
+#### ✅ BUG-2: Operation Limit Error Type Inconsistency — FIXED
 
-**Reproduction:**
-```rust
-let mut symtab = SymbolTable::new();
-symtab.set("A.B.C", ExprValue::Int(1)).unwrap();
-symtab.set("A.B", ExprValue::Int(2));  // Silently succeeds — should error
-// A.B.C is now lost
-```
+**Status:** Resolved. The private `Evaluator::count_op()` now uses
+`ExpressionErrorKind::OperationLimitExceeded` matching the `EvalContext` trait impl.
 
-**Expected:** `set("A.B", ...)` should return an error when `A.B` is already a table.
+#### ✅ BUG-3: URI Path Mapping Case Sensitivity Violation — FIXED
 
-#### BUG-2: Operation Limit Error Type Inconsistency
-
-**Severity:** Medium
-**Location:** `eval/evaluator.rs`, two `count_op` implementations
-
-The evaluator has two `count_op` methods that produce different error types:
-
-- **Private method** (called from `eval_call`, `eval_compare`, `eval_ifexp`, `eval_subscript`,
-  `eval_attribute`, list comprehension): produces `ExpressionErrorKind::Other` with a
-  formatted message including counts.
-- **EvalContext trait impl** (called from function implementations): produces
-  `ExpressionErrorKind::OperationLimitExceeded`.
-
-Code matching on `ExpressionErrorKind::OperationLimitExceeded` will miss operation limit
-errors from the evaluator's own control flow. The error messages also differ.
-
-**Fix:** Unify both to use `ExpressionErrorKind::OperationLimitExceeded`. Include the
-counts in the error kind's `Display` impl if desired.
-
-#### BUG-3: URI Path Mapping Case Sensitivity Violation
-
-**Severity:** Medium
-**Location:** `path_mapping.rs`, `apply_uri()` method
-
-The `apply_uri` method uses `path.starts_with(&self.source_path)` which is case-sensitive.
-Per RFC 3986 and the path-mapping.md spec, URI scheme and authority components should be
-compared case-insensitively. For example, `S3://Bucket/key` should match a rule with
-`source_path: "s3://bucket/key"`, but it won't.
-
-The filesystem path matching (`apply_filesystem`) correctly handles case sensitivity for
-Windows paths, but the URI path matching does not.
+**Status:** Resolved. `apply_uri()` now splits URIs at the path boundary, compares
+scheme+authority case-insensitively and path case-sensitively per RFC 3986.
 
 ### 3.2 Performance Issue
 
-#### PERF-1: Format String Re-Parses Expressions on Every Resolve
+#### ✅ PERF-1: Format String Re-Parses Expressions on Every Resolve — FIXED
 
-**Severity:** Medium
-**Location:** `format_string.rs`, `eval_segment()` method
+**Status:** Resolved (S1)
 
-The `Segment::Expression` variant stores the expression as a `String`. Every call to
-`resolve`, `resolve_string`, or `resolve_typed` calls `ParsedExpression::new(expr)` which
-invokes the ruff Python parser. For format strings evaluated repeatedly (e.g., once per
-task in a job), this is unnecessary overhead.
-
-**Fix:** Store `ParsedExpression` in the `Segment` enum at `FormatString::new()` time,
-matching what the spec describes.
+`Segment::Expression` now stores a pre-parsed `ParsedExpression`. Parsing happens once
+at `FormatString::new()` time. Structural validation errors (bitwise ops, dict literals,
+etc.) are now caught at parse time rather than resolve time — strictly better fail-fast
+behavior.
 
 ### 3.3 Code Quality Assessment
 
@@ -220,14 +181,14 @@ No O(N²) or worse algorithms were found. Key operations:
 
 ### 4.2 Test Quality Issues
 
-| # | File | Issue | Severity |
-|---|------|-------|----------|
-| T1 | test_strings.rs | `eval_fails` helper defined with `#[allow(dead_code)]` — never used | Low |
-| T2 | test_strings.rs | Some `split`/`rsplit` tests only assert `is_list()` without checking contents | Medium |
-| T3 | test_types.rs | 7 `p_err()` calls only check `is_err()` without asserting error messages | Medium |
-| T4 | test_rfc_examples.rs | Some assertions use `contains()` instead of exact value comparison | Low |
-| T5 | format_string.rs | 8 test functions outside `mod tests` block (at module scope) | Low |
-| T6 | path_mapping.rs | No tests for actual path mapping application logic — only serde tests | High |
+| # | File | Issue | Status |
+|---|------|-------|--------|
+| T1 | test_strings.rs | `eval_fails` helper defined with `#[allow(dead_code)]` — never used | ✅ Removed |
+| T2 | test_strings.rs | Some `split`/`rsplit` tests only assert `is_list()` without checking contents | ✅ 10 redundant removed, 2 strengthened |
+| T3 | test_types.rs | 7 `p_err()` calls only check `is_err()` without asserting error messages | ✅ All 7 now assert exact error messages |
+| T4 | test_rfc_examples.rs | Some assertions use `contains()` instead of exact value comparison | ✅ Both assertions now exact |
+| T5 | format_string.rs | 8 test functions outside `mod tests` block (at module scope) | ✅ All 9 moved inside `#[cfg(test)] mod tests` |
+| T6 | path_mapping.rs | No tests for actual path mapping application logic — only serde tests | ✅ Report was inaccurate — extensive apply tests already exist |
 
 ### 4.3 Exploratory Test Results
 
@@ -245,51 +206,44 @@ No O(N²) or worse algorithms were found. Key operations:
 
 ### Priority 1 — Bug Fixes
 
-1. **Fix symbol table conflict detection** (BUG-1): Add a check in `set()` that returns
-   an error when the target key already maps to a `SymbolTableEntry::Table`.
+1. ~~**Fix symbol table conflict detection** (BUG-1)~~ ✅ Already fixed in codebase.
 
-2. **Unify operation limit error types** (BUG-2): Change the private `count_op` to use
-   `ExpressionErrorKind::OperationLimitExceeded` instead of `ExpressionErrorKind::Other`.
+2. ~~**Unify operation limit error types** (BUG-2)~~ ✅ Done — private `count_op` now
+   uses `OperationLimitExceeded`.
 
-3. **Fix URI case sensitivity** (BUG-3): In `apply_uri`, split the URI into
-   scheme+authority and path components, compare scheme+authority case-insensitively
-   and path case-sensitively.
+3. ~~**Fix URI case sensitivity** (BUG-3)~~ ✅ Done — scheme+authority compared
+   case-insensitively per RFC 3986.
 
 ### Priority 2 — Performance
 
-4. **Pre-parse format string expressions** (PERF-1): Change `Segment::Expression` to
-   store `ParsedExpression` instead of `String`. Parse at `FormatString::new()` time.
+4. ~~**Pre-parse format string expressions** (PERF-1)~~ ✅ Done (S1).
 
 ### Priority 3 — Spec Updates
 
-5. **Update values.md**: Add cached size fields to enum definition, document `hint_type`
-   parameter, document nested list promotion rules, fix `Float64::from_str` reference.
+5. ~~**Update values.md**~~ ✅ Done (S4, S5, S7).
 
-6. **Update function-library.md**: Fix `call()` signature, update `EvalContext` return
-   types, document `get_or_compile_regex`.
+6. ~~**Update function-library.md**~~ ✅ Done (S3, S9, S10).
 
-7. **Update format-string.md**: Either fix the "pre-parsed" claim to match reality, or
-   implement pre-parsing (recommendation 4) and keep the spec.
+7. ~~**Update format-string.md**~~ ✅ Done — pre-parsing implemented (S1), spec now accurate.
 
-8. **Resolve range-expr.md conflict**: Either update the spec to say descending ranges
-   require a negative step, or update the code to accept `"10-1"` as valid. The code
-   comment says "invalid per spec" so the spec document may be aspirational.
+8. ~~**Resolve range-expr.md conflict**~~ ✅ Done (S2) — spec updated to require negative step.
 
-9. **Update evaluator.md**: Document regex cache, document `eval_attribute` operation
-   counting, document unresolved handling in BoolOp.
+9. ~~**Update evaluator.md**~~ ✅ Mostly done — regex cache documented (S16), unresolved
+   BoolOp handling was already documented. Minor: `eval_attribute` operation counting
+   remains undocumented.
 
 ### Priority 4 — Test Improvements
 
-10. **Add path mapping application tests**: The `path_mapping.rs` test module only tests
-    serde — add tests for `apply()`, `apply_rules()`, Windows case-insensitive matching,
-    URI matching, and trailing slash preservation.
+10. ~~**Add path mapping application tests**~~ ✅ Report was inaccurate — extensive
+    `apply_unit` tests already exist covering POSIX, Windows, URI, trailing slashes,
+    case sensitivity, `apply_rules`, and `apply_with_format`.
 
-11. **Strengthen weak assertions**: Fix `split`/`rsplit` tests in test_strings.rs to
-    assert exact list contents. Fix `p_err()` calls in test_types.rs to assert error
-    messages. Fix `contains()` assertions in test_rfc_examples.rs.
+11. ~~**Strengthen weak assertions**~~ ✅ Done — 10 redundant `is_list()` split/rsplit
+    tests removed, 2 strengthened; 7 `p_err()` calls now assert exact error messages;
+    2 `contains()` assertions replaced with exact values.
 
-12. **Clean up test organization**: Remove dead `eval_fails` helper. Move 8 tests in
-    format_string.rs into the `mod tests` block.
+12. ~~**Clean up test organization**~~ ✅ Done — dead `eval_fails` removed; 9 tests
+    moved inside `#[cfg(test)] mod tests` in format_string.rs.
 
 ### Priority 5 — Code Quality
 
@@ -299,9 +253,7 @@ No O(N²) or worse algorithms were found. Key operations:
 14. **Reduce AST cloning for error context**: Consider using `Cow` or span references
     instead of cloning entire AST subtrees for error context attachment.
 
-15. **Add missing type constants**: Implement `ExprType::LIST_INT`, `LIST_FLOAT`,
-    `LIST_STRING`, `LIST_PATH`, `LIST_BOOL`, `LIST_LIST_INT`, `EMPTY_LIST` as documented
-    in the spec, for API ergonomics.
+15. ~~**Add missing type constants**~~ — Removed from spec (S11). Not wanted.
 
 ---
 

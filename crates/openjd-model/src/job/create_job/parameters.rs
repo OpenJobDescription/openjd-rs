@@ -511,7 +511,7 @@ pub(super) fn json_to_expr_value(val: &serde_json::Value) -> openjd_expr::ExprVa
             let elements: Vec<openjd_expr::ExprValue> = arr.iter().map(json_to_expr_value).collect();
             // hint_type is only used by make_list for empty lists; for non-empty
             // lists it infers the type from elements (with int→float promotion etc.)
-            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULL)
+            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE).unwrap()
         }
         serde_json::Value::Object(_) => openjd_expr::ExprValue::String(val.to_string()),
     }

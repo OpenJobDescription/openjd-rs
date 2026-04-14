@@ -369,7 +369,7 @@ fn assert_err_with(expr: &str, st: &SymbolTable, expected: &[&str]) {
 
 #[test] fn index_out_of_bounds_caret() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap()).unwrap();
     assert_err_with("L[10]", &st, &[
         "Index 10 out of bounds for list of length 3\n",
         "  L[10]\n",
@@ -672,7 +672,7 @@ fn prefix_preserves_tilde_span() {
     st.set("Param.List", ExprValue::make_list(
         vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)],
         ExprType::INT,
-    )).unwrap();
+    ).unwrap()).unwrap();
     assert_err_with("Param.List[10] + 1", &st, &[
         "Index 10 out of bounds for list of length 3\n",
         "  Param.List[10] + 1\n",

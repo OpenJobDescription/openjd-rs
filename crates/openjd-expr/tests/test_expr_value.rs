@@ -102,7 +102,7 @@ use openjd_expr::value::Float64;
     let list = ExprValue::make_list(
         vec![ExprValue::String("1".to_string()), ExprValue::String("2".to_string())],
         ExprType::STRING,
-    );
+    ).unwrap();
     let v = list.coerce(&ExprType::list(ExprType::INT), PathFormat::Posix).unwrap();
     assert_eq!(v.expr_type().to_string(), "list[int]");
 }
@@ -122,19 +122,19 @@ use openjd_expr::value::Float64;
 #[test] fn repr_none() { assert_eq!(ExprValue::Null.repr_python(), "ExprValue(None)"); }
 
 #[test] fn repr_list_int() {
-    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT);
+    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap();
     assert_eq!(v.repr_python(), "ExprValue([1, 2, 3], type='list[int]')");
 }
 
 #[test] fn repr_list_string() {
-    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING);
+    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING).unwrap();
     assert_eq!(v.repr_python(), "ExprValue(['a', 'b'], type='list[string]')");
 }
 
 #[test] fn repr_list_nested() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     assert_eq!(v.repr_python(), "ExprValue([[1, 2], [3]], type='list[list[int]]')");
 }
 
@@ -153,7 +153,7 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn repr_list_path_with_format() {
-    let v = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }, ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH);
+    let v = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }, ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH).unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[path]'"));
     assert!(r.contains("path_format=PathFormat.POSIX"));
@@ -217,7 +217,7 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn transport_list_int_roundtrip() {
-    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT);
+    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap();
     let json = v.to_json_transport();
     assert_eq!(json["type"], "list[int]");
     assert!(json["value"].is_array());
@@ -228,7 +228,7 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn transport_list_string_roundtrip() {
-    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING);
+    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING).unwrap();
     let json = v.to_json_transport();
     assert_eq!(json["type"], "list[string]");
     assert_eq!(json["value"][0], "a");
@@ -237,9 +237,9 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn transport_nested_list_roundtrip() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     let json = v.to_json_transport();
     assert_eq!(json["type"], "list[list[int]]");
     assert!(json["value"][0].is_array());
@@ -258,7 +258,7 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn transport_list_path_roundtrip() {
-    let v = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }, ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH);
+    let v = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }, ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH).unwrap();
     let json = v.to_json_transport();
     assert_eq!(json["type"], "list[path]");
     assert_eq!(json["value"][0], "/a");
@@ -317,7 +317,7 @@ use openjd_expr::value::Float64;
 #[test] fn memory_size_list_no_double_count() {
     let base = std::mem::size_of::<ExprValue>();
     let input: Vec<ExprValue> = (0..100).map(ExprValue::Int).collect();
-    let v = ExprValue::make_list(input, ExprType::INT);
+    let v = ExprValue::make_list(input, ExprType::INT).unwrap();
     assert!(matches!(&v, ExprValue::ListInt(_)));
     let total = v.memory_size();
     // ListInt heap = capacity * 8. Capacity may exceed len due to allocator reuse.
@@ -393,29 +393,29 @@ use openjd_expr::value::Float64;
 #[test] fn to_string_string() { assert_eq!(ExprValue::String("hello".into()).to_display_string(), "hello"); }
 #[test] fn to_string_path() { assert_eq!(ExprValue::Path { value: "/a/b".into(), format: PathFormat::Posix }.to_display_string(), "/a/b"); }
 #[test] fn to_string_list_int() {
-    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT);
+    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap();
     assert_eq!(v.to_display_string(), "[1, 2, 3]");
 }
 #[test] fn to_string_list_string() {
-    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING);
+    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING).unwrap();
     assert_eq!(v.to_display_string(), "[\"a\", \"b\"]");
 }
 #[test] fn to_string_list_float() {
-    let v = ExprValue::make_list(vec![ExprValue::Float(Float64::new(1.5).unwrap()), ExprValue::Float(Float64::new(2.5).unwrap())], ExprType::FLOAT);
+    let v = ExprValue::make_list(vec![ExprValue::Float(Float64::new(1.5).unwrap()), ExprValue::Float(Float64::new(2.5).unwrap())], ExprType::FLOAT).unwrap();
     assert_eq!(v.to_display_string(), "[1.5, 2.5]");
 }
 #[test] fn to_string_list_bool() {
-    let v = ExprValue::make_list(vec![ExprValue::Bool(true), ExprValue::Bool(false)], ExprType::BOOL);
+    let v = ExprValue::make_list(vec![ExprValue::Bool(true), ExprValue::Bool(false)], ExprType::BOOL).unwrap();
     assert_eq!(v.to_display_string(), "[true, false]");
 }
 #[test] fn to_string_list_nested() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     assert_eq!(v.to_display_string(), "[[1, 2], [3, 4]]");
 }
 #[test] fn to_string_list_empty() {
-    let v = ExprValue::make_list(vec![], ExprType::NULL);
+    let v = ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap();
     assert_eq!(v.to_display_string(), "[]");
 }
 
@@ -434,13 +434,13 @@ use openjd_expr::value::Float64;
 #[test] fn eq_null_same() { assert_eq!(ExprValue::Null, ExprValue::Null); }
 #[test] fn eq_null_int_diff() { assert_ne!(ExprValue::Null, ExprValue::Int(0)); }
 #[test] fn eq_list_same() {
-    let a = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let b = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
+    let a = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let b = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     assert_eq!(a, b);
 }
 #[test] fn eq_list_diff() {
-    let a = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT);
-    let b = ExprValue::make_list(vec![ExprValue::Int(2)], ExprType::INT);
+    let a = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
+    let b = ExprValue::make_list(vec![ExprValue::Int(2)], ExprType::INT).unwrap();
     assert_ne!(a, b);
 }
 #[test] fn eq_string_path() {
@@ -455,19 +455,19 @@ use openjd_expr::value::Float64;
 // ══════════════════════════════════════════════════════════════
 
 #[test] fn list_string() {
-    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into()), ExprValue::String("c".into())], ExprType::STRING);
+    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into()), ExprValue::String("c".into())], ExprType::STRING).unwrap();
     assert_eq!(v.list_len(), Some(3));
     assert_eq!(v.expr_type().to_string(), "list[string]");
 }
 
 #[test] fn list_int() {
-    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT);
+    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap();
     assert_eq!(v.list_len(), Some(3));
     assert_eq!(v.expr_type().to_string(), "list[int]");
 }
 
 #[test] fn list_bool() {
-    let v = ExprValue::make_list(vec![ExprValue::Bool(true), ExprValue::Bool(false), ExprValue::Bool(true)], ExprType::BOOL);
+    let v = ExprValue::make_list(vec![ExprValue::Bool(true), ExprValue::Bool(false), ExprValue::Bool(true)], ExprType::BOOL).unwrap();
     assert_eq!(v.list_len(), Some(3));
     let elems = v.list_elements().unwrap();
     assert!(matches!(elems[0], ExprValue::Bool(true)));
@@ -475,9 +475,9 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn list_list_int() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4), ExprValue::Int(5)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4), ExprValue::Int(5)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     assert_eq!(v.list_len(), Some(2));
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].list_len(), Some(2));
@@ -485,13 +485,13 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn list_empty() {
-    let v = ExprValue::make_list(vec![], ExprType::NULL);
+    let v = ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap();
     assert_eq!(v.expr_type().to_string(), "list[nulltype]");
     assert_eq!(v.list_len(), Some(0));
 }
 
 #[test] fn list_int_float_mix() {
-    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Float(Float64::new(2.0).unwrap()), ExprValue::Int(3)], ExprType::FLOAT);
+    let v = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Float(Float64::new(2.0).unwrap()), ExprValue::Int(3)], ExprType::FLOAT).unwrap();
     assert_eq!(v.expr_type().to_string(), "list[float]");
     // All elements coerced to float
     for e in v.list_elements().unwrap() {
@@ -500,16 +500,16 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn list_nested() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     assert_eq!(v.expr_type().to_string(), "list[list[int]]");
 }
 
 #[test] fn list_nested_int_float_mix() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Float(Float64::new(3.0).unwrap()), ExprValue::Float(Float64::new(4.0).unwrap())], ExprType::FLOAT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::FLOAT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Float(Float64::new(3.0).unwrap()), ExprValue::Float(Float64::new(4.0).unwrap())], ExprType::FLOAT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::FLOAT)).unwrap();
     // Inner int list should be promoted to float
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].expr_type().to_string(), "list[float]");
@@ -519,7 +519,7 @@ use openjd_expr::value::Float64;
     let v = ExprValue::make_list(vec![
         ExprValue::Path { value: "/a".into(), format: PathFormat::Posix },
         ExprValue::String("b".into()),
-    ], ExprType::STRING);
+    ], ExprType::STRING).unwrap();
     // path/string mix promotes to string
     assert_eq!(v.expr_type().to_string(), "list[string]");
 }
@@ -537,8 +537,8 @@ use openjd_expr::value::Float64;
 #[test] fn truthy_float_nonzero() { assert!(ExprValue::Float(Float64::new(1.0).unwrap()).is_truthy()); }
 #[test] fn truthy_string_empty() { assert!(!ExprValue::String("".into()).is_truthy()); }
 #[test] fn truthy_string_nonempty() { assert!(ExprValue::String("x".into()).is_truthy()); }
-#[test] fn truthy_list_empty() { assert!(!ExprValue::make_list(vec![], ExprType::NULL).is_truthy()); }
-#[test] fn truthy_list_nonempty() { assert!(ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).is_truthy()); }
+#[test] fn truthy_list_empty() { assert!(!ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap().is_truthy()); }
+#[test] fn truthy_list_nonempty() { assert!(ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap().is_truthy()); }
 
 // ══════════════════════════════════════════════════════════════
 // repr_python — additional cases
@@ -553,14 +553,14 @@ use openjd_expr::value::Float64;
 }
 
 #[test] fn repr_empty_list_path() {
-    let v = ExprValue::make_list(vec![], ExprType::PATH);
+    let v = ExprValue::make_list(vec![], ExprType::PATH).unwrap();
     let r = v.repr_python();
     assert!(r.contains("[]"), "got: {r}");
     assert!(r.contains("type='list["), "got: {r}");
 }
 
 #[test] fn repr_empty_list_list_path() {
-    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH));
+    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH)).unwrap();
     let r = v.repr_python();
     assert!(r.contains("[]"), "got: {r}");
 }
@@ -570,22 +570,22 @@ use openjd_expr::value::Float64;
 // ══════════════════════════════════════════════════════════════
 
 #[test] fn coerce_list_string_type() {
-    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING);
+    let v = ExprValue::make_list(vec![ExprValue::String("a".into()), ExprValue::String("b".into())], ExprType::STRING).unwrap();
     let coerced = v.coerce(&ExprType::list(ExprType::STRING), PathFormat::Posix).unwrap();
     assert_eq!(coerced.expr_type().to_string(), "list[string]");
 }
 
 #[test] fn coerce_nested_list_type() {
-    let inner = ExprValue::make_list(vec![ExprValue::String("1".into()), ExprValue::String("2".into())], ExprType::STRING);
-    let v = ExprValue::make_list(vec![inner], ExprType::list(ExprType::STRING));
+    let inner = ExprValue::make_list(vec![ExprValue::String("1".into()), ExprValue::String("2".into())], ExprType::STRING).unwrap();
+    let v = ExprValue::make_list(vec![inner], ExprType::list(ExprType::STRING)).unwrap();
     let coerced = v.coerce(&ExprType::list(ExprType::list(ExprType::INT)), PathFormat::Posix).unwrap();
     assert_eq!(coerced.expr_type().to_string(), "list[list[int]]");
 }
 
 #[test] fn repr_list_list_path_with_format() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }], ExprType::PATH);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Path { value: "/a".into(), format: PathFormat::Posix }], ExprType::PATH).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }], ExprType::PATH).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH)).unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[list[path]]'"), "got: {r}");
     assert!(r.contains("path_format=PathFormat.POSIX"), "got: {r}");
@@ -639,7 +639,7 @@ use openjd_expr::value::Float64;
     let v = ExprValue::make_list(vec![
         ExprValue::Float(Float64::with_str(1.1, "1.100".to_string()).unwrap()),
         ExprValue::Float(Float64::with_str(2.2, "2.200".to_string()).unwrap()),
-    ], ExprType::FLOAT);
+    ], ExprType::FLOAT).unwrap();
     assert_eq!(v.list_len(), Some(2));
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].to_display_string(), "1.100");
@@ -651,7 +651,7 @@ use openjd_expr::value::Float64;
     let v = ExprValue::make_list(vec![
         ExprValue::Float(Float64::new(1.5).unwrap()),
         ExprValue::Float(Float64::with_str(2.5, "2.500".to_string()).unwrap()),
-    ], ExprType::FLOAT);
+    ], ExprType::FLOAT).unwrap();
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].to_display_string(), "1.5");
     assert_eq!(elems[1].to_display_string(), "2.500");
@@ -678,16 +678,16 @@ use openjd_expr::value::Float64;
 // -- Coerce list with ExprType (Python: ExprValue([1,2,3], type="list[int]")) --
 
 #[test] fn coerce_list_int_with_type() {
-    let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT);
+    let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3)], ExprType::INT).unwrap();
     let coerced = list.coerce(&ExprType::list(ExprType::INT), PathFormat::Posix).unwrap();
     assert_eq!(coerced.list_len(), Some(3));
     assert_eq!(coerced.expr_type().to_string(), "list[int]");
 }
 
 #[test] fn coerce_nested_list_int_with_type() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     let coerced = v.coerce(&ExprType::list(ExprType::list(ExprType::INT)), PathFormat::Posix).unwrap();
     assert_eq!(coerced.expr_type().to_string(), "list[list[int]]");
 }
@@ -708,16 +708,16 @@ use openjd_expr::value::Float64;
     let v = ExprValue::make_list(vec![
         ExprValue::Path { value: "\\a".into(), format: PathFormat::Windows },
         ExprValue::Path { value: "\\b".into(), format: PathFormat::Windows },
-    ], ExprType::PATH);
+    ], ExprType::PATH).unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[path]'"), "got: {r}");
     assert!(r.contains("path_format=PathFormat.WINDOWS"), "got: {r}");
 }
 
 #[test] fn repr_list_list_path_with_windows_format() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Path { value: "\\a".into(), format: PathFormat::Windows }], ExprType::PATH);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Path { value: "\\b".into(), format: PathFormat::Windows }], ExprType::PATH);
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Path { value: "\\a".into(), format: PathFormat::Windows }], ExprType::PATH).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Path { value: "\\b".into(), format: PathFormat::Windows }], ExprType::PATH).unwrap();
+    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH)).unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[list[path]]'"), "got: {r}");
     assert!(r.contains("path_format=PathFormat.WINDOWS"), "got: {r}");
@@ -726,14 +726,14 @@ use openjd_expr::value::Float64;
 // -- repr_python: exact match for empty list[path] and list[list[path]] --
 
 #[test] fn repr_empty_list_path_exact() {
-    let v = ExprValue::make_list(vec![], ExprType::PATH);
+    let v = ExprValue::make_list(vec![], ExprType::PATH).unwrap();
     let r = v.repr_python();
     assert!(r.starts_with("ExprValue([]"), "got: {r}");
     assert!(r.contains("type='list["), "got: {r}");
 }
 
 #[test] fn repr_empty_list_list_path_exact() {
-    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH));
+    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH)).unwrap();
     let r = v.repr_python();
     assert!(r.starts_with("ExprValue([]"), "got: {r}");
 }

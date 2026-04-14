@@ -7,7 +7,6 @@ use openjd_expr::types::{ExprType, TypeCode};
 use std::collections::{HashMap, HashSet};
 
 fn p(s: &str) -> ExprType { ExprType::parse(s).unwrap() }
-fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
 
 // ══════════════════════════════════════════════════════════════
 // TestExprType
@@ -22,7 +21,7 @@ fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
 }
 
 #[test] fn nullable() {
-    let t = ExprType::union(vec![ExprType::INT, ExprType::NULL]);
+    let t = ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]);
     assert_eq!(t.code(), TypeCode::Union);
     assert_eq!(t.to_string(), "int?");
 }
@@ -53,7 +52,7 @@ fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
     assert_eq!(ExprType::INT.to_string(), "int");
     assert_eq!(ExprType::BOOL.to_string(), "bool");
     assert_eq!(ExprType::list(ExprType::INT).to_string(), "list[int]");
-    assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULL]).to_string(), "int?");
+    assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(), "int?");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -67,19 +66,19 @@ fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
     assert_eq!(p("bool"), ExprType::BOOL);
     assert_eq!(p("path"), ExprType::PATH);
     assert_eq!(p("range_expr"), ExprType::RANGE_EXPR);
-    assert_eq!(p("nulltype"), ExprType::NULL);
+    assert_eq!(p("nulltype"), ExprType::NULLTYPE);
 }
 
 #[test] fn parse_case_sensitive() {
-    assert!(p_err("INT"));
-    assert!(p_err("String"));
+    assert_eq!(ExprType::parse("INT").unwrap_err(), "Unknown type string: INT");
+    assert_eq!(ExprType::parse("String").unwrap_err(), "Unknown type string: String");
 }
 
 #[test] fn parse_whitespace_rejected() {
-    assert!(p_err(" int"));
-    assert!(p_err("int "));
-    assert!(p_err("list[int ]"));
-    assert!(p_err("list[ int]"));
+    assert_eq!(ExprType::parse(" int").unwrap_err(), "Unknown type string:  int");
+    assert_eq!(ExprType::parse("int ").unwrap_err(), "Unknown type string: int ");
+    assert_eq!(ExprType::parse("list[int ]").unwrap_err(), "Unknown type string: int ");
+    assert_eq!(ExprType::parse("list[ int]").unwrap_err(), "Unknown type string:  int");
 }
 
 #[test] fn parse_signature_basic() {
@@ -137,7 +136,9 @@ fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
     assert_eq!(list_opt.to_string(), "list[int]?");
 }
 
-#[test] fn parse_unknown_type_raises() { assert!(p_err("notavalidtype")); }
+#[test] fn parse_unknown_type_raises() {
+    assert_eq!(ExprType::parse("notavalidtype").unwrap_err(), "Unknown type string: notavalidtype");
+}
 
 // ══════════════════════════════════════════════════════════════
 // TestUnionTypes
@@ -211,11 +212,11 @@ fn p_err(s: &str) -> bool { ExprType::parse(s).is_err() }
 }
 
 #[test] fn union_nullable_display_single() {
-    assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULL]).to_string(), "int?");
+    assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(), "int?");
 }
 
 #[test] fn union_nullable_display_multiple() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::FLOAT, ExprType::NULL]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::FLOAT, ExprType::NULLTYPE]);
     assert_eq!(u.to_string(), "float | int | nulltype");
 }
 
@@ -1051,7 +1052,7 @@ use openjd_expr::PathFormat;
 
 #[test] fn value_from_list() {
     let items = vec![ExprValue::Int(1), ExprValue::Int(2)];
-    let val = ExprValue::make_list(items, ExprType::INT);
+    let val = ExprValue::make_list(items, ExprType::INT).unwrap();
     assert_eq!(val.expr_type().code(), TypeCode::List);
     assert_eq!(val.list_len(), Some(2));
 }
@@ -1095,20 +1096,20 @@ use openjd_expr::PathFormat;
 }
 
 #[test] fn value_list_empty() {
-    let val = ExprValue::make_list(vec![], ExprType::NULL);
+    let val = ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap();
     assert_eq!(val.list_len(), Some(0));
 }
 
 #[test] fn value_list_int_float_mix() {
     let items = vec![ExprValue::Int(1), ExprValue::Float(Float64::new(2.0).unwrap()), ExprValue::Int(3)];
-    let val = ExprValue::make_list(items, ExprType::FLOAT);
+    let val = ExprValue::make_list(items, ExprType::FLOAT).unwrap();
     assert_eq!(val.expr_type(), ExprType::list(ExprType::FLOAT));
 }
 
 #[test] fn value_list_nested() {
-    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
-    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT);
-    let val = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT));
+    let inner1 = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
+    let val = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
     assert_eq!(val.expr_type(), ExprType::list(ExprType::list(ExprType::INT)));
 }
 
@@ -1117,7 +1118,7 @@ use openjd_expr::PathFormat;
         ExprValue::Path { value: "/a".to_string(), format: PathFormat::Posix },
         ExprValue::String("b".to_string()),
     ];
-    let val = ExprValue::make_list(items, ExprType::STRING);
+    let val = ExprValue::make_list(items, ExprType::STRING).unwrap();
     assert_eq!(val.expr_type(), ExprType::list(ExprType::STRING));
 }
 
@@ -1166,3 +1167,4 @@ use openjd_expr::PathFormat;
     assert!(ExprValue::unresolved(ExprType::INT).is_unresolved());
     assert!(!ExprValue::Int(42).is_unresolved());
 }
+

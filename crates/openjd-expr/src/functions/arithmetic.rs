@@ -251,7 +251,7 @@ pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
         (ExprValue::RangeExpr(l), ExprValue::RangeExpr(r)) => {
             ctx.count_ops(l.len() + r.len())?;
             let elements: Vec<ExprValue> = l.iter().chain(r.iter()).map(ExprValue::Int).collect();
-            Ok(ExprValue::make_list(elements, ExprType::INT))
+            Ok(ExprValue::make_list(elements, ExprType::INT)?)
         }
         _ => Err(ExpressionError::type_error("type error"))
     }
@@ -260,27 +260,27 @@ pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn mul_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let (elements, elem_type) = a[0].clone().into_list().ok_or_else(|| ExpressionError::type_error("type error"))?;
     let n = match &a[1] { ExprValue::Int(n) => *n, _ => return Err(ExpressionError::type_error("type error")) };
-    if n <= 0 { return Ok(ExprValue::make_list(Vec::new(), elem_type)); }
+    if n <= 0 { return Ok(ExprValue::make_list(Vec::new(), elem_type)?); }
     let result_len = elements.len() * n as usize;
     for _ in 0..result_len { ctx.count_op()?; }
     let mut result = Vec::new();
     for _ in 0..n { result.extend(elements.iter().cloned()); }
-    Ok(ExprValue::make_list(result, elem_type))
+    Ok(ExprValue::make_list(result, elem_type)?)
 }
 
 pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let (l, lt) = a[0].clone().into_list().ok_or_else(|| ExpressionError::type_error("type error"))?;
     let (r, rt) = a[1].clone().into_list().ok_or_else(|| ExpressionError::type_error("type error"))?;
     ctx.count_ops(l.len() + r.len())?;
-    if lt != rt && lt != ExprType::NULL && rt != ExprType::NULL
+    if lt != rt && lt != ExprType::NULLTYPE && rt != ExprType::NULLTYPE
         && !((lt == ExprType::INT && rt == ExprType::FLOAT) || (lt == ExprType::FLOAT && rt == ExprType::INT))
         && !((lt == ExprType::PATH && rt == ExprType::STRING) || (lt == ExprType::STRING && rt == ExprType::PATH)) {
         return Err(ExpressionError::type_error(format!("Cannot concatenate list[{lt}] and list[{rt}]")));
     }
     let mut combined = l;
     combined.extend(r);
-    let result_type = if lt == ExprType::NULL { rt } else { lt };
-    Ok(ExprValue::make_list(combined, result_type))
+    let result_type = if lt == ExprType::NULLTYPE { rt } else { lt };
+    Ok(ExprValue::make_list(combined, result_type)?)
 }
 
 pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -288,7 +288,7 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     let r = match &a[1] { ExprValue::RangeExpr(r) => r, _ => return Err(ExpressionError::type_error("type error")) };
     ctx.count_ops(l.len() + r.len())?;
     l.extend(r.iter().map(ExprValue::Int));
-    Ok(ExprValue::make_list(l, et))
+    Ok(ExprValue::make_list(l, et)?)
 }
 
 pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -297,7 +297,7 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_ops(r.len() + l.len())?;
     let mut combined: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
     combined.extend(l);
-    Ok(ExprValue::make_list(combined, et))
+    Ok(ExprValue::make_list(combined, et)?)
 }
 
 // ── Comparison operators ──

@@ -29,7 +29,7 @@ fn op_count_with(expr: &str, st: &SymbolTable) -> usize {
 
 #[test] fn function_calls_count() {
     let e = eval_op("1 + 1", 0).unwrap_err().to_string();
-    assert!(e.contains(&["Expression operation count (1) exceeded limit (0)\n",
+    assert!(e.contains(&["Operation limit exceeded\n",
         "  1 + 1\n", "  ~~^~~"].concat()), "got:\n{e}");
 }
 
@@ -228,50 +228,50 @@ fn op_count_with(expr: &str, st: &SymbolTable) -> usize {
 
 #[test] fn sorted_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("sorted(L)", &st);
     assert!(ops >= 100, "sorted(100 elements) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn reversed_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("reversed(L)", &st);
     assert!(ops >= 100, "reversed(100 elements) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn unique_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("unique(L)", &st);
     assert!(ops >= 100, "unique(100 elements) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn min_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("min(L)", &st);
     assert!(ops >= 100, "min(100 elements) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn max_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("max(L)", &st);
     assert!(ops >= 100, "max(100 elements) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn list_concat_charges_per_element() {
     let mut st = SymbolTable::new();
-    st.set("A", ExprValue::make_list((0..50).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
-    st.set("B", ExprValue::make_list((0..50).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("A", ExprValue::make_list((0..50).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
+    st.set("B", ExprValue::make_list((0..50).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("A + B", &st);
     assert!(ops >= 100, "list concat (50+50) should charge >= 100 ops, got {ops}");
 }
 
 #[test] fn list_slice_charges_per_output_element() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..100).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let ops = op_count_with("L[10:60]", &st);
     assert!(ops >= 50, "list slice of 50 elements should charge >= 50 ops, got {ops}");
 }
@@ -324,21 +324,35 @@ fn op_count_with(expr: &str, st: &SymbolTable) -> usize {
 
 #[test] fn sorted_exceeds_limit_via_symtab() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let r = evaluate_expression_bounded("sorted(L)", &st, usize::MAX, 100);
     assert!(r.is_err(), "sorted(1000 elements) with limit 100 should fail");
 }
 
 #[test] fn unique_exceeds_limit_via_symtab() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let r = evaluate_expression_bounded("unique(L)", &st, usize::MAX, 100);
     assert!(r.is_err(), "unique(1000 elements) with limit 100 should fail");
 }
 
 #[test] fn min_exceeds_limit_via_symtab() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap()).unwrap();
     let r = evaluate_expression_bounded("min(L)", &st, usize::MAX, 100);
     assert!(r.is_err(), "min(1000 elements) with limit 100 should fail");
+}
+
+#[test]
+fn operation_limit_error_kind_from_evaluator() {
+    // Trigger the evaluator's private count_op via chained binary ops
+    let mut symtab = SymbolTable::new();
+    symtab.set("x", ExprValue::Int(1)).unwrap();
+    let parsed = ParsedExpression::new("x + x + x + x").unwrap();
+    let err = parsed.evaluator(&[&symtab])
+        .with_operation_limit(2)
+        .evaluate(&parsed.ast)
+        .unwrap_err();
+    assert!(matches!(err.kind(), ExpressionErrorKind::OperationLimitExceeded),
+        "Expected OperationLimitExceeded, got: {:?}", err.kind());
 }

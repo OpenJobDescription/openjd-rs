@@ -164,13 +164,13 @@ fn rfc_repr_sh_string_with_quotes() {
     st.set("Task.Command", ExprValue::String("echo 'hello world'".into())).unwrap();
     let r = eval_with("repr_sh(Task.Command)", &st);
     let s = r.to_display_string();
-    assert!(s.contains("echo") && s.contains("hello world"));
+    assert_eq!(s, "\"echo 'hello world'\"");
 }
 
 #[test]
 fn rfc_repr_sh_list_strings() {
     let r = eval("repr_sh(['file with spaces.txt', '--flag', 'value'])");
-    assert!(r.to_display_string().contains("'file with spaces.txt'"));
+    assert_eq!(r.to_display_string(), "'file with spaces.txt' --flag value");
 }
 
 #[test]

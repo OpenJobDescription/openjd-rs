@@ -506,7 +506,7 @@ mod tests {
         let mut lib = FunctionLibrary::new();
         lib.register_sig("len", "(list[T1]) -> int", list_len);
         let mut ctx = MockCtx;
-        let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
+        let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
         let r = lib.call("len", &[list], &mut ctx).unwrap();
         assert_eq!(r, ExprValue::Int(2));
     }

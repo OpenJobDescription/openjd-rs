@@ -33,11 +33,11 @@ fn nested_list_type() {
     let mut st = SymbolTable::new();
     st.set("nested", ExprValue::make_list(
         vec![
-            ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], openjd_expr::ExprType::INT),
-            ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], openjd_expr::ExprType::INT),
+            ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], openjd_expr::ExprType::INT).unwrap(),
+            ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], openjd_expr::ExprType::INT).unwrap(),
         ],
         openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
-    )).unwrap();
+    ).unwrap()).unwrap();
     assert_eq!(evaluate_expression("nested", &st).unwrap().expr_type().to_string(), "list[list[int]]");
 }
 

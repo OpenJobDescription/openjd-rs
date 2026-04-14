@@ -223,10 +223,10 @@ pub fn prop_suffixes(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_string_ops(path_str.len())?;
     if crate::uri_path::is_uri(&path_str) {
         let suffixes: Vec<ExprValue> = crate::uri_path::suffixes(&path_str).into_iter().map(ExprValue::String).collect();
-        return Ok(ExprValue::make_list(suffixes, crate::types::ExprType::STRING));
+        return Ok(ExprValue::make_list(suffixes, crate::types::ExprType::STRING)?);
     }
     let suffixes: Vec<ExprValue> = pp::suffixes(&path_str, fmt).into_iter().map(ExprValue::String).collect();
-    Ok(ExprValue::make_list(suffixes, crate::types::ExprType::STRING))
+    Ok(ExprValue::make_list(suffixes, crate::types::ExprType::STRING)?)
 }
 
 pub fn prop_parent(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -243,8 +243,8 @@ pub fn prop_parts(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_string_ops(path_str.len())?;
     if crate::uri_path::is_uri(&path_str) {
         let parts: Vec<ExprValue> = crate::uri_path::parts(&path_str).into_iter().map(ExprValue::String).collect();
-        return Ok(ExprValue::make_list(parts, crate::types::ExprType::STRING));
+        return Ok(ExprValue::make_list(parts, crate::types::ExprType::STRING)?);
     }
     let parts: Vec<ExprValue> = pp::parts(&path_str, fmt).into_iter().map(ExprValue::String).collect();
-    Ok(ExprValue::make_list(parts, crate::types::ExprType::STRING))
+    Ok(ExprValue::make_list(parts, crate::types::ExprType::STRING)?)
 }

@@ -158,17 +158,28 @@ impl ExprValue {
     ///
     /// Applies type promotion rules: int+float→float, path+string→string.
     /// Uses `hint_type` for empty lists to determine the element type.
-    pub fn make_list(mut elements: Vec<ExprValue>, hint_type: ExprType) -> Self {
+    /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
+    pub fn make_list(mut elements: Vec<ExprValue>, hint_type: ExprType) -> Result<Self, crate::error::ExpressionError> {
+        // Reject 3+ nesting levels: if any element is itself a ListList, that's too deep
+        if elements.iter().any(|e| matches!(e, Self::ListList(..))) {
+            return Err(crate::error::ExpressionError::new(
+                "Lists may be nested at most 2 levels deep"
+            ));
+        }
         if elements.is_empty() {
-            return match hint_type.code {
+            // Empty lists are list[nulltype], compatible with any list type.
+            // When a concrete hint is provided, use the matching typed variant
+            // so that subsequent operations (e.g. append) preserve the type.
+            // Otherwise, use ListInt as the canonical empty list[nulltype]
+            // representation (smallest variant, no cached size field).
+            return Ok(match hint_type.code {
                 crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
                 crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
                 crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
                 crate::types::TypeCode::Path => Self::make_list_path(Vec::new(), PathFormat::host()),
                 crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
-                crate::types::TypeCode::Null => Self::make_list_string(Vec::new()),
-                _ => Self::make_list_string(Vec::new()),
-            };
+                _ => Self::ListInt(Vec::new()),
+            });
         }
         let has_int = elements.iter().any(|e| matches!(e, Self::Int(_)));
         let has_float = elements.iter().any(|e| matches!(e, Self::Float(_)));
@@ -176,9 +187,9 @@ impl ExprValue {
             for e in &mut elements {
                 if let Self::Int(i) = e { *e = Self::Float(Float64::new(*i as f64).unwrap()); }
             }
-            return Self::ListFloat(elements.into_iter().map(|e| match e {
+            return Ok(Self::ListFloat(elements.into_iter().map(|e| match e {
                 Self::Float(f) => f, _ => unreachable!("all elements promoted to Float above")
-            }).collect());
+            }).collect()));
         }
         let has_list_int = elements.iter().any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::INT));
         let has_list_float = elements.iter().any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::FLOAT));
@@ -188,7 +199,7 @@ impl ExprValue {
                     *e = Self::ListFloat(ints.iter().map(|i| Float64::new(*i as f64).unwrap()).collect());
                 }
             }
-            return Self::make_list_list(elements, ExprType::NULL);
+            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
         }
         // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements.iter().any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::PATH));
@@ -199,17 +210,17 @@ impl ExprValue {
                     *e = Self::make_list_string(std::mem::take(paths));
                 }
             }
-            return Self::make_list_list(elements, ExprType::NULL);
+            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
         }
         // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
         let has_string = elements.iter().any(|e| matches!(e, Self::String(_)));
         if has_path && has_string {
-            return Self::make_list_string(elements.into_iter().map(|e| match e {
+            return Ok(Self::make_list_string(elements.into_iter().map(|e| match e {
                 Self::String(s) | Self::Path { value: s, .. } => s, _ => e.to_display_string()
-            }).collect());
+            }).collect()));
         }
-        match &elements[0] {
+        Ok(match &elements[0] {
             Self::Bool(_) => Self::ListBool(elements.into_iter().map(|e| matches!(e, Self::Bool(true))).collect()),
             Self::Int(_) => Self::ListInt(elements.into_iter().map(|e| match e { Self::Int(i) => i, _ => unreachable!("homogeneous Int list") }).collect()),
             Self::Float(_) => Self::ListFloat(elements.into_iter().map(|e| match e { Self::Float(f) => f, _ => unreachable!("homogeneous Float list") }).collect()),
@@ -218,10 +229,10 @@ impl ExprValue {
                 let fmt = *format;
                 Self::make_list_path(elements.into_iter().map(|e| match e { Self::Path { value, .. } | Self::String(value) => value, _ => e.to_display_string() }).collect(), fmt)
             }
-            _ if elements[0].is_list() => Self::make_list_list(elements, ExprType::NULL),
+            _ if elements[0].is_list() => Self::make_list_list(elements, ExprType::NULLTYPE),
             Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
             _ => Self::make_list_string(elements.into_iter().map(|e| e.to_display_string()).collect()),
-        }
+        })
     }
 
     /// Create an unresolved value with a type constraint (for validation-time type checking).
@@ -282,13 +293,15 @@ impl ExprValue {
             (ExprValue::Float(f), TypeCode::String) => Ok(ExprValue::String(f.to_display_string())),
             (ExprValue::String(s), _) => ExprValue::from_str_coerce(s, target, path_format),
             (ExprValue::Path { value, .. }, TypeCode::String) => Ok(ExprValue::String(value.clone())),
+            (ExprValue::RangeExpr(r), TypeCode::String) => Ok(ExprValue::String(r.to_string())),
+            (ExprValue::RangeExpr(r), TypeCode::List) => Ok(ExprValue::ListInt(r.to_vec())),
             _ if target.code == TypeCode::List && target.params.len() == 1 => {
                 let elem_type = &target.params[0];
                 if let Some(elements) = self.list_elements() {
                     let coerced: Result<Vec<_>, _> = elements.into_iter()
                         .map(|e| e.coerce(elem_type, path_format))
                         .collect();
-                    Ok(ExprValue::make_list(coerced?, elem_type.clone()))
+                    Ok(ExprValue::make_list(coerced?, elem_type.clone()).map_err(|e| e.to_string())?)
                 } else {
                     Err(format!("Cannot coerce {} to {target}", self.expr_type()))
                 }
@@ -397,7 +410,7 @@ impl ExprValue {
             let elements: Result<Vec<_>, _> = arr.iter()
                 .map(|v| Self::from_transport_value(v, elem_type, path_format))
                 .collect();
-            return Ok(ExprValue::make_list(elements?, elem_type.clone()));
+            return Ok(ExprValue::make_list(elements?, elem_type.clone()).map_err(|e| e.to_string())?);
         }
         let s = value.as_str().ok_or_else(|| format!("Expected string value for {target}"))?;
         ExprValue::from_str_coerce(s, target, path_format)
@@ -469,11 +482,11 @@ impl ExprValue {
     /// Element type of a list, or `None` for non-list values.
     pub fn list_elem_type(&self) -> Option<ExprType> {
         match self {
-            Self::ListBool(v) => Some(if v.is_empty() { ExprType::NULL } else { ExprType::BOOL }),
-            Self::ListInt(v) => Some(if v.is_empty() { ExprType::NULL } else { ExprType::INT }),
-            Self::ListFloat(v) => Some(if v.is_empty() { ExprType::NULL } else { ExprType::FLOAT }),
-            Self::ListString(v, _) => Some(if v.is_empty() { ExprType::NULL } else { ExprType::STRING }),
-            Self::ListPath(v, _, _) => Some(if v.is_empty() { ExprType::NULL } else { ExprType::PATH }),
+            Self::ListBool(v) => Some(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::BOOL }),
+            Self::ListInt(v) => Some(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::INT }),
+            Self::ListFloat(v) => Some(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::FLOAT }),
+            Self::ListString(v, _) => Some(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::STRING }),
+            Self::ListPath(v, _, _) => Some(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::PATH }),
             Self::ListList(_, elem_type, _) => Some(elem_type.clone()),
             _ => None,
         }
@@ -488,17 +501,17 @@ impl ExprValue {
     /// The [`ExprType`] of this value.
     pub fn expr_type(&self) -> ExprType {
         match self {
-            Self::Null => ExprType::NULL,
+            Self::Null => ExprType::NULLTYPE,
             Self::Bool(_) => ExprType::BOOL,
             Self::Int(_) => ExprType::INT,
             Self::Float(_) => ExprType::FLOAT,
             Self::String(_) => ExprType::STRING,
             Self::Path { .. } => ExprType::PATH,
-            Self::ListBool(_) => ExprType::list(ExprType::BOOL),
-            Self::ListInt(_) => ExprType::list(ExprType::INT),
-            Self::ListFloat(_) => ExprType::list(ExprType::FLOAT),
-            Self::ListString(v, _) => ExprType::list(if v.is_empty() { ExprType::NULL } else { ExprType::STRING }),
-            Self::ListPath(_, _, _) => ExprType::list(ExprType::PATH),
+            Self::ListBool(v) => ExprType::list(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::BOOL }),
+            Self::ListInt(v) => ExprType::list(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::INT }),
+            Self::ListFloat(v) => ExprType::list(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::FLOAT }),
+            Self::ListString(v, _) => ExprType::list(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::STRING }),
+            Self::ListPath(v, _, _) => ExprType::list(if v.is_empty() { ExprType::NULLTYPE } else { ExprType::PATH }),
             Self::ListList(_, elem_type, _) => ExprType::list(elem_type.clone()),
             Self::RangeExpr(_) => ExprType::RANGE_EXPR,
             Self::Unresolved(t) => ExprType::unresolved(t.clone()),

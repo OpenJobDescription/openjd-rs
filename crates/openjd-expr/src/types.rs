@@ -52,7 +52,7 @@ impl ExprType {
     pub const STRING: ExprType = ExprType { code: TypeCode::String, params: Vec::new() };
     pub const PATH: ExprType = ExprType { code: TypeCode::Path, params: Vec::new() };
     pub const RANGE_EXPR: ExprType = ExprType { code: TypeCode::RangeExpr, params: Vec::new() };
-    pub const NULL: ExprType = ExprType { code: TypeCode::Null, params: Vec::new() };
+    pub const NULLTYPE: ExprType = ExprType { code: TypeCode::Null, params: Vec::new() };
     pub const ANY: ExprType = ExprType { code: TypeCode::Any, params: Vec::new() };
     pub const NORETURN: ExprType = ExprType { code: TypeCode::NoReturn, params: Vec::new() };
     pub const T: ExprType = ExprType { code: TypeCode::TypeVarT, params: Vec::new() };
@@ -314,7 +314,7 @@ impl ExprType {
             "string" => return Ok(ExprType::STRING),
             "path" => return Ok(ExprType::PATH),
             "range_expr" => return Ok(ExprType::RANGE_EXPR),
-            "nulltype" => return Ok(ExprType::NULL),
+            "nulltype" => return Ok(ExprType::NULLTYPE),
             "noreturn" => return Ok(ExprType::NORETURN),
             "any" => return Ok(ExprType::ANY),
             "unresolved" => return Ok(ExprType::unresolved(ExprType::ANY)),
@@ -323,7 +323,7 @@ impl ExprType {
         // Optional: T?
         if let Some(inner) = s.strip_suffix('?') {
             let t = ExprType::parse(inner)?;
-            return Ok(ExprType::union(vec![t, ExprType::NULL]));
+            return Ok(ExprType::union(vec![t, ExprType::NULLTYPE]));
         }
         // list[T]
         if let Some(inner) = s.strip_prefix("list[").and_then(|s| s.strip_suffix(']')) {
@@ -486,7 +486,7 @@ mod tests {
     #[test] fn display_noreturn() { assert_eq!(ExprType::NORETURN.to_string(), "noreturn"); }
     #[test] fn display_typevar() { assert_eq!(ExprType::T1.to_string(), "T1"); }
     #[test] fn display_union() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::STRING]).to_string(), "int | string"); }
-    #[test] fn display_nullable() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULL]).to_string(), "int?"); }
+    #[test] fn display_nullable() { assert_eq!(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(), "int?"); }
     #[test] fn display_unresolved_bare() { assert_eq!(ExprType::unresolved(ExprType::ANY).to_string(), "unresolved"); }
     #[test] fn display_unresolved_int() { assert_eq!(ExprType::unresolved(ExprType::INT).to_string(), "unresolved[int]"); }
 
@@ -497,7 +497,7 @@ mod tests {
     #[test] fn parse_bool() { assert_eq!(ExprType::parse("bool").unwrap(), ExprType::BOOL); }
     #[test] fn parse_path() { assert_eq!(ExprType::parse("path").unwrap(), ExprType::PATH); }
     #[test] fn parse_range_expr() { assert_eq!(ExprType::parse("range_expr").unwrap(), ExprType::RANGE_EXPR); }
-    #[test] fn parse_nulltype() { assert_eq!(ExprType::parse("nulltype").unwrap(), ExprType::NULL); }
+    #[test] fn parse_nulltype() { assert_eq!(ExprType::parse("nulltype").unwrap(), ExprType::NULLTYPE); }
     #[test] fn parse_noreturn() { assert_eq!(ExprType::parse("noreturn").unwrap(), ExprType::NORETURN); }
     #[test] fn parse_any() { assert_eq!(ExprType::parse("any").unwrap(), ExprType::ANY); }
     #[test] fn parse_list_int() { assert_eq!(ExprType::parse("list[int]").unwrap(), ExprType::list(ExprType::INT)); }

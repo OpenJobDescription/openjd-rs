@@ -2,7 +2,7 @@
 
 ## Overview
 
-`RangeExpr` represents sets of integers as sorted, non-overlapping integer ranges like `"1-10"`,
+`RangeExpr` represents a sorted set of integers expressed as sorted, non-overlapping integer ranges like `"1-10"`,
 `"1-10:2"`, or `"1-5,10-15"`. It's used for frame ranges and other integer sequences
 in job templates.
 
@@ -22,8 +22,11 @@ Examples:
 - `"1-10"` → [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 - `"1-10:2"` → [1, 3, 5, 7, 9]
 - `"1-5,10-15"` → [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15]
-- `"10-1"` → [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (descending, step -1)
-- `"10-1:3"` → [10, 7, 4, 1] (descending with step)
+- `"10-1:-1"` → [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (descending, requires negative step)
+- `"10-1:-3"` → [10, 7, 4, 1] (descending with step)
+
+Note: Descending ranges (where start > end) require a negative step. `"10-1"` without
+a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
 
 ## Internal Representation
 

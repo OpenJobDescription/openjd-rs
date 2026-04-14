@@ -169,7 +169,7 @@ use openjd_expr::value::Float64;
 
 #[test] fn eval_with_list() {
     let st = SymbolTable::from_pairs(vec![
-        ("Items", ExprValue::make_list(vec![ExprValue::Int(10), ExprValue::Int(20)], openjd_expr::ExprType::INT)),
+        ("Items", ExprValue::make_list(vec![ExprValue::Int(10), ExprValue::Int(20)], openjd_expr::ExprType::INT).unwrap()),
     ]).unwrap();
     let r = openjd_expr::evaluate_expression("Items[0] + Items[1]", &st).unwrap();
     assert_eq!(r.to_display_string(), "30");
@@ -383,4 +383,12 @@ use openjd_expr::value::Float64;
     let mut st = SymbolTable::new();
     st.set_string("Param.Name", "test").unwrap();
     assert_eq!(st.get_value("Param.Name"), Some(&ExprValue::String("test".into())));
+}
+
+#[test] fn set_value_over_existing_table_errors() {
+    let mut st = SymbolTable::new();
+    st.set("A.B.C", ExprValue::Int(1)).unwrap();
+    // A.B is a table containing C. Setting A.B to a scalar should error.
+    let err = st.set("A.B", ExprValue::Int(2)).unwrap_err();
+    assert!(err.to_string().contains("A.B"), "Error should mention the conflicting path: {err}");
 }

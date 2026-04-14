@@ -413,11 +413,11 @@ mod tests {
     fn derive_return_type_slice_operators() {
         let lib = get_default_library();
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[ExprType::list(ExprType::INT), ExprType::NULL, ExprType::INT, ExprType::NULL]),
+            lib.derive_return_type("__getitem__", &[ExprType::list(ExprType::INT), ExprType::NULLTYPE, ExprType::INT, ExprType::NULLTYPE]),
             Some(ExprType::list(ExprType::INT))
         );
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[ExprType::STRING, ExprType::INT, ExprType::NULL, ExprType::NULL]),
+            lib.derive_return_type("__getitem__", &[ExprType::STRING, ExprType::INT, ExprType::NULLTYPE, ExprType::NULLTYPE]),
             Some(ExprType::STRING)
         );
     }

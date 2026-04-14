@@ -42,11 +42,19 @@ the `EvalContext` trait.
 pub trait EvalContext {
     fn path_format(&self) -> PathFormat;
     fn path_mapping_rules(&self) -> &[PathMappingRule];
-    fn count_op(&mut self);
-    fn count_ops(&mut self, n: usize);
-    fn count_string_ops(&mut self, len: usize);
+    fn count_op(&mut self) -> Result<(), ExpressionError>;
+    fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError>;
+    fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError>;
+    fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
+        // Default: compile without caching
+        regex::Regex::new(pattern).map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
+    }
 }
 ```
+
+`get_or_compile_regex` has a default implementation that compiles the pattern on every
+call. The evaluator overrides it with a caching version that stores compiled regexes
+for reuse across repeated calls with the same pattern.
 
 The evaluator implements `EvalContext` directly. This trait boundary prevents function
 implementations from calling evaluation methods (like `evaluate` or `dispatch`),
@@ -69,10 +77,10 @@ lib.register_sig("min", "(list[T1]) -> T1", min_list);
 ## Three-Phase Dispatch
 
 ```rust
-library.call(name, &arg_types, &args, eval_context)
+library.call(name, &args, ctx)
 ```
 
-1. **Exact non-generic match** — signature params match arg types exactly
+1. **Exact non-generic match** — signature params match arg types exactly (types derived from args)
 2. **Non-generic with coercion** — try implicit coercions (INT→FLOAT, PATH→STRING);
    skip receiver coercion for method calls to prevent `42.upper()`
 3. **Generic match** — bind type variables (T, T1, T2, T3) and check consistency

@@ -113,6 +113,9 @@ impl SymbolTable {
     fn set_value(&mut self, key: &str, value: ExprValue) -> Result<(), SymbolTableError> {
         let parts: Vec<&str> = key.split('.').collect();
         if parts.len() == 1 {
+            if matches!(self.table.get(key), Some(SymbolTableEntry::Table(_))) {
+                return Err(SymbolTableError { key: key.to_string(), conflict: key.to_string() });
+            }
             self.table.insert(key.to_string(), SymbolTableEntry::Value(value));
             return Ok(());
         }
@@ -129,10 +132,11 @@ impl SymbolTable {
                 }),
             };
         }
-        current.table.insert(
-            parts.last().unwrap().to_string(),
-            SymbolTableEntry::Value(value),
-        );
+        let last = parts.last().unwrap().to_string();
+        if matches!(current.table.get(&last), Some(SymbolTableEntry::Table(_))) {
+            return Err(SymbolTableError { key: key.to_string(), conflict: last });
+        }
+        current.table.insert(last, SymbolTableEntry::Value(value));
         Ok(())
     }
 

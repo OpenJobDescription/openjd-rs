@@ -56,11 +56,29 @@ impl PathMappingRule {
         }
     }
 
+    /// Find the byte offset where the path component begins in a URI (after `scheme://authority`).
+    /// Returns `None` if there is no `://` separator.
+    fn uri_path_start(uri: &str) -> Option<usize> {
+        let authority_start = uri.find("://")? + 3;
+        Some(uri[authority_start..].find('/').map_or(uri.len(), |i| authority_start + i))
+    }
+
     fn apply_uri(&self, path: &str, sep: char) -> Option<String> {
-        if !path.starts_with(&self.source_path) {
+        // Per RFC 3986: scheme and authority are case-insensitive, path is case-sensitive.
+        let src_path_start = Self::uri_path_start(&self.source_path).unwrap_or(0);
+        let inp_path_start = Self::uri_path_start(path).unwrap_or(0);
+
+        // Scheme+authority must match case-insensitively
+        if !path[..inp_path_start].eq_ignore_ascii_case(&self.source_path[..src_path_start]) {
             return None;
         }
-        let remainder = &path[self.source_path.len()..];
+        // Path portion must match case-sensitively
+        let src_path = &self.source_path[src_path_start..];
+        let inp_path = &path[inp_path_start..];
+        if !inp_path.starts_with(src_path) {
+            return None;
+        }
+        let remainder = &inp_path[src_path.len()..];
         if !remainder.is_empty() && !remainder.starts_with('/') {
             return None;
         }

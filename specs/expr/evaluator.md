@@ -234,6 +234,17 @@ it. Most callers will want to use regular evaluation instead; this fast path is 
 for letting implementations validate templates correctly without EXPR enabled, where
 expressions must be simple dotted name lookups.
 
+## Regex Cache
+
+The evaluator maintains a `HashMap<String, regex::Regex>` that caches compiled regex
+patterns across function calls within a single evaluation. When a regex function
+(`re_match`, `re_fullmatch`, `re_replace`) is called, the evaluator checks the cache
+before compiling. This avoids recompiling the same pattern when used multiple times,
+e.g., in a list comprehension like `[x for x in items if re_match(x, "^shot_\\d+$")]`.
+
+The cache is per-evaluation, not global — it is created fresh for each `evaluate()` call
+and discarded afterward.
+
 ## Divergence from Python
 
 The Rust evaluator uses the same algorithmic structure as the Python `Evaluator` class.

@@ -1226,7 +1226,7 @@ impl Session {
                                 openjd_expr::ExprValue::Path { value: m, format: openjd_expr::path_mapping::PathFormat::host() }
                             }).collect();
                             let key = format!("Param.{name}");
-                            s.set(&key, openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH))
+                            s.set(&key, openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap())
                                 .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
                         }
                     }
@@ -1262,7 +1262,7 @@ impl Session {
                                     let m = self.apply_path_mapping_to_string(s);
                                     openjd_expr::ExprValue::Path { value: m, format: openjd_expr::path_mapping::PathFormat::host() }
                                 }).collect();
-                                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
+                                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
                             }
                             other => self.apply_path_mapping_to_value(other),
                         }
@@ -1342,7 +1342,7 @@ impl Session {
                     let mapped_s = openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
                     openjd_expr::ExprValue::Path { value: mapped_s, format: *fmt }
                 }).collect();
-                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
+                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
             }
             _ => value.clone(),
         }

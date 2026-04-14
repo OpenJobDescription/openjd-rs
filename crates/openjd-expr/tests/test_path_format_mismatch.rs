@@ -57,7 +57,7 @@ fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> Result<ExprValue, 
     st.set("Paths", ExprValue::make_list(vec![
         ExprValue::Path { value: "/a".into(), format: PathFormat::Posix },
         ExprValue::Path { value: "/b".into(), format: PathFormat::Posix },
-    ], ExprType::PATH)).unwrap();
+    ], ExprType::PATH).unwrap()).unwrap();
     let r = eval_fmt("Paths", &st, PathFormat::Posix).unwrap();
     assert!(r.is_list());
 }
@@ -67,7 +67,7 @@ fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> Result<ExprValue, 
     st.set("Paths", ExprValue::make_list(vec![
         ExprValue::Path { value: "/a".into(), format: PathFormat::Posix },
         ExprValue::Path { value: "/b".into(), format: PathFormat::Posix },
-    ], ExprType::PATH)).unwrap();
+    ], ExprType::PATH).unwrap()).unwrap();
     let err = eval_fmt("Paths", &st, PathFormat::Windows).unwrap_err();
     assert!(err.to_string().contains("Path format mismatch"), "expected mismatch error, got: {err}");
 }

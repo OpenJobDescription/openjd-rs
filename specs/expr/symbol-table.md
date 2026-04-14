@@ -12,10 +12,10 @@ Defined in `symbol_table.rs`.
 
 ```rust
 pub struct SymbolTable {
-    table: HashMap<String, SymbolEntry>,
+    table: HashMap<String, SymbolTableEntry>,
 }
 
-enum SymbolEntry {
+enum SymbolTableEntry {
     Value(ExprValue),
     Table(SymbolTable),
 }

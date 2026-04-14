@@ -9,6 +9,7 @@ use crate::error::ExpressionError;
 use std::collections::HashMap;
 
 /// A parsed expression ready for evaluation.
+#[derive(Debug, Clone)]
 pub struct ParsedExpression {
     pub ast: ast::Expr,
     pub expr: String,

@@ -109,7 +109,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 }
 #[test] fn list_three_level_nesting_fails() {
     let e = evaluate_expression("[[[1]]]", &SymbolTable::new()).unwrap_err().to_string();
-    assert!(e.contains("Lists cannot be nested more than 2 levels deep"), "got:\n{e}");
+    assert!(e.contains("Lists may be nested at most 2 levels deep"), "got:\n{e}");
     assert!(e.contains("  [[[1]]]\n  ^~~~~~~"), "got:\n{e}");
 }
 
@@ -287,7 +287,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 #[test] fn comprehension_concat_list() { assert_eq!(eval("[x * 2 for x in [1, 2, 3]] + [100]").list_len(), Some(4)); }
 #[test] fn concat_with_symtab() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap()).unwrap();
     assert_eq!(evaluate_expression("L + [3, 4]", &st).unwrap().list_len(), Some(4));
 }
 
@@ -403,7 +403,7 @@ fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
 
 #[test] fn three_level_nesting_in_comprehension_fails() {
     let e = evaluate_expression("[[[x]] for x in [1, 2]]", &SymbolTable::new()).unwrap_err().to_string();
-    assert!(e.contains("nested more than 2 levels"), "got:\n{e}");
+    assert!(e.contains("Lists may be nested at most 2 levels deep"), "got:\n{e}");
 }
 
 // === TestListComprehension: value checks ===
@@ -465,7 +465,7 @@ fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
 #[test] fn concat_symtab_range_expr() {
     let mut st = SymbolTable::new();
     st.set("frames", ExprValue::RangeExpr("1-5".parse::<RangeExpr>().unwrap())).unwrap();
-    st.set("extra", ExprValue::make_list(vec![ExprValue::Int(100), ExprValue::Int(200)], ExprType::INT)).unwrap();
+    st.set("extra", ExprValue::make_list(vec![ExprValue::Int(100), ExprValue::Int(200)], ExprType::INT).unwrap()).unwrap();
     let r = evaluate_expression("frames + extra", &st).unwrap();
     assert_eq!(r.to_display_string(), "[1, 2, 3, 4, 5, 100, 200]");
 }
@@ -480,7 +480,7 @@ fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
             ExprValue::Path { value: "/b".into(), format: PathFormat::Posix },
         ],
         ExprType::PATH,
-    )).unwrap();
+    ).unwrap()).unwrap();
     st.set("p", ExprValue::Path { value: "/b".into(), format: PathFormat::Posix }).unwrap();
     assert_eq!(eval_posix_st("p in paths", &st).to_display_string(), "true");
 }
@@ -493,7 +493,7 @@ fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
             ExprValue::Path { value: "/b".into(), format: PathFormat::Posix },
         ],
         ExprType::PATH,
-    )).unwrap();
+    ).unwrap()).unwrap();
     st.set("p", ExprValue::Path { value: "/c".into(), format: PathFormat::Posix }).unwrap();
     assert_eq!(eval_posix_st("p in paths", &st).to_display_string(), "false");
 }
@@ -618,7 +618,7 @@ fn coerce_bool_list_to_string_list() {
     let val = ExprValue::make_list(
         vec![ExprValue::Bool(true), ExprValue::Bool(false)],
         ExprType::BOOL,
-    );
+    ).unwrap();
     let coerced = val.coerce(&ExprType::parse("list[string]").unwrap(), PathFormat::Posix).unwrap();
     assert_eq!(coerced.expr_type(), ExprType::parse("list[string]").unwrap());
     let elems = coerced.list_elements().unwrap();

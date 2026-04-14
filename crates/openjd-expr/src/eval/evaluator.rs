@@ -355,13 +355,13 @@ impl<'a> Evaluator<'a> {
                     if let Some(inner) = t.list_element_type() {
                         if inner.list_element_type().is_some() {
                             return Err(ExpressionError::new(
-                                "Lists cannot be nested more than 2 levels deep (e.g., list[list[int]] is allowed, but list[list[list[int]]] is not)"
+                                "Lists may be nested at most 2 levels deep"
                             ));
                         }
                     }
                 }
                 let elem_type = if result.is_empty() { ExprType::INT } else { result[0].expr_type() };
-                self.track(ExprValue::make_list(result, elem_type))
+                self.track(ExprValue::make_list(result, elem_type)?)
             }
             ast::Expr::Slice(s) => {
                 // Check for step=0
@@ -393,10 +393,7 @@ impl<'a> Evaluator<'a> {
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count += 1;
         if self.operation_count > self.operation_limit {
-            Err(ExpressionError::new(format!(
-                "Expression operation count ({}) exceeded limit ({})",
-                self.operation_count, self.operation_limit
-            )))
+            Err(ExpressionError::from_kind(ExpressionErrorKind::OperationLimitExceeded))
         } else { Ok(()) }
     }
 
@@ -959,7 +956,7 @@ impl<'a> Evaluator<'a> {
             if let Some(inner) = t.list_element_type() {
                 if inner.list_element_type().is_some() {
                     return Err(ExpressionError::new(
-                        "Lists cannot be nested more than 2 levels deep (e.g., list[list[int]] is allowed, but list[list[list[int]]] is not)"
+                        "Lists may be nested at most 2 levels deep"
                     ));
                 }
             }
@@ -984,7 +981,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
             let elem_type = if elements.is_empty() {
-                ExprType::NULL
+                ExprType::NULLTYPE
             } else {
                 // Compute coerced element type: int+float→float, path+string→string
                 let mut result = unwrap_unresolved(&elements[0].expr_type());
@@ -1008,7 +1005,7 @@ impl<'a> Evaluator<'a> {
                 .map(|e| e.coerce(elem_t, self.path_format)
                     .map_err(|msg| ExpressionError::new(msg)))
                 .collect();
-            return self.track(ExprValue::make_list(coerced?, elem_t.clone()));
+            return self.track(ExprValue::make_list(coerced?, elem_t.clone())?);
         }
         // Check type consistency
         if !elements.is_empty() {
@@ -1047,8 +1044,8 @@ impl<'a> Evaluator<'a> {
                 return Err(ExpressionError::new(msg));
             }
         }
-        let elem_type = if elements.is_empty() { ExprType::NULL } else { elements[0].expr_type() };
-        self.track(ExprValue::make_list(elements, elem_type))
+        let elem_type = if elements.is_empty() { ExprType::NULLTYPE } else { elements[0].expr_type() };
+        self.track(ExprValue::make_list(elements, elem_type)?)
     }
 
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {

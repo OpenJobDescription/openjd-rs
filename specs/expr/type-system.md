@@ -48,13 +48,6 @@ ExprType::NORETURN      // TypeCode::NoReturn
 ExprType::RANGE_EXPR    // TypeCode::RangeExpr
 ExprType::ANY           // TypeCode::Any
 ExprType::T, T1, T2, T3 // Type variables
-ExprType::LIST_INT      // list[int]
-ExprType::LIST_FLOAT    // list[float]
-ExprType::LIST_STRING   // list[string]
-ExprType::LIST_PATH     // list[path]
-ExprType::LIST_BOOL     // list[bool]
-ExprType::LIST_LIST_INT // list[list[int]]
-ExprType::EMPTY_LIST    // list[nulltype] — empty list compatible with any list type
 ```
 
 Parameterized constructors:

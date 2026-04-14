@@ -122,7 +122,7 @@ impl EvalContext for Ctx {
     let list = ExprValue::make_list(
         vec![ExprValue::from("/a"), ExprValue::Int(42)],
         ExprType::union(vec![ExprType::STRING, ExprType::INT]),
-    );
+    ).unwrap();
     let r = path_fn(&mut Ctx, &[list]).unwrap();
     // PathBuf::push with "42" appends it
     assert!(matches!(r, ExprValue::Path { .. }));

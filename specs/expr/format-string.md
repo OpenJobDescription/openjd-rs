@@ -89,6 +89,58 @@ fs.validate_comprehension_vars(&let_binding_names)?;
 Checks that list comprehension loop variables in the format string don't shadow
 let-binding names from the enclosing template scope.
 
+## Typed Resolution
+
+### resolve_typed — resolve with target type coercion
+
+```rust
+let val = fs.resolve_typed(&symtab, &library, &rules, &ExprType::FLOAT)?;
+```
+
+Like `resolve` but passes a target type to the evaluator for context-dependent coercion
+(e.g., determining the element type of an empty list, or coercing INT → FLOAT when the
+target context expects a float).
+
+### resolve_typed_with_format — resolve_typed with explicit path format
+
+```rust
+let val = fs.resolve_typed_with_format(&symtab, &library, &rules, PathFormat::Posix, &ExprType::PATH)?;
+```
+
+Combines target type coercion with an explicit path format.
+
+## Symbol Table Extraction
+
+### copy_used_symtab_values — build minimal symbol tables
+
+```rust
+fs.copy_used_symtab_values(&source_symtab, &mut dest_symtab);
+```
+
+Copies only the symbol table entries referenced by the format string's expressions from
+`source` into `dest`. Walks each referenced dotted path into the source table, stops at
+the first `Value` entry (since the remainder is property/method access, not a symtab
+key), and copies that value into `dest` at the same path.
+
+Used by the model layer to build minimal symbol tables for session handoff — only the
+parameters actually referenced by a step's format strings are included.
+
+## FormatStringValidationError
+
+Structured error returned by `validate_expressions`:
+
+```rust
+pub struct FormatStringValidationError {
+    pub message: String,  // e.g. "Undefined variable 'Param.X'"
+    pub input: String,    // the raw format string
+    pub start: usize,     // byte offset of the opening {{
+    pub end: usize,       // byte offset past the closing }}
+}
+```
+
+Carries the position of the failing interpolation within the format string for
+caret-style diagnostics or structured error responses.
+
 ## Serde Integration
 
 `FormatString` implements `Deserialize` by deserializing as a `String` then parsing:

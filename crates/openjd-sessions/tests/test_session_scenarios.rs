@@ -88,7 +88,7 @@ fn yaml_to_expr_value(v: &serde_yaml::Value) -> openjd_expr::ExprValue {
         serde_yaml::Value::Sequence(seq) => {
             let items: Vec<openjd_expr::ExprValue> = seq.iter().map(yaml_to_expr_value).collect();
             if items.is_empty() {
-                return openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::STRING);
+                return openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::STRING).unwrap();
             }
             // Infer list type from first element
             let elem_type = match &items[0] {
@@ -99,7 +99,7 @@ fn yaml_to_expr_value(v: &serde_yaml::Value) -> openjd_expr::ExprValue {
                 openjd_expr::ExprValue::ListInt(_) => openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
                 _ => openjd_expr::ExprType::STRING,
             };
-            openjd_expr::ExprValue::make_list(items, elem_type)
+            openjd_expr::ExprValue::make_list(items, elem_type).unwrap()
         }
         _ => openjd_expr::ExprValue::String(String::new()),
     }

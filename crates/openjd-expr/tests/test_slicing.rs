@@ -64,7 +64,7 @@ fn assert_err(expr: &str, expected: &[&str]) {
 }
 #[test] fn slice_with_variable_bounds() {
     let mut st = SymbolTable::new();
-    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT)).unwrap();
+    st.set("L", ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2), ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap()).unwrap();
     st.set("S", ExprValue::Int(1)).unwrap();
     st.set("E", ExprValue::Int(3)).unwrap();
     assert_eq!(evaluate_expression("L[S:E]", &st).unwrap().list_len(), Some(2));

@@ -168,7 +168,7 @@ pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .filter_map(|i| a[0].list_get(i as i64))
         .collect();
     ctx.count_ops(result.len())?;
-    Ok(ExprValue::make_list(result, elem_type.clone()))
+    Ok(ExprValue::make_list(result, elem_type.clone())?)
 }
 
 pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -217,6 +217,6 @@ pub fn slice_range(ctx: Ctx, a: &[ExprValue]) -> R {
             .filter_map(|i| r.get(i as i64).map(ExprValue::Int))
             .collect();
         ctx.count_ops(result.len())?;
-        Ok(ExprValue::make_list(result, crate::types::ExprType::INT))
+        Ok(ExprValue::make_list(result, crate::types::ExprType::INT)?)
     }
 }
