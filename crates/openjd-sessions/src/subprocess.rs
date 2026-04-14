@@ -346,8 +346,10 @@ mod platform {
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if let Ok(snap) = snap {
-                let mut entry = PROCESSENTRY32W::default();
-                entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+                let mut entry = PROCESSENTRY32W {
+                    dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                    ..Default::default()
+                };
                 if Process32FirstW(snap, &mut entry).is_ok() {
                     loop {
                         if entry.th32ParentProcessID == parent_pid {
@@ -453,7 +455,7 @@ mod platform {
 
         // Convert write handle to Stdio for the child process.
         // We need two copies: one for stdout, one for stderr.
-        let write_owned = OwnedHandle::from_raw_handle(write_handle.0 as *mut std::ffi::c_void);
+        let write_owned = OwnedHandle::from_raw_handle(write_handle.0);
         let write_stdio_stdout = std::process::Stdio::from(write_owned);
 
         // Duplicate the write handle for stderr
@@ -475,20 +477,19 @@ mod platform {
             // Fall back: just use the one handle for stdout, pipe stderr separately
             cmd.stdout(write_stdio_stdout);
             cmd.stderr(std::process::Stdio::piped());
-            let read_owned = OwnedHandle::from_raw_handle(read_handle.0 as *mut std::ffi::c_void);
+            let read_owned = OwnedHandle::from_raw_handle(read_handle.0);
             let read_std: std::fs::File = std::fs::File::from(read_owned);
             let read_tokio = tokio::fs::File::from_std(read_std);
             return Some(Box::new(read_tokio));
         }
-        let write_owned_dup =
-            OwnedHandle::from_raw_handle(write_handle_dup.0 as *mut std::ffi::c_void);
+        let write_owned_dup = OwnedHandle::from_raw_handle(write_handle_dup.0);
         let write_stdio_stderr = std::process::Stdio::from(write_owned_dup);
 
         cmd.stdout(write_stdio_stdout);
         cmd.stderr(write_stdio_stderr);
 
         // Convert read handle to an async reader
-        let read_owned = OwnedHandle::from_raw_handle(read_handle.0 as *mut std::ffi::c_void);
+        let read_owned = OwnedHandle::from_raw_handle(read_handle.0);
         let read_std: std::fs::File = std::fs::File::from(read_owned);
         let read_tokio = tokio::fs::File::from_std(read_std);
         Some(Box::new(read_tokio))
@@ -731,7 +732,7 @@ pub async fn run_subprocess(
                         );
                         return Err(SessionError::SubprocessStart {
                             command: args[0].clone(),
-                            source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                            source: std::io::Error::other(e),
                         });
                     }
                 }
@@ -942,7 +943,7 @@ pub async fn run_subprocess(
         // Windows cross-user: wait on the raw process handle
         #[cfg(windows)]
         {
-            win32_process_handle.and_then(|h| {
+            win32_process_handle.map(|h| {
                 use std::os::windows::process::ExitStatusExt;
                 use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
                 unsafe {
@@ -950,7 +951,7 @@ pub async fn run_subprocess(
                     let mut code = 0u32;
                     let _ = GetExitCodeProcess(h, &mut code);
                     let _ = windows::Win32::Foundation::CloseHandle(h);
-                    Some(std::process::ExitStatus::from_raw(code))
+                    std::process::ExitStatus::from_raw(code)
                 }
             })
         }

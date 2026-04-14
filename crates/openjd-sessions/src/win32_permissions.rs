@@ -85,7 +85,7 @@ pub fn set_permissions(
 
     if !new_acl.is_null() {
         unsafe {
-            windows::Win32::Foundation::LocalFree(HLOCAL(new_acl as *mut _));
+            windows::Win32::Foundation::LocalFree(Some(HLOCAL(new_acl as *mut _)));
         }
     }
 

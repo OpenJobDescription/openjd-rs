@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, BOOL, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::Authentication::Identity::{GetUserNameExW, NameSamCompatible};
 use windows::Win32::Security::{LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
@@ -20,16 +20,16 @@ pub fn get_process_user() -> Result<String, windows::core::Error> {
     let mut size = 0u32;
     // First call to get required buffer size
     unsafe {
-        let _ = GetUserNameExW(NameSamCompatible, PWSTR::null(), &mut size);
+        let _ = GetUserNameExW(NameSamCompatible, None, &mut size);
     }
     if size == 0 {
-        return Err(windows::core::Error::from_win32());
+        return Err(windows::core::Error::from_thread());
     }
     let mut buf = vec![0u16; size as usize];
     unsafe {
-        GetUserNameExW(NameSamCompatible, PWSTR(buf.as_mut_ptr()), &mut size)
-            .ok()
-            .map_err(|_| windows::core::Error::from_win32())?;
+        if !GetUserNameExW(NameSamCompatible, Some(PWSTR(buf.as_mut_ptr())), &mut size) {
+            return Err(windows::core::Error::from_thread());
+        }
     }
     Ok(String::from_utf16_lossy(&buf[..size as usize]))
 }
@@ -100,7 +100,7 @@ pub fn environment_for_user(
 ) -> Result<HashMap<String, String>, windows::core::Error> {
     let mut block_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
     unsafe {
-        CreateEnvironmentBlock(&mut block_ptr, token, BOOL(0))?;
+        CreateEnvironmentBlock(&mut block_ptr, Some(token), false)?;
     }
 
     let env = parse_environment_block(block_ptr);
@@ -207,7 +207,7 @@ fn merge_environment(
 
 /// Create an inheritable pipe, returning (read_handle, write_handle).
 fn create_stdout_pipe() -> Result<(HANDLE, HANDLE), String> {
-    let mut sa = SECURITY_ATTRIBUTES {
+    let sa = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: true.into(),
@@ -216,7 +216,7 @@ fn create_stdout_pipe() -> Result<(HANDLE, HANDLE), String> {
     let mut write_handle = HANDLE::default();
 
     unsafe {
-        CreatePipe(&mut read_handle, &mut write_handle, Some(&mut sa), 0)
+        CreatePipe(&mut read_handle, &mut write_handle, Some(&sa), 0)
             .map_err(|e| format!("CreatePipe failed: {e}"))?;
         // The read end should NOT be inherited by the child
         SetHandleInformation(read_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))
@@ -263,13 +263,15 @@ pub fn spawn_as_user(
         .unwrap_or(PCWSTR::null());
 
     // STARTUPINFOW: redirect stdout+stderr to our pipe
-    let mut si = STARTUPINFOW::default();
-    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-    si.dwFlags = STARTUPINFOW_FLAGS(0x00000100 | 0x00000001); // STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW
-    si.wShowWindow = 0; // SW_HIDE
-    si.hStdOutput = stdout_write;
-    si.hStdError = stdout_write; // merge stderr into stdout
-    si.hStdInput = HANDLE::default();
+    let si = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        dwFlags: STARTUPINFOW_FLAGS(0x00000100 | 0x00000001), // STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW
+        wShowWindow: 0,                                       // SW_HIDE
+        hStdOutput: stdout_write,
+        hStdError: stdout_write, // merge stderr into stdout
+        hStdInput: HANDLE::default(),
+        ..Default::default()
+    };
 
     let mut pi = PROCESS_INFORMATION::default();
     let creation_flags = CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT;
@@ -289,7 +291,7 @@ pub fn spawn_as_user(
                 PCWSTR(pw_w.as_ptr()),
                 LOGON_WITH_PROFILE,
                 PCWSTR::null(), // application name
-                PWSTR(cmdline.as_mut_ptr()),
+                Some(PWSTR(cmdline.as_mut_ptr())),
                 creation_flags,
                 Some(env_block.as_mut_ptr() as *const std::ffi::c_void),
                 cwd_ptr,
@@ -302,9 +304,9 @@ pub fn spawn_as_user(
 
         unsafe {
             CreateProcessAsUserW(
-                token,
+                Some(token),
                 PCWSTR::null(),
-                PWSTR(cmdline.as_mut_ptr()),
+                Some(PWSTR(cmdline.as_mut_ptr())),
                 None, // process security attributes
                 None, // thread security attributes
                 true, // inherit handles
@@ -360,7 +362,7 @@ fn args_to_cmdline(args: &[String]) -> String {
 /// Append a single argument to a command line, quoting as needed.
 /// Follows the Windows command-line escaping convention.
 fn append_arg(cmdline: &mut String, arg: &str) {
-    if !arg.is_empty() && !arg.contains(|c: char| c == ' ' || c == '\t' || c == '"') {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
         cmdline.push_str(arg);
         return;
     }
