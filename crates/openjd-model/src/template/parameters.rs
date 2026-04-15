@@ -447,7 +447,7 @@ pub(crate) fn validate_ui_label(
                 "Parameter '{param_name}': {field_name} must not be empty."
             ));
         }
-        if l.len() > 64 {
+        if l.chars().count() > 64 {
             errors.push(format!(
                 "Parameter '{param_name}': {field_name} exceeds 64 characters."
             ));
@@ -519,23 +519,23 @@ impl JobStringParameterDefinition {
                 ));
             }
             for (i, v) in allowed.iter().enumerate() {
-                if v.len() > limits.max_job_param_string_len {
+                let vlen = v.chars().count();
+                if vlen > limits.max_job_param_string_len {
                     errors.push(format!(
                         "Parameter '{}': allowedValues[{i}] exceeds {} characters.",
                         self.name, limits.max_job_param_string_len
                     ));
                 }
                 if let Some(min) = self.min_length {
-                    if v.len() < min {
-                        errors.push(format!("Parameter '{}': allowedValues[{i}] length {} is less than minLength {min}.", self.name, v.len()));
+                    if vlen < min {
+                        errors.push(format!("Parameter '{}': allowedValues[{i}] length {vlen} is less than minLength {min}.", self.name));
                     }
                 }
                 if let Some(max) = self.max_length {
-                    if v.len() > max {
+                    if vlen > max {
                         errors.push(format!(
-                            "Parameter '{}': allowedValues[{i}] length {} exceeds maxLength {max}.",
+                            "Parameter '{}': allowedValues[{i}] length {vlen} exceeds maxLength {max}.",
                             self.name,
-                            v.len()
                         ));
                     }
                 }
@@ -559,27 +559,26 @@ impl JobStringParameterDefinition {
 
         // Default must satisfy constraints
         if let Some(default) = &self.default {
-            if default.len() > limits.max_job_param_string_len {
+            let dlen = default.chars().count();
+            if dlen > limits.max_job_param_string_len {
                 errors.push(format!(
                     "Parameter '{}': default exceeds {} characters.",
                     self.name, limits.max_job_param_string_len
                 ));
             }
             if let Some(min) = self.min_length {
-                if default.len() < min {
+                if dlen < min {
                     errors.push(format!(
-                        "Parameter '{}': default length {} is less than minLength {min}.",
+                        "Parameter '{}': default length {dlen} is less than minLength {min}.",
                         self.name,
-                        default.len()
                     ));
                 }
             }
             if let Some(max) = self.max_length {
-                if default.len() > max {
+                if dlen > max {
                     errors.push(format!(
-                        "Parameter '{}': default length {} exceeds maxLength {max}.",
+                        "Parameter '{}': default length {dlen} exceeds maxLength {max}.",
                         self.name,
-                        default.len()
                     ));
                 }
             }
@@ -667,7 +666,8 @@ impl JobStringParameterDefinition {
     }
 }
 
-/// Flexible int value that accepts both integer and string representations.
+/// An `i64` that deserializes from YAML integers, integer-valued floats (e.g. `42.0`), or
+/// numeric strings (e.g. `"42"`). Rejects booleans, nulls, and non-integer floats.
 #[derive(Debug, Clone)]
 pub struct FlexInt(pub i64);
 
@@ -710,9 +710,22 @@ impl std::fmt::Display for FlexInt {
     }
 }
 
-/// Flexible float value that accepts number and string representations.
+/// An `f64` that deserializes from YAML numbers or numeric strings (e.g. `"3.14"`).
+/// Preserves the original string representation when parsed from a string, which is needed
+/// for round-trip fidelity in constraint checking. Rejects NaN, Infinity, booleans, and nulls.
 #[derive(Debug, Clone)]
 pub struct FlexFloat(pub f64, pub Option<String>);
+
+/// Reject NaN and Infinity float values.
+pub(crate) fn reject_nan_inf(f: f64) -> Result<(), String> {
+    if f.is_nan() {
+        Err("NaN is not a valid float value".to_string())
+    } else if f.is_infinite() {
+        Err("Infinity is not a valid float value".to_string())
+    } else {
+        Ok(())
+    }
+}
 
 impl<'de> Deserialize<'de> for FlexFloat {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -720,16 +733,19 @@ impl<'de> Deserialize<'de> for FlexFloat {
         match &val {
             serde_yaml::Value::Number(n) => {
                 if let Some(f) = n.as_f64() {
+                    reject_nan_inf(f).map_err(serde::de::Error::custom)?;
                     Ok(FlexFloat(f, None))
                 } else {
                     Err(serde::de::Error::custom("Invalid number"))
                 }
             }
-            serde_yaml::Value::String(s) => s
-                .trim()
-                .parse::<f64>()
-                .map(|f| FlexFloat(f, Some(s.trim().to_string())))
-                .map_err(|_| serde::de::Error::custom(format!("Cannot parse '{s}' as float"))),
+            serde_yaml::Value::String(s) => {
+                let f = s.trim().parse::<f64>().map_err(|_| {
+                    serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
+                })?;
+                reject_nan_inf(f).map_err(serde::de::Error::custom)?;
+                Ok(FlexFloat(f, Some(s.trim().to_string())))
+            }
             serde_yaml::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected number, got boolean"))
             }
@@ -914,6 +930,7 @@ impl JobFloatParameterDefinition {
                 self.name
             )
         })?;
+        reject_nan_inf(parsed).map_err(|e| format!("Parameter '{}': {e}", self.name))?;
         if let Some(min) = &self.min_value {
             if parsed < min.0 {
                 return Err(format!(
@@ -1123,27 +1140,26 @@ impl JobPathParameterDefinition {
                 ));
             }
             for (i, v) in allowed.iter().enumerate() {
-                if v.len() > limits.max_job_param_string_len {
+                let vlen = v.chars().count();
+                if vlen > limits.max_job_param_string_len {
                     errors.push(format!(
                         "Parameter '{}': allowedValues[{i}] exceeds {} characters.",
                         self.name, limits.max_job_param_string_len
                     ));
                 }
                 if let Some(min) = self.min_length {
-                    if v.len() < min {
+                    if vlen < min {
                         errors.push(format!(
-                            "Parameter '{}': allowedValues[{i}] length {} < minLength {min}.",
+                            "Parameter '{}': allowedValues[{i}] length {vlen} < minLength {min}.",
                             self.name,
-                            v.len()
                         ));
                     }
                 }
                 if let Some(max) = self.max_length {
-                    if v.len() > max {
+                    if vlen > max {
                         errors.push(format!(
-                            "Parameter '{}': allowedValues[{i}] length {} > maxLength {max}.",
+                            "Parameter '{}': allowedValues[{i}] length {vlen} > maxLength {max}.",
                             self.name,
-                            v.len()
                         ));
                     }
                 }
@@ -1158,27 +1174,26 @@ impl JobPathParameterDefinition {
             }
         }
         if let Some(default) = &self.default {
-            if default.len() > limits.max_job_param_string_len {
+            let dlen = default.chars().count();
+            if dlen > limits.max_job_param_string_len {
                 errors.push(format!(
                     "Parameter '{}': default exceeds {} characters.",
                     self.name, limits.max_job_param_string_len
                 ));
             }
             if let Some(min) = self.min_length {
-                if default.len() < min {
+                if dlen < min {
                     errors.push(format!(
-                        "Parameter '{}': default length {} < minLength {min}.",
+                        "Parameter '{}': default length {dlen} < minLength {min}.",
                         self.name,
-                        default.len()
                     ));
                 }
             }
             if let Some(max) = self.max_length {
-                if default.len() > max {
+                if dlen > max {
                     errors.push(format!(
-                        "Parameter '{}': default length {} > maxLength {max}.",
+                        "Parameter '{}': default length {dlen} > maxLength {max}.",
                         self.name,
-                        default.len()
                     ));
                 }
             }

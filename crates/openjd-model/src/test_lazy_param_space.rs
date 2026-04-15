@@ -5,11 +5,11 @@
 
 use std::collections::HashMap;
 
+use crate::job::{ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter};
+use crate::step_param_space::StepParameterSpaceIterator;
+use crate::template::RangeConstraint;
+use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 use openjd_expr::{ExprValue, RangeExpr};
-use openjd_model::job::{ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter};
-use openjd_model::step_param_space::StepParameterSpaceIterator;
-use openjd_model::template::RangeConstraint;
-use openjd_model::types::{TaskParameterType, TaskParameterValue};
 
 fn make_space(params: Vec<(&str, TaskParameter)>, combination: Option<&str>) -> StepParameterSpace {
     StepParameterSpace {
@@ -696,4 +696,63 @@ fn path_parameter_contains() {
             .unwrap()
             .contains(&task));
     }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PATH parameter containment via ExprValue::String vs ExprValue::Path
+// ══════════════════════════════════════════════════════════════
+
+fn make_path_space(paths: Vec<&str>) -> StepParameterSpace {
+    let mut defs = indexmap::IndexMap::new();
+    defs.insert(
+        "Dir".to_string(),
+        TaskParameter::Path {
+            range: paths.iter().map(|s| s.to_string()).collect(),
+        },
+    );
+    StepParameterSpace {
+        task_parameter_definitions: defs,
+        combination: None,
+    }
+}
+
+#[test]
+fn validate_containment_path_as_string_works() {
+    let space = make_path_space(vec!["/tmp/a", "/tmp/b", "/tmp/c"]);
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+
+    let mut params = TaskParameterSet::new();
+    params.insert(
+        "Dir".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
+            value: openjd_expr::ExprValue::String("/tmp/b".to_string()),
+        },
+    );
+    assert!(
+        iter.validate_containment(&params).is_ok(),
+        "validate_containment should accept ExprValue::String for PATH param"
+    );
+}
+
+#[test]
+fn validate_containment_path_as_path_value() {
+    let space = make_path_space(vec!["/tmp/a", "/tmp/b", "/tmp/c"]);
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+
+    let mut params = TaskParameterSet::new();
+    params.insert(
+        "Dir".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
+            value: openjd_expr::ExprValue::Path {
+                value: "/tmp/b".to_string(),
+                format: openjd_expr::PathFormat::Posix,
+            },
+        },
+    );
+    assert!(
+        iter.validate_containment(&params).is_ok(),
+        "validate_containment should accept ExprValue::Path for PATH param"
+    );
 }

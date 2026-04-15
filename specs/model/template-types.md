@@ -53,6 +53,11 @@ pub struct EnvironmentTemplate {
 
 ## StepTemplate (§3)
 
+> **Note:** Step names are plain `String`, not `Identifier` or `FormatString`.
+> They accept any Unicode except Cc control characters — unlike parameter names
+> and environment names which are constrained to `[A-Za-z_][A-Za-z0-9_]*` via
+> the `Identifier` type. This is per the OpenJD specification §3.1 `<StepName>`.
+
 ```rust
 pub struct StepTemplate {
     pub name: FormatString,

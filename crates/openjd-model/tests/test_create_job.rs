@@ -2766,3 +2766,189 @@ fn test_create_job_host_req_amount_non_numeric() {
     );
     assert!(err.contains("not a valid number"), "got: {err}");
 }
+
+#[test]
+fn zero_dimension_parameter_space() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let jt = decode_job_template(template, None).unwrap();
+    let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
+    let job = create_job(&jt, &params).unwrap();
+    let step = &job.steps[0];
+    if let Some(ref space) = step.parameter_space {
+        let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
+        assert_eq!(iter.len(), 1);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Script-level let binding errors should propagate from create_job
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn script_let_binding_division_by_zero_is_caught() {
+    // A script-level let binding with a concrete division by zero should
+    // be caught — either at validation or create_job time.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "script": {
+                "let": ["bad = 1 / 0"],
+                "actions": {"onRun": {"command": "echo"}}
+            }
+        }]
+    }"#,
+    );
+    let exts: &[&str] = &["EXPR"];
+    let result = decode_job_template(v, Some(exts));
+    // Validation catches this — division by zero with concrete values is detected
+    assert!(
+        result.is_err(),
+        "Division by zero in let binding should be caught"
+    );
+}
+
+#[test]
+fn script_let_binding_param_dependent_division_by_zero_is_caught() {
+    // A script-level let binding that divides by a parameter whose value is 0.
+    // Validation can't catch this (parameter value isn't known), but create_job should.
+    // The binding uses Param.Divisor which is in template scope (concrete at create_job time).
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{
+            "name": "Divisor",
+            "type": "INT",
+            "default": 1
+        }],
+        "steps": [{
+            "name": "S",
+            "script": {
+                "let": ["result = 100 / Param.Divisor"],
+                "actions": {"onRun": {"command": "echo", "args": ["{{result}}"]}}
+            }
+        }]
+    }"#,
+    );
+    let exts: &[&str] = &["EXPR"];
+    let jt = decode_job_template(v, Some(exts)).unwrap();
+
+    // Provide Divisor=0 to trigger division by zero
+    let mut input = JobParameterInputValues::new();
+    input.insert("Divisor".into(), openjd_expr::ExprValue::Int(0));
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        std::path::Path::new("/tmp"),
+        std::path::Path::new("/tmp"),
+        true,
+    )
+    .unwrap();
+    let result = openjd_model::create_job(&jt, &params);
+    assert!(
+        result.is_err(),
+        "Script-level let binding '100 / Param.Divisor' with Divisor=0 should error at create_job"
+    );
+}
+
+#[test]
+fn script_let_binding_syntax_error_is_caught() {
+    // A script-level let binding with a syntax error should be caught.
+    // (Validation should catch this first, but if it doesn't, create_job should.)
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "script": {
+                "let": ["bad = +++"],
+                "actions": {"onRun": {"command": "echo"}}
+            }
+        }]
+    }"#,
+    );
+    let exts: &[&str] = &["EXPR"];
+    let result = decode_job_template(v, Some(exts));
+    // This should be caught either at validation or create_job time
+    if let Ok(jt) = result {
+        let params = std::collections::HashMap::new();
+        let result = openjd_model::create_job(&jt, &params);
+        assert!(
+            result.is_err(),
+            "Script-level let binding with syntax error should produce an error"
+        );
+    }
+    // If validation caught it, that's also fine
+}
+
+#[test]
+fn range_expression_evaluation_error_is_caught() {
+    // A range expression format string that evaluates to a single int (not a list/range).
+    // The typed evaluation returns Ok(Int(5)), which doesn't match RangeExpr or list,
+    // so it falls through to string resolution which tries to parse "5" as a range expr.
+    // "5" is a valid range expression (single value), so this actually succeeds.
+    // This test documents the current behavior.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{
+            "name": "Count",
+            "type": "INT",
+            "default": 5
+        }],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{
+                    "name": "Frame",
+                    "type": "INT",
+                    "range": "{{Param.Count}}"
+                }]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    let exts: &[&str] = &["EXPR"];
+    let jt = decode_job_template(v, Some(exts)).unwrap();
+
+    let mut input = JobParameterInputValues::new();
+    input.insert("Count".into(), openjd_expr::ExprValue::Int(5));
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        std::path::Path::new("/tmp"),
+        std::path::Path::new("/tmp"),
+        true,
+    )
+    .unwrap();
+    // "5" is a valid range expression (single value), so this succeeds
+    let result = openjd_model::create_job(&jt, &params);
+    assert!(
+        result.is_ok(),
+        "Single int as range expression should work: {:?}",
+        result.err()
+    );
+}

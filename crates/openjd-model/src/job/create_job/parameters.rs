@@ -427,6 +427,7 @@ pub(super) fn coerce_from_str(
         | JobParameterType::ListPath
         | JobParameterType::ListBool
         | JobParameterType::ListListInt => {
+            // Try parsing the string as JSON for list parameter coercion.
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
                 json_to_expr_value(&json_val)
             } else {

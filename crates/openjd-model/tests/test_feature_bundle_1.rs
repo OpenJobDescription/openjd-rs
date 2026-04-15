@@ -946,3 +946,26 @@ fn multiple_simple_action_fields_rejected() {
         &["cannot have more than one simple action field."],
     );
 }
+
+#[test]
+fn simple_action_malformed_format_string_behavior() {
+    let exts = &["FEATURE_BUNDLE_1"];
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        extensions:
+          - FEATURE_BUNDLE_1
+        steps:
+          - name: Step1
+            bash: "echo '{{broken'"
+    "#,
+    );
+    let result = decode_job_template(template, Some(exts));
+    // Validation catches the malformed format string before
+    // resolve_syntax_sugar runs, so the silent fallback is not reached.
+    assert!(
+        result.is_err(),
+        "Validation should catch malformed format string"
+    );
+}

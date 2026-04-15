@@ -677,3 +677,60 @@ fn combination_single_element_association() {
         );
     }
 }
+
+#[test]
+fn combination_expr_empty_parens_rejected() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: Step1
+            parameterSpace:
+              taskParameterDefinitions:
+                - name: A
+                  type: INT
+                  range: [1, 2]
+              combination: "()"
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_err(),
+        "Empty parentheses in combination should be rejected"
+    );
+}
+
+#[test]
+fn combination_expr_leading_star_rejected() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: Step1
+            parameterSpace:
+              taskParameterDefinitions:
+                - name: A
+                  type: INT
+                  range: [1, 2]
+                - name: B
+                  type: INT
+                  range: [3, 4]
+              combination: "* A * B"
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_err(),
+        "Leading star in combination should be rejected"
+    );
+}

@@ -357,3 +357,104 @@ fn test_empty_dependencies() {
         &["steps[0] -> dependencies:\n\tmust not be empty."],
     );
 }
+
+#[test]
+fn step_name_accepts_unicode() {
+    // StepTemplate.name is String, not Identifier. Unicode is valid.
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: "Stëp"
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "Step names accept Unicode (they are String, not Identifier)"
+    );
+}
+
+#[test]
+fn duplicate_env_name_across_job_and_step_rejected() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        jobEnvironments:
+          - name: SharedEnv
+            variables:
+              FOO: bar
+        steps:
+          - name: Step1
+            stepEnvironments:
+              - name: SharedEnv
+                variables:
+                  BAZ: qux
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_err(),
+        "Duplicate env name across job and step should be rejected"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// HashMap ordering in Environment.variables
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn environment_variables_all_preserved() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "jobEnvironments": [{
+            "name": "MyEnv",
+            "variables": {
+                "VAR_A": "alpha",
+                "VAR_B": "bravo",
+                "VAR_C": "charlie",
+                "VAR_D": "delta",
+                "VAR_E": "echo",
+                "VAR_F": "foxtrot",
+                "VAR_G": "golf",
+                "VAR_H": "hotel"
+            },
+            "script": {"actions": {"onEnter": {"command": "setup"}}}
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None).unwrap();
+    let envs = jt.job_environments.as_ref().unwrap();
+    let vars = envs[0].variables.as_ref().unwrap();
+
+    assert_eq!(vars.len(), 8, "Expected 8 variables, got {}", vars.len());
+    let expected = [
+        ("VAR_A", "alpha"),
+        ("VAR_B", "bravo"),
+        ("VAR_C", "charlie"),
+        ("VAR_D", "delta"),
+        ("VAR_E", "echo"),
+        ("VAR_F", "foxtrot"),
+        ("VAR_G", "golf"),
+        ("VAR_H", "hotel"),
+    ];
+    for (key, val) in &expected {
+        let actual = vars
+            .get(*key)
+            .unwrap_or_else(|| panic!("Missing variable: {key}"));
+        assert_eq!(actual.raw(), *val, "Variable {key} has wrong value");
+    }
+}

@@ -60,7 +60,7 @@ pub(super) fn instantiate_step(
         }
     }
 
-    let script_template = st.resolve_syntax_sugar().or_else(|| st.script.clone());
+    let script_template = st.resolve_syntax_sugar()?.or_else(|| st.script.clone());
     let script = script_template.as_ref().map(convert_step_script);
 
     // Type-check script-level let bindings with unresolved host context
@@ -68,6 +68,21 @@ pub(super) fn instantiate_step(
         if let Some(s) = &script_template {
             if let Some(bindings) = &s.let_bindings {
                 let mut check_symtab = step_symtab.clone();
+
+                // PATH Param.* are excluded from the template-scope symtab (they
+                // require session-time path mapping). Add them as Unresolved(PATH)
+                // so script-level let bindings can reference them for type-checking.
+                if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
+                    for name in raw_param_table.keys() {
+                        let param_key = format!("Param.{name}");
+                        if !step_symtab.contains(&param_key) {
+                            let _ = check_symtab.set(
+                                &param_key,
+                                openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+                            );
+                        }
+                    }
+                }
 
                 let _ = check_symtab.set(
                     "Session.WorkingDirectory",
@@ -135,16 +150,21 @@ pub(super) fn instantiate_step(
                         let name = binding[..eq_pos].trim();
                         let expr = binding[eq_pos + 1..].trim();
                         if !name.is_empty() && !expr.is_empty() {
-                            if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
-                                let symtabs = [&check_symtab as &SymbolTable];
-                                let mut evaluator = parsed
-                                    .evaluator(&symtabs)
-                                    .with_path_format(PathFormat::Posix)
-                                    .with_library(&lib);
-                                if let Ok(val) = evaluator.evaluate(&parsed.ast) {
-                                    let _ = check_symtab.set(name, val);
-                                }
-                            }
+                            let parsed =
+                                openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
+                                    OpenJdError::Expression(format!(
+                                        "script let binding '{name}': {e}"
+                                    ))
+                                })?;
+                            let symtabs = [&check_symtab as &SymbolTable];
+                            let mut evaluator = parsed
+                                .evaluator(&symtabs)
+                                .with_path_format(PathFormat::Posix)
+                                .with_library(&lib);
+                            let val = evaluator.evaluate(&parsed.ast).map_err(|e| {
+                                OpenJdError::Expression(format!("script let binding '{name}': {e}"))
+                            })?;
+                            check_symtab.set(name, val)?;
                         }
                     }
                 }
@@ -464,6 +484,10 @@ fn collect_let_binding_refs(bindings: &[String], full: &SymbolTable, filtered: &
     for binding in bindings {
         if let Some(eq_pos) = binding.find('=') {
             let expr = binding[eq_pos + 1..].trim();
+            // Bindings have already been validated and evaluated by this point.
+            // Parse here only to discover referenced symbols for the filtered symtab.
+            // A parse failure is unreachable but harmless — the symbol just won't
+            // appear in the filtered output.
             if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
                 for symbol in &parsed.accessed_symbols {
                     copy_symbol_value(symbol, full, filtered);

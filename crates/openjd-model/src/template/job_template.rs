@@ -26,6 +26,14 @@ pub struct JobTemplate {
 }
 
 impl JobTemplate {
+    pub fn name(&self) -> &FormatString {
+        &self.name
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_ref().map(|d| d.0.as_str())
+    }
+
     pub fn parameter_definitions_list(&self) -> &[JobParameterDefinition] {
         match &self.parameter_definitions {
             Some(defs) => defs,

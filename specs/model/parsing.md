@@ -92,6 +92,13 @@ defaults to an empty set — no extensions are supported.
 
 The resulting extension set is stored in a `ValidationContext`.
 
+> **Empty extensions list asymmetry:** For environment templates, an empty `extensions: []`
+> list is caught during parsing (Phase 4) and produces an immediate `DecodeValidation` error.
+> For job templates, the same check is deferred to structural validation (Pass 3 in the
+> validation pipeline). Both produce equivalent errors, but the detection point differs
+> because the job template validation pipeline handles this as part of its accumulated
+> error reporting, while the environment template parser checks it eagerly.
+
 ### Phase 5: Validation
 
 The deserialized template is passed through the multi-pass validation pipeline

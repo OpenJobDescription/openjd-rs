@@ -52,12 +52,13 @@ pub struct StepTemplate {
 
 impl StepTemplate {
     /// De-sugar SimpleAction syntax into equivalent StepScript.
-    /// If the step already has a `script` field, returns a clone of it.
+    /// If the step already has a `script` field, returns `Ok(Some(clone))`.
     /// If it uses a SimpleAction (bash/python/cmd/powershell/node), transforms
     /// it into a StepScript with an embedded file and onRun action.
-    pub fn resolve_syntax_sugar(&self) -> Option<StepScript> {
+    /// Returns `Err` if the SimpleAction script contains malformed format string syntax.
+    pub fn resolve_syntax_sugar(&self) -> Result<Option<StepScript>, crate::OpenJdError> {
         if let Some(script) = &self.script {
-            return Some(script.clone());
+            return Ok(Some(script.clone()));
         }
 
         let interpreters: &[(&str, &str, &[&str], Option<&SimpleAction>)] = &[
@@ -90,7 +91,7 @@ impl StepTemplate {
                 args.extend(user_args.iter().cloned());
             }
 
-            return Some(StepScript {
+            return Ok(Some(StepScript {
                 let_bindings: sa.let_bindings.clone(),
                 actions: StepActions {
                     on_run: Action {
@@ -104,17 +105,18 @@ impl StepTemplate {
                     name: embedded_name,
                     file_type: crate::types::FileType::Text,
                     filename: Some(FormatString::new(&filename).unwrap()),
-                    data: Some(
-                        FormatString::new(&sa.script)
-                            .unwrap_or_else(|_| FormatString::new("").unwrap()),
-                    ),
+                    data: Some(FormatString::new(&sa.script).map_err(|e| {
+                        crate::OpenJdError::DecodeValidation(format!(
+                            "SimpleAction script format string error: {e}"
+                        ))
+                    })?),
                     runnable: Some(true),
                     end_of_line: None,
                 }]),
-            });
+            }));
         }
 
-        None
+        Ok(None)
     }
 }
 
@@ -133,4 +135,46 @@ pub struct StepScript {
     pub let_bindings: Option<Vec<String>>,
     pub actions: StepActions,
     pub embedded_files: Option<Vec<EmbeddedFile>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StepTemplate;
+
+    #[test]
+    fn resolve_syntax_sugar_returns_error_for_malformed_format_string() {
+        let step: StepTemplate = serde_yaml::from_str(
+            r#"
+            name: TestStep
+            bash:
+              script: "echo '{{broken'"
+            "#,
+        )
+        .unwrap();
+
+        let result = step.resolve_syntax_sugar();
+        assert!(
+            result.is_err(),
+            "resolve_syntax_sugar should return Err for malformed format string"
+        );
+    }
+
+    #[test]
+    fn resolve_syntax_sugar_ok_for_valid_script() {
+        let step: StepTemplate = serde_yaml::from_str(
+            r#"
+            name: TestStep
+            bash:
+              script: "echo hello"
+            "#,
+        )
+        .unwrap();
+
+        let result = step.resolve_syntax_sugar();
+        assert!(result.is_ok(), "valid script should succeed");
+        assert!(
+            result.unwrap().is_some(),
+            "bash step should produce a StepScript"
+        );
+    }
 }

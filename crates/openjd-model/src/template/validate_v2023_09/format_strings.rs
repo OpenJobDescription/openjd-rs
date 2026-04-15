@@ -219,6 +219,8 @@ fn build_task_scope_symtab(
     // Task.File.* from step script embedded files
     if let Some(script) = step
         .resolve_syntax_sugar()
+        .ok()
+        .flatten()
         .as_ref()
         .or(step.script.as_ref())
     {
@@ -448,16 +450,28 @@ pub fn validate_format_strings(
                             let name = binding[..eq_pos].trim();
                             let expr_str = binding[eq_pos + 1..].trim();
                             if !name.is_empty() && !expr_str.is_empty() {
-                                if let Ok(parsed) =
-                                    openjd_expr::eval::ParsedExpression::new(expr_str)
-                                {
-                                    let symtabs = [&range_symtab as &SymbolTable];
-                                    let mut evaluator = parsed
-                                        .evaluator(&symtabs)
-                                        .with_path_format(PathFormat::Posix)
-                                        .with_library(&default_lib);
-                                    if let Ok(val) = evaluator.evaluate(&parsed.ast) {
-                                        let _ = range_symtab.set(name, val);
+                                match openjd_expr::eval::ParsedExpression::new(expr_str) {
+                                    Ok(parsed) => {
+                                        let symtabs = [&range_symtab as &SymbolTable];
+                                        let mut evaluator = parsed
+                                            .evaluator(&symtabs)
+                                            .with_path_format(PathFormat::Posix)
+                                            .with_library(&default_lib);
+                                        match evaluator.evaluate(&parsed.ast) {
+                                            Ok(val) => {
+                                                let _ = range_symtab.set(name, val);
+                                            }
+                                            Err(e) => {
+                                                errors.add(
+                                                    &step_path,
+                                                    format!("let binding '{name}': {e}"),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        errors
+                                            .add(&step_path, format!("let binding '{name}': {e}"));
                                     }
                                 }
                             }
@@ -821,9 +835,14 @@ pub fn validate_format_strings(
                     }
                 }
                 if !sa_let_names.is_empty() {
-                    if let Ok(fs) = FormatString::new(&sa.script) {
-                        if let Err(e) = fs.validate_comprehension_vars(&sa_let_names) {
-                            errors.add(&step_path, e.to_string());
+                    match FormatString::new(&sa.script) {
+                        Ok(fs) => {
+                            if let Err(e) = fs.validate_comprehension_vars(&sa_let_names) {
+                                errors.add(&step_path, e.to_string());
+                            }
+                        }
+                        Err(e) => {
+                            errors.add(&step_path, format!("SimpleAction script: {e}"));
                         }
                     }
                     if let Some(args) = &sa.args {

@@ -4,6 +4,8 @@
 //! Integration tests: template → create_job → StepParameterSpaceIterator.
 //! Ported from Python test_step_param_space_iter.py.
 
+use std::collections::HashMap;
+
 use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::JobParameterInputValues;
 use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
@@ -558,4 +560,34 @@ fn test_default_product_preserves_definition_order() {
             .collect();
         assert_eq!(expected, actual, "Iteration order must be deterministic");
     }
+}
+
+#[test]
+fn lazy_param_space_range_expr_within_limit() {
+    // max_task_param_range_len is 1024 for all configs (not raised by FB1)
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: Step1
+            parameterSpace:
+              taskParameterDefinitions:
+                - name: Frame
+                  type: INT
+                  range: "1-1024"
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let jt = decode_job_template(template, None).unwrap();
+    let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
+    let job = create_job(&jt, &params).unwrap();
+    let space = job.steps[0].parameter_space.as_ref().unwrap();
+    let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
+    assert_eq!(iter.len(), 1024);
+    let task = iter.get(1023).unwrap();
+    assert_eq!(task.len(), 1);
 }

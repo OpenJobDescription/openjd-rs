@@ -317,3 +317,53 @@ fn job_no_extensions_with_unsupported_in_supported_list() {
     );
     decode_job_template(v, Some(&["UNSUPPORTED_NAME"])).unwrap();
 }
+
+// ══════════════════════════════════════════════════════════════
+// Empty extensions list asymmetry
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn empty_extensions_job_template() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": [],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let result = decode_job_template(v, None);
+    let job_result_is_err = result.is_err();
+    if job_result_is_err {
+        let msg = result.unwrap_err().to_string();
+        eprintln!("Job template with empty extensions: REJECTED with: {msg}");
+    } else {
+        eprintln!("Job template with empty extensions: ACCEPTED");
+    }
+
+    let v2 = yaml_val(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": [],
+        "environment": {
+            "name": "E",
+            "script": {"actions": {"onEnter": {"command": "echo"}}}
+        }
+    }"#,
+    );
+    let env_result = decode_environment_template(v2, None);
+    let env_result_is_err = env_result.is_err();
+    if env_result_is_err {
+        let msg = env_result.unwrap_err().to_string();
+        eprintln!("Env template with empty extensions: REJECTED with: {msg}");
+    } else {
+        eprintln!("Env template with empty extensions: ACCEPTED");
+    }
+
+    assert_eq!(
+        job_result_is_err, env_result_is_err,
+        "BUG: Asymmetric handling of empty extensions list! \
+         Job template empty extensions is_err={job_result_is_err}, \
+         Env template empty extensions is_err={env_result_is_err}"
+    );
+}

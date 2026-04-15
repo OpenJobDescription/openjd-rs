@@ -17,3 +17,9 @@ pub struct EnvironmentTemplate {
     pub parameter_definitions: Option<Vec<JobParameterDefinition>>,
     pub environment: Environment,
 }
+
+impl EnvironmentTemplate {
+    pub fn environment(&self) -> &Environment {
+        &self.environment
+    }
+}

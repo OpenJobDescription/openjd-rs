@@ -8,11 +8,12 @@
 
 pub mod error;
 pub mod job;
-pub mod template;
+pub(crate) mod template;
 pub use job::create_job;
 pub use job::step_dependency_graph;
 pub use job::step_param_space;
 pub use template::parse;
+pub use template::{EnvironmentTemplate, JobParameterDefinition, JobTemplate};
 pub mod capabilities;
 pub mod types;
 
@@ -21,6 +22,9 @@ pub use openjd_expr::format_string;
 pub use openjd_expr::format_string::FormatString;
 pub use openjd_expr::symbol_table;
 pub use openjd_expr::symbol_table::SymbolTable;
+
+#[cfg(test)]
+mod test_lazy_param_space;
 
 pub use error::OpenJdError;
 pub use job::create_job::{
@@ -40,3 +44,8 @@ pub use types::{
     TaskParameterSet, TaskParameterType, TaskParameterValue, TemplateSpecificationVersion,
     ValidationContext,
 };
+
+#[cfg(test)]
+mod test_expr_param_constraints;
+#[cfg(test)]
+mod test_instantiate_and_display;

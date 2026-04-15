@@ -66,6 +66,12 @@ Common methods on all variants:
 
 ### Constraint Checking vs Definition Validation
 
+> **Length measurement:** All string length checks (minLength, maxLength, allowedValues
+> length validation) use **Unicode scalar value count** (Rust's `.chars().count()`), not
+> byte length. For example, the string "aéb" has length 3 (three characters), not 4
+> (its UTF-8 byte length). This applies to both `check_constraints` (runtime) and
+> `validate_definition` (template-time) checks for STRING and PATH parameters.
+
 These are two distinct operations:
 
 - **`check_constraints`** runs at `preprocess_job_parameters` time against user-provided values.

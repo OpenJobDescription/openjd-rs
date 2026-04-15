@@ -4,7 +4,7 @@
 //! Context-aware help for `openjd-rs run <template> --help`.
 
 use openjd_model::parse::{self, DocumentType};
-use openjd_model::template::{JobParameterDefinition, JobTemplate};
+use openjd_model::{JobParameterDefinition, JobTemplate};
 use std::path::Path;
 
 /// Check if the CLI args are `run <path> -h/--help` and if so, print
@@ -96,25 +96,24 @@ pub fn format_help(template: &JobTemplate, path: &Path) -> String {
     ));
 
     // Job name
-    out.push_str(&format!("Job: {}\n", template.name));
+    out.push_str(&format!("Job: {}\n", template.name()));
 
     // Description
-    if let Some(desc) = &template.description {
-        out.push_str(&format!("{}\n", desc.0));
+    if let Some(desc) = template.description() {
+        out.push_str(&format!("{}\n", desc));
     }
     out.push('\n');
 
     // Parameters
-    if let Some(params) = &template.parameter_definitions {
-        if !params.is_empty() {
-            out.push_str("Job Parameters (-p/--job-param PARAM_NAME=VALUE):\n");
-            for param in params {
-                out.push_str("  ");
-                out.push_str(&format_parameter(param));
-                out.push('\n');
-            }
+    let params = template.parameter_definitions_list();
+    if !params.is_empty() {
+        out.push_str("Job Parameters (-p/--job-param PARAM_NAME=VALUE):\n");
+        for param in params {
+            out.push_str("  ");
+            out.push_str(&format_parameter(param));
             out.push('\n');
         }
+        out.push('\n');
     }
 
     // Standard options
@@ -203,8 +202,7 @@ fn format_parameter(param: &JobParameterDefinition) -> String {
     }
 
     // Description
-    let desc = get_description(param);
-    if let Some(d) = desc {
+    if let Some(d) = param.description() {
         line.push_str(&format!("\n    {d}"));
     }
 
@@ -219,16 +217,4 @@ fn format_parameter(param: &JobParameterDefinition) -> String {
     }
 
     line
-}
-
-fn get_description(param: &JobParameterDefinition) -> Option<String> {
-    match param {
-        JobParameterDefinition::STRING(p) => p.description.as_ref().map(|d| d.0.clone()),
-        JobParameterDefinition::INT(p) => p.description.as_ref().map(|d| d.0.clone()),
-        JobParameterDefinition::FLOAT(p) => p.description.as_ref().map(|d| d.0.clone()),
-        JobParameterDefinition::PATH(p) => p.description.as_ref().map(|d| d.0.clone()),
-        JobParameterDefinition::BOOL(p) => p.description.as_ref().map(|d| d.0.clone()),
-        JobParameterDefinition::RANGE_EXPR(p) => p.description.as_ref().map(|d| d.0.clone()),
-        _ => None,
-    }
 }

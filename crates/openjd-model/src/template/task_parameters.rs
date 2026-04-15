@@ -110,10 +110,13 @@ impl<'de> Deserialize<'de> for FloatRangeItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let val = serde_yaml::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => n
-                .as_f64()
-                .map(FloatRangeItem::Float)
-                .ok_or_else(|| serde::de::Error::custom("Invalid number in float range")),
+            serde_yaml::Value::Number(n) => {
+                let f = n
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("Invalid number in float range"))?;
+                super::parameters::reject_nan_inf(f).map_err(serde::de::Error::custom)?;
+                Ok(FloatRangeItem::Float(f))
+            }
             serde_yaml::Value::String(s) => FormatString::new(s)
                 .map(FloatRangeItem::FormatString)
                 .map_err(serde::de::Error::custom),

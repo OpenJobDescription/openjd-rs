@@ -1367,3 +1367,284 @@ fn float_param_large_value_roundtrip() {
         other => panic!("Expected Float, got {other:?}"),
     }
 }
+
+#[test]
+fn bug_string_param_allowed_values_byte_vs_char_length() {
+    // "aéb" is 3 chars but 4 bytes. maxLength=3 should accept it.
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Greeting
+            type: STRING
+            maxLength: 3
+            allowedValues: ["aéb"]
+            default: "aéb"
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "3-char string with maxLength=3 should pass: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn string_param_minlength_uses_char_count() {
+    // "éé" is 2 chars but 4 bytes. minLength=2 should accept it.
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Val
+            type: STRING
+            minLength: 2
+            default: "éé"
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "2-char string with minLength=2 should pass: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn path_param_maxlength_uses_char_count() {
+    // "/àb" is 3 chars but 4 bytes. maxLength=3 should accept it.
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Dir
+            type: PATH
+            maxLength: 3
+            default: "/àb"
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "3-char path with maxLength=3 should pass: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn path_param_minlength_uses_char_count() {
+    // "/é" is 2 chars but 3 bytes. minLength=2 should accept it.
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Dir
+            type: PATH
+            minLength: 2
+            default: "/é"
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "2-char path with minLength=2 should pass: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn ui_label_maxlength_uses_char_count() {
+    // 64 chars of "é" = 128 bytes. Should pass the 64-char label limit.
+    let label = "é".repeat(64);
+    let template = yaml_val(&format!(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Val
+            type: STRING
+            userInterface:
+              label: "{label}"
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#
+    ));
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_ok(),
+        "64-char label should pass: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn float_param_nan_rejected_by_flexfloat() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Val
+            type: FLOAT
+            default: .nan
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(result.is_err(), "NaN must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("NaN is not a valid float value"),
+        "Expected NaN rejection message, got: {msg}"
+    );
+}
+
+#[test]
+fn float_param_infinity_rejected_by_flexfloat() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        parameterDefinitions:
+          - name: Val
+            type: FLOAT
+            default: .inf
+        steps:
+          - name: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(result.is_err(), "Infinity must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("Infinity is not a valid float value"),
+        "Expected Infinity rejection message, got: {msg}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// STRING/PATH parameter minLength/maxLength char vs byte semantics
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn string_param_maxlength_uses_chars_not_bytes() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "Msg",
+            "type": "STRING",
+            "default": "hello",
+            "maxLength": 5
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None).unwrap();
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+
+    // "héllo" is 5 chars but 6 bytes — should be accepted with maxLength=5
+    let test_value = openjd_expr::ExprValue::String("héllo".to_string());
+    assert!(
+        param.check_constraints(&test_value).is_ok(),
+        "5-character string 'héllo' should pass maxLength=5 (char count, not byte count)"
+    );
+}
+
+#[test]
+fn string_param_minlength_uses_chars_not_bytes() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "Msg",
+            "type": "STRING",
+            "default": "hello world",
+            "minLength": 6
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None).unwrap();
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+
+    // "ééé" is 3 chars but 6 bytes — should be rejected with minLength=6
+    let test_value = openjd_expr::ExprValue::String("ééé".to_string());
+    assert!(
+        param.check_constraints(&test_value).is_err(),
+        "3-character string 'ééé' should fail minLength=6 (char count, not byte count)"
+    );
+}
+
+#[test]
+fn path_param_maxlength_uses_chars_not_bytes() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "Dir",
+            "type": "PATH",
+            "default": "/tmp/hello",
+            "maxLength": 10
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None).unwrap();
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+
+    // "/tmp/héllo" is 10 chars but 11 bytes — should be accepted with maxLength=10
+    let test_value = openjd_expr::ExprValue::Path {
+        value: "/tmp/héllo".to_string(),
+        format: openjd_expr::PathFormat::Posix,
+    };
+    assert!(
+        param.check_constraints(&test_value).is_ok(),
+        "10-character path '/tmp/héllo' should pass maxLength=10 (char count, not byte count)"
+    );
+}

@@ -3,8 +3,8 @@
 
 //! Red/green TDD tests for instantiate_step error propagation and FlexFloat Display.
 
-use openjd_model::JobParameterInputValues;
-use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
+use crate::JobParameterInputValues;
+use crate::{create_job, decode_job_template, preprocess_job_parameters};
 use std::path::Path;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -12,9 +12,9 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 }
 
 fn preprocess(
-    jt: &openjd_model::template::JobTemplate,
+    jt: &crate::template::JobTemplate,
     input: &JobParameterInputValues,
-) -> openjd_model::JobParameterValues {
+) -> crate::JobParameterValues {
     preprocess_job_parameters(jt, input, &[], Path::new("/tmp"), Path::new("/tmp"), true).unwrap()
 }
 
@@ -115,7 +115,7 @@ fn create_job_step_let_binding_type_error_at_instantiation() {
 /// FlexFloat Display for a whole number > i64::MAX should not saturate to i64::MAX.
 #[test]
 fn flexfloat_display_large_positive_whole_number() {
-    use openjd_model::template::FlexFloat;
+    use crate::template::FlexFloat;
     let ff = FlexFloat(1e19, None);
     let display = format!("{ff}");
     assert_ne!(
@@ -129,7 +129,7 @@ fn flexfloat_display_large_positive_whole_number() {
 /// FlexFloat Display for a whole number < i64::MIN should not saturate to i64::MIN.
 #[test]
 fn flexfloat_display_large_negative_whole_number() {
-    use openjd_model::template::FlexFloat;
+    use crate::template::FlexFloat;
     let ff = FlexFloat(-1e19, None);
     let display = format!("{ff}");
     assert_ne!(
@@ -143,8 +143,72 @@ fn flexfloat_display_large_negative_whole_number() {
 /// FlexFloat Display for a normal whole number within i64 range should still use integer format.
 #[test]
 fn flexfloat_display_normal_whole_number() {
-    use openjd_model::template::FlexFloat;
+    use crate::template::FlexFloat;
     let ff = FlexFloat(42.0, None);
     let display = format!("{ff}");
     assert_eq!(display, "42", "FlexFloat should display 42.0 as '42'");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FlexFloat Display: large whole numbers via job template roundtrip
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn flexfloat_display_large_whole_number_overflow() {
+    let template_yaml = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "BigFloat",
+            "type": "FLOAT",
+            "default": 1e19
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#
+    .to_string();
+    let v = yaml_val(&template_yaml);
+    let jt = decode_job_template(v, None).unwrap();
+
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+    let default_str = param.default_value().unwrap();
+
+    let expected_correct = "10000000000000000000";
+    let i64_max_str = i64::MAX.to_string();
+
+    if default_str == i64_max_str {
+        panic!(
+            "BUG CONFIRMED: FlexFloat Display overflow! \
+             1e19 displayed as i64::MAX ({i64_max_str}) instead of {expected_correct}"
+        );
+    }
+    assert_eq!(
+        default_str, expected_correct,
+        "FlexFloat should display 1e19 correctly, got: {default_str}"
+    );
+}
+
+#[test]
+fn flexfloat_display_negative_large_whole_number() {
+    let template_yaml = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "BigNeg",
+            "type": "FLOAT",
+            "default": -1e19
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#;
+    let v = yaml_val(template_yaml);
+    let jt = decode_job_template(v, None).unwrap();
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+    let default_str = param.default_value().unwrap();
+
+    let i64_min_str = i64::MIN.to_string();
+    if default_str == i64_min_str {
+        panic!(
+            "BUG CONFIRMED: FlexFloat Display overflow for negative! \
+             -1e19 displayed as i64::MIN ({i64_min_str})"
+        );
+    }
 }

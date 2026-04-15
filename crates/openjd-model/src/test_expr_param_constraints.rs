@@ -4,14 +4,14 @@
 //! Tests for EXPR parameter type check_value_constraints.
 //! Asserts specific error messages per AGENTS.md test quality standard.
 
-use openjd_expr::{value::Float64, ExprType, ExprValue, PathFormat};
-use openjd_model::template::{
+use crate::template::{
     FlexFloat, FlexInt, Identifier, JobBoolParameterDefinition, JobListBoolParameterDefinition,
     JobListFloatParameterDefinition, JobListIntParameterDefinition,
     JobListListIntParameterDefinition, JobListPathParameterDefinition,
     JobListStringParameterDefinition, JobRangeExprParameterDefinition, ListFloatItemConstraints,
     ListIntItemConstraints, ListListIntItemConstraints, ListStringItemConstraints,
 };
+use openjd_expr::{value::Float64, ExprType, ExprValue, PathFormat};
 
 fn id(s: &str) -> Identifier {
     Identifier::new(s).unwrap()
@@ -166,7 +166,7 @@ fn test_list_int_rejects_below_min() {
         max_length: None,
         item: Some(ListIntItemConstraints {
             allowed_values: None,
-            min_value: Some(openjd_model::template::FlexInt(0)),
+            min_value: Some(crate::template::FlexInt(0)),
             max_value: None,
         }),
         user_interface: None,
@@ -347,7 +347,7 @@ fn test_list_int_rejects_above_max() {
         item: Some(ListIntItemConstraints {
             allowed_values: None,
             min_value: None,
-            max_value: Some(openjd_model::template::FlexInt(10)),
+            max_value: Some(crate::template::FlexInt(10)),
         }),
         user_interface: None,
     };

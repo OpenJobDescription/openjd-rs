@@ -4,6 +4,7 @@
 use indexmap::IndexMap;
 
 use openjd_expr::FormatString;
+use openjd_model::decode_job_template;
 use openjd_model::job::{Action, Job, Step, StepActions, StepDependency, StepScript};
 use openjd_model::step_dependency_graph::StepDependencyGraph;
 
@@ -221,5 +222,32 @@ fn test_long_cycle_detection() {
         graph.topo_sorted().unwrap_err().to_string(),
         "Validation error: A circular dependency was found in the step dependency graph:\n\
          S1 -> S2 -> S3 -> S4 -> S5 -> S6 -> S7 -> S1"
+    );
+}
+
+fn yaml_val(s: &str) -> serde_yaml::Value {
+    serde_yaml::from_str(s).unwrap()
+}
+
+#[test]
+fn self_referencing_step_dependency_rejected() {
+    let template = yaml_val(
+        r#"
+        specificationVersion: "jobtemplate-2023-09"
+        name: Test
+        steps:
+          - name: Step1
+            dependencies:
+              - dependsOn: Step1
+            script:
+              actions:
+                onRun:
+                  command: echo
+    "#,
+    );
+    let result = decode_job_template(template, None);
+    assert!(
+        result.is_err(),
+        "Self-referencing step dependency should be rejected"
     );
 }

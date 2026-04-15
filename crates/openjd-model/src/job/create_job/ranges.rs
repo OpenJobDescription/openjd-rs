@@ -158,6 +158,12 @@ fn resolve_int_range(
             Ok(job::TaskParamRange::List(ints))
         }
         template::IntRange::Expression(expr) => {
+            // Try typed evaluation first — may directly yield a RangeExpr or list[int].
+            // For multi-segment format strings (e.g., "1-{{Param.Count}}"), typed
+            // evaluation fails and we fall through to string resolution, which
+            // concatenates segments and parses the result as a range expression.
+            // Any real evaluation errors (division by zero, type errors) will be
+            // caught by the string resolution fallback path.
             if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
                 match val {
                     ExprValue::RangeExpr(r) => {
@@ -241,8 +247,10 @@ fn resolve_float_range(
             })
             .collect::<Result<Vec<_>, _>>()?,
         template::FloatRange::Expression(expr) => {
-            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
-                if val.is_list() {
+            // Typed evaluation — must yield a list. Propagate the actual error
+            // if evaluation fails.
+            match expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
+                Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements
                         .iter()
@@ -255,15 +263,17 @@ fn resolve_float_range(
                             ))),
                         })
                         .collect::<Result<Vec<_>, _>>()?
-                } else {
+                }
+                Ok(_) => {
                     return Err(OpenJdError::Expression(
                         "Float range expression must evaluate to a list".into(),
                     ));
                 }
-            } else {
-                return Err(OpenJdError::Expression(
-                    "Float range expression must evaluate to a list".into(),
-                ));
+                Err(e) => {
+                    return Err(OpenJdError::Expression(format!(
+                        "Float range expression: {e}"
+                    )));
+                }
             }
         }
     };
@@ -294,19 +304,23 @@ fn resolve_string_range(
             })
             .collect::<Result<Vec<_>, _>>()?,
         template::StringRange::Expression(expr) => {
-            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
-                if val.is_list() {
+            // Typed evaluation — must yield a list. Propagate the actual error
+            // if evaluation fails (e.g., division by zero, undefined variable).
+            match expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
+                Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements.iter().map(|e| e.to_display_string()).collect()
-                } else {
+                }
+                Ok(_) => {
                     return Err(OpenJdError::Expression(
                         "String range expression must evaluate to a list".into(),
                     ));
                 }
-            } else {
-                return Err(OpenJdError::Expression(
-                    "String range expression must evaluate to a list".into(),
-                ));
+                Err(e) => {
+                    return Err(OpenJdError::Expression(format!(
+                        "String range expression: {e}"
+                    )));
+                }
             }
         }
     };
