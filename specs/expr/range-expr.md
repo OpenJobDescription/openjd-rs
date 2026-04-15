@@ -34,7 +34,7 @@ a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
 pub struct RangeExpr {
     ranges: Vec<IntRange>,
     length: usize,                    // total element count across all ranges
-    range_length_indices: Vec<usize>, // cumulative lengths for binary search indexing
+    cumulative_lengths: Vec<usize>,   // cumulative lengths for binary search indexing
 }
 
 struct IntRange {
@@ -58,7 +58,7 @@ specified. Descending ranges like `"10-1:-1"` are normalized to ascending form i
 
 ## Indexing
 
-`RangeExpr` supports O(log n) random access via binary search on `range_length_indices`:
+`RangeExpr` supports O(log n) random access via binary search on `cumulative_lengths`:
 
 ```rust
 let r = RangeExpr::from_str("1-5,10-15")?;
@@ -69,7 +69,7 @@ r[10]  // → 15
 r.len() // → 11
 ```
 
-The `range_length_indices` array stores cumulative element counts, enabling binary search
+The `cumulative_lengths` array stores cumulative element counts, enabling binary search
 to find which sub-range contains a given index, then computing the element within that
 sub-range.
 
@@ -83,13 +83,28 @@ walks through sub-ranges without materializing the full list.
 | From | To | Method |
 |------|----|--------|
 | `&str` | `RangeExpr` | `RangeExpr::from_str(s)` |
-| `&[i64]` | `RangeExpr` | `RangeExpr::from_list(values)` — auto-detects step patterns |
+| `Vec<i64>` | `RangeExpr` | `RangeExpr::from_values(values)` — sorts, deduplicates, auto-detects step patterns |
 | `RangeExpr` | `String` | `to_string()` — canonical form |
 | `RangeExpr` | `Vec<i64>` | `iter().collect()` |
 | `RangeExpr` | `ExprValue::ListInt` | Via `list()` function in expression language |
 
-`from_list` analyzes the input values to detect arithmetic sequences and reconstruct
-compact range representations. For example, `[1, 3, 5, 7, 9]` becomes `"1-9:2"`.
+`from_values` sorts and deduplicates the input, then detects arithmetic sequences to
+reconstruct compact range representations. For example, `[1, 3, 5, 7, 9]` becomes `"1-9:2"`.
+
+## Slicing
+
+`RangeExpr` supports slicing with `slice(start, stop, step)`, returning a new `RangeExpr`
+without materializing elements:
+
+```rust
+let r = RangeExpr::from_str("1-100")?;
+let sliced = r.slice(10, 50, 2)?;  // elements at indices 10, 12, 14, ..., 48
+```
+
+The algorithm operates in O(m) time where m is the number of sub-ranges, by walking
+the sub-ranges and computing intersections with the requested index range. No element
+vector is allocated — the result is a new `RangeExpr` built directly from computed
+sub-ranges. Step must be positive.
 
 ## Containment
 

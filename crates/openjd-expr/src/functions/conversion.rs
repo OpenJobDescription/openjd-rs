@@ -29,7 +29,7 @@ pub fn int_from_float(_: Ctx, a: &[ExprValue]) -> R {
                     "Cannot convert {f} to int: not a whole number"
                 )));
             }
-            if *f > i64::MAX as f64 || *f < i64::MIN as f64 {
+            if f.0 >= i64::MAX as f64 || f.0 < i64::MIN as f64 {
                 return Err(ExpressionError::integer_overflow());
             }
             Ok(ExprValue::Int(f.0 as i64))

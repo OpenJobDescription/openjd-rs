@@ -346,26 +346,38 @@ impl ExprValue {
             Self::Bool(_) => Self::ListBool(
                 elements
                     .into_iter()
-                    .map(|e| matches!(e, Self::Bool(true)))
-                    .collect(),
+                    .map(|e| match e {
+                        Self::Bool(b) => Ok(b),
+                        _ => Err(crate::error::ExpressionError::type_error(format!(
+                            "make_list expected bool element, got {}",
+                            e.type_name()
+                        ))),
+                    })
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Int(_) => Self::ListInt(
                 elements
                     .into_iter()
                     .map(|e| match e {
-                        Self::Int(i) => i,
-                        _ => unreachable!("homogeneous Int list"),
+                        Self::Int(i) => Ok(i),
+                        _ => Err(crate::error::ExpressionError::type_error(format!(
+                            "make_list expected int element, got {}",
+                            e.type_name()
+                        ))),
                     })
-                    .collect(),
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Float(_) => Self::ListFloat(
                 elements
                     .into_iter()
                     .map(|e| match e {
-                        Self::Float(f) => f,
-                        _ => unreachable!("homogeneous Float list"),
+                        Self::Float(f) => Ok(f),
+                        _ => Err(crate::error::ExpressionError::type_error(format!(
+                            "make_list expected float element, got {}",
+                            e.type_name()
+                        ))),
                     })
-                    .collect(),
+                    .collect::<Result<_, _>>()?,
             ),
             Self::String(_) => Self::make_list_string(
                 elements

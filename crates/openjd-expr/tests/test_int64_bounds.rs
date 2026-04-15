@@ -228,3 +228,36 @@ fn large_negative_float() {
         "-9.223372036854776e+18"
     );
 }
+
+// === Bug 2: floor/ceil/round with large floats ===
+#[test]
+fn floor_large_float_overflow() {
+    assert_err("floor(1e300)", &["Integer overflow"]);
+}
+
+#[test]
+fn ceil_large_float_overflow() {
+    assert_err("ceil(1e300)", &["Integer overflow"]);
+}
+
+#[test]
+fn round_large_float_overflow() {
+    assert_err("round(1e300)", &["Integer overflow"]);
+}
+
+#[test]
+fn floor_large_negative_float_overflow() {
+    assert_err("floor(-1e300)", &["Integer overflow"]);
+}
+
+#[test]
+fn ceil_large_negative_float_overflow() {
+    assert_err("ceil(-1e300)", &["Integer overflow"]);
+}
+
+// === Bug 4: int_from_float boundary ===
+#[test]
+fn int_from_float_boundary_overflow() {
+    // i64::MAX as f64 rounds up to 9223372036854775808.0 which exceeds i64::MAX
+    assert_err("int(9223372036854775808.0)", &["Integer overflow"]);
+}

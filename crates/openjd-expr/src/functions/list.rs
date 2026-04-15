@@ -195,20 +195,3 @@ pub fn range_expr_from_empty_list(_: Ctx, _a: &[ExprValue]) -> R {
         "range_expr() requires at least one value",
     ))
 }
-
-/// join with reversed args (method syntax: "sep".join(list))
-pub fn join_method_fn(ctx: Ctx, a: &[ExprValue]) -> R {
-    let sep = match &a[0] {
-        ExprValue::String(s) => s.as_str(),
-        _ => return Err(ExpressionError::new("join() separator must be string")),
-    };
-    let iter = a[1]
-        .list_iter()
-        .ok_or_else(|| ExpressionError::new("join() argument must be a list"))?;
-    let mut parts = Vec::new();
-    for e in iter {
-        ctx.count_op()?;
-        parts.push(e.to_display_string());
-    }
-    Ok(ExprValue::String(parts.join(sep)))
-}

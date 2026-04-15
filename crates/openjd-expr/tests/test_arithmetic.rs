@@ -861,3 +861,15 @@ fn mod_float_result_sign_matches_divisor_negative() {
         "floored mod with negative divisor must be <= 0, got {val}"
     );
 }
+
+// === Bug 1: sum_list integer overflow ===
+#[test]
+fn sum_int_list_overflow() {
+    assert_err("sum([9223372036854775807, 1])", &["Integer overflow"]);
+}
+
+// === Bug 3: floordiv_float large result overflow ===
+#[test]
+fn floordiv_float_large_result_overflow() {
+    assert_err("1e300 // 1.0", &["Integer overflow"]);
+}

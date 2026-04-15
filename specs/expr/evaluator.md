@@ -6,7 +6,10 @@ The evaluator is an AST-walking interpreter that evaluates parsed EXPR expressio
 against a symbol table, using the function library for dispatch. It tracks memory and
 operation counts to enforce resource bounds.
 
-Defined in `eval/evaluator.rs` (the largest file in the crate at ~59KB).
+Defined in `eval/evaluator.rs`. The central `evaluate_inner` method is a dispatch
+table mapping each AST node type to a dedicated `eval_*` method. Child evaluators
+(used by list comprehensions) are created via `child_evaluator()` with resource
+counters propagated back via `absorb_counters()`.
 
 ## Builder Pattern
 
@@ -238,7 +241,7 @@ expressions must be simple dotted name lookups.
 
 The evaluator maintains a `HashMap<String, regex::Regex>` that caches compiled regex
 patterns across function calls within a single evaluation. When a regex function
-(`re_match`, `re_fullmatch`, `re_replace`) is called, the evaluator checks the cache
+(`re_match`, `re_search`, `re_sub`) is called, the evaluator checks the cache
 before compiling. This avoids recompiling the same pattern when used multiple times,
 e.g., in a list comprehension like `[x for x in items if re_match(x, "^shot_\\d+$")]`.
 

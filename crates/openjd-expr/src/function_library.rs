@@ -48,7 +48,10 @@ pub trait EvalContext {
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError>;
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError>;
     fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
-        regex::Regex::new(pattern).map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
+        regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .build()
+            .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
     }
 }
 

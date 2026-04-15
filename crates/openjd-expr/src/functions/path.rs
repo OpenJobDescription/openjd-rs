@@ -150,13 +150,23 @@ pub fn is_absolute(path_str: &str, fmt: PathFormat) -> bool {
 pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, _) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
-    Ok(ExprValue::Bool(path_str.starts_with(&base)))
+    let is_rel = path_str.starts_with(&base)
+        && (path_str.len() == base.len()
+            || base.ends_with('/')
+            || base.ends_with('\\')
+            || matches!(path_str.as_bytes().get(base.len()), Some(b'/' | b'\\')));
+    Ok(ExprValue::Bool(is_rel))
 }
 
 pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
-    if !path_str.starts_with(&base) {
+    let is_rel = path_str.starts_with(&base)
+        && (path_str.len() == base.len()
+            || base.ends_with('/')
+            || base.ends_with('\\')
+            || matches!(path_str.as_bytes().get(base.len()), Some(b'/' | b'\\')));
+    if !is_rel {
         return Err(ExpressionError::new(format!(
             "relative_to failed: '{path_str}' is not relative to '{base}'"
         )));
