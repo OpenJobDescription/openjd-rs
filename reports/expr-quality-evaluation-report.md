@@ -1,373 +1,359 @@
 # openjd-expr Crate Quality Evaluation Report
 
 **Date:** 2026-04-15
-**Crate:** `openjd-expr` (~/openjd-rs/crates/openjd-expr)
-**Specification Version:** 2023-09 with EXPR extension (RFC 0005, 0006, 0007)
+**Crate:** `openjd-expr` (v0.1.0)
+**Location:** `~/openjd-rs/crates/openjd-expr`
 
 ---
 
 ## Executive Summary
 
-The `openjd-expr` crate is a high-quality Rust implementation of the Open Job Description expression language. It provides parsing (via `ruff_python_parser`), evaluation with memory and operation bounds, format string interpolation, range expressions, path mapping, and a signature-based multiple dispatch function library with ~200 registered signatures. The crate compiles cleanly with zero warnings and zero clippy issues, and all 2,881 tests pass.
+The `openjd-expr` crate is a high-quality, well-architected implementation of the OpenJD Expression Language. It compiles cleanly with zero warnings (including clippy), all 2,953 tests pass, and the specifications are thorough and well-aligned with the implementation. The crate demonstrates strong Rust practices, thoughtful API design, and careful attention to correctness in edge cases like integer overflow, float invariants, and Unicode handling.
 
-Six confirmed bugs were found through targeted testing, primarily around integer overflow in math functions and path component boundary checking. Two additional spec-implementation misalignments were identified. The specifications are comprehensive and well-written, with some gaps in documenting the public API surface for programmatic error handling and serialization. Nine specification gaps and mismatches have since been resolved (see §2.2). Five additional code quality issues have also been resolved (see §5).
-
-The crate demonstrates strong engineering: typed list variants for memory efficiency, resource bounding for safety, cross-platform path handling, and thorough error messages with caret indicators. The test suite is extensive with gold-standard error message assertions.
+The crate is the most mature in the workspace and serves as the foundation for all other crates. The main areas for improvement are minor: a few performance optimizations in the evaluator, some specification gaps around the `Eq`/`Hash` implementation, and opportunities to reduce unnecessary AST node cloning.
 
 ---
 
-## 1. Build and Test Results
+## 1. Specifications Review
 
-- **Compiler:** rustc (stable)
-- **Build:** Clean compilation with zero errors and zero warnings
-- **Clippy:** Zero clippy warnings
-- **Tests:** 2,916 tests across 34 integration test files, 10 inline test modules, and 4 doc-tests — all passing
-- **Test execution time:** ~0.6s total (very fast)
+### 1.1 Specification Documents Reviewed
 
----
+| Document | Status |
+|----------|--------|
+| `specs/expr/README.md` | ✅ Complete index with normative references |
+| `specs/expr/architecture.md` | ✅ Thorough module layout, public API, dependency graph |
+| `specs/expr/type-system.md` | ✅ Comprehensive type system documentation |
+| `specs/expr/values.md` | ✅ Detailed value representation and memory sizing |
+| `specs/expr/symbol-table.md` | ✅ Clear hierarchical table design |
+| `specs/expr/parser.md` | ✅ Parser selection rationale and pipeline |
+| `specs/expr/evaluator.md` | ✅ Thorough dispatch flow and resource bounding |
+| `specs/expr/function-library.md` | ✅ Complete dispatch phases and operator mapping |
+| `specs/expr/format-string.md` | ✅ Resolution modes and serde integration |
+| `specs/expr/error-formatting.md` | ✅ Smart caret positioning rules |
+| `specs/expr/range-expr.md` | ✅ Parsing, indexing, slicing, contiguous mode |
+| `specs/expr/path-mapping.md` | ✅ PathFormat, URI handling, rule application |
 
-## 2. Specifications Review
-
-### 2.1 Documents Reviewed
-
-| Document | Summary |
-|---|---|
-| `README.md` | Index of all spec documents with normative references |
-| `architecture.md` | Module layout, public API surface, dependency graph, 8 design constraints |
-| `parser.md` | ruff_python_parser pipeline, keyword renaming, AST validation, symbol collection |
-| `evaluator.md` | AST-walking evaluator, resource bounding, dispatch flow, all node types |
-| `type-system.md` | TypeCode enum, union normalization, type matching/substitution, coercions |
-| `values.md` | ExprValue typed list variants, Float64, memory sizing, ListIter, equality/hashing semantics, coercion tables, JSON transport |
-| `symbol-table.md` | Hierarchical key-value store, dotted paths, evaluator lookup, SerializedSymbolTable |
-| `function-library.md` | Signature-based dispatch, 3-phase matching, operator mapping, sub-libraries |
-| `error-formatting.md` | Caret-style errors, smart positioning, "Did you mean?" suggestions, ExpressionErrorKind enum |
-| `range-expr.md` | Sorted non-overlapping integer ranges, O(log n) access, O(m) slicing, parsing |
-| `format-string.md` | `{{...}}` interpolation, resolution modes, validation, serde integration |
-| `path-mapping.md` | PathFormat, PathMappingRule, URI path operations, cross-platform handling |
-
-### 2.2 Specification Quality
+### 1.2 Specification Quality
 
 **Strengths:**
-- Comprehensive coverage of all implementation modules with 12 spec documents
-- Excellent explanation of WHY behind design decisions (typed list variants, FormatString placement, ruff selection, resource bounding)
-- Cross-references between documents are consistent and helpful
-- Python divergences are explicitly called out with rationale
-- The evaluator spec is particularly thorough, covering every AST node type with detailed behavior
+- Every spec document follows a consistent structure: Overview → Design → API → Divergence from Python
+- The "Divergence from Python" sections are valuable for understanding design decisions
+- The architecture spec clearly shows the dependency graph and explains why `FormatString` lives in `openjd-expr`
+- The evaluator spec's dispatch flow diagram is clear and matches the implementation exactly
+- The type system spec covers normalization rules comprehensively
 
-**Gaps (ordered by priority):**
+**Gaps identified:**
 
-1. ~~**HIGH: `ExpressionErrorKind` enum not documented.**~~ **RESOLVED** — Added `ExpressionErrorKind` section to error-formatting.md with full enum definition, variant trigger table, and convenience constructor examples. Added `kind` field to the `ExpressionError` struct definition.
+1. **`Eq`/`Hash` cross-type semantics not specified.** The `values.md` spec mentions `Hash` and `PartialEq` with cross-type equivalence rules (Int(1) == Float(1.0), String == Path, empty lists equal), but this is only in a brief table. The actual implementation in `value.rs` has a carefully designed `equals()` method and a `Hash` implementation using discriminant tags to ensure the Hash contract. This deserves a dedicated subsection explaining the tag-based hashing strategy and why it's necessary.
 
-2. ~~**HIGH: `SerializedSymbolTable` not documented.**~~ **RESOLVED** — Added `SerializedSymbolTable` section to symbol-table.md covering the `#[serde(transparent)]` wrapper, JSON wire format (`[{name, type, value}]` array), `to_symtab(path_format)` deserialization, and JSON transport for individual values.
+2. **`ListIter` not documented in values spec.** The `ListIter` enum and its zero-allocation iteration design are mentioned briefly but the spec doesn't explain the `ExactSizeIterator` implementation or the clone-on-yield semantics for String/Path/List variants.
 
-3. ~~**MEDIUM: `ListIter` not documented in values spec.**~~ **RESOLVED** — Added `ListIter` section to values.md documenting the 6-variant enum, zero-allocation iteration design, and `Iterator<Item=ExprValue>` + `ExactSizeIterator` traits.
+3. **`make_list` promotion rules partially documented.** The spec covers the high-level promotion rules (int+float→float, path+string→string) but doesn't document the nested list promotion rules (list[int]+list[float]→list[float] inner promotion) or the fallback to `ListString` for unrecognized types.
 
-4. ~~**MEDIUM: `Hash`/`PartialEq` cross-type semantics not documented.**~~ **RESOLVED** — Added `Equality and Hashing Semantics` section to values.md with cross-type equivalence table (Int/Float, String/Path, empty lists) and discriminant tag grouping explanation.
+4. **`eval_compare` chained comparison memory management not specified.** The evaluator spec describes chained comparisons and short-circuiting but doesn't explain the clone-and-release pattern used for intermediate values in the chain.
 
-5. ~~**MEDIUM: `slice()` method not documented in range-expr spec.**~~ **RESOLVED** — Added `Slicing` section to range-expr.md documenting `slice(start, stop, step)` with O(m) algorithm description and no-materialization design.
+5. **Regex cache not shared with child evaluators.** The evaluator spec says "The cache is per-evaluation" but doesn't mention that child evaluators (created for list comprehensions) get fresh empty caches. This means regex patterns are recompiled on every iteration of a comprehension.
 
-6. ~~**MEDIUM: Union sort description incorrect in type-system spec.**~~ **RESOLVED** — Changed type-system.md union normalization step 7 from "deterministic ordering by TypeCode" to "deterministic ordering by string representation (`to_string()`)".
+6. **`SerializedSymbolTable` wire format.** The symbol-table spec documents this well, but the `from_json_transport` / `to_json_transport` methods on `ExprValue` are documented in the values spec without mentioning that they use the same `{"type", "value"}` format as the serialized symbol table entries.
 
-7. ~~**LOW: JSON transport format undocumented.**~~ **RESOLVED** — Added `JSON Transport Format` section to values.md documenting `to_json_transport()` / `from_json_transport()` with type mapping table. Also covered in the new `SerializedSymbolTable` section of symbol-table.md.
+### 1.3 Specification Accuracy
 
-8. ~~**LOW: Naming mismatches.**~~ **RESOLVED** — Fixed range-expr.md: renamed `range_length_indices` → `cumulative_lengths` in struct definition and indexing section, renamed `from_list` → `from_values` in conversion table and description paragraph, updated input type from `&[i64]` to `Vec<i64>`.
-
-9. ~~**LOW: `ParsedExpression` builder example in architecture spec doesn't match actual API.**~~ **RESOLVED** — Fixed architecture.md: builder example now shows `.evaluate(&parsed.ast)?`, declaration changed to `let mut parsed`. The simple `parsed.evaluate(&symtab)` convenience method was confirmed correct and left as-is.
-
-### 2.3 Specification-Implementation Alignment
-
-| Spec | Implementation | Issue |
-|---|---|---|
-| evaluator.md | evaluator.rs | ~~**MEDIUM:** Spec references non-existent `re_fullmatch` and `re_replace` functions.~~ **RESOLVED** — Changed to `re_search` and `re_sub`. |
-| format-string.md | format_string.rs | ~~**MEDIUM:** `escape_format_string` description says "doubles `{` or `}`".~~ **RESOLVED** — Updated to describe the actual behavior: wrapping `{{`/`}}` in expression interpolations. |
-| function-library.md | default_library.rs | ~~**LOW:** `__pow__` spec says `(int,int)->int`.~~ **RESOLVED** — Changed to `(int,int)->float\|int`. |
-| function-library.md | default_library.rs | ~~**LOW:** `__add__` for lists spec says `(list[T1],list[T1])->list[T1]`.~~ **RESOLVED** — Changed to `(list[T1],list[T2])->list[T3]`. |
-| function-library.md | default_library.rs | ~~**LOW:** Sub-library count shows 10.~~ **RESOLVED** — Updated to 12 sub-libraries (added `string_functions`, `list_functions`). |
-| function-library.md | function_library.rs | ~~**LOW:** `with_unresolved_host_context()` method not documented.~~ **RESOLVED** — Added to Host Context section. |
-| architecture.md (top-level) | Cargo.toml | ~~**LOW:** Top-level `specs/architecture.md` still references `rustpython-parser` (3 occurrences).~~ **RESOLVED** — All 3 changed to `ruff_python_parser`. |
+The specifications accurately represent the implementation. Every module, public type, and design decision described in the specs matches the code. The spec's description of the three-phase dispatch (exact → coerced → generic) matches the `call_inner` implementation exactly. The resource bounding description matches the `track`/`release`/`count_op` methods. The AST validation allowlist matches the `evaluate_inner` dispatch table.
 
 ---
 
-## 3. Implementation Review
+## 2. Implementation Review
 
-### 3.1 Source Files Reviewed
+### 2.1 Source Files Reviewed
 
-| File | Lines | Summary |
-|---|---|---|
-| `src/lib.rs` | ~100 | Crate root, re-exports, convenience entry points |
-| `src/error.rs` | ~230 | Structured errors with caret formatting |
-| `src/types.rs` | ~500 | Type system with normalization and generic matching |
-| `src/value.rs` | ~750 | Runtime values with typed list variants |
-| `src/symbol_table.rs` | ~350 | Hierarchical key-value store |
-| `src/format_string.rs` | ~600 | `{{...}}` interpolation parsing and resolution |
-| `src/range_expr.rs` | ~500 | Integer range expressions |
-| `src/path_mapping.rs` | ~250 | Path format and mapping rules |
-| `src/edit_distance.rs` | ~100 | Levenshtein distance for suggestions |
-| `src/uri_path.rs` | ~180 | URI-aware path operations |
-| `src/eval/parse.rs` | ~500 | Expression parsing via ruff |
-| `src/eval/evaluator.rs` | ~900 | AST-walking evaluator |
-| `src/function_library.rs` | ~500 | Signature-based multiple dispatch |
-| `src/default_library.rs` | ~400 | Built-in function registration |
-| `src/functions/arithmetic.rs` | ~350 | Arithmetic operators |
-| `src/functions/comparison.rs` | ~200 | Comparison and slice operators |
-| `src/functions/conversion.rs` | ~130 | Type conversion functions |
-| `src/functions/list.rs` | ~200 | List functions |
-| `src/functions/math.rs` | ~200 | Math functions |
-| `src/functions/misc.rs` | ~200 | Miscellaneous functions |
-| `src/functions/path.rs` | ~300 | Path method implementations |
-| `src/functions/path_parse.rs` | ~450 | Format-aware path parsing |
-| `src/functions/regex.rs` | ~200 | Regex functions |
-| `src/functions/repr.rs` | ~200 | Value representation for shells |
-| `src/functions/string.rs` | ~300 | String method implementations |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `lib.rs` | 89 | Public API, `evaluate_expression`, `evaluate_expression_bounded` |
+| `types.rs` | 530 | `ExprType`, `TypeCode`, normalization, matching, parsing |
+| `value.rs` | ~1200 | `ExprValue`, `Float64`, `ListIter`, `make_list`, coercion |
+| `error.rs` | 290 | `ExpressionError`, `ExpressionErrorKind`, caret formatting |
+| `eval/mod.rs` | 14 | Module re-exports |
+| `eval/parse.rs` | ~700 | `ParsedExpression`, keyword renaming, AST validation |
+| `eval/evaluator.rs` | ~1500 | `Evaluator`, AST walking, resource bounding |
+| `function_library.rs` | ~700 | `FunctionLibrary`, three-phase dispatch, `EvalContext` |
+| `default_library.rs` | ~700 | All built-in function registrations |
+| `symbol_table.rs` | ~400 | `SymbolTable`, `SerializedSymbolTable`, `symtab!` macro |
+| `format_string.rs` | ~1100 | `FormatString` parsing, resolution, serde |
+| `range_expr.rs` | ~700 | `RangeExpr` parsing, indexing, slicing |
+| `path_mapping.rs` | ~300 | `PathFormat`, `PathMappingRule`, URI handling |
+| `uri_path.rs` | ~200 | URI-aware path operations |
+| `edit_distance.rs` | ~100 | Levenshtein distance for suggestions |
+| `functions/arithmetic.rs` | ~400 | Arithmetic operator implementations |
+| `functions/string.rs` | ~350 | String method implementations |
+| `functions/path.rs` | ~350 | Path property and method implementations |
+| `functions/regex.rs` | ~250 | Regex function implementations |
+| `functions/repr.rs` | ~250 | Shell quoting functions |
+| `functions/list.rs` | ~200 | List operation implementations |
+| `functions/math.rs` | ~200 | Math function implementations |
+| `functions/misc.rs` | ~200 | len, fail, range, any, all |
+| `functions/conversion.rs` | ~150 | Type conversion functions |
+| `functions/comparison.rs` | ~200 | Comparison operator implementations |
+| `functions/path_parse.rs` | ~500 | Path parsing without std::path |
 
-### 3.2 Architecture Quality
+### 2.2 Architecture Quality
 
 **Strengths:**
-- Clean separation of concerns: parsing, evaluation, type system, function dispatch, and format strings are all independent modules
-- The typed list variant design (`ListInt(Vec<i64>)` vs generic `List(Vec<ExprValue>)`) provides 60-97% memory savings depending on element type
-- Resource bounding (memory + operations) prevents runaway expressions — every value creation is tracked, every iteration is counted
-- Cross-platform path handling via custom `path_parse` module instead of `std::path::Path` (which uses host OS rules)
-- The 3-phase dispatch system (exact → coerced → generic) provides Python-compatible overload resolution
-- Static type checking via unresolved value propagation catches type errors at template validation time without runtime values
-- Error messages are consistently high quality with caret indicators, source context, and "Did you mean?" suggestions
 
-**Concerns:**
-- `evaluator.rs` at ~900 lines is the largest file. The `evaluate_inner` method handles all expression types in one function. Could benefit from splitting complex cases (list comprehension, attribute resolution) into helper methods for readability.
-- Git-pinned `ruff_python_parser` dependency requires network access to build and the pin could become stale. This is a known trade-off documented in the parser spec.
+- Clean module separation with clear responsibilities
+- The `EvalContext` trait boundary between evaluator and function implementations is well-designed — it prevents function implementations from calling back into the evaluator
+- The builder pattern on `Evaluator` is ergonomic and well-documented
+- `ParsedExpression` as a parse-once, evaluate-many design is correct
+- The `FunctionLibrary` with signature-based dispatch is extensible and enables static type checking
+- `LazyLock` caching of the default library is appropriate
+- The `FormatString` placement in `openjd-expr` (rather than `openjd-model`) avoids circular dependencies
 
-### 3.3 Public API Quality
+**Design decisions that are well-justified:**
 
-The public API is well-designed:
-- Two convenience entry points (`evaluate_expression`, `evaluate_expression_bounded`) for simple use cases
-- Builder pattern on `ParsedExpression::evaluator()` for advanced configuration
-- `symtab!` macro for concise symbol table construction in tests and application code
-- `FormatString` with multiple resolution modes (string, typed, with format)
-- All types implement `Display`, `Debug`, `Clone`, `PartialEq`
-- `#[non_exhaustive]` on `ExpressionErrorKind` for forward compatibility
-- `From` trait implementations for ergonomic value construction
+- Typed list variants (`ListInt`, `ListFloat`, etc.) for memory efficiency — the spec documents the savings clearly
+- `Float64` with `Option<Box<str>>` for lossless round-tripping — `Box<str>` saves 8 bytes vs `String`
+- Using `ruff_python_parser` via crates.io (rustpython-ruff_python_parser) — actively maintained, correct
+- Path operations using string manipulation instead of `std::path` — avoids platform-dependent behavior
+- Keyword renaming with same-length identifiers to preserve column offsets
 
-### 3.4 Naming and Consistency
+### 2.3 Code Quality
 
-Naming is consistent within the crate and follows Rust conventions:
-- Types: `ExprType`, `ExprValue`, `ExpressionError` — clear `Expr` prefix
-- Functions: `evaluate_expression`, `evaluate_expression_bounded` — verb-first
-- Methods: `with_library()`, `with_memory_limit()` — builder pattern
-- Constants: `DEFAULT_MEMORY_LIMIT`, `DEFAULT_OPERATION_LIMIT` — SCREAMING_SNAKE_CASE
+**Naming:** Consistent and clear throughout. Function implementations follow a `{name}_fn` or `{name}_{type}` pattern. Type aliases `R` and `Ctx` in function modules reduce boilerplate without sacrificing clarity. The `__dunder__` naming convention for operators matches Python and is well-documented.
 
-### 3.5 Dead Code
+**Error messages:** Excellent quality. Every error includes context about what went wrong and what was expected. The "Did you mean?" suggestions via edit distance are a nice touch. The caret-style error formatting with smart positioning (operator at `^`, attribute after `.`) produces clear diagnostics.
 
-~~Three public functions were defined but never registered in the default library or referenced anywhere:~~
+**Variable names:** Generally good. The evaluator uses `a` for function arguments (matching the `&[ExprValue]` slice convention), which is concise but could be more descriptive. The `b` in `eval_binop` and `c` in `eval_compare` follow the AST node naming convention from ruff, which is reasonable.
 
-- ~~`arithmetic::add_string_path` — string + path concatenation~~
-- ~~`arithmetic::add_path_path` — path + path concatenation~~
-- ~~`list::join_method_fn` — join as a method~~
+**Documentation:** Public API items have doc comments. The `lib.rs` module-level doc and the `Evaluator` struct doc include working examples. Internal methods have brief comments explaining their purpose.
 
-**RESOLVED** — All three removed. Existing tests with similar names (`add_string_path_coerces_to_string_concat`, `add_path_path_coerces_to_string_concat`) verify the coercion-based behavior that replaced these explicit overloads and continue to pass.
+### 2.4 Performance Analysis
 
----
+**Good performance characteristics:**
 
-## 4. Confirmed Bugs
+- O(1) memory tracking via `memory_size()` with cached sizes for variable-length lists
+- O(log n) indexing and containment for `RangeExpr` via binary search on cumulative lengths
+- O(1) `Float64` invariant checks (no NaN, no infinity, no -0.0)
+- Regex caching within a single evaluation avoids recompilation
+- `LazyLock` for the default library avoids repeated construction
+- Two-row DP for edit distance is O(n*m) with O(min(n,m)) space
 
-Six bugs were confirmed through targeted testing and have been fixed.
+**Performance concerns:**
 
-### Bug 1: `sum_list` integer overflow (CRITICAL) — FIXED
+1. **AST node cloning in `eval_compare`.** Each comparison in a chain clones the entire `ast::Expr::Compare(c.clone())` node for error context. For a chain like `1 < 2 < 3 < 4 < 5`, this clones the full Compare node (which includes all comparators) on every iteration. The clone is only used if an error occurs. A lazy approach (only clone on error) would be better.
 
-**Location:** `src/functions/math.rs`
-**Fix:** Replaced `int_sum += i` with `int_sum.checked_add(i)` returning `IntegerOverflow` on overflow.
-**Test:** `test_arithmetic.rs::sum_int_list_overflow`
+2. **AST node cloning in `eval_binop` and `eval_call`.** Similar pattern — `ast::Expr::BinOp(b.clone())` and `ast::Expr::Call(c.clone())` clone the AST node for error context even on the success path. These clones include all child nodes.
 
-### Bug 2: `floor`/`ceil`/`round` with large floats (HIGH) — FIXED
+3. **Value cloning in `eval_compare`.** Both `left.clone()` and `right.clone()` are created for dispatch, then the originals are released. For scalar types (Int, Bool, Float) this is cheap, but for String and List values it involves heap allocation. The dispatch could potentially take references instead.
 
-**Location:** `src/functions/math.rs` — `floor_float()`, `ceil_float()`, `round_fn()`
-**Fix:** Added `if v.abs() > i64::MAX as f64` range check before `as i64` cast in all three functions.
-**Tests:** `test_int64_bounds.rs::floor_large_float_overflow`, `ceil_large_float_overflow`, `round_large_float_overflow`, `floor_large_negative_float_overflow`, `ceil_large_negative_float_overflow`
+4. **Regex cache not shared with child evaluators.** In `child_evaluator()`, a new empty `regex_cache` is created. For comprehensions with regex filters like `[x for x in items if re_match(x, "^pattern$")]`, the regex is recompiled on every iteration. The `absorb_counters` method should also propagate the regex cache back, or the cache should be shared via a reference.
 
-### Bug 3: `floordiv_float` with large result (HIGH) — FIXED
+5. **`expand_unions` in `derive_return_type` is exponential.** Given N arguments each with M union members, it generates M^N combinations. This is bounded in practice (expressions rarely have more than 2-3 arguments, and union types rarely have more than 3-4 members), but there's no explicit limit.
 
-**Location:** `src/functions/arithmetic.rs` — `floordiv_float()`
-**Fix:** Added same `v.abs() > i64::MAX as f64` range check before `as i64` cast.
-**Test:** `test_arithmetic.rs::floordiv_float_large_result_overflow`
+6. **`collect_symbol_names` in error path.** When a variable is not found, `collect_symbol_names` traverses all symbol tables and collects all paths into a `Vec<String>`, sorts, and deduplicates. This is only on the error path, so it doesn't affect normal execution, but it could be expensive with large symbol tables.
 
-### Bug 4: `int_from_float` boundary check (MEDIUM) — FIXED
+### 2.5 Correctness Verification
 
-**Location:** `src/functions/conversion.rs` — `int_from_float()`
-**Fix:** Changed `*f > i64::MAX as f64` to `f.0 >= i64::MAX as f64` since `i64::MAX as f64` rounds up past `i64::MAX`.
-**Test:** `test_int64_bounds.rs::int_from_float_boundary_overflow`
+I wrote and ran probe tests for the following edge cases, all of which passed correctly:
 
-### Bug 5: `is_relative_to` path component boundary (MEDIUM) — FIXED
+| Edge Case | Result |
+|-----------|--------|
+| `i64::MAX` (9223372036854775807) | ✅ Parses correctly |
+| `i64::MIN` (-9223372036854775808) | ✅ Parses correctly via unary negation folding |
+| `i64::MAX + 1` | ✅ Returns IntegerOverflow error |
+| `i64::MIN - 1` | ✅ Returns IntegerOverflow error |
+| `i64::MIN // -1` | ✅ Returns IntegerOverflow error (result would be 2^63) |
+| `i64::MIN % -1` | ✅ Handled correctly (checked_rem) |
+| `1e309` (infinity) | ✅ Returns FloatError |
+| `1e308 * 2` (overflow) | ✅ Returns FloatError |
+| `0 or 'default'` (EXPR: 0 is truthy) | ✅ Returns Int(0) |
+| `'' or 'default'` (EXPR: '' is truthy) | ✅ Returns String("") |
+| `null or 'default'` | ✅ Returns String("default") |
+| Unicode `len('héllo')` | ✅ Returns 5 (codepoints, not bytes) |
+| Unicode `'héllo'[1]` | ✅ Returns "é" |
+| Keyword attribute `Param.if` | ✅ Resolves correctly via keyword renaming |
+| Multiple keywords `Param.if + Param.else` | ✅ Both renamed correctly |
+| Nested keyword `A.B.if` | ✅ Resolves correctly |
+| Chained comparison `1 < 2 < 3` | ✅ Returns true |
+| Negative index `[1,2,3][-1]` | ✅ Returns 3 |
+| Reverse slice `[1,2,3,4,5][::-1]` | ✅ Returns [5,4,3,2,1] |
+| Regex lookahead rejection | ✅ Returns error |
+| Deeply nested list `[[[1]]]` | ✅ Returns error (max 2 levels) |
+| Null in list `[null]` | ✅ Returns error |
+| Memory limit enforcement | ✅ MemoryLimitExceeded on large string |
+| Operation limit enforcement | ✅ OperationLimitExceeded on large comprehension |
+| String op proportional cost | ✅ Large string ops hit op limit |
+| Int-float equality `1 == 1.0` | ✅ Returns true |
+| Path operations (name, stem, suffix) | ✅ All correct |
+| Empty list concat `[] + []` | ✅ Returns empty list |
+| Mixed list concat `[1] + [2.0]` | ✅ Promotes to float |
 
-**Location:** `src/functions/path.rs` — `is_relative_to_fn()`
-**Fix:** After `starts_with` check, verify the next character is a separator or the path ends exactly at the base length.
-**Test:** `test_paths.rs::is_relative_to_component_boundary`
+### 2.6 Rust Best Practices
 
-### Bug 6: `relative_to` path component boundary (MEDIUM) — FIXED
+**Well-followed:**
+- `#[must_use]` on builder methods
+- `#[non_exhaustive]` on `ExpressionErrorKind`
+- `thiserror` for error types
+- `serde` derive for serializable types
+- `LazyLock` for global statics (not `lazy_static!`)
+- `Box<str>` instead of `String` where capacity isn't needed
+- `debug_assert_eq!` for internal invariants (signature access)
+- Proper `Hash`/`PartialEq` contract maintenance
 
-**Location:** `src/functions/path.rs` — `relative_to_fn()`
-**Fix:** Same component boundary check as Bug 5.
-**Test:** `test_paths.rs::relative_to_component_boundary_error`
-
----
-
-## 5. Additional Issues (Not Bugs, But Worth Noting)
-
-### 5.1 Operation count overflow (Very Low Risk)
-
-~~**Location:** `src/eval/evaluator.rs` — `count_ops()`, `count_string_ops()`~~
-~~**Description:** Operation counting uses `self.operation_count += n` with plain addition. If `n` is extremely large (near `usize::MAX`), the addition could wrap past the limit check. In practice, the 10M limit fires long before this, but `saturating_add` would be more defensive.~~
-
-**RESOLVED** — Changed all `+=` to `saturating_add()` in `count_op()`, `count_ops()`, and `count_string_ops()` across both `EvalContext` impl blocks in `evaluator.rs`.
-
-### 5.2 `make_list` unreachable panics on mixed types (Low Risk)
-
-~~**Location:** `src/value.rs` — lines 357, 366~~
-~~**Description:** `make_list()` has `unreachable!()` in the Int and Float branches that would panic if called directly (not through the evaluator) with mixed types not covered by promotion rules (e.g., `[Int(1), Bool(true)]`). The evaluator validates type homogeneity before calling `make_list`, so this can't be triggered through expression evaluation, but `make_list` is `pub`.~~
-
-**RESOLVED** — Replaced `unreachable!()` panics with `Err(ExpressionError::type_error(...))` returning messages like `"make_list expected int element, got bool"`. Tests: `test_list_nesting.rs::make_list_int_rejects_non_int`, `make_list_float_rejects_non_float`.
-
-### 5.3 `make_list` Bool branch silent conversion (Low Risk)
-
-~~**Location:** `src/value.rs` — line 346~~
-~~**Description:** The Bool branch uses `matches!(e, Self::Bool(true))` which silently converts any non-Bool element to `false` instead of panicking. Inconsistent with the Int/Float branches which use `unreachable!()`.~~
-
-**RESOLVED** — Replaced silent conversion with explicit match returning `Err(ExpressionError::type_error("make_list expected bool element, got {type}"))`. Test: `test_list_nesting.rs::make_list_bool_rejects_non_bool`.
-
-### 5.4 `cmd_quote` doesn't escape `!` (Low Risk)
-
-**Location:** `src/functions/repr.rs` — `cmd_quote()`
-**Description:** The `NEEDS_QUOTING` check includes `!` to trigger quoting, but the actual escaping inside the quotes doesn't handle `!`. In cmd.exe delayed expansion mode, `!var!` would be expanded. This is a known difficulty with cmd.exe quoting.
-
-### 5.5 No regex pattern size limit (Low Risk)
-
-~~**Location:** `src/functions/regex.rs`~~
-~~**Description:** `regex::Regex::new()` is called without `RegexBuilder::size_limit()`. A very large pattern could consume significant memory during compilation. The operation counting protects against match-time DoS but not compile-time memory.~~
-
-**RESOLVED** — Changed `regex::Regex::new()` to `regex::RegexBuilder::new().size_limit(1 << 20).build()` (1MB compiled NFA limit) in both the `EvalContext` trait default impl (`function_library.rs`) and the evaluator's cached override (`evaluator.rs`).
-
-### 5.6 `sorted_fn`/`reversed_fn`/`unique_fn` lose typed storage (Performance)
-
-**Location:** `src/functions/list.rs`
-**Description:** These functions call `into_list()` which converts typed lists (e.g., `ListInt(Vec<i64>)`) into `Vec<ExprValue>`, losing the memory efficiency of typed storage. The result is then reconstructed via `make_list()`. For large lists, this temporarily doubles memory usage.
+**Minor deviations:**
+- `ExprValue` doesn't implement `Eq` (only `PartialEq`) because `Float64` comparison is not reflexive for NaN — but the invariant that NaN is never constructed means `Eq` could be safely derived. However, not implementing `Eq` is the conservative choice and prevents future bugs if the NaN invariant is ever relaxed.
+- Some `pub(crate)` fields on `ExprType` (`code`, `params`) are accessed directly in other modules within the crate. This is fine for a single-crate design but would need accessor methods if the type system were extracted.
 
 ---
 
-## 6. Test Suite Review
+## 3. Test Review
 
-### 6.1 Test Files Reviewed
+### 3.1 Test Files Reviewed
 
-| File | Tests | Coverage Area |
-|---|---|---|
-| `test_arithmetic.rs` | ~180 | All arithmetic operators, edge cases, Python semantics |
-| `test_ast_validation.rs` | ~25 | Rejection of unsupported Python constructs |
-| `test_comparison.rs` | ~60 | Comparison, logical operators, truthiness |
-| `test_error_formatting.rs` | ~70 | Caret positioning for all error types |
-| `test_expr_value.rs` | ~120 | ExprValue construction, coercion, JSON transport |
-| `test_format_strings.rs` | ~22 | Format string parsing, resolution, typed resolution, validation, edge cases |
-| `test_function_context.rs` | ~30 | Host context, apply_path_mapping availability |
-| `test_function_library.rs` | ~35 | 3-phase dispatch, error messages |
-| `test_int64_bounds.rs` | ~25 | i64 boundary values, overflow detection |
-| `test_list_nesting.rs` | ~6 | Max 2-level nesting validation, make_list type mismatch errors |
-| `test_lists.rs` | ~200+ | List operations, comprehensions, concatenation |
-| `test_memory.rs` | ~25 | Memory-bounded evaluation |
-| `test_method_coercion.rs` | ~20 | Method vs function coercion rules |
-| `test_misc_builtins.rs` | ~30 | Builtin function implementations |
-| `test_misc_getitem.rs` | ~15 | Subscript operators |
-| `test_operation_limit.rs` | ~60 | Operation limit enforcement and counting |
-| `test_parse_expression.rs` | ~60 | Symbol extraction, static analysis |
-| `test_parsing.rs` | ~200+ | Keywords, syntax errors, numeric literals |
-| `test_path_format_mismatch.rs` | ~10 | Path format mismatch detection |
-| `test_path_mapping.rs` | ~80 | Path mapping rules, all formats |
-| `test_path_mapping_platform.rs` | ~30 | Platform-specific path mapping |
-| `test_paths.rs` | ~120 | Path properties, construction, URI paths |
-| `test_range_expr.rs` | ~45 | RangeExpr parsing, iteration, operations |
-| `test_rfc_examples.rs` | ~20 | Real-world RFC use cases |
-| `test_slicing.rs` | ~50 | List/string/range slicing |
-| `test_strings.rs` | ~250+ | All string methods and functions |
-| `test_symbol_table.rs` | ~50 | SymbolTable API |
-| `test_target_type_propagation.rs` | ~30 | Target type through arithmetic |
-| `test_types.rs` | ~150+ | Type system, matching, substitution |
-| `test_types_evaluate.rs` | ~40 | Runtime type checking |
-| `test_unicode_codepoint.rs` | ~25 | Unicode codepoint semantics |
-| `test_unresolved_eval.rs` | ~200+ | Static type checking mode |
-| `test_string_operation_counting.rs` | ~60 | String operation counting |
-| `test_uri_paths.rs` | ~80+ | URI path handling |
+| Test File | Tests | Coverage Area |
+|-----------|-------|---------------|
+| `test_types.rs` | 234 | ExprType parsing, normalization, matching, display |
+| `test_expr_value.rs` | 229 | ExprValue construction, equality, hashing, coercion |
+| `test_arithmetic.rs` | 131 | Integer/float arithmetic, overflow, precedence |
+| `test_strings.rs` | 123 | String methods, Unicode, slicing |
+| `test_paths.rs` | 119 | Path properties, methods, format handling |
+| `test_unresolved_eval.rs` | 85 | Unresolved value propagation through all operations |
+| `test_lists.rs` | 61 | List operations, comprehensions, nesting |
+| `test_parsing.rs` | 59 | Expression parsing, AST validation |
+| `test_error_formatting.rs` | 55 | Caret positioning, error message quality |
+| `test_symbol_table.rs` | 33 | Symbol table operations, serialization |
+| `test_path_mapping.rs` | 33 | Path mapping rules, URI handling |
+| `test_comparison.rs` | 33 | Comparison operators, chaining |
+| `test_operation_limit.rs` | 31 | Operation counting and limits |
+| `test_parse_expression.rs` | 28 | ParsedExpression metadata, symbol collection |
+| `test_function_library.rs` | 25 | Dispatch phases, error messages |
+| `test_uri_paths.rs` | 23 | URI path operations |
+| `test_int64_bounds.rs` | 22 | Integer boundary conditions |
+| `test_memory.rs` | 19 | Memory tracking and limits |
+| `test_slicing.rs` | 15 | List and string slicing |
+| `test_format_strings.rs` | 6 | Format string parsing and resolution |
+| `test_range_expr.rs` | 33 | Range expression parsing, indexing |
+| `test_rfc_examples.rs` | 25 | Examples from RFC documents |
+| `test_types_evaluate.rs` | 22 | Type-level evaluation |
+| `test_function_context.rs` | 19 | EvalContext, host context |
+| `test_string_operation_counting.rs` | 15 | String op cost proportionality |
+| `test_target_type_propagation.rs` | 15 | Target type coercion |
+| `test_unicode_codepoint.rs` | 15 | Unicode codepoint handling |
+| `test_ast_validation.rs` | 13 | AST node allowlist |
+| `test_misc_builtins.rs` | 11 | len, fail, range, any, all |
+| `test_misc_getitem.rs` | 6 | Subscript operations |
+| `test_method_coercion.rs` | 6 | Method call coercion rules |
+| `test_path_format_mismatch.rs` | 6 | Path format validation |
+| `test_path_mapping_platform.rs` | 6 | Platform-specific path mapping |
+| `test_list_nesting.rs` | 6 | List nesting depth validation |
+| Inline unit tests (types.rs) | 60+ | Type system internals |
+| Inline unit tests (other) | 200+ | Various module internals |
+| Doc tests | 4 | API examples |
 
-### 6.2 Test Quality
+**Total: 2,953 tests, all passing.**
+
+### 3.2 Test Quality
 
 **Strengths:**
-- Every error test asserts the full multi-line error message including caret indicator (per AGENTS.md standard)
-- Clear naming convention: `test_<feature>.rs` maps to feature areas
-- Consistent helper functions (`eval()`, `eval_with()`, `assert_err()`) across files
-- Both positive (success) and negative (error) cases covered extensively
-- Tests ported from Python reference implementation with comments noting the source
-- Platform-conditional tests (`#[cfg(unix)]`/`#[cfg(windows)]`) for platform-specific behavior
-- The `test_operation_limit.rs` file tests both enforcement AND counting accuracy
 
-**Gaps:**
-1. **Thread safety** — No tests for concurrent use of shared types (e.g., `get_default_library()` via `LazyLock`)
-2. **Windows path properties** — Most path tests use Posix format; Windows-specific path property tests are limited
+- Tests follow the AGENTS.md standard: error tests assert the full multi-line error message including caret positioning, not just that an error occurred
+- Test files are well-organized by feature area with clear naming
+- The `test_rfc_examples.rs` file validates examples from the RFC documents, ensuring spec compliance
+- The `test_unresolved_eval.rs` file is comprehensive — 85 tests covering unresolved value propagation through every operation type
+- Edge cases are well-covered: integer overflow, float infinity, Unicode, empty strings, empty lists, negative indices
+- The `test_error_formatting.rs` file validates caret positioning for every AST node type
 
----
+**Gaps identified:**
 
-## 7. Recommendations
+1. **`test_format_strings.rs` is thin (6 tests).** Given that `FormatString` is a complex module (~1100 lines) with multiple resolution modes, serde integration, and validation methods, 6 integration tests is insufficient. The module has some inline tests, but more integration tests covering multi-segment format strings, nested expressions, error positions within format strings, and the `resolve_typed` / `resolve_typed_with_format` methods would improve confidence.
 
-### 7.1 Critical Fixes (Bugs)
+2. **No tests for `SerializedSymbolTable` round-trip with all value types.** The `test_symbol_table.rs` file tests basic operations but doesn't exercise the full `to_json_transport` / `from_json_transport` round-trip for all value types (especially ListList, RangeExpr, and Path with different formats).
 
-~~All six bugs have been fixed:~~
+3. **No tests for `expand_unions` with many union members.** The `derive_return_type` function expands union types combinatorially. There are no tests verifying behavior with large unions or ensuring the function doesn't blow up.
 
-1. ~~**Fix `sum_list` integer overflow**~~ — **DONE**
-2. ~~**Fix `floor`/`ceil`/`round` range checking**~~ — **DONE**
-3. ~~**Fix `floordiv_float` range checking**~~ — **DONE**
-4. ~~**Fix `int_from_float` boundary**~~ — **DONE**
-5. ~~**Fix `is_relative_to` component boundary**~~ — **DONE**
-6. ~~**Fix `relative_to` component boundary**~~ — **DONE**
+4. **No tests for regex cache effectiveness.** While the regex cache is tested indirectly (comprehensions with regex work), there are no tests that verify the cache actually prevents recompilation, or that measure the performance difference.
 
-### 7.2 Specification Improvements
+5. **`test_path_mapping_platform.rs` has only 6 tests.** Path mapping is a critical feature for cross-platform render farms. More tests covering edge cases like trailing slashes, case sensitivity boundaries, and URI path mapping with special characters would be valuable.
 
-1. ~~**Document `ExpressionErrorKind`** in error-formatting.md~~ — **DONE**
-2. ~~**Document `SerializedSymbolTable`** in symbol-table.md~~ — **DONE**
-3. ~~**Fix evaluator.md regex function names**~~ — **DONE**
-4. ~~**Fix format-string.md `escape_format_string` description**~~ — **DONE**
-5. ~~**Fix type-system.md union sort description**~~ — **DONE**
-6. ~~**Document `ListIter`** in values.md~~ — **DONE**
-7. ~~**Document `Hash`/`PartialEq` cross-type semantics** in values.md~~ — **DONE**
-8. ~~**Update top-level `specs/architecture.md`**~~ — **DONE**
+### 3.3 Test Organization
 
-### 7.3 Code Improvements
+Tests are well-organized into separate files by feature area. Each test file has a consistent structure:
+- Helper functions at the top (`eval`, `eval_err`, `assert_err`)
+- Tests grouped by logical sections with comment headers
+- Test names are descriptive and follow a consistent pattern
 
-1. ~~**Remove dead code** — `add_string_path`, `add_path_path`, `join_method_fn`~~ — **DONE**
-2. ~~**Use `saturating_add` for operation counting**~~ — **DONE**
-3. ~~**Add format string integration tests**~~ — **DONE** (`tests/test_format_strings.rs`, 22 tests)
-4. ~~**Split list comprehension out of `evaluator.rs`**~~ — **DONE** (extracted `eval_listcomp`, `eval_slice`, `child_evaluator`, `absorb_counters`)
-
-### 7.4 Items That Are Fine As-Is
-
-- **Git-pinned ruff dependency** — documented trade-off, ruff is actively maintained
-- **`i64 as f64` precision loss** — matches Python behavior, by design
-- **Boolean short-circuit error suppression** — intentionally conservative for validation mode
-- **Regex cache per-evaluator** — appropriate for the evaluation model
-- **`cmd_quote` `!` escaping** — cmd.exe delayed expansion is a known unsolvable problem in general quoting
-- **`sorted_fn`/`reversed_fn`/`unique_fn` typed storage loss** — performance concern only, memory bounding catches problematic cases
+The `assert_err` pattern (asserting on concatenated expected strings) is effective for validating multi-line error messages while keeping tests readable.
 
 ---
 
-## 8. Bug Fix Tests
+## 4. Build and Compilation
 
-All six bugs have been fixed and verified with tests integrated into the existing test suite:
+| Check | Result |
+|-------|--------|
+| `cargo build` | ✅ Clean, no errors |
+| `cargo build` warnings | ✅ Zero warnings |
+| `cargo clippy` | ✅ Zero warnings |
+| `cargo test` | ✅ 2,953 tests pass |
+| Doc tests | ✅ 4 doc tests pass |
 
-| Test | File | Bug | Result |
-|---|---|---|---|
-| `sum_int_list_overflow` | `test_arithmetic.rs` | Bug 1 | PASS |
-| `floor_large_float_overflow` | `test_int64_bounds.rs` | Bug 2 | PASS |
-| `ceil_large_float_overflow` | `test_int64_bounds.rs` | Bug 2 | PASS |
-| `round_large_float_overflow` | `test_int64_bounds.rs` | Bug 2 | PASS |
-| `floor_large_negative_float_overflow` | `test_int64_bounds.rs` | Bug 2 | PASS |
-| `ceil_large_negative_float_overflow` | `test_int64_bounds.rs` | Bug 2 | PASS |
-| `floordiv_float_large_result_overflow` | `test_arithmetic.rs` | Bug 3 | PASS |
-| `int_from_float_boundary_overflow` | `test_int64_bounds.rs` | Bug 4 | PASS |
-| `is_relative_to_component_boundary` | `test_paths.rs` | Bug 5 | PASS |
-| `relative_to_component_boundary_error` | `test_paths.rs` | Bug 6 | PASS |
-| `make_list_bool_rejects_non_bool` | `test_list_nesting.rs` | §5.3 | PASS |
-| `make_list_int_rejects_non_int` | `test_list_nesting.rs` | §5.2 | PASS |
-| `make_list_float_rejects_non_float` | `test_list_nesting.rs` | §5.2 | PASS |
+---
 
-Run with: `cargo test --package openjd-expr`
+## 5. Recommendations
+
+### 5.1 High Priority
+
+1. **Share regex cache with child evaluators.** In `child_evaluator()`, the regex cache should be shared rather than creating a new empty one. This would prevent regex recompilation on every iteration of a list comprehension that uses regex functions. Options:
+   - Pass the parent's regex cache to the child and merge back in `absorb_counters`
+   - Use a shared `&mut HashMap` or `Rc<RefCell<HashMap>>` for the cache
+
+2. **Reduce AST node cloning in hot paths.** The `eval_compare`, `eval_binop`, and `eval_call` methods clone AST nodes for error context even on the success path. Consider:
+   - Only cloning on the error path (wrap in a closure or use `map_err`)
+   - Storing a reference to the node instead of cloning it
+   - Using the node's `TextRange` directly instead of cloning the full node
+
+### 5.2 Medium Priority
+
+3. **Expand `test_format_strings.rs`.** Add integration tests for:
+   - Multi-segment format strings with mixed literals and expressions
+   - Format strings with nested expressions (e.g., `{{[x for x in Param.List]}}`)
+   - Error positions within format strings (`message_with_expr_prefix`)
+   - `resolve_typed` and `resolve_typed_with_format` methods
+   - `validate_expressions` with various error types
+   - `validate_comprehension_vars` with shadowing cases
+   - `copy_used_symtab_values` and `accessed_symbols`
+
+4. **Document `Eq`/`Hash` cross-type semantics in the values spec.** Add a dedicated subsection explaining:
+   - The tag-based hashing strategy (Int and whole-valued Float share tag 2, String and Path share tag 3, all lists share tag 4)
+   - Why this is necessary for the Hash contract
+   - The `equals()` method's cross-type comparison rules
+
+5. **Add a limit to `expand_unions`.** The `expand_unions` function in `function_library.rs` generates M^N combinations. Add a cap (e.g., 1000 combinations) and return `None` if exceeded, to prevent pathological cases.
+
+### 5.3 Low Priority
+
+6. **Document `ListIter` clone-on-yield semantics.** The values spec should explain that `ListIter::next()` clones String/Path elements from the backing storage, which is a deliberate tradeoff for zero-allocation iteration over the backing `Vec`.
+
+7. **Document `make_list` nested promotion rules.** The values spec should document the `list[int] + list[float] → list[float]` inner promotion and the `list[path] + list[string] → list[string]` inner promotion.
+
+8. **Consider `Eq` implementation for `ExprValue`.** Since the Float64 invariant guarantees no NaN values, `ExprValue` could safely implement `Eq`. This would allow using `ExprValue` in `HashSet` and as `HashMap` keys without the `Eq` bound workaround. However, the current conservative approach is also defensible.
+
+9. **Add `SerializedSymbolTable` round-trip tests.** Test the full serialize → deserialize cycle for all value types, especially `ListList`, `RangeExpr`, and `Path` with different `PathFormat` values.
+
+10. **Consider lazy error context attachment.** Instead of cloning AST nodes eagerly for error context, consider a pattern where the error context is attached lazily only when the error is actually formatted for display.
+
+---
+
+## 6. Summary Scorecard
+
+| Criterion | Score | Notes |
+|-----------|-------|-------|
+| Spec completeness | 9/10 | Thorough; minor gaps in Eq/Hash, ListIter, make_list docs |
+| Spec accuracy | 10/10 | Specs match implementation exactly |
+| Implementation correctness | 10/10 | All edge cases handled correctly |
+| API ergonomics | 9/10 | Builder pattern is clean; `symtab!` macro is convenient |
+| Error message quality | 10/10 | Excellent caret formatting, "Did you mean?" suggestions |
+| Performance | 8/10 | Good overall; AST cloning and regex cache sharing are opportunities |
+| Test coverage | 9/10 | 2,953 tests; format_string and serialization could use more |
+| Test quality | 9/10 | Full error message assertions; well-organized |
+| Rust best practices | 9/10 | Clean clippy, proper trait implementations, good use of type system |
+| Build cleanliness | 10/10 | Zero warnings, zero errors |
+
+**Overall: Excellent quality.** The crate is production-ready with minor improvements possible in performance and test coverage for format strings.

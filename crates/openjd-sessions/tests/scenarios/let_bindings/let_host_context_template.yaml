@@ -21,29 +21,25 @@ steps:
             - env_work = Session.WorkingDirectory / 'env_output'
           actions:
             onEnter:
-              command: python
+              command: bash
               args:
                 - "-c"
                 - |
-                  import os
-                  p = r'{{env_work}}'
-                  assert p.endswith('env_output'), f'bad env_work: {p}'
-                  print(f'ENV_WORK_OK=true')
+                  p='{{env_work}}'
+                  case "$p" in *env_output) echo "ENV_WORK_OK=true" ;; *) echo "bad env_work: $p"; exit 1 ;; esac
     script:
       let:
         - work_out = Session.WorkingDirectory / 'output'
         - frame_path = Param.OutputDir / string(Task.Param.Frame)
       actions:
         onRun:
-          command: python
+          command: bash
           args:
             - "-c"
             - |
-              import os
-              w = r'{{work_out}}'
-              assert w.endswith('output'), f'bad work_out: {w}'
-              print(f'WORK_OUT_OK=true')
-              print(f'FRAME_PATH={{frame_path}}')
+              w='{{work_out}}'
+              case "$w" in *output) echo "WORK_OUT_OK=true" ;; *) echo "bad work_out: $w"; exit 1 ;; esac
+              echo "FRAME_PATH={{frame_path}}"
 
   - name: SimpleActionLetWithSession
     bash:

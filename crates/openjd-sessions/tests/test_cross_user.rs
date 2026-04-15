@@ -74,7 +74,7 @@ fn support_dir() -> PathBuf {
 // === Cross-user subprocess tests ===
 
 /// Run `whoami` as target user — verify stdout contains the target username.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_basic() {
     let user = require_target_user();
@@ -95,7 +95,7 @@ async fn test_cross_user_subprocess_basic() {
 
 /// Run long_running.sh (traps SIGTERM) with a timeout — process should be killed
 /// before completing all iterations, and the trap handler should fire.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_notify() {
     let user = require_target_user();
@@ -129,7 +129,7 @@ async fn test_cross_user_subprocess_notify() {
 }
 
 /// Run long_running.sh with timeout — SIGKILL cannot be trapped.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_terminate() {
     let user = require_target_user();
@@ -155,7 +155,7 @@ async fn test_cross_user_subprocess_terminate() {
 }
 
 /// Run spawn_child.sh with timeout — parent and child should both be killed.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_terminate_tree() {
     let user = require_target_user();
@@ -191,7 +191,7 @@ async fn test_cross_user_subprocess_terminate_tree() {
 // === Cross-user runner identity tests ===
 
 /// Verify the subprocess runs as the target user's UID, not ours.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_runner_uid() {
     let user = require_target_user();
@@ -221,7 +221,7 @@ async fn test_cross_user_runner_uid() {
 }
 
 /// Verify env vars are propagated to the cross-user subprocess.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_runner_env_vars() {
     let user = require_target_user();
@@ -242,7 +242,7 @@ async fn test_cross_user_runner_env_vars() {
 }
 
 /// Verify host-process env vars do NOT leak into the cross-user subprocess.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_no_env_inheritance() {
     let unique_var = format!("OPENJD_UNIQUE_{}", std::process::id());
@@ -267,7 +267,7 @@ async fn test_cross_user_no_env_inheritance() {
 // === Cross-user session cleanup tests ===
 
 /// Session cleanup deletes files owned by target user with restrictive permissions.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_session_cleanup() {
     let user = require_target_user();
@@ -306,7 +306,7 @@ async fn test_cross_user_session_cleanup() {
 // === Cross-user Session::run_subprocess identity test ===
 
 /// Verify Session::run_subprocess runs as the configured target user.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_session_run_subprocess() {
     let user = require_target_user();
@@ -393,7 +393,7 @@ async fn test_cross_user_tempdir_disjoint_fails() {
 // === CAP_KILL signal delivery test ===
 
 /// Verify cross-user signal delivery works (via CAP_KILL or sudo kill).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_cap_kill_direct_signal() {
     let user = require_target_user();

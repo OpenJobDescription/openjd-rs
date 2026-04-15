@@ -95,3 +95,20 @@ jobs:
         run: cargo doc --no-deps --workspace
         env:
           RUSTDOCFLAGS: -D warnings
+
+  cross-user:
+    name: Cross-User Tests (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [localuser, ldap]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run cross-user tests
+        run: |
+          if [ "${{ matrix.variant }}" = "ldap" ]; then
+            bash scripts/run_cross_user_tests.sh --ldap
+          else
+            bash scripts/run_cross_user_tests.sh
+          fi

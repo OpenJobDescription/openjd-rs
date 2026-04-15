@@ -18,28 +18,29 @@ jobEnvironments:
         - "cfg_has_parent = len(string(cfg.parent)) > 0"
       actions:
         onEnter:
-          command: python
+          command: bash
           args:
             - "-c"
             - |
-              import os
-              path = r'{{ cfg }}'
-              exists = os.path.isfile(path)
-              content = open(path).read() if exists else ''
-              print(f'env_file_exists={exists}')
-              print(f'env_file_content={content}')
-              print(r'env_file_has_parent={{ cfg_has_parent }}')
+              path='{{ cfg }}'
+              if [ -f "$path" ]; then
+                echo "env_file_exists=True"
+                echo "env_file_content=$(cat "$path")"
+              else
+                echo "env_file_exists=False"
+              fi
+              echo "env_file_has_parent={{ cfg_has_parent }}"
         onExit:
-          command: python
+          command: bash
           args:
             - "-c"
-            - "print('env_exit=ok')"
+            - "echo 'env_exit=ok'"
 steps:
   - name: Step1
     script:
       actions:
         onRun:
-          command: python
+          command: bash
           args:
             - "-c"
-            - "print('task_ran=ok')"
+            - "echo 'task_ran=ok'"
