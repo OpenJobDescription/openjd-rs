@@ -70,15 +70,26 @@ pub(super) fn instantiate_step(
                 let mut check_symtab = step_symtab.clone();
 
                 // PATH Param.* are excluded from the template-scope symtab (they
-                // require session-time path mapping). Add them as Unresolved(PATH)
-                // so script-level let bindings can reference them for type-checking.
+                // require session-time path mapping). Add them as Unresolved with
+                // the correct type so script-level let bindings can reference them
+                // for type-checking.
                 if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
                     for name in raw_param_table.keys() {
                         let param_key = format!("Param.{name}");
                         if !step_symtab.contains(&param_key) {
+                            // Derive the Param type from the RawParam value: if it's
+                            // a list, use list(PATH); otherwise use PATH.
+                            let raw_key = format!("RawParam.{name}");
+                            let unresolved_type = match step_symtab.get_value(&raw_key) {
+                                Some(
+                                    openjd_expr::ExprValue::ListPath(..)
+                                    | openjd_expr::ExprValue::ListString(..),
+                                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+                                _ => openjd_expr::ExprType::PATH,
+                            };
                             let _ = check_symtab.set(
                                 &param_key,
-                                openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+                                openjd_expr::ExprValue::Unresolved(unresolved_type),
                             );
                         }
                     }
@@ -477,7 +488,120 @@ fn filter_symtab_for_step(
         }
     }
 
+    // For PATH/LIST[PATH] params, Param.X is excluded from the template-scope symtab
+    // (host-context only). When a format string references Param.X and it's missing from
+    // full, include RawParam.X so the session can construct Param.X with path mapping.
+    let all_symbols = collect_all_accessed_symbols(script, step_environments, step_let_bindings);
+    for symbol in &all_symbols {
+        if let Some(param_name) = symbol.strip_prefix("Param.") {
+            if full.get_value(symbol).is_none() {
+                let raw_key = format!("RawParam.{param_name}");
+                copy_symbol_value(&raw_key, full, &mut filtered);
+            }
+        }
+    }
+
     filtered
+}
+
+/// Collect all symbol names accessed by format strings in a step's script,
+/// step environments, and let bindings.
+fn collect_all_accessed_symbols(
+    script: Option<&job::StepScript>,
+    step_environments: &Option<Vec<job::Environment>>,
+    step_let_bindings: Option<&[String]>,
+) -> std::collections::HashSet<String> {
+    let mut symbols = std::collections::HashSet::new();
+
+    fn collect_from_fs(
+        fs: &openjd_expr::FormatString,
+        out: &mut std::collections::HashSet<String>,
+    ) {
+        out.extend(fs.accessed_symbols());
+    }
+
+    fn collect_from_action(a: &job::Action, out: &mut std::collections::HashSet<String>) {
+        collect_from_fs(&a.command, out);
+        if let Some(args) = &a.args {
+            for fs in args {
+                collect_from_fs(fs, out);
+            }
+        }
+        if let Some(t) = &a.timeout {
+            collect_from_fs(t, out);
+        }
+    }
+
+    if let Some(bindings) = step_let_bindings {
+        for binding in bindings {
+            if let Some(eq_pos) = binding.find('=') {
+                let expr = binding[eq_pos + 1..].trim();
+                if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
+                    symbols.extend(parsed.accessed_symbols);
+                }
+            }
+        }
+    }
+
+    if let Some(s) = script {
+        collect_from_action(&s.actions.on_run, &mut symbols);
+        if let Some(job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(n),
+        }) = &s.actions.on_run.cancelation
+        {
+            collect_from_fs(n, &mut symbols);
+        }
+        if let Some(files) = &s.embedded_files {
+            for f in files {
+                if let Some(d) = &f.data {
+                    collect_from_fs(d, &mut symbols);
+                }
+                if let Some(n) = &f.filename {
+                    collect_from_fs(n, &mut symbols);
+                }
+            }
+        }
+        if let Some(bindings) = &s.let_bindings {
+            for binding in bindings {
+                if let Some(eq_pos) = binding.find('=') {
+                    let expr = binding[eq_pos + 1..].trim();
+                    if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
+                        symbols.extend(parsed.accessed_symbols);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(envs) = step_environments {
+        for env in envs {
+            if let Some(vars) = &env.variables {
+                for fs in vars.values() {
+                    collect_from_fs(fs, &mut symbols);
+                }
+            }
+            if let Some(es) = &env.script {
+                for action in [&es.actions.on_enter, &es.actions.on_exit]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_from_action(action, &mut symbols);
+                }
+                if let Some(files) = &es.embedded_files {
+                    for f in files {
+                        if let Some(d) = &f.data {
+                            collect_from_fs(d, &mut symbols);
+                        }
+                        if let Some(n) = &f.filename {
+                            collect_from_fs(n, &mut symbols);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    symbols
 }
 
 fn collect_let_binding_refs(bindings: &[String], full: &SymbolTable, filtered: &mut SymbolTable) {

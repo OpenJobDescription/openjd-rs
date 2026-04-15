@@ -7,6 +7,10 @@ spawns a child process, streams stdout/stderr through the `ActionFilter` in real
 sends parsed `ActionMessage` values through an mpsc channel, and handles cancelation,
 timeout, and cross-user execution.
 
+This document covers the internal `run_subprocess` function used by script runners. For
+the public `Session::run_subprocess` method (ad-hoc subprocess execution for the worker
+agent), see [session.md § Ad-hoc Subprocess](session.md#ad-hoc-subprocess).
+
 ## SubprocessConfig
 
 ```rust
@@ -180,10 +184,13 @@ Immediate SIGKILL to the process group. Used for actions with `TerminateCancelMe
 
 ### CancelMethod::NotifyThenTerminate
 
-1. Write `cancel_info.json` to the session working directory:
+1. Write `cancel_info.json` to the session working directory (per
+   [§5.3.2 `<CancelationMethodNotifyThenTerminate>`](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas#532-cancelationmethodnotifythenterminate)):
    ```json
-   {"NotifyEnd": "2024-01-15T10:30:00Z"}
+   {"NotifyEnd": "<yyyy>-<mm>-<dd>T<hh>:<mm>:<ss>Z"}
    ```
+   The `NotifyEnd` value is an ISO 8601 UTC timestamp indicating when the notify
+   period will end and the process will be forcefully terminated.
 2. Send SIGTERM to the process (or process group)
 3. Start a grace period timer (default: 120s for `onRun`, 30s for env scripts)
 4. If the process doesn't exit within the grace period, send SIGKILL

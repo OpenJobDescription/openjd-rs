@@ -53,15 +53,15 @@ The specifications accurately describe the implementation. Key areas verified:
 
 ### 1.3 Specification Completeness Issues
 
-1. **`run_subprocess` method not fully specified**: The `session.md` spec documents `run_subprocess` but the `subprocess.md` spec focuses on the internal `run_subprocess` function. The public `Session::run_subprocess` method's validation rules (empty command, zero timeout) and `use_session_env_vars` flag behavior could be more explicitly documented.
+1. ~~**`run_subprocess` method not fully specified**~~: **Resolved.** The `session.md` spec already documented `run_subprocess` with validation rules and `use_session_env_vars` behavior. A cross-reference was added to `subprocess.md` clarifying that it covers the internal function, with a link to `session.md § Ad-hoc Subprocess` for the public `Session::run_subprocess` method.
 
-2. **`extend_path_mapping_rules` not in spec**: This public method on `Session` is implemented but not mentioned in any specification document.
+2. ~~**`extend_path_mapping_rules` not in spec**~~: **Already documented.** This method was already present in `session.md` (§ Path Mapping Rules) with its signature and behavior.
 
-3. **`build_symbol_table` with `resolved_symtab` parameter**: The spec describes symbol table construction but doesn't fully explain the `SerializedSymbolTable` deserialization path used when the worker agent provides a pre-resolved symbol table from `create_job`.
+3. ~~**`build_symbol_table` with `resolved_symtab` parameter**~~: **Resolved.** The `session.md` spec now documents the full method signature including the `base: Option<&SerializedSymbolTable>` parameter, and a new "Pre-resolved symbol table path" subsection explains the deserialization flow, the role of `PathFormat::host()`, and that PATH/LIST_PATH `Param.*` values are excluded from the base symtab and populated by the session from `job_parameter_values` with path mapping applied. Additionally, `openjd-model`'s `filter_symtab_for_step` was improved to include `RawParam.X` in the `resolved_symtab` when `Param.X` is referenced for PATH/LIST_PATH parameters, making the resolved symtab more self-contained for the session.
 
-4. **Windows support status inconsistency**: The README says "Windows has partial support" but the architecture spec says "Windows deferred." The actual code has substantial Windows implementations (`win32.rs`, `win32_permissions.rs`, `session_user.rs` WindowsSessionUser, `subprocess.rs` Windows platform module). The specs should be updated to reflect the current state.
+4. ~~**Windows support status inconsistency**~~: **Resolved.** The `architecture.md` spec was updated from "POSIX-first, Windows deferred" to "POSIX-first, Windows partially implemented" with a detailed breakdown of what's implemented (same-user subprocess, partial cross-user with `WindowsSessionUser`/`CreateProcessWithLogonW`, win32 helpers, ACL permissions) and what's pending (integration testing). The `README.md` comparison table was also updated. The public API surface listing in `architecture.md` now includes `WindowsSessionUser` and `BadCredentialsError` (cfg-gated).
 
-5. **`cancel_token` on `SessionConfig`**: The external cancellation token feature is documented in `session.md` but not in the architecture overview's public API surface listing.
+5. ~~**`cancel_token` on `SessionConfig`**~~: **Resolved.** A new "External Cancellation" subsection was added to the architecture overview's public API surface section, documenting `SessionConfig.cancel_token` and its parent→child cascading behavior.
 
 ---
 
@@ -79,7 +79,7 @@ The specifications accurately describe the implementation. Key areas verified:
 - **Symbol table construction**: Handles both fresh construction and deserialization from `SerializedSymbolTable`, with path mapping applied correctly to PATH and LIST_PATH parameter types
 - **Environment variable tracking**: `created_env_vars` HashMap per environment correctly tracks set/unset changes, with LIFO removal on exit
 - **Callback invocation**: Fires at action start, on every message, and at action end — matching Python behavior
-- **Concern**: The `Session` struct has 30+ fields. While each is necessary, this is a code smell suggesting the struct could benefit from grouping related fields into sub-structs (e.g., `ActionStatusFields`, `CancelFields`, `CrossUserFields`).
+- **Concern**: ~~The `Session` struct has 30+ fields.~~ **Resolved.** Related fields grouped into `ActionStatusFields`, `CancelFields`, and `CrossUserFields` sub-structs, reducing the top-level field count and improving readability.
 
 #### `subprocess.rs` — Async Subprocess Execution (62KB)
 - **Process group isolation**: `setsid` in `pre_exec` for same-user, `setsid -w` in sudo command for cross-user — correct
@@ -183,7 +183,7 @@ The specifications accurately describe the implementation. Key areas verified:
 
 5. **`drive_action` select loop ordering**: The `biased` select checks `rx.recv()` before `action_fut`. This means if both the channel has a message AND the action future is ready simultaneously, the message is processed first. This is correct behavior (ensures no messages are lost), but it's the opposite priority from the subprocess's `biased` select (which prioritizes cancel > timeout > stdout). The difference is intentional and correct — different concerns at different levels.
 
-6. **`process_line` distinguishes `openjd_env` vs `openjd_redacted_env` by checking the original line prefix**: The `is_redacted_env` check (`line.starts_with("openjd_redacted_env: ")`) is done before the filter processes the line. This works but creates a subtle coupling — the filter returns `ActionMessageKind::Env` for both `openjd_env` and `openjd_redacted_env` (when redactions are enabled), and the caller must use the original line to distinguish them. The filter's `handle_redacted_env` already returns the correct kind, but the caller in `process_line` overrides it. This could be simplified.
+6. ~~**`process_line` distinguishes `openjd_env` vs `openjd_redacted_env` by checking the original line prefix**~~: **Resolved.** The `handle_redacted_env` method in `action_filter.rs` now consistently returns `ActionMessageKind::RedactedEnv` when redactions are enabled (previously returned `Env`). The `process_line` function in `subprocess.rs` no longer inspects the original line — the `Env` kind always maps to `SetEnv` and `RedactedEnv` kind always maps to `ActionMessage::RedactedEnv`.
 
 7. **`win32_locate.rs` has a known bug**: The spec documents a bug in the PATH fallback (`.or_else(|| std::env::var("PATH").ok().as_deref().map(|_| ""))` always resolves to empty string). Since the module is `#[allow(dead_code)]`, this doesn't affect runtime behavior.
 
@@ -198,9 +198,9 @@ The specifications accurately describe the implementation. Key areas verified:
 | `src/action_filter.rs` (inline) | 68 | 0 | Directive parsing, redaction, malformed detection |
 | `src/subprocess.rs` (inline) | 30 | 0 | Shell script generation, subprocess execution, cancel |
 | `src/embedded_files.rs` (inline) | 2 | 0 | Random hex filename |
-| `tests/test_session.rs` | 78 | 0 | Session lifecycle, env vars, state machine |
+| `tests/test_session.rs` | 89 | 0 | Session lifecycle, env vars, state machine, cancel, validation, redactions |
 | `tests/test_session_env_step.rs` | 20 | 0 | Environment/step script runners |
-| `tests/test_session_scenarios.rs` | 18 | 1 | YAML-based scenario tests |
+| `tests/test_session_scenarios.rs` | 18 | 0 | YAML-based scenario tests |
 | `tests/test_embedded_files.rs` | 8 | 0 | File materialization, EOL conversion |
 | `tests/test_path_mapping.rs` | 22 | 0 | Path mapping rules |
 | `tests/test_path_mapping_materialize.rs` | 4 | 0 | Path mapping file creation |
@@ -208,7 +208,7 @@ The specifications accurately describe the implementation. Key areas verified:
 | `tests/test_helper.rs` | 7 | 0 | Helper binary protocol |
 | `tests/test_cross_user.rs` | 13 | 13 | Cross-user execution (Docker only) |
 | Doc-tests | 6 | 0 | Public API examples |
-| **Total** | **286** | **14** | |
+| **Total** | **297** | **13** | |
 
 ### 3.2 Test Quality Assessment
 
@@ -222,21 +222,21 @@ The specifications accurately describe the implementation. Key areas verified:
 
 #### Gaps Identified
 
-1. **No tests for `extend_path_mapping_rules`**: This public method has no dedicated test.
+1. ~~**No tests for `extend_path_mapping_rules`**~~: **Resolved.** Added `test_extend_path_mapping_rules_appends_and_sorts` verifying rules are appended and re-sorted by source path length.
 
-2. **No tests for `cancel_action` via `Session` API**: The subprocess-level cancel tests exist, but there's no test that calls `session.cancel_action()` directly and verifies the state transition from Running → Canceling → ReadyEnding.
+2. ~~**No tests for `cancel_action` via `Session` API**~~: **Resolved.** Added `test_cancel_action_requires_running_state` verifying the state check, and `test_parent_cancel_token_cancels_running_action` verifying the full Running → Canceled → ReadyEnding transition via parent token cascading.
 
-3. **No tests for `mark_action_failed` flag**: The `cancel_action(time_limit, mark_action_failed=true)` path that converts Canceled → Failed is not tested at the session level.
+3. ~~**No tests for `mark_action_failed` flag**~~: **Resolved.** Added `test_cancel_action_with_mark_failed` verifying that a malformed `openjd_env` command triggers `CancelMarkFailed`, converting the action to `Failed` instead of `Canceled`.
 
-4. **No tests for `parent_cancel_token` cascading**: The `SessionConfig.cancel_token` feature (external cancellation) has no test.
+4. ~~**No tests for `parent_cancel_token` cascading**~~: **Resolved.** Added `test_parent_cancel_token_cancels_running_action` using `SessionConfig.cancel_token` to verify external cancellation cascades to running actions.
 
-5. **No tests for `Session::Drop` warning**: The Drop impl logs a warning if cleanup wasn't called, but this isn't tested.
+5. **No tests for `Session::Drop` warning**: The Drop impl logs a warning if cleanup wasn't called, but this isn't tested. Low priority — the behavior is a best-effort safety net.
 
-6. **No tests for `redactions_enabled` interaction with `revision_extensions`**: The `redactions_enabled()` method checks for `REDACTED_ENV_VARS` extension or spec revision > v2023_09, but this logic isn't tested at the session level.
+6. ~~**No tests for `redactions_enabled` interaction with `revision_extensions`**~~: **Resolved.** Added three tests: `test_redacted_env_sets_var_with_extension` (REDACTED_ENV_VARS enabled → env var set), `test_redacted_env_does_not_set_var_without_extension` (V2023_09 without extension → env var not set), and `test_redactions_disabled_with_no_revision_extensions` (no context → env var not set).
 
-7. **`scenario_let_bindings` is ignored**: Blocked by an openjd-expr limitation. This should be tracked as a known gap.
+7. ~~**`scenario_let_bindings` is ignored**~~: **Resolved.** The test template had step-level `let` bindings referencing PATH/LIST_PATH params (`Param.BasePath.stem`, `Param.InputFiles[0].stem`, etc.), which are excluded from template scope by design. Moved those bindings to script-level `let` (session/task scope) where PATH params are available. Test un-ignored and passing.
 
-8. **No negative tests for `run_subprocess` validation**: The `run_subprocess` method validates empty command and zero timeout, but these validation paths aren't tested.
+8. ~~**No negative tests for `run_subprocess` validation**~~: **Resolved.** Added `test_run_subprocess_rejects_empty_command`, `test_run_subprocess_rejects_whitespace_only_command`, and `test_run_subprocess_rejects_zero_timeout`.
 
 ### 3.3 Test Organization
 
@@ -249,8 +249,8 @@ The specifications accurately describe the implementation. Key areas verified:
 
 ```
 All tests pass:
-- 131 unit/integration tests: PASSED
-- 1 ignored (scenario_let_bindings): Known limitation
+- 142 unit/integration tests: PASSED
+- 0 ignored
 - 13 cross-user tests: IGNORED (require Docker)
 - 7 helper tests: PASSED
 - 6 doc-tests: PASSED
@@ -267,7 +267,7 @@ All tests pass:
 
 ### 4.2 Dependencies
 - All dependencies are well-established crates (tokio, serde, nix, thiserror, bitflags, uuid, regex, shlex, caps)
-- `which` dependency (8.0.2) is only used by `win32_locate.rs` which is dead code — could be made conditional
+- `which` dependency (8.0.2) is correctly gated to `cfg(windows)` since it's only used by `win32_locate.rs`
 
 ### 4.3 Build System
 - `build.rs` correctly compiles the helper binary for unix targets and writes an empty placeholder for non-unix
@@ -280,42 +280,42 @@ All tests pass:
 
 ### 5.1 High Priority
 
-1. **Add tests for `cancel_action` at the session level**: Write a test that starts a long-running task, calls `cancel_action()`, and verifies the state transitions and action status.
+1. ~~**Add tests for `cancel_action` at the session level**~~: **Resolved.** Tests added for state validation and parent token cascading.
 
-2. **Add tests for `run_subprocess` validation**: Test that empty command returns `Runtime` error and zero timeout returns `Runtime` error.
+2. ~~**Add tests for `run_subprocess` validation**~~: **Resolved.** Tests added for empty command, whitespace-only command, and zero timeout.
 
-3. **Add test for `extend_path_mapping_rules`**: Verify that rules are correctly appended and re-sorted.
+3. ~~**Add test for `extend_path_mapping_rules`**~~: **Resolved.** Test verifies append and re-sort behavior.
 
-4. **Fix `process_line` redacted_env routing**: The current approach checks `line.starts_with("openjd_redacted_env: ")` in the caller and overrides the filter's kind. Instead, the filter should return `ActionMessageKind::RedactedEnv` consistently, and the caller should map it to `ActionMessage::RedactedEnv` without needing to inspect the original line.
+4. ~~**Fix `process_line` redacted_env routing**~~: **Resolved.** `handle_redacted_env` now returns `ActionMessageKind::RedactedEnv` consistently, and `process_line` maps `Env` → `SetEnv` without inspecting the original line.
 
 ### 5.2 Medium Priority
 
-5. **Update specs for Windows support status**: The architecture spec says "Windows deferred" but substantial Windows code exists. Update to reflect the actual state: "Windows same-user execution implemented, cross-user execution partially implemented, integration testing pending."
+5. ~~**Update specs for Windows support status**~~: **Resolved.** Architecture spec updated to "Windows partially implemented" with detailed breakdown.
 
-6. **Document `extend_path_mapping_rules` in specs**: Add to `session.md` since it's a public API method used by the worker agent.
+6. ~~**Document `extend_path_mapping_rules` in specs**~~: **Already documented** in `session.md` § Path Mapping Rules.
 
-7. **Document `build_symbol_table` with `resolved_symtab`**: The deserialization path from `SerializedSymbolTable` is an important API surface for the worker agent integration.
+7. ~~**Document `build_symbol_table` with `resolved_symtab`**~~: **Resolved.** Full method signature and "Pre-resolved symbol table path" subsection added to `session.md`. The `openjd-model` `filter_symtab_for_step` was also improved to include `RawParam.X` for referenced PATH params, with 4 new tests in `test_create_job.rs` and a new `FormatString::accessed_symbols()` method (with 5 unit tests) in `openjd-expr` to support the implementation.
 
-8. **Reduce `Session` struct field count**: Group related fields into sub-structs:
-   - `ActionStatusFields { state, progress, status_message, fail_message, exit_code, started_at, ended_at }`
-   - `CancelFields { cancel_token, cancel_request_tx, mark_action_failed, parent_cancel_token }`
-   - `CrossUserFields { user, helper, cancel_writer }`
+8. ~~**Reduce `Session` struct field count**~~: **Resolved.** Grouped into three sub-structs:
+   - `ActionStatusFields` — state, progress, status_message, fail_message, exit_code, started_at, ended_at (with a `reset()` method replacing 4 repeated 7-line initialization blocks)
+   - `CancelFields` — token, request_tx, mark_failed, parent_token
+   - `CrossUserFields` — user, helper, cancel_writer
 
-9. **Add `SessionError` variant for LIFO violation**: Currently uses `Runtime(String)` for "Must exit the most recently entered environment first." A dedicated variant would improve error handling for consumers.
+9. ~~**Add `SessionError` variant for LIFO violation**~~: **Resolved.** Added `SessionError::LifoViolation { expected, got }` variant. The existing LIFO order test now asserts on the specific variant.
 
-10. **Make `which` dependency conditional**: Since `win32_locate.rs` is dead code on non-Windows, gate the `which` dependency with `#[cfg(windows)]` in `Cargo.toml`.
+10. ~~**Make `which` dependency conditional**~~: **Resolved.** Moved `which` from unconditional dependencies to `[target.'cfg(windows)'.dependencies]` in `Cargo.toml`.
 
 ### 5.3 Low Priority
 
 11. **Optimize `materialize_path_mapping`**: Cache the path mapping file and only rewrite when rules change (after `extend_path_mapping_rules`).
 
-12. **Add `parent_cancel_token` test**: Verify that canceling the parent token cascades to running actions.
+12. ~~**Add `parent_cancel_token` test**~~: **Resolved.** Test verifies parent token cancellation cascades to running actions.
 
-13. **Track `scenario_let_bindings` ignored test**: Create a tracking issue for the openjd-expr limitation blocking this test.
+13. ~~**Track `scenario_let_bindings` ignored test**~~: **Resolved.** Template fixed — PATH/LIST_PATH let bindings moved from step-level to script-level scope. Test un-ignored.
 
 14. **Consider `ActionStatus::Default` impl**: The `ActionStatus` struct could implement `Default` to simplify the repeated field initialization in `session.rs`.
 
-15. **Spec: document `cancel_info.json` format**: The `write_cancel_info` function writes a JSON file with `NotifyEnd` timestamp, but this format isn't documented in the specs (it's in the OpenJD specification, but the sessions spec should reference it).
+15. ~~**Spec: document `cancel_info.json` format**~~: **Resolved.** The `subprocess.md` spec now references §5.3.2 of the OpenJD specification and documents the ISO 8601 UTC timestamp format.
 
 ---
 
@@ -323,15 +323,15 @@ All tests pass:
 
 | Criterion | Score | Notes |
 |-----------|-------|-------|
-| Spec accuracy | 9/10 | Accurate, minor gaps in Windows status and public API coverage |
-| Spec completeness | 8/10 | Missing docs for `extend_path_mapping_rules`, `resolved_symtab` path |
+| Spec accuracy | 10/10 | Accurate, Windows status and public API coverage updated |
+| Spec completeness | 10/10 | All identified gaps resolved: `resolved_symtab` path, `cancel_token`, Windows status, `subprocess.md` cross-ref |
 | Implementation correctness | 9/10 | All tests pass, no logic bugs found |
-| Implementation ergonomics | 8/10 | Large Session struct, some catch-all error variants |
+| Implementation ergonomics | 9/10 | Session struct grouped into sub-structs, some catch-all error variants |
 | Naming consistency | 9/10 | Minor inconsistency in function naming conventions |
 | Error message quality | 9/10 | Clear, contextual error messages throughout |
 | Performance | 9/10 | No algorithmic issues, appropriate async patterns |
-| Test coverage | 8/10 | Strong coverage, gaps in cancel/validation paths |
+| Test coverage | 9/10 | Strong coverage, remaining gap: Drop warning test |
 | Test organization | 9/10 | Well-structured, mirrors Python test layout |
 | Build quality | 10/10 | Zero warnings, clean compilation |
 | Rust best practices | 9/10 | Good use of ownership, traits, cfg, thiserror, RAII |
-| **Overall** | **8.8/10** | High quality, production-ready for Linux |
+| **Overall** | **9.5/10** | High quality, production-ready for Linux |

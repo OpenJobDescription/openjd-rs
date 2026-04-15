@@ -2822,6 +2822,35 @@ fn script_let_binding_division_by_zero_is_caught() {
     );
 }
 
+// ══════════════════════════════════════════════════════════════
+// resolved_symtab includes RawParam.X for PATH params referenced as Param.X
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Foo}}"}}}}]
+    }"#,
+        &[("Foo", "/tmp/foo")],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    // RawParam.Foo should be included because Param.Foo is referenced in host context
+    assert_eq!(
+        symtab.get_value("RawParam.Foo"),
+        Some(&openjd_expr::ExprValue::String("/tmp/foo".to_string())),
+        "RawParam.Foo should be in resolved_symtab when Param.Foo is referenced"
+    );
+}
+
 #[test]
 fn script_let_binding_param_dependent_division_by_zero_is_caught() {
     // A script-level let binding that divides by a parameter whose value is 0.
@@ -2865,6 +2894,30 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
     assert!(
         result.is_err(),
         "Script-level let binding '100 / Param.Divisor' with Divisor=0 should error at create_job"
+    );
+}
+
+#[test]
+fn resolved_symtab_includes_raw_param_for_referenced_list_path_param() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["/a", "/b"]}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Paths}}"}}}}]
+    }"#,
+        &[],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    assert!(
+        symtab.get_value("RawParam.Paths").is_some(),
+        "RawParam.Paths should be in resolved_symtab when Param.Paths is referenced"
     );
 }
 
@@ -2950,5 +3003,64 @@ fn range_expression_evaluation_error_is_caught() {
         result.is_ok(),
         "Single int as range expression should work: {:?}",
         result.err()
+    );
+}
+
+#[test]
+fn resolved_symtab_excludes_raw_param_for_unreferenced_path_param() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "Foo", "type": "PATH"},
+            {"name": "Bar", "type": "STRING", "default": "hi"}
+        ],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Bar}}"}}}}]
+    }"#,
+        &[("Foo", "/tmp/foo")],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    // RawParam.Foo should NOT be included — Param.Foo is not referenced anywhere
+    assert_eq!(
+        symtab.get_value("RawParam.Foo"),
+        None,
+        "RawParam.Foo should not be in resolved_symtab when Param.Foo is not referenced"
+    );
+}
+
+#[test]
+fn resolved_symtab_does_not_add_raw_param_for_referenced_string_param() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Msg", "type": "STRING", "default": "hello"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Msg}}"}}}}]
+    }"#,
+        &[],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    // Param.Msg IS in the template-scope symtab (STRING, not PATH), so it gets
+    // copied by the normal filter. RawParam.Msg should NOT be separately added
+    // by the PATH-specific logic.
+    assert_eq!(
+        symtab.get_value("Param.Msg"),
+        Some(&openjd_expr::ExprValue::String("hello".to_string())),
+    );
+    assert_eq!(
+        symtab.get_value("RawParam.Msg"),
+        None,
+        "RawParam.Msg should not be added for STRING params — only PATH/LIST[PATH]"
     );
 }

@@ -81,15 +81,15 @@ steps:
                   echo "=== Step Environment onExit ==="
                   echo "step_env_exit_msg={{step_env_exit_msg}}"
     # Step-level let bindings - evaluated once per step at job creation
+    # NOTE: PATH and LIST[PATH] params are not available at step-level (template scope).
+    # Those bindings are in the script-level let below (session/task scope).
     let:
       - step_int = Param.BaseInt * 2
       - step_float = Param.BaseFloat + 0.5
-      - step_path = Param.BasePath.parent / "output"
       - step_string = Param.BaseString + "_world"
       - step_list_sum = sum(Param.Items)
       - step_chained = step_int + 5
       - step_conditional = "big" if step_int > 15 else "small"
-      - step_path_stem = Param.BasePath.stem
       - step_list_len = len(Param.Items)
       - step_min = min(Param.Items)
       - step_max = max(Param.Items)
@@ -100,18 +100,12 @@ steps:
       - step_chained_compare = 0 < step_min <= step_max < 10
       # List comprehension
       - step_doubled = [x * 2 for x in Param.Items]
-      # Additional path operations
-      - step_path_suffix = Param.BasePath.suffix
       # RANGE_EXPR operations - can be used in range expressions
       - step_range_len = len(Param.FrameRange)
       # LIST[STRING] operations
       - step_tags_len = len(Param.Tags)
       - step_first_tag = Param.Tags[0]
       - step_tags_upper = [t + "_TAG" for t in Param.Tags]
-      # LIST[PATH] operations
-      - step_files_len = len(Param.InputFiles)
-      - step_first_file_stem = Param.InputFiles[0].stem
-      - step_file_stems = [f.stem for f in Param.InputFiles]
     parameterSpace:
       taskParameterDefinitions:
         - name: Frame
@@ -119,7 +113,15 @@ steps:
           range: "1-{{ step_int // 10 }}"
     script:
       # Script-level let bindings - evaluated at task runtime, can use Task.Param
+      # PATH and LIST[PATH] bindings live here because Param.BasePath and
+      # Param.InputFiles are only available in session/task scope.
       let:
+        - step_path = Param.BasePath.parent / "output"
+        - step_path_stem = Param.BasePath.stem
+        - step_path_suffix = Param.BasePath.suffix
+        - step_files_len = len(Param.InputFiles)
+        - step_first_file_stem = Param.InputFiles[0].stem
+        - step_file_stems = [f.stem for f in Param.InputFiles]
         - task_frame = Task.Param.Frame
         - task_combined = step_int + Task.Param.Frame
         - task_output_name = step_string + "_" + string(Task.Param.Frame) + ".exr"

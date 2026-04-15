@@ -72,6 +72,12 @@ pub enum SessionError {
     /// A generic runtime error.
     #[error("{0}")]
     Runtime(String),
+
+    /// Attempted to exit an environment out of LIFO order.
+    #[error(
+        "Must exit the most recently entered environment first. Expected {expected}, got {got}"
+    )]
+    LifoViolation { expected: String, got: String },
 }
 
 fn format_expected(states: &[SessionState]) -> String {

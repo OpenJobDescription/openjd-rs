@@ -389,7 +389,7 @@ impl ActionFilter {
 
                 // Set env var via callback
                 callbacks.push(FilterCallback {
-                    kind: ActionMessageKind::Env,
+                    kind: ActionMessageKind::RedactedEnv,
                     value: ActionMessageValue::EnvVar {
                         name: name.clone(),
                         value: value.clone(),
@@ -846,9 +846,9 @@ mod tests {
     fn test_redacted_env_redacts_value() {
         let mut f = make_filter(false, true);
         let (cbs, _, msg) = f.filter_message("openjd_redacted_env: PASSWORD=secret123", "foo");
-        // Should callback with env var
+        // Should callback with redacted env var
         assert_eq!(cbs.len(), 1);
-        assert_eq!(cbs[0].kind, ActionMessageKind::Env);
+        assert_eq!(cbs[0].kind, ActionMessageKind::RedactedEnv);
         assert_eq!(
             cbs[0].value,
             ActionMessageValue::EnvVar {

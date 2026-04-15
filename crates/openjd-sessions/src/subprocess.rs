@@ -1001,7 +1001,6 @@ pub(crate) fn process_line(
     message_tx: &mpsc::UnboundedSender<ActionMessage>,
     saw_fail: &mut bool,
 ) -> (String, bool) {
-    let is_redacted_env = line.starts_with("openjd_redacted_env: ");
     let (callbacks, pass_through, display) = filter.filter_message(line, session_id);
     for cb in callbacks {
         let cancel = cb.cancel;
@@ -1030,11 +1029,7 @@ pub(crate) fn process_line(
             }
             ActionMessageKind::Env => {
                 if let ActionMessageValue::EnvVar { name, value } = cb.value {
-                    if is_redacted_env {
-                        Some(ActionMessage::RedactedEnv { name, value })
-                    } else {
-                        Some(ActionMessage::SetEnv { name, value })
-                    }
+                    Some(ActionMessage::SetEnv { name, value })
                 } else {
                     None
                 }

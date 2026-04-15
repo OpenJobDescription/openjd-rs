@@ -414,6 +414,27 @@ impl FormatString {
             }
         }
     }
+
+    /// Returns the set of symbol names accessed by this format string.
+    pub fn accessed_symbols(&self) -> std::collections::HashSet<String> {
+        use crate::eval::ParsedExpression;
+
+        let mut symbols = std::collections::HashSet::new();
+        for segment in &self.segments {
+            match segment {
+                Segment::SimpleName { name, .. } => {
+                    if let Ok(parsed) = ParsedExpression::new(name.as_str()) {
+                        symbols.extend(parsed.accessed_symbols);
+                    }
+                }
+                Segment::Expression { parsed, .. } => {
+                    symbols.extend(parsed.accessed_symbols.iter().cloned());
+                }
+                Segment::Literal(_) => {}
+            }
+        }
+        symbols
+    }
 }
 
 /// Walk a dotted symbol name into `source`, find the deepest Value entry,
@@ -1047,5 +1068,45 @@ mod tests {
 
         assert_eq!(dest.get_value("Param.Frame"), Some(&ExprValue::Int(1)));
         assert!(dest.get("Param.Missing").is_none());
+    }
+
+    #[test]
+    fn accessed_symbols_simple() {
+        let fs = FormatString::new("render --frame {{Param.Frame}}").unwrap();
+        let syms = fs.accessed_symbols();
+        assert!(syms.contains("Param.Frame"));
+        assert_eq!(syms.len(), 1);
+    }
+
+    #[test]
+    fn accessed_symbols_multiple_refs() {
+        let fs = FormatString::new("{{Param.Start + Param.End}}").unwrap();
+        let syms = fs.accessed_symbols();
+        assert!(syms.contains("Param.Start"));
+        assert!(syms.contains("Param.End"));
+        assert_eq!(syms.len(), 2);
+    }
+
+    #[test]
+    fn accessed_symbols_literal_returns_empty() {
+        let fs = FormatString::new("just a literal").unwrap();
+        assert!(fs.accessed_symbols().is_empty());
+    }
+
+    #[test]
+    fn accessed_symbols_method_call() {
+        let fs = FormatString::new("{{Param.Name.upper()}}").unwrap();
+        let syms = fs.accessed_symbols();
+        // The parser resolves the attribute chain to the base symbol
+        assert!(syms.contains("Param.Name"));
+    }
+
+    #[test]
+    fn accessed_symbols_multiple_segments() {
+        let fs = FormatString::new("{{Param.A}}_{{Param.B}}").unwrap();
+        let syms = fs.accessed_symbols();
+        assert!(syms.contains("Param.A"));
+        assert!(syms.contains("Param.B"));
+        assert_eq!(syms.len(), 2);
     }
 }

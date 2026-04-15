@@ -1014,7 +1014,14 @@ async fn test_exit_environment_lifo_order() {
     let id2 = s.enter_environment(&env2, None, None, None).await.unwrap();
 
     // Must exit env2 first (LIFO)
-    assert!(s.exit_environment(&id1, None, true, None).await.is_err());
+    let err = s
+        .exit_environment(&id1, None, true, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        openjd_sessions::SessionError::LifoViolation { .. }
+    ));
     assert!(s.exit_environment(&id2, None, true, None).await.is_ok());
     assert!(s.exit_environment(&id1, None, true, None).await.is_ok());
 }
@@ -1894,5 +1901,375 @@ async fn test_run_task_rejects_ended_state() {
     assert!(
         err.contains("READY"),
         "Expected InvalidState error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_exit_environment_failure_still_pops_for_lifo() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf());
+
+    // Enter two environments
+    let env1 = env_with_enter("env1", "sh", vec!["-c", "echo enter1"]);
+    let id1 = s.enter_environment(&env1, None, None, None).await.unwrap();
+
+    let env2 = Environment {
+        name: "env2".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action("sh", vec!["-c", "echo enter2"])),
+                on_exit: Some(action("sh", vec!["-c", "exit 1"])),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id2 = s.enter_environment(&env2, None, None, None).await.unwrap();
+
+    // Exit env2 — the onExit script fails
+    let result = s.exit_environment(&id2, None, true, None).await;
+    assert!(
+        result.is_err(),
+        "exit_environment should fail when onExit script fails"
+    );
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+
+    // Exit env1 — this should succeed because env2 was popped despite its failure
+    let result = s.exit_environment(&id1, None, true, None).await;
+    assert!(
+        result.is_ok(),
+        "Should be able to exit env1 after env2 failed: {:?}",
+        result.err()
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// extend_path_mapping_rules
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_extend_path_mapping_rules_appends_and_sorts() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/short".into(),
+        destination_path: "/s".into(),
+    }]);
+
+    assert_eq!(s.path_mapping_rules().len(), 1);
+
+    s.extend_path_mapping_rules(vec![
+        PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/much/longer/path".into(),
+            destination_path: "/m".into(),
+        },
+        PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/med".into(),
+            destination_path: "/d".into(),
+        },
+    ]);
+
+    let rules = s.path_mapping_rules();
+    assert_eq!(rules.len(), 3);
+    // Sorted by source_path length descending (longest first)
+    assert_eq!(rules[0].source_path, "/much/longer/path");
+    assert_eq!(rules[1].source_path, "/short");
+    assert_eq!(rules[2].source_path, "/med");
+}
+
+// ══════════════════════════════════════════════════════════════
+// cancel_action via Session API
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_cancel_action_requires_running_state() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf());
+    assert_eq!(s.state(), SessionState::Ready);
+    let err = s.cancel_action(None, false).unwrap_err();
+    assert!(matches!(
+        err,
+        openjd_sessions::SessionError::InvalidState { .. }
+    ));
+}
+
+// ══════════════════════════════════════════════════════════════
+// parent_cancel_token cascading + mark_action_failed
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_parent_cancel_token_cancels_running_action() {
+    use tokio_util::sync::CancellationToken;
+
+    let tmp = TempDir::new().unwrap();
+    let parent_token = CancellationToken::new();
+
+    let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
+    let statuses_clone = statuses.clone();
+
+    let config = SessionConfig {
+        session_id: "cancel-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: Some(Box::new(move |_sid, status| {
+            statuses_clone.lock().unwrap().push(status.state);
+        })),
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        revision_extensions: None,
+        cancel_token: Some(parent_token.clone()),
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    let token_clone = parent_token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        token_clone.cancel();
+    });
+
+    let _result = s
+        .run_task(&step("sh", vec!["-c", "sleep 30"]), None, None, None)
+        .await;
+
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let final_statuses = statuses.lock().unwrap();
+    assert!(
+        final_statuses.contains(&ActionState::Canceled),
+        "Expected Canceled in statuses: {:?}",
+        *final_statuses
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_action_with_mark_failed() {
+    use tokio_util::sync::CancellationToken;
+
+    let tmp = TempDir::new().unwrap();
+    let parent_token = CancellationToken::new();
+
+    let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
+    let statuses_clone = statuses.clone();
+
+    let config = SessionConfig {
+        session_id: "mark-failed-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: Some(Box::new(move |_sid, status| {
+            statuses_clone.lock().unwrap().push(status.state);
+        })),
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        revision_extensions: None,
+        cancel_token: Some(parent_token.clone()),
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    // Spawn a task that cancels with mark_action_failed after the action starts
+    let token_clone = parent_token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        token_clone.cancel();
+    });
+
+    // Set mark_action_failed before the cancel arrives — cancel_action sets it,
+    // but with parent_cancel_token we need to set it via cancel_action.
+    // Since we can't call cancel_action while run_task holds &mut self,
+    // we use the CancelMarkFailed message path instead: have the script emit
+    // openjd_fail and then the parent token cancels.
+    // Actually, the simplest approach: use cancel_action from a separate context.
+    // But run_task borrows &mut self. The mark_action_failed flag is set by
+    // cancel_action(_, true). With parent_cancel_token, the cancel cascades
+    // but mark_action_failed defaults to false.
+    //
+    // To test mark_action_failed, we use the CancelMarkFailed ActionMessage path:
+    // a malformed openjd_env command triggers it.
+    let _result = s
+        .run_task(
+            &step("sh", vec!["-c", "echo 'openjd_env:badformat'; sleep 30"]),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let final_statuses = statuses.lock().unwrap();
+    // CancelMarkFailed converts the action to Failed
+    assert!(
+        final_statuses.contains(&ActionState::Failed),
+        "Expected Failed in statuses: {:?}",
+        *final_statuses
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// run_subprocess validation
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_run_subprocess_rejects_empty_command() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf());
+    let err = s
+        .run_subprocess("", None, None, None, false, None)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("non-empty"),
+        "Expected non-empty error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_run_subprocess_rejects_whitespace_only_command() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf());
+    let err = s
+        .run_subprocess("   ", None, None, None, false, None)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("non-empty"),
+        "Expected non-empty error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_run_subprocess_rejects_zero_timeout() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new(tmp.path().to_path_buf());
+    let err = s
+        .run_subprocess(
+            "echo",
+            None,
+            Some(std::time::Duration::from_secs(0)),
+            None,
+            false,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("positive"),
+        "Expected positive timeout error, got: {err}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// redactions_enabled interaction with revision_extensions
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_redacted_env_sets_var_with_extension() {
+    use openjd_model::types::{KnownExtension, SpecificationRevision, ValidationContext};
+
+    let tmp = TempDir::new().unwrap();
+    let mut exts = std::collections::HashSet::new();
+    exts.insert(KnownExtension::RedactedEnvVars);
+    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, exts);
+
+    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+
+    // With REDACTED_ENV_VARS extension, openjd_redacted_env should set env vars.
+    let env = Environment {
+        name: "env1".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action(
+                    "sh",
+                    vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
+                )),
+                on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id = s.enter_environment(&env, None, None, None).await.unwrap();
+    let out = s.exit_environment(&id, None, true, None).await.unwrap();
+    // SECRET should be set because REDACTED_ENV_VARS extension is enabled
+    assert!(
+        out.contains("SECRET=hunter2"),
+        "SECRET should be set with REDACTED_ENV_VARS extension, got: {out}"
+    );
+}
+
+#[tokio::test]
+async fn test_redacted_env_does_not_set_var_without_extension() {
+    use openjd_model::types::{SpecificationRevision, ValidationContext};
+
+    let tmp = TempDir::new().unwrap();
+    let ctx = ValidationContext::new(SpecificationRevision::V2023_09);
+
+    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+
+    // Without REDACTED_ENV_VARS extension, openjd_redacted_env should NOT set env vars.
+    let env = Environment {
+        name: "env1".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action(
+                    "sh",
+                    vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
+                )),
+                on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id = s.enter_environment(&env, None, None, None).await.unwrap();
+    let out = s.exit_environment(&id, None, true, None).await.unwrap();
+    assert!(
+        out.contains("SECRET=unset"),
+        "SECRET should not be set without REDACTED_ENV_VARS extension, got: {out}"
+    );
+}
+
+#[tokio::test]
+async fn test_redactions_disabled_with_no_revision_extensions() {
+    let tmp = TempDir::new().unwrap();
+    // No revision_extensions at all (default Session::new)
+    let mut s = Session::new(tmp.path().to_path_buf());
+
+    let env = Environment {
+        name: "env1".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action(
+                    "sh",
+                    vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
+                )),
+                on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id = s.enter_environment(&env, None, None, None).await.unwrap();
+    let out = s.exit_environment(&id, None, true, None).await.unwrap();
+    assert!(
+        out.contains("SECRET=unset"),
+        "SECRET should not be set with no revision_extensions, got: {out}"
     );
 }

@@ -97,6 +97,74 @@ fn normalize_env_key(name: &str) -> String {
 /// `None` value means "unset this variable".
 type EnvVarChanges = HashMap<String, Option<String>>;
 
+/// Tracks the status of the currently running (or most recently completed) action.
+struct ActionStatusFields {
+    state: Option<ActionState>,
+    progress: Option<f64>,
+    status_message: Option<String>,
+    fail_message: Option<String>,
+    exit_code: Option<i32>,
+    started_at: Option<std::time::SystemTime>,
+    ended_at: Option<std::time::SystemTime>,
+}
+
+impl ActionStatusFields {
+    fn new() -> Self {
+        Self {
+            state: None,
+            progress: None,
+            status_message: None,
+            fail_message: None,
+            exit_code: None,
+            started_at: None,
+            ended_at: None,
+        }
+    }
+
+    /// Reset all fields for a new action.
+    fn reset(&mut self) {
+        self.state = Some(ActionState::Running);
+        self.started_at = Some(std::time::SystemTime::now());
+        self.ended_at = None;
+        self.progress = None;
+        self.status_message = None;
+        self.fail_message = None;
+        self.exit_code = None;
+    }
+}
+
+/// Cancellation state for the current action and external cancellation support.
+struct CancelFields {
+    /// Token for the current action (cancelled to abort the subprocess).
+    token: Option<CancellationToken>,
+    /// Channel to send cancel requests (with optional time limit) to the subprocess.
+    request_tx: Option<tokio::sync::watch::Sender<Option<Duration>>>,
+    /// When true, a Canceled action result is reported as Failed.
+    mark_failed: bool,
+    /// External cancellation token from the caller; action tokens are children of this.
+    parent_token: Option<CancellationToken>,
+}
+
+impl CancelFields {
+    fn new(parent_token: Option<CancellationToken>) -> Self {
+        Self {
+            token: None,
+            request_tx: None,
+            mark_failed: false,
+            parent_token,
+        }
+    }
+}
+
+/// Cross-user execution state (POSIX).
+struct CrossUserFields {
+    user: Option<Arc<dyn SessionUser>>,
+    #[cfg(unix)]
+    helper: Option<CrossUserHelper>,
+    #[cfg(unix)]
+    cancel_writer: Option<std::fs::File>,
+}
+
 pub struct Session {
     session_id: String,
     state: SessionState,
@@ -119,33 +187,15 @@ pub struct Session {
     library: Option<Arc<FunctionLibrary>>,
     path_mapping_rules: Arc<Vec<PathMappingRule>>,
     job_parameter_values: JobParameterValues,
-    // Action status fields
-    action_state: Option<ActionState>,
-    action_progress: Option<f64>,
-    action_status_message: Option<String>,
-    action_fail_message: Option<String>,
-    action_exit_code: Option<i32>,
-    action_started_at: Option<std::time::SystemTime>,
-    action_ended_at: Option<std::time::SystemTime>,
+    // Grouped fields
+    action: ActionStatusFields,
+    cancel: CancelFields,
+    cross_user: CrossUserFields,
     // Callback
     callback: Option<SessionCallbackType>,
     // Redaction
     redacted_values: HashSet<String>,
     revision_extensions: Option<openjd_model::types::ValidationContext>,
-    // Async cancel support
-    cancel_token: Option<CancellationToken>,
-    cancel_request_tx: Option<tokio::sync::watch::Sender<Option<Duration>>>,
-    mark_action_failed: bool,
-    // External cancellation token (from caller)
-    parent_cancel_token: Option<CancellationToken>,
-    // Cross-user execution
-    user: Option<Arc<dyn SessionUser>>,
-    #[cfg(unix)]
-    helper: Option<CrossUserHelper>,
-    /// Dup'd copy of the helper's stdin fd for sending cancel commands
-    /// while the helper is owned by a runner.
-    #[cfg(unix)]
-    cancel_writer: Option<std::fs::File>,
 }
 
 impl Session {
@@ -171,25 +221,18 @@ impl Session {
             library: None,
             path_mapping_rules: Arc::new(Vec::new()),
             job_parameter_values: HashMap::new(),
-            action_state: None,
-            action_progress: None,
-            action_status_message: None,
-            action_fail_message: None,
-            action_exit_code: None,
-            action_started_at: None,
-            action_ended_at: None,
+            action: ActionStatusFields::new(),
+            cancel: CancelFields::new(None),
+            cross_user: CrossUserFields {
+                user: None,
+                #[cfg(unix)]
+                helper: None,
+                #[cfg(unix)]
+                cancel_writer: None,
+            },
             callback: None,
             redacted_values: HashSet::new(),
             revision_extensions: None,
-            cancel_token: None,
-            cancel_request_tx: None,
-            mark_action_failed: false,
-            parent_cancel_token: None,
-            user: None,
-            #[cfg(unix)]
-            helper: None,
-            #[cfg(unix)]
-            cancel_writer: None,
         }
     }
 
@@ -293,25 +336,18 @@ impl Session {
             library: None,
             path_mapping_rules,
             job_parameter_values: config.job_parameter_values,
-            action_state: None,
-            action_progress: None,
-            action_status_message: None,
-            action_fail_message: None,
-            action_exit_code: None,
-            action_started_at: None,
-            action_ended_at: None,
+            action: ActionStatusFields::new(),
+            cancel: CancelFields::new(config.cancel_token),
+            cross_user: CrossUserFields {
+                user: config.user,
+                #[cfg(unix)]
+                helper,
+                #[cfg(unix)]
+                cancel_writer,
+            },
             callback: config.callback,
             redacted_values: HashSet::new(),
             revision_extensions: config.revision_extensions,
-            cancel_token: None,
-            cancel_request_tx: None,
-            mark_action_failed: false,
-            parent_cancel_token: config.cancel_token,
-            user: config.user,
-            #[cfg(unix)]
-            helper,
-            #[cfg(unix)]
-            cancel_writer,
         })
     }
 
@@ -412,14 +448,14 @@ impl Session {
 
     /// Get the current action status, if any action has been run.
     pub fn action_status(&self) -> Option<ActionStatus> {
-        self.action_state.map(|state| ActionStatus {
+        self.action.state.map(|state| ActionStatus {
             state,
-            progress: self.action_progress,
-            status_message: self.action_status_message.clone(),
-            fail_message: self.action_fail_message.clone(),
-            exit_code: self.action_exit_code,
-            started_at: self.action_started_at,
-            ended_at: self.action_ended_at,
+            progress: self.action.progress,
+            status_message: self.action.status_message.clone(),
+            fail_message: self.action.fail_message.clone(),
+            exit_code: self.action.exit_code,
+            started_at: self.action.started_at,
+            ended_at: self.action.ended_at,
         })
     }
 
@@ -436,7 +472,7 @@ impl Session {
     /// provided at session construction, the action token is a child of it
     /// so that cancelling the parent cascades to all actions.
     fn new_action_cancel_token(&self) -> CancellationToken {
-        match &self.parent_cancel_token {
+        match &self.cancel.parent_token {
             Some(parent) => parent.child_token(),
             None => CancellationToken::new(),
         }
@@ -456,12 +492,12 @@ impl Session {
         }
         self.state = SessionState::Canceling;
         if mark_action_failed {
-            self.mark_action_failed = true;
+            self.cancel.mark_failed = true;
         }
 
         // Send cancel to the helper process via the dup'd stdin fd.
         #[cfg(unix)]
-        if let Some(ref mut writer) = self.cancel_writer {
+        if let Some(ref mut writer) = self.cross_user.cancel_writer {
             use std::io::Write;
             let signal = match time_limit {
                 Some(d) if d.is_zero() => "SIGKILL",
@@ -472,10 +508,10 @@ impl Session {
             let _ = writer.flush();
         }
 
-        if let Some(tx) = &self.cancel_request_tx {
+        if let Some(tx) = &self.cancel.request_tx {
             let _ = tx.send(time_limit);
         }
-        if let Some(token) = &self.cancel_token {
+        if let Some(token) = &self.cancel.token {
             token.cancel();
         }
         Ok(())
@@ -493,7 +529,7 @@ impl Session {
 
             // Shut down the cross-user helper before deleting the working directory
             #[cfg(unix)]
-            if let Some(ref mut helper) = self.helper {
+            if let Some(ref mut helper) = self.cross_user.helper {
                 helper.shutdown();
             }
 
@@ -508,7 +544,7 @@ impl Session {
             // Cross-user cleanup: delete files owned by session user first,
             // since files created via sudo may not be deletable by the process owner.
             #[cfg(unix)]
-            if let Some(ref user) = self.user {
+            if let Some(ref user) = self.cross_user.user {
                 if !user.is_process_user() {
                     if let Ok(entries) = std::fs::read_dir(&self.working_directory) {
                         let files: Vec<String> = entries
@@ -619,13 +655,7 @@ impl Session {
             .and_then(|s| s.actions.on_enter.as_ref())
             .is_some()
         {
-            self.action_state = Some(ActionState::Running);
-            self.action_started_at = Some(std::time::SystemTime::now());
-            self.action_ended_at = None;
-            self.action_progress = None;
-            self.action_status_message = None;
-            self.action_fail_message = None;
-            self.action_exit_code = None;
+            self.action.reset();
             self.state = SessionState::Running;
             self.notify_callback();
 
@@ -636,8 +666,8 @@ impl Session {
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-            self.cancel_token = Some(cancel_token.clone());
-            self.cancel_request_tx = Some(cancel_tx);
+            self.cancel.token = Some(cancel_token.clone());
+            self.cancel.request_tx = Some(cancel_tx);
 
             let env_vars = self.evaluate_env_vars(os_env_vars);
             let mut action_symtab = symtab.clone();
@@ -647,14 +677,14 @@ impl Session {
                 &self.session_id,
                 self.working_directory.clone(),
                 self.files_directory.clone(),
-                self.user.clone(),
+                self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
             #[cfg(unix)]
-            let mut runner = match self.helper.take() {
+            let mut runner = match self.cross_user.helper.take() {
                 Some(h) => runner.with_helper(h),
                 None => runner,
             };
@@ -668,7 +698,7 @@ impl Session {
             let result = self.drive_action(runner_fut, &mut rx, &identifier).await;
             #[cfg(unix)]
             {
-                self.helper = runner.take_helper();
+                self.cross_user.helper = runner.take_helper();
             }
             let result = result?;
 
@@ -682,19 +712,19 @@ impl Session {
             result.stdout.clone()
         } else {
             let now = std::time::SystemTime::now();
-            self.action_state = Some(ActionState::Success);
-            self.action_started_at = Some(now);
-            self.action_progress = None;
-            self.action_status_message = None;
-            self.action_fail_message = None;
-            self.action_exit_code = None;
+            self.action.state = Some(ActionState::Success);
+            self.action.started_at = Some(now);
+            self.action.progress = None;
+            self.action.status_message = None;
+            self.action.fail_message = None;
+            self.action.exit_code = None;
 
             log_section_banner(
                 &self.session_id,
                 &format!("Entering Environment: {}", env.name),
             );
 
-            self.action_ended_at = Some(std::time::SystemTime::now());
+            self.action.ended_at = Some(std::time::SystemTime::now());
 
             if let Some(cb) = &self.callback {
                 if let Some(status) = self.action_status() {
@@ -741,12 +771,14 @@ impl Session {
 
         // Validate LIFO order
         if self.environments_entered.last() != Some(identifier) {
-            return Err(SessionError::Runtime(
-                format!(
-                    "Must exit the most recently entered environment first. Expected {:?}, got {identifier}",
-                    self.environments_entered.last()
-                ),
-            ));
+            return Err(SessionError::LifoViolation {
+                expected: self
+                    .environments_entered
+                    .last()
+                    .cloned()
+                    .unwrap_or_default(),
+                got: identifier.clone(),
+            });
         }
 
         let symtab = self.build_symbol_table(None, resolved_symtab)?;
@@ -754,19 +786,25 @@ impl Session {
         // Evaluate env vars BEFORE removing from tracking (matching Python)
         let env_vars = self.evaluate_env_vars(os_env_vars);
 
+        // Unless overridden by the caller, once we've started exiting environments
+        // we can only exit environments.
+        if !keep_session_running {
+            self.ending_only = true;
+        }
+
+        // Remove environment from tracking BEFORE running the exit script.
+        // This matches the Python session behavior — a failed exit is still an exit,
+        // and subsequent exits must be able to proceed in LIFO order.
+        self.environments.remove(identifier);
+        self.environments_entered.pop();
+
         let output = if env
             .script
             .as_ref()
             .and_then(|s| s.actions.on_exit.as_ref())
             .is_some()
         {
-            self.action_state = Some(ActionState::Running);
-            self.action_started_at = Some(std::time::SystemTime::now());
-            self.action_ended_at = None;
-            self.action_progress = None;
-            self.action_status_message = None;
-            self.action_fail_message = None;
-            self.action_exit_code = None;
+            self.action.reset();
             self.state = SessionState::Running;
             self.notify_callback();
 
@@ -777,8 +815,8 @@ impl Session {
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-            self.cancel_token = Some(cancel_token.clone());
-            self.cancel_request_tx = Some(cancel_tx);
+            self.cancel.token = Some(cancel_token.clone());
+            self.cancel.request_tx = Some(cancel_tx);
 
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
@@ -787,14 +825,14 @@ impl Session {
                 &self.session_id,
                 self.working_directory.clone(),
                 self.files_directory.clone(),
-                self.user.clone(),
+                self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
             #[cfg(unix)]
-            let mut runner = match self.helper.take() {
+            let mut runner = match self.cross_user.helper.take() {
                 Some(h) => runner.with_helper(h),
                 None => runner,
             };
@@ -808,7 +846,7 @@ impl Session {
             let result = self.drive_action(runner_fut, &mut rx, identifier).await;
             #[cfg(unix)]
             {
-                self.helper = runner.take_helper();
+                self.cross_user.helper = runner.take_helper();
             }
             let result = result?;
 
@@ -824,12 +862,12 @@ impl Session {
         } else {
             // No exit script — set state based on ending_only (drive_action not called)
             let now = std::time::SystemTime::now();
-            self.action_state = Some(ActionState::Success);
-            self.action_started_at = Some(now);
-            self.action_progress = None;
-            self.action_status_message = None;
-            self.action_fail_message = None;
-            self.action_exit_code = None;
+            self.action.state = Some(ActionState::Success);
+            self.action.started_at = Some(now);
+            self.action.progress = None;
+            self.action.status_message = None;
+            self.action.fail_message = None;
+            self.action.exit_code = None;
             self.state = if self.ending_only {
                 SessionState::ReadyEnding
             } else {
@@ -841,7 +879,7 @@ impl Session {
                 &format!("Exiting Environment: {}", env.name),
             );
 
-            self.action_ended_at = Some(std::time::SystemTime::now());
+            self.action.ended_at = Some(std::time::SystemTime::now());
 
             if let Some(cb) = &self.callback {
                 if let Some(status) = self.action_status() {
@@ -851,21 +889,6 @@ impl Session {
 
             String::new()
         };
-
-        // Remove static variables from env_vars
-        if let Some(vars) = &env.variables {
-            for key in vars.keys() {
-                self.env_vars.remove(&normalize_env_key(key));
-            }
-        }
-
-        // Remove environment from tracking (don't remove created_env_vars — they persist)
-        self.environments.remove(identifier);
-        self.environments_entered.pop();
-
-        if !keep_session_running {
-            self.ending_only = true;
-        }
 
         Ok(output)
     }
@@ -887,13 +910,7 @@ impl Session {
 
         let symtab = self.build_symbol_table(task_parameter_values, resolved_symtab)?;
 
-        self.action_state = Some(ActionState::Running);
-        self.action_started_at = Some(std::time::SystemTime::now());
-        self.action_ended_at = None;
-        self.action_progress = None;
-        self.action_status_message = None;
-        self.action_fail_message = None;
-        self.action_exit_code = None;
+        self.action.reset();
         self.state = SessionState::Running;
         self.notify_callback();
 
@@ -901,8 +918,8 @@ impl Session {
 
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-        self.cancel_token = Some(cancel_token.clone());
-        self.cancel_request_tx = Some(cancel_tx);
+        self.cancel.token = Some(cancel_token.clone());
+        self.cancel.request_tx = Some(cancel_tx);
 
         let env_vars = self.evaluate_env_vars(os_env_vars);
         let mut action_symtab = symtab.clone();
@@ -912,14 +929,14 @@ impl Session {
             &self.session_id,
             self.working_directory.clone(),
             self.files_directory.clone(),
-            self.user.clone(),
+            self.cross_user.user.clone(),
         )
         .with_redactions(self.redactions_enabled())
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
         #[cfg(unix)]
-        let mut runner = match self.helper.take() {
+        let mut runner = match self.cross_user.helper.take() {
             Some(h) => runner.with_helper(h),
             None => runner,
         };
@@ -942,7 +959,7 @@ impl Session {
             .await;
         #[cfg(unix)]
         {
-            self.helper = runner.take_helper();
+            self.cross_user.helper = runner.take_helper();
         }
         let result = result?;
 
@@ -989,13 +1006,7 @@ impl Session {
             log_section_banner(&self.session_id, msg);
         }
 
-        self.action_state = Some(ActionState::Running);
-        self.action_started_at = Some(std::time::SystemTime::now());
-        self.action_ended_at = None;
-        self.action_progress = None;
-        self.action_status_message = None;
-        self.action_fail_message = None;
-        self.action_exit_code = None;
+        self.action.reset();
         self.state = SessionState::Running;
         self.notify_callback();
 
@@ -1022,7 +1033,7 @@ impl Session {
 
         // Route through the persistent helper process when cross-user helper is active.
         #[cfg(unix)]
-        if self.helper.is_some() {
+        if self.cross_user.helper.is_some() {
             return self
                 .run_subprocess_via_helper(&cmd_args, env_vars, timeout)
                 .await;
@@ -1030,15 +1041,15 @@ impl Session {
 
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-        self.cancel_token = Some(cancel_token.clone());
-        self.cancel_request_tx = Some(cancel_tx);
+        self.cancel.token = Some(cancel_token.clone());
+        self.cancel.request_tx = Some(cancel_tx);
 
         let config = crate::subprocess::SubprocessConfig {
             args: cmd_args,
             env_vars,
             working_dir: Some(self.working_directory.clone()),
             timeout,
-            user: self.user.clone(),
+            user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
         };
@@ -1080,12 +1091,13 @@ impl Session {
             env_vars,
             working_dir: Some(self.working_directory.clone()),
             timeout: _timeout,
-            user: self.user.clone(),
+            user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: None,
         };
 
         let helper = self
+            .cross_user
             .helper
             .as_mut()
             .expect("caller checked helper.is_some()");
@@ -1097,7 +1109,7 @@ impl Session {
                 &mut filter,
                 &sid,
                 tx,
-                self.cancel_writer.as_ref(),
+                self.cross_user.cancel_writer.as_ref(),
             )
         });
 
@@ -1107,12 +1119,12 @@ impl Session {
         }
 
         let r = result?;
-        self.action_state = Some(r.state);
-        self.action_ended_at = Some(std::time::SystemTime::now());
-        self.action_exit_code = r.exit_code;
-        self.cancel_token = None;
-        self.cancel_request_tx = None;
-        self.mark_action_failed = false;
+        self.action.state = Some(r.state);
+        self.action.ended_at = Some(std::time::SystemTime::now());
+        self.action.exit_code = r.exit_code;
+        self.cancel.token = None;
+        self.cancel.request_tx = None;
+        self.cancel.mark_failed = false;
         self.state = if r.state == ActionState::Success {
             SessionState::Ready
         } else {
@@ -1165,12 +1177,12 @@ impl Session {
             Err(e) => {
                 // The subprocess failed to start or the runner encountered an error.
                 // Update session state so callers see Failed instead of stuck Running.
-                self.action_state = Some(ActionState::Failed);
-                self.action_ended_at = Some(std::time::SystemTime::now());
-                self.action_exit_code = None;
-                self.cancel_token = None;
-                self.cancel_request_tx = None;
-                self.mark_action_failed = false;
+                self.action.state = Some(ActionState::Failed);
+                self.action.ended_at = Some(std::time::SystemTime::now());
+                self.action.exit_code = None;
+                self.cancel.token = None;
+                self.cancel.request_tx = None;
+                self.cancel.mark_failed = false;
                 self.state = SessionState::ReadyEnding;
 
                 if let Some(cb) = &self.callback {
@@ -1185,18 +1197,18 @@ impl Session {
 
         // If the action was canceled but mark_action_failed is set,
         // report it as Failed instead of Canceled (matches Python behavior)
-        let final_state = if self.mark_action_failed && r.state == ActionState::Canceled {
+        let final_state = if self.cancel.mark_failed && r.state == ActionState::Canceled {
             ActionState::Failed
         } else {
             r.state
         };
 
-        self.action_state = Some(final_state);
-        self.action_ended_at = Some(std::time::SystemTime::now());
-        self.action_exit_code = r.exit_code;
-        self.cancel_token = None;
-        self.cancel_request_tx = None;
-        self.mark_action_failed = false;
+        self.action.state = Some(final_state);
+        self.action.ended_at = Some(std::time::SystemTime::now());
+        self.action.exit_code = r.exit_code;
+        self.cancel.token = None;
+        self.cancel.request_tx = None;
+        self.cancel.mark_failed = false;
 
         self.state = if self.ending_only || final_state != ActionState::Success {
             SessionState::ReadyEnding
@@ -1221,13 +1233,13 @@ impl Session {
     fn apply_message(&mut self, msg: ActionMessage, identifier: &str) {
         match msg {
             ActionMessage::Progress(v) => {
-                self.action_progress = Some(v);
+                self.action.progress = Some(v);
             }
             ActionMessage::Status(s) => {
-                self.action_status_message = Some(s);
+                self.action.status_message = Some(s);
             }
             ActionMessage::Fail(s) => {
-                self.action_fail_message = Some(s);
+                self.action.fail_message = Some(s);
             }
             ActionMessage::SetEnv { name, value } => {
                 let key = normalize_env_key(&name);
@@ -1254,7 +1266,7 @@ impl Session {
                 self.redacted_values.insert(value);
             }
             ActionMessage::CancelMarkFailed { fail_message } => {
-                self.action_fail_message = Some(fail_message);
+                self.action.fail_message = Some(fail_message);
                 let _ = self.cancel_action(None, true);
             }
         }

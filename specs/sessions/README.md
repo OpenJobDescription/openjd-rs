@@ -57,7 +57,7 @@ in implementation:
 | Action filter | `logging.Filter` on the LOG logger | Standalone `ActionFilter` struct, messages sent via mpsc channel |
 | Non-blocking API | Returns immediately, caller polls `action_status` | Async methods that `.await` to completion |
 | Cross-user (POSIX) | `sudo -u` + procfs/pgrep + libcap ctypes | `sudo -u` + procfs/pgrep + `caps` crate |
-| Cross-user (Windows) | `CreateProcessWithLogonW`/`AsUserW` via ctypes | Not yet implemented |
+| Cross-user (Windows) | `CreateProcessWithLogonW`/`AsUserW` via ctypes | Partially implemented (`WindowsSessionUser`, `win32.rs`, `win32_permissions.rs`); integration testing pending |
 
 ## Normative References
 

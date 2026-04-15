@@ -71,10 +71,22 @@ pub use openjd_expr::{PathFormat, PathMappingRule};  // re-export
 // Logging
 pub use logging::LogContent;
 
-// Cross-user
+// Cross-user (POSIX)
 pub use session_user::{SessionUser, PosixSessionUser};
 pub use tempdir::TempDir;
+
+// Cross-user (Windows)
+#[cfg(windows)]
+pub use session_user::{WindowsSessionUser, BadCredentialsError};
 ```
+
+### External Cancellation
+
+`SessionConfig.cancel_token` accepts an optional `tokio_util::sync::CancellationToken`.
+When provided, all action cancel tokens are created as children of this token via
+`parent.child_token()`. Canceling the parent cascades to all current and future actions
+in the session. This enables the worker agent to cancel an entire session from outside
+the session's async context.
 
 ## Data Flow
 
@@ -148,9 +160,18 @@ action lifecycle through `&mut self` methods. The `drive_action` method holds `&
 while concurrently processing messages from the channel, which is safe because the
 subprocess runs in a separate future joined via `tokio::select!`.
 
-### POSIX-first, Windows deferred
+### POSIX-first, Windows partially implemented
 
 The Python library supports both POSIX and Windows with extensive platform-specific code
 (ACLs, `CreateProcessWithLogonW`, `PopenWindowsAsUser`, etc.). The Rust crate implements
-POSIX/Linux first since the primary deployment target is Linux workers. Windows support
-is deferred until needed.
+POSIX/Linux as the primary target since Linux workers are the primary deployment.
+
+Windows has partial support:
+- Same-user subprocess execution: implemented (`subprocess.rs` Windows platform module)
+- Cross-user subprocess execution: partially implemented (`WindowsSessionUser` with
+  `CreateProcessWithLogonW`/`CreateProcessAsUserW`, process tree kill via
+  `CreateToolhelp32Snapshot`)
+- Win32 helpers: `win32.rs` (logon, user lookup), `win32_permissions.rs` (ACL management),
+  `win32_locate.rs` (executable resolution, not yet integrated)
+- Temp directory and embedded file permissions: Windows ACL paths implemented
+- Integration testing on Windows: pending

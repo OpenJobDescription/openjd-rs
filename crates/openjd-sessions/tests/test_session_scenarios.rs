@@ -425,7 +425,10 @@ macro_rules! scenario_test {
 }
 
 // let_bindings scenarios
-scenario_test!(ignore: scenario_let_bindings, "let_bindings/let_bindings_scenario.yaml"); // step let bindings referencing PATH params get Unresolved values at create_job time
+scenario_test!(
+    scenario_let_bindings,
+    "let_bindings/let_bindings_scenario.yaml"
+);
 scenario_test!(
     scenario_let_host_context,
     "let_bindings/let_host_context_scenario.yaml"

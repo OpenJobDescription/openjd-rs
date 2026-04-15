@@ -125,6 +125,17 @@ key), and copies that value into `dest` at the same path.
 Used by the model layer to build minimal symbol tables for session handoff — only the
 parameters actually referenced by a step's format strings are included.
 
+### accessed_symbols — collect referenced symbol names
+
+```rust
+let symbols: HashSet<String> = fs.accessed_symbols();
+```
+
+Returns the set of symbol names accessed by the format string's expressions, without
+copying values. Used by the model layer to detect references to symbols that are absent
+from the template-scope symbol table (e.g., `Param.X` for PATH parameters) so it can
+include related entries like `RawParam.X` in the filtered symbol table.
+
 ## FormatStringValidationError
 
 Structured error returned by `validate_expressions`:

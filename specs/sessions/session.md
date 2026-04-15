@@ -233,7 +233,15 @@ session creation (e.g., from job attachment manifests).
 
 ## Symbol Table Construction
 
-`build_symbol_table()` populates a `SymbolTable` with:
+```rust
+pub fn build_symbol_table(
+    &self,
+    task_parameter_values: Option<&TaskParameterSet>,
+    base: Option<&SerializedSymbolTable>,
+) -> Result<SymbolTable, SessionError>
+```
+
+Populates a `SymbolTable` with:
 
 | Symbol | Value | Source |
 |--------|-------|--------|
@@ -248,6 +256,24 @@ session creation (e.g., from job attachment manifests).
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
 applied to each element. Values are stored as `ExprValue` (typed) when the EXPR extension
 is active, or as strings for the base spec.
+
+### Pre-resolved symbol table path
+
+When the `base` parameter is provided (a `SerializedSymbolTable` from `create_job`), the
+method skips building `Param.*`, `RawParam.*`, `Job.Name`, `Step.Name`, and let bindings
+from scratch. Instead it deserializes the pre-resolved symbol table via
+`base.to_symtab(PathFormat::host())`, which converts path values from the template's
+storage format (Posix) to the host's native path format.
+
+The worker agent uses this path when it receives a `resolved_symtab` from `create_job` —
+the job creation phase has already resolved template-scope format strings, evaluated let
+bindings, and populated `Job.Name`/`Step.Name`. The session then layers `Session.*` and
+`Task.*` symbols on top.
+
+PATH and LIST_PATH `Param.*` values are excluded from the base symtab — they are omitted
+in template scope because their concrete values depend on session-time path mapping. The
+session populates these from `self.job_parameter_values` with the session's path mapping
+rules applied.
 
 ## Path Mapping Materialization
 
