@@ -25,6 +25,7 @@ Three lines:
 
 ```rust
 pub struct ExpressionError {
+    pub kind: ExpressionErrorKind,
     pub message: String,
     pub expr: Option<String>,        // source expression text
     pub col_offset: Option<usize>,   // start of error span
@@ -61,6 +62,57 @@ err.message_with_expr_prefix("{{")
 When an expression error occurs inside a format string `{{expr}}`, the column offsets
 need adjustment to account for the `{{` prefix. This method shifts the caret position
 accordingly.
+
+## ExpressionErrorKind
+
+`ExpressionError` carries a structured `kind` field for programmatic error handling:
+
+```rust
+#[non_exhaustive]
+pub enum ExpressionErrorKind {
+    UndefinedVariable,
+    UnknownFunction,
+    TypeError,
+    IntegerOverflow,
+    DivisionByZero,
+    FloatError,
+    IndexOutOfBounds,
+    MemoryLimitExceeded,
+    OperationLimitExceeded,
+    UnsupportedSyntax,
+    ExplicitFail,
+    ParseError,
+    Other,
+}
+```
+
+| Variant | Trigger |
+|---|---|
+| `UndefinedVariable` | Symbol table lookup finds no matching variable |
+| `UnknownFunction` | No function with the given name in the library |
+| `TypeError` | Type mismatch in operation or function call |
+| `IntegerOverflow` | i64 arithmetic exceeds bounds |
+| `DivisionByZero` | Division or modulo by zero |
+| `FloatError` | Float operation produces NaN or infinity |
+| `IndexOutOfBounds` | List or range index outside valid range |
+| `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit |
+| `OperationLimitExceeded` | Operation count exceeds configured limit |
+| `UnsupportedSyntax` | Valid Python syntax not supported by the expression language |
+| `ExplicitFail` | The `fail()` function was called |
+| `ParseError` | Expression could not be parsed |
+| `Other` | Catch-all for errors that don't fit other categories |
+
+The enum is `#[non_exhaustive]` to allow adding new variants without breaking callers.
+Callers should always include a wildcard arm when matching.
+
+Convenience constructors on `ExpressionError` set the kind automatically:
+
+```rust
+ExpressionError::undefined_variable("Param.Missing")
+ExpressionError::type_error("expected int, got string")
+ExpressionError::integer_overflow("result exceeds i64 range")
+ExpressionError::division_by_zero()
+```
 
 ## Smart Caret Positioning
 

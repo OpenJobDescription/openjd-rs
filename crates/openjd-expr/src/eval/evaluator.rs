@@ -247,167 +247,8 @@ impl<'a> Evaluator<'a> {
             ast::Expr::Call(c) => self.eval_call(c),
             ast::Expr::List(l) => self.eval_list(l),
             ast::Expr::Subscript(s) => self.eval_subscript(s),
-            ast::Expr::ListComp(lc) => {
-                // Validate restrictions
-                if lc.generators.len() != 1 {
-                    return Err(ExpressionError::unsupported(
-                        "Multiple 'for' clauses in list comprehensions are not supported",
-                    ));
-                }
-                let gen = &lc.generators[0];
-                if gen.ifs.len() > 1 {
-                    return Err(ExpressionError::unsupported("Multiple 'if' clauses in a list comprehension are not supported; combine with 'and'"));
-                }
-                if !matches!(&gen.target, ast::Expr::Name(_)) {
-                    return Err(ExpressionError::unsupported(
-                        "Tuple unpacking in list comprehension is not supported",
-                    ));
-                }
-                // Reject loop variables that don't start with lowercase or underscore
-                if let ast::Expr::Name(n) = &gen.target {
-                    let var_name = n.id.as_str();
-                    if !var_name.is_empty()
-                        && !var_name.starts_with(|c: char| c.is_lowercase() || c == '_')
-                    {
-                        return Err(ExpressionError::new(format!(
-                            "Loop variable '{var_name}' must start with a lowercase letter or underscore"
-                        )));
-                    }
-                }
-                // Evaluate the iterable
-                let iterable = self.evaluate(&gen.iter)?;
-                if iterable.is_unresolved() {
-                    // Determine element type from the iterable's inner type
-                    let inner = unwrap_unresolved(&iterable.expr_type());
-                    let elem_type = if let Some(et) = inner.list_element_type() {
-                        et.clone()
-                    } else {
-                        ExprType::INT
-                    };
-                    // Evaluate the body with an unresolved loop variable to determine output type
-                    let var_name = match &gen.target {
-                        ast::Expr::Name(n) => n.id.to_string(),
-                        _ => unreachable!(),
-                    };
-                    let mut tmp = crate::symbol_table::SymbolTable::new();
-                    tmp.set(&var_name, ExprValue::unresolved(elem_type.clone()))
-                        .map_err(|e| ExpressionError::new(e.to_string()))?;
-                    let combined: Vec<&crate::symbol_table::SymbolTable> = {
-                        let mut v: Vec<&crate::symbol_table::SymbolTable> = self.symtabs.to_vec();
-                        v.push(&tmp);
-                        v
-                    };
-                    let mut child = Evaluator {
-                        symtabs: &combined,
-                        path_format: self.path_format,
-                        expr_source: self.expr_source,
-                        memory_limit: self.memory_limit,
-                        operation_limit: self.operation_limit,
-                        current_memory: self.current_memory,
-                        peak_memory: self.peak_memory,
-                        operation_count: self.operation_count,
-                        keyword_renames: self.keyword_renames,
-                        library: self.library,
-                        path_mapping_rules: self.path_mapping_rules,
-                        target_type: None,
-                        regex_cache: std::collections::HashMap::new(),
-                    };
-                    let body_val = child.evaluate(&lc.elt)?;
-                    self.current_memory = child.current_memory;
-                    self.peak_memory = child.peak_memory;
-                    self.operation_count = child.operation_count;
-                    let body_type = unwrap_unresolved(&body_val.expr_type());
-                    return self.track(ExprValue::unresolved(ExprType::list(body_type)));
-                }
-                let items: Vec<ExprValue> = if let Some(iter) = iterable.list_iter() {
-                    iter.collect()
-                } else if let ExprValue::RangeExpr(r) = &iterable {
-                    r.iter().map(ExprValue::Int).collect()
-                } else {
-                    return Err(ExpressionError::type_error(format!(
-                        "Cannot iterate over {}",
-                        iterable.expr_type()
-                    )));
-                };
-                // Release the iterable — we've extracted the items
-                self.release(&iterable);
-                // Get loop variable name
-                let var_name = match &gen.target {
-                    ast::Expr::Name(n) => n.id.to_string(),
-                    _ => unreachable!(),
-                };
-                // Evaluate each element
-                let mut result = Vec::new();
-                let base_symtabs: Vec<&crate::symbol_table::SymbolTable> = self.symtabs.to_vec();
-                for item in &items {
-                    self.count_op()?;
-                    let mut tmp = crate::symbol_table::SymbolTable::new();
-                    tmp.set(&var_name, item.clone())
-                        .map_err(|e| ExpressionError::new(e.to_string()))?;
-                    let mut combined = base_symtabs.clone();
-                    combined.push(&tmp);
-                    let mut child = Evaluator {
-                        symtabs: &combined,
-                        path_format: self.path_format,
-                        expr_source: self.expr_source,
-                        memory_limit: self.memory_limit,
-                        operation_limit: self.operation_limit,
-                        current_memory: self.current_memory,
-                        peak_memory: self.peak_memory,
-                        operation_count: self.operation_count,
-                        keyword_renames: self.keyword_renames,
-                        library: self.library,
-                        path_mapping_rules: self.path_mapping_rules,
-                        target_type: None,
-                        regex_cache: std::collections::HashMap::new(),
-                    };
-                    // Check filter
-                    let mut include = true;
-                    if let Some(if_clause) = gen.ifs.first() {
-                        let cond = child.evaluate(if_clause)?;
-                        if let ExprValue::Bool(b) = cond {
-                            include = b;
-                        }
-                    }
-                    if include {
-                        let val = child.evaluate(&lc.elt)?;
-                        result.push(val);
-                    }
-                    // Propagate counters back
-                    self.current_memory = child.current_memory;
-                    self.peak_memory = child.peak_memory;
-                    self.operation_count = child.operation_count;
-                    // Release the loop variable's memory for this iteration
-                    self.current_memory = self.current_memory.saturating_sub(item.memory_size());
-                }
-                // Check nesting depth — same as list literals
-                for e in &result {
-                    let t = e.expr_type();
-                    if let Some(inner) = t.list_element_type() {
-                        if inner.list_element_type().is_some() {
-                            return Err(ExpressionError::new(
-                                "Lists may be nested at most 2 levels deep",
-                            ));
-                        }
-                    }
-                }
-                let elem_type = if result.is_empty() {
-                    ExprType::INT
-                } else {
-                    result[0].expr_type()
-                };
-                self.track(ExprValue::make_list(result, elem_type)?)
-            }
-            ast::Expr::Slice(s) => {
-                // Check for step=0
-                if let Some(step) = &s.step {
-                    let step_val = self.evaluate(step)?;
-                    if let ExprValue::Int(0) = step_val {
-                        return Err(ExpressionError::new("Slice step cannot be zero"));
-                    }
-                }
-                self.track(ExprValue::unresolved(ExprType::INT))
-            }
+            ast::Expr::ListComp(lc) => self.eval_listcomp(lc),
+            ast::Expr::Slice(s) => self.eval_slice(s),
             ast::Expr::Starred(_) => Err(ExpressionError::unsupported(
                 "Star unpacking is not supported",
             )),
@@ -452,7 +293,7 @@ impl<'a> Evaluator<'a> {
     }
 
     fn count_op(&mut self) -> Result<(), ExpressionError> {
-        self.operation_count += 1;
+        self.operation_count = self.operation_count.saturating_add(1);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded,
@@ -1368,6 +1209,154 @@ impl<'a> Evaluator<'a> {
             Some(&ast::Expr::Subscript(s.clone())),
         )
     }
+
+    /// Create a child evaluator with an extra symbol table for local scope.
+    /// The child shares resource counters with the parent; callers must
+    /// propagate counters back after the child returns.
+    fn child_evaluator<'b>(&self, symtabs: &'b [&'b SymbolTable]) -> Evaluator<'b>
+    where
+        'a: 'b,
+    {
+        Evaluator {
+            symtabs,
+            path_format: self.path_format,
+            expr_source: self.expr_source,
+            memory_limit: self.memory_limit,
+            operation_limit: self.operation_limit,
+            current_memory: self.current_memory,
+            peak_memory: self.peak_memory,
+            operation_count: self.operation_count,
+            keyword_renames: self.keyword_renames,
+            library: self.library,
+            path_mapping_rules: self.path_mapping_rules,
+            target_type: None,
+            regex_cache: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Propagate resource counters back from a child evaluator.
+    fn absorb_counters(&mut self, child: &Evaluator) {
+        self.current_memory = child.current_memory;
+        self.peak_memory = child.peak_memory;
+        self.operation_count = child.operation_count;
+    }
+
+    fn eval_listcomp(&mut self, lc: &ast::ExprListComp) -> Result<ExprValue, ExpressionError> {
+        // Validate restrictions
+        if lc.generators.len() != 1 {
+            return Err(ExpressionError::unsupported(
+                "Multiple 'for' clauses in list comprehensions are not supported",
+            ));
+        }
+        let gen = &lc.generators[0];
+        if gen.ifs.len() > 1 {
+            return Err(ExpressionError::unsupported(
+                "Multiple 'if' clauses in a list comprehension are not supported; combine with 'and'",
+            ));
+        }
+        if !matches!(&gen.target, ast::Expr::Name(_)) {
+            return Err(ExpressionError::unsupported(
+                "Tuple unpacking in list comprehension is not supported",
+            ));
+        }
+        if let ast::Expr::Name(n) = &gen.target {
+            let var_name = n.id.as_str();
+            if !var_name.is_empty() && !var_name.starts_with(|c: char| c.is_lowercase() || c == '_')
+            {
+                return Err(ExpressionError::new(format!(
+                    "Loop variable '{var_name}' must start with a lowercase letter or underscore"
+                )));
+            }
+        }
+
+        let iterable = self.evaluate(&gen.iter)?;
+        let var_name = match &gen.target {
+            ast::Expr::Name(n) => n.id.to_string(),
+            _ => unreachable!(),
+        };
+
+        // Unresolved iterable: evaluate body once to determine output type
+        if iterable.is_unresolved() {
+            let inner = unwrap_unresolved(&iterable.expr_type());
+            let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
+            let mut tmp = crate::symbol_table::SymbolTable::new();
+            tmp.set(&var_name, ExprValue::unresolved(elem_type))
+                .map_err(|e| ExpressionError::new(e.to_string()))?;
+            let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
+            combined.push(&tmp);
+            let mut child = self.child_evaluator(&combined);
+            let body_val = child.evaluate(&lc.elt)?;
+            self.absorb_counters(&child);
+            let body_type = unwrap_unresolved(&body_val.expr_type());
+            return self.track(ExprValue::unresolved(ExprType::list(body_type)));
+        }
+
+        // Materialize iterable elements
+        let items: Vec<ExprValue> = if let Some(iter) = iterable.list_iter() {
+            iter.collect()
+        } else if let ExprValue::RangeExpr(r) = &iterable {
+            r.iter().map(ExprValue::Int).collect()
+        } else {
+            return Err(ExpressionError::type_error(format!(
+                "Cannot iterate over {}",
+                iterable.expr_type()
+            )));
+        };
+        self.release(&iterable);
+
+        // Evaluate each element with a child scope
+        let mut result = Vec::new();
+        let base_symtabs: Vec<&SymbolTable> = self.symtabs.to_vec();
+        for item in &items {
+            self.count_op()?;
+            let mut tmp = crate::symbol_table::SymbolTable::new();
+            tmp.set(&var_name, item.clone())
+                .map_err(|e| ExpressionError::new(e.to_string()))?;
+            let mut combined = base_symtabs.clone();
+            combined.push(&tmp);
+            let mut child = self.child_evaluator(&combined);
+            let mut include = true;
+            if let Some(if_clause) = gen.ifs.first() {
+                let cond = child.evaluate(if_clause)?;
+                if let ExprValue::Bool(b) = cond {
+                    include = b;
+                }
+            }
+            if include {
+                result.push(child.evaluate(&lc.elt)?);
+            }
+            self.absorb_counters(&child);
+            self.current_memory = self.current_memory.saturating_sub(item.memory_size());
+        }
+
+        // Check nesting depth
+        for e in &result {
+            let t = e.expr_type();
+            if let Some(inner) = t.list_element_type() {
+                if inner.list_element_type().is_some() {
+                    return Err(ExpressionError::new(
+                        "Lists may be nested at most 2 levels deep",
+                    ));
+                }
+            }
+        }
+        let elem_type = if result.is_empty() {
+            ExprType::INT
+        } else {
+            result[0].expr_type()
+        };
+        self.track(ExprValue::make_list(result, elem_type)?)
+    }
+
+    fn eval_slice(&mut self, s: &ast::ExprSlice) -> Result<ExprValue, ExpressionError> {
+        if let Some(step) = &s.step {
+            let step_val = self.evaluate(step)?;
+            if let ExprValue::Int(0) = step_val {
+                return Err(ExpressionError::new("Slice step cannot be zero"));
+            }
+        }
+        self.track(ExprValue::unresolved(ExprType::INT))
+    }
 }
 
 /// Try to build a dotted name from an attribute chain.
@@ -1380,7 +1369,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.path_mapping_rules
     }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
-        self.operation_count += 1;
+        self.operation_count = self.operation_count.saturating_add(1);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded,
@@ -1390,7 +1379,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         }
     }
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError> {
-        self.operation_count += n;
+        self.operation_count = self.operation_count.saturating_add(n);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded,
@@ -1401,7 +1390,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     }
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError> {
         let ops = len.div_ceil(256);
-        self.operation_count += ops;
+        self.operation_count = self.operation_count.saturating_add(ops);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded,
@@ -1414,7 +1403,9 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         if let Some(re) = self.regex_cache.get(pattern) {
             return Ok(re.clone());
         }
-        let re = regex::Regex::new(pattern)
+        let re = regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .build()
             .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))?;
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)

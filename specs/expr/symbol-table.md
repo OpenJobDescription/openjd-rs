@@ -101,6 +101,63 @@ symtab.set("Param.Frame", ExprValue::unresolved(ExprType::INT));
 This is used during template validation to build type-only symbol tables from parameter
 definitions.
 
+## SerializedSymbolTable
+
+`SerializedSymbolTable` is the cross-process serialization boundary between template
+scope and session scope. It wraps a `serde_json::Value` and provides conversion to
+a live `SymbolTable` with path format awareness.
+
+Defined in `symbol_table.rs`.
+
+```rust
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SerializedSymbolTable(serde_json::Value);
+```
+
+### Wire Format
+
+A `SymbolTable` serializes as a JSON array of entries:
+
+```json
+[
+  { "name": "Param.Frame", "type": "int", "value": "42" },
+  { "name": "Param.Name", "type": "string", "value": "shot_01" },
+  { "name": "Param.OutputDir", "type": "path", "value": "/out" }
+]
+```
+
+Each entry has `name` (dotted path), `type` (`ExprType` display string), and `value`
+(string representation). `Unresolved` entries are skipped during serialization.
+
+### Deserialization with Path Format
+
+```rust
+let serialized: SerializedSymbolTable = serde_json::from_str(json)?;
+let symtab = serialized.to_symtab(PathFormat::Posix)?;
+```
+
+`to_symtab(path_format)` converts the serialized form back to a live `SymbolTable`.
+The `path_format` parameter determines how `PATH`-typed values are constructed —
+template scope stores paths in Posix format, while session scope may need host-native
+format. This is the key architectural role: it bridges the serialization boundary
+between processes that may run on different operating systems.
+
+### JSON Transport for Values
+
+Individual `ExprValue` instances also support JSON transport via `to_json_transport()`
+and `from_json_transport()`:
+
+```json
+{ "type": "int", "value": "42" }
+{ "type": "string", "value": "hello" }
+{ "type": "list[int]", "value": ["1", "2", "3"] }
+{ "type": "path", "value": "/tmp/out" }
+```
+
+This format is used for individual value serialization in contexts outside the symbol
+table, such as evaluation result transport.
+
 ## Divergence from Python
 
 The Python `SymbolTable` accepts raw Python values and `ExprType` objects in its

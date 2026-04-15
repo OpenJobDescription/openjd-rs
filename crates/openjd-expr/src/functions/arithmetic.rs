@@ -167,7 +167,11 @@ pub fn floordiv_float(_: Ctx, a: &[ExprValue]) -> R {
     if r == 0.0 {
         return Err(ExpressionError::division_by_zero("Division"));
     }
-    Ok(ExprValue::Int((l / r).floor() as i64))
+    let v = (l / r).floor();
+    if v.abs() > i64::MAX as f64 {
+        return Err(ExpressionError::integer_overflow());
+    }
+    Ok(ExprValue::Int(v as i64))
 }
 
 pub fn mod_float(_: Ctx, a: &[ExprValue]) -> R {
@@ -298,29 +302,6 @@ pub fn path_div(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn add_path_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Path { value: l, format }, ExprValue::String(r)) => {
-            ctx.count_string_ops(l.len() + r.len())?;
-            Ok(ExprValue::Path {
-                value: format!("{l}{r}"),
-                format: *format,
-            })
-        }
-        _ => Err(ExpressionError::type_error("type error")),
-    }
-}
-
-pub fn add_string_path(ctx: Ctx, a: &[ExprValue]) -> R {
-    match (&a[0], &a[1]) {
-        (ExprValue::String(l), ExprValue::Path { value: r, .. }) => {
-            ctx.count_string_ops(l.len() + r.len())?;
-            Ok(ExprValue::String(format!("{l}{r}")))
-        }
-        _ => Err(ExpressionError::type_error("type error")),
-    }
-}
-
-pub fn add_path_path(ctx: Ctx, a: &[ExprValue]) -> R {
-    match (&a[0], &a[1]) {
-        (ExprValue::Path { value: l, format }, ExprValue::Path { value: r, .. }) => {
             ctx.count_string_ops(l.len() + r.len())?;
             Ok(ExprValue::Path {
                 value: format!("{l}{r}"),

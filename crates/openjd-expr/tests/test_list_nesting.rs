@@ -43,3 +43,48 @@ fn make_list_rejects_listlist_element() {
         "got: {err}"
     );
 }
+
+// === make_list type mismatch errors ===
+
+#[test]
+fn make_list_bool_rejects_non_bool() {
+    let result = ExprValue::make_list(
+        vec![ExprValue::Bool(true), ExprValue::Int(1)],
+        ExprType::BOOL,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("make_list expected bool element, got int"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_int_rejects_non_int() {
+    let result = ExprValue::make_list(
+        vec![ExprValue::Int(1), ExprValue::Bool(true)],
+        ExprType::INT,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("make_list expected int element, got bool"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_float_rejects_non_float() {
+    use openjd_expr::value::Float64;
+    let result = ExprValue::make_list(
+        vec![
+            ExprValue::Float(Float64::new(1.0).unwrap()),
+            ExprValue::Bool(false),
+        ],
+        ExprType::FLOAT,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("make_list expected float element, got bool"),
+        "got: {err}"
+    );
+}

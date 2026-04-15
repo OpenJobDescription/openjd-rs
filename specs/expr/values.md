@@ -135,6 +135,43 @@ regardless of variant. The variable part is heap allocations:
 The evaluator calls `_track(value)` after creating a value and `_release(value)` before
 consuming it, maintaining a running `current_memory` counter checked against the limit.
 
+## ListIter
+
+`ListIter` provides zero-allocation iteration over list elements, yielding `ExprValue`
+references without copying the underlying typed storage:
+
+```rust
+pub enum ListIter<'a> {
+    Bool(std::slice::Iter<'a, bool>),
+    Int(std::slice::Iter<'a, i64>),
+    Float(std::slice::Iter<'a, Float64>),
+    String(std::slice::Iter<'a, String>),
+    Path(std::slice::Iter<'a, String>, PathFormat),
+    List(std::slice::Iter<'a, ExprValue>),
+}
+```
+
+Obtained via `ExprValue::iter()` on any list variant. Implements `Iterator<Item = ExprValue>`
+and `ExactSizeIterator`. Each `next()` call wraps the underlying element in the
+appropriate `ExprValue` variant — this is a copy for scalar types but avoids cloning
+the backing storage.
+
+## Equality and Hashing Semantics
+
+`ExprValue` implements `Hash` and `PartialEq` with cross-type equivalence rules:
+
+| Comparison | Result | Rationale |
+|---|---|---|
+| `Int(1) == Float(1.0)` | `true` | Int-float equivalence when float is whole |
+| `String("x") == Path { value: "x", .. }` | `true` | Path coerces to its string value |
+| `ListInt([]) == ListFloat([])` | `true` | Empty lists are equal regardless of element type |
+| `ListBool([]) == ListString([])` | `true` | Same — all empty lists hash and compare equally |
+
+The `Hash` implementation uses discriminant tags that group equivalent types together:
+Int and whole-valued Float share the same tag, String and Path share the same tag, and
+all list variants share the same tag. This ensures that values which compare equal also
+hash equally, as required by the `Hash` contract.
+
 ## Coercion
 
 Two levels of coercion serve different purposes:
@@ -166,6 +203,31 @@ Applied when the evaluation result needs to match an expected type:
 
 `ExprValue::from_str_coerce(s, target_type)` parses a string into a typed value,
 used when binding parameter values from their string representations.
+
+## JSON Transport Format
+
+`ExprValue` supports JSON serialization for cross-process transport:
+
+```rust
+let json = value.to_json_transport();   // ExprValue → serde_json::Value
+let value = ExprValue::from_json_transport(&json, PathFormat::Posix)?;  // reverse
+```
+
+The transport format uses `{"type", "value"}` objects where `type` is the `ExprType`
+display string and scalar values are serialized as JSON strings:
+
+| ExprValue | JSON |
+|---|---|
+| `Int(42)` | `{"type": "int", "value": "42"}` |
+| `Float(3.14)` | `{"type": "float", "value": "3.14"}` |
+| `String("hi")` | `{"type": "string", "value": "hi"}` |
+| `Bool(true)` | `{"type": "bool", "value": "true"}` |
+| `Path { value, .. }` | `{"type": "path", "value": "/tmp"}` |
+| `ListInt([1,2])` | `{"type": "list[int]", "value": ["1", "2"]}` |
+| `Null` | `{"type": "nulltype", "value": ""}` |
+
+`from_json_transport` takes a `PathFormat` parameter to construct path values with the
+correct format for the receiving process.
 
 ## Unresolved Values
 

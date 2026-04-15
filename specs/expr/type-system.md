@@ -97,7 +97,7 @@ Union types are normalized on construction (matching the Python implementation):
 4. **NORETURN collapse** — `union[int, noreturn]` → `int`
 5. **Unresolved hoisting** — `union[unresolved[int], unresolved[string]]` → `unresolved[union[int, string]]`
 6. **Singleton unwrap** — `union[int]` → `int`
-7. **Sort** — deterministic ordering by TypeCode
+7. **Sort** — deterministic ordering by string representation (`to_string()`)
 
 ## Unresolved Type Normalization
 

@@ -24,7 +24,7 @@ openjd-rs/
 │   │       ├── error.rs        # Expression error types
 │   │       └── eval/           # Expression parsing and evaluation
 │   │           ├── mod.rs
-│   │           ├── parse.rs    # rustpython-parser integration
+│   │           ├── parse.rs    # ruff_python_parser integration
 │   │           └── evaluator.rs # AST-walking evaluator with resource bounds
 │   ├── openjd-model/           # Core library: template parsing, validation
 │   │   └── src/
@@ -77,7 +77,7 @@ Expression language implementation. No dependency on model or sessions. Provides
 - Type system (`ExprType`, `TypeCode`) matching the EXPR extension spec
 - Runtime values (`ExprValue`) with truthiness, comparison, memory tracking
 - Hierarchical symbol table for expression evaluation
-- Expression parsing via `rustpython-parser` (see `specs/parser-selection.md`)
+- Expression parsing via `ruff_python_parser` (see `specs/parser-selection.md`)
 - AST-walking evaluator with memory and operation bounds
 - Integer range expression parsing (`1-10:2,20-30`)
 - Path format and mapping rules
@@ -101,7 +101,7 @@ Commands: `check` (validate templates), `summary` (job/step summary), `run` (exe
 
 ## Key Design Decisions
 
-- **Parser**: `rustpython-parser` from crates.io (see `specs/parser-selection.md`)
+- **Parser**: `ruff_python_parser` via git pin (see `specs/parser-selection.md`)
 - **Serialization**: serde + serde_yaml for template deserialization
 - **Validation**: Post-deserialization validation pass (not inline with serde)
 - **Error handling**: `thiserror`-based enums throughout

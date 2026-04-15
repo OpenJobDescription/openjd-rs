@@ -160,8 +160,9 @@ Python behavior where Pydantic validates format strings on model construction.
 ## Utility
 
 ```rust
-/// Escape a string for use as a literal in a format string.
-/// Doubles any `{` or `}` characters.
+/// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
+/// Replaces `{{` with `{{ "{{" }}` and `}}` with `{{ "}" + "}" }}` — wrapping the
+/// literal brace characters in expression interpolations that produce them as string values.
 pub fn escape_format_string(s: &str) -> String;
 ```
 

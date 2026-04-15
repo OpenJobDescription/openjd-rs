@@ -80,7 +80,7 @@ pub fn evaluate_expression_bounded(
 For more control, parse once and evaluate with a builder:
 
 ```rust
-let parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
+let mut parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
 
 // Inspect parse metadata
 parsed.accessed_symbols  // {"Param.Frame"}
@@ -97,7 +97,7 @@ let value = parsed.evaluator(&[&job_params, &let_bindings])
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
     .with_path_mapping_rules(&rules)
-    .evaluate()?;
+    .evaluate(&parsed.ast)?;
 ```
 
 `ParsedExpression::new` parses once and exposes symbol/function metadata for validation.

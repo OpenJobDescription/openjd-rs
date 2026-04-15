@@ -1320,3 +1320,24 @@ fn digits_as_extension_no_stem_digits() {
 fn path_from_list_relative() {
     assert_eq!(eval("path(['a', 'b', 'c'])").to_display_string(), "a/b/c");
 }
+
+// === Bug 5: is_relative_to path component boundary ===
+#[test]
+fn is_relative_to_component_boundary() {
+    // '/foo/bar' is NOT relative to '/foo/b' — must check component boundaries
+    assert_eq!(
+        eval_with("P.is_relative_to('/foo/b')", &posix_st("P", "/foo/bar")).to_display_string(),
+        "false"
+    );
+}
+
+// === Bug 6: relative_to path component boundary ===
+#[test]
+fn relative_to_component_boundary_error() {
+    // '/foo/bar'.relative_to('/foo/b') should error, not return "ar"
+    assert_err_with(
+        "P.relative_to('/foo/b')",
+        &posix_st("P", "/foo/bar"),
+        &["relative_to failed"],
+    );
+}

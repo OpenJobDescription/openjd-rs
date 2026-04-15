@@ -96,7 +96,13 @@ fn round_half_even(x: f64) -> f64 {
 
 pub fn floor_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(f) => Ok(ExprValue::Int(f.floor() as i64)),
+        ExprValue::Float(f) => {
+            let v = f.floor();
+            if v.abs() > i64::MAX as f64 {
+                return Err(ExpressionError::integer_overflow());
+            }
+            Ok(ExprValue::Int(v as i64))
+        }
         _ => Err(ExpressionError::type_error("type error")),
     }
 }
@@ -110,7 +116,13 @@ pub fn floor_int(_: Ctx, a: &[ExprValue]) -> R {
 
 pub fn ceil_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(f) => Ok(ExprValue::Int(f.ceil() as i64)),
+        ExprValue::Float(f) => {
+            let v = f.ceil();
+            if v.abs() > i64::MAX as f64 {
+                return Err(ExpressionError::integer_overflow());
+            }
+            Ok(ExprValue::Int(v as i64))
+        }
         _ => Err(ExpressionError::type_error("type error")),
     }
 }
@@ -134,7 +146,11 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
                 })
                 .unwrap_or(0);
             if !has_ndigits {
-                Ok(ExprValue::Int(round_half_even(f.0) as i64))
+                let v = round_half_even(f.0);
+                if v.abs() > i64::MAX as f64 {
+                    return Err(ExpressionError::integer_overflow());
+                }
+                Ok(ExprValue::Int(v as i64))
             } else if ndigits >= 0 {
                 let factor = 10f64.powi(ndigits as i32);
                 let rounded = round_half_even(f.0 * factor) / factor;
@@ -168,9 +184,11 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
                 Ok(ExprValue::Int(*i))
             } else {
                 let factor = 10f64.powi((-ndigits) as i32);
-                Ok(ExprValue::Int(
-                    (round_half_even(*i as f64 / factor) * factor) as i64,
-                ))
+                let v = round_half_even(*i as f64 / factor) * factor;
+                if v.abs() > i64::MAX as f64 {
+                    return Err(ExpressionError::integer_overflow());
+                }
+                Ok(ExprValue::Int(v as i64))
             }
         }
         _ => Err(ExpressionError::new("round() requires numeric argument")),
@@ -186,7 +204,9 @@ pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
             ctx.count_op()?;
             match e {
                 ExprValue::Int(i) => {
-                    int_sum += i;
+                    int_sum = int_sum
+                        .checked_add(i)
+                        .ok_or_else(ExpressionError::integer_overflow)?;
                     float_sum += i as f64;
                 }
                 ExprValue::Float(f) => {

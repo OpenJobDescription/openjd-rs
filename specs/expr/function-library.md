@@ -97,13 +97,13 @@ Operators are registered as dunder-named functions:
 
 | Operator | Function name | Example signatures |
 |----------|--------------|-------------------|
-| `+` | `__add__` | `(int, int) -> int`, `(string, string) -> string`, `(path, string) -> path`, `(list[T1], list[T1]) -> list[T1]` |
+| `+` | `__add__` | `(int, int) -> int`, `(string, string) -> string`, `(path, string) -> path`, `(list[T1], list[T2]) -> list[T3]` |
 | `-` | `__sub__` | `(int, int) -> int`, `(float, float) -> float` |
 | `*` | `__mul__` | `(int, int) -> int`, `(string, int) -> string`, `(list[T1], int) -> list[T1]` |
 | `/` | `__truediv__` | `(int, int) -> float`, `(path, string) -> path`, `(path, path) -> path` |
 | `//` | `__floordiv__` | `(int, int) -> int`, `(float, float) -> int` |
 | `%` | `__mod__` | `(int, int) -> int`, `(float, float) -> float` |
-| `**` | `__pow__` | `(int, int) -> int`, `(float, float) -> float` |
+| `**` | `__pow__` | `(int, int) -> float\|int`, `(float, float) -> float` |
 | unary `-` | `__neg__` | `(int) -> int`, `(float) -> float` |
 | unary `+` | `__pos__` | `(int) -> int`, `(float) -> float` |
 | `not` | `__not__` | `(bool) -> bool` |
@@ -160,10 +160,12 @@ pub fn default_library() -> FunctionLibrary {
         .merge(list_ops::library())
         .merge(comparison::library())
         .merge(math_ops::library())
+        .merge(string_functions::library())
+        .merge(list_functions::library())
+        .merge(conversion::library())
         .merge(path_ops::library())
         .merge(repr_ops::library())
         .merge(regex_ops::library())
-        .merge(conversion::library())
         .merge(misc::library())
 }
 ```
@@ -192,6 +194,17 @@ via `with_host_context()`:
 ```rust
 let lib = get_default_library().clone().merge(host_library());
 ```
+
+For template validation at job creation time (when path mapping rules aren't available
+yet), `with_unresolved_host_context()` registers the host-context function signatures
+with stub implementations that return `Unresolved(PATH)`:
+
+```rust
+let lib = get_default_library().clone().with_unresolved_host_context();
+```
+
+This allows the type checker to verify that calls to host-context functions are
+well-typed without requiring actual path mapping rules.
 
 Cloning copies the `HashMap<String, Vec<FunctionEntry>>` (all `fn` pointers, no
 heap-allocated closures), so this is cheap.
