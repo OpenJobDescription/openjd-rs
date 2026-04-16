@@ -13,12 +13,12 @@ against the current symbol table.
 pub struct EmbeddedFiles {
     files: Vec<EmbeddedFileInfo>,
     scope: EmbeddedFilesScope,
-    user: Option<PosixSessionUser>,
+    user: Option<Arc<dyn SessionUser>>,
 }
 
 impl EmbeddedFiles {
-    pub fn new(scope: EmbeddedFilesScope) -> Self;
-    pub fn with_user(self, user: PosixSessionUser) -> Self;
+    pub fn new(scope: EmbeddedFilesScope, session_files_directory: PathBuf, session_id: &str) -> Self;
+    pub fn with_user(self, user: Option<Arc<dyn SessionUser>>) -> Self;
 
     pub fn allocate_file_paths(
         &mut self,

@@ -126,6 +126,18 @@ impl CrossUserHelper {
     }
 }
 
+#[cfg(unix)]
+impl Drop for CrossUserHelper {
+    fn drop(&mut self) {
+        // Safety net: kill the child if shutdown() wasn't called.
+        if let Ok(None) = self.child.try_wait() {
+            log::warn!(target: "openjd.sessions", "CrossUserHelper dropped without shutdown(), killing child process");
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
 #[cfg(windows)]
 impl CrossUserHelperWin {
     /// Spawn the helper binary as the given user via `CreateProcessAsUserW` (Windows).
@@ -240,11 +252,25 @@ impl CrossUserHelperWin {
     /// Send "shutdown" and wait for the process to exit.
     pub fn shutdown(&mut self) {
         let _ = self.send_command(&serde_json::Value::String("shutdown".into()));
-        // Wait for the process to exit
         unsafe {
             let _ =
                 windows::Win32::System::Threading::WaitForSingleObject(self.process_handle, 5000);
             let _ = windows::Win32::Foundation::CloseHandle(self.process_handle);
+            self.process_handle = windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for CrossUserHelperWin {
+    fn drop(&mut self) {
+        // Safety net: terminate the process if shutdown() wasn't called.
+        if !self.process_handle.is_invalid() {
+            log::warn!(target: "openjd.sessions", "CrossUserHelperWin dropped without shutdown(), terminating child process");
+            unsafe {
+                let _ = windows::Win32::System::Threading::TerminateProcess(self.process_handle, 1);
+                let _ = windows::Win32::Foundation::CloseHandle(self.process_handle);
+            }
         }
     }
 }
@@ -410,11 +436,7 @@ pub(crate) fn run_via_helper(
         }
 
         if let Some(line) = resp.get("out").and_then(|v| v.as_str()) {
-            let line = if line.len() > 64 * 1024 {
-                &line[..64 * 1024]
-            } else {
-                line
-            };
+            let line = crate::subprocess::truncate_line(line);
             let (display, pass_through) = crate::subprocess::process_line(
                 line,
                 filter,
@@ -425,8 +447,10 @@ pub(crate) fn run_via_helper(
             if pass_through && filter.min_log_level() <= 20 {
                 session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
             }
-            stdout_collected.push_str(line);
-            stdout_collected.push('\n');
+            if config.collect_stdout {
+                stdout_collected.push_str(&display);
+                stdout_collected.push('\n');
+            }
             continue;
         }
 

@@ -22,7 +22,7 @@ async fn test_path_mapping_file_created_with_rules() {
         source_path: "/mnt/shared".into(),
         destination_path: "/local/shared".into(),
     }];
-    let mut session = Session::new(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -48,7 +48,7 @@ async fn test_path_mapping_file_created_with_rules() {
 #[tokio::test]
 async fn test_path_mapping_file_created_empty_when_no_rules() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -75,7 +75,7 @@ async fn test_has_path_mapping_rules_true() {
         source_path: "/src".into(),
         destination_path: "/dst".into(),
     }];
-    let mut session = Session::new(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -95,7 +95,7 @@ async fn test_has_path_mapping_rules_true() {
 #[tokio::test]
 async fn test_has_path_mapping_rules_false() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -127,7 +127,7 @@ async fn test_path_mapping_multiple_rules() {
             destination_path: "/local/share".into(),
         },
     ];
-    let mut session = Session::new(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {

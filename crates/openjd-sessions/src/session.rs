@@ -78,6 +78,11 @@ pub struct SessionConfig {
     /// Optional external cancellation token. When cancelled, all running and
     /// future actions will be cancelled via the spec's cancellation sequence.
     pub cancel_token: Option<CancellationToken>,
+    /// Whether to accumulate subprocess stdout into result strings.
+    /// Default is `false` — output is still streamed through the callback in
+    /// real time, but `ActionResult.stdout` and similar fields stay empty.
+    /// Set to `true` for CLI usage where captured output is needed.
+    pub collect_stdout: bool,
 }
 
 /// Normalize an environment variable name for the current platform.
@@ -200,12 +205,14 @@ pub struct Session {
     // Redaction
     redacted_values: HashSet<String>,
     revision_extensions: Option<openjd_model::types::ValidationContext>,
+    collect_stdout: bool,
 }
 
 impl Session {
-    /// Simple constructor for backward compatibility with existing tests.
+    /// Test-only constructor that accepts a pre-existing working directory.
+    /// Production code should use `Session::with_config`.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn new(working_directory: PathBuf) -> Self {
+    pub fn new_for_test(working_directory: PathBuf) -> Self {
         let files_directory = working_directory.join("embedded_files");
         Self {
             session_id: String::new(),
@@ -235,6 +242,7 @@ impl Session {
             callback: None,
             redacted_values: HashSet::new(),
             revision_extensions: None,
+            collect_stdout: true, // test constructor — tests need captured stdout
         }
     }
 
@@ -242,7 +250,7 @@ impl Session {
     pub fn with_config(config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
             Some(d) => d.clone(),
-            None => crate::tempdir::custom_gettempdir()?,
+            None => crate::tempdir::openjd_temp_dir()?,
         };
 
         #[cfg(unix)]
@@ -362,6 +370,7 @@ impl Session {
             callback: config.callback,
             redacted_values: HashSet::new(),
             revision_extensions: config.revision_extensions,
+            collect_stdout: config.collect_stdout,
         })
     }
 
@@ -475,8 +484,12 @@ impl Session {
 
     /// Redact sensitive values from output text.
     pub fn redact(&self, text: &str) -> String {
+        // Sort by length descending so longer matches are replaced first,
+        // preventing partial replacements when values overlap (e.g. "FOOBAR" and "BAR").
+        let mut vals: Vec<&str> = self.redacted_values.iter().map(|s| s.as_str()).collect();
+        vals.sort_by_key(|s| std::cmp::Reverse(s.len()));
         let mut result = text.to_string();
-        for val in &self.redacted_values {
+        for val in vals {
             result = result.replace(val, "********");
         }
         result
@@ -577,6 +590,7 @@ impl Session {
                                 "-i".to_string(),
                                 "rm".to_string(),
                                 "-rf".to_string(),
+                                "--".to_string(),
                             ];
                             args.extend(files);
                             let _ = std::process::Command::new("sudo")
@@ -699,6 +713,7 @@ impl Session {
                 self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
+            .with_collect_stdout(self.collect_stdout)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -854,6 +869,7 @@ impl Session {
                 self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
+            .with_collect_stdout(self.collect_stdout)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -965,6 +981,7 @@ impl Session {
             self.cross_user.user.clone(),
         )
         .with_redactions(self.redactions_enabled())
+        .with_collect_stdout(self.collect_stdout)
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
@@ -1007,7 +1024,6 @@ impl Session {
             state: result.state,
             exit_code: result.exit_code,
             stdout: result.stdout,
-            stderr: String::new(),
         })
     }
 
@@ -1091,6 +1107,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            collect_stdout: self.collect_stdout,
         };
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
         let subprocess_identifier = format!(
@@ -1133,6 +1150,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: None,
+            collect_stdout: self.collect_stdout,
         };
 
         let helper = self

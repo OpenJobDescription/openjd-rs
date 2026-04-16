@@ -19,3 +19,34 @@ pub struct ActionStatus {
     /// When the action ended (subprocess exited or action completed).
     pub ended_at: Option<SystemTime>,
 }
+
+impl Default for ActionStatus {
+    fn default() -> Self {
+        Self {
+            state: ActionState::Running,
+            progress: None,
+            status_message: None,
+            fail_message: None,
+            exit_code: None,
+            started_at: None,
+            ended_at: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_status_default() {
+        let s = ActionStatus::default();
+        assert_eq!(s.state, ActionState::Running);
+        assert!(s.progress.is_none());
+        assert!(s.status_message.is_none());
+        assert!(s.fail_message.is_none());
+        assert!(s.exit_code.is_none());
+        assert!(s.started_at.is_none());
+        assert!(s.ended_at.is_none());
+    }
+}

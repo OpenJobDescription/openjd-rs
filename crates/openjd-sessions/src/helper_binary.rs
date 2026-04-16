@@ -30,15 +30,20 @@ pub(crate) fn write_helper(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        if let Ok(Some(grp)) = nix::unistd::Group::from_name(user.group()) {
+            nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
+                SessionError::Runtime(format!(
+                    "Could not change ownership of '{}': {e}",
+                    path.display()
+                ))
+            })?;
+        }
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o750)).map_err(
             |source| SessionError::WorkingDirectory {
                 path: path.clone(),
                 source,
             },
         )?;
-        if let Ok(Some(grp)) = nix::unistd::Group::from_name(user.group()) {
-            let _ = nix::unistd::chown(&path, None, Some(grp.gid));
-        }
     }
 
     #[cfg(not(unix))]

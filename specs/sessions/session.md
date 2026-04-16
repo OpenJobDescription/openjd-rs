@@ -120,7 +120,7 @@ flag for tests that need to control the directory directly.
 
 ### Enter
 
-`enter_environment(env, identifier, os_env_vars, resolved_bindings)`:
+`enter_environment(env, resolved_symtab, identifier, os_env_vars)`:
 
 1. Validates state is `Ready`
 2. Sets state to `Running`
@@ -134,7 +134,7 @@ flag for tests that need to control the directory directly.
 
 ### Exit
 
-`exit_environment(identifier, os_env_vars, keep_session_running)`:
+`exit_environment(identifier, resolved_symtab, keep_session_running, os_env_vars)`:
 
 1. Validates state is `Ready` or `ReadyEnding`
 2. Validates the identifier matches the most recently entered environment (LIFO order)
@@ -151,7 +151,7 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 
 ## Task Execution
 
-`run_task(step_script, task_parameter_values, os_env_vars, resolved_bindings)`:
+`run_task(script, task_parameter_values, resolved_symtab, os_env_vars)`:
 
 1. Validates state is `Ready`
 2. Sets state to `Running`
@@ -318,8 +318,11 @@ subprocess doesn't exit within the limit, it's forcefully killed.
 3. Sets state to `Ended`
 4. Skips directory removal if `retain_working_dir` is true
 
-The `Drop` impl logs a warning if `cleanup()` wasn't called, but does not attempt
-cleanup itself — matching the Python library's explicit cleanup requirement.
+The `Drop` impl logs a warning if `cleanup()` wasn't called, and performs a best-effort
+`remove_dir_all` on the working directory (unless `retain_working_dir` is true). This
+safety net prevents leaked temp directories when callers forget to call `cleanup()`, but
+callers should still call `cleanup()` explicitly for proper cross-user file removal and
+logging.
 
 ## drive_action
 
@@ -357,3 +360,111 @@ Handles each `ActionMessage` variant:
 | `CancelMarkFailed` | Sets `action_fail_message`, triggers cancelation with `mark_action_failed = true` |
 
 After each message, the user callback is invoked with the updated `ActionStatus`.
+
+
+## Builder Methods
+
+After constructing a `Session` via `with_config`, several builder methods configure
+optional features before the first action:
+
+### with_path_mapping
+
+```rust
+pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Self
+```
+
+Sets the session's path mapping rules. Rules are sorted by source path length
+(longest first) so more specific rules take precedence. Called immediately after
+construction when path mapping rules are known at session creation time.
+
+### with_library
+
+```rust
+pub fn with_library(self, library: FunctionLibrary) -> Self
+```
+
+Sets the expression function library for format string evaluation. Required when
+templates use the EXPR extension. Without this, format strings can only use simple
+`{{Param.Name}}` references — function calls, arithmetic, and comprehensions will fail.
+
+### with_revision_extensions
+
+```rust
+pub fn with_revision_extensions(self, ctx: ValidationContext) -> Self
+```
+
+Sets the specification revision and enabled extensions for the session. This controls:
+- Whether `openjd_redacted_env` directives are processed (requires `REDACTED_ENV_VARS`
+  extension or revision > v2023_09)
+- Which features are available in format string evaluation
+
+### get_enabled_extensions
+
+```rust
+pub fn get_enabled_extensions(&self) -> Vec<String>
+```
+
+Returns the sorted list of enabled extension names for this session. Returns an empty
+vec if no `revision_extensions` were set. Used by the worker agent to report which
+extensions are active.
+
+## enter_environment_with_output
+
+```rust
+pub async fn enter_environment_with_output(
+    &mut self,
+    env: &Environment,
+    resolved_symtab: Option<&SerializedSymbolTable>,
+    identifier: Option<&str>,
+    os_env_vars: Option<&HashMap<String, String>>,
+) -> Result<(String, String), SessionError>
+```
+
+Variant of `enter_environment` that returns both the environment identifier and the
+captured stdout from the `onEnter` script as `(identifier, stdout)`. The regular
+`enter_environment` wraps this and discards the stdout.
+
+Used by the CLI's `run` command to display a unified output stream showing what each
+environment and task printed. The worker agent uses the regular `enter_environment`
+since it observes output through the real-time callback.
+
+Note: stdout is only captured when `SessionConfig.collect_stdout` is `true`.
+
+## Redaction
+
+### redact
+
+```rust
+pub fn redact(&self, text: &str) -> String
+```
+
+Replaces all known redacted values in `text` with `"********"`. Values are sorted by
+length descending before replacement so longer matches take precedence over shorter
+overlapping ones (e.g., `"FOOBAR"` is replaced before `"BAR"`).
+
+The redacted value set is populated from `openjd_redacted_env` directives processed
+during environment entry and task execution.
+
+## Duplicate Environment Identifier Rejection
+
+When `enter_environment` is called with an explicit `identifier` that has already been
+entered in the session, it returns `SessionError::Runtime` with the message
+`"Environment {id} has already been entered in this Session."`. This prevents
+accidentally entering the same environment twice, which would corrupt the LIFO stack.
+
+## Environment Variable Normalization
+
+On Windows, environment variable names are case-insensitive. The internal
+`normalize_env_key()` function uppercases all env var keys on Windows to prevent
+mixed-case duplicates from causing undefined behavior in the Win32 API. On POSIX,
+keys are passed through unchanged.
+
+## collect_stdout
+
+`SessionConfig.collect_stdout: bool` (default `false`) controls whether subprocess
+output is accumulated into `SubprocessResult.stdout` / `ActionResult.stdout`. When
+`false`, output is still streamed through the `ActionFilter` and callback in real time,
+but the collected `String` stays empty — preventing unbounded memory growth.
+
+Set to `true` for CLI usage where captured output is needed (e.g., `openjd run`).
+The worker agent leaves this `false` since it observes output through the callback.

@@ -12,7 +12,7 @@ delegate to `run_subprocess()` for actual process execution.
 ```rust
 pub enum CancelMethod {
     Terminate,
-    NotifyThenTerminate { notify_period: Duration },
+    NotifyThenTerminate { terminate_delay: Duration },
 }
 ```
 
@@ -193,3 +193,39 @@ ordering reflects this: let bindings first, then files, then action.
 
 The Python library follows the same ordering distinction between environment and step
 scripts.
+
+
+## resolve_action_timeout
+
+```rust
+pub(crate) fn resolve_action_timeout(
+    action: &Action,
+    symtab: &SymbolTable,
+    library: Option<&FunctionLibrary>,
+    rules: &[PathMappingRule],
+    default: Option<Duration>,
+) -> Result<Option<Duration>, SessionError>
+```
+
+Resolves an action's `timeout` format string to a `Duration`. If the action has no
+timeout field, returns the `default`. The resolved value must be a positive integer
+(seconds). Zero is rejected with an error.
+
+## Runner Builder Methods
+
+Both `EnvironmentScriptRunner` and `StepScriptRunner` wrap a shared `ScriptRunnerBase`
+and expose identical builder methods:
+
+| Method | Effect |
+|--------|--------|
+| `with_redactions(bool)` | Enable/disable redaction processing in the `ActionFilter` |
+| `with_collect_stdout(bool)` | Enable/disable stdout accumulation in `SubprocessResult` |
+| `with_initial_redacted_values(Vec<String>)` | Pre-populate the redaction set (from session's accumulated values) |
+| `with_cancel_token(CancellationToken)` | Set the cancellation token for the action |
+| `with_cancel_request_rx(Receiver<Option<Duration>>)` | Set the cancel request channel for time-limited cancellation |
+| `with_helper(CrossUserHelper)` | Transfer the cross-user helper process to this runner |
+| `take_helper() -> Option<CrossUserHelper>` | Take the helper back after the action completes |
+
+The `with_helper` / `take_helper` pair transfers ownership of the persistent cross-user
+helper process between the session and the runner for each action, avoiding the need to
+spawn a new sudo process per action.

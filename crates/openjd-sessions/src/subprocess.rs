@@ -26,7 +26,16 @@ use std::sync::Arc;
 const STDOUT_GRACE_TIME: Duration = Duration::from_secs(5);
 
 /// Maximum line length for stdout reading.
-const LOG_LINE_MAX_LENGTH: usize = 64 * 1024;
+pub(crate) const LOG_LINE_MAX_LENGTH: usize = 64 * 1024;
+
+/// Truncate a line to at most `LOG_LINE_MAX_LENGTH` bytes on a valid UTF-8 char boundary.
+pub(crate) fn truncate_line(line: &str) -> &str {
+    if line.len() > LOG_LINE_MAX_LENGTH {
+        &line[..line.floor_char_boundary(LOG_LINE_MAX_LENGTH)]
+    } else {
+        line
+    }
+}
 
 /// Result of running a subprocess action.
 #[derive(Debug)]
@@ -45,6 +54,11 @@ pub struct SubprocessConfig {
     pub user: Option<Arc<dyn SessionUser>>,
     pub cancel_method: CancelMethod,
     pub cancel_request_rx: Option<tokio::sync::watch::Receiver<Option<Duration>>>,
+    /// Whether to accumulate all stdout into `SubprocessResult.stdout`.
+    /// Default is `false` — lines are still streamed through the filter and
+    /// callback in real time, but the collected string stays empty.
+    /// Set to `true` only when the caller needs the full output (e.g. CLI `run`).
+    pub collect_stdout: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -144,30 +158,17 @@ mod platform {
             .map(|p| p.as_raw());
 
         loop {
-            // Try procfs first (Linux)
-            if let Some(child_pid) = find_child_pid_procfs(sudo_pid) {
-                if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid)))
+            let child_pids = find_child_pids_procfs(sudo_pid)
+                .or_else(|| find_child_pids_pgrep(sudo_pid))
+                .unwrap_or_default();
+
+            for child_pid in &child_pids {
+                if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(*child_pid)))
                 {
                     let pgid = pgid.as_raw();
                     // Wait until the child has its own process group (not sudo's)
                     if sudo_pgid != Some(pgid) {
                         return Some(pgid);
-                    }
-                } else {
-                    return None; // Process already exited
-                }
-            } else {
-                // Fall back to pgrep
-                if let Some(child_pid) = find_child_pid_pgrep(sudo_pid) {
-                    if let Ok(pgid) =
-                        nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(child_pid)))
-                    {
-                        let pgid = pgid.as_raw();
-                        if sudo_pgid != Some(pgid) {
-                            return Some(pgid);
-                        }
-                    } else {
-                        return None;
                     }
                 }
             }
@@ -179,7 +180,7 @@ mod platform {
         }
     }
 
-    fn find_child_pid_procfs(parent_pid: u32) -> Option<i32> {
+    fn find_child_pids_procfs(parent_pid: u32) -> Option<Vec<i32>> {
         let task_dir = format!("/proc/{parent_pid}/task");
         let mut child_pids = std::collections::HashSet::new();
         if let Ok(entries) = std::fs::read_dir(&task_dir) {
@@ -194,14 +195,14 @@ mod platform {
                 }
             }
         }
-        if child_pids.len() == 1 {
-            child_pids.into_iter().next()
-        } else {
+        if child_pids.is_empty() {
             None
+        } else {
+            Some(child_pids.into_iter().collect())
         }
     }
 
-    fn find_child_pid_pgrep(parent_pid: u32) -> Option<i32> {
+    fn find_child_pids_pgrep(parent_pid: u32) -> Option<Vec<i32>> {
         let output = std::process::Command::new("pgrep")
             .args(["-P", &parent_pid.to_string()])
             .stdin(std::process::Stdio::null())
@@ -211,11 +212,15 @@ mod platform {
             return None;
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = stdout.trim().lines().collect();
-        if lines.len() == 1 {
-            lines[0].trim().parse().ok()
-        } else {
+        let pids: Vec<i32> = stdout
+            .trim()
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        if pids.is_empty() {
             None
+        } else {
+            Some(pids)
         }
     }
 
@@ -649,11 +654,19 @@ pub async fn run_subprocess(
             })?;
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ =
-                    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o770));
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(_user.group()) {
-                    let _ = nix::unistd::chown(&script_path, None, Some(grp.gid));
+                    nix::unistd::chown(&script_path, None, Some(grp.gid)).map_err(|e| {
+                        SessionError::Runtime(format!(
+                            "Could not change ownership of '{}': {e}",
+                            script_path.display()
+                        ))
+                    })?;
                 }
+                std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o770))
+                    .map_err(|e| SessionError::SubprocessStart {
+                        command: args[0].clone(),
+                        source: e,
+                    })?;
             }
             let sudo_args = vec![
                 "sudo".to_string(),
@@ -862,8 +875,8 @@ pub async fn run_subprocess(
     let mut saw_fail = false;
 
     if let Some(stdout) = stdout_for_reading {
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
+        let mut reader = BufReader::new(stdout);
+        let mut line_buf = Vec::new();
 
         // Create timeout future once, pin it for reuse across loop iterations
         let timeout_fut = async {
@@ -912,25 +925,28 @@ pub async fn run_subprocess(
                     cancel_requested = true;
                     session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Action timed out, sending SIGKILL to process group");
                     send_terminate(pid, sudo_child_pgid, config.user.as_deref());
-                    break;
                 }
 
-                result = lines.next_line() => {
-                    match result {
-                        Ok(Some(line)) => {
-                            let line = if line.len() > LOG_LINE_MAX_LENGTH {
-                                line[..LOG_LINE_MAX_LENGTH].to_string()
-                            } else {
-                                line
-                            };
+                n = reader.read_until(b'\n', &mut line_buf) => {
+                    match n {
+                        Ok(0) => break, // EOF
+                        Ok(_) => {
+                            // Strip trailing newline
+                            if line_buf.last() == Some(&b'\n') {
+                                line_buf.pop();
+                            }
+                            let line = String::from_utf8_lossy(&line_buf);
+                            let line = truncate_line(&line).to_string();
+                            line_buf.clear();
                             let (display, pass_through) = process_line(&line, filter, session_id, &message_tx, &mut saw_fail);
                             if pass_through && filter.min_log_level() <= 20 {
                                 session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
                             }
-                            stdout_collected.push_str(&line);
-                            stdout_collected.push('\n');
+                            if config.collect_stdout {
+                                stdout_collected.push_str(&display);
+                                stdout_collected.push('\n');
+                            }
                         }
-                        Ok(None) => break, // EOF
                         Err(_) => break,
                     }
                 }
@@ -1202,6 +1218,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(60),
             },
             cancel_request_rx: Some(cancel_rx),
+            collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1246,6 +1263,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(1),
             },
             cancel_request_rx: Some(cancel_rx),
+            collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1291,6 +1309,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1337,6 +1356,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1588,6 +1608,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            collect_stdout: true,
         })
     }
 
@@ -1648,6 +1669,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
         });
@@ -1675,6 +1697,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
         });
@@ -1704,6 +1727,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                collect_stdout: false,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
                 .await
@@ -1719,6 +1743,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn test_run_subprocess_timeout_drains_stdout() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (r, _) = rt.block_on(async {
+            let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+            let mut filter = ActionFilter::new("test", false, false);
+            let token = CancellationToken::new();
+            let config = SubprocessConfig {
+                args: vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "echo before_timeout; sleep 30".into(),
+                ],
+                env_vars: HashMap::new(),
+                working_dir: None,
+                timeout: Some(Duration::from_millis(500)),
+                user: None,
+                cancel_method: CancelMethod::Terminate,
+                cancel_request_rx: None,
+                collect_stdout: true,
+            };
+            let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
+                .await
+                .unwrap();
+            let mut msgs = Vec::new();
+            while let Ok(m) = msg_rx.try_recv() {
+                msgs.push(m);
+            }
+            (r, msgs)
+        });
+        assert_eq!(r.state, ActionState::Timeout);
+        assert!(
+            r.stdout.contains("before_timeout"),
+            "output before timeout should be captured: {:?}",
+            r.stdout
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn test_run_subprocess_env_vars() {
         let mut env = HashMap::new();
         env.insert("OPENJD_TEST_VAR".into(), Some("test_value_42".into()));
@@ -1730,6 +1796,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("test_value_42"), "stdout: {}", r.stdout);
@@ -1754,6 +1821,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("VAL=UNSET"), "stdout: {}", r.stdout);
@@ -1771,6 +1839,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         // Resolve symlinks for comparison (macOS /tmp -> /private/tmp)
@@ -1875,5 +1944,98 @@ mod tests {
         assert!(r.stdout.contains("line1\n"), "stdout: {:?}", r.stdout);
         assert!(r.stdout.contains("line2\n"), "stdout: {:?}", r.stdout);
         assert!(r.stdout.contains("line3\n"), "stdout: {:?}", r.stdout);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_run_subprocess_collect_stdout_false_by_default() {
+        let (r, _) = run_simple(vec!["echo".into(), "hello".into()]);
+        // run_simple sets collect_stdout: true, so stdout is captured
+        assert!(r.stdout.contains("hello"));
+
+        // With collect_stdout: false (default), stdout should be empty
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let r = rt.block_on(async {
+            let (msg_tx, _) = mpsc::unbounded_channel();
+            let mut filter = ActionFilter::new("test", false, false);
+            let token = CancellationToken::new();
+            let config = SubprocessConfig {
+                args: vec!["echo".into(), "hello".into()],
+                env_vars: HashMap::new(),
+                working_dir: None,
+                timeout: None,
+                user: None,
+                cancel_method: CancelMethod::Terminate,
+                cancel_request_rx: None,
+                collect_stdout: false,
+            };
+            run_subprocess(config, &mut filter, "test", msg_tx, token)
+                .await
+                .unwrap()
+        });
+        assert_eq!(r.state, ActionState::Success);
+        assert!(
+            r.stdout.is_empty(),
+            "stdout should be empty when collect_stdout is false: {:?}",
+            r.stdout
+        );
+    }
+
+    #[test]
+    fn test_truncate_line_multibyte_boundary() {
+        // '€' is 3 bytes in UTF-8. LOG_LINE_MAX_LENGTH (65536) % 3 == 1,
+        // so the byte boundary falls inside a multi-byte character.
+        let s = "€".repeat(LOG_LINE_MAX_LENGTH); // 3 * LOG_LINE_MAX_LENGTH bytes
+        let truncated = truncate_line(&s);
+        assert!(truncated.len() <= LOG_LINE_MAX_LENGTH);
+        // Must be valid UTF-8 (the fact that we can call .chars() without panic proves it)
+        assert!(truncated.chars().count() > 0);
+    }
+
+    #[test]
+    fn test_truncate_line_short_line_unchanged() {
+        let s = "hello";
+        assert_eq!(truncate_line(s), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_run_subprocess_invalid_utf8_continues() {
+        // printf outputs raw bytes: valid line, then 0xFF (invalid UTF-8), then another valid line.
+        // All lines including those after invalid bytes must be captured.
+        let (r, _) = run_simple(vec![
+            "sh".into(),
+            "-c".into(),
+            r#"echo before; printf '\xff\n'; echo after"#.into(),
+        ]);
+        assert_eq!(r.state, ActionState::Success);
+        assert!(
+            r.stdout.contains("before"),
+            "line before invalid UTF-8 should be captured: {:?}",
+            r.stdout
+        );
+        assert!(
+            r.stdout.contains("after"),
+            "line after invalid UTF-8 should be captured: {:?}",
+            r.stdout
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_run_subprocess_progress_error_in_stdout() {
+        let (r, _) = run_simple(vec![
+            "sh".into(),
+            "-c".into(),
+            "echo 'openjd_progress: 200.0'".into(),
+        ]);
+        assert!(
+            r.stdout.contains("ERROR"),
+            "out-of-range progress error should appear in stdout: {:?}",
+            r.stdout
+        );
     }
 }
