@@ -66,6 +66,23 @@ fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
     eval_with_fmt(expr, st, PathFormat::Posix)
 }
 
+fn windows_st(key: &str, path: &str) -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(
+        key,
+        ExprValue::Path {
+            value: path.to_string(),
+            format: PathFormat::Windows,
+        },
+    )
+    .unwrap();
+    st
+}
+
+fn eval_windows(expr: &str, st: &SymbolTable) -> ExprValue {
+    eval_with_fmt(expr, st, PathFormat::Windows)
+}
+
 // === TestPaths ===
 #[test]
 fn path_name() {
@@ -1635,3 +1652,68 @@ fn join_windows_unc_forward_normal_relative() {
         "//server/share\\relative"
     );
 }
+
+// ── Cross-format tests ──
+// Forward-slash paths must produce the same results for path properties
+// regardless of whether the evaluator uses Posix or Windows format.
+// This catches bugs where paths like "/input/scene.exr" work on Posix
+// but break on Windows (e.g. the session scenario tests).
+
+macro_rules! cross_format_test {
+    ($name:ident, $expr:expr, $path:expr, $expected:expr) => {
+        mod $name {
+            use super::*;
+
+            #[test]
+            fn posix() {
+                assert_eq!(
+                    eval_posix($expr, &posix_st("P", $path)).to_display_string(),
+                    $expected,
+                    "Posix format failed for {} on {}",
+                    $expr,
+                    $path
+                );
+            }
+
+            #[test]
+            fn windows() {
+                assert_eq!(
+                    eval_windows($expr, &windows_st("P", $path)).to_display_string(),
+                    $expected,
+                    "Windows format failed for {} on {}",
+                    $expr,
+                    $path
+                );
+            }
+        }
+    };
+}
+
+cross_format_test!(cross_stem_basic, "P.stem", "/a/b/file.txt", "file");
+cross_format_test!(
+    cross_stem_multi_ext,
+    "P.stem",
+    "/a/b/file.tar.gz",
+    "file.tar"
+);
+cross_format_test!(cross_stem_no_ext, "P.stem", "/a/b/Makefile", "Makefile");
+cross_format_test!(cross_stem_hidden, "P.stem", "/a/b/.hidden", ".hidden");
+cross_format_test!(cross_stem_deep, "P.stem", "/input/scene.exr", "scene");
+
+cross_format_test!(cross_suffix_basic, "P.suffix", "/a/b/file.txt", ".txt");
+cross_format_test!(cross_suffix_multi, "P.suffix", "/a/b/file.tar.gz", ".gz");
+cross_format_test!(cross_suffix_none, "P.suffix", "/a/b/Makefile", "");
+
+cross_format_test!(cross_name_basic, "P.name", "/a/b/file.txt", "file.txt");
+cross_format_test!(cross_name_root_file, "P.name", "/file.txt", "file.txt");
+cross_format_test!(cross_name_deep, "P.name", "/a/b/c/d.exr", "d.exr");
+
+// parent normalizes separators, so it legitimately differs between formats.
+// Tested separately below.
+
+cross_format_test!(
+    cross_stem_on_function,
+    "path('/a/b/file.txt').stem",
+    "/unused",
+    "file"
+);

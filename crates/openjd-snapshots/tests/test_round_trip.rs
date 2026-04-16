@@ -157,9 +157,7 @@ fn download_skip_with_hash_cache() {
 
 #[test]
 fn chunked_round_trip() {
-    let test_dir = Path::new("/shared/snapshot-testing");
-    std::fs::create_dir_all(test_dir).unwrap();
-    let src_dir = TempDir::new_in(test_dir).unwrap();
+    let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dst_dir = TempDir::new().unwrap();
 

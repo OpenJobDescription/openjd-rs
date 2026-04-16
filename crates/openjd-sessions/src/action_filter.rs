@@ -414,20 +414,29 @@ impl ActionFilter {
                     if !val.is_empty() {
                         self.redacted_values.insert(val.to_string());
                     }
-                } else {
-                    if !trimmed.is_empty() {
-                        self.redacted_values.insert(trimmed.to_string());
-                    }
+                } else if !trimmed.is_empty() {
+                    self.redacted_values.insert(trimmed.to_string());
                 }
 
                 let msg = self.redact_env_message(original_message, trimmed);
-                callbacks.push(FilterCallback {
-                    kind: ActionMessageKind::Env,
-                    value: ActionMessageValue::String(
-                        "Failed to parse environment variable assignment.".to_string(),
-                    ),
-                    cancel: true,
-                });
+
+                if self.redactions_enabled {
+                    // When REDACTED_ENV_VARS extension is enabled, malformed
+                    // redacted_env directives are warnings — no env var is set
+                    // but the action is NOT canceled (matches Python behavior).
+                    log::warn!(
+                        target: "openjd.sessions",
+                        "Malformed openjd_redacted_env command: invalid format. No environment variable will be set."
+                    );
+                } else {
+                    callbacks.push(FilterCallback {
+                        kind: ActionMessageKind::Env,
+                        value: ActionMessageValue::String(
+                            "Failed to parse environment variable assignment.".to_string(),
+                        ),
+                        cancel: true,
+                    });
+                }
                 (callbacks, msg)
             }
         }
@@ -1441,13 +1450,13 @@ mod tests {
 
     #[test]
     fn test_malformed_redacted_env_when_redactions_enabled() {
-        // When redactions ARE enabled, a malformed openjd_redacted_env should still
-        // push a cancel callback — not silently swallow the error.
+        // When redactions ARE enabled, a malformed openjd_redacted_env should NOT
+        // cancel the action — it just logs a warning (matches Python behavior).
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message("openjd_redacted_env: bad_no_equals", "foo");
         assert!(
-            cbs.iter().any(|cb| cb.cancel),
-            "malformed redacted_env with redactions enabled should cancel: {cbs:?}"
+            !cbs.iter().any(|cb| cb.cancel),
+            "malformed redacted_env with redactions enabled should NOT cancel: {cbs:?}"
         );
     }
 }

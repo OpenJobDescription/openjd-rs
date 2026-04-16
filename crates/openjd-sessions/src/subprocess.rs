@@ -25,6 +25,9 @@ use std::sync::Arc;
 /// Grace time to wait for stdout to close after process exits.
 const STDOUT_GRACE_TIME: Duration = Duration::from_secs(5);
 
+/// Grace time to drain stdout after sending a kill signal.
+const STDOUT_DRAIN_AFTER_KILL: Duration = Duration::from_secs(1);
+
 /// Maximum line length for stdout reading.
 pub(crate) const LOG_LINE_MAX_LENGTH: usize = 64 * 1024;
 
@@ -887,12 +890,26 @@ pub async fn run_subprocess(
         };
         tokio::pin!(timeout_fut);
 
+        // Grace period for stdout to drain after process termination.
+        // On Windows, killed processes (especially MSYS2 sh.exe) may leave
+        // inherited pipe handles open in orphaned child processes, preventing
+        // EOF. This deadline ensures we don't hang forever.
+        let drain_deadline = tokio::time::sleep(Duration::MAX);
+        tokio::pin!(drain_deadline);
+
         loop {
             tokio::select! {
                 biased;
 
+                _ = &mut drain_deadline, if cancel_requested => {
+                    session_log!(info, session_id, LogContent::PROCESS_CONTROL,
+                        "Stdout drain grace period expired, stopping read loop");
+                    break;
+                }
+
                 _ = cancel_token.cancelled(), if !cancel_requested => {
                     cancel_requested = true;
+                    drain_deadline.as_mut().reset(tokio::time::Instant::now() + STDOUT_DRAIN_AFTER_KILL);
                     let time_limit = config.cancel_request_rx.as_ref()
                         .and_then(|rx| *rx.borrow());
 
@@ -923,6 +940,7 @@ pub async fn run_subprocess(
                 _ = &mut timeout_fut, if !cancel_requested && !timed_out => {
                     timed_out = true;
                     cancel_requested = true;
+                    drain_deadline.as_mut().reset(tokio::time::Instant::now() + STDOUT_DRAIN_AFTER_KILL);
                     session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Action timed out, sending SIGKILL to process group");
                     send_terminate(pid, sudo_child_pgid, config.user.as_deref());
                 }

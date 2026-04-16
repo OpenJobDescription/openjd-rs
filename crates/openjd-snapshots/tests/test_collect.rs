@@ -27,7 +27,11 @@ fn absolute_paths() {
     )
     .unwrap();
 
-    assert!(m.files[0].path.starts_with('/'));
+    assert!(
+        m.files[0].path.starts_with('/') || m.files[0].path.chars().nth(1) == Some(':'),
+        "path should be absolute: {}",
+        m.files[0].path
+    );
     assert!(m.files[0].path.ends_with("/file.txt"));
 }
 
@@ -51,7 +55,11 @@ fn nested_absolute_paths() {
         .filter(|f| f.path.contains("nested.txt"))
         .collect();
     assert_eq!(nested.len(), 1);
-    assert!(nested[0].path.starts_with('/'));
+    assert!(
+        nested[0].path.starts_with('/') || nested[0].path.chars().nth(1) == Some(':'),
+        "path should be absolute: {}",
+        nested[0].path
+    );
 }
 
 #[test]
@@ -491,7 +499,11 @@ fn all_paths_absolute_and_normalized() {
     .unwrap();
 
     for f in &m.files {
-        assert!(f.path.starts_with('/'), "not absolute: {}", f.path);
+        assert!(
+            f.path.starts_with('/') || f.path.chars().nth(1) == Some(':'),
+            "not absolute: {}",
+            f.path
+        );
         assert!(!f.path.contains("/../"), "not normalized: {}", f.path);
     }
 }
@@ -551,12 +563,13 @@ fn symlinks_exclude_all_policy() {
 #[test]
 fn preserve_file_symlink_has_absolute_target() {
     let tmp = TempDir::new().unwrap();
-    let target = tmp.path().join("target.txt");
+    let root = tmp.path().canonicalize().unwrap();
+    let target = root.join("target.txt");
     std::fs::write(&target, "content").unwrap();
-    std::os::unix::fs::symlink("target.txt", tmp.path().join("link.txt")).unwrap();
+    std::os::unix::fs::symlink("target.txt", root.join("link.txt")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[tmp.path().to_path_buf()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
         CollectOptions {
             symlink_policy: SymlinkPolicy::Preserve,
@@ -2666,18 +2679,21 @@ fn dir_symlink_in_filenames_transitive() {
 #[test]
 fn root_directory_included_in_dirs() {
     let tmp = TempDir::new().unwrap();
-    std::fs::write(tmp.path().join("file.txt"), "content").unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::write(root.join("file.txt"), "content").unwrap();
 
     let m = collect_abs_snapshot(
-        &[tmp.path().to_path_buf()],
+        std::slice::from_ref(&root),
         &[] as &[PathBuf],
         CollectOptions::default(),
     )
     .unwrap();
 
-    let root_norm = tmp.path().canonicalize().unwrap();
+    // On Windows, normalize_path converts backslashes to forward slashes,
+    // so compare using the same normalization the manifest applies.
+    let root_str = openjd_snapshots::path_util::normalize_path(&root.to_string_lossy());
     assert!(
-        m.dirs.iter().any(|d| d.path == root_norm.to_str().unwrap()),
+        m.dirs.iter().any(|d| d.path == root_str),
         "root directory should appear in dirs, got: {:?}",
         m.dirs.iter().map(|d| &d.path).collect::<Vec<_>>()
     );

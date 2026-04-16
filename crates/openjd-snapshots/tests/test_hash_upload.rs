@@ -165,7 +165,7 @@ fn preserves_metadata() {
     let f = &result.manifest.files()[0];
     assert_eq!(f.size, Some(size));
     assert_eq!(f.mtime, Some(mtime));
-    assert_eq!(f.path, path);
+    assert_eq!(f.path, openjd_snapshots::path_util::normalize_path(&path));
 }
 
 #[test]
@@ -1170,7 +1170,12 @@ fn accepts_absolute_path() {
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "abs.txt", b"absolute");
     let dc = new_data_cache(&cache_dir);
-    assert!(path.starts_with('/'));
+    let norm = openjd_snapshots::path_util::normalize_path(&path);
+    assert!(
+        norm.starts_with('/') || norm.chars().nth(1) == Some(':'),
+        "path should be absolute: {}",
+        norm
+    );
     let manifest = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
     let result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),

@@ -653,4 +653,39 @@ mod tests {
             r"\\server\share\"
         );
     }
+
+    // ── Forward-slash paths with Windows format ──
+    // Forward slashes are valid separators on Windows. These paths must
+    // parse identically to their backslash equivalents.
+
+    #[test]
+    fn windows_forward_slash_file_name() {
+        assert_eq!(
+            file_name("/input/scene.exr", PathFormat::Windows),
+            "scene.exr"
+        );
+    }
+
+    #[test]
+    fn windows_forward_slash_file_stem() {
+        assert_eq!(file_stem("/input/scene.exr", PathFormat::Windows), "scene");
+    }
+
+    #[test]
+    fn windows_forward_slash_extension() {
+        assert_eq!(extension("/input/scene.exr", PathFormat::Windows), ".exr");
+    }
+
+    #[test]
+    fn windows_forward_slash_parent() {
+        assert_eq!(parent("/input/scene.exr", PathFormat::Windows), r"\input");
+    }
+
+    #[test]
+    fn windows_forward_slash_parts() {
+        assert_eq!(
+            parts("/input/scene.exr", PathFormat::Windows),
+            vec![r"\", "input", "scene.exr"]
+        );
+    }
 }

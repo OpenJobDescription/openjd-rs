@@ -130,7 +130,7 @@ fn preserves_metadata() {
     let f = &result.manifest.files()[0];
     assert_eq!(f.size, Some(size));
     assert_eq!(f.mtime, Some(mtime));
-    assert_eq!(f.path, path);
+    assert_eq!(f.path, openjd_snapshots::path_util::normalize_path(&path));
 }
 
 #[test]
@@ -1020,7 +1020,12 @@ fn hash_accepts_absolute_paths() {
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_file(tmp.path(), "abs.txt", b"absolute");
 
-    assert!(path.starts_with('/'));
+    let path_normalized = openjd_snapshots::path_util::normalize_path(&path);
+    assert!(
+        path_normalized.starts_with('/') || path_normalized.chars().nth(1) == Some(':'),
+        "path should be absolute: {}",
+        path_normalized
+    );
     let m = snapshot(vec![FileEntry::file(&path, size, mtime)]);
     let result = hash_abs_manifest(&m, HashOptions::default()).unwrap();
     assert!(result.manifest.files()[0].hash.is_some());

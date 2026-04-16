@@ -3,6 +3,19 @@ use std::sync::Mutex;
 
 pub const WHOLE_FILE_RANGE_END: i64 = -1;
 
+/// Normalize a path to a consistent cache key.
+/// On Windows, backslashes are converted to forward slashes so that
+/// paths from the manifest (normalized) match paths from the filesystem.
+fn normalize_cache_key(path: &Path) -> Vec<u8> {
+    #[allow(unused_mut)]
+    let mut s = path.to_string_lossy().into_owned();
+    #[cfg(windows)]
+    {
+        s = s.replace('\\', "/");
+    }
+    s.into_bytes()
+}
+
 pub struct HashCache {
     conn: Mutex<rusqlite::Connection>,
 }
@@ -45,7 +58,7 @@ impl HashCache {
         range_start: i64,
         range_end: i64,
     ) -> Option<(String, u64)> {
-        let path_bytes = file_path.to_string_lossy().into_owned().into_bytes();
+        let path_bytes = normalize_cache_key(file_path);
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT file_hash, last_modified_time FROM hashesV4
@@ -73,7 +86,7 @@ impl HashCache {
         hash: &str,
         mtime: u64,
     ) -> crate::Result<()> {
-        let path_bytes = file_path.to_string_lossy().into_owned().into_bytes();
+        let path_bytes = normalize_cache_key(file_path);
         let mtime_text = rusqlite::types::Value::Text(mtime.to_string());
         let conn = self.conn.lock().unwrap();
         conn.execute(

@@ -85,6 +85,13 @@ pub struct SessionConfig {
     pub collect_stdout: bool,
 }
 
+fn format_exit_code(code: Option<i32>) -> String {
+    match code {
+        Some(c) => format!("exit code: {c}"),
+        None => "exit code: N/A".to_string(),
+    }
+}
+
 /// Normalize an environment variable name for the current platform.
 /// On Windows, env vars are case-insensitive, so we uppercase all keys
 /// to avoid undefined behavior from mixed-case duplicates in the Win32 API.
@@ -469,6 +476,16 @@ impl Session {
         &self.environments_entered
     }
 
+    /// Clone the cancel_writer file handle, if one exists.
+    /// Used by Python bindings to send cancel commands when the session is
+    /// taken by a background thread.
+    pub fn clone_cancel_writer(&self) -> Option<std::fs::File> {
+        self.cross_user
+            .cancel_writer
+            .as_ref()
+            .and_then(|f| f.try_clone().ok())
+    }
+
     /// Get the current action status, if any action has been run.
     pub fn action_status(&self) -> Option<ActionStatus> {
         self.action.state.map(|state| ActionStatus {
@@ -747,7 +764,7 @@ impl Session {
                 return Err(SessionError::EnvironmentScriptFailed {
                     name: env.name.clone(),
                     action: "onEnter".into(),
-                    reason: format!("exit code: {:?}", result.exit_code),
+                    reason: format_exit_code(result.exit_code),
                 });
             }
             result.stdout.clone()
@@ -904,7 +921,7 @@ impl Session {
                 return Err(SessionError::EnvironmentScriptFailed {
                     name: env.name.clone(),
                     action: "onExit".into(),
-                    reason: format!("exit code: {:?}", result.exit_code),
+                    reason: format_exit_code(result.exit_code),
                 });
             }
             result.stdout.clone()

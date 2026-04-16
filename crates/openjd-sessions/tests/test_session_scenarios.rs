@@ -175,7 +175,8 @@ async fn run_scenario(scenario_path: &Path) {
     let path_rules = parse_path_mapping_rules(&scenario.path_mapping_rules);
 
     // Derive path_format from the source_path_format of the first mapping rule,
-    // since input paths are in the source format. Fall back to host format.
+    // since input paths are in the source format. Fall back to Posix because
+    // scenario templates use forward-slash paths regardless of host OS.
     let path_format = path_rules
         .first()
         .map(|r| match r.source_path_format {
@@ -184,7 +185,7 @@ async fn run_scenario(scenario_path: &Path) {
                 openjd_expr::path_mapping::PathFormat::Posix
             }
         })
-        .unwrap_or_else(openjd_expr::path_mapping::PathFormat::host);
+        .unwrap_or(openjd_expr::path_mapping::PathFormat::Posix);
 
     let job_params = preprocess_job_parameters(
         &job_template,
