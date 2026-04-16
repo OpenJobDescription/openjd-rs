@@ -78,6 +78,7 @@ pub(crate) struct ScriptRunnerBase {
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelperWin>,
+    pub cancel_writer: Option<std::fs::File>,
 }
 
 impl ScriptRunnerBase {
@@ -98,6 +99,7 @@ impl ScriptRunnerBase {
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
             helper: None,
+            cancel_writer: None,
         }
     }
 
@@ -139,7 +141,7 @@ impl ScriptRunnerBase {
                     &mut filter,
                     &self.session_id,
                     message_tx,
-                    None,
+                    self.cancel_writer.as_ref(),
                 )
             })?;
             self.state = state_from_action(result.state);

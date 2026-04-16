@@ -28,6 +28,7 @@ pub fn run_command(
         .args(&cmd.args)
         .envs(&cmd.env)
         .current_dir(&cmd.cwd)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NEW_PROCESS_GROUP)

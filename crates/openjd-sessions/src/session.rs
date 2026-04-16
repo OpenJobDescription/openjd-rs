@@ -703,7 +703,18 @@ impl Session {
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
             let mut runner = match self.cross_user.helper.take() {
-                Some(h) => runner.with_helper(h),
+                Some(h) => {
+                    let r = runner.with_helper(h);
+                    match self
+                        .cross_user
+                        .cancel_writer
+                        .as_ref()
+                        .and_then(|f| f.try_clone().ok())
+                    {
+                        Some(w) => r.with_cancel_writer(w),
+                        None => r,
+                    }
+                }
                 None => runner,
             };
 
@@ -847,7 +858,18 @@ impl Session {
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
             let mut runner = match self.cross_user.helper.take() {
-                Some(h) => runner.with_helper(h),
+                Some(h) => {
+                    let r = runner.with_helper(h);
+                    match self
+                        .cross_user
+                        .cancel_writer
+                        .as_ref()
+                        .and_then(|f| f.try_clone().ok())
+                    {
+                        Some(w) => r.with_cancel_writer(w),
+                        None => r,
+                    }
+                }
                 None => runner,
             };
 
@@ -947,7 +969,18 @@ impl Session {
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
         let mut runner = match self.cross_user.helper.take() {
-            Some(h) => runner.with_helper(h),
+            Some(h) => {
+                let r = runner.with_helper(h);
+                match self
+                    .cross_user
+                    .cancel_writer
+                    .as_ref()
+                    .and_then(|f| f.try_clone().ok())
+                {
+                    Some(w) => r.with_cancel_writer(w),
+                    None => r,
+                }
+            }
             None => runner,
         };
 

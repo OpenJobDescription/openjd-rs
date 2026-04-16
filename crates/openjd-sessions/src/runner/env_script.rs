@@ -91,6 +91,11 @@ impl EnvironmentScriptRunner {
         self.base.helper.take()
     }
 
+    pub(crate) fn with_cancel_writer(mut self, writer: std::fs::File) -> Self {
+        self.base.cancel_writer = Some(writer);
+        self
+    }
+
     /// Run the environment's onEnter action.
     pub async fn enter(
         &mut self,
