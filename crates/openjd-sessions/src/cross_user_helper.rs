@@ -38,6 +38,11 @@ pub(crate) struct CrossUserHelperWin {
     stdout: std::io::BufReader<std::fs::File>,
 }
 
+// SAFETY: Windows HANDLE is a kernel object handle that is safe to send across
+// threads. The other fields (BufWriter<File>, BufReader<File>) are already Send.
+#[cfg(windows)]
+unsafe impl Send for CrossUserHelperWin {}
+
 #[cfg(unix)]
 impl CrossUserHelper {
     /// Spawn the helper binary as the given user via sudo (POSIX).
