@@ -497,9 +497,8 @@ mod tests {
 
     #[test]
     fn chunked_hashing_for_large_files() {
-        let test_dir = Path::new("/shared/snapshot-testing");
-        std::fs::create_dir_all(test_dir).unwrap();
-        let file_path = test_dir.join("large_file.bin");
+        let tmp = TempDir::new().unwrap();
+        let file_path = tmp.path().join("large_file.bin");
         // Create a file larger than chunk size (use small chunk for test)
         let data = vec![0u8; 1024];
         std::fs::write(&file_path, &data).unwrap();
@@ -532,8 +531,5 @@ mod tests {
         assert!(f.hash.is_none()); // no whole-file hash
         let chunks = f.chunk_hashes.as_ref().unwrap();
         assert_eq!(chunks.len(), 4); // 1024 / 256 = 4 chunks
-
-        // Cleanup
-        let _ = std::fs::remove_file(&file_path);
     }
 }

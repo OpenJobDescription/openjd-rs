@@ -4,8 +4,10 @@
 // Tests for collect_abs_snapshot: absolute paths, metadata, directory handling,
 // filenames parameter, chunk size, empty inputs, special files.
 
+#[cfg(unix)]
+use openjd_snapshots::SymlinkPolicy;
 use openjd_snapshots::{
-    collect_abs_snapshot, CollectOptions, HashAlgorithm, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    collect_abs_snapshot, CollectOptions, HashAlgorithm, DEFAULT_FILE_CHUNK_SIZE,
     WHOLE_FILE_CHUNK_SIZE,
 };
 use std::path::PathBuf;

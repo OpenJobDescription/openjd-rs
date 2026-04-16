@@ -790,7 +790,7 @@ fn upload_permission_denied_error() {
     }
 
     let manifest = make_snapshot(vec![FileEntry::file(&p, s, m)]);
-    let result = hash_upload_abs_manifest(
+    let _result = hash_upload_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         HashUploadOptions {
@@ -807,7 +807,7 @@ fn upload_permission_denied_error() {
     }
 
     #[cfg(unix)]
-    assert!(result.is_err());
+    assert!(_result.is_err());
 }
 
 // ===== Concurrent deduplication tests =====
