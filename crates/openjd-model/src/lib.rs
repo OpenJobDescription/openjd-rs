@@ -30,6 +30,7 @@ pub use error::OpenJdError;
 pub use job::create_job::{
     build_symbol_table, convert_environment, create_job, evaluate_let_bindings,
     merge_job_parameter_definitions, preprocess_job_parameters, MergedParameterDefinition,
+    PathParameterOptions,
 };
 pub use parse::{
     decode_environment_template, decode_job_template, decode_template, DecodedTemplate,

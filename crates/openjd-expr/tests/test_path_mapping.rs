@@ -6,7 +6,7 @@
 use openjd_expr::{ExprValue, PathFormat, PathMappingRule, SymbolTable};
 
 fn eval_with_rules(expr: &str, rules: Vec<PathMappingRule>, st: &SymbolTable) -> ExprValue {
-    eval_with_rules_fmt(expr, rules, st, PathFormat::host())
+    eval_with_rules_fmt(expr, rules, st, PathFormat::Posix)
 }
 
 fn eval_with_rules_fmt(
@@ -101,6 +101,27 @@ fn posix_no_match_different_path() {
     let r = eval_with_rules("P.apply_path_mapping()", vec![rule], &st);
     assert_eq!(r.to_display_string(), "/other/path");
 }
+
+#[test]
+fn unmapped_posix_path_normalized_to_windows_format() {
+    // When no rule matches and format is Windows, separators should be normalized
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/mnt/shared".into(),
+        destination_path: "/new/shared".into(),
+    };
+    let mut st = SymbolTable::new();
+    st.set("P", ExprValue::String("/other/path/file.txt".into()))
+        .unwrap();
+    let r = eval_with_rules_fmt(
+        "P.apply_path_mapping()",
+        vec![rule],
+        &st,
+        PathFormat::Windows,
+    );
+    assert_eq!(r.to_display_string(), "\\other\\path\\file.txt");
+}
+
 #[test]
 fn posix_no_match_same_prefix() {
     let rule = PathMappingRule {
@@ -336,11 +357,23 @@ fn posix_trailing_slash_exact_output() {
         destination_path: "/dst".into(),
     };
     // No trailing slash → no trailing slash
-    assert_eq!(rule.apply("/src"), Some("/dst".into()));
-    assert_eq!(rule.apply("/src/file.txt"), Some("/dst/file.txt".into()));
+    assert_eq!(
+        rule.apply_with_format("/src", PathFormat::Posix),
+        Some("/dst".into())
+    );
+    assert_eq!(
+        rule.apply_with_format("/src/file.txt", PathFormat::Posix),
+        Some("/dst/file.txt".into())
+    );
     // Trailing slash → trailing slash preserved
-    assert_eq!(rule.apply("/src/"), Some("/dst/".into()));
-    assert_eq!(rule.apply("/src/subdir/"), Some("/dst/subdir/".into()));
+    assert_eq!(
+        rule.apply_with_format("/src/", PathFormat::Posix),
+        Some("/dst/".into())
+    );
+    assert_eq!(
+        rule.apply_with_format("/src/subdir/", PathFormat::Posix),
+        Some("/dst/subdir/".into())
+    );
 }
 
 #[test]
@@ -351,13 +384,19 @@ fn uri_trailing_slash_exact_output() {
         destination_path: "/local".into(),
     };
     // No trailing slash → no trailing slash
-    assert_eq!(rule.apply("s3://bucket/prefix"), Some("/local".into()));
     assert_eq!(
-        rule.apply("s3://bucket/prefix/file.txt"),
+        rule.apply_with_format("s3://bucket/prefix", PathFormat::Posix),
+        Some("/local".into())
+    );
+    assert_eq!(
+        rule.apply_with_format("s3://bucket/prefix/file.txt", PathFormat::Posix),
         Some("/local/file.txt".into())
     );
     // Trailing slash → trailing slash preserved
-    assert_eq!(rule.apply("s3://bucket/prefix/"), Some("/local/".into()));
+    assert_eq!(
+        rule.apply_with_format("s3://bucket/prefix/", PathFormat::Posix),
+        Some("/local/".into())
+    );
 }
 
 // === No rules returns unchanged ===
@@ -403,42 +442,51 @@ mod apply_unit {
     #[test]
     fn posix_subpath() {
         assert_eq!(
-            posix_rule("/src", "/dst").apply("/src/a/b"),
+            posix_rule("/src", "/dst").apply_with_format("/src/a/b", PathFormat::Posix),
             Some("/dst/a/b".into())
         );
     }
     #[test]
     fn posix_exact() {
         assert_eq!(
-            posix_rule("/src", "/dst").apply("/src"),
+            posix_rule("/src", "/dst").apply_with_format("/src", PathFormat::Posix),
             Some("/dst".into())
         );
     }
     #[test]
     fn posix_trailing() {
         assert_eq!(
-            posix_rule("/src", "/dst").apply("/src/"),
+            posix_rule("/src", "/dst").apply_with_format("/src/", PathFormat::Posix),
             Some("/dst/".into())
         );
     }
     #[test]
     fn posix_subdir_trailing() {
         assert_eq!(
-            posix_rule("/src", "/dst").apply("/src/a/b/"),
+            posix_rule("/src", "/dst").apply_with_format("/src/a/b/", PathFormat::Posix),
             Some("/dst/a/b/".into())
         );
     }
     #[test]
     fn posix_no_match() {
-        assert_eq!(posix_rule("/src", "/dst").apply("/other"), None);
+        assert_eq!(
+            posix_rule("/src", "/dst").apply_with_format("/other", PathFormat::Posix),
+            None
+        );
     }
     #[test]
     fn posix_prefix_overlap() {
-        assert_eq!(posix_rule("/src", "/dst").apply("/srcextra/file"), None);
+        assert_eq!(
+            posix_rule("/src", "/dst").apply_with_format("/srcextra/file", PathFormat::Posix),
+            None
+        );
     }
     #[test]
     fn posix_case_sensitive() {
-        assert_eq!(posix_rule("/Src", "/dst").apply("/src/file"), None);
+        assert_eq!(
+            posix_rule("/Src", "/dst").apply_with_format("/src/file", PathFormat::Posix),
+            None
+        );
     }
 
     // ── Windows ──
@@ -446,39 +494,44 @@ mod apply_unit {
     #[test]
     fn windows_subpath() {
         assert_eq!(
-            windows_rule("C:\\old", "/new").apply("C:\\old\\sub\\file.txt"),
+            windows_rule("C:\\old", "/new")
+                .apply_with_format("C:\\old\\sub\\file.txt", PathFormat::Posix),
             Some("/new/sub/file.txt".into())
         );
     }
     #[test]
     fn windows_exact() {
         assert_eq!(
-            windows_rule("C:\\old", "/new").apply("C:\\old"),
+            windows_rule("C:\\old", "/new").apply_with_format("C:\\old", PathFormat::Posix),
             Some("/new".into())
         );
     }
     #[test]
     fn windows_trailing_backslash() {
         assert_eq!(
-            windows_rule("C:\\old", "/new").apply("C:\\old\\"),
+            windows_rule("C:\\old", "/new").apply_with_format("C:\\old\\", PathFormat::Posix),
             Some("/new/".into())
         );
     }
     #[test]
     fn windows_trailing_fwdslash() {
         assert_eq!(
-            windows_rule("C:\\old", "/new").apply("C:\\old/"),
+            windows_rule("C:\\old", "/new").apply_with_format("C:\\old/", PathFormat::Posix),
             Some("/new/".into())
         );
     }
     #[test]
     fn windows_no_match() {
-        assert_eq!(windows_rule("C:\\old", "/new").apply("D:\\old\\file"), None);
+        assert_eq!(
+            windows_rule("C:\\old", "/new").apply_with_format("D:\\old\\file", PathFormat::Posix),
+            None
+        );
     }
     #[test]
     fn windows_prefix_overlap() {
         assert_eq!(
-            windows_rule("Z:\\shared", "/new").apply("Z:\\sharedextra\\file"),
+            windows_rule("Z:\\shared", "/new")
+                .apply_with_format("Z:\\sharedextra\\file", PathFormat::Posix),
             None
         );
     }
@@ -487,14 +540,16 @@ mod apply_unit {
     #[test]
     fn windows_case_insensitive_lower() {
         assert_eq!(
-            windows_rule("C:\\Users", "/home").apply("c:\\users\\bob"),
+            windows_rule("C:\\Users", "/home")
+                .apply_with_format("c:\\users\\bob", PathFormat::Posix),
             Some("/home/bob".into())
         );
     }
     #[test]
     fn windows_case_insensitive_upper() {
         assert_eq!(
-            windows_rule("C:\\Users", "/home").apply("C:\\USERS\\bob"),
+            windows_rule("C:\\Users", "/home")
+                .apply_with_format("C:\\USERS\\bob", PathFormat::Posix),
             Some("/home/bob".into())
         );
     }
@@ -503,14 +558,16 @@ mod apply_unit {
     #[test]
     fn windows_fwd_slash_input() {
         assert_eq!(
-            windows_rule("C:\\data", "/data").apply("C:/data/file.txt"),
+            windows_rule("C:\\data", "/data")
+                .apply_with_format("C:/data/file.txt", PathFormat::Posix),
             Some("/data/file.txt".into())
         );
     }
     #[test]
     fn windows_mixed_slash_input() {
         assert_eq!(
-            windows_rule("C:\\data", "/data").apply("C:\\data/sub/file.txt"),
+            windows_rule("C:\\data", "/data")
+                .apply_with_format("C:\\data/sub/file.txt", PathFormat::Posix),
             Some("/data/sub/file.txt".into())
         );
     }
@@ -519,7 +576,8 @@ mod apply_unit {
     #[test]
     fn windows_to_posix_deep() {
         assert_eq!(
-            windows_rule("Z:\\shared", "/mnt/shared").apply("Z:\\shared\\project\\file.txt"),
+            windows_rule("Z:\\shared", "/mnt/shared")
+                .apply_with_format("Z:\\shared\\project\\file.txt", PathFormat::Posix),
             Some("/mnt/shared/project/file.txt".into())
         );
     }
@@ -529,55 +587,65 @@ mod apply_unit {
     #[test]
     fn uri_subpath() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://bucket/prefix/file.txt"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://bucket/prefix/file.txt", PathFormat::Posix),
             Some("/local/file.txt".into())
         );
     }
     #[test]
     fn uri_exact() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://bucket/prefix"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://bucket/prefix", PathFormat::Posix),
             Some("/local".into())
         );
     }
     #[test]
     fn uri_trailing() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://bucket/prefix/"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://bucket/prefix/", PathFormat::Posix),
             Some("/local/".into())
         );
     }
     #[test]
     fn uri_nested() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://bucket/prefix/a/b/c"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://bucket/prefix/a/b/c", PathFormat::Posix),
             Some("/local/a/b/c".into())
         );
     }
     #[test]
     fn uri_no_match_bucket() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://other/prefix/file"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://other/prefix/file", PathFormat::Posix),
             None
         );
     }
     #[test]
     fn uri_no_match_prefix() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("s3://bucket/prefixextra"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("s3://bucket/prefixextra", PathFormat::Posix),
             None
         );
     }
     #[test]
     fn uri_no_match_scheme() {
         assert_eq!(
-            uri_rule("s3://bucket/prefix", "/local").apply("gs://bucket/prefix/file"),
+            uri_rule("s3://bucket/prefix", "/local")
+                .apply_with_format("gs://bucket/prefix/file", PathFormat::Posix),
             None
         );
     }
     #[test]
     fn uri_no_match_filesystem() {
-        assert_eq!(uri_rule("s3://bucket", "/local").apply("/local/file"), None);
+        assert_eq!(
+            uri_rule("s3://bucket", "/local").apply_with_format("/local/file", PathFormat::Posix),
+            None
+        );
     }
 
     // ── apply_with_format: Posix output ──
@@ -685,7 +753,11 @@ mod apply_unit {
     fn apply_rules_first_match_wins() {
         let rules = vec![posix_rule("/a", "/first"), posix_rule("/a", "/second")];
         assert_eq!(
-            openjd_expr::path_mapping::apply_rules(&rules, "/a/file"),
+            openjd_expr::path_mapping::apply_rules_with_format(
+                &rules,
+                "/a/file",
+                PathFormat::Posix
+            ),
             "/first/file"
         );
     }
@@ -962,7 +1034,7 @@ mod uri_case_sensitivity {
     fn uri_scheme_case_insensitive_match() {
         let rule = uri_rule("s3://bucket/prefix", "s3://other-bucket/out");
         // Uppercase scheme should still match
-        let result = rule.apply("S3://bucket/prefix/file.txt");
+        let result = rule.apply_with_format("S3://bucket/prefix/file.txt", PathFormat::Posix);
         assert_eq!(
             result,
             Some("s3://other-bucket/out/file.txt".to_string()),
@@ -974,7 +1046,7 @@ mod uri_case_sensitivity {
     fn uri_authority_case_insensitive_match() {
         let rule = uri_rule("s3://mybucket/prefix", "s3://other/out");
         // Uppercase authority should still match
-        let result = rule.apply("s3://MyBucket/prefix/file.txt");
+        let result = rule.apply_with_format("s3://MyBucket/prefix/file.txt", PathFormat::Posix);
         assert_eq!(
             result,
             Some("s3://other/out/file.txt".to_string()),
@@ -986,14 +1058,14 @@ mod uri_case_sensitivity {
     fn uri_path_case_sensitive() {
         let rule = uri_rule("s3://bucket/Prefix", "s3://other/out");
         // Path component is case-sensitive, so lowercase 'prefix' should NOT match 'Prefix'
-        let result = rule.apply("s3://bucket/prefix/file.txt");
+        let result = rule.apply_with_format("s3://bucket/prefix/file.txt", PathFormat::Posix);
         assert_eq!(result, None, "URI path comparison should be case-sensitive");
     }
 
     #[test]
     fn uri_exact_case_match_still_works() {
         let rule = uri_rule("s3://bucket/prefix", "s3://other/out");
-        let result = rule.apply("s3://bucket/prefix/file.txt");
+        let result = rule.apply_with_format("s3://bucket/prefix/file.txt", PathFormat::Posix);
         assert_eq!(result, Some("s3://other/out/file.txt".to_string()));
     }
 }

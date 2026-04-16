@@ -52,9 +52,13 @@ fn iterate(template: &str) -> Result<Vec<openjd_model::types::TaskParameterSet>,
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: openjd_expr::path_mapping::PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
     )
     .map_err(|e| e.to_string())?;
     let job = create_job(&jt, &processed).map_err(|e| e.to_string())?;

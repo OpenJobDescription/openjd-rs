@@ -77,6 +77,20 @@ impl EnvironmentScriptRunner {
         self.base.helper.take()
     }
 
+    #[cfg(windows)]
+    pub(crate) fn with_helper(
+        mut self,
+        helper: crate::cross_user_helper::CrossUserHelperWin,
+    ) -> Self {
+        self.base.helper = Some(helper);
+        self
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn take_helper(&mut self) -> Option<crate::cross_user_helper::CrossUserHelperWin> {
+        self.base.helper.take()
+    }
+
     /// Run the environment's onEnter action.
     pub async fn enter(
         &mut self,

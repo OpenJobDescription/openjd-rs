@@ -113,9 +113,13 @@ fn job_name_with_path_parent() {
         &jt,
         &input,
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let job = create_job(&jt, &processed).unwrap();

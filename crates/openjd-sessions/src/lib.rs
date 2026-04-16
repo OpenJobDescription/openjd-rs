@@ -9,11 +9,9 @@ pub mod action;
 pub(crate) mod action_filter;
 pub mod action_status;
 pub(crate) mod capabilities;
-#[cfg(unix)]
 pub(crate) mod cross_user_helper;
 pub mod embedded_files;
 pub mod error;
-#[cfg(unix)]
 pub(crate) mod helper_binary;
 pub mod let_bindings;
 pub mod logging;

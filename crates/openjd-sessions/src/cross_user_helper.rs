@@ -1,11 +1,14 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Persistent cross-user helper process for subprocess execution via sudo.
+//! Persistent cross-user helper process for subprocess execution.
 //!
-//! Instead of spawning `sudo -u <user> -i` per action (paying ~1s login cost
-//! each time), the helper is launched once at session start and communicates
-//! over newline-delimited JSON on stdin/stdout.
+//! On POSIX, the helper is launched via `sudo -u <user> -i <helper_path>`.
+//! On Windows, the helper is launched via `CreateProcessAsUserW` / `CreateProcessWithLogonW`.
+//!
+//! In both cases the helper communicates over newline-delimited JSON on stdin/stdout,
+//! avoiding per-action login costs and enabling reliable cancellation from the
+//! target user's context.
 
 use std::path::Path;
 
@@ -15,22 +18,34 @@ use crate::logging::LogContent;
 use crate::session_log;
 use crate::session_user::SessionUser;
 
-/// Manages a long-lived helper process for cross-user command execution.
+/// Manages a long-lived helper process for cross-user command execution (POSIX).
 ///
-/// The helper is launched once via `sudo -u <user> -i <helper_path>` and
-/// communicates over newline-delimited JSON on stdin/stdout.
+/// On POSIX: launched via `sudo -u <user> -i <helper_path>`.
+/// Communicates over newline-delimited JSON on stdin/stdout.
+#[cfg(unix)]
 pub(crate) struct CrossUserHelper {
     child: std::process::Child,
     stdin: std::io::BufWriter<std::process::ChildStdin>,
     stdout: std::io::BufReader<std::process::ChildStdout>,
 }
 
+/// Windows variant: the child is a raw process handle from `CreateProcessAsUserW`,
+/// not a `std::process::Child`. We wrap stdin/stdout from the pipe handles.
+#[cfg(windows)]
+pub(crate) struct CrossUserHelperWin {
+    process_handle: windows::Win32::Foundation::HANDLE,
+    stdin: std::io::BufWriter<std::fs::File>,
+    stdout: std::io::BufReader<std::fs::File>,
+}
+
+#[cfg(unix)]
 impl CrossUserHelper {
-    /// Spawn the helper binary as the given user via sudo.
+    /// Spawn the helper binary as the given user via sudo (POSIX).
     ///
     /// Returns `(helper, cancel_writer)` where `cancel_writer` is a dup'd copy
     /// of the helper's stdin fd. This allows sending cancel commands even while
     /// the helper struct is moved to a runner during action execution.
+    #[cfg(unix)]
     pub fn spawn(
         helper_path: &Path,
         user: &dyn SessionUser,
@@ -106,6 +121,156 @@ impl CrossUserHelper {
     }
 }
 
+#[cfg(windows)]
+impl CrossUserHelperWin {
+    /// Spawn the helper binary as the given user via `CreateProcessAsUserW` (Windows).
+    ///
+    /// Returns `(helper, cancel_writer)` where `cancel_writer` is a `DuplicateHandle`'d
+    /// copy of the helper's stdin pipe. This allows sending cancel commands even while
+    /// the helper struct is moved to a runner during action execution.
+    pub fn spawn(
+        helper_path: &Path,
+        user: &dyn SessionUser,
+    ) -> Result<(Self, std::fs::File), SessionError> {
+        use crate::session_user::WindowsSessionUser;
+        use std::collections::HashMap;
+        use std::os::windows::io::FromRawHandle;
+        use windows::Win32::Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS};
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        let wu = user
+            .as_any()
+            .downcast_ref::<WindowsSessionUser>()
+            .ok_or_else(|| {
+                SessionError::Runtime("Cross-user on Windows requires WindowsSessionUser".into())
+            })?;
+
+        let spawned = crate::win32::spawn_as_user_with_stdin(
+            &[helper_path.to_string_lossy().to_string()],
+            &HashMap::new(),
+            None, // working_dir — helper doesn't need one
+            wu.password(),
+            wu.user(),
+            wu.logon_token(),
+        )
+        .map_err(|e| SessionError::SubprocessStart {
+            command: format!("spawn_as_user_with_stdin {}", helper_path.display()),
+            source: std::io::Error::other(e),
+        })?;
+
+        let stdin_write = spawned.stdin_write.ok_or_else(|| {
+            SessionError::Runtime("spawn_as_user_with_stdin did not return stdin pipe".into())
+        })?;
+
+        // Convert OwnedHandle → File for stdin
+        let stdin_file: std::fs::File = stdin_write.into();
+
+        // DuplicateHandle to create a cancel_writer (like dup() on POSIX)
+        let cancel_writer = unsafe {
+            use std::os::windows::io::AsRawHandle;
+            let current_process = GetCurrentProcess();
+            let src_handle = windows::Win32::Foundation::HANDLE(stdin_file.as_raw_handle());
+            let mut dup_handle = windows::Win32::Foundation::HANDLE::default();
+            DuplicateHandle(
+                current_process,
+                src_handle,
+                current_process,
+                &mut dup_handle,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+            .map_err(|e| {
+                SessionError::Runtime(format!("DuplicateHandle for cancel_writer failed: {e}"))
+            })?;
+            std::fs::File::from_raw_handle(dup_handle.0 as std::os::windows::io::RawHandle)
+        };
+
+        // Convert stdout OwnedHandle → File
+        let stdout_file: std::fs::File = spawned.stdout_read.into();
+
+        let stdin = std::io::BufWriter::new(stdin_file);
+        let stdout = std::io::BufReader::new(stdout_file);
+
+        Ok((
+            Self {
+                process_handle: spawned.process_handle,
+                stdin,
+                stdout,
+            },
+            cancel_writer,
+        ))
+    }
+
+    /// Send a JSON command to the helper (writes JSON + newline, then flushes).
+    pub fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+        use std::io::Write;
+        serde_json::to_writer(&mut self.stdin, cmd)
+            .map_err(|e| SessionError::Runtime(format!("Failed to write to helper stdin: {e}")))?;
+        self.stdin.write_all(b"\n").map_err(|e| {
+            SessionError::Runtime(format!("Failed to write newline to helper: {e}"))
+        })?;
+        self.stdin
+            .flush()
+            .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
+        Ok(())
+    }
+
+    /// Read one line from the helper's stdout and parse as JSON.
+    pub fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
+        use std::io::BufRead;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).map_err(|e| {
+            SessionError::Runtime(format!("Failed to read from helper stdout: {e}"))
+        })?;
+        if line.is_empty() {
+            return Err(SessionError::Runtime(
+                "Helper process closed stdout unexpectedly".into(),
+            ));
+        }
+        serde_json::from_str(line.trim_end())
+            .map_err(|e| SessionError::Runtime(format!("Failed to parse helper response: {e}")))
+    }
+
+    /// Send "shutdown" and wait for the process to exit.
+    pub fn shutdown(&mut self) {
+        let _ = self.send_command(&serde_json::Value::String("shutdown".into()));
+        // Wait for the process to exit
+        unsafe {
+            let _ =
+                windows::Win32::System::Threading::WaitForSingleObject(self.process_handle, 5000);
+            let _ = windows::Win32::Foundation::CloseHandle(self.process_handle);
+        }
+    }
+}
+
+/// Trait for the shared helper interface used by `run_via_helper`.
+/// Both `CrossUserHelper` (POSIX) and `CrossUserHelperWin` (Windows) implement this.
+pub(crate) trait HelperIO {
+    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError>;
+    fn read_response(&mut self) -> Result<serde_json::Value, SessionError>;
+}
+
+#[cfg(unix)]
+impl HelperIO for CrossUserHelper {
+    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+        self.send_command(cmd)
+    }
+    fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
+        self.read_response()
+    }
+}
+
+#[cfg(windows)]
+impl HelperIO for CrossUserHelperWin {
+    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+        self.send_command(cmd)
+    }
+    fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
+        self.read_response()
+    }
+}
+
 /// Execute a subprocess via a CrossUserHelper, returning the result.
 ///
 /// This is the shared core used by both `Session::run_subprocess_via_helper`
@@ -117,8 +282,8 @@ impl CrossUserHelper {
 ///
 /// # Cancel safety
 ///
-/// The cancel_writer (dup'd fd) and helper.stdin (BufWriter) both write to the
-/// same underlying pipe, but cannot race in practice:
+/// The cancel_writer (dup'd fd / DuplicateHandle) and helper.stdin both write
+/// to the same underlying pipe, but cannot race in practice:
 /// - `send_command` completes and flushes before the response loop begins
 /// - The timeout thread only wakes after the configured timeout duration,
 ///   long after `send_command` has finished
@@ -126,7 +291,7 @@ impl CrossUserHelper {
 ///   by the async method that called `run_via_helper`, preventing concurrent
 ///   cancel writes during command submission
 pub(crate) fn run_via_helper(
-    helper: &mut CrossUserHelper,
+    helper: &mut dyn HelperIO,
     config: &crate::subprocess::SubprocessConfig,
     filter: &mut crate::action_filter::ActionFilter,
     session_id: &str,
@@ -154,7 +319,12 @@ pub(crate) fn run_via_helper(
             } // command finished before timeout
             drop(guard);
             timed_out.store(true, std::sync::atomic::Ordering::Release);
-            let _ = writeln!(writer, "{{\"cancel\":\"SIGTERM\"}}");
+            let cancel_notify = if cfg!(windows) {
+                r#"{"cancel":"CTRL_BREAK"}"#
+            } else {
+                r#"{"cancel":"SIGTERM"}"#
+            };
+            let _ = writeln!(writer, "{cancel_notify}");
             let _ = writer.flush();
             // Grace period — also cancellable
             let guard = lock.lock().unwrap();
@@ -165,7 +335,12 @@ pub(crate) fn run_via_helper(
                 return;
             }
             drop(guard);
-            let _ = writeln!(writer, "{{\"cancel\":\"SIGKILL\"}}");
+            let cancel_terminate = if cfg!(windows) {
+                r#"{"cancel":"TERMINATE"}"#
+            } else {
+                r#"{"cancel":"SIGKILL"}"#
+            };
+            let _ = writeln!(writer, "{cancel_terminate}");
             let _ = writer.flush();
         });
         Some(handle)

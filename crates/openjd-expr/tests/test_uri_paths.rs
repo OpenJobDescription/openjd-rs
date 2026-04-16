@@ -3,14 +3,25 @@
 
 //! Tests ported from Python test_uri_paths.py
 
-use openjd_expr::{evaluate_expression, ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
 }
 
 fn uri_st(key: &str, uri: &str) -> SymbolTable {
@@ -325,13 +336,13 @@ fn uri_fsx() {
 #[test]
 fn uri_join_in_symtab() {
     let st = uri_st("P", "s3://bucket/renders");
-    let r = evaluate_expression("P / 'output.exr'", &st).unwrap();
+    let r = eval_with("P / 'output.exr'", &st);
     assert_eq!(r.to_display_string(), "s3://bucket/renders/output.exr");
 }
 #[test]
 fn uri_with_suffix_in_symtab() {
     let st = uri_st("P", "s3://bucket/renders/scene.exr");
-    let r = evaluate_expression("P.with_suffix('.png')", &st).unwrap();
+    let r = eval_with("P.with_suffix('.png')", &st);
     assert_eq!(r.to_display_string(), "s3://bucket/renders/scene.png");
 }
 
@@ -339,7 +350,7 @@ fn uri_with_suffix_in_symtab() {
 #[test]
 fn uri_roundtrip_via_parts() {
     let st = uri_st("P", "s3://bucket/a/b/file.txt");
-    let r = evaluate_expression("string(path(P.parts))", &st).unwrap();
+    let r = eval_with("string(path(P.parts))", &st);
     assert_eq!(r.to_display_string(), "s3://bucket/a/b/file.txt");
 }
 
@@ -347,7 +358,7 @@ fn uri_roundtrip_via_parts() {
 #[test]
 fn uri_concat() {
     let st = uri_st("P", "s3://bucket/file");
-    let r = evaluate_expression("P + '.txt'", &st).unwrap();
+    let r = eval_with("P + '.txt'", &st);
     assert_eq!(r.to_display_string(), "s3://bucket/file.txt");
 }
 
@@ -555,9 +566,7 @@ fn from_parts_double_slash() {
 fn roundtrip() {
     let st = uri_st("P", "s3://bucket/a/b/file.txt");
     assert_eq!(
-        evaluate_expression("string(path(P.parts))", &st)
-            .unwrap()
-            .to_display_string(),
+        eval_with("string(path(P.parts))", &st).to_display_string(),
         "s3://bucket/a/b/file.txt"
     );
 }
@@ -689,12 +698,7 @@ fn custom_scheme() {
 #[test]
 fn uri_in_symtab_name() {
     let st = uri_st("P", "s3://bucket/renders/scene.exr");
-    assert_eq!(
-        evaluate_expression("P.name", &st)
-            .unwrap()
-            .to_display_string(),
-        "scene.exr"
-    );
+    assert_eq!(eval_with("P.name", &st).to_display_string(), "scene.exr");
 }
 
 // === Missing Python tests ported below ===
@@ -940,9 +944,7 @@ fn custom_scheme_parent() {
 fn uri_in_symtab_parent() {
     let st = uri_st("P", "s3://bucket/dir/file.obj");
     assert_eq!(
-        evaluate_expression("P.parent", &st)
-            .unwrap()
-            .to_display_string(),
+        eval_with("P.parent", &st).to_display_string(),
         "s3://bucket/dir"
     );
 }
@@ -960,9 +962,7 @@ fn uri_join_in_symtab_multi() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("Dir / 'sub' / 'file.obj'", &st)
-            .unwrap()
-            .to_display_string(),
+        eval_with("Dir / 'sub' / 'file.obj'", &st).to_display_string(),
         "s3://bucket/assets/sub/file.obj"
     );
 }
@@ -982,9 +982,7 @@ fn uri_join_multi_children() {
 fn roundtrip_double_slash() {
     let st = uri_st("P", "s3://bucket/a//b/file.txt");
     assert_eq!(
-        evaluate_expression("string(path(P.parts))", &st)
-            .unwrap()
-            .to_display_string(),
+        eval_with("string(path(P.parts))", &st).to_display_string(),
         "s3://bucket/a//b/file.txt"
     );
 }

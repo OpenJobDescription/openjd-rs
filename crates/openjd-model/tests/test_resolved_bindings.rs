@@ -4,6 +4,7 @@
 //! Tests for resolved_symtab serialization/deserialization on job::Step,
 //! verifying compatibility with the Python library's JSON transport format.
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
 
 struct TestDirs {
@@ -47,9 +48,19 @@ fn test_resolved_symtab_serialize_with_let_bindings() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let step = &job.steps[0];
@@ -113,9 +124,19 @@ fn test_resolved_symtab_round_trip() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let step = &job.steps[0];
@@ -169,9 +190,19 @@ fn test_resolved_symtab_list_value() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let json = serde_json::to_value(&job.steps[0]).unwrap();
@@ -213,9 +244,19 @@ fn test_resolved_symtab_serialized_without_expr() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let json = serde_json::to_value(&job.steps[0]).unwrap();
@@ -259,9 +300,19 @@ fn test_script_let_apply_path_mapping_not_in_resolved_symtab() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let symtab = job.steps[0]
@@ -328,9 +379,19 @@ fn test_step_resolved_symtab_excludes_unreferenced_symbols() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let st = job.steps[0]
@@ -404,9 +465,19 @@ fn test_job_env_resolved_symtab_excludes_unreferenced_symbols() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     // Check the job environment's resolved_symtab
@@ -481,9 +552,19 @@ fn test_job_env_resolved_symtab_includes_embedded_file_refs() {
     );
 
     let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
-    let params =
-        preprocess_job_parameters(&jt, &Default::default(), &[], td.path(), td.path(), true)
-            .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let job = create_job(&jt, &params).unwrap();
 
     let env = &job.job_environments.as_ref().unwrap()[0];

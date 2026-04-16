@@ -3,10 +3,30 @@
 
 //! Tests ported from Python test_method_coercion.py and test_target_type_propagation.py
 
-use openjd_expr::{evaluate_expression, ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{evaluate_expression, ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
     evaluate_expression(expr, &SymbolTable::new()).unwrap()
+}
+
+fn eval_posix(expr: &str) -> ExprValue {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
+
+fn eval_posix_err(expr: &str) -> String {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap_err().to_string()
 }
 
 // === TestMethodCallNoReceiverCoercion ===
@@ -47,7 +67,12 @@ fn path_startswith_as_function() {
         },
     )
     .unwrap();
-    assert!(evaluate_expression("startswith(string(P), '/a')", &st).is_ok());
+    let parsed = ParsedExpression::new("startswith(string(P), '/a')").unwrap();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    assert!(ev.evaluate(&parsed.ast).is_ok());
 }
 #[test]
 fn path_endswith_as_function() {
@@ -60,7 +85,12 @@ fn path_endswith_as_function() {
         },
     )
     .unwrap();
-    assert!(evaluate_expression("endswith(string(P), '.txt')", &st).is_ok());
+    let parsed = ParsedExpression::new("endswith(string(P), '.txt')").unwrap();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    assert!(ev.evaluate(&parsed.ast).is_ok());
 }
 #[test]
 fn string_method_on_string_works() {
@@ -100,9 +130,7 @@ fn int_method_coercion_blocked() {
 
 #[test]
 fn path_startswith_as_method_fails() {
-    let e = evaluate_expression("path('/foo/bar').startswith('/foo')", &SymbolTable::new())
-        .unwrap_err()
-        .to_string();
+    let e = eval_posix_err("path('/foo/bar').startswith('/foo')");
     assert!(
         e.contains("startswith() is not available for path"),
         "got:\n{e}"
@@ -111,9 +139,7 @@ fn path_startswith_as_method_fails() {
 
 #[test]
 fn path_endswith_as_method_fails() {
-    let e = evaluate_expression("path('/foo/bar').endswith('bar')", &SymbolTable::new())
-        .unwrap_err()
-        .to_string();
+    let e = eval_posix_err("path('/foo/bar').endswith('bar')");
     assert!(
         e.contains("endswith() is not available for path"),
         "got:\n{e}"
@@ -122,28 +148,25 @@ fn path_endswith_as_method_fails() {
 
 #[test]
 fn path_split_as_method_fails() {
-    let e = evaluate_expression("path('/foo/bar').split('/')", &SymbolTable::new())
-        .unwrap_err()
-        .to_string();
+    let e = eval_posix_err("path('/foo/bar').split('/')");
     assert!(e.contains("split() is not available for path"), "got:\n{e}");
 }
 
 #[test]
 fn path_split_as_function_succeeds() {
-    let r = evaluate_expression("split(path('/foo/bar'), '/')", &SymbolTable::new()).unwrap();
+    let r = eval_posix("split(path('/foo/bar'), '/')");
     assert_eq!(r.to_display_string(), "[\"\", \"foo\", \"bar\"]");
 }
 
 #[test]
 fn path_startswith_as_function_with_coercion() {
-    let r =
-        evaluate_expression("startswith(path('/foo/bar'), '/foo')", &SymbolTable::new()).unwrap();
+    let r = eval_posix("startswith(path('/foo/bar'), '/foo')");
     assert_eq!(r.to_display_string(), "true");
 }
 
 #[test]
 fn path_endswith_as_function_with_coercion() {
-    let r = evaluate_expression("endswith(path('/foo/bar'), 'bar')", &SymbolTable::new()).unwrap();
+    let r = eval_posix("endswith(path('/foo/bar'), 'bar')");
     assert_eq!(r.to_display_string(), "true");
 }
 

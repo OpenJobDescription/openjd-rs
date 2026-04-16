@@ -921,7 +921,7 @@ fn unknown_property_in_chain_with_path_symtab() {
         "Param.X",
         ExprValue::Path {
             value: "/test/file.exr".into(),
-            format: PathFormat::Posix,
+            format: PathFormat::host(),
         },
     )
     .unwrap();

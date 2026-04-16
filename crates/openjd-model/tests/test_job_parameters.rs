@@ -5,6 +5,7 @@
 //!
 //! Gold standard: failure tests assert the full error message including path.
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_model::decode_job_template;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -1354,9 +1355,13 @@ fn float_param_large_value_roundtrip() {
         &jt,
         &openjd_model::JobParameterInputValues::new(),
         &[],
-        td.path(),
-        td.path(),
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     match &result["Big"].value {

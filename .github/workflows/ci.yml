@@ -46,6 +46,8 @@ jobs:
           key: ${{ matrix.os }}
       - name: Run cargo clippy
         run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+      - name: Run helper clippy
+        run: cargo clippy --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -65,6 +67,8 @@ jobs:
           key: ${{ matrix.os }}
       - name: Run tests
         run: cargo test --workspace
+      - name: Run helper integration tests
+        run: cargo test --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
 
   msrv:
     name: MSRV

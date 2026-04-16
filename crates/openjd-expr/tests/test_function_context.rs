@@ -170,7 +170,8 @@ fn with_path_mapping_rules() {
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules);
+        .with_path_mapping_rules(&rules)
+        .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/new/file.txt");
 }
@@ -193,13 +194,25 @@ fn unmatched_path_unchanged() {
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules);
+        .with_path_mapping_rules(&rules)
+        .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/other/file.txt");
 }
 #[test]
 fn no_rules_returns_path_unchanged() {
-    let r = eval_with_host_context("apply_path_mapping('/any/path')");
+    // Use Posix format so the path isn't normalized to backslashes on Windows
+    let lib = default_library::get_default_library()
+        .clone()
+        .with_host_context();
+    let parsed = ParsedExpression::new("apply_path_mapping('/any/path')").unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_library(&lib)
+        .with_path_format(PathFormat::Posix);
+    let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/any/path");
 }
 #[test]

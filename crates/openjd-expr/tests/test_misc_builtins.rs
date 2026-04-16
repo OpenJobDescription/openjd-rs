@@ -18,6 +18,23 @@ fn eval(expr: &str) -> ExprValue {
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
     evaluate_expression(expr, st).unwrap()
 }
+fn eval_posix(expr: &str) -> ExprValue {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
+fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
 fn assert_err(expr: &str, expected: &[&str]) {
     let e = evaluate_expression(expr, &SymbolTable::new())
         .unwrap_err()
@@ -172,7 +189,7 @@ fn len_path_basic() {
         },
     )
     .unwrap();
-    assert_eq!(eval_with("len(p)", &st).to_display_string(), "8");
+    assert_eq!(eval_posix_st("len(p)", &st).to_display_string(), "8");
 }
 #[test]
 fn len_path_direct() {
@@ -226,11 +243,17 @@ fn path_from_path() {
         },
     )
     .unwrap();
-    assert!(matches!(eval_with("path(p)", &st), ExprValue::Path { .. }));
+    assert!(matches!(
+        eval_posix_st("path(p)", &st),
+        ExprValue::Path { .. }
+    ));
 }
 #[test]
 fn path_from_list() {
-    assert_eq!(eval("path(['/a', 'b', 'c'])").to_display_string(), "/a/b/c");
+    assert_eq!(
+        eval_posix("path(['/a', 'b', 'c'])").to_display_string(),
+        "/a/b/c"
+    );
 }
 #[test]
 fn path_from_list_with_non_string() {

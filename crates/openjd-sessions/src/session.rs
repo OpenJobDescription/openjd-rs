@@ -17,8 +17,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::action::{ActionMessage, ActionResult, ActionState};
 use crate::action_status::ActionStatus;
+use crate::cross_user_helper::run_via_helper;
 #[cfg(unix)]
-use crate::cross_user_helper::{run_via_helper, CrossUserHelper};
+use crate::cross_user_helper::CrossUserHelper;
+#[cfg(windows)]
+use crate::cross_user_helper::CrossUserHelperWin;
 use crate::error::SessionError;
 use crate::logging::{log_section_banner, LogContent};
 use crate::runner::env_script::EnvironmentScriptRunner;
@@ -156,12 +159,13 @@ impl CancelFields {
     }
 }
 
-/// Cross-user execution state (POSIX).
+/// Cross-user execution state.
 struct CrossUserFields {
     user: Option<Arc<dyn SessionUser>>,
     #[cfg(unix)]
     helper: Option<CrossUserHelper>,
-    #[cfg(unix)]
+    #[cfg(windows)]
+    helper: Option<CrossUserHelperWin>,
     cancel_writer: Option<std::fs::File>,
 }
 
@@ -225,9 +229,7 @@ impl Session {
             cancel: CancelFields::new(None),
             cross_user: CrossUserFields {
                 user: None,
-                #[cfg(unix)]
                 helper: None,
-                #[cfg(unix)]
                 cancel_writer: None,
             },
             callback: None,
@@ -261,7 +263,7 @@ impl Session {
         let files_directory = files_dir.path().to_path_buf();
 
         let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
-        path_mapping_rules.sort_by(|a, b| b.source_path.len().cmp(&a.source_path.len()));
+        path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         let path_mapping_rules = Arc::new(path_mapping_rules);
         let process_env = config.os_env_vars.unwrap_or_default();
 
@@ -272,6 +274,20 @@ impl Session {
                 let helper_path =
                     crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
                 let (h, cw) = CrossUserHelper::spawn(&helper_path, user.as_ref())?;
+                (Some(h), Some(cw))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        #[cfg(windows)]
+        let (helper, cancel_writer) = if let Some(ref user) = config.user {
+            if !user.is_process_user() {
+                let helper_path =
+                    crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
+                let (h, cw) = CrossUserHelperWin::spawn(&helper_path, user.as_ref())?;
                 (Some(h), Some(cw))
             } else {
                 (None, None)
@@ -340,9 +356,7 @@ impl Session {
             cancel: CancelFields::new(config.cancel_token),
             cross_user: CrossUserFields {
                 user: config.user,
-                #[cfg(unix)]
                 helper,
-                #[cfg(unix)]
                 cancel_writer,
             },
             callback: config.callback,
@@ -352,7 +366,7 @@ impl Session {
     }
 
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
-        rules.sort_by(|a, b| b.source_path.len().cmp(&a.source_path.len()));
+        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
         self
     }
@@ -362,7 +376,7 @@ impl Session {
     pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>) {
         let mut rules = (*self.path_mapping_rules).clone();
         rules.extend(additional);
-        rules.sort_by(|a, b| b.source_path.len().cmp(&a.source_path.len()));
+        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
     }
 
@@ -496,12 +510,18 @@ impl Session {
         }
 
         // Send cancel to the helper process via the dup'd stdin fd.
-        #[cfg(unix)]
         if let Some(ref mut writer) = self.cross_user.cancel_writer {
             use std::io::Write;
-            let signal = match time_limit {
-                Some(d) if d.is_zero() => "SIGKILL",
-                _ => "SIGTERM",
+            let signal = if cfg!(windows) {
+                match time_limit {
+                    Some(d) if d.is_zero() => "TERMINATE",
+                    _ => "CTRL_BREAK",
+                }
+            } else {
+                match time_limit {
+                    Some(d) if d.is_zero() => "SIGKILL",
+                    _ => "SIGTERM",
+                }
             };
             let cmd = format!("{{\"cancel\":\"{signal}\"}}\n");
             let _ = writer.write_all(cmd.as_bytes());
@@ -528,7 +548,6 @@ impl Session {
             log_section_banner(&self.session_id, "Session Cleanup");
 
             // Shut down the cross-user helper before deleting the working directory
-            #[cfg(unix)]
             if let Some(ref mut helper) = self.cross_user.helper {
                 helper.shutdown();
             }
@@ -683,7 +702,6 @@ impl Session {
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
-            #[cfg(unix)]
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => runner.with_helper(h),
                 None => runner,
@@ -696,10 +714,7 @@ impl Session {
             let runner_fut =
                 runner.enter(env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, &identifier).await;
-            #[cfg(unix)]
-            {
-                self.cross_user.helper = runner.take_helper();
-            }
+            self.cross_user.helper = runner.take_helper();
             let result = result?;
 
             if result.state != ActionState::Success {
@@ -831,7 +846,6 @@ impl Session {
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
-            #[cfg(unix)]
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => runner.with_helper(h),
                 None => runner,
@@ -844,10 +858,7 @@ impl Session {
             let runner_fut =
                 runner.exit(&env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, identifier).await;
-            #[cfg(unix)]
-            {
-                self.cross_user.helper = runner.take_helper();
-            }
+            self.cross_user.helper = runner.take_helper();
             let result = result?;
 
             if result.state != ActionState::Success {
@@ -935,7 +946,6 @@ impl Session {
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
-        #[cfg(unix)]
         let mut runner = match self.cross_user.helper.take() {
             Some(h) => runner.with_helper(h),
             None => runner,
@@ -957,10 +967,7 @@ impl Session {
         let result = self
             .drive_action(runner_fut, &mut rx, &step_identifier)
             .await;
-        #[cfg(unix)]
-        {
-            self.cross_user.helper = runner.take_helper();
-        }
+        self.cross_user.helper = runner.take_helper();
         let result = result?;
 
         Ok(ActionResult {
@@ -1032,7 +1039,6 @@ impl Session {
         }
 
         // Route through the persistent helper process when cross-user helper is active.
-        #[cfg(unix)]
         if self.cross_user.helper.is_some() {
             return self
                 .run_subprocess_via_helper(&cmd_args, env_vars, timeout)
@@ -1069,9 +1075,9 @@ impl Session {
 
     /// Execute a subprocess via the persistent cross-user helper process.
     ///
-    /// Instead of spawning `sudo` per action, sends a run command over the
-    /// helper's stdin and reads streamed responses from its stdout.
-    #[cfg(unix)]
+    /// Instead of spawning `sudo` (POSIX) or `CreateProcessAsUserW` (Windows)
+    /// per action, sends a run command over the helper's stdin and reads
+    /// streamed responses from its stdout.
     async fn run_subprocess_via_helper(
         &mut self,
         args: &[String],

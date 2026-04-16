@@ -285,10 +285,22 @@ mod platform {
     ///
     /// Mirrors Python's `_signal_win_subprocess.py`: detach from current console,
     /// attach to the target's console, send CTRL_BREAK, then re-attach to our own.
+    ///
+    /// Note: When running as a Windows service (Session 0), console manipulation
+    /// doesn't work reliably. In that case we return false so the caller falls
+    /// back to terminate (immediate kill).
     fn send_ctrl_break(pid: u32) -> bool {
         use windows::Win32::System::Console::{
             AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT,
         };
+
+        // Console APIs don't work from Session 0 (Windows services).
+        // Fall back to terminate for reliable cancellation.
+        if crate::win32::is_session_zero() {
+            log::info!(target: "openjd.sessions", "Running in Session 0, skipping CTRL_BREAK (will fall back to terminate)");
+            return false;
+        }
+
         unsafe {
             // Detach from our console
             let _ = FreeConsole();
@@ -1299,6 +1311,51 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(2),
             "took {:?}, expected < 2s",
+            elapsed
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn test_cancel_terminate_on_windows() {
+        use tokio_util::sync::CancellationToken;
+
+        let token = CancellationToken::new();
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Use powershell sleep which is a real process (not a shell builtin)
+        let config = SubprocessConfig {
+            args: vec![
+                "powershell".into(),
+                "-Command".into(),
+                "Start-Sleep 30".into(),
+            ],
+            env_vars: HashMap::new(),
+            working_dir: None,
+            timeout: None,
+            user: None,
+            cancel_method: CancelMethod::Terminate,
+            cancel_request_rx: Some(cancel_rx),
+        };
+
+        let t = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            t.cancel();
+        });
+
+        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let start = std::time::Instant::now();
+        let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result.state, ActionState::Canceled);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Cancel took {:?}, expected < 5s — process was not killed promptly",
             elapsed
         );
     }

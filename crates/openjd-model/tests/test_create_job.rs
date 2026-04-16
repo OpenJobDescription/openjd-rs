@@ -3,6 +3,7 @@
 
 //! Tests ported from Python test_create_job.py and test_merge_job_parameters.py
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_model::JobParameterInputValues;
 use openjd_model::{
     build_symbol_table, decode_environment_template, decode_job_template,
@@ -80,8 +81,19 @@ fn test_preprocess_string_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("hello".into()));
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "hello"));
 }
 
@@ -92,8 +104,19 @@ fn test_preprocess_int_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Int(42)
@@ -107,8 +130,19 @@ fn test_preprocess_float_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Float(_)
@@ -121,8 +155,19 @@ fn test_preprocess_uses_default() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "bar"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "bar"));
 }
 
@@ -132,7 +177,19 @@ fn test_preprocess_missing_required_param() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    assert!(preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).is_err());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_err());
 }
 
 #[test]
@@ -142,7 +199,19 @@ fn test_preprocess_extra_param() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Bar".into(), openjd_expr::ExprValue::String("extra".into()));
-    assert!(preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).is_err());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_err());
 }
 
 #[test]
@@ -153,7 +222,19 @@ fn test_preprocess_int_constraint_violation() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("5".into()));
-    assert!(preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).is_err());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_err());
 }
 
 #[test]
@@ -164,7 +245,19 @@ fn test_preprocess_string_allowed_values_violation() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("c".into()));
-    assert!(preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).is_err());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_err());
 }
 
 // === PATH parameter resolution ===
@@ -176,8 +269,19 @@ fn test_path_default_joined_to_template_dir() {
         minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
         let exp = TestDirs::join_normalized(td.template(), "data/input.csv");
         assert_eq!(s, &exp);
@@ -196,8 +300,19 @@ fn test_path_user_value_joined_to_cwd() {
         "DataDir".into(),
         openjd_expr::ExprValue::String("my/output".into()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
         let exp = td.cwd().join("my/output").to_string_lossy().to_string();
         assert_eq!(s, &exp);
@@ -217,8 +332,19 @@ fn test_path_absolute_user_value_unchanged() {
         "DataDir".into(),
         openjd_expr::ExprValue::String(abs_path.clone()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
         assert_eq!(s, &abs_path);
     } else {
@@ -240,8 +366,19 @@ fn test_path_absolute_default_rejected() {
     ));
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(
         err.to_string().contains("absolute path"),
         "Expected absolute path error, got: {err}"
@@ -255,8 +392,19 @@ fn test_path_default_walkup_rejected() {
         minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "../escape/path"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(
         err.to_string()
             .contains("outside of the template directory"),
@@ -270,8 +418,19 @@ fn test_path_empty_default_not_joined() {
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": ""}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(
         matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s.is_empty())
     );
@@ -284,8 +443,19 @@ fn test_path_empty_user_value_not_joined() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("DataDir".into(), openjd_expr::ExprValue::String("".into()));
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(
         matches!(result["DataDir"].value, openjd_expr::ExprValue::String(ref s) if s.is_empty())
     );
@@ -300,8 +470,19 @@ fn test_build_symbol_table_int() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Frame".into(), openjd_expr::ExprValue::String("42".into()));
-    let params =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     let val = symtab.get_value("Param.Frame").unwrap();
     assert_eq!(val.to_display_string(), "42");
@@ -317,8 +498,19 @@ fn test_build_symbol_table_string() {
         "Name".into(),
         openjd_expr::ExprValue::String("hello".into()),
     );
-    let params =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     let val = symtab.get_value("Param.Name").unwrap();
     assert_eq!(val.to_display_string(), "hello");
@@ -404,8 +596,19 @@ fn test_uri_user_value_preserved() {
         "S3File".into(),
         openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     // URI should be preserved as-is, not joined with /tmp/cwd
     match &result["S3File"].value {
         openjd_expr::ExprValue::String(s) => assert_eq!(s, "s3://my-bucket/assets/teapot.obj"),
@@ -423,9 +626,13 @@ fn test_uri_default_preserved() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        td.template(),
-        td.cwd(),
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     match &result["S3File"].value {
@@ -444,8 +651,19 @@ fn test_https_uri_user_value_preserved() {
         "HttpFile".into(),
         openjd_expr::ExprValue::String("https://cdn.example.com/models/scene.obj".into()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     match &result["HttpFile"].value {
         openjd_expr::ExprValue::String(s) => {
             assert_eq!(s, "https://cdn.example.com/models/scene.obj")
@@ -455,9 +673,10 @@ fn test_https_uri_user_value_preserved() {
 }
 
 #[test]
-fn test_uri_not_preserved_without_expr_extension() {
+fn test_uri_joined_without_expr_extension() {
     let td = TestDirs::new();
-    // Without EXPR extension, URI values are treated as relative paths and joined
+    // Without EXPR, URIs are not recognized — treated as opaque relative strings
+    // and joined with cwd, matching Python's Path("s3://bucket/key") behavior.
     let jt_val = yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -472,17 +691,237 @@ fn test_uri_not_preserved_without_expr_extension() {
         "S3File".into(),
         openjd_expr::ExprValue::String("s3://my-bucket/file.obj".into()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
-    // Without EXPR, the URI is treated as a relative path and joined with cwd
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true, // doesn't matter without EXPR
+        },
+    )
+    .unwrap();
     match &result["S3File"].value {
-        openjd_expr::ExprValue::String(s) => assert!(
-            {
-                let cwd_str = td.cwd().to_string_lossy().to_string();
-                s.contains(&cwd_str)
-            },
-            "Expected joined path, got: {s}"
-        ),
+        openjd_expr::ExprValue::String(s) => {
+            // Should be joined with cwd since URI is not recognized without EXPR
+            assert!(
+                s.contains("s3:") && s != "s3://my-bucket/file.obj",
+                "URI should be joined with cwd, got: {s}"
+            );
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_uri_rejected_when_not_allowed() {
+    let td = TestDirs::new();
+    // With EXPR + allow_uri_path_values=false, URIs are rejected
+    let jt_val = expr_job_template_with_path_param("S3File", None);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "S3File".into(),
+        openjd_expr::ExprValue::String("s3://my-bucket/file.obj".into()),
+    );
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("URI path values are not permitted"),
+        "Expected URI rejection error, got: {err}"
+    );
+}
+
+#[test]
+fn test_uri_default_rejected_when_not_allowed() {
+    let td = TestDirs::new();
+    // With EXPR + allow_uri_path_values=false, URI defaults are rejected
+    let jt_val = expr_job_template_with_path_param("S3File", Some("s3://my-bucket/default.obj"));
+    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("URI path values are not permitted"),
+        "Expected URI rejection error, got: {err}"
+    );
+}
+
+#[test]
+fn test_posix_absolute_path_recognized_with_posix_format() {
+    // /foo/bar is absolute under PathFormat::Posix — should not be joined with cwd
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("/foo/bar".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/template"),
+            current_working_dir: std::path::Path::new("/cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Dir"].value {
+        openjd_expr::ExprValue::String(s) => assert_eq!(s, "/foo/bar"),
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_posix_path_is_relative_under_windows_format() {
+    // /foo/bar under PathFormat::Windows is root-relative: keeps drive from cwd
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("/foo/bar".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("C:\\template"),
+            current_working_dir: std::path::Path::new("C:\\cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Windows,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Dir"].value {
+        openjd_expr::ExprValue::String(s) => {
+            // Root-relative: drive from cwd + the /foo/bar path
+            assert_eq!(s, "C:/foo/bar");
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_windows_absolute_path_recognized_with_windows_format() {
+    // C:\foo is absolute under PathFormat::Windows — should not be joined
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("C:\\foo\\bar".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("C:\\template"),
+            current_working_dir: std::path::Path::new("C:\\cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Windows,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Dir"].value {
+        openjd_expr::ExprValue::String(s) => assert_eq!(s, "C:\\foo\\bar"),
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_windows_path_is_relative_under_posix_format() {
+    // C:\foo is NOT absolute under PathFormat::Posix — should be joined with cwd
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("C:\\foo\\bar".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/template"),
+            current_working_dir: std::path::Path::new("/cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Dir"].value {
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(
+                s, "/cwd/C:\\foo\\bar",
+                "Should be joined with cwd using POSIX separator"
+            );
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_unc_path_recognized_as_absolute() {
+    // \\server\share is absolute under both formats
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("\\\\server\\share".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("C:\\template"),
+            current_working_dir: std::path::Path::new("C:\\cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Windows,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Dir"].value {
+        openjd_expr::ExprValue::String(s) => assert_eq!(s, "\\\\server\\share"),
         other => panic!("Expected String, got {:?}", other),
     }
 }
@@ -498,8 +937,19 @@ fn test_relative_path_still_joined_with_expr() {
         "LocalFile".into(),
         openjd_expr::ExprValue::String("subdir/file.txt".into()),
     );
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     match &result["LocalFile"].value {
         openjd_expr::ExprValue::String(s) => {
             let exp = td
@@ -525,8 +975,19 @@ fn test_uri_in_build_symbol_table() {
         "S3File".into(),
         openjd_expr::ExprValue::String("s3://my-bucket/assets/teapot.obj".into()),
     );
-    let params =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), false).unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     let symtab = build_symbol_table(&params).unwrap();
     // RawParam should be the original string
     assert_eq!(
@@ -555,7 +1016,19 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
         .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
         .collect();
-    let processed = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), true).unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     create_job(&jt, &processed).unwrap()
 }
 
@@ -569,7 +1042,18 @@ fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String 
         .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
         .collect();
-    let processed = match preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), true) {
+    let processed = match preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    ) {
         Err(e) => return e.to_string(),
         Ok(p) => p,
     };
@@ -1573,9 +2057,13 @@ fn test_uneven_parameter_space_association() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        td.cwd(),
-        td.cwd(),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let result = create_job(&jt, &processed);
@@ -1670,7 +2158,19 @@ fn test_preprocess_reports_extra_with_environments() {
         "ThisIsKnown".into(),
         openjd_expr::ExprValue::String("value".into()),
     );
-    let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(
         err.to_string().contains("ThisIsUnknown"),
         "Expected extra param error, got: {err}"
@@ -1691,7 +2191,19 @@ fn test_preprocess_reports_missing_with_environments() {
     );
     let et = decode_environment_template(et_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("ThisIsNotDefined"),
@@ -1718,7 +2230,19 @@ fn test_preprocess_collects_defaults_with_environments() {
     );
     let et = decode_environment_template(et_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(
         matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "defaultValue")
     );
@@ -1743,7 +2267,19 @@ fn test_preprocess_checks_constraints_with_environments() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     input.insert("Bar".into(), openjd_expr::ExprValue::String("one".into()));
-    let err = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     let msg = err.to_string();
     // At minimum, the first constraint violation should be reported
     assert!(
@@ -1771,7 +2307,19 @@ fn test_preprocess_collects_multiple_errors() {
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     input.insert("Bar".into(), openjd_expr::ExprValue::String("three".into()));
-    let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     let msg = err.to_string();
     // The Rust implementation may report errors differently (one at a time or all at once)
     // At minimum, one of the errors should be reported
@@ -1792,7 +2340,19 @@ fn test_preprocess_ignores_defaults_when_value_provided() {
         "Foo".into(),
         openjd_expr::ExprValue::String("FooValue".into()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(
         matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "FooValue")
     );
@@ -1805,7 +2365,19 @@ fn test_preprocess_string_constraint_violation_message() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
-    let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Foo")
@@ -1838,7 +2410,19 @@ fn test_preprocess_int_to_float_coercion() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Int(42));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     match &result["Foo"].value {
         openjd_expr::ExprValue::Float(f) => assert_eq!(f.value(), 42.0),
         other => panic!("Expected Float, got {:?}", other),
@@ -1865,7 +2449,19 @@ fn test_preprocess_float_to_int_coercion_whole() {
         "Foo".into(),
         openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Int(5)
@@ -1891,7 +2487,18 @@ fn test_preprocess_float_to_int_coercion_fractional_falls_through() {
         "Foo".into(),
         openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.5).unwrap()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false);
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1908,7 +2515,19 @@ fn test_preprocess_bool_coercion_true() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("true".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Bool(true)
@@ -1922,7 +2541,19 @@ fn test_preprocess_bool_coercion_false() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("false".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Bool(false)
@@ -1936,7 +2567,19 @@ fn test_preprocess_bool_coercion_yes() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("yes".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Bool(true)
@@ -1950,7 +2593,19 @@ fn test_preprocess_bool_coercion_0() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("0".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Bool(false)
@@ -1965,7 +2620,19 @@ fn test_preprocess_bool_invalid_string() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("maybe".into()));
-    let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("not a valid bool"), "got: {err}");
 }
 
@@ -1977,7 +2644,19 @@ fn test_preprocess_bool_from_bool_value() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Bool(true));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Bool(true)
@@ -1992,7 +2671,19 @@ fn test_preprocess_range_expr_coercion() {
     let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("1-10".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::RangeExpr(_)
@@ -2010,7 +2701,19 @@ fn test_preprocess_range_expr_invalid_stays_string() {
         "Foo".into(),
         openjd_expr::ExprValue::String("not-a-range".into()),
     );
-    let err = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("not a valid range"), "got: {err}");
 }
 
@@ -2052,7 +2755,19 @@ fn test_preprocess_list_int_json_coercion() {
         "Foo".into(),
         openjd_expr::ExprValue::String("[1,2,3]".into()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::ListInt(_)
@@ -2074,7 +2789,19 @@ fn test_preprocess_list_string_json_coercion() {
         "Foo".into(),
         openjd_expr::ExprValue::String(r#"["a","b"]"#.into()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::ListString(_, _)
@@ -2096,7 +2823,19 @@ fn test_preprocess_list_bool_json_coercion() {
         "Foo".into(),
         openjd_expr::ExprValue::String("[true,false]".into()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::ListBool(_)
@@ -2119,7 +2858,18 @@ fn test_preprocess_list_invalid_json_stays_string() {
         "Foo".into(),
         openjd_expr::ExprValue::String("not json".into()),
     );
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.cwd(), td.cwd(), false);
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -2138,7 +2888,18 @@ fn test_coerce_string_to_int_errors_on_non_numeric() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("abc".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false);
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -2154,7 +2915,18 @@ fn test_coerce_string_to_float_errors_on_non_numeric() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("xyz".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false);
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -2170,7 +2942,19 @@ fn test_coerce_valid_int_string_succeeds() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Int(42)
@@ -2185,7 +2969,19 @@ fn test_coerce_valid_float_string_succeeds() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(
         result["Foo"].value,
         openjd_expr::ExprValue::Float(_)
@@ -2204,9 +3000,13 @@ fn test_relative_template_dir_with_walkup_false_errors() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        std::path::Path::new("relative/dir"),
-        td.cwd(),
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("relative/dir"),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     );
     assert!(result.is_err());
     assert!(result
@@ -2226,9 +3026,13 @@ fn test_relative_template_dir_with_walkup_true_succeeds() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        std::path::Path::new("relative/dir"),
-        td.cwd(),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("relative/dir"),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     );
     assert!(result.is_ok());
 }
@@ -2256,7 +3060,19 @@ fn test_preprocess_int_coerced_to_string_repr() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Int(42));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "42"));
 }
 
@@ -2268,7 +3084,19 @@ fn test_preprocess_bool_coerced_to_string_repr() {
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Bool(true));
-    let result = preprocess_job_parameters(&jt, &input, &[], td.cwd(), td.cwd(), false).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     assert!(matches!(result["Foo"].value, openjd_expr::ExprValue::String(ref s) if s == "true"));
 }
 
@@ -2291,8 +3119,19 @@ fn test_path_absolute_default_allowed_with_walkup() {
     ));
     let jt = decode_job_template(jt_val, None).unwrap();
     let input = JobParameterInputValues::new();
-    let result =
-        preprocess_job_parameters(&jt, &input, &[], td.template(), td.cwd(), true).unwrap();
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
         assert_eq!(s, expected);
     } else {
@@ -2312,9 +3151,13 @@ fn test_path_default_relative_template_dir() {
         &jt,
         &input,
         &[],
-        std::path::Path::new("relative/template"),
-        td.cwd(),
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("relative/template"),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     );
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
@@ -2649,7 +3492,6 @@ fn test_create_job_host_req_attributes_both() {
 //          error paths, and remaining coverage gaps
 // ══════════════════════════════════════════════════════════════
 
-use openjd_expr::PathFormat;
 use openjd_model::{evaluate_let_bindings, JobParameterType, JobParameterValue};
 use std::collections::HashMap;
 
@@ -2828,15 +3670,32 @@ fn script_let_binding_division_by_zero_is_caught() {
 
 #[test]
 fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
-    let job = parse_and_create(
-        r#"{
+    let v: serde_yaml::Value = serde_yaml::from_str(r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Foo}}"}}}}]
-    }"#,
-        &[("Foo", "/tmp/foo")],
+    }"#).unwrap();
+    let jt = decode_job_template(v, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::String("/tmp/foo".into()),
     );
+    let processed = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed).unwrap();
     let symtab = job.steps[0]
         .resolved_symtab
         .as_ref()
@@ -2885,9 +3744,13 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
         &jt,
         &input,
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let result = openjd_model::create_job(&jt, &params);
@@ -2992,9 +3855,13 @@ fn range_expression_evaluation_error_is_caught() {
         &jt,
         &input,
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     // "5" is a valid range expression (single value), so this succeeds

@@ -147,6 +147,108 @@ pub fn is_absolute(path_str: &str, fmt: PathFormat) -> bool {
     }
 }
 
+/// Join two path strings using the separator and absoluteness rules for `fmt`.
+///
+/// If `right` is absolute (according to `fmt`), it replaces `left` entirely.
+/// On Windows, if `right` starts with a single `/` or `\` (root-relative),
+/// the drive letter from `left` is preserved (matching `ntpath.join` behavior).
+/// Otherwise, `right` is appended to `left` with the appropriate separator.
+pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
+    if is_absolute(right, fmt) {
+        return right.to_string();
+    }
+    // Windows root-relative: /foo or \foo (but not \\server) replaces the path
+    // but keeps the root from left. Matches ntpath.join behavior.
+    // For drive paths (C:\...), the root is "C:".
+    // For UNC paths (\\server\share\...), the root is "\\server\share".
+    if fmt == PathFormat::Windows {
+        let rb = right.as_bytes();
+        if rb.first() == Some(&b'/') || rb.first() == Some(&b'\\') {
+            let lb = left.as_bytes();
+            // Drive path: keep "C:" prefix
+            if lb.len() >= 2 && lb[0].is_ascii_alphabetic() && lb[1] == b':' {
+                return format!("{}{right}", &left[..2]);
+            }
+            // UNC path: keep "\\server\share" or "//server/share" prefix
+            if let Some(unc_root) = extract_unc_root(left) {
+                return format!("{unc_root}{right}");
+            }
+        }
+    }
+    let left_is_uri = crate::uri_path::is_uri(left);
+    let (sep, trim_chars): (&str, &[char]) = if left_is_uri {
+        ("/", &['/'])
+    } else {
+        match fmt {
+            // On Windows, both / and \ are separators
+            PathFormat::Windows => ("\\", &['/', '\\']),
+            // On POSIX, only / is a separator (\ is a valid filename char)
+            PathFormat::Posix | PathFormat::Uri => ("/", &['/']),
+        }
+    };
+    let left = left.trim_end_matches(trim_chars);
+    // When appending to a URI from a Windows context, normalize backslashes to forward slashes.
+    // In POSIX context, backslashes are valid filename characters and must not be converted.
+    let right = if left_is_uri && fmt == PathFormat::Windows {
+        std::borrow::Cow::Owned(right.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(right)
+    };
+    format!("{left}{sep}{right}")
+}
+
+/// Join two path strings without recognizing URIs as absolute.
+///
+/// Like [`join`], but does not check `is_absolute(right)`. Use when `right` has
+/// already been determined to be non-absolute via a URI-unaware check (e.g.,
+/// `is_absolute` without URI recognition). This prevents `scheme://...` strings
+/// from being treated as absolute when URI support is disabled.
+pub fn non_uri_join(left: &str, right: &str, fmt: PathFormat) -> String {
+    // Windows root-relative: /foo or \foo keeps the root from left
+    if fmt == PathFormat::Windows {
+        let rb = right.as_bytes();
+        if rb.first() == Some(&b'/') || rb.first() == Some(&b'\\') {
+            let lb = left.as_bytes();
+            if lb.len() >= 2 && lb[0].is_ascii_alphabetic() && lb[1] == b':' {
+                return format!("{}{right}", &left[..2]);
+            }
+            if let Some(unc_root) = extract_unc_root(left) {
+                return format!("{unc_root}{right}");
+            }
+        }
+    }
+    let (sep, trim_chars): (&str, &[char]) = match fmt {
+        PathFormat::Windows => ("\\", &['/', '\\']),
+        PathFormat::Posix | PathFormat::Uri => ("/", &['/']),
+    };
+    let left = left.trim_end_matches(trim_chars);
+    format!("{left}{sep}{right}")
+}
+
+/// Extract the UNC root from a path: `\\server\share` or `//server/share`.
+/// Returns the root portion (two components after the leading `\\` or `//`).
+fn extract_unc_root(path: &str) -> Option<&str> {
+    let bytes = path.as_bytes();
+    if bytes.len() < 2 {
+        return None;
+    }
+    let prefix_char = bytes[0];
+    if !((prefix_char == b'\\' && bytes[1] == b'\\') || (prefix_char == b'/' && bytes[1] == b'/')) {
+        return None;
+    }
+    // Find the separator after "server"
+    let rest = &path[2..];
+    let sep_after_server = rest.find(['/', '\\'])?;
+    let after_server = sep_after_server + 3; // 2 for prefix + 1 for separator
+                                             // Find the separator after "share" (or end of string)
+    let share_start = after_server;
+    let sep_after_share = path[share_start..]
+        .find(['/', '\\'])
+        .map(|i| share_start + i)
+        .unwrap_or(path.len());
+    Some(&path[..sep_after_share])
+}
+
 pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, _) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
@@ -190,11 +292,8 @@ pub fn apply_path_mapping_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let mapped = crate::path_mapping::apply_rules(ctx.path_mapping_rules(), &path_str);
     if mapped == path_str {
-        // No rule matched — preserve original separators
-        Ok(ExprValue::Path {
-            value: path_str,
-            format: fmt,
-        })
+        // No rule matched — still normalize separators to the target format
+        Ok(ExprValue::new_path(path_str, fmt))
     } else {
         Ok(ExprValue::new_path(mapped, fmt))
     }

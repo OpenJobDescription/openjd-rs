@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::JobParameterInputValues;
 use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
@@ -33,9 +34,13 @@ fn create_and_iterate(
         &jt,
         &input,
         &[],
-        std::path::Path::new("/tmp/template"),
-        std::path::Path::new("/tmp/cwd"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp/template"),
+            current_working_dir: std::path::Path::new("/tmp/cwd"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let job = create_job(&jt, &processed).unwrap();
@@ -77,9 +82,13 @@ fn test_no_param_space() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let job = create_job(&jt, &processed).unwrap();
@@ -466,9 +475,13 @@ fn test_contains_check() {
         &jt,
         &JobParameterInputValues::new(),
         &[],
-        std::path::Path::new("/tmp"),
-        std::path::Path::new("/tmp"),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new("/tmp"),
+            current_working_dir: std::path::Path::new("/tmp"),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
     )
     .unwrap();
     let job = create_job(&jt, &processed).unwrap();

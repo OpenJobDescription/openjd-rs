@@ -6,6 +6,7 @@
 //! Tests merge_job_parameter_definitions and constraint validation
 //! when merging parameters from multiple environment templates and a job template.
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_model::{
     decode_environment_template, decode_job_template, merge_job_parameter_definitions,
     preprocess_job_parameters, JobParameterInputValues, JobParameterType,
@@ -266,8 +267,19 @@ fn constraint_non_compatible_int_value_range() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no valid range"), "got: {err}");
 }
 
@@ -290,8 +302,19 @@ fn constraint_non_compatible_string_length() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no valid length"), "got: {err}");
 }
 
@@ -501,8 +524,19 @@ fn constraint_float_incompatible_range() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no valid range"), "got: {err}");
 }
 
@@ -523,7 +557,18 @@ fn constraint_float_compatible_range() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let result = preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false);
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
     assert!(result.is_ok(), "got: {}", result.unwrap_err());
 }
 
@@ -545,7 +590,19 @@ fn constraint_float_boundary_equal_range() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    assert!(preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false,).is_ok());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_ok());
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -571,8 +628,19 @@ fn constraint_string_no_common_allowed_values() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no common values"), "got: {err}");
 }
 
@@ -593,7 +661,19 @@ fn constraint_string_common_allowed_values_ok() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    assert!(preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false,).is_ok());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_ok());
 }
 
 #[test]
@@ -617,8 +697,19 @@ fn constraint_string_default_not_in_merged_allowed() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(
         err.to_string().contains("not in merged allowedValues"),
         "got: {err}"
@@ -646,7 +737,19 @@ fn constraint_string_default_in_merged_allowed_ok() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    assert!(preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false,).is_ok());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_ok());
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -668,7 +771,19 @@ fn constraint_int_min_only_max_only_compatible() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    assert!(preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false,).is_ok());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_ok());
 }
 
 #[test]
@@ -686,8 +801,19 @@ fn constraint_int_min_only_max_only_incompatible() {
     )
     .unwrap();
     let input = JobParameterInputValues::new();
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no valid range"), "got: {err}");
 }
 
@@ -716,8 +842,19 @@ fn input_value_rejected_by_env_int_allowed_values() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::Int(4));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -738,8 +875,19 @@ fn input_value_rejected_by_env_int_min_value() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::Int(5));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -760,8 +908,19 @@ fn input_value_rejected_by_env_int_max_value() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::Int(15));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -787,8 +946,19 @@ fn input_value_rejected_by_env_float_min_value() {
         "foo".into(),
         openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap()),
     );
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -812,8 +982,19 @@ fn input_value_rejected_by_env_string_allowed_values() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::String("c".into()));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -839,8 +1020,19 @@ fn input_value_rejected_by_env_string_max_length() {
         "foo".into(),
         openjd_expr::ExprValue::String("abcdefgh".into()),
     );
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -863,8 +1055,19 @@ fn input_value_rejected_by_env_string_min_length() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::String("ab".into()));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
 
@@ -888,7 +1091,19 @@ fn input_value_accepted_when_within_all_constraints() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::Int(2));
-    assert!(preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false,).is_ok());
+    assert!(preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .is_ok());
 }
 
 #[test]
@@ -904,7 +1119,18 @@ fn input_value_rejected_by_env_only_constraint_no_job_constraint() {
     .unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("foo".into(), openjd_expr::ExprValue::Int(15));
-    let err =
-        preprocess_job_parameters(&jt, &input, &[et], td.path(), td.path(), false).unwrap_err();
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }

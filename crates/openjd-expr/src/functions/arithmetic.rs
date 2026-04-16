@@ -5,7 +5,6 @@
 
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
-use crate::path_mapping::PathFormat;
 use crate::types::ExprType;
 use crate::value::{ExprValue, Float64};
 
@@ -273,28 +272,8 @@ pub fn path_div(ctx: Ctx, a: &[ExprValue]) -> R {
         _ => return Err(ExpressionError::type_error("type error")),
     };
     ctx.count_string_ops(l.len() + r.len())?;
-    if r.starts_with('/')
-        || r.starts_with("\\\\")
-        || (r.len() >= 3
-            && r.as_bytes()[0].is_ascii_alphabetic()
-            && r.as_bytes()[1] == b':'
-            && (r.as_bytes()[2] == b'/' || r.as_bytes()[2] == b'\\'))
-    {
-        return Ok(ExprValue::Path {
-            value: r.to_string(),
-            format,
-        });
-    }
-    let sep = if crate::uri_path::is_uri(l) {
-        "/"
-    } else if format == PathFormat::Windows {
-        "\\"
-    } else {
-        "/"
-    };
-    let left = l.trim_end_matches(['/', '\\']);
     Ok(ExprValue::Path {
-        value: format!("{left}{sep}{r}"),
+        value: super::path::join(l, r, format),
         format,
     })
 }

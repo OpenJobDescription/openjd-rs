@@ -32,6 +32,15 @@ fn assert_err(expr: &str, expected: &[&str]) {
     assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
 }
 
+fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
+
 // === TestStrings ===
 #[test]
 fn concatenation() {
@@ -1218,7 +1227,7 @@ fn repr_py_path() {
         },
     )
     .unwrap();
-    let r = openjd_expr::evaluate_expression("repr_py(P)", &st).unwrap();
+    let r = eval_posix_st("repr_py(P)", &st);
     assert_eq!(r.to_display_string(), "'/tmp/file.txt'");
 }
 
@@ -1243,7 +1252,7 @@ fn repr_py_list_path() {
         .unwrap(),
     )
     .unwrap();
-    let r = openjd_expr::evaluate_expression("repr_py(P)", &st).unwrap();
+    let r = eval_posix_st("repr_py(P)", &st);
     assert_eq!(r.to_display_string(), "['/a', '/b']");
 }
 
@@ -1262,7 +1271,7 @@ fn repr_json_list_path() {
         .unwrap(),
     )
     .unwrap();
-    let r = openjd_expr::evaluate_expression("repr_json(P)", &st).unwrap();
+    let r = eval_posix_st("repr_json(P)", &st);
     assert_eq!(r.to_display_string(), "[\"/a\"]");
 }
 
@@ -1277,7 +1286,7 @@ fn repr_pwsh_path() {
         },
     )
     .unwrap();
-    let r = openjd_expr::evaluate_expression("repr_pwsh(P)", &st).unwrap();
+    let r = eval_posix_st("repr_pwsh(P)", &st);
     assert_eq!(r.to_display_string(), "'/tmp/file.txt'");
 }
 
@@ -1431,8 +1440,7 @@ fn removesuffix_with_suffixes_join() {
         },
     )
     .unwrap();
-    let r =
-        openjd_expr::evaluate_expression("P.name.removesuffix(P.suffixes.join(''))", &st).unwrap();
+    let r = eval_posix_st("P.name.removesuffix(P.suffixes.join(''))", &st);
     assert_eq!(r.to_display_string(), "archive");
 }
 

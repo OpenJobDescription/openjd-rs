@@ -25,7 +25,7 @@ pub use instantiate::{
 };
 pub use parameters::{
     build_symbol_table, merge_job_parameter_definitions, preprocess_job_parameters,
-    MergedParameterDefinition,
+    MergedParameterDefinition, PathParameterOptions,
 };
 
 /// Create an instantiated Job from a validated JobTemplate and preprocessed parameter values.

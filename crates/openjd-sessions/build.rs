@@ -13,7 +13,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed=src/helper/");
 
-    if target.contains("linux") || target.contains("unix") || cfg!(unix) {
+    let is_unix = target.contains("linux") || target.contains("unix") || cfg!(unix);
+    let is_windows = target.contains("windows") || cfg!(windows);
+
+    if is_unix || is_windows {
         let status = std::process::Command::new("cargo")
             .args([
                 "build",
@@ -29,21 +32,26 @@ fn main() {
             .expect("Failed to run cargo for helper binary");
         assert!(status.success(), "Helper binary compilation failed");
 
+        let binary_name = if is_windows {
+            "openjd_helper.exe"
+        } else {
+            "openjd_helper"
+        };
         let built = out_dir
             .join("helper_build")
             .join(&target)
             .join("release")
-            .join("openjd_helper");
+            .join(binary_name);
         std::fs::copy(&built, &helper_out).expect("Failed to copy helper binary");
 
         // Also place the binary where integration tests expect it
         // (tests can't access OUT_DIR, so they look in the helper's own target dir)
         let test_dir = helper_dir.join("target/release");
         std::fs::create_dir_all(&test_dir).expect("Failed to create helper test dir");
-        std::fs::copy(&built, test_dir.join("openjd_helper"))
+        std::fs::copy(&built, test_dir.join(binary_name))
             .expect("Failed to copy helper binary for tests");
     } else {
-        // Non-unix: write empty placeholder so include_bytes! doesn't fail
+        // Unsupported platform: write empty placeholder so include_bytes! doesn't fail
         std::fs::write(&helper_out, b"").expect("Failed to write placeholder");
     }
 }

@@ -173,6 +173,9 @@ pub struct SpawnedProcess {
     pub pid: u32,
     /// Read end of the stdout pipe. Caller owns this handle.
     pub stdout_read: std::os::windows::io::OwnedHandle,
+    /// Write end of the stdin pipe. Caller owns this handle.
+    /// None if stdin was not requested.
+    pub stdin_write: Option<std::os::windows::io::OwnedHandle>,
 }
 
 /// Merge the user's environment block with additional env vars.
@@ -206,6 +209,7 @@ fn merge_environment(
 }
 
 /// Create an inheritable pipe, returning (read_handle, write_handle).
+/// The read end is inheritable (for the child), the write end is not.
 fn create_stdout_pipe() -> Result<(HANDLE, HANDLE), String> {
     let sa = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -226,6 +230,28 @@ fn create_stdout_pipe() -> Result<(HANDLE, HANDLE), String> {
     Ok((read_handle, write_handle))
 }
 
+/// Create an inheritable pipe for stdin, returning (read_handle, write_handle).
+/// The write end is inheritable (for the caller), the read end is inheritable (for the child).
+fn create_stdin_pipe() -> Result<(HANDLE, HANDLE), String> {
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: true.into(),
+    };
+    let mut read_handle = HANDLE::default();
+    let mut write_handle = HANDLE::default();
+
+    unsafe {
+        CreatePipe(&mut read_handle, &mut write_handle, Some(&sa), 0)
+            .map_err(|e| format!("CreatePipe (stdin) failed: {e}"))?;
+        // The write end should NOT be inherited by the child
+        SetHandleInformation(write_handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))
+            .map_err(|e| format!("SetHandleInformation (stdin) failed: {e}"))?;
+    }
+
+    Ok((read_handle, write_handle))
+}
+
 /// Spawn a process as another user.
 ///
 /// Uses `CreateProcessWithLogonW` when a password is provided, or
@@ -238,9 +264,56 @@ pub fn spawn_as_user(
     username: &str,
     logon_token: Option<HANDLE>,
 ) -> Result<SpawnedProcess, String> {
+    spawn_as_user_impl(
+        args,
+        env_vars,
+        working_dir,
+        password,
+        username,
+        logon_token,
+        false,
+    )
+}
+
+/// Spawn a process as another user with bidirectional pipes (stdin + stdout).
+pub fn spawn_as_user_with_stdin(
+    args: &[String],
+    env_vars: &HashMap<String, Option<String>>,
+    working_dir: Option<&std::path::Path>,
+    password: Option<&str>,
+    username: &str,
+    logon_token: Option<HANDLE>,
+) -> Result<SpawnedProcess, String> {
+    spawn_as_user_impl(
+        args,
+        env_vars,
+        working_dir,
+        password,
+        username,
+        logon_token,
+        true,
+    )
+}
+
+fn spawn_as_user_impl(
+    args: &[String],
+    env_vars: &HashMap<String, Option<String>>,
+    working_dir: Option<&std::path::Path>,
+    password: Option<&str>,
+    username: &str,
+    logon_token: Option<HANDLE>,
+    with_stdin: bool,
+) -> Result<SpawnedProcess, String> {
     use std::os::windows::io::FromRawHandle;
 
     let (stdout_read, stdout_write) = create_stdout_pipe()?;
+    let stdin_pipe = if with_stdin {
+        Some(create_stdin_pipe()?)
+    } else {
+        None
+    };
+    let stdin_read = stdin_pipe.map(|(r, _)| r).unwrap_or(HANDLE::default());
+    let stdin_write_handle = stdin_pipe.map(|(_, w)| w);
 
     // Build command line
     let cmdline_str = args_to_cmdline(args);
@@ -269,7 +342,7 @@ pub fn spawn_as_user(
         wShowWindow: 0,                                       // SW_HIDE
         hStdOutput: stdout_write,
         hStdError: stdout_write, // merge stderr into stdout
-        hStdInput: HANDLE::default(),
+        hStdInput: stdin_read,
         ..Default::default()
     };
 
@@ -321,9 +394,15 @@ pub fn spawn_as_user(
         return Err("Must provide either password or logon_token".into());
     };
 
-    // Close the write end of the pipe (child has it now)
+    // Close the write end of the stdout pipe (child has it now)
     unsafe {
         let _ = CloseHandle(stdout_write);
+    }
+    // Close the read end of the stdin pipe (child has it now)
+    if stdin_pipe.is_some() {
+        unsafe {
+            let _ = CloseHandle(stdin_read);
+        }
     }
 
     result.map_err(|e| format!("CreateProcess failed: {e}"))?;
@@ -339,10 +418,15 @@ pub fn spawn_as_user(
         )
     };
 
+    let stdin_owned = stdin_write_handle.map(|h| unsafe {
+        std::os::windows::io::OwnedHandle::from_raw_handle(h.0 as std::os::windows::io::RawHandle)
+    });
+
     Ok(SpawnedProcess {
         process_handle: pi.hProcess,
         pid: pi.dwProcessId,
         stdout_read: stdout_owned,
+        stdin_write: stdin_owned,
     })
 }
 

@@ -170,18 +170,35 @@ async fn run_scenario(scenario_path: &Path) {
 
     // Build parameter values
     let input_values = yaml_to_input_values(&scenario.job_parameters);
+
+    // Path mapping rules
+    let path_rules = parse_path_mapping_rules(&scenario.path_mapping_rules);
+
+    // Derive path_format from the source_path_format of the first mapping rule,
+    // since input paths are in the source format. Fall back to host format.
+    let path_format = path_rules
+        .first()
+        .map(|r| match r.source_path_format {
+            openjd_sessions::PathFormat::Windows => openjd_expr::path_mapping::PathFormat::Windows,
+            openjd_sessions::PathFormat::Posix | openjd_sessions::PathFormat::Uri => {
+                openjd_expr::path_mapping::PathFormat::Posix
+            }
+        })
+        .unwrap_or_else(openjd_expr::path_mapping::PathFormat::host);
+
     let job_params = preprocess_job_parameters(
         &job_template,
         &input_values,
         &[],
-        std::path::Path::new(""),
-        std::path::Path::new(""),
-        true,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: std::path::Path::new(""),
+            current_working_dir: std::path::Path::new(""),
+            path_format,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: true,
+        },
     )
     .unwrap_or_else(|e| panic!("Failed to preprocess params for '{}': {e}", scenario.name));
-
-    // Path mapping rules
-    let path_rules = parse_path_mapping_rules(&scenario.path_mapping_rules);
 
     // Create job
     let job = create_job(&job_template, &job_params)

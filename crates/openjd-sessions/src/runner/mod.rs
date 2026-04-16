@@ -76,6 +76,8 @@ pub(crate) struct ScriptRunnerBase {
     pub initial_redacted_values: Vec<String>,
     #[cfg(unix)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
+    #[cfg(windows)]
+    pub helper: Option<crate::cross_user_helper::CrossUserHelperWin>,
 }
 
 impl ScriptRunnerBase {
@@ -95,7 +97,6 @@ impl ScriptRunnerBase {
             user,
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
-            #[cfg(unix)]
             helper: None,
         }
     }
@@ -130,7 +131,6 @@ impl ScriptRunnerBase {
         let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);
         filter.add_redacted_values(&self.initial_redacted_values);
 
-        #[cfg(unix)]
         if let Some(ref mut helper) = self.helper {
             let result = tokio::task::block_in_place(|| {
                 crate::cross_user_helper::run_via_helper(

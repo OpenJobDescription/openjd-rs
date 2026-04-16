@@ -73,9 +73,7 @@ fn rfc_path_with_suffix() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("P.with_suffix('.png')", &st)
-            .unwrap()
-            .to_display_string(),
+        eval_with_path_format("P.with_suffix('.png')", &st, PathFormat::Posix).to_display_string(),
         "/renders/scene.png"
     );
 }

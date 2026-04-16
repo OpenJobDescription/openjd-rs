@@ -15,7 +15,19 @@ fn preprocess(
     jt: &crate::template::JobTemplate,
     input: &JobParameterInputValues,
 ) -> crate::JobParameterValues {
-    preprocess_job_parameters(jt, input, &[], Path::new("/tmp"), Path::new("/tmp"), true).unwrap()
+    preprocess_job_parameters(
+        jt,
+        input,
+        &[],
+        &crate::PathParameterOptions {
+            job_template_dir: Path::new("/tmp"),
+            current_working_dir: Path::new("/tmp"),
+            path_format: openjd_expr::path_mapping::PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════

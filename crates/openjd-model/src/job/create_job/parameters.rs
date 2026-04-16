@@ -461,16 +461,57 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
     )
 }
 
+/// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
+pub struct PathParameterOptions<'a> {
+    /// Directory containing the job template. Relative PATH defaults are joined to this.
+    pub job_template_dir: &'a std::path::Path,
+    /// Current working directory. Relative PATH user values are joined to this.
+    pub current_working_dir: &'a std::path::Path,
+    /// How path strings are interpreted for absolute/relative checks.
+    /// Use `PathFormat::host()` for local filesystem paths, or `PathFormat::Posix` /
+    /// `PathFormat::Windows` when paths originate from a known platform.
+    pub path_format: openjd_expr::path_mapping::PathFormat,
+    /// If `false`, PATH defaults must be relative and within `job_template_dir`.
+    /// If `true`, absolute defaults and `..` walk-up are permitted.
+    pub allow_template_dir_walk_up: bool,
+    /// If `true`, URI values (`scheme://...`) in PATH parameters are preserved as-is
+    /// (requires EXPR extension). If `false` with EXPR, URIs are rejected with an error.
+    /// Without EXPR, this flag is ignored — URIs are treated as opaque relative strings.
+    pub allow_uri_path_values: bool,
+}
+
+impl<'a> PathParameterOptions<'a> {
+    /// Create options with sensible defaults: host path format, no walk-up, no URIs.
+    pub fn new(
+        job_template_dir: &'a std::path::Path,
+        current_working_dir: &'a std::path::Path,
+    ) -> Self {
+        Self {
+            job_template_dir,
+            current_working_dir,
+            path_format: openjd_expr::path_mapping::PathFormat::host(),
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        }
+    }
+}
+
 /// Preprocess job parameters: validate inputs, fill defaults, check constraints.
 pub fn preprocess_job_parameters(
     job_template: &JobTemplate,
     input_values: &JobParameterInputValues,
     environment_templates: &[EnvironmentTemplate],
-    job_template_dir: &std::path::Path,
-    current_working_dir: &std::path::Path,
-    allow_job_template_dir_walk_up: bool,
+    path_options: &PathParameterOptions<'_>,
 ) -> Result<JobParameterValues, OpenJdError> {
-    if !allow_job_template_dir_walk_up && !job_template_dir.is_absolute() {
+    let job_template_dir = path_options.job_template_dir;
+    let current_working_dir = path_options.current_working_dir;
+    let path_format = path_options.path_format;
+    let allow_job_template_dir_walk_up = path_options.allow_template_dir_walk_up;
+    let allow_uri_path_values = path_options.allow_uri_path_values;
+
+    if !allow_job_template_dir_walk_up
+        && !is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format)
+    {
         return Err(OpenJdError::DecodeValidation(format!(
             "The value supplied for the job template dir, {}, is not an absolute path. \
              It must be absolute to enforce that PATH parameter defaults are always inside the job template dir.",
@@ -495,27 +536,38 @@ pub fn preprocess_job_parameters(
     let mut result = JobParameterValues::new();
     let mut missing = Vec::new();
 
-    let uri_aware = job_template
+    let has_expr = job_template
         .extensions
         .as_ref()
-        .map(|exts| exts.iter().any(|e| e.as_str() == "EXPR"))
-        .unwrap_or(false);
+        .is_some_and(|exts| exts.iter().any(|e| e.as_str() == "EXPR"));
 
     for param in &merged {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
             let coerced = if param.param_type == JobParameterType::Path {
                 let s = input_val.as_str_repr();
-                if !(s.is_empty()
-                    || (uri_aware && openjd_expr::uri_path::is_uri(&s))
-                    || std::path::Path::new(s.as_ref()).is_absolute())
-                {
-                    openjd_expr::ExprValue::String(
-                        current_working_dir
-                            .join(s.as_ref())
-                            .to_string_lossy()
-                            .to_string(),
-                    )
+                if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
+                    // EXPR extension: URI handling depends on allow_uri_path_values
+                    if !allow_uri_path_values {
+                        return Err(OpenJdError::DecodeValidation(format!(
+                            "Parameter '{}': URI path values are not permitted. Got '{}'",
+                            param.name, s
+                        )));
+                    }
+                    input_val.clone()
+                } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
+                    // We already know s is not absolute (URI-unaware check).
+                    // Use join_for_format for root-relative handling, but the value
+                    // won't be recognized as a URI by join since left (cwd) isn't a URI
+                    // and right was already checked. However, path::join's is_absolute
+                    // still recognizes scheme:// in right. So we do a direct concat
+                    // using the format-appropriate separator.
+                    let cwd_str = current_working_dir.to_string_lossy();
+                    openjd_expr::ExprValue::String(openjd_expr::functions::path::non_uri_join(
+                        &cwd_str,
+                        &s,
+                        path_format,
+                    ))
                 } else {
                     input_val.clone()
                 }
@@ -534,12 +586,19 @@ pub fn preprocess_job_parameters(
                 },
             );
         } else if let Some(default) = &param.default {
-            let value_str = if param.param_type == JobParameterType::Path
-                && !default.is_empty()
-                && !(uri_aware && openjd_expr::uri_path::is_uri(default))
-            {
-                let p = std::path::Path::new(default);
-                if p.is_absolute() {
+            let value_str = if param.param_type == JobParameterType::Path && !default.is_empty() {
+                if has_expr && allow_uri_path_values && openjd_expr::uri_path::is_uri(default) {
+                    // EXPR + allow: URI preserved as-is
+                    default.clone()
+                } else if has_expr
+                    && !allow_uri_path_values
+                    && openjd_expr::uri_path::is_uri(default)
+                {
+                    return Err(OpenJdError::DecodeValidation(format!(
+                        "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
+                        param.name, default
+                    )));
+                } else if is_absolute_for_format_no_uri(default, path_format) {
                     if !allow_job_template_dir_walk_up {
                         return Err(OpenJdError::DecodeValidation(format!(
                             "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
@@ -547,22 +606,25 @@ pub fn preprocess_job_parameters(
                         )));
                     }
                     default.clone()
-                } else if !allow_job_template_dir_walk_up && job_template_dir.is_absolute() {
-                    let joined = job_template_dir.join(p);
-                    let normalized = normalize_path(&joined);
-                    if !normalized.starts_with(job_template_dir) {
+                } else if !allow_job_template_dir_walk_up
+                    && is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format)
+                {
+                    let joined =
+                        join_for_format(&job_template_dir.to_string_lossy(), default, path_format);
+                    let normalized = normalize_path_str(&joined, path_format);
+                    let normalized_dir =
+                        normalize_path_str(&job_template_dir.to_string_lossy(), path_format);
+                    if !normalized.starts_with(&normalized_dir) {
                         return Err(OpenJdError::DecodeValidation(format!(
                             "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
                             param.name
                         )));
                     }
-                    normalized.to_string_lossy().to_string()
+                    normalized
+                } else if is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format) {
+                    join_for_format(&job_template_dir.to_string_lossy(), default, path_format)
                 } else {
-                    if job_template_dir.is_absolute() {
-                        job_template_dir.join(p).to_string_lossy().to_string()
-                    } else {
-                        default.clone()
-                    }
+                    default.clone()
                 }
             } else {
                 default.clone()
@@ -593,18 +655,72 @@ pub fn preprocess_job_parameters(
     Ok(result)
 }
 
-fn normalize_path(path: &std::path::Path) -> std::path::PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
+/// Check whether a path string is absolute according to the given path format.
+///
+/// Delegates to `openjd_expr::functions::path::is_absolute` which handles
+/// URIs (`scheme://...`), UNC paths (`\\server`), POSIX (`/...`), and
+/// Windows drive letters (`C:\...`).
+fn is_absolute_for_format(s: &str, format: openjd_expr::path_mapping::PathFormat) -> bool {
+    openjd_expr::functions::path::is_absolute(s, format)
+}
+
+/// Like `is_absolute_for_format` but does NOT recognize URIs as absolute.
+/// Used for PATH parameter values when EXPR is not enabled — URIs should be
+/// treated as opaque relative strings.
+fn is_absolute_for_format_no_uri(s: &str, format: openjd_expr::path_mapping::PathFormat) -> bool {
+    if openjd_expr::uri_path::is_uri(s) {
+        return false;
+    }
+    openjd_expr::functions::path::is_absolute(s, format)
+}
+
+/// Join two path strings using the separator and absoluteness rules for `format`.
+fn join_for_format(
+    base: &str,
+    relative: &str,
+    format: openjd_expr::path_mapping::PathFormat,
+) -> String {
+    openjd_expr::functions::path::join(base, relative, format)
+}
+
+/// Normalize a path string by resolving `.` and `..` components.
+/// Uses string-based logic so it works correctly regardless of host OS.
+fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat) -> String {
+    use openjd_expr::path_mapping::PathFormat;
+    let sep = match format {
+        PathFormat::Windows => '\\',
+        PathFormat::Posix | PathFormat::Uri => '/',
+    };
+
+    // Detect and preserve the root prefix
+    let (root, rest) = if path.len() >= 3
+        && path.as_bytes()[0].is_ascii_alphabetic()
+        && path.as_bytes()[1] == b':'
+        && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
+    {
+        // Windows drive root: "C:\" or "C:/"
+        let root = format!("{}:{sep}", path.chars().next().unwrap());
+        (root, &path[3..])
+    } else if path.starts_with("\\\\") || path.starts_with("//") {
+        // UNC path
+        (format!("{sep}{sep}"), &path[2..])
+    } else if path.starts_with('/') || path.starts_with('\\') {
+        (sep.to_string(), &path[1..])
+    } else {
+        (String::new(), path)
+    };
+
+    let mut components: Vec<&str> = Vec::new();
+    for part in rest.split(['/', '\\']) {
+        match part {
+            ".." => {
                 components.pop();
             }
-            std::path::Component::CurDir => {}
-            c => components.push(c),
+            "." | "" => {}
+            _ => components.push(part),
         }
     }
-    components.iter().collect()
+    format!("{root}{}", components.join(&sep.to_string()))
 }
 
 /// Convert a serde_json::Value to an ExprValue.

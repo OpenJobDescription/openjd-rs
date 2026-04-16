@@ -317,16 +317,27 @@ fn path_join_not_in_spec() {
 fn add_string_path_coerces_to_string_concat() {
     // With explicit __add__(string, path) removed, path coerces to string
     // and __add__(string, string) matches — this is string concatenation, not path joining.
-    assert_eq!(
-        eval("'prefix' + path('/tmp')").to_display_string(),
-        "prefix/tmp"
-    );
+    let parsed = openjd_expr::ParsedExpression::new("'prefix' + path('/tmp')").unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(openjd_expr::PathFormat::Posix);
+    let r = ev.evaluate(&parsed.ast).unwrap();
+    assert_eq!(r.to_display_string(), "prefix/tmp");
 }
 
 #[test]
 fn add_path_path_coerces_to_string_concat() {
     // With explicit __add__(path, path) removed, both coerce to string.
-    assert_eq!(eval("path('/a') + path('/b')").to_display_string(), "/a/b");
+    let parsed = openjd_expr::ParsedExpression::new("path('/a') + path('/b')").unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(openjd_expr::PathFormat::Posix);
+    let r = ev.evaluate(&parsed.ast).unwrap();
+    assert_eq!(r.to_display_string(), "/a/b");
 }
 
 #[test]

@@ -8,6 +8,31 @@ use openjd_expr::{evaluate_expression, ExprType, ExprValue, PathFormat, RangeExp
 fn eval(expr: &str) -> ExprValue {
     evaluate_expression(expr, &SymbolTable::new()).unwrap()
 }
+fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
+fn eval_posix_no_st(expr: &str) -> ExprValue {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap()
+}
+fn eval_posix_err(expr: &str, st: &SymbolTable) -> String {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    ev.evaluate(&parsed.ast).unwrap_err().to_string()
+}
 fn eval_fails(expr: &str) -> bool {
     evaluate_expression(expr, &SymbolTable::new()).is_err()
 }
@@ -280,10 +305,7 @@ fn list_path_string_promotes() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("[P, 'b']", &st)
-            .unwrap()
-            .expr_type()
-            .to_string(),
+        eval_posix("[P, 'b']", &st).expr_type().to_string(),
         "list[string]"
     );
 }
@@ -353,7 +375,7 @@ fn list_path_int_fails() {
         },
     )
     .unwrap();
-    let e = evaluate_expression("[P, 1]", &st).unwrap_err().to_string();
+    let e = eval_posix_err("[P, 1]", &st);
     assert!(
         e.contains("incompatible types") && e.contains("^"),
         "got:\n{e}"
@@ -726,10 +748,7 @@ fn path_string_promotes_to_string() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("[P, 'b']", &st)
-            .unwrap()
-            .expr_type()
-            .to_string(),
+        eval_posix("[P, 'b']", &st).expr_type().to_string(),
         "list[string]"
     );
 }
@@ -821,7 +840,7 @@ fn path_int_fails() {
         },
     )
     .unwrap();
-    let e = evaluate_expression("[P, 1]", &st).unwrap_err().to_string();
+    let e = eval_posix_err("[P, 1]", &st);
     assert!(
         e.contains("incompatible types") && e.contains("^"),
         "got:\n{e}"
@@ -1118,26 +1137,6 @@ fn empty() {
 // Missing tests ported from Python test_lists.py
 // ============================================================
 
-// --- Helper for evaluating with path_format ---
-fn eval_posix(expr: &str) -> ExprValue {
-    let st = SymbolTable::new();
-    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
-    let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
-}
-
-fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
-    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
-    let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
-}
-
 // === TestListLiteralTypeInference: value checks ===
 
 #[test]
@@ -1157,20 +1156,20 @@ fn nested_int_float_coerces_values() {
 
 #[test]
 fn path_string_promotes_values() {
-    let r = eval_posix("[path(\"/a\"), \"b\"]");
+    let r = eval_posix_no_st("[path(\"/a\"), \"b\"]");
     assert_eq!(r.expr_type().to_string(), "list[string]");
     assert_eq!(r.to_display_string(), "[\"/a\", \"b\"]");
 }
 
 #[test]
 fn nested_path_string_promotes() {
-    let r = eval_posix("[[path(\"/a\")], [\"b\"]]");
+    let r = eval_posix_no_st("[[path(\"/a\")], [\"b\"]]");
     assert_eq!(r.expr_type().to_string(), "list[list[string]]");
 }
 
 #[test]
 fn nested_path_string_coerces_values() {
-    let r = eval_posix("[[path(\"/a\")], [\"b\"]]");
+    let r = eval_posix_no_st("[[path(\"/a\")], [\"b\"]]");
     let inner = r.list_get(0).unwrap();
     assert_eq!(inner.expr_type().to_string(), "list[string]");
 }
@@ -1255,13 +1254,13 @@ fn range_expr_concat_list_float() {
 
 #[test]
 fn list_concat_path_string() {
-    let r = eval_posix("[path(\"/foo\"), path(\"/bar\")] + [\"baz\", \"qux\"]");
+    let r = eval_posix_no_st("[path(\"/foo\"), path(\"/bar\")] + [\"baz\", \"qux\"]");
     assert_eq!(r.expr_type().to_string(), "list[string]");
 }
 
 #[test]
 fn list_concat_string_path() {
-    let r = eval_posix("[\"foo\", \"bar\"] + [path(\"/baz\"), path(\"/qux\")]");
+    let r = eval_posix_no_st("[\"foo\", \"bar\"] + [path(\"/baz\"), path(\"/qux\")]");
     assert_eq!(r.expr_type().to_string(), "list[string]");
 }
 
@@ -1319,7 +1318,7 @@ fn path_in_list() {
         },
     )
     .unwrap();
-    assert_eq!(eval_posix_st("p in paths", &st).to_display_string(), "true");
+    assert_eq!(eval_posix("p in paths", &st).to_display_string(), "true");
 }
 
 #[test]
@@ -1351,10 +1350,7 @@ fn path_not_in_list() {
         },
     )
     .unwrap();
-    assert_eq!(
-        eval_posix_st("p in paths", &st).to_display_string(),
-        "false"
-    );
+    assert_eq!(eval_posix("p in paths", &st).to_display_string(), "false");
 }
 
 #[test]
@@ -1461,7 +1457,7 @@ fn sorted_chained_method_values() {
 
 #[test]
 fn unique_path() {
-    let r = eval_posix("unique([path(\"/a/b\"), path(\"/c/d\"), path(\"/a/b\")])");
+    let r = eval_posix_no_st("unique([path(\"/a/b\"), path(\"/c/d\"), path(\"/a/b\")])");
     assert_eq!(r.list_len(), Some(2));
     assert_eq!(r.expr_type().to_string(), "list[path]");
 }
@@ -1502,7 +1498,7 @@ fn unique_list_bool() {
 
 #[test]
 fn unique_list_path() {
-    let r = eval_posix("unique([[path(\"/a\")], [path(\"/b\")], [path(\"/a\")]])");
+    let r = eval_posix_no_st("unique([[path(\"/a\")], [path(\"/b\")], [path(\"/a\")]])");
     assert_eq!(r.list_len(), Some(2));
     assert_eq!(r.expr_type().to_string(), "list[list[path]]");
 }
@@ -1512,7 +1508,7 @@ fn unique_list_path() {
 #[test]
 fn join_paths() {
     assert_eq!(
-        eval_posix("join([path(\"/a\"), path(\"/b\")], \":\")").to_display_string(),
+        eval_posix_no_st("join([path(\"/a\"), path(\"/b\")], \":\")").to_display_string(),
         "/a:/b"
     );
 }

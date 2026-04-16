@@ -14,10 +14,12 @@ fn eval(expr: &str) -> ExprValue {
     evaluate_expression(expr, &SymbolTable::new()).unwrap()
 }
 
+#[allow(dead_code)]
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
     evaluate_expression(expr, st).unwrap()
 }
 
+#[allow(dead_code)]
 fn eval_err_with(expr: &str, st: &SymbolTable) -> String {
     evaluate_expression(expr, st).unwrap_err().to_string()
 }
@@ -493,7 +495,12 @@ fn evaluator_method_call_skips_receiver_coercion() {
         },
     )
     .unwrap();
-    let e = eval_err_with("P.startswith('/tmp')", &st);
+    let parsed = ParsedExpression::new("P.startswith('/tmp')").unwrap();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    let e = ev.evaluate(&parsed.ast).unwrap_err().to_string();
     assert!(e.contains("not available for path"), "got: {e}");
 }
 
@@ -509,10 +516,12 @@ fn evaluator_function_call_coerces_path_to_string() {
         },
     )
     .unwrap();
-    assert_eq!(
-        eval_with("startswith(P, '/tmp')", &st),
-        ExprValue::Bool(true)
-    );
+    let parsed = ParsedExpression::new("startswith(P, '/tmp')").unwrap();
+    let symtabs = [&st];
+    let mut ev = parsed
+        .evaluator(&symtabs)
+        .with_path_format(PathFormat::Posix);
+    assert_eq!(ev.evaluate(&parsed.ast).unwrap(), ExprValue::Bool(true));
 }
 
 #[test]

@@ -917,7 +917,15 @@ mod tests {
         st.set("Param.X", ExprValue::String("/foo/bar".into()))
             .unwrap();
         let target = crate::types::ExprType::PATH;
-        let val = fs.resolve_typed(&st, None, &[], &target).unwrap();
+        let val = fs
+            .resolve_typed_with_format(
+                &st,
+                None,
+                &[],
+                crate::path_mapping::PathFormat::Posix,
+                &target,
+            )
+            .unwrap();
         assert!(matches!(val, ExprValue::Path { ref value, .. } if value == "/foo/bar"));
     }
 

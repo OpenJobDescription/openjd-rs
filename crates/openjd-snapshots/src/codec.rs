@@ -239,7 +239,7 @@ pub fn encode_v2025<P: Clone + std::fmt::Debug, K: Clone + std::fmt::Debug>(
 
     // Sort files by UTF-16 BE
     let mut sorted_files = manifest.files.clone();
-    sorted_files.sort_by(|a, b| utf16_be_bytes(&a.path).cmp(&utf16_be_bytes(&b.path)));
+    sorted_files.sort_by_key(|a| utf16_be_bytes(&a.path));
 
     // Encode files
     let files_json: Vec<Value> = sorted_files

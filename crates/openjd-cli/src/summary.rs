@@ -96,9 +96,13 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         &job_template,
         &input_values,
         &env_templates,
-        &job_template_dir,
-        &current_working_dir,
-        false,
+        &openjd_model::PathParameterOptions {
+            job_template_dir: &job_template_dir,
+            current_working_dir: &current_working_dir,
+            path_format: openjd_expr::path_mapping::PathFormat::host(),
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: true,
+        },
     )?;
 
     let the_job = openjd_model::create_job(&job_template, &param_values)?;
