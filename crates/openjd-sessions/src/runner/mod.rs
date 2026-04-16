@@ -47,6 +47,17 @@ pub enum CancelMethod {
     NotifyThenTerminate { terminate_delay: Duration },
 }
 
+impl std::fmt::Display for CancelMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Terminate => write!(f, "Terminate"),
+            Self::NotifyThenTerminate { terminate_delay } => {
+                write!(f, "NotifyThenTerminate({}s)", terminate_delay.as_secs())
+            }
+        }
+    }
+}
+
 /// State of a script runner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptRunnerState {
@@ -57,6 +68,20 @@ pub enum ScriptRunnerState {
     Timeout,
     Failed,
     Success,
+}
+
+impl std::fmt::Display for ScriptRunnerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ready => write!(f, "Ready"),
+            Self::Running => write!(f, "Running"),
+            Self::Canceling => write!(f, "Canceling"),
+            Self::Canceled => write!(f, "Canceled"),
+            Self::Timeout => write!(f, "Timeout"),
+            Self::Failed => write!(f, "Failed"),
+            Self::Success => write!(f, "Success"),
+        }
+    }
 }
 
 /// Shared infrastructure for script runners.
@@ -74,6 +99,7 @@ pub(crate) struct ScriptRunnerBase {
     pub user: Option<Arc<dyn SessionUser>>,
     pub redactions_enabled: bool,
     pub initial_redacted_values: Vec<String>,
+    pub collect_stdout: bool,
     #[cfg(unix)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
@@ -98,6 +124,7 @@ impl ScriptRunnerBase {
             user,
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
+            collect_stdout: false,
             helper: None,
             cancel_writer: None,
         }
@@ -129,6 +156,7 @@ impl ScriptRunnerBase {
             user: self.user.clone(),
             cancel_method,
             cancel_request_rx: self.cancel_request_rx.clone(),
+            collect_stdout: self.collect_stdout,
         };
         let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);
         filter.add_redacted_values(&self.initial_redacted_values);
@@ -267,4 +295,32 @@ pub(crate) fn resolve_action_args(
         }
     }
     Ok(args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_runner_state_display() {
+        assert_eq!(ScriptRunnerState::Ready.to_string(), "Ready");
+        assert_eq!(ScriptRunnerState::Running.to_string(), "Running");
+        assert_eq!(ScriptRunnerState::Canceling.to_string(), "Canceling");
+        assert_eq!(ScriptRunnerState::Canceled.to_string(), "Canceled");
+        assert_eq!(ScriptRunnerState::Timeout.to_string(), "Timeout");
+        assert_eq!(ScriptRunnerState::Failed.to_string(), "Failed");
+        assert_eq!(ScriptRunnerState::Success.to_string(), "Success");
+    }
+
+    #[test]
+    fn cancel_method_display() {
+        assert_eq!(CancelMethod::Terminate.to_string(), "Terminate");
+        assert_eq!(
+            CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_secs(30)
+            }
+            .to_string(),
+            "NotifyThenTerminate(30s)"
+        );
+    }
 }

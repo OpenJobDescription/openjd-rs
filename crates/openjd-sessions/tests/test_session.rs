@@ -68,7 +68,7 @@ fn env_with_vars(name: &str, vars: HashMap<String, FormatString>) -> Environment
 #[tokio::test]
 async fn test_initialize_basic() {
     let tmp = TempDir::new().unwrap();
-    let session = Session::new(tmp.path().to_path_buf());
+    let session = Session::new_for_test(tmp.path().to_path_buf());
     assert_eq!(session.state(), SessionState::Ready);
     assert!(session.working_directory().exists());
 }
@@ -76,7 +76,7 @@ async fn test_initialize_basic() {
 #[tokio::test]
 async fn test_initialize_with_root_dir() {
     let tmp = TempDir::new().unwrap();
-    let session = Session::new(tmp.path().to_path_buf());
+    let session = Session::new_for_test(tmp.path().to_path_buf());
     assert_eq!(session.working_directory(), tmp.path());
 }
 
@@ -85,7 +85,7 @@ async fn test_initialize_with_root_dir() {
 #[tokio::test]
 async fn test_run_task() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
         .run_task(
             &step("sh", vec!["-c", "echo task_output"]),
@@ -102,7 +102,7 @@ async fn test_run_task() {
 #[tokio::test]
 async fn test_run_task_with_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("TASK_VAR".into(), fs("task_value"));
     let env = env_with_vars("env1", vars);
@@ -123,7 +123,7 @@ async fn test_run_task_with_env_vars() {
 #[tokio::test]
 async fn test_run_task_fail_run() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
         .run_task(&step("sh", vec!["-c", "exit 42"]), None, None, None)
         .await
@@ -135,7 +135,7 @@ async fn test_run_task_fail_run() {
 #[tokio::test]
 async fn test_no_task_run_after_fail() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     // First run fails — session becomes "brittle" (ReadyEnding), only exit_environment allowed
     s.run_task(&step("sh", vec!["-c", "exit 1"]), None, None, None)
         .await
@@ -146,7 +146,7 @@ async fn test_no_task_run_after_fail() {
 #[tokio::test]
 async fn test_run_task_with_variables() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut task_params = HashMap::new();
     task_params.insert(
         "Greeting".into(),
@@ -180,7 +180,7 @@ async fn test_run_task_with_variables() {
 #[tokio::test]
 async fn test_enter_environment_basic() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", "echo entered"]);
     let id = s.enter_environment(&env, None, None, None).await.unwrap();
     assert!(!id.is_empty());
@@ -189,7 +189,7 @@ async fn test_enter_environment_basic() {
 #[tokio::test]
 async fn test_enter_environment_with_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("ENV_VAR".into(), fs("env_value"));
     let env = Environment {
@@ -213,7 +213,7 @@ async fn test_enter_environment_with_env_vars() {
 #[tokio::test]
 async fn test_enter_two_environments() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env1 = env_with_enter(
         "env1",
         "sh",
@@ -228,7 +228,7 @@ async fn test_enter_two_environments() {
 #[tokio::test]
 async fn test_enter_environment_fail_run() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", "exit 1"]);
     assert!(s.enter_environment(&env, None, None, None).await.is_err());
 }
@@ -238,7 +238,7 @@ async fn test_enter_environment_command_not_found() {
     // Regression: when the subprocess command doesn't exist, the session must
     // transition to ReadyEnding with action_state=Failed, not stay stuck in Running.
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "nonexistent-command-xyz", vec![]);
     let result = s.enter_environment(&env, None, None, None).await;
     assert!(result.is_err());
@@ -253,7 +253,7 @@ async fn test_enter_environment_command_not_found() {
 async fn test_run_task_command_not_found() {
     // Same regression test for run_task: command not found must set Failed state.
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let script = step("nonexistent-command-xyz", vec![]);
     let result = s.run_task(&script, None, None, None).await;
     assert!(result.is_err());
@@ -267,7 +267,7 @@ async fn test_run_task_command_not_found() {
 #[tokio::test]
 async fn test_enter_no_action() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "env1".into(),
         description: None,
@@ -308,6 +308,7 @@ async fn test_enter_environment_with_resolved_variables() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();
@@ -335,7 +336,7 @@ async fn test_enter_environment_with_resolved_variables() {
 #[tokio::test]
 async fn test_exit_environment_basic() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "env1".into(),
         description: None,
@@ -358,7 +359,7 @@ async fn test_exit_environment_basic() {
 #[tokio::test]
 async fn test_exit_environment_with_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("EXIT_VAR".into(), fs("exit_value"));
     let env = Environment {
@@ -384,7 +385,7 @@ async fn test_exit_environment_with_env_vars() {
 #[tokio::test]
 async fn test_exit_environment_removes_variables() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("REMOVED_VAR".into(), fs("value"));
     let env = env_with_vars("env1", vars);
@@ -406,7 +407,7 @@ async fn test_exit_environment_removes_variables() {
 #[tokio::test]
 async fn test_exit_environment_fail_run() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "env1".into(),
         description: None,
@@ -428,7 +429,7 @@ async fn test_exit_environment_fail_run() {
 #[tokio::test]
 async fn test_run_task_after_env_exit() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", "echo 'openjd_env: PERSIST=yes'"]);
     let id = s.enter_environment(&env, None, None, None).await.unwrap();
     s.exit_environment(&id, None, true, None).await.unwrap();
@@ -452,7 +453,7 @@ async fn test_run_task_after_env_exit() {
 #[tokio::test]
 async fn test_direct_definition() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("DIRECT".into(), fs("direct_val"));
     let env = env_with_vars("env1", vars);
@@ -473,7 +474,7 @@ async fn test_direct_definition() {
 #[tokio::test]
 async fn test_redefinition_nested() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars1 = HashMap::new();
     vars1.insert("VAR".into(), fs("outer"));
     let env1 = env_with_vars("env1", vars1);
@@ -494,7 +495,7 @@ async fn test_redefinition_nested() {
 #[tokio::test]
 async fn test_def_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter(
         "env1",
         "sh",
@@ -517,7 +518,7 @@ async fn test_def_via_stdout() {
 #[tokio::test]
 async fn test_def_via_stdout_overrides_direct() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("OVERRIDE".into(), fs("direct"));
     let env = Environment {
@@ -554,7 +555,7 @@ async fn test_def_via_stdout_overrides_direct() {
 #[tokio::test]
 async fn test_undef_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env1 = env_with_enter("env1", "sh", vec!["-c", "echo 'openjd_env: TO_UNDEF=val'"]);
     s.enter_environment(&env1, None, None, None).await.unwrap();
 
@@ -580,7 +581,7 @@ async fn test_undef_via_stdout() {
 #[tokio::test]
 async fn test_def_via_redacted_env_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
         openjd_model::types::ValidationContext::with_extensions(
             openjd_model::types::SpecificationRevision::V2023_09,
             [openjd_model::types::KnownExtension::RedactedEnvVars]
@@ -604,7 +605,7 @@ async fn test_def_via_redacted_env_stdout() {
         )
         .await
         .unwrap();
-    assert!(r.stdout.contains("SECRET_KEY=secret_val"));
+    assert!(r.stdout.contains("SECRET_KEY=********"));
 
     // Redaction should work
     let redacted = s.redact("The key is secret_val");
@@ -617,7 +618,7 @@ async fn test_def_via_redacted_env_stdout() {
 #[tokio::test]
 async fn test_env_var_changes_init() {
     let tmp = TempDir::new().unwrap();
-    let s = Session::new(tmp.path().to_path_buf());
+    let s = Session::new_for_test(tmp.path().to_path_buf());
     assert_eq!(s.state(), SessionState::Ready);
 }
 
@@ -627,7 +628,7 @@ async fn test_env_var_changes_init() {
 async fn test_def_via_multi_line_stdout() {
     // Test that JSON-encoded multi-line env vars are set correctly
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter(
         "env1",
         "sh",
@@ -651,7 +652,7 @@ async fn test_def_via_multi_line_stdout() {
 async fn test_def_via_stdout_set_empty() {
     // Test that setting an env var to empty string works
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", "echo 'openjd_env: FOO='"]);
     s.enter_environment(&env, None, None, None).await.unwrap();
 
@@ -666,7 +667,7 @@ async fn test_def_via_stdout_set_empty() {
 async fn test_def_via_stdout_set_empty_json() {
     // Test that setting an env var to empty string via JSON works
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", r#"echo 'openjd_env: "FOO="'"#]);
     s.enter_environment(&env, None, None, None).await.unwrap();
 
@@ -681,7 +682,7 @@ async fn test_def_via_stdout_set_empty_json() {
 async fn test_def_via_redacted_env_json_stdout() {
     // Test that redacted env vars are redacted in logs but not set without extension
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter(
         "env1",
         "sh",
@@ -710,7 +711,7 @@ async fn test_def_via_redacted_env_json_stdout() {
 async fn test_def_via_redacted_env_with_extension() {
     // Test that redacted env vars ARE set when extension is enabled
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
         openjd_model::types::ValidationContext::with_extensions(
             openjd_model::types::SpecificationRevision::V2023_09,
             [openjd_model::types::KnownExtension::RedactedEnvVars]
@@ -734,7 +735,7 @@ async fn test_def_via_redacted_env_with_extension() {
         )
         .await
         .unwrap();
-    assert!(r.stdout.contains("PASSWORD=secret123"));
+    assert!(r.stdout.contains("PASSWORD=********"));
 
     let redacted = s.redact("PASSWORD=secret123");
     assert!(!redacted.contains("secret123"));
@@ -744,7 +745,7 @@ async fn test_def_via_redacted_env_with_extension() {
 async fn test_def_via_redacted_env_with_variables() {
     // Test that redacted env vars override directly defined variables when extension is NOT enabled
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("TOKEN".into(), fs("public-token"));
     let env = Environment {
@@ -787,7 +788,7 @@ async fn test_def_via_redacted_env_with_variables() {
 async fn test_multiple_different_redacted_env_vars() {
     // Test that multiple redacted env vars with different values are handled correctly
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
         openjd_model::types::ValidationContext::with_extensions(
             openjd_model::types::SpecificationRevision::V2023_09,
             [openjd_model::types::KnownExtension::RedactedEnvVars]
@@ -812,8 +813,8 @@ async fn test_multiple_different_redacted_env_vars() {
         )
         .await
         .unwrap();
-    assert!(r.stdout.contains("PASSWORD=secret123"));
-    assert!(r.stdout.contains("PASSWORD2=mysecret123"));
+    assert!(r.stdout.contains("PASSWORD=********"));
+    assert!(r.stdout.contains("PASSWORD2=********"));
 
     let redacted = s.redact("secret123 and mysecret123");
     assert!(!redacted.contains("secret123"));
@@ -837,6 +838,7 @@ async fn test_run_subprocess_basic() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -869,6 +871,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -907,6 +910,7 @@ async fn test_run_subprocess_with_os_env_vars() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let mut extra = HashMap::new();
@@ -942,6 +946,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -972,6 +977,7 @@ async fn test_run_subprocess_empty_command_fails() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -994,6 +1000,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -1007,7 +1014,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
 #[tokio::test]
 async fn test_exit_environment_lifo_order() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env1 = env_with_vars("env1", HashMap::new());
     let env2 = env_with_vars("env2", HashMap::new());
     let id1 = s.enter_environment(&env1, None, None, None).await.unwrap();
@@ -1031,7 +1038,7 @@ async fn test_exit_environment_lifo_order() {
 #[tokio::test]
 async fn test_exit_unknown_environment() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     assert!(s
         .exit_environment(&"nonexistent".to_string(), None, true, None)
         .await
@@ -1043,7 +1050,7 @@ async fn test_exit_unknown_environment() {
 #[tokio::test]
 async fn test_redefinition_exit() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars1 = HashMap::new();
     vars1.insert("VAR".into(), fs("outer"));
     let env1 = env_with_vars("env1", vars1);
@@ -1102,6 +1109,7 @@ fn realtime_test_config(
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     }
 }
 
@@ -1190,7 +1198,7 @@ async fn test_env_enter_callback_receives_progress_before_completion() {
 #[tokio::test]
 async fn test_run_task_with_per_action_os_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let extra = HashMap::from([("EXTRA_VAR".to_string(), "extra_value".to_string())]);
     let r = s
         .run_task(
@@ -1208,7 +1216,7 @@ async fn test_run_task_with_per_action_os_env_vars() {
 #[tokio::test]
 async fn test_enter_environment_with_per_action_os_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = env_with_enter("env1", "sh", vec!["-c", "echo ACTION_VAR=$ACTION_VAR"]);
     let extra = HashMap::from([("ACTION_VAR".to_string(), "from_action".to_string())]);
     let (_, stdout) = s
@@ -1221,7 +1229,7 @@ async fn test_enter_environment_with_per_action_os_env_vars() {
 #[tokio::test]
 async fn test_exit_environment_with_per_action_os_env_vars() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "env1".into(),
         description: None,
@@ -1248,7 +1256,7 @@ async fn test_exit_environment_with_per_action_os_env_vars() {
 #[tokio::test]
 async fn test_per_action_os_env_vars_override_session_env() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     // Set a session-level env var via an environment's variables block
     let mut vars = HashMap::new();
     vars.insert("MY_VAR".into(), fs("session_value"));
@@ -1274,7 +1282,7 @@ async fn test_per_action_os_env_vars_override_session_env() {
 #[tokio::test]
 async fn test_per_action_os_env_vars_do_not_persist() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let extra = HashMap::from([("EPHEMERAL".to_string(), "yes".to_string())]);
     let r = s
         .run_task(
@@ -1305,7 +1313,7 @@ async fn test_per_action_os_env_vars_do_not_persist() {
 #[tokio::test]
 async fn test_cancel_action_not_running() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     // Session is in READY state, cancel should fail
     let result = s.cancel_action(None, false);
     assert!(result.is_err());
@@ -1325,6 +1333,7 @@ async fn test_cancel_action_mark_failed() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -1347,7 +1356,7 @@ async fn test_malformed_env_cancels_and_marks_failed() {
     // Test that a malformed openjd_env command (missing space after colon) causes
     // the action to be canceled and marked as failed
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_env:FOO=bar'; sleep 10"]);
     let r = s.run_task(&script, None, None, None).await.unwrap();
@@ -1363,7 +1372,7 @@ async fn test_malformed_env_cancels_and_marks_failed() {
 async fn test_malformed_unset_env_cancels_and_marks_failed() {
     // Test that a malformed openjd_unset_env command causes cancel+fail
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_unset_env:FOO'; sleep 10"]);
     let r = s.run_task(&script, None, None, None).await.unwrap();
@@ -1374,7 +1383,7 @@ async fn test_malformed_unset_env_cancels_and_marks_failed() {
 async fn test_invalid_env_var_name_cancels_and_marks_failed() {
     // Test that an invalid env var name (starts with digit) causes cancel+fail
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_env: 1BAD=value'; sleep 10"]);
     let r = s.run_task(&script, None, None, None).await.unwrap();
@@ -1386,7 +1395,7 @@ async fn test_invalid_env_var_name_cancels_and_marks_failed() {
 #[tokio::test]
 async fn test_get_enabled_extensions_with_extensions() {
     let tmp = TempDir::new().unwrap();
-    let s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+    let s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
         openjd_model::types::ValidationContext::with_extensions(
             openjd_model::types::SpecificationRevision::V2023_09,
             [
@@ -1405,7 +1414,7 @@ async fn test_get_enabled_extensions_with_extensions() {
 #[tokio::test]
 async fn test_get_enabled_extensions_empty() {
     let tmp = TempDir::new().unwrap();
-    let s = Session::new(tmp.path().to_path_buf());
+    let s = Session::new_for_test(tmp.path().to_path_buf());
     assert!(s.get_enabled_extensions().is_empty());
 }
 
@@ -1416,7 +1425,7 @@ async fn invalid_state_error_carries_enum_values() {
     // After cleanup (Ended), enter_environment should give InvalidState
     // with expected=[Ready], current=Ended as SessionState values.
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     s.cleanup();
     let env = env_with_enter("env1", "echo", vec!["hi"]);
     let err = s
@@ -1436,7 +1445,7 @@ async fn invalid_state_error_carries_enum_values() {
 async fn invalid_state_error_multiple_expected_states() {
     // exit_environment when in Ended state should give expected=[Ready, ReadyEnding]
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     s.cleanup();
     let id = "env1".to_string();
     let err = s
@@ -1463,7 +1472,7 @@ async fn invalid_state_error_multiple_expected_states() {
 async fn invalid_state_error_display_format() {
     // Verify the Display output is human-readable
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     s.cleanup();
     let env = env_with_enter("env1", "echo", vec!["hi"]);
     let err = s
@@ -1494,7 +1503,7 @@ fn action_with_timeout(cmd: &str, args: Vec<&str>, timeout_secs: &str) -> Action
 #[tokio::test]
 async fn test_run_task_action_timeout_enforced() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -1530,7 +1539,7 @@ async fn test_run_task_action_timeout_enforced() {
 #[tokio::test]
 async fn test_enter_environment_action_timeout_enforced() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "timeout_env".into(),
         description: None,
@@ -1568,7 +1577,7 @@ async fn test_enter_environment_action_timeout_enforced() {
 #[tokio::test]
 async fn test_exit_environment_action_timeout_enforced() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     // Enter with a simple env first
     let env = Environment {
         name: "exit_timeout_env".into(),
@@ -1607,7 +1616,7 @@ async fn test_exit_environment_action_timeout_enforced() {
 #[tokio::test]
 async fn test_run_task_no_timeout_still_works() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
         .run_task(&step("sh", vec!["-c", "echo hello"]), None, None, None)
         .await
@@ -1636,6 +1645,7 @@ fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionCon
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     }
 }
 
@@ -1890,7 +1900,7 @@ async fn test_callback_progress_not_leaked_between_actions() {
 #[tokio::test]
 async fn test_run_task_rejects_ended_state() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     s.cleanup();
     assert_eq!(s.state(), SessionState::Ended);
 
@@ -1907,7 +1917,7 @@ async fn test_run_task_rejects_ended_state() {
 #[tokio::test]
 async fn test_exit_environment_failure_still_pops_for_lifo() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     // Enter two environments
     let env1 = env_with_enter("env1", "sh", vec!["-c", "echo enter1"]);
@@ -1955,11 +1965,12 @@ async fn test_extend_path_mapping_rules_appends_and_sorts() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/short".into(),
-        destination_path: "/s".into(),
-    }]);
+    let mut s =
+        Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/short".into(),
+            destination_path: "/s".into(),
+        }]);
 
     assert_eq!(s.path_mapping_rules().len(), 1);
 
@@ -1991,7 +2002,7 @@ async fn test_extend_path_mapping_rules_appends_and_sorts() {
 #[tokio::test]
 async fn test_cancel_action_requires_running_state() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     assert_eq!(s.state(), SessionState::Ready);
     let err = s.cancel_action(None, false).unwrap_err();
     assert!(matches!(
@@ -2027,6 +2038,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
         user: None,
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2072,6 +2084,7 @@ async fn test_cancel_action_with_mark_failed() {
         user: None,
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
+        collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2120,7 +2133,7 @@ async fn test_cancel_action_with_mark_failed() {
 #[tokio::test]
 async fn test_run_subprocess_rejects_empty_command() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let err = s
         .run_subprocess("", None, None, None, false, None)
         .await
@@ -2134,7 +2147,7 @@ async fn test_run_subprocess_rejects_empty_command() {
 #[tokio::test]
 async fn test_run_subprocess_rejects_whitespace_only_command() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let err = s
         .run_subprocess("   ", None, None, None, false, None)
         .await
@@ -2148,7 +2161,7 @@ async fn test_run_subprocess_rejects_whitespace_only_command() {
 #[tokio::test]
 async fn test_run_subprocess_rejects_zero_timeout() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let err = s
         .run_subprocess(
             "echo",
@@ -2179,7 +2192,7 @@ async fn test_redacted_env_sets_var_with_extension() {
     exts.insert(KnownExtension::RedactedEnvVars);
     let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, exts);
 
-    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(ctx);
 
     // With REDACTED_ENV_VARS extension, openjd_redacted_env should set env vars.
     let env = Environment {
@@ -2203,8 +2216,8 @@ async fn test_redacted_env_sets_var_with_extension() {
     let out = s.exit_environment(&id, None, true, None).await.unwrap();
     // SECRET should be set because REDACTED_ENV_VARS extension is enabled
     assert!(
-        out.contains("SECRET=hunter2"),
-        "SECRET should be set with REDACTED_ENV_VARS extension, got: {out}"
+        out.contains("SECRET=********"),
+        "SECRET should be redacted in collected stdout, got: {out}"
     );
 }
 
@@ -2215,7 +2228,7 @@ async fn test_redacted_env_does_not_set_var_without_extension() {
     let tmp = TempDir::new().unwrap();
     let ctx = ValidationContext::new(SpecificationRevision::V2023_09);
 
-    let mut s = Session::new(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(ctx);
 
     // Without REDACTED_ENV_VARS extension, openjd_redacted_env should NOT set env vars.
     let env = Environment {
@@ -2247,7 +2260,7 @@ async fn test_redacted_env_does_not_set_var_without_extension() {
 async fn test_redactions_disabled_with_no_revision_extensions() {
     let tmp = TempDir::new().unwrap();
     // No revision_extensions at all (default Session::new)
-    let mut s = Session::new(tmp.path().to_path_buf());
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let env = Environment {
         name: "env1".into(),

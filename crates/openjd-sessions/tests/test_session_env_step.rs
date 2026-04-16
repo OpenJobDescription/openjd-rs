@@ -56,7 +56,7 @@ fn make_step_script(command: &str, args: Vec<&str>) -> StepScript {
 #[tokio::test]
 async fn test_env_enter_basic() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         Some(make_action("sh", vec!["-c", "echo Hello"])),
@@ -70,7 +70,7 @@ async fn test_env_enter_basic() {
 #[tokio::test]
 async fn test_env_exit_basic() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         None,
@@ -90,7 +90,7 @@ async fn test_env_exit_basic() {
 #[tokio::test]
 async fn test_env_enter_no_action() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         None,
@@ -103,7 +103,7 @@ async fn test_env_enter_no_action() {
 #[tokio::test]
 async fn test_env_exit_no_action() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         Some(make_action("sh", vec!["-c", "echo x"])),
@@ -122,7 +122,7 @@ async fn test_env_exit_no_action() {
 #[tokio::test]
 async fn test_env_no_script() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "test_env".to_string(),
         description: None,
@@ -146,7 +146,7 @@ async fn test_env_no_script() {
 #[tokio::test]
 async fn test_env_with_embedded_files() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "test_env".to_string(),
         description: None,
@@ -182,7 +182,7 @@ async fn test_env_with_embedded_files() {
 #[tokio::test]
 async fn test_env_with_variables() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("MY_VAR".to_string(), fs("my_value"));
     let env = Environment {
@@ -208,7 +208,7 @@ async fn test_env_with_variables() {
 #[tokio::test]
 async fn test_env_exit_removes_variables() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let mut vars = HashMap::new();
     vars.insert("MY_VAR".to_string(), fs("my_value"));
     let env = Environment {
@@ -238,7 +238,7 @@ async fn test_env_exit_removes_variables() {
 #[tokio::test]
 async fn test_step_run_basic() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "echo Hello from step"]);
     let result = session.run_task(&script, None, None, None).await;
     assert!(result.is_ok());
@@ -252,7 +252,7 @@ async fn test_step_run_basic() {
 #[tokio::test]
 async fn test_step_run_failing() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "exit 1"]);
     let result = session.run_task(&script, None, None, None).await;
     assert!(result.is_ok());
@@ -267,7 +267,7 @@ async fn test_step_run_failing() {
 #[tokio::test]
 async fn test_env_enter_fail() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         Some(make_action("sh", vec!["-c", "exit 1"])),
@@ -284,7 +284,7 @@ async fn test_env_enter_fail() {
 #[tokio::test]
 async fn test_env_exit_fail() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         None,
@@ -305,7 +305,7 @@ async fn test_env_exit_fail() {
 #[tokio::test]
 async fn test_env_sets_env_vars_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = make_env(
         "test_env",
         Some(make_action(
@@ -329,7 +329,7 @@ async fn test_env_sets_env_vars_via_stdout() {
 #[tokio::test]
 async fn test_env_unsets_env_vars_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
 
     let env1 = make_env(
         "env1",
@@ -367,7 +367,7 @@ async fn test_env_unsets_env_vars_via_stdout() {
 #[tokio::test]
 async fn test_session_state_ready_after_success() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     assert_eq!(session.state(), SessionState::Ready);
 
     let script = make_step_script("echo", vec!["ok"]);
@@ -378,7 +378,7 @@ async fn test_session_state_ready_after_success() {
 #[tokio::test]
 async fn test_session_state_ended_after_failure() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "exit 1"]);
     session.run_task(&script, None, None, None).await.unwrap();
     assert_eq!(session.state(), SessionState::ReadyEnding);
@@ -389,7 +389,7 @@ async fn test_session_state_ended_after_failure() {
 #[tokio::test]
 async fn test_redacted_env_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf()).with_revision_extensions(
+    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
         openjd_model::types::ValidationContext::with_extensions(
             openjd_model::types::SpecificationRevision::V2023_09,
             [openjd_model::types::KnownExtension::RedactedEnvVars]
@@ -412,7 +412,7 @@ async fn test_redacted_env_via_stdout() {
 
     let script = make_step_script("sh", vec!["-c", "echo SECRET=$SECRET"]);
     let result = session.run_task(&script, None, None, None).await.unwrap();
-    assert!(result.stdout.contains("SECRET=mysecret"));
+    assert!(result.stdout.contains("SECRET=********"));
 
     let redacted = session.redact("The secret is mysecret");
     assert!(!redacted.contains("mysecret"));
@@ -444,6 +444,7 @@ async fn test_env_with_resolved_variables() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
+        collect_stdout: true,
     };
     let mut session = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();
@@ -473,7 +474,7 @@ async fn test_env_with_let_bindings_and_embedded_files() {
     let tmp = TempDir::new().unwrap();
     let files_dir = tmp.path().join("embedded_files");
     std::fs::create_dir_all(&files_dir).unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let env = Environment {
         name: "test_env".to_string(),
         description: None,
@@ -518,7 +519,7 @@ async fn test_step_with_let_bindings_and_embedded_files() {
     let tmp = TempDir::new().unwrap();
     let files_dir = tmp.path().join("embedded_files");
     std::fs::create_dir_all(&files_dir).unwrap();
-    let mut session = Session::new(tmp.path().to_path_buf());
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = StepScript {
         let_bindings: Some(vec!["greeting = 'hello'".to_string()]),
         actions: StepActions {

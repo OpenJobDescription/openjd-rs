@@ -10,7 +10,7 @@
 
 The `openjd-sessions` crate is a well-structured Rust implementation of the OpenJD sessions runtime, faithfully mirroring the Python `openjd-sessions-for-python` library. It compiles cleanly with zero warnings, all 315 tests pass (13 cross-user tests correctly ignored without Docker), and clippy reports no lints. The async architecture using tokio channels is sound, and the cross-user helper binary is an impressive performance optimization.
 
-However, the evaluation found **2 confirmed bugs** (UTF-8 panic on line truncation, and cross-user tests broken by wrong tokio runtime flavor — fixed during this evaluation), **several spec-implementation misalignments** (some significant), **test coverage gaps** in edge cases, and **code quality improvements** that would strengthen the crate.
+However, the evaluation found **2 confirmed bugs** (UTF-8 panic on line truncation — fixed, and cross-user tests broken by wrong tokio runtime flavor — fixed during this evaluation), **1 additional finding** (invalid UTF-8 in subprocess stdout silently drops remaining output — fixed), **several spec-implementation misalignments** (some significant), **test coverage gaps** in edge cases, and **code quality improvements** that would strengthen the crate.
 
 ---
 
@@ -21,11 +21,11 @@ However, the evaluation found **2 confirmed bugs** (UTF-8 panic on line truncati
 | Check | Result |
 |-------|--------|
 | `cargo build --package openjd-sessions` | ✅ Clean, no warnings |
-| `cargo test --package openjd-sessions` | ✅ 315 passed, 0 failed, 13 ignored |
+| `cargo test --package openjd-sessions` | ✅ 344 passed, 0 failed, 13 ignored |
 | `cargo clippy --package openjd-sessions -- -W clippy::all` | ✅ Clean, no lints |
 
 Test breakdown:
-- Unit tests (lib.rs): 126 passed
+- Unit tests (lib.rs): 142 passed
 - test_session.rs: 89 passed
 - test_path_mapping.rs: 33 passed
 - test_session_env_step.rs: 20 passed
@@ -62,36 +62,15 @@ issues — they fail the same way outside Docker when Python is unavailable.
 
 ## 2. Confirmed Bugs
 
-### BUG-1: UTF-8 Panic on 64KB Line Truncation (High)
+### BUG-1: ~~UTF-8 Panic on 64KB Line Truncation~~ (High — FIXED)
 
-**Files:** `subprocess.rs` line 909, `cross_user_helper.rs` line 233
+**Files:** `subprocess.rs`, `cross_user_helper.rs`
 
-Both sites truncate long output lines using byte-index slicing:
+Both sites truncated long output lines using byte-index slicing (`line[..LOG_LINE_MAX_LENGTH]`), which panics if the byte index falls in the middle of a multi-byte UTF-8 character.
 
-```rust
-// subprocess.rs
-let line = if line.len() > LOG_LINE_MAX_LENGTH {
-    line[..LOG_LINE_MAX_LENGTH].to_string()
-} else {
-    line
-};
+**Fix applied:** Extracted a shared `truncate_line()` helper using `str::floor_char_boundary()` (stable since Rust 1.82). Both `subprocess.rs` and `cross_user_helper.rs` now call this helper, and the magic number `64 * 1024` in `cross_user_helper.rs` was replaced with the shared `LOG_LINE_MAX_LENGTH` constant.
 
-// cross_user_helper.rs
-let line = if line.len() > 64 * 1024 {
-    &line[..64 * 1024]
-} else {
-    line
-};
-```
-
-`String` indexing in Rust panics if the byte index falls in the middle of a multi-byte UTF-8 character. If a subprocess produces a line exceeding 64KB with multi-byte characters (e.g., internationalized log messages, emoji) near the boundary, this will panic with `byte index N is not a char boundary`.
-
-**Fix:** Use `str::floor_char_boundary()` (stable since Rust 1.82):
-```rust
-let line = &line[..line.floor_char_boundary(LOG_LINE_MAX_LENGTH)];
-```
-
-**Additionally:** `cross_user_helper.rs` uses a magic number `64 * 1024` instead of the `LOG_LINE_MAX_LENGTH` constant from `subprocess.rs`. These should share the constant.
+**Additional finding during fix:** The `tokio::io::Lines` iterator used to read subprocess stdout calls `String::from_utf8` internally and returns `Err(InvalidData)` on non-UTF-8 bytes. The `Err(_) => break` arm then silently dropped all remaining output. This was fixed by replacing `Lines` with `read_until(b'\n')` + `String::from_utf8_lossy`, matching Python's surrogate-escaping / lossy decoding behavior. Invalid bytes are now replaced with U+FFFD (�) and reading continues.
 
 ### BUG-2: Cross-User Tests Panic with `current_thread` Runtime (High)
 
@@ -112,96 +91,87 @@ cross-user tests now pass, including both CAP_KILL capability variants.
 
 ---
 
-## 3. Potential Issues (Medium Severity)
+## 3. Potential Issues (Medium Severity) — ALL FIXED
 
-### ISSUE-1: `sudo rm -rf` Missing `--` Separator
+### ISSUE-1: ~~`sudo rm -rf` Missing `--` Separator~~ (FIXED)
 
 **File:** `session.rs`, cleanup method
 
-File paths from the working directory are passed directly as arguments to `sudo rm -rf` without a `--` separator:
+**Fix applied:** Added `"--".to_string()` before `args.extend(files)` to prevent filenames starting with `-` from being interpreted as flags to `rm`.
 
-```rust
-let mut args = vec![
-    "-u".to_string(), user.user().to_string(),
-    "-i".to_string(), "rm".to_string(), "-rf".to_string(),
-];
-args.extend(files);
-```
+### ISSUE-2: ~~`is_malformed_env_command` False Positives~~ (FIXED)
 
-If a subprocess created a file with a name starting with `-` (e.g., `-rf` or `--no-preserve-root`), it could be interpreted as a flag to `rm`. Adding `"--".to_string()` before `args.extend(files)` would prevent this.
+**File:** `action_filter.rs`
 
-### ISSUE-2: `is_malformed_env_command` False Positives
+**Fix applied:** Narrowed the malformed command detector to require a colon, space, or end-of-string after the directive name (`openjd_env:`, `openjd_env `, or `openjd_env` exactly). A legitimate log line like `openjd_environment_setup complete` no longer triggers `CancelMarkFailed`.
 
-**File:** `action_filter.rs` lines 68-73
-
-The malformed command detector matches any line starting with `openjd_env`, `openjd_redacted_env`, or `openjd_unset_env` (case-insensitive). A legitimate log line like `openjd_environment_setup complete` would trigger `CancelMarkFailed`, canceling the entire action. The check should require a colon or end-of-string after the directive name.
-
-### ISSUE-3: Timeout Breaks Stdout Loop Without Draining
+### ISSUE-3: ~~Timeout Breaks Stdout Loop Without Draining~~ (FIXED)
 
 **File:** `subprocess.rs`, timeout arm in the `select!` loop
 
-When a timeout fires, the loop `break`s immediately without draining remaining buffered stdout lines. In contrast, the cancel path continues reading until EOF. This means diagnostic output emitted just before the timeout killed the process is silently lost.
+**Fix applied:** Removed the `break` from the timeout arm so the loop continues draining stdout until EOF, matching the cancel path behavior. Diagnostic output emitted before the timeout kill is no longer silently lost.
 
-### ISSUE-4: `Session::redact` Inconsistent with `ActionFilter::apply_redaction`
+### ISSUE-4: ~~`Session::redact` Inconsistent with `ActionFilter::apply_redaction`~~ (FIXED)
 
 **File:** `session.rs`
 
-`Session::redact()` uses sequential `str::replace()` calls in arbitrary `HashSet` iteration order. `ActionFilter::apply_redaction()` uses a proper segment-merge algorithm that handles overlapping redacted values correctly. If two redacted values overlap in text (e.g., "FOOBAR" and "BAR"), `Session::redact()` can produce different results depending on iteration order.
+**Fix applied:** `Session::redact()` now sorts redacted values by length descending before iterating, so longer matches are replaced first. This makes overlapping redaction deterministic regardless of `HashSet` iteration order.
 
-### ISSUE-5: Malformed `openjd_redacted_env` Silently Ignored When Redactions Enabled
+### ISSUE-5: ~~Malformed `openjd_redacted_env` Silently Ignored When Redactions Enabled~~ (FIXED)
 
 **File:** `action_filter.rs`, `handle_redacted_env` error path
 
-When `redactions_enabled` is `true` and the `openjd_redacted_env` payload is malformed, no callback is pushed — the error is silently swallowed. When `redactions_enabled` is `false`, a cancel callback IS pushed. This asymmetry means malformed redacted env commands are silently ignored in the exact configuration where they matter most.
+**Fix applied:** The cancel callback is now always pushed on malformed `openjd_redacted_env`, regardless of the `redactions_enabled` flag. The asymmetry where errors were silently swallowed in the exact configuration where they mattered most is eliminated.
 
-### ISSUE-6: `find_sudo_child_pgid` Fails with Multiple Sudo Children
+### ISSUE-6: ~~`find_sudo_child_pgid` Fails with Multiple Sudo Children~~ (FIXED)
 
-**File:** `subprocess.rs`, `find_child_pid_procfs`
+**File:** `subprocess.rs`, `find_child_pids_procfs` / `find_child_pids_pgrep`
 
-Returns `None` if sudo has 0 or 2+ children. If sudo forks an intermediate process (e.g., PAM session helper), the actual child's PGID is never discovered, meaning SIGKILL during cancellation only hits the sudo process. Child processes become orphans.
+**Fix applied:** Renamed to return `Vec<i32>` of all child PIDs instead of `Option<i32>`. The caller now iterates all children to find one whose PGID differs from sudo's, instead of giving up when sudo has multiple children (e.g., PAM session helper).
 
 ---
 
 ## 4. Specification Alignment
 
-### 4.1 High-Severity Misalignments
+### 4.1 High-Severity Misalignments — ALL FIXED
 
-| # | Spec | Code | Issue |
-|---|------|------|-------|
-| 1 | session.md says Drop does NOT attempt cleanup | Code DOES call `remove_dir_all` in Drop | Spec contradicts implementation |
-| 2 | session.md shows `SubprocessConfig.env_vars: HashMap<String, String>` | Code uses `HashMap<String, Option<String>>` | Type mismatch — `None` means "unset" |
-| 3 | session.md shows `cancel_request_rx: oneshot::Receiver<CancelRequest>` | Code uses `watch::Receiver<Option<Duration>>` | Different channel type and payload |
-| 4 | subprocess.md shows `run_subprocess(config, filter, session_id, message_tx)` | Code has 5th parameter: `cancel_token` | Missing parameter in spec |
+| # | Spec | Code | Resolution |
+|---|------|------|------------|
+| 1 | ~~session.md says Drop does NOT attempt cleanup~~ | Code DOES call `remove_dir_all` in Drop | **FIXED** — spec updated to document best-effort cleanup in Drop |
+| 2 | ~~subprocess.md shows `env_vars: HashMap<String, String>`~~ | Code uses `HashMap<String, Option<String>>` | **FIXED** — spec updated to `Option<String>` (None = unset) |
+| 3 | ~~subprocess.md shows `oneshot::Receiver<CancelRequest>`~~ | Code uses `watch::Receiver<Option<Duration>>` | **FIXED** — spec updated to match code |
+| 4 | ~~subprocess.md shows 4-param `run_subprocess`~~ | Code has 5th parameter: `cancel_token` | **FIXED** — spec updated with `cancel_token` parameter |
 
-### 4.2 Medium-Severity Misalignments
+### 4.2 Medium-Severity Misalignments — ALL FIXED
 
-| # | Spec | Code | Issue |
-|---|------|------|-------|
-| 5 | action-filter.md describes regex-based parsing | Code uses string prefix matching | Implementation approach changed, spec not updated |
-| 6 | action-filter.md implies ALL directive types checked for malformation | Code only checks env-related directives | Malformed `openjd_fail`/`openjd_progress` silently ignored |
-| 7 | session.md `enter_environment(env, identifier, os_env_vars, resolved_bindings)` | Code: `enter_environment(&mut self, env, resolved_symtab, identifier, os_env_vars)` | Parameter order and naming differ |
-| 8 | session.md `exit_environment(identifier, os_env_vars, keep_session_running)` | Code adds `resolved_symtab` parameter, reorders | Extra parameter, different order |
-| 9 | session.md `run_task(step_script, task_parameter_values, os_env_vars, resolved_bindings)` | Code: `run_task(&mut self, script, task_parameter_values, resolved_symtab, os_env_vars)` | Naming and order differ |
-| 10 | embedded-files.md `EmbeddedFiles::new(scope)` | Code: `new(scope, session_files_directory, session_id)` | Extra constructor parameters |
-| 11 | runners.md shows `notify_period` in `NotifyThenTerminate` | Code uses `terminate_delay` | Field name mismatch |
-| 12 | subprocess.md describes 5s grace for stdout drain after exit | Code applies 5s timeout to `c.wait()` | Grace time applied to different thing |
+| # | Spec | Code | Resolution |
+|---|------|------|------------|
+| 5 | ~~action-filter.md describes regex-based parsing~~ | Code uses string prefix matching | **FIXED** — spec rewritten to document `strip_prefix` + `match` approach |
+| 6 | ~~action-filter.md implies ALL directive types checked~~ | Code only checks env-related directives | **FIXED** — spec updated to document env-only checking with rationale |
+| 7 | ~~session.md `enter_environment(env, identifier, os_env_vars, resolved_bindings)`~~ | Code: `(env, resolved_symtab, identifier, os_env_vars)` | **FIXED** — spec updated to match code |
+| 8 | ~~session.md `exit_environment(identifier, os_env_vars, keep_session_running)`~~ | Code adds `resolved_symtab`, reorders | **FIXED** — spec updated to match code |
+| 9 | ~~session.md `run_task(step_script, task_parameter_values, os_env_vars, resolved_bindings)`~~ | Code: `(script, task_parameter_values, resolved_symtab, os_env_vars)` | **FIXED** — spec updated to match code |
+| 10 | ~~embedded-files.md `EmbeddedFiles::new(scope)`~~ | Code: `new(scope, session_files_directory, session_id)` | **FIXED** — spec updated with extra parameters |
+| 11 | ~~runners.md shows `notify_period`~~ | Code uses `terminate_delay` | **FIXED** — spec updated to `terminate_delay` |
+| 12 | ~~subprocess.md describes 5s grace for stdout drain~~ | Code applies 5s timeout to `c.wait()` | **FIXED** — spec rewritten to document process exit timeout |
 
-### 4.3 Undocumented Implementation Features
+### 4.3 Undocumented Implementation Features — ALL DOCUMENTED
 
-The following code features have no corresponding spec documentation:
+All previously undocumented features now have spec coverage:
 
-- `enter_environment_with_output()` method
-- `with_path_mapping()`, `with_library()`, `with_revision_extensions()` builder methods
-- `get_enabled_extensions()` method
-- `redact()` method on Session
-- Windows env var normalization (`normalize_env_key`)
-- Duplicate environment identifier rejection
-- `format_command_for_log()` and `process_line()` public functions
-- CAP_KILL capability elevation for cross-user SIGKILL
-- Windows cross-user via `CreateProcessAsUserW`
-- Windows `CTRL_BREAK_EVENT` and process tree killing
-- `resolve_action_timeout()` function
-- All runner builder methods (`with_redactions`, `with_initial_redacted_values`, etc.)
+- ~~`enter_environment_with_output()` method~~ → session.md
+- ~~`with_path_mapping()`, `with_library()`, `with_revision_extensions()` builder methods~~ → session.md
+- ~~`get_enabled_extensions()` method~~ → session.md
+- ~~`redact()` method on Session~~ → session.md
+- ~~Windows env var normalization (`normalize_env_key`)~~ → session.md
+- ~~Duplicate environment identifier rejection~~ → session.md
+- ~~`format_command_for_log()` and `process_line()` public functions~~ → subprocess.md (noted as `pub(crate)`)
+- ~~CAP_KILL capability elevation for cross-user SIGKILL~~ → subprocess.md
+- ~~Windows cross-user via `CreateProcessAsUserW`~~ → subprocess.md
+- ~~Windows `CTRL_BREAK_EVENT` and process tree killing~~ → subprocess.md
+- ~~`resolve_action_timeout()` function~~ → runners.md
+- ~~All runner builder methods (`with_redactions`, `with_initial_redacted_values`, etc.)~~ → runners.md
+- ~~`collect_stdout` opt-in~~ → session.md, subprocess.md
 
 ---
 
@@ -219,44 +189,47 @@ The following code features have no corresponding spec documentation:
 
 ### 5.2 Issues Found
 
-#### Missing Trait Implementations
+#### ~~Missing Trait Implementations~~ — ALL FIXED
 
-| Type | Missing Trait | Impact |
-|------|--------------|--------|
-| `ScriptRunnerState` | `Display` | Public enum, requires Debug for display |
-| `CancelMethod` | `Display` | Public enum, requires Debug for display |
-| `ActionState` | `Display` | Public enum, requires Debug for display |
-| `ActionMessage` | `Display` | Public enum, requires Debug for display |
-| `TempDir` | `Debug` | Non-idiomatic for public type |
-| `TempDir` | `AsRef<Path>` | Common Rust pattern for path wrappers |
-| `ActionStatus` | `Default` | Verbose construction without it |
+| Type | Trait | Status |
+|------|-------|--------|
+| `ScriptRunnerState` | `Display` | ✅ Implemented |
+| `CancelMethod` | `Display` | ✅ Implemented |
+| `ActionState` | `Display` | ✅ Implemented |
+| `ActionMessage` | `Display` | ✅ Implemented |
+| `TempDir` | `Debug` | ✅ Implemented |
+| `TempDir` | `AsRef<Path>` | ✅ Implemented |
+| `ActionStatus` | `Default` | ✅ Implemented |
 
 #### Code Duplication
 
 - **Runner builder methods**: `EnvironmentScriptRunner` and `StepScriptRunner` have near-identical `new()`, `with_redactions()`, `with_initial_redacted_values()`, `with_cancel_token()`, `with_cancel_request_rx()`, `with_helper()`, `take_helper()`, `cancel()`, `state()` methods. A macro or shared trait would eliminate this.
-- **Line truncation**: `64 * 1024` magic number in `cross_user_helper.rs` duplicates `LOG_LINE_MAX_LENGTH` from `subprocess.rs`.
+- ~~**Line truncation**: `64 * 1024` magic number in `cross_user_helper.rs` duplicates `LOG_LINE_MAX_LENGTH` from `subprocess.rs`.~~ **FIXED** — shared `truncate_line()` helper.
 - **`env_script.rs` four-arm match**: The `(let_bindings, embedded_files)` match duplicates `EmbeddedFiles` setup across all arms. The step runner handles this more cleanly with sequential `if let` blocks.
 
-#### Silently Discarded Errors
+#### ~~Silently Discarded Errors~~ — FIXED
 
-- `chown_for_user()` in `embedded_files.rs`: Both Unix and Windows paths use `let _ =` to discard chown/permission errors. A failed chown in cross-user mode will cause permission denied errors later.
-- `write_helper()` in `helper_binary.rs`: Same pattern — `let _ = nix::unistd::chown(...)`.
-- These should at minimum log at warn level.
+- ~~`chown_for_user()` in `embedded_files.rs`: Both Unix and Windows paths use `let _ =` to discard chown/permission errors.~~ **FIXED** — `chown_for_user()` now returns `Result<(), SessionError>`. Chown runs before chmod (matching Python's security pattern: don't widen permissions if group ownership wasn't set).
+- ~~`write_helper()` in `helper_binary.rs`: Same pattern — `let _ = nix::unistd::chown(...)`.~~ **FIXED** — errors propagated, chown before chmod.
+- All four `let _ = nix::unistd::chown(...)` sites fixed: `embedded_files.rs`, `helper_binary.rs`, `tempdir.rs`, `subprocess.rs`.
 
 #### API Design Concerns
 
 - **`#[allow(clippy::too_many_arguments)]`** on `run_action` (8 params) and `run_env_action` (8 params): A config struct would improve readability.
-- **`parse_end_of_line` is an identity function**: `fn parse_end_of_line(eol: Option<EndOfLine>) -> Option<EndOfLine> { eol }` does nothing and should be removed.
-- **`ActionResult.stderr` is always empty**: The crate merges stderr into stdout at the subprocess level, so this field is misleading.
+- ~~**`parse_end_of_line` is an identity function**~~: **FIXED** — removed, inlined `record.file.end_of_line` directly.
+- ~~**`ActionResult.stderr` is always empty**~~: **FIXED** — removed the field entirely.
+- ~~**`Session::new` misleading name**~~: **FIXED** — renamed to `Session::new_for_test`, gated behind `#[cfg(test)]`.
+- ~~**Unbounded stdout accumulation**~~: **FIXED** — added `collect_stdout: bool` to `SessionConfig` (default `false`). When false, subprocess output is still streamed through the filter/callback in real time, but the collected `String` stays empty. Prevents unbounded memory growth in the worker agent.
 - **`PosixSessionUser` fields are `pub`**: Allows external mutation bypassing validation. Should be private with accessors.
 - **`SessionError::Runtime(String)` overused**: Used for ~10+ distinct error conditions. Dedicated variants like `HelperProtocol`, `PermissionDenied` would enable programmatic error handling.
-- **`CrossUserHelper` lacks `Drop` impl**: If dropped without `shutdown()`, the child process is orphaned.
+- ~~**`CrossUserHelper` lacks `Drop` impl**~~: **FIXED** — added `Drop` for both POSIX and Windows variants. Logs warning and kills/terminates the child if dropped without `shutdown()`.
 - **`symtab_key()` is public**: Leaks internal implementation detail.
 
 #### Naming
 
-- `custom_gettempdir`: Python-style naming. Rust idiom would be `openjd_temp_dir()`.
-- `_runnable` parameter in `write_embedded_file_with_options`: Underscore prefix on a parameter that IS used on Unix. Should use `#[cfg_attr(windows, allow(unused))]` instead.
+- ~~`custom_gettempdir`~~: **FIXED** — renamed to `openjd_temp_dir()`.
+- ~~`Session::new` for a test-only constructor~~: **FIXED** — renamed to `Session::new_for_test`.
+- ~~`_runnable` parameter in `write_embedded_file_with_options`~~: **FIXED** — renamed to `runnable` with `#[cfg_attr(not(unix), allow(unused))]`.
 
 ---
 
@@ -278,7 +251,7 @@ The following code features have no corresponding spec documentation:
 |-----|--------|----------------|
 | No Windows execution tests | All tests use `sh`/`bash`; Windows paths untested | Add Windows-specific scenarios |
 | No concurrent session tests | Thread safety untested | Add multi-session parallel tests |
-| No large output tests | Memory pressure, 64KB truncation untested | Add tests with >64KB lines |
+| ~~No large output tests~~ | ~~Memory pressure, 64KB truncation untested~~ | **FIXED** — `test_truncate_line_multibyte_boundary` and `test_truncate_line_short_line_unchanged` added |
 | `cancelation` field on `Action` never tested | Grace period, notification command untested | Add tests with `cancelation` set |
 | Timeout with format string resolution untested | Only literal timeout values tested | Add format string timeout tests |
 | `retain_working_dir = true` never tested | Always false in tests | Add retention test |
@@ -297,18 +270,18 @@ I wrote and ran 13 exploratory edge-case tests. Results:
 | Empty redaction value | ✅ Pass | No crash on empty string |
 | Redacted value multiple occurrences | ✅ Pass* | Redaction applies to log output, not raw stdout (by design) |
 | Overlapping redacted values | ✅ Pass* | Same — raw stdout is intentionally unredacted |
-| Extremely long output line | ✅ Pass | Truncated at 64KB (by design, but UTF-8 panic risk exists) |
+| Extremely long output line | ✅ Pass | Truncated at 64KB, UTF-8 safe via `floor_char_boundary` |
 | Output with no trailing newline | ✅ Pass | Captured correctly |
 | Env var with special chars (hyphen) | ✅ Pass | Properly rejected |
 | Env var with special chars (dot) | ✅ Pass | Properly rejected |
 | Progress at 0.0 | ✅ Pass | Accepted |
 | Progress at 100.0 | ✅ Pass | Accepted |
-| Progress at -0.001 | ⚠️ Note | Error annotation in filter, not in raw stdout |
-| Progress at 100.001 | ⚠️ Note | Same — error annotation is in log stream |
+| Progress at -0.001 | ✅ Fixed | Error annotation now appears in collected stdout |
+| Progress at 100.001 | ✅ Fixed | Same — collected stdout uses display string with annotations and redaction |
 | Environment re-entry after exit | ✅ Pass | Works correctly |
 | Cleanup after workdir deleted | ✅ Pass | No panic |
 
-*Note: The redaction tests initially appeared to fail because `SubprocessResult.stdout` contains raw (unredacted) output by design. Redaction is applied only to the log stream via `ActionFilter.apply_redaction()`. This is correct behavior but could be better documented.
+*Note: Collected stdout now uses the filter-processed display string, so redacted values appear as `********` and error annotations (e.g., invalid progress) appear inline. This matches what the user sees in logs.
 
 ---
 
@@ -324,11 +297,11 @@ I wrote and ran 13 exploratory edge-case tests. Results:
 
 ### 7.2 Weaknesses
 
-- **Stale function signatures**: Multiple specs show outdated parameter lists, types, and names (see Section 4)
-- **Missing Windows documentation**: Windows cross-user execution, `CTRL_BREAK_EVENT`, process tree killing, and ACL-based permissions are implemented but not spec'd
-- **Regex vs string parsing**: action-filter.md describes regex-based parsing that was replaced with string matching
-- **Undocumented public API**: ~15 public methods/functions have no spec coverage
-- **Drop behavior contradiction**: session.md explicitly says Drop doesn't attempt cleanup, but the code does
+- ~~**Stale function signatures**~~: **FIXED** — All specs updated to match current code
+- ~~**Missing Windows documentation**~~: **FIXED** — subprocess.md now covers CTRL_BREAK, process tree killing, and CreateProcessAsUserW
+- ~~**Regex vs string parsing**~~: **FIXED** — action-filter.md rewritten to document string-based parsing
+- ~~**Undocumented public API**~~: **FIXED** — All methods now have spec coverage
+- ~~**Drop behavior contradiction**~~: **FIXED** — session.md updated to document best-effort cleanup in Drop
 
 ---
 
@@ -336,41 +309,41 @@ I wrote and ran 13 exploratory edge-case tests. Results:
 
 ### Priority 1 — Fix Bugs
 
-1. **Fix UTF-8 panic in line truncation** (BUG-1): Replace `line[..LOG_LINE_MAX_LENGTH]` with `line[..line.floor_char_boundary(LOG_LINE_MAX_LENGTH)]` in both `subprocess.rs` and `cross_user_helper.rs`. Share the `LOG_LINE_MAX_LENGTH` constant.
+1. ~~**Fix UTF-8 panic in line truncation** (BUG-1)~~: **FIXED.** Extracted shared `truncate_line()` helper using `floor_char_boundary()` in both `subprocess.rs` and `cross_user_helper.rs`. Also replaced `tokio::io::Lines` with `read_until` + `from_utf8_lossy` so invalid UTF-8 bytes no longer silently drop remaining output.
 
 2. ~~**Fix cross-user test runtime flavor** (BUG-2)~~: **FIXED** during this evaluation. Changed `#[tokio::test]` to `#[tokio::test(flavor = "multi_thread")]` on 10 cross-user tests.
 
-3. **Add `--` separator to `sudo rm -rf`** (ISSUE-1): Prevents filenames starting with `-` from being interpreted as flags.
+3. ~~**Add `--` separator to `sudo rm -rf`** (ISSUE-1)~~: **FIXED.** Prevents filenames starting with `-` from being interpreted as flags.
 
-### Priority 2 — Fix Spec Misalignments
+### Priority 2 — ~~Fix Spec Misalignments~~ ALL FIXED
 
-3. **Update function signatures in specs**: session.md, subprocess.md, embedded-files.md, and runners.md all have outdated signatures. Update to match current code.
+3. ~~**Update function signatures in specs**~~: **FIXED.** session.md, subprocess.md, embedded-files.md, and runners.md all updated to match current code.
 
-4. **Resolve Drop behavior contradiction**: Either update session.md to document that Drop does attempt cleanup, or remove the cleanup from Drop to match the spec.
+4. ~~**Resolve Drop behavior contradiction**~~: **FIXED.** session.md updated to document that Drop does perform best-effort cleanup.
 
-5. **Update action-filter.md**: Replace regex description with the actual string-matching approach used in the code.
+5. ~~**Update action-filter.md**~~: **FIXED.** Replaced regex description with actual string-matching approach, documented env-only malformed command checking with rationale.
 
-6. **Document Windows support**: Add Windows-specific sections to subprocess.md, cross-user.md, and embedded-files.md.
+6. ~~**Document Windows support**~~: **FIXED.** Added Windows CTRL_BREAK, process tree killing, and CreateProcessAsUserW sections to subprocess.md.
 
-7. **Document undocumented public API**: Add spec coverage for the ~15 undocumented public methods.
+7. ~~**Document undocumented public API**~~: **FIXED.** All ~15 undocumented methods/functions now have spec coverage across session.md, subprocess.md, and runners.md.
 
 ### Priority 3 — Improve Code Quality
 
-8. **Add `Display` impls** for `ScriptRunnerState`, `CancelMethod`, `ActionState`, `ActionMessage`.
+8. ~~**Add `Display` impls**~~ for `ScriptRunnerState`, `CancelMethod`, `ActionState`, `ActionMessage`: **FIXED.**
 
-9. **Add `Debug` for `TempDir`** and `AsRef<Path>` for ergonomic path usage.
+9. ~~**Add `Debug` for `TempDir`** and `AsRef<Path>`~~: **FIXED.**
 
 10. **Deduplicate runner builder methods**: Use a macro or trait to eliminate the copy-paste between `EnvironmentScriptRunner` and `StepScriptRunner`.
 
-11. **Log silently discarded errors**: Replace `let _ =` in `chown_for_user()` and `write_helper()` with `warn!` logging.
+11. ~~**Log silently discarded errors**~~: **FIXED.** All `let _ =` chown/chmod calls now propagate errors. Chown runs before chmod matching Python's security pattern.
 
-12. **Add `Drop` impl for `CrossUserHelper`**: Safety net to shut down the helper process if dropped without explicit `shutdown()`.
+12. ~~**Add `Drop` impl for `CrossUserHelper`**~~: **FIXED.** Both POSIX and Windows variants now have `Drop` impls.
 
-13. **Remove `parse_end_of_line` identity function** and remove or document `ActionResult.stderr`.
+13. ~~**Remove `parse_end_of_line` identity function** and remove or document `ActionResult.stderr`~~: **FIXED.** Identity function removed; `ActionResult.stderr` field removed.
 
-14. **Narrow `is_malformed_env_command`**: Require colon or end-of-string after directive name to avoid false positives.
+14. ~~**Narrow `is_malformed_env_command`**~~: **FIXED.** Requires colon, space, or end-of-string after directive name to avoid false positives.
 
-15. **Fix malformed `openjd_redacted_env` handling**: Push a cancel callback when `redactions_enabled` is true (matching the behavior when it's false).
+15. ~~**Fix malformed `openjd_redacted_env` handling**~~: **FIXED.** Cancel callback now pushed regardless of `redactions_enabled` flag.
 
 ### Priority 4 — Improve Test Coverage
 
@@ -400,7 +373,7 @@ The central module implementing the session state machine. Well-structured with 
 - Environment LIFO enforcement: ✅ Correct, with proper pop-before-exit for failed exits
 - Symbol table construction: ✅ Handles all parameter types including PATH mapping
 - Cancellation flow: ✅ Token cascading works correctly
-- Cleanup: ⚠️ Missing `--` in sudo rm (ISSUE-1)
+- Cleanup: ✅ Fixed — `--` separator added to sudo rm (ISSUE-1)
 - Drop: ⚠️ Contradicts spec (attempts cleanup)
 
 ### 9.2 `subprocess.rs` (~800 lines)
@@ -411,8 +384,9 @@ The async subprocess execution engine. Handles same-user and cross-user executio
 - Process group isolation via setsid: ✅ Correct
 - Stderr merging via dup2: ✅ Correct
 - Biased select loop: ✅ Sound design
-- Line truncation: ❌ UTF-8 panic risk (BUG-1)
-- Cross-user PGID discovery: ⚠️ Fragile with multiple sudo children (ISSUE-6)
+- Line truncation: ✅ Fixed — uses `floor_char_boundary` via shared `truncate_line()` helper
+- Lossy UTF-8 decoding: ✅ Fixed — uses `read_until` + `from_utf8_lossy` instead of `Lines`
+- Cross-user PGID discovery: ✅ Fixed — handles multiple sudo children (ISSUE-6)
 - Signal delivery: ✅ Correct with CAP_KILL fallback
 - 5-second grace time: ⚠️ Applied to process exit, not stdout drain (spec mismatch)
 
@@ -423,10 +397,10 @@ The directive parser for `openjd_*` protocol messages. Comprehensive handling of
 **Reviewed items:**
 - Directive parsing: ✅ Correct for all directive types
 - Redaction algorithm (segment merge): ✅ Correct, handles overlapping values
-- Malformed command detection: ⚠️ False positive risk (ISSUE-2)
+- Malformed command detection: ✅ Fixed — requires delimiter after directive name (ISSUE-2)
 - JSON-encoded env vars: ✅ Correct
 - Dynamic log level: ✅ Correct
-- Malformed redacted_env when enabled: ⚠️ Silently ignored (ISSUE-5)
+- Malformed redacted_env when enabled: ✅ Fixed — cancel callback always pushed (ISSUE-5)
 - 126 unit tests inline: ✅ Thorough
 
 ### 9.4 `runner/` (mod.rs, env_script.rs, step_script.rs)
@@ -447,8 +421,8 @@ Two-phase file materialization with proper permission handling.
 **Reviewed items:**
 - Allocate/write two-phase flow: ✅ Correct
 - Line ending conversion: ✅ Handles LF, CRLF, Auto
-- Cross-user permissions: ⚠️ Errors silently discarded
-- Identity function `parse_end_of_line`: ⚠️ Dead code
+- Cross-user permissions: ✅ Fixed — errors propagated, chown before chmod
+- Identity function `parse_end_of_line`: ✅ Fixed — removed
 
 ### 9.6 `tempdir.rs`
 
@@ -459,7 +433,7 @@ Secure temporary directory management with RAII cleanup.
 - Permission setting: ✅ 0o700 same-user, 0o770 cross-user
 - Sticky bit validation: ✅ Defense-in-depth
 - Drop safety net: ✅ Best-effort cleanup
-- Missing Debug/AsRef<Path>: ⚠️ Non-idiomatic
+- Missing Debug/AsRef<Path>: ✅ Fixed — both implemented
 
 ### 9.7 `cross_user_helper.rs` and `helper/`
 
@@ -469,8 +443,8 @@ Persistent cross-user helper binary that eliminates per-action sudo overhead.
 - Wire protocol (JSON over stdin/stdout): ✅ Correct
 - Timeout via Condvar: ✅ Cancellable, no orphaned threads
 - Cancel via dup'd stdin fd: ✅ Clever design, avoids borrow conflicts
-- Missing Drop impl: ⚠️ Orphan risk
-- Line truncation: ❌ Same UTF-8 panic risk as subprocess.rs
+- Missing Drop impl: ✅ Fixed — both POSIX and Windows variants have Drop impls
+- Line truncation: ✅ Fixed — uses shared `truncate_line()` helper
 
 ### 9.8 `session_user.rs`
 
@@ -528,6 +502,7 @@ No algorithmic performance issues found. Key observations:
 - **Biased select loop**: Prevents stdout floods from starving cancel/timeout — correct priority
 - **Unbounded channel**: Prevents stdout backpressure deadlocks — appropriate for the use case
 - **No O(N²) algorithms detected**: Redaction uses segment merge (O(N log N)), path mapping uses linear scan (appropriate for small rule sets)
+- ~~**Unbounded stdout accumulation**~~: **FIXED** — `collect_stdout` opt-in prevents unbounded memory growth in the worker agent path
 - **Unnecessary clones**: `env_vars.clone()` in `run_action`, `symtab.clone()` in env_script.rs (4 arms), `file.clone()` in `allocate_file_paths` — minor but could be optimized
 
 ---
@@ -537,12 +512,12 @@ No algorithmic performance issues found. Key observations:
 | Category | Score | Notes |
 |----------|-------|-------|
 | Compilation | ⭐⭐⭐⭐⭐ | Zero warnings, zero clippy lints |
-| Test pass rate | ⭐⭐⭐⭐⭐ | 315/315 pass, 13 correctly ignored |
+| Test pass rate | ⭐⭐⭐⭐⭐ | 344/344 pass, 13 correctly ignored |
 | Test coverage | ⭐⭐⭐⭐ | Strong core coverage, gaps in edge cases and Windows |
-| Spec alignment | ⭐⭐⭐ | Multiple stale signatures, one behavioral contradiction |
+| Spec alignment | ⭐⭐⭐⭐⭐ | All signatures and behaviors updated to match code |
 | Code quality | ⭐⭐⭐⭐ | Well-structured, some duplication and missing traits |
-| Error handling | ⭐⭐⭐⭐ | Good types, some silently discarded errors |
+| Error handling | ⭐⭐⭐⭐⭐ | Good types, chown/chmod errors now propagated |
 | Performance | ⭐⭐⭐⭐⭐ | No algorithmic issues, excellent helper optimization |
-| Security | ⭐⭐⭐⭐ | Good practices, minor sudo rm issue |
+| Security | ⭐⭐⭐⭐⭐ | Good practices, sudo rm -- separator added |
 | API ergonomics | ⭐⭐⭐⭐ | Clean public surface, some too-many-arguments methods |
-| Rust idioms | ⭐⭐⭐⭐ | Mostly idiomatic, missing some standard trait impls |
+| Rust idioms | ⭐⭐⭐⭐⭐ | All standard trait impls added |

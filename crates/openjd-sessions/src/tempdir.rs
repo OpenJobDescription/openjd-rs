@@ -9,7 +9,7 @@ use crate::error::SessionError;
 use crate::session_user::SessionUser;
 
 /// Returns the platform-specific OpenJD temp directory, creating it if needed.
-pub fn custom_gettempdir() -> Result<PathBuf, SessionError> {
+pub fn openjd_temp_dir() -> Result<PathBuf, SessionError> {
     #[cfg(unix)]
     let base = std::env::temp_dir();
 
@@ -77,10 +77,25 @@ pub struct TempDir {
     cleaned_up: bool,
 }
 
+impl std::fmt::Debug for TempDir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TempDir")
+            .field("path", &self.path)
+            .field("cleaned_up", &self.cleaned_up)
+            .finish()
+    }
+}
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
 impl TempDir {
     /// Create a new secure temp directory.
     ///
-    /// - `dir`: parent directory (defaults to `custom_gettempdir()`)
+    /// - `dir`: parent directory (defaults to `openjd_temp_dir()`)
     /// - `prefix`: optional name prefix
     /// - `user`: optional session user for cross-user ownership
     pub fn new(
@@ -90,7 +105,7 @@ impl TempDir {
     ) -> Result<Self, SessionError> {
         let parent = match dir {
             Some(d) => d.to_path_buf(),
-            None => custom_gettempdir()?,
+            None => openjd_temp_dir()?,
         };
 
         let prefix = prefix.unwrap_or("");
@@ -107,9 +122,15 @@ impl TempDir {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = if let Some(u) = _user.filter(|u| !u.is_process_user()) {
-                // Cross-user: chown group and set 0o770
+                // Cross-user: chown group then set 0o770
+                // chown before chmod — security: don't grant group access if chown fails
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
-                    let _ = nix::unistd::chown(&path, None, Some(grp.gid));
+                    nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
+                        SessionError::Runtime(format!(
+                            "Could not change ownership of '{}' (error: {e}). Please ensure that uid {} is a member of group {}.",
+                            path.display(), nix::unistd::geteuid(), u.group()
+                        ))
+                    })?;
                 }
                 0o770
             } else {
@@ -175,4 +196,24 @@ impl Drop for TempDir {
 
 fn random_hex() -> String {
     uuid::Uuid::new_v4().simple().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tempdir_debug() {
+        let td = TempDir::new(None, None, None).unwrap();
+        let dbg = format!("{td:?}");
+        assert!(dbg.contains("TempDir"));
+        assert!(dbg.contains("cleaned_up: false"));
+    }
+
+    #[test]
+    fn tempdir_as_ref_path() {
+        let td = TempDir::new(None, None, None).unwrap();
+        let p: &std::path::Path = td.as_ref();
+        assert_eq!(p, td.path());
+    }
 }

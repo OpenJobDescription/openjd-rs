@@ -21,6 +21,18 @@ pub enum ActionState {
     Timeout,
 }
 
+impl std::fmt::Display for ActionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Running => write!(f, "Running"),
+            Self::Success => write!(f, "Success"),
+            Self::Failed => write!(f, "Failed"),
+            Self::Canceled => write!(f, "Canceled"),
+            Self::Timeout => write!(f, "Timeout"),
+        }
+    }
+}
+
 /// A parsed openjd stdout message from a running action.
 #[derive(Debug, Clone)]
 pub enum ActionMessage {
@@ -40,11 +52,74 @@ pub enum ActionMessage {
     CancelMarkFailed { fail_message: String },
 }
 
+impl std::fmt::Display for ActionMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Progress(v) => write!(f, "Progress({v})"),
+            Self::Status(s) => write!(f, "Status({s})"),
+            Self::Fail(s) => write!(f, "Fail({s})"),
+            Self::SetEnv { name, .. } => write!(f, "SetEnv({name})"),
+            Self::UnsetEnv { name } => write!(f, "UnsetEnv({name})"),
+            Self::RedactedEnv { name, .. } => write!(f, "RedactedEnv({name})"),
+            Self::CancelMarkFailed { fail_message } => {
+                write!(f, "CancelMarkFailed({fail_message})")
+            }
+        }
+    }
+}
+
 /// Result of running an action.
 #[derive(Debug)]
 pub struct ActionResult {
     pub state: ActionState,
     pub exit_code: Option<i32>,
     pub stdout: String,
-    pub stderr: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_state_display() {
+        assert_eq!(ActionState::Running.to_string(), "Running");
+        assert_eq!(ActionState::Success.to_string(), "Success");
+        assert_eq!(ActionState::Failed.to_string(), "Failed");
+        assert_eq!(ActionState::Canceled.to_string(), "Canceled");
+        assert_eq!(ActionState::Timeout.to_string(), "Timeout");
+    }
+
+    #[test]
+    fn action_message_display() {
+        assert_eq!(ActionMessage::Progress(50.0).to_string(), "Progress(50)");
+        assert_eq!(ActionMessage::Status("ok".into()).to_string(), "Status(ok)");
+        assert_eq!(ActionMessage::Fail("err".into()).to_string(), "Fail(err)");
+        assert_eq!(
+            ActionMessage::SetEnv {
+                name: "K".into(),
+                value: "V".into()
+            }
+            .to_string(),
+            "SetEnv(K)"
+        );
+        assert_eq!(
+            ActionMessage::UnsetEnv { name: "K".into() }.to_string(),
+            "UnsetEnv(K)"
+        );
+        assert_eq!(
+            ActionMessage::RedactedEnv {
+                name: "K".into(),
+                value: "V".into()
+            }
+            .to_string(),
+            "RedactedEnv(K)"
+        );
+        assert_eq!(
+            ActionMessage::CancelMarkFailed {
+                fail_message: "bad".into()
+            }
+            .to_string(),
+            "CancelMarkFailed(bad)"
+        );
+    }
 }

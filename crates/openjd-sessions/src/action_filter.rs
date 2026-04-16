@@ -65,9 +65,17 @@ fn parse_directive(line: &str) -> Option<(ActionMessageKind, &str)> {
 /// Check if a line is a near-miss malformed env command (wrong case, missing space, etc.).
 fn is_malformed_env_command(line: &str) -> bool {
     let lower = line.trim_start().to_lowercase();
-    lower.starts_with("openjd_env")
-        || lower.starts_with("openjd_redacted_env")
-        || lower.starts_with("openjd_unset_env")
+    // Require the directive name to be followed by a colon (with or without space)
+    // or end-of-string, to avoid false positives on lines like "openjd_environment_setup".
+    lower.starts_with("openjd_env:")
+        || lower.starts_with("openjd_env ")
+        || lower == "openjd_env"
+        || lower.starts_with("openjd_redacted_env:")
+        || lower.starts_with("openjd_redacted_env ")
+        || lower == "openjd_redacted_env"
+        || lower.starts_with("openjd_unset_env:")
+        || lower.starts_with("openjd_unset_env ")
+        || lower == "openjd_unset_env"
 }
 
 static ENVVAR_SET_REGEX: LazyLock<Regex> =
@@ -412,19 +420,14 @@ impl ActionFilter {
                     }
                 }
 
-                if !self.redactions_enabled {
-                    let msg = self.redact_env_message(original_message, trimmed);
-                    callbacks.push(FilterCallback {
-                        kind: ActionMessageKind::Env,
-                        value: ActionMessageValue::String(
-                            "Failed to parse environment variable assignment.".to_string(),
-                        ),
-                        cancel: true,
-                    });
-                    return (callbacks, msg);
-                }
-
                 let msg = self.redact_env_message(original_message, trimmed);
+                callbacks.push(FilterCallback {
+                    kind: ActionMessageKind::Env,
+                    value: ActionMessageValue::String(
+                        "Failed to parse environment variable assignment.".to_string(),
+                    ),
+                    cancel: true,
+                });
                 (callbacks, msg)
             }
         }
@@ -1421,5 +1424,30 @@ mod tests {
         f.filter_message("openjd_redacted_env: KEY=pässwörd", "s");
         let (_, _, msg) = f.filter_message("ünïcödé pässwörd täïl", "s");
         assert_eq!(msg, "ünïcödé ******** täïl");
+    }
+
+    #[test]
+    fn test_malformed_env_command_no_false_positive_on_prefix() {
+        // "openjd_environment_setup" starts with "openjd_env" but is NOT a malformed
+        // env command — it's a legitimate log line. Should pass through with no callbacks.
+        let mut f = make_filter(false, false);
+        let (cbs, pass, _) = f.filter_message("openjd_environment_setup complete", "foo");
+        assert!(
+            cbs.is_empty(),
+            "should not trigger malformed detection: {cbs:?}"
+        );
+        assert!(pass);
+    }
+
+    #[test]
+    fn test_malformed_redacted_env_when_redactions_enabled() {
+        // When redactions ARE enabled, a malformed openjd_redacted_env should still
+        // push a cancel callback — not silently swallow the error.
+        let mut f = make_filter(false, true);
+        let (cbs, _, _) = f.filter_message("openjd_redacted_env: bad_no_equals", "foo");
+        assert!(
+            cbs.iter().any(|cb| cb.cancel),
+            "malformed redacted_env with redactions enabled should cancel: {cbs:?}"
+        );
     }
 }

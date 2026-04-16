@@ -69,7 +69,7 @@ pub fn write_embedded_file(path: &Path, data: &str) -> Result<(), std::io::Error
 pub fn write_embedded_file_with_options(
     path: &Path,
     data: &str,
-    _runnable: bool,
+    #[cfg_attr(not(unix), allow(unused))] runnable: bool,
     end_of_line: Option<EndOfLine>,
 ) -> Result<(), std::io::Error> {
     if let Some(parent) = path.parent() {
@@ -84,7 +84,7 @@ pub fn write_embedded_file_with_options(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = if _runnable { 0o700 } else { 0o600 };
+        let mode = if runnable { 0o700 } else { 0o600 };
         let perms = fs::Permissions::from_mode(mode);
         fs::set_permissions(path, perms)?;
     }
@@ -95,37 +95,65 @@ pub fn write_embedded_file_with_options(
 /// Change ownership and permissions of a file for cross-user access.
 ///
 /// Sets the group to the user's group and adds group read/write (and execute if runnable).
+/// Errors are propagated to match Python's behavior — if chown fails, permissions are
+/// NOT widened (security: don't grant group access to the wrong group).
 #[cfg(unix)]
-pub fn chown_for_user(path: &Path, user: &dyn SessionUser, runnable: bool) {
-    if let Ok(Some(grp)) = nix::unistd::Group::from_name(user.group()) {
-        let _ = nix::unistd::chown(path, None, Some(grp.gid));
-    }
+pub fn chown_for_user(
+    path: &Path,
+    user: &dyn SessionUser,
+    runnable: bool,
+) -> Result<(), SessionError> {
+    let grp = nix::unistd::Group::from_name(user.group())
+        .map_err(|e| {
+            SessionError::Runtime(format!("Could not look up group '{}': {e}", user.group()))
+        })?
+        .ok_or_else(|| SessionError::Runtime(format!("Group '{}' not found", user.group())))?;
+    nix::unistd::chown(path, None, Some(grp.gid))
+        .map_err(|e| SessionError::Runtime(format!(
+            "Could not change ownership of '{}' (error: {e}). Please ensure that uid {} is a member of group {}.",
+            path.display(), nix::unistd::geteuid(), user.group()
+        )))?;
+    // Only widen permissions after chown succeeds — security: don't grant group
+    // access if the group wasn't actually set.
     use std::os::unix::fs::PermissionsExt;
-    let base = if runnable { 0o770 } else { 0o660 };
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(base));
+    let mode = if runnable { 0o770 } else { 0o660 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|e| {
+        SessionError::Runtime(format!(
+            "Could not set permissions on '{}': {e}",
+            path.display()
+        ))
+    })?;
+    Ok(())
 }
 
 /// Set ACL permissions on a file for cross-user access (Windows).
 ///
 /// Sets process user as full control, session user as modify access.
 #[cfg(windows)]
-pub fn chown_for_user(path: &Path, user: &dyn SessionUser, _runnable: bool) {
-    if let Ok(process_user) = crate::win32::get_process_user() {
-        let _ = crate::win32_permissions::set_permissions(
-            &path.to_string_lossy(),
-            &[process_user.as_str()],
-            &[user.user()],
-        );
-    }
+pub fn chown_for_user(
+    path: &Path,
+    user: &dyn SessionUser,
+    _runnable: bool,
+) -> Result<(), SessionError> {
+    let process_user = crate::win32::get_process_user()
+        .map_err(|e| SessionError::Runtime(format!("Could not determine process user: {e}")))?;
+    crate::win32_permissions::set_permissions(
+        &path.to_string_lossy(),
+        &[process_user.as_str()],
+        &[user.user()],
+    )
+    .map_err(|e| {
+        SessionError::Runtime(format!(
+            "Could not set permissions on '{}': {e}",
+            path.display()
+        ))
+    })?;
+    Ok(())
 }
 
 /// Get the symbol table key for an embedded file.
 pub fn symtab_key(scope: EmbeddedFilesScope, name: &str) -> String {
     format!("{}.{}", scope.prefix(), name)
-}
-
-fn parse_end_of_line(eol: Option<EndOfLine>) -> Option<EndOfLine> {
-    eol
 }
 
 fn random_hex_filename() -> String {
@@ -261,7 +289,7 @@ impl EmbeddedFiles {
                     "Contents:\n{}",
                     &resolved
                 );
-                let eol = parse_end_of_line(record.file.end_of_line);
+                let eol = record.file.end_of_line;
                 let runnable = record.file.runnable.unwrap_or(false);
                 write_embedded_file_with_options(&record.filename, &resolved, runnable, eol)
                     .map_err(|e| SessionError::EmbeddedFile {
@@ -271,7 +299,7 @@ impl EmbeddedFiles {
                 #[cfg(unix)]
                 if let Some(ref user) = self.user {
                     if !user.is_process_user() {
-                        chown_for_user(&record.filename, &**user, runnable);
+                        chown_for_user(&record.filename, &**user, runnable)?;
                     }
                 }
             } else {
@@ -308,5 +336,37 @@ mod tests {
     #[test]
     fn test_random_hex_filename_no_collision() {
         assert_ne!(random_hex_filename(), random_hex_filename());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_chown_for_user_nonexistent_group_returns_error() {
+        use crate::session_user::SessionUser;
+
+        #[derive(Debug)]
+        struct FakeUser;
+        impl SessionUser for FakeUser {
+            fn user(&self) -> &str {
+                "nobody"
+            }
+            fn group(&self) -> &str {
+                "nonexistent_group_xyz_12345"
+            }
+            fn is_process_user(&self) -> bool {
+                false
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let result = chown_for_user(tmp.path(), &FakeUser, false);
+        assert!(result.is_err(), "chown with nonexistent group should fail");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("nonexistent_group_xyz_12345"),
+            "error should mention the group: {msg}"
+        );
     }
 }

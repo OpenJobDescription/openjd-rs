@@ -44,6 +44,11 @@ impl StepScriptRunner {
         self
     }
 
+    pub fn with_collect_stdout(mut self, collect: bool) -> Self {
+        self.base.collect_stdout = collect;
+        self
+    }
+
     pub fn with_initial_redacted_values(mut self, values: Vec<String>) -> Self {
         self.base.initial_redacted_values = values;
         self

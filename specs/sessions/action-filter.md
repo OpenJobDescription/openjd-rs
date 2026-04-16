@@ -93,24 +93,36 @@ by the `openjd_session_runtime_loglevel` directive. The subprocess stdout loop c
 `filter.min_log_level()` before logging command output lines, allowing actions to
 suppress verbose output by raising the level to WARNING or ERROR.
 
-## Regex-Based Parsing
+## String-Based Parsing
 
-A single compiled regex with named groups matches all directive types:
+Directive parsing uses `str::strip_prefix` and exact string matching rather than regex:
 
 ```rust
-static FILTER_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^openjd_(?:(?P<progress>progress)|(?P<status>status)|(?P<fail>fail)|(?P<env>env)|(?P<redacted_env>redacted_env)|(?P<unset_env>unset_env)|(?P<session_runtime_loglevel>session_runtime_loglevel)): (.+)$"
-    ).unwrap()
-});
+fn parse_directive(line: &str) -> Option<(ActionMessageKind, &str)> {
+    let rest = line.strip_prefix("openjd_")?;
+    let colon_pos = rest.find(": ")?;
+    let kind_str = &rest[..colon_pos];
+    let payload = &rest[colon_pos + 2..];
+    if payload.is_empty() { return None; }
+    match kind_str {
+        "progress" => ...,
+        "status" => ...,
+        "fail" => ...,
+        "env" => ...,
+        "redacted_env" => ...,
+        "unset_env" => ...,
+        "session_runtime_loglevel" => ...,
+        _ => None,
+    }
+}
 ```
 
-Additional regexes validate env var names and detect near-miss malformed commands:
+This is simpler and faster than regex for the fixed set of known directives. The
+`openjd_` prefix and `: ` separator are checked structurally.
+
+Additional regexes validate env var names:
 
 ```rust
-static ENV_ACTIONS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(openjd_env|openjd_redacted_env|openjd_unset_env)").unwrap()
-});
 static ENVVAR_SET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^"?[A-Za-z_][A-Za-z0-9_]*=.*$"#).unwrap()
 });
@@ -119,25 +131,28 @@ static ENVVAR_UNSET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 ```
 
-### Why a single regex with named groups
+### Why string matching instead of regex
 
-Using one regex avoids testing each directive type sequentially. The named groups
-identify which directive matched, and the final capture group extracts the payload.
-`LazyLock` (std) replaces `lazy_static` for zero-dependency static initialization.
+Using `strip_prefix` + `find` + `match` avoids compiling a complex regex for the fixed
+set of known directives. The regex approach was considered but string matching is simpler,
+faster, and easier to maintain for this use case. `LazyLock` (std) is used for the env
+var validation regexes which do need pattern matching.
 
 ## Malformed Command Detection
 
 If a line looks like an `openjd_*` directive but doesn't match any known pattern (e.g.,
-`openjd_ENV: FOO=bar` with wrong case), the filter:
+`openjd_ENV: FOO=bar` with wrong case, or `openjd_env:FOO=bar` missing the space), the
+filter checks specifically for env-related directives:
 
-1. Performs a case-insensitive near-match check
-2. If it matches a known directive name, emits `ActionMessage::CancelMarkFailed` with
-   an error message explaining the malformed command
+1. Performs a case-insensitive check for `openjd_env`, `openjd_redacted_env`, or
+   `openjd_unset_env` followed by a colon, space, or end-of-string
+2. If it matches, emits `ActionMessage::CancelMarkFailed` with an error message
 3. The session cancels the action with `Failed` state
 
-This catches common mistakes like wrong capitalization or typos in directive names,
-preventing silent failures where the action thinks it set an env var but the runtime
-ignored it.
+Only env-related directives are checked for malformation because they have side effects
+(setting/unsetting environment variables). Malformed `openjd_progress`, `openjd_status`,
+and `openjd_fail` are silently ignored — they don't affect session state, so a false
+positive would be more harmful than a missed directive.
 
 ## Redaction
 
