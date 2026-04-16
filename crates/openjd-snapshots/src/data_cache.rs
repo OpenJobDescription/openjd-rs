@@ -844,29 +844,16 @@ impl AsyncDataCache for S3DataCache {
             .send()
             .await
             .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
-        let mut body = resp.body;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
+        })?;
+        let data = bytes.to_vec();
+        let len = data.len() as u64;
         let dest = dest.to_path_buf();
-        // Stream chunks to file without buffering the entire response
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
-        let writer = tokio::task::spawn_blocking(move || {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&dest)?;
-            let mut total: u64 = 0;
-            while let Some(chunk) = rx.blocking_recv() {
-                f.write_all(&chunk)?;
-                total += chunk.len() as u64;
-            }
-            Ok::<_, std::io::Error>(total)
-        });
-        while let Some(chunk) = body
-            .try_next()
+        tokio::task::spawn_blocking(move || std::fs::write(&dest, &data))
             .await
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-        {
-            let _ = tx.send(chunk).await;
-        }
-        drop(tx);
-        writer.await.map_err(std::io::Error::other)?
+            .map_err(std::io::Error::other)??;
+        Ok(len)
     }
 
     async fn write_object_to_file_at_offset(
@@ -886,29 +873,21 @@ impl AsyncDataCache for S3DataCache {
             .send()
             .await
             .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
-        let mut body = resp.body;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
+        })?;
+        let data = bytes.to_vec();
+        let len = data.len() as u64;
         let dest = dest.to_path_buf();
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
-        let writer = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             use std::io::{Seek, SeekFrom, Write};
             let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
             f.seek(SeekFrom::Start(offset))?;
-            let mut total: u64 = 0;
-            while let Some(chunk) = rx.blocking_recv() {
-                f.write_all(&chunk)?;
-                total += chunk.len() as u64;
-            }
-            Ok::<_, std::io::Error>(total)
-        });
-        while let Some(chunk) = body
-            .try_next()
-            .await
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-        {
-            let _ = tx.send(chunk).await;
-        }
-        drop(tx);
-        writer.await.map_err(std::io::Error::other)?
+            f.write_all(&data)?;
+            Ok::<_, std::io::Error>(len)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 
     async fn stream_range_to_file_at_offset(
@@ -934,29 +913,23 @@ impl AsyncDataCache for S3DataCache {
             .map_err(|e| {
                 std::io::Error::other(format!("S3 GetObject range failed for {key}: {e}"))
             })?;
-        let mut body = resp.body;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!(
+                "S3 GetObject range body read failed for {key}: {e}"
+            ))
+        })?;
+        let data = bytes.to_vec();
+        let len = data.len() as u64;
         let dest = dest.to_path_buf();
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
-        let writer = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             use std::io::{Seek, SeekFrom, Write};
             let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
             f.seek(SeekFrom::Start(file_offset))?;
-            let mut total: u64 = 0;
-            while let Some(chunk) = rx.blocking_recv() {
-                f.write_all(&chunk)?;
-                total += chunk.len() as u64;
-            }
-            Ok::<_, std::io::Error>(total)
-        });
-        while let Some(chunk) = body
-            .try_next()
-            .await
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-        {
-            let _ = tx.send(chunk).await;
-        }
-        drop(tx);
-        writer.await.map_err(std::io::Error::other)?
+            f.write_all(&data)?;
+            Ok::<_, std::io::Error>(len)
+        })
+        .await
+        .map_err(std::io::Error::other)?
     }
 }
 
