@@ -257,15 +257,12 @@ fn path_from_list() {
 }
 #[test]
 fn path_from_list_with_non_string() {
-    // Exercise the _ => e.to_display_string() branch in path_fn list handling (line 82)
-    let list = ExprValue::make_list(
+    // Per spec, incompatible types in a list literal are an error
+    let result = ExprValue::make_list(
         vec![ExprValue::from("/a"), ExprValue::Int(42)],
         ExprType::union(vec![ExprType::STRING, ExprType::INT]),
-    )
-    .unwrap();
-    let r = path_fn(&mut Ctx, &[list]).unwrap();
-    // PathBuf::push with "42" appends it
-    assert!(matches!(r, ExprValue::Path { .. }));
+    );
+    assert!(result.is_err());
 }
 #[test]
 fn path_fn_unsupported_type() {

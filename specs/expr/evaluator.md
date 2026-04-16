@@ -146,6 +146,34 @@ evaluates `b < c`. The intermediate value `b` is reused.
 Comparison stays in the evaluator (not fully delegated to the library) because the
 chaining logic requires control flow that doesn't fit the simple dispatch model.
 
+#### Chained Comparison Memory Management
+
+Each comparison in the chain clones `left` and `right` to pass to `dispatch` (which
+releases its inputs), while retaining the originals for the chain. After dispatch
+returns, the boolean result is extracted and the dispatch return value is released.
+If the comparison is false, both `left` and `right` are released and `false` is returned
+immediately (short-circuit). If true, `left` is released and `right` becomes the new
+`left` for the next iteration — avoiding a redundant re-evaluation of the shared
+operand. After the final comparison, the surviving `left` is released and `true` is
+returned.
+
+```
+a < b < c
+  │
+  ├── left = eval(a), right = eval(b)
+  ├── dispatch("__lt__", [left.clone(), right.clone()])
+  ├── result true → release(left), left = right
+  │
+  ├── right = eval(c)
+  ├── dispatch("__lt__", [left.clone(), right.clone()])
+  ├── result true → release(left), release(right)
+  └── return true
+```
+
+The clone-and-release pattern is necessary because `dispatch` consumes (releases) its
+arguments for memory tracking, but the chained comparison needs to retain the shared
+middle operand for the next pair.
+
 ### BoolOp (`eval_boolop`)
 `and` and `or` are value-returning with null-coalescing semantics:
 
@@ -243,10 +271,13 @@ The evaluator maintains a `HashMap<String, regex::Regex>` that caches compiled r
 patterns across function calls within a single evaluation. When a regex function
 (`re_match`, `re_search`, `re_sub`) is called, the evaluator checks the cache
 before compiling. This avoids recompiling the same pattern when used multiple times,
-e.g., in a list comprehension like `[x for x in items if re_match(x, "^shot_\\d+$")]`.
+e.g., in a list comprehension like `[x for x in items if re_search(x, "shot") != null]`.
 
 The cache is per-evaluation, not global — it is created fresh for each `evaluate()` call
-and discarded afterward.
+and discarded afterward. Child evaluators (created for list comprehensions) share the
+parent's cache via move-and-return: the parent's cache is moved into the child before
+each iteration and moved back after, so patterns compiled in one iteration are available
+in subsequent iterations without recompilation.
 
 ## Divergence from Python
 

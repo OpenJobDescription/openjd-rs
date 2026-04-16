@@ -44,17 +44,17 @@ The crate is the most mature in the workspace and serves as the foundation for a
 
 **Gaps identified:**
 
-1. **`Eq`/`Hash` cross-type semantics not specified.** The `values.md` spec mentions `Hash` and `PartialEq` with cross-type equivalence rules (Int(1) == Float(1.0), String == Path, empty lists equal), but this is only in a brief table. The actual implementation in `value.rs` has a carefully designed `equals()` method and a `Hash` implementation using discriminant tags to ensure the Hash contract. This deserves a dedicated subsection explaining the tag-based hashing strategy and why it's necessary.
+1. ~~**`Eq`/`Hash` cross-type semantics not specified.**~~ **RESOLVED.** The `values.md` spec now has a dedicated "Tag-Based Hashing Strategy" subsection explaining the discriminant tags, why equivalent types share tags, and how Float hashes as Int when whole-valued.
 
-2. **`ListIter` not documented in values spec.** The `ListIter` enum and its zero-allocation iteration design are mentioned briefly but the spec doesn't explain the `ExactSizeIterator` implementation or the clone-on-yield semantics for String/Path/List variants.
+2. ~~**`ListIter` not documented in values spec.**~~ **RESOLVED.** The `values.md` spec now documents clone-on-yield semantics per variant (zero-cost for Bool/Int, heap alloc for String/Path/List) and the `ExactSizeIterator` delegation.
 
-3. **`make_list` promotion rules partially documented.** The spec covers the high-level promotion rules (int+float→float, path+string→string) but doesn't document the nested list promotion rules (list[int]+list[float]→list[float] inner promotion) or the fallback to `ListString` for unrecognized types.
+3. ~~**`make_list` promotion rules partially documented.**~~ **RESOLVED (spec and code).** The `values.md` spec now documents the full promotion priority order including nested list promotion rules. Additionally, the code was fixed: the fallback to `ListString` for unrecognized types was replaced with an error, per spec section 1.2.6 rule 7 ("incompatible types → error"). The String and Path arms were also tightened to reject non-matching elements. Regression tests added for all arms.
 
-4. **`eval_compare` chained comparison memory management not specified.** The evaluator spec describes chained comparisons and short-circuiting but doesn't explain the clone-and-release pattern used for intermediate values in the chain.
+4. ~~**`eval_compare` chained comparison memory management not specified.**~~ **RESOLVED.** The `evaluator.md` spec now has a "Chained Comparison Memory Management" subsection with a flow diagram showing the clone-and-release pattern.
 
-5. **Regex cache not shared with child evaluators.** The evaluator spec says "The cache is per-evaluation" but doesn't mention that child evaluators (created for list comprehensions) get fresh empty caches. This means regex patterns are recompiled on every iteration of a comprehension.
+5. ~~**Regex cache not shared with child evaluators.**~~ **RESOLVED (spec and code).** Child evaluators now share the parent's regex cache via `std::mem::take`/return. The `evaluator.md` spec documents the move-and-return pattern.
 
-6. **`SerializedSymbolTable` wire format.** The symbol-table spec documents this well, but the `from_json_transport` / `to_json_transport` methods on `ExprValue` are documented in the values spec without mentioning that they use the same `{"type", "value"}` format as the serialized symbol table entries.
+6. ~~**`SerializedSymbolTable` wire format.**~~ **RESOLVED.** The `values.md` spec now has a "Shared Format with SerializedSymbolTable" subsection, and `symbol-table.md` cross-references it.
 
 ### 1.3 Specification Accuracy
 
@@ -144,9 +144,9 @@ The specifications accurately represent the implementation. Every module, public
 
 3. **Value cloning in `eval_compare`.** Both `left.clone()` and `right.clone()` are created for dispatch, then the originals are released. For scalar types (Int, Bool, Float) this is cheap, but for String and List values it involves heap allocation. The dispatch could potentially take references instead.
 
-4. **Regex cache not shared with child evaluators.** In `child_evaluator()`, a new empty `regex_cache` is created. For comprehensions with regex filters like `[x for x in items if re_match(x, "^pattern$")]`, the regex is recompiled on every iteration. The `absorb_counters` method should also propagate the regex cache back, or the cache should be shared via a reference.
+4. ~~**Regex cache not shared with child evaluators.**~~ **RESOLVED.** In `child_evaluator()`, the regex cache is now shared via `std::mem::take`/return. For comprehensions with regex filters like `[x for x in items if re_search(x, "shot") != null]`, the regex is compiled once on the first iteration and reused for all subsequent iterations.
 
-5. **`expand_unions` in `derive_return_type` is exponential.** Given N arguments each with M union members, it generates M^N combinations. This is bounded in practice (expressions rarely have more than 2-3 arguments, and union types rarely have more than 3-4 members), but there's no explicit limit.
+5. ~~**`expand_unions` in `derive_return_type` is exponential.**~~ **RESOLVED.** Replaced the Cartesian product approach (M^N combinations upfront) with per-signature recursive matching that prunes non-matching branches early. This matches the Python implementation's `_match_signature` approach. The `expand_unions` function has been removed. The `function-library.md` spec documents the algorithm.
 
 6. **`collect_symbol_names` in error path.** When a variable is not found, `collect_symbol_names` traverses all symbol tables and collects all paths into a `Vec<String>`, sorts, and deduplicates. This is only on the error path, so it doesn't affect normal execution, but it could be expensive with large symbol tables.
 
@@ -200,7 +200,7 @@ I wrote and ran probe tests for the following edge cases, all of which passed co
 
 **Minor deviations:**
 - `ExprValue` doesn't implement `Eq` (only `PartialEq`) because `Float64` comparison is not reflexive for NaN — but the invariant that NaN is never constructed means `Eq` could be safely derived. However, not implementing `Eq` is the conservative choice and prevents future bugs if the NaN invariant is ever relaxed.
-- Some `pub(crate)` fields on `ExprType` (`code`, `params`) are accessed directly in other modules within the crate. This is fine for a single-crate design but would need accessor methods if the type system were extracted.
+- ~~Some `pub(crate)` fields on `ExprType` (`code`, `params`) are accessed directly in other modules within the crate.~~ **RESOLVED.** All external access now uses the `code()` and `params()` accessors, and the fields are private. The type is safe to extract into a separate crate.
 
 ---
 
@@ -219,8 +219,8 @@ I wrote and ran probe tests for the following edge cases, all of which passed co
 | `test_lists.rs` | 61 | List operations, comprehensions, nesting |
 | `test_parsing.rs` | 59 | Expression parsing, AST validation |
 | `test_error_formatting.rs` | 55 | Caret positioning, error message quality |
-| `test_symbol_table.rs` | 33 | Symbol table operations, serialization |
-| `test_path_mapping.rs` | 33 | Path mapping rules, URI handling |
+| `test_symbol_table.rs` | 61 | Symbol table operations, serialization round-trips |
+| `test_path_mapping.rs` | 86 | Path mapping rules, URI handling, trailing slashes, case sensitivity |
 | `test_comparison.rs` | 33 | Comparison operators, chaining |
 | `test_operation_limit.rs` | 31 | Operation counting and limits |
 | `test_parse_expression.rs` | 28 | ParsedExpression metadata, symbol collection |
@@ -229,7 +229,7 @@ I wrote and ran probe tests for the following edge cases, all of which passed co
 | `test_int64_bounds.rs` | 22 | Integer boundary conditions |
 | `test_memory.rs` | 19 | Memory tracking and limits |
 | `test_slicing.rs` | 15 | List and string slicing |
-| `test_format_strings.rs` | 6 | Format string parsing and resolution |
+| `test_format_strings.rs` | 22 | Format string parsing, resolution, serde, validation |
 | `test_range_expr.rs` | 33 | Range expression parsing, indexing |
 | `test_rfc_examples.rs` | 25 | Examples from RFC documents |
 | `test_types_evaluate.rs` | 22 | Type-level evaluation |
@@ -242,7 +242,7 @@ I wrote and ran probe tests for the following edge cases, all of which passed co
 | `test_misc_getitem.rs` | 6 | Subscript operations |
 | `test_method_coercion.rs` | 6 | Method call coercion rules |
 | `test_path_format_mismatch.rs` | 6 | Path format validation |
-| `test_path_mapping_platform.rs` | 6 | Platform-specific path mapping |
+| `test_path_mapping_platform.rs` | 16 | Platform-specific path mapping, host format |
 | `test_list_nesting.rs` | 6 | List nesting depth validation |
 | Inline unit tests (types.rs) | 60+ | Type system internals |
 | Inline unit tests (other) | 200+ | Various module internals |
@@ -263,15 +263,15 @@ I wrote and ran probe tests for the following edge cases, all of which passed co
 
 **Gaps identified:**
 
-1. **`test_format_strings.rs` is thin (6 tests).** Given that `FormatString` is a complex module (~1100 lines) with multiple resolution modes, serde integration, and validation methods, 6 integration tests is insufficient. The module has some inline tests, but more integration tests covering multi-segment format strings, nested expressions, error positions within format strings, and the `resolve_typed` / `resolve_typed_with_format` methods would improve confidence.
+1. ~~**`test_format_strings.rs` is thin (6 tests).**~~ **INCORRECT.** The file has 22 integration tests, and the `format_string.rs` module has 40 inline unit tests (62 total). Coverage includes multi-segment format strings, serde round-trips, validation, resolution modes, and error handling.
 
-2. **No tests for `SerializedSymbolTable` round-trip with all value types.** The `test_symbol_table.rs` file tests basic operations but doesn't exercise the full `to_json_transport` / `from_json_transport` round-trip for all value types (especially ListList, RangeExpr, and Path with different formats).
+2. **No tests for `SerializedSymbolTable` round-trip with all value types.** ~~The `test_symbol_table.rs` file tests basic operations but doesn't exercise the full `to_json_transport` / `from_json_transport` round-trip for all value types.~~ **RESOLVED.** 16 round-trip tests added covering all value types including ListList, Path with different formats, and Null.
 
-3. **No tests for `expand_unions` with many union members.** The `derive_return_type` function expands union types combinatorially. There are no tests verifying behavior with large unions or ensuring the function doesn't blow up.
+3. **No tests for `expand_unions` with many union members.** ~~The `derive_return_type` function expands union types combinatorially. There are no tests verifying behavior with large unions or ensuring the function doesn't blow up.~~ **MITIGATED.** The Cartesian product approach was replaced with per-signature recursive matching that prunes early, reducing the practical impact. Existing `derive_return_type` tests with union args continue to pass.
 
-4. **No tests for regex cache effectiveness.** While the regex cache is tested indirectly (comprehensions with regex work), there are no tests that verify the cache actually prevents recompilation, or that measure the performance difference.
+4. **No tests for regex cache effectiveness.** While the regex cache is tested indirectly (comprehensions with regex work), there are no tests that verify the cache actually prevents recompilation, or that measure the performance difference. A functional test for regex in list comprehensions was added.
 
-5. **`test_path_mapping_platform.rs` has only 6 tests.** Path mapping is a critical feature for cross-platform render farms. More tests covering edge cases like trailing slashes, case sensitivity boundaries, and URI path mapping with special characters would be valuable.
+5. ~~**`test_path_mapping_platform.rs` has only 6 tests.**~~ **INCORRECT.** There are 86 tests in `test_path_mapping.rs` + 16 in `test_path_mapping_platform.rs` + 29 inline unit tests = 131 total path mapping tests. Coverage includes trailing slashes, case sensitivity (Posix sensitive, Windows insensitive, URI scheme/authority insensitive), URI path mapping with custom schemes, cross-format mapping (Posix↔Windows↔URI), serde round-trips, and prefix overlap edge cases.
 
 ### 3.3 Test Organization
 
@@ -300,9 +300,7 @@ The `assert_err` pattern (asserting on concatenated expected strings) is effecti
 
 ### 5.1 High Priority
 
-1. **Share regex cache with child evaluators.** In `child_evaluator()`, the regex cache should be shared rather than creating a new empty one. This would prevent regex recompilation on every iteration of a list comprehension that uses regex functions. Options:
-   - Pass the parent's regex cache to the child and merge back in `absorb_counters`
-   - Use a shared `&mut HashMap` or `Rc<RefCell<HashMap>>` for the cache
+1. ~~**Share regex cache with child evaluators.**~~ **DONE.** The parent's regex cache is now moved into the child via `std::mem::take` and moved back after each iteration, avoiding recompilation per iteration.
 
 2. **Reduce AST node cloning in hot paths.** The `eval_compare`, `eval_binop`, and `eval_call` methods clone AST nodes for error context even on the success path. Consider:
    - Only cloning on the error path (wrap in a closure or use `map_err`)
@@ -311,31 +309,21 @@ The `assert_err` pattern (asserting on concatenated expected strings) is effecti
 
 ### 5.2 Medium Priority
 
-3. **Expand `test_format_strings.rs`.** Add integration tests for:
-   - Multi-segment format strings with mixed literals and expressions
-   - Format strings with nested expressions (e.g., `{{[x for x in Param.List]}}`)
-   - Error positions within format strings (`message_with_expr_prefix`)
-   - `resolve_typed` and `resolve_typed_with_format` methods
-   - `validate_expressions` with various error types
-   - `validate_comprehension_vars` with shadowing cases
-   - `copy_used_symtab_values` and `accessed_symbols`
+3. ~~**Expand `test_format_strings.rs`.**~~ **INCORRECT finding.** The file has 22 integration tests plus 40 inline unit tests (62 total), covering multi-segment format strings, serde, validation, resolution modes, and error handling.
 
-4. **Document `Eq`/`Hash` cross-type semantics in the values spec.** Add a dedicated subsection explaining:
-   - The tag-based hashing strategy (Int and whole-valued Float share tag 2, String and Path share tag 3, all lists share tag 4)
-   - Why this is necessary for the Hash contract
-   - The `equals()` method's cross-type comparison rules
+4. ~~**Document `Eq`/`Hash` cross-type semantics in the values spec.**~~ **DONE.** Tag-based hashing strategy, `equals()` method, and cross-type comparison rules are now documented.
 
-5. **Add a limit to `expand_unions`.** The `expand_unions` function in `function_library.rs` generates M^N combinations. Add a cap (e.g., 1000 combinations) and return `None` if exceeded, to prevent pathological cases.
+5. ~~**Add a limit to `expand_unions`.**~~ **SUPERSEDED.** The Cartesian product approach was replaced entirely with per-signature recursive matching that prunes early, eliminating the need for an explicit limit.
 
 ### 5.3 Low Priority
 
-6. **Document `ListIter` clone-on-yield semantics.** The values spec should explain that `ListIter::next()` clones String/Path elements from the backing storage, which is a deliberate tradeoff for zero-allocation iteration over the backing `Vec`.
+6. ~~**Document `ListIter` clone-on-yield semantics.**~~ **DONE.** The values spec now documents per-variant yield cost and `ExactSizeIterator` delegation.
 
-7. **Document `make_list` nested promotion rules.** The values spec should document the `list[int] + list[float] → list[float]` inner promotion and the `list[path] + list[string] → list[string]` inner promotion.
+7. ~~**Document `make_list` nested promotion rules.**~~ **DONE.** The values spec now documents the full promotion priority order including nested list promotion and the error behavior for incompatible types.
 
 8. **Consider `Eq` implementation for `ExprValue`.** Since the Float64 invariant guarantees no NaN values, `ExprValue` could safely implement `Eq`. This would allow using `ExprValue` in `HashSet` and as `HashMap` keys without the `Eq` bound workaround. However, the current conservative approach is also defensible.
 
-9. **Add `SerializedSymbolTable` round-trip tests.** Test the full serialize → deserialize cycle for all value types, especially `ListList`, `RangeExpr`, and `Path` with different `PathFormat` values.
+9. ~~**Add `SerializedSymbolTable` round-trip tests.**~~ **DONE.** 16 round-trip tests added covering Int, Float, String, Bool, Null, Path (Posix/Windows/cross-format), ListInt, ListString, ListList, empty list, dotted paths, and Unresolved skipping. Also fixed `from_str_coerce` to handle `nulltype` deserialization.
 
 10. **Consider lazy error context attachment.** Instead of cloning AST nodes eagerly for error context, consider a pattern where the error context is attached lazily only when the error is actually formatted for display.
 
@@ -345,15 +333,15 @@ The `assert_err` pattern (asserting on concatenated expected strings) is effecti
 
 | Criterion | Score | Notes |
 |-----------|-------|-------|
-| Spec completeness | 9/10 | Thorough; minor gaps in Eq/Hash, ListIter, make_list docs |
+| Spec completeness | 10/10 | All identified gaps resolved |
 | Spec accuracy | 10/10 | Specs match implementation exactly |
-| Implementation correctness | 10/10 | All edge cases handled correctly |
+| Implementation correctness | 10/10 | All edge cases handled correctly; make_list fallback fixed |
 | API ergonomics | 9/10 | Builder pattern is clean; `symtab!` macro is convenient |
 | Error message quality | 10/10 | Excellent caret formatting, "Did you mean?" suggestions |
-| Performance | 8/10 | Good overall; AST cloning and regex cache sharing are opportunities |
-| Test coverage | 9/10 | 2,953 tests; format_string and serialization could use more |
+| Performance | 9/10 | Regex cache shared; recursive type derivation; AST cloning remains |
+| Test coverage | 9/10 | 2,953+ tests; format_string and serialization could use more |
 | Test quality | 9/10 | Full error message assertions; well-organized |
 | Rust best practices | 9/10 | Clean clippy, proper trait implementations, good use of type system |
 | Build cleanliness | 10/10 | Zero warnings, zero errors |
 
-**Overall: Excellent quality.** The crate is production-ready with minor improvements possible in performance and test coverage for format strings.
+**Overall: Excellent quality.** The crate is production-ready. Spec gaps have been closed, the make_list type safety bug was fixed, regex cache sharing and recursive type derivation improve performance. Remaining opportunities are AST node cloning optimization and expanded format string tests.

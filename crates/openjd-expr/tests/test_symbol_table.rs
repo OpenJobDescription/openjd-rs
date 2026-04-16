@@ -5,7 +5,7 @@
 //! Tests ported from Python test_symbol_table.py
 
 use openjd_expr::value::Float64;
-use openjd_expr::{ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{ExprType, ExprValue, PathFormat, SymbolTable};
 
 // ══════════════════════════════════════════════════════════════
 // TestSymbolTable
@@ -509,4 +509,196 @@ fn set_value_over_existing_table_errors() {
         err.to_string().contains("A.B"),
         "Error should mention the conflicting path: {err}"
     );
+}
+
+// ══════════════════════════════════════════════════════════════
+// SerializedSymbolTable round-trip
+// ══════════════════════════════════════════════════════════════
+
+fn round_trip(symtab: &SymbolTable, path_format: PathFormat) -> SymbolTable {
+    let json = serde_json::to_string(symtab).unwrap();
+    let serialized: openjd_expr::SerializedSymbolTable = serde_json::from_str(&json).unwrap();
+    serialized.to_symtab(path_format).unwrap()
+}
+
+#[test]
+fn round_trip_int() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::Int(42)).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("x"), Some(&ExprValue::Int(42)));
+}
+
+#[test]
+fn round_trip_float() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::Float(Float64::new(3.14).unwrap()))
+        .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert!(matches!(rt.get_value("x"), Some(ExprValue::Float(f)) if f.0 == 3.14));
+}
+
+#[test]
+fn round_trip_string() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::String("hello".into())).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("x"), Some(&ExprValue::String("hello".into())));
+}
+
+#[test]
+fn round_trip_bool() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::Bool(true)).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("x"), Some(&ExprValue::Bool(true)));
+}
+
+#[test]
+fn round_trip_null() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::Null).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("x"), Some(&ExprValue::Null));
+}
+
+#[test]
+fn round_trip_path_posix() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "x",
+        ExprValue::Path {
+            value: "/tmp/out".into(),
+            format: PathFormat::Posix,
+        },
+    )
+    .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(
+        rt.get_value("x"),
+        Some(&ExprValue::Path {
+            value: "/tmp/out".into(),
+            format: PathFormat::Posix
+        })
+    );
+}
+
+#[test]
+fn round_trip_path_windows() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "x",
+        ExprValue::Path {
+            value: "C:\\out".into(),
+            format: PathFormat::Windows,
+        },
+    )
+    .unwrap();
+    // Deserialize with a different format — the value is preserved but format comes from the receiver
+    let rt = round_trip(&st, PathFormat::Windows);
+    assert_eq!(
+        rt.get_value("x"),
+        Some(&ExprValue::Path {
+            value: "C:\\out".into(),
+            format: PathFormat::Windows
+        })
+    );
+}
+
+#[test]
+fn round_trip_path_format_changes_on_deserialize() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "x",
+        ExprValue::Path {
+            value: "/tmp/out".into(),
+            format: PathFormat::Posix,
+        },
+    )
+    .unwrap();
+    // Deserialize with Windows format — path separators are normalized to the receiver's format
+    let rt = round_trip(&st, PathFormat::Windows);
+    let v = rt.get_value("x").unwrap();
+    assert_eq!(v.to_display_string(), "\\tmp\\out");
+    assert_eq!(v.expr_type().to_string(), "path");
+}
+
+#[test]
+fn round_trip_list_int() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "x",
+        ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap(),
+    )
+    .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    let v = rt.get_value("x").unwrap();
+    assert_eq!(v.list_len(), Some(2));
+}
+
+#[test]
+fn round_trip_list_string() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "x",
+        ExprValue::make_list(
+            vec![ExprValue::from("a"), ExprValue::from("b")],
+            ExprType::STRING,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    let v = rt.get_value("x").unwrap();
+    assert_eq!(v.list_len(), Some(2));
+    assert_eq!(v.expr_type().to_string(), "list[string]");
+}
+
+#[test]
+fn round_trip_list_list() {
+    let inner1 =
+        ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
+    let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
+    let outer = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let mut st = SymbolTable::new();
+    st.set("x", outer).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    let v = rt.get_value("x").unwrap();
+    assert_eq!(v.expr_type().to_string(), "list[list[int]]");
+    assert_eq!(v.list_len(), Some(2));
+}
+
+#[test]
+fn round_trip_dotted_paths() {
+    let mut st = SymbolTable::new();
+    st.set("Param.Frame", ExprValue::Int(42)).unwrap();
+    st.set("Param.Name", ExprValue::from("shot_01")).unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("Param.Frame"), Some(&ExprValue::Int(42)));
+    assert_eq!(
+        rt.get_value("Param.Name"),
+        Some(&ExprValue::String("shot_01".into()))
+    );
+}
+
+#[test]
+fn round_trip_skips_unresolved() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::Int(1)).unwrap();
+    st.set("y", ExprValue::unresolved(ExprType::STRING))
+        .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    assert_eq!(rt.get_value("x"), Some(&ExprValue::Int(1)));
+    // Unresolved values are skipped during serialization
+    assert_eq!(rt.get_value("y"), None);
+}
+
+#[test]
+fn round_trip_empty_list() {
+    let mut st = SymbolTable::new();
+    st.set("x", ExprValue::make_list(vec![], ExprType::INT).unwrap())
+        .unwrap();
+    let rt = round_trip(&st, PathFormat::Posix);
+    let v = rt.get_value("x").unwrap();
+    assert_eq!(v.list_len(), Some(0));
 }

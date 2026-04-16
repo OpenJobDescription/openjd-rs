@@ -515,10 +515,10 @@ impl<'a> Evaluator<'a> {
             Err(_) => {
                 let src = self.expr_source.unwrap_or("");
                 let val_type = value.expr_type();
-                let val_type_str = if val_type.code == crate::types::TypeCode::Unresolved
-                    && !val_type.params.is_empty()
+                let val_type_str = if val_type.code() == crate::types::TypeCode::Unresolved
+                    && !val_type.params().is_empty()
                 {
-                    val_type.params[0].to_string()
+                    val_type.params()[0].to_string()
                 } else {
                     val_type.to_string()
                 };
@@ -782,10 +782,10 @@ impl<'a> Evaluator<'a> {
             // Check that the unresolved type is compatible with bool
             let inner = unwrap_unresolved(&test.expr_type());
             let is_bool_compatible = inner == ExprType::BOOL
-                || inner.code == crate::types::TypeCode::Unresolved
-                || inner.code == crate::types::TypeCode::Any
-                || (inner.code == crate::types::TypeCode::Union
-                    && inner.params.contains(&ExprType::BOOL));
+                || inner.code() == crate::types::TypeCode::Unresolved
+                || inner.code() == crate::types::TypeCode::Any
+                || (inner.code() == crate::types::TypeCode::Union
+                    && inner.params().contains(&ExprType::BOOL));
             if !is_bool_compatible {
                 let err =
                     ExpressionError::new(format!("Condition must be a boolean, got {}", inner));
@@ -967,8 +967,8 @@ impl<'a> Evaluator<'a> {
     fn eval_list(&mut self, l: &ast::ExprList) -> Result<ExprValue, ExpressionError> {
         // Extract element target type from list[T] target
         let list_elem_target = self.target_type.as_ref().and_then(|tt| {
-            if tt.code == crate::types::TypeCode::List && tt.params.len() == 1 {
-                Some(tt.params[0].clone())
+            if tt.code() == crate::types::TypeCode::List && tt.params().len() == 1 {
+                Some(tt.params()[0].clone())
             } else {
                 None
             }
@@ -1018,8 +1018,8 @@ impl<'a> Evaluator<'a> {
                     {
                         continue;
                     }
-                    if t.code == crate::types::TypeCode::Unresolved
-                        || first_type.code == crate::types::TypeCode::Unresolved
+                    if t.code() == crate::types::TypeCode::Unresolved
+                        || first_type.code() == crate::types::TypeCode::Unresolved
                     {
                         continue;
                     }
@@ -1037,10 +1037,10 @@ impl<'a> Evaluator<'a> {
                 let mut result = unwrap_unresolved(&elements[0].expr_type());
                 for e in elements.iter().skip(1) {
                     let t = unwrap_unresolved(&e.expr_type());
-                    if t.code == crate::types::TypeCode::Unresolved {
+                    if t.code() == crate::types::TypeCode::Unresolved {
                         continue;
                     }
-                    if result.code == crate::types::TypeCode::Unresolved {
+                    if result.code() == crate::types::TypeCode::Unresolved {
                         result = t;
                         continue;
                     }
@@ -1083,7 +1083,7 @@ impl<'a> Evaluator<'a> {
                 .iter()
                 .filter(|t| {
                     // nulltype is compatible with anything
-                    t.code == crate::types::TypeCode::Null ||
+                    t.code() == crate::types::TypeCode::Null ||
                 // int is compatible if float is also present (promotion)
                 (**t == ExprType::INT && seen_types.contains(&ExprType::FLOAT)) ||
                 // float is compatible if int is also present (promotion)
@@ -1098,7 +1098,7 @@ impl<'a> Evaluator<'a> {
             let compatible = dominated.len() == seen_types.len() ||
                 seen_types.len() == 1 ||
                 // All list types are compatible (make_list handles inner promotion)
-                seen_types.iter().all(|t| t.code == crate::types::TypeCode::List || t.code == crate::types::TypeCode::Null);
+                seen_types.iter().all(|t| t.code() == crate::types::TypeCode::List || t.code() == crate::types::TypeCode::Null);
             if !compatible {
                 let type_strs: Vec<String> = seen_types.iter().map(|t| t.to_string()).collect();
                 let msg = if type_strs.len() == 2 {
@@ -1187,8 +1187,8 @@ impl<'a> Evaluator<'a> {
         if slice.is_unresolved() {
             let inner = unwrap_unresolved(&slice.expr_type());
             if inner != ExprType::INT
-                && inner.code != crate::types::TypeCode::Unresolved
-                && inner.code != crate::types::TypeCode::Any
+                && inner.code() != crate::types::TypeCode::Unresolved
+                && inner.code() != crate::types::TypeCode::Any
             {
                 let mut err = ExpressionError::new("Index must be an integer");
                 if let Some(src) = self.expr_source {
@@ -1315,6 +1315,7 @@ impl<'a> Evaluator<'a> {
             let mut combined = base_symtabs.clone();
             combined.push(&tmp);
             let mut child = self.child_evaluator(&combined);
+            child.regex_cache = std::mem::take(&mut self.regex_cache);
             let mut include = true;
             if let Some(if_clause) = gen.ifs.first() {
                 let cond = child.evaluate(if_clause)?;
@@ -1326,6 +1327,7 @@ impl<'a> Evaluator<'a> {
                 result.push(child.evaluate(&lc.elt)?);
             }
             self.absorb_counters(&child);
+            self.regex_cache = child.regex_cache;
             self.current_memory = self.current_memory.saturating_sub(item.memory_size());
         }
 
@@ -1414,8 +1416,8 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.
 fn unwrap_unresolved(t: &ExprType) -> ExprType {
-    if t.code == crate::types::TypeCode::Unresolved && !t.params.is_empty() {
-        t.params[0].clone()
+    if t.code() == crate::types::TypeCode::Unresolved && !t.params().is_empty() {
+        t.params()[0].clone()
     } else {
         t.clone()
     }

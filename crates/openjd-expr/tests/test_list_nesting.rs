@@ -88,3 +88,42 @@ fn make_list_float_rejects_non_float() {
         "got: {err}"
     );
 }
+
+#[test]
+fn make_list_string_rejects_non_string() {
+    let result = ExprValue::make_list(
+        vec![ExprValue::String("a".into()), ExprValue::Int(1)],
+        ExprType::STRING,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("make_list expected string element, got int"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_path_rejects_non_path_non_string() {
+    let result = ExprValue::make_list(
+        vec![
+            ExprValue::Path {
+                value: "/a".into(),
+                format: openjd_expr::PathFormat::Posix,
+            },
+            ExprValue::Int(42),
+        ],
+        ExprType::PATH,
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("make_list expected path element, got int"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_incompatible_types_error() {
+    // Null + Int has no promotion rule — must error, not fall back to ListString
+    let result = ExprValue::make_list(vec![ExprValue::Null, ExprValue::Int(1)], ExprType::NULLTYPE);
+    assert!(result.is_err(), "incompatible types must error");
+}

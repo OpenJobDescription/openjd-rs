@@ -187,8 +187,8 @@ impl FunctionLibrary {
             .iter()
             .map(|a| {
                 let t = a.expr_type();
-                if t.code == crate::types::TypeCode::Unresolved && !t.params.is_empty() {
-                    t.params[0].clone() // unwrap unresolved for matching
+                if t.code() == crate::types::TypeCode::Unresolved && !t.params().is_empty() {
+                    t.params()[0].clone() // unwrap unresolved for matching
                 } else {
                     t
                 }
@@ -343,7 +343,7 @@ impl FunctionLibrary {
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
         let has_unions = arg_types
             .iter()
-            .any(|t| t.code == crate::types::TypeCode::Union);
+            .any(|t| t.code() == crate::types::TypeCode::Union);
         if !has_unions {
             for entry in self.get_signatures(name) {
                 if let Some(bindings) = entry.signature.match_call(arg_types) {
@@ -363,32 +363,55 @@ impl FunctionLibrary {
             return None;
         }
 
-        // Union path: expand and collect all possible return types
-        let expanded = expand_unions(arg_types);
-        let mut result_types = Vec::new();
-
-        for concrete_args in &expanded {
-            // Try exact, then coerced for each combination
-            let mut found = false;
-            for entry in self.get_signatures(name) {
-                if let Some(bindings) = entry.signature.match_call(concrete_args) {
-                    result_types.push(entry.signature.sig_return().substitute(&bindings));
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                for entry in self.get_signatures(name) {
-                    if let Some(coerced) =
-                        try_coerce_types(concrete_args, entry.signature.sig_params(), false)
-                    {
-                        if let Some(bindings) = entry.signature.match_call(&coerced) {
-                            result_types.push(entry.signature.sig_return().substitute(&bindings));
-                            break;
+        // Union path: flatten each arg's types into sets, then recurse per-signature.
+        // This prunes early: if arg 0 doesn't match a signature's param 0, we skip
+        // all combinations involving that arg type without expanding further args.
+        let arg_type_sets: Vec<Vec<ExprType>> = arg_types
+            .iter()
+            .map(|t| {
+                if t.code() == crate::types::TypeCode::Union {
+                    let mut members = t.params().to_vec();
+                    // Apply implicit coercions: int→float, path→string
+                    let mut coerced = Vec::new();
+                    for m in &members {
+                        if m.code() == crate::types::TypeCode::Int {
+                            coerced.push(ExprType::FLOAT);
+                        } else if m.code() == crate::types::TypeCode::Path {
+                            coerced.push(ExprType::STRING);
                         }
                     }
+                    for c in coerced {
+                        if !members.contains(&c) {
+                            members.push(c);
+                        }
+                    }
+                    members
+                } else {
+                    let mut members = vec![t.clone()];
+                    if t.code() == crate::types::TypeCode::Int {
+                        members.push(ExprType::FLOAT);
+                    } else if t.code() == crate::types::TypeCode::Path {
+                        members.push(ExprType::STRING);
+                    }
+                    members
                 }
+            })
+            .collect();
+
+        let mut result_types = Vec::new();
+        for entry in self.get_signatures(name) {
+            let sig_params = entry.signature.sig_params();
+            if sig_params.len() != arg_type_sets.len() {
+                continue;
             }
+            Self::match_signature_recursive(
+                &entry.signature,
+                sig_params,
+                &arg_type_sets,
+                0,
+                HashMap::new(),
+                &mut result_types,
+            );
         }
 
         if result_types.is_empty() {
@@ -403,6 +426,48 @@ impl FunctionLibrary {
         }
     }
 
+    /// Recursively match a signature against argument type sets, pruning
+    /// non-matching branches early instead of expanding the full Cartesian product.
+    fn match_signature_recursive(
+        sig: &ExprType,
+        sig_params: &[ExprType],
+        arg_type_sets: &[Vec<ExprType>],
+        idx: usize,
+        bindings: HashMap<crate::types::TypeCode, ExprType>,
+        result_types: &mut Vec<ExprType>,
+    ) {
+        if idx == arg_type_sets.len() {
+            result_types.push(sig.sig_return().substitute(&bindings));
+            return;
+        }
+        let param = &sig_params[idx];
+        for arg_type in &arg_type_sets[idx] {
+            if let Some(new_binds) = param.match_type(arg_type) {
+                let mut merged = bindings.clone();
+                let mut conflict = false;
+                for (k, v) in new_binds {
+                    if let Some(existing) = merged.get(&k) {
+                        if *existing != v {
+                            conflict = true;
+                            break;
+                        }
+                    }
+                    merged.insert(k, v);
+                }
+                if !conflict {
+                    Self::match_signature_recursive(
+                        sig,
+                        sig_params,
+                        arg_type_sets,
+                        idx + 1,
+                        merged,
+                        result_types,
+                    );
+                }
+            }
+        }
+    }
+
     /// Get the type of a property access.
     pub fn get_property_type(&self, base_type: &ExprType, property_name: &str) -> Option<ExprType> {
         self.derive_return_type(
@@ -412,33 +477,11 @@ impl FunctionLibrary {
     }
 }
 
-/// Expand union types into all concrete type combinations.
-/// `[int | string, float]` → `[[int, float], [string, float]]`
-fn expand_unions(arg_types: &[ExprType]) -> Vec<Vec<ExprType>> {
-    let mut combos = vec![Vec::new()];
-    for arg in arg_types {
-        let members: Vec<&ExprType> = if arg.code == crate::types::TypeCode::Union {
-            arg.params.iter().collect()
-        } else {
-            vec![arg]
-        };
-        let mut new_combos = Vec::new();
-        for combo in &combos {
-            for m in &members {
-                let mut c = combo.clone();
-                c.push((*m).clone());
-                new_combos.push(c);
-            }
-        }
-        combos = new_combos;
-    }
-    combos
-}
-
 /// Implicit coercion rules: int→float, path→string.
 fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
-    (from.code == crate::types::TypeCode::Int && to.code == crate::types::TypeCode::Float)
-        || (from.code == crate::types::TypeCode::Path && to.code == crate::types::TypeCode::String)
+    (from.code() == crate::types::TypeCode::Int && to.code() == crate::types::TypeCode::Float)
+        || (from.code() == crate::types::TypeCode::Path
+            && to.code() == crate::types::TypeCode::String)
 }
 
 /// Try to coerce argument types to match parameter types.
@@ -452,7 +495,7 @@ fn try_coerce_types(
     }
     let mut coerced = Vec::with_capacity(arg_types.len());
     for (i, (at, pt)) in arg_types.iter().zip(param_types.iter()).enumerate() {
-        if at == pt || pt.code == crate::types::TypeCode::Any {
+        if at == pt || pt.code() == crate::types::TypeCode::Any {
             coerced.push(at.clone());
         } else if can_coerce(at, pt) && !(skip_first && i == 0) {
             coerced.push(pt.clone());
@@ -482,7 +525,7 @@ fn try_coerce_args(
             coerced.push(args[i].clone());
         } else if can_coerce(at, pt) && !(skip_first && i == 0) {
             any_changed = true;
-            match (&args[i], pt.code) {
+            match (&args[i], pt.code()) {
                 (ExprValue::Int(v), crate::types::TypeCode::Float) => {
                     coerced.push(ExprValue::Float(
                         crate::value::Float64::new(*v as f64).unwrap(),
@@ -510,7 +553,7 @@ fn coerce_values(args: &[ExprValue], target_types: &[ExprType]) -> Vec<ExprValue
         .zip(target_types.iter())
         .map(|(a, t)| {
             if can_coerce(&a.expr_type(), t) {
-                match (a, t.code) {
+                match (a, t.code()) {
                     (ExprValue::Int(v), crate::types::TypeCode::Float) => {
                         ExprValue::Float(crate::value::Float64::new(*v as f64).unwrap())
                     }

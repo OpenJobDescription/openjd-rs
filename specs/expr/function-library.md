@@ -133,7 +133,7 @@ lib.register_sig("__property_parts__", "(path) -> list[string]", path_parts);
 The evaluator's `eval_attribute` dispatches to `__property_NAME__` when the attribute
 isn't found as a variable in the symbol table.
 
-## Static Type Checking
+## Static Type Derivation
 
 The library supports type-level queries without evaluation:
 
@@ -146,6 +146,49 @@ lib.get_property_type(&ExprType::PATH, "name")  // → Some(ExprType::STRING)
 ```
 
 This is used by the model layer for template validation with unresolved values.
+
+### Non-Union Fast Path
+
+When no argument type is a union, `derive_return_type` tries each registered signature
+in two passes:
+
+1. **Exact match** — `match_call` checks each parameter against the argument type,
+   binding type variables (T1, T2, etc.) and checking consistency
+2. **Coerced match** — applies implicit coercions (INT→FLOAT, PATH→STRING) to the
+   argument types and retries
+
+This is O(S) where S is the number of signatures for the function name.
+
+### Union Path: Per-Signature Recursive Matching
+
+When any argument is a union type (e.g., `union[int, string]`), the function must
+determine all possible return types across all valid type combinations. The naive
+approach — generating the Cartesian product of all union members upfront — is O(M^N)
+where M is the max union size and N is the argument count.
+
+Instead, `derive_return_type` uses per-signature recursive matching (matching the
+Python implementation's `_match_signature` approach):
+
+1. Flatten each argument's types into a set (union members + implicit coercions)
+2. For each registered signature, recurse through argument positions:
+   - At position `i`, try each type from arg `i`'s set against the signature's
+     parameter `i`
+   - If `param.match_type(arg_type)` fails → prune (skip all deeper combinations)
+   - If a type variable binding conflicts with an earlier binding → prune
+   - If all positions match → record the substituted return type
+3. Collect, deduplicate, and return as a union (or single type if all paths agree)
+
+This prunes aggressively in practice because most signatures are concrete. For example,
+with signature `(int, int) -> int` and args `[union[int, string, path], union[int, float]]`:
+- The Cartesian product approach generates 6 combinations and checks each
+- The recursive approach tries `int` at arg 0 → matches → recurses to arg 1 (2 checks),
+  then tries `string` at arg 0 → fails immediately (0 further checks), then `path` →
+  fails immediately. Total: 4 checks instead of 6
+
+The savings grow with more arguments and larger unions. For generic signatures (e.g.,
+`(T1, T2) -> bool` for comparison operators), pruning is less effective since most
+types match, but binding conflict detection still prunes some branches (e.g., `(T, T)`
+rejects `(int, string)`).
 
 ## Sub-Library Composition
 

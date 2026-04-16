@@ -266,7 +266,7 @@ impl ExprValue {
             // so that subsequent operations (e.g. append) preserve the type.
             // Otherwise, use ListInt as the canonical empty list[nulltype]
             // representation (smallest variant, no cached size field).
-            return Ok(match hint_type.code {
+            return Ok(match hint_type.code() {
                 crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
                 crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
                 crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
@@ -383,10 +383,13 @@ impl ExprValue {
                 elements
                     .into_iter()
                     .map(|e| match e {
-                        Self::String(s) => s,
-                        _ => e.to_display_string(),
+                        Self::String(s) => Ok(s),
+                        _ => Err(crate::error::ExpressionError::type_error(format!(
+                            "make_list expected string element, got {}",
+                            e.type_name()
+                        ))),
                     })
-                    .collect(),
+                    .collect::<Result<_, _>>()?,
             ),
             Self::Path { format, .. } => {
                 let fmt = *format;
@@ -394,21 +397,25 @@ impl ExprValue {
                     elements
                         .into_iter()
                         .map(|e| match e {
-                            Self::Path { value, .. } | Self::String(value) => value,
-                            _ => e.to_display_string(),
+                            Self::Path { value, .. } => Ok(value),
+                            Self::String(value) => Ok(value),
+                            _ => Err(crate::error::ExpressionError::type_error(format!(
+                                "make_list expected path element, got {}",
+                                e.type_name()
+                            ))),
                         })
-                        .collect(),
+                        .collect::<Result<_, _>>()?,
                     fmt,
                 )
             }
             _ if elements[0].is_list() => Self::make_list_list(elements, ExprType::NULLTYPE),
             Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
-            _ => Self::make_list_string(
-                elements
-                    .into_iter()
-                    .map(|e| e.to_display_string())
-                    .collect(),
-            ),
+            _ => {
+                return Err(crate::error::ExpressionError::type_error(format!(
+                    "Cannot create list from {} elements",
+                    elements[0].type_name()
+                )))
+            }
         })
     }
 
@@ -441,7 +448,7 @@ impl ExprValue {
         target: &ExprType,
         path_format: PathFormat,
     ) -> Result<Self, String> {
-        match target.code {
+        match target.code() {
             TypeCode::Int => s
                 .parse::<i64>()
                 .map(ExprValue::Int)
@@ -471,6 +478,7 @@ impl ExprValue {
                     })?;
                 Ok(ExprValue::RangeExpr(r))
             }
+            TypeCode::Null if s == "null" => Ok(ExprValue::Null),
             _ => Err(format!("Cannot coerce string to {target}")),
         }
     }
@@ -480,7 +488,7 @@ impl ExprValue {
         if self.expr_type() == *target {
             return Ok(self);
         }
-        match (&self, target.code) {
+        match (&self, target.code()) {
             (ExprValue::Int(i), TypeCode::Float) => {
                 Ok(ExprValue::Float(Float64::new(*i as f64).unwrap()))
             }
@@ -506,8 +514,8 @@ impl ExprValue {
             }
             (ExprValue::RangeExpr(r), TypeCode::String) => Ok(ExprValue::String(r.to_string())),
             (ExprValue::RangeExpr(r), TypeCode::List) => Ok(ExprValue::ListInt(r.to_vec())),
-            _ if target.code == TypeCode::List && target.params.len() == 1 => {
-                let elem_type = &target.params[0];
+            _ if target.code() == TypeCode::List && target.params().len() == 1 => {
+                let elem_type = &target.params()[0];
                 if let Some(elements) = self.list_elements() {
                     let coerced: Result<Vec<_>, _> = elements
                         .into_iter()
@@ -642,9 +650,9 @@ impl ExprValue {
         target: &ExprType,
         path_format: PathFormat,
     ) -> Result<Self, String> {
-        if target.code == TypeCode::List {
+        if target.code() == TypeCode::List {
             let elem_type = target
-                .params
+                .params()
                 .first()
                 .ok_or("List type missing element type")?;
             let arr = value.as_array().ok_or("Expected array for list type")?;

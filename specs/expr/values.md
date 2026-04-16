@@ -101,19 +101,34 @@ ExprValue::unresolved(ExprType::INT)
 necessary. The `hint_type` parameter determines the element type for empty lists — when
 the list is non-empty, the element type is inferred from the elements themselves.
 
+Promotion rules are applied in priority order — the first matching rule wins:
+
 1. All same type → use that typed variant directly
 2. Mix of INT and FLOAT → promote all to FLOAT (`ListFloat`)
-3. Mix of PATH and STRING → promote all to STRING (`ListString`)
-4. Nested lists → `ListList` (validates max 2 nesting levels)
-5. Empty list → variant selected by `hint_type` (defaults to `ListInt` for `list[nulltype]`, compatible with any list type)
+3. Nested `list[int]` + `list[float]` → promote inner `ListInt` elements to `ListFloat`
+4. Nested `list[path]` + `list[string]` → promote inner `ListPath` elements to `ListString`
+5. Mix of PATH and STRING → promote all to STRING (`ListString`)
+6. First element determines variant (homogeneous case)
+7. Incompatible types → error (e.g., INT + STRING, BOOL + FLOAT)
 
-Nested list promotion rules (applied when elements are themselves lists):
+The nested list promotion rules (3, 4) mirror the scalar rules (2, 5) but operate on
+the inner element types. For example, `[ListInt([1,2]), ListFloat([3.0])]` promotes the
+`ListInt` to `ListFloat` before wrapping in `ListList`. This matches the Python
+`_from_list` logic.
 
-- `list[int]` + `list[float]` → promotes inner `ListInt` elements to `ListFloat`
-- `list[path]` + `list[string]` → promotes inner `ListPath` elements to `ListString`
+Per the specification (section 1.2.6), incompatible element types are always an error —
+there is no silent fallback to string conversion.
 
-This matches the Python `_from_list` logic but produces typed Rust vectors instead of
-tagged `ExprValue` vectors.
+Empty list variant selection by `hint_type`:
+
+| `hint_type` | Variant |
+|-------------|---------|
+| BOOL | `ListBool([])` |
+| INT | `ListInt([])` |
+| FLOAT | `ListFloat([])` |
+| PATH | `ListPath([], host_format)` |
+| LIST[T] | `ListList([], T)` |
+| anything else | `ListInt([])` (canonical empty list) |
 
 ## Memory Sizing
 
@@ -156,6 +171,31 @@ and `ExactSizeIterator`. Each `next()` call wraps the underlying element in the
 appropriate `ExprValue` variant — this is a copy for scalar types but avoids cloning
 the backing storage.
 
+### Clone-on-Yield Semantics
+
+The iterator's `Item` type is `ExprValue` (owned), not `&ExprValue`, because the typed
+list variants store raw values (e.g., `Vec<i64>`) that must be wrapped in `ExprValue`
+on yield. The cost varies by variant:
+
+| Variant | Yield cost |
+|---------|-----------|
+| Bool, Int | Bitwise copy (1 or 8 bytes) — zero allocation |
+| Float | `Float64::clone()` — copies the f64 and clones the optional `Box<str>` |
+| String, Path | `String::clone()` — allocates a new heap buffer |
+| List | `ExprValue::clone()` — deep clone of the nested value |
+
+For Bool and Int, this is effectively zero-cost. For String/Path/List, each `next()`
+call allocates. This is acceptable because the evaluator tracks memory for each yielded
+value individually, and the alternative (returning references) would require GATs or
+unsafe code to handle the typed-to-tagged conversion.
+
+### ExactSizeIterator
+
+`ListIter` implements `ExactSizeIterator` by delegating `size_hint()` to the underlying
+`std::slice::Iter`, which always returns an exact `(len, Some(len))`. This enables
+callers (e.g., `make_list`, `equals()`) to pre-allocate output vectors or short-circuit
+on length mismatch without iterating.
+
 ## Equality and Hashing Semantics
 
 `ExprValue` implements `Hash` and `PartialEq` with cross-type equivalence rules:
@@ -166,11 +206,40 @@ the backing storage.
 | `String("x") == Path { value: "x", .. }` | `true` | Path coerces to its string value |
 | `ListInt([]) == ListFloat([])` | `true` | Empty lists are equal regardless of element type |
 | `ListBool([]) == ListString([])` | `true` | Same — all empty lists hash and compare equally |
+| `ListInt([1]) == ListFloat([1.0])` | `true` | Element-wise cross-type comparison via `equals()` |
 
-The `Hash` implementation uses discriminant tags that group equivalent types together:
-Int and whole-valued Float share the same tag, String and Path share the same tag, and
-all list variants share the same tag. This ensures that values which compare equal also
-hash equally, as required by the `Hash` contract.
+`PartialEq` delegates to the `equals()` method, which handles cross-type matching
+explicitly: Int↔Float compares via `(i as f64) == f`, String↔Path compares the string
+values, and list↔list iterates element-wise using `equals()` recursively. List↔RangeExpr
+comparison materializes the range and compares element-by-element.
+
+### Tag-Based Hashing Strategy
+
+The `Hash` implementation must satisfy the contract that `a == b` implies
+`hash(a) == hash(b)`. Because `equals()` treats certain different variants as equal,
+the `Hash` implementation uses discriminant tags that group equivalent types together
+rather than using the enum's natural discriminant:
+
+| Tag | Variants | Why grouped |
+|-----|----------|-------------|
+| `0` | Null | — |
+| `1` | Bool | — |
+| `2` | Int, Float (when whole and in i64 range) | `Int(1) == Float(1.0)` |
+| `12` | Float (fractional or out of i64 range) | No Int equivalent exists |
+| `3` | String, Path | `String("x") == Path { value: "x", .. }` |
+| `4` | All list variants | Empty lists are equal across types |
+| `10` | RangeExpr | — |
+| `11` | Unresolved | — |
+
+For Float values, the hash checks whether the float is a whole number in i64 range. If
+so, it hashes with tag `2` and the `i64` cast — identical to how `Int` hashes. Otherwise
+it uses tag `12` with the raw `f64` bits. This ensures `Int(1)` and `Float(1.0)` produce
+the same hash.
+
+List element hashing mirrors this: each element within a list is hashed using its
+`ExprValue`-equivalent tag, not the raw storage type. So `ListInt([1])` hashes tag `4`,
+then tag `2` + `1i64`, and `ListFloat([1.0])` hashes tag `4`, then tag `2` + `1i64`
+(because `1.0` is whole), producing identical hashes.
 
 ## Coercion
 
@@ -228,6 +297,27 @@ display string and scalar values are serialized as JSON strings:
 
 `from_json_transport` takes a `PathFormat` parameter to construct path values with the
 correct format for the receiving process.
+
+### Shared Format with SerializedSymbolTable
+
+The `{"type", "value"}` encoding is shared with `SerializedSymbolTable` (see
+symbol-table.md). The `SymbolTable` serializer calls `transport_value()` for each entry's
+value, and the deserializer calls `from_transport_value()` to reconstruct it — the same
+internal methods that `to_json_transport()` and `from_json_transport()` use. The only
+difference is that `SerializedSymbolTable` entries add a `"name"` field for the dotted
+path:
+
+```json
+// ExprValue transport (to_json_transport):
+{"type": "int", "value": "42"}
+
+// SerializedSymbolTable entry (same type/value encoding + name):
+{"name": "Param.Frame", "type": "int", "value": "42"}
+```
+
+This shared encoding means that any changes to value serialization (e.g., adding a new
+type) automatically apply to both individual value transport and symbol table
+serialization.
 
 ## Unresolved Values
 

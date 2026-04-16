@@ -39,8 +39,8 @@ pub enum TypeCode {
 /// Use [`code()`](ExprType::code) and [`params()`](ExprType::params) for read access.
 #[derive(Debug, Clone, Eq, serde::Serialize)]
 pub struct ExprType {
-    pub(crate) code: TypeCode,
-    pub(crate) params: Vec<ExprType>,
+    code: TypeCode,
+    params: Vec<ExprType>,
 }
 
 // ── Constants ──

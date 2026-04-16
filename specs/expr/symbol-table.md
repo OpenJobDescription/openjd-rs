@@ -155,8 +155,10 @@ and `from_json_transport()`:
 { "type": "path", "value": "/tmp/out" }
 ```
 
-This format is used for individual value serialization in contexts outside the symbol
-table, such as evaluation result transport.
+This uses the same `{"type", "value"}` encoding as the symbol table entries (minus the
+`"name"` field). Both share the underlying `transport_value()` / `from_transport_value()`
+methods, so the serialization format is always consistent. See the "Shared Format with
+SerializedSymbolTable" subsection in values.md for details.
 
 ## Divergence from Python
 

@@ -2425,3 +2425,12 @@ fn re_sub_method_syntax_hello() {
         "heLo"
     );
 }
+
+#[test]
+fn regex_in_list_comprehension_uses_shared_cache() {
+    // Regex pattern is the same on every iteration — with cache sharing,
+    // it's compiled once. Without sharing, it would be compiled per iteration.
+    let result =
+        eval(r"[x for x in ['shot_01', 'bg', 'shot_02', 'ref'] if re_search(x, 'shot') != null]");
+    assert_eq!(result.list_len(), Some(2));
+}
