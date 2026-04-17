@@ -1,523 +1,488 @@
-# openjd-sessions Crate Quality Evaluation Report
+# openjd-sessions Crate Quality Evaluation
 
-**Date:** 2026-04-15
-**Crate:** `openjd-sessions` (`crates/openjd-sessions`)
-**Scope:** Specifications, implementation source, and tests
+**Evaluator:** Kiro
+**Date:** 2026-04-17
+**Crate location:** `~/openjd-rs/crates/openjd-sessions`
+**Spec location:** `~/openjd-rs/specs/sessions`
 
----
+## Executive summary
 
-## Executive Summary
+`openjd-sessions` is the Rust runtime for executing OpenJD sessions (environment
+enter/exit, task execution, subprocess management, cross-user support). It is a
+port of the Python `openjd-sessions-for-python` library, redesigned around tokio
+async/await + channels + cancellation tokens instead of threads + locks + queues.
 
-The `openjd-sessions` crate is a well-structured Rust implementation of the OpenJD sessions runtime, faithfully mirroring the Python `openjd-sessions-for-python` library. It compiles cleanly with zero warnings, all 315 tests pass (13 cross-user tests correctly ignored without Docker), and clippy reports no lints. The async architecture using tokio channels is sound, and the cross-user helper binary is an impressive performance optimization.
+**Build/test status:**
+- `cargo build -p openjd-sessions --all-targets` — clean, no warnings
+- `cargo clippy -p openjd-sessions --all-targets` — clean
+- `cargo test -p openjd-sessions --all-targets` — **338 passed, 0 failed, 13 ignored**
+  (ignored tests require Docker-based cross-user infrastructure)
 
-However, the evaluation found **2 confirmed bugs** (UTF-8 panic on line truncation — fixed, and cross-user tests broken by wrong tokio runtime flavor — fixed during this evaluation), **1 additional finding** (invalid UTF-8 in subprocess stdout silently drops remaining output — fixed), **several spec-implementation misalignments** (some significant), **test coverage gaps** in edge cases, and **code quality improvements** that would strengthen the crate.
+**Overall assessment:** production-ready for POSIX/Linux. Windows support is
+explicitly partial. The main gaps are alignment (spec drift) and some coverage /
+documentation holes rather than correctness bugs. No blocking release issues were
+identified.
 
----
-
-## 1. Build & Test Results
-
-### Standard Tests
-
-| Check | Result |
-|-------|--------|
-| `cargo build --package openjd-sessions` | ✅ Clean, no warnings |
-| `cargo test --package openjd-sessions` | ✅ 344 passed, 0 failed, 13 ignored |
-| `cargo clippy --package openjd-sessions -- -W clippy::all` | ✅ Clean, no lints |
-
-Test breakdown:
-- Unit tests (lib.rs): 142 passed
-- test_session.rs: 89 passed
-- test_path_mapping.rs: 33 passed
-- test_session_env_step.rs: 20 passed
-- test_session_scenarios.rs: 18 passed
-- test_embedded_files.rs: 13 passed
-- test_tempdir_os.rs: 10 passed
-- test_helper.rs: 8 passed
-- test_path_mapping_materialize.rs: 5 passed
-- test_cross_user.rs: 13 ignored (require Docker)
-- Doc-tests: 6 passed
-
-### Docker Cross-User Tests (localuser environment)
-
-| Check | Result |
-|-------|--------|
-| Cross-user tests (Docker localuser) | ✅ 13 passed, 0 failed |
-| CAP_KILL effective+permitted | ✅ 1 passed |
-| CAP_KILL permitted-only (elevation test) | ✅ 1 passed |
-
-**Bug found and fixed during testing:** All 9 cross-user tests that exercise the helper
-binary were failing with `can call blocking only when running on the multi-threaded runtime`.
-The tests used `#[tokio::test]` (single-threaded `current_thread` runtime), but the
-cross-user helper code uses `tokio::task::block_in_place()` which requires a multi-threaded
-runtime. Fixed by changing to `#[tokio::test(flavor = "multi_thread")]` on the 10 tests
-that create a `Session` with a cross-user configuration. The 3 TempDir-only tests don't
-go through the helper path and correctly use the default single-threaded runtime.
-
-**Pre-existing failures (unrelated):** 2 scenario tests (`scenario_env_file_let_bindings`,
-`scenario_let_host_context`) fail inside Docker because their templates use `python` as
-the command, which is not installed in the Rust Docker image. These are not cross-user
-issues — they fail the same way outside Docker when Python is unavailable.
 
 ---
 
-## 2. Confirmed Bugs
+## Artifacts reviewed
 
-### BUG-1: ~~UTF-8 Panic on 64KB Line Truncation~~ (High — FIXED)
+### Specifications (`~/openjd-rs/specs/sessions/`, 16 files)
 
-**Files:** `subprocess.rs`, `cross_user_helper.rs`
+`README.md`, `architecture.md`, `session.md`, `subprocess.md`, `action-filter.md`,
+`action-messages.md`, `action-status.md`, `runners.md`, `embedded-files.md`,
+`cross-user.md`, `cross-user-subprocess-issues.md`, `cross-user-testing.md`,
+`embedded-cross-user-helper.md`, `tempdir.md`, `logging.md`, `error-handling.md`,
+`win32-locate.md`.
 
-Both sites truncated long output lines using byte-index slicing (`line[..LOG_LINE_MAX_LENGTH]`), which panics if the byte index falls in the middle of a multi-byte UTF-8 character.
+### Implementation source (`src/`)
 
-**Fix applied:** Extracted a shared `truncate_line()` helper using `str::floor_char_boundary()` (stable since Rust 1.82). Both `subprocess.rs` and `cross_user_helper.rs` now call this helper, and the magic number `64 * 1024` in `cross_user_helper.rs` was replaced with the shared `LOG_LINE_MAX_LENGTH` constant.
+`lib.rs`, `session.rs` (1,656), `subprocess.rs` (2,059 incl. tests),
+`action_filter.rs` (1,462 incl. tests), `cross_user_helper.rs` (503),
+`runner/{mod,env_script,step_script}.rs`, `embedded_files.rs`, `tempdir.rs`,
+`session_user.rs`, `action.rs`, `action_status.rs`, `logging.rs`, `error.rs`,
+`capabilities.rs`, `win32.rs`, `win32_permissions.rs`, `win32_locate.rs`,
+`helper_binary.rs`, `helper/` (embedded helper binary).
 
-**Additional finding during fix:** The `tokio::io::Lines` iterator used to read subprocess stdout calls `String::from_utf8` internally and returns `Err(InvalidData)` on non-UTF-8 bytes. The `Err(_) => break` arm then silently dropped all remaining output. This was fixed by replacing `Lines` with `read_until(b'\n')` + `String::from_utf8_lossy`, matching Python's surrogate-escaping / lossy decoding behavior. Invalid bytes are now replaced with U+FFFD (�) and reading continues.
+### Tests
 
-### BUG-2: Cross-User Tests Panic with `current_thread` Runtime (High)
+- Integration: `test_session.rs`, `test_session_scenarios.rs`,
+  `test_session_env_step.rs`, `test_helper.rs`, `test_cross_user.rs`,
+  `test_path_mapping.rs`, `test_path_mapping_materialize.rs`,
+  `test_tempdir_os.rs`, `test_embedded_files.rs`.
+- In-source `#[cfg(test)]` modules in `action_filter.rs`, `subprocess.rs`, and others.
+- `tests/scenarios/` — 23 template + scenario YAML pairs for parameter types and let
+  bindings.
 
-**File:** `tests/test_cross_user.rs`
-
-All 9 cross-user tests that exercise the helper binary used `#[tokio::test]` which
-defaults to a single-threaded (`current_thread`) runtime. The cross-user helper code
-at `session.rs` line 1105 uses `tokio::task::block_in_place()` which panics on
-single-threaded runtimes with: `can call blocking only when running on the multi-threaded runtime`.
-
-This meant **all cross-user subprocess, runner, and session tests were broken** — they
-would panic immediately when run in Docker. Only the 3 TempDir tests and 1 cleanup test
-(which don't go through the helper path) were passing.
-
-**Fix applied:** Changed `#[tokio::test]` to `#[tokio::test(flavor = "multi_thread")]`
-on the 10 tests that create a `Session` with a cross-user user configuration. All 13
-cross-user tests now pass, including both CAP_KILL capability variants.
-
----
-
-## 3. Potential Issues (Medium Severity) — ALL FIXED
-
-### ISSUE-1: ~~`sudo rm -rf` Missing `--` Separator~~ (FIXED)
-
-**File:** `session.rs`, cleanup method
-
-**Fix applied:** Added `"--".to_string()` before `args.extend(files)` to prevent filenames starting with `-` from being interpreted as flags to `rm`.
-
-### ISSUE-2: ~~`is_malformed_env_command` False Positives~~ (FIXED)
-
-**File:** `action_filter.rs`
-
-**Fix applied:** Narrowed the malformed command detector to require a colon, space, or end-of-string after the directive name (`openjd_env:`, `openjd_env `, or `openjd_env` exactly). A legitimate log line like `openjd_environment_setup complete` no longer triggers `CancelMarkFailed`.
-
-### ISSUE-3: ~~Timeout Breaks Stdout Loop Without Draining~~ (FIXED)
-
-**File:** `subprocess.rs`, timeout arm in the `select!` loop
-
-**Fix applied:** Removed the `break` from the timeout arm so the loop continues draining stdout until EOF, matching the cancel path behavior. Diagnostic output emitted before the timeout kill is no longer silently lost.
-
-### ISSUE-4: ~~`Session::redact` Inconsistent with `ActionFilter::apply_redaction`~~ (FIXED)
-
-**File:** `session.rs`
-
-**Fix applied:** `Session::redact()` now sorts redacted values by length descending before iterating, so longer matches are replaced first. This makes overlapping redaction deterministic regardless of `HashSet` iteration order.
-
-### ISSUE-5: ~~Malformed `openjd_redacted_env` Silently Ignored When Redactions Enabled~~ (FIXED)
-
-**File:** `action_filter.rs`, `handle_redacted_env` error path
-
-**Fix applied:** The cancel callback is now always pushed on malformed `openjd_redacted_env`, regardless of the `redactions_enabled` flag. The asymmetry where errors were silently swallowed in the exact configuration where they mattered most is eliminated.
-
-### ISSUE-6: ~~`find_sudo_child_pgid` Fails with Multiple Sudo Children~~ (FIXED)
-
-**File:** `subprocess.rs`, `find_child_pids_procfs` / `find_child_pids_pgrep`
-
-**Fix applied:** Renamed to return `Vec<i32>` of all child PIDs instead of `Option<i32>`. The caller now iterates all children to find one whose PGID differs from sudo's, instead of giving up when sudo has multiple children (e.g., PAM session helper).
 
 ---
 
-## 4. Specification Alignment
+## 1. Spec ↔ implementation mismatches
 
-### 4.1 High-Severity Misalignments — ALL FIXED
+Concrete drift between spec docs and code. Several examples in the specs would not
+compile against the current API.
 
-| # | Spec | Code | Resolution |
-|---|------|------|------------|
-| 1 | ~~session.md says Drop does NOT attempt cleanup~~ | Code DOES call `remove_dir_all` in Drop | **FIXED** — spec updated to document best-effort cleanup in Drop |
-| 2 | ~~subprocess.md shows `env_vars: HashMap<String, String>`~~ | Code uses `HashMap<String, Option<String>>` | **FIXED** — spec updated to `Option<String>` (None = unset) |
-| 3 | ~~subprocess.md shows `oneshot::Receiver<CancelRequest>`~~ | Code uses `watch::Receiver<Option<Duration>>` | **FIXED** — spec updated to match code |
-| 4 | ~~subprocess.md shows 4-param `run_subprocess`~~ | Code has 5th parameter: `cancel_token` | **FIXED** — spec updated with `cancel_token` parameter |
+| # | Spec file | Spec claim | Actual implementation |
+|---|---|---|---|
+| 1 | `session.md` | `SessionConfig` ends at `cancel_token` | Also has `pub collect_stdout: bool` (session.rs:85) |
+| 2 | `architecture.md` | `pub use session::{Session, SessionState, SessionConfig}` example | `lib.rs` also re-exports `EnvironmentIdentifier` at top level |
+| 3 | `session.md` §Session Construction | `Session::new(working_directory)` "behind the `test-utils` feature flag" | Actual fn is `Session::new_for_test` (session.rs:222), no feature flag — always available |
+| 4 | `subprocess.md` | `SubprocessConfig` ends at `cancel_request_rx` | Also has `pub collect_stdout: bool` (subprocess.rs:63) |
+| 5 | `action-filter.md` | `ActionFilter::filter_message(&mut self, line: &str)` (1-arg) | Signature is `filter_message(&mut self, message: &str, session_id: &str)` (action_filter.rs:135) — caller passes session_id per-call |
+| 6 | `action-filter.md` | `ActionFilter` struct stores `session_id: String` | Matches, but spec is unclear why per-call `session_id` is *also* required (used to filter out lines from other sessions that share the same log stream) |
+| 7 | `session.md` §Cleanup | "For cross-user sessions: runs `sudo rm -rf` … then removes the directory as the process user" | Cross-user cleanup path routes through the persistent helper (`cross_user_helper.rs`) when available; sudo-rm is the fallback. Spec doesn't mention the helper-based path. |
+| 8 | `session.md` §Enter | Shows signature `enter_environment(env, resolved_symtab, identifier, os_env_vars)` | Actual also takes `identifier` as `Option<&str>` and returns `SessionError`. Resolved_symtab is `Option<&SerializedSymbolTable>` — not noted as optional in prose. |
+| 9 | `runners.md` §Runner Builder Methods | Lists `with_collect_stdout(bool)` as a runner builder method | Builder exists but spec doesn't say it must match the `SessionConfig.collect_stdout` — leaving ambiguity about precedence |
+| 10 | `runners.md` §CancelMethod | "`onRun` actions: 120 seconds" default grace | Confirmed in source but the 300s `onExit` default mentioned elsewhere isn't cross-linked here |
+| 11 | `embedded-files.md` | `EmbeddedFiles::new(scope, session_files_directory, session_id)` | Matches, but spec misses `with_user(Option<Arc<dyn SessionUser>>)` builder discussion and says "If cross-user, set group ownership" without showing the API path |
+| 12 | `action-messages.md` | Spec signature: `drive_action(&mut self, action_future, message_rx)` | Implementation is a private method; spec should mark it `async fn` + private. It's documented as if public. |
+| 13 | `logging.md` | "`session.rs` logs `HOST_INFO` … at init" | session.rs logs host info inside `with_config` — confirmed. But `log_section_banner` is also used, which the table doesn't attribute to session.rs |
+| 14 | `cross-user.md` / `embedded-cross-user-helper.md` | Two spec docs cover overlapping material. README lists both but the relationship is not stated — a reader has to cross-reference to figure out which describes the primary path and which describes the helper |
+| 15 | `win32-locate.md` | Explicitly "not yet integrated" | `lib.rs` does `pub(crate) mod win32_locate`, which matches. README says "partially implemented" — the spec and README use different phrasing for the same state |
 
-### 4.2 Medium-Severity Misalignments — ALL FIXED
+### Missing from the spec entirely
 
-| # | Spec | Code | Resolution |
-|---|------|------|------------|
-| 5 | ~~action-filter.md describes regex-based parsing~~ | Code uses string prefix matching | **FIXED** — spec rewritten to document `strip_prefix` + `match` approach |
-| 6 | ~~action-filter.md implies ALL directive types checked~~ | Code only checks env-related directives | **FIXED** — spec updated to document env-only checking with rationale |
-| 7 | ~~session.md `enter_environment(env, identifier, os_env_vars, resolved_bindings)`~~ | Code: `(env, resolved_symtab, identifier, os_env_vars)` | **FIXED** — spec updated to match code |
-| 8 | ~~session.md `exit_environment(identifier, os_env_vars, keep_session_running)`~~ | Code adds `resolved_symtab`, reorders | **FIXED** — spec updated to match code |
-| 9 | ~~session.md `run_task(step_script, task_parameter_values, os_env_vars, resolved_bindings)`~~ | Code: `(script, task_parameter_values, resolved_symtab, os_env_vars)` | **FIXED** — spec updated to match code |
-| 10 | ~~embedded-files.md `EmbeddedFiles::new(scope)`~~ | Code: `new(scope, session_files_directory, session_id)` | **FIXED** — spec updated with extra parameters |
-| 11 | ~~runners.md shows `notify_period`~~ | Code uses `terminate_delay` | **FIXED** — spec updated to `terminate_delay` |
-| 12 | ~~subprocess.md describes 5s grace for stdout drain~~ | Code applies 5s timeout to `c.wait()` | **FIXED** — spec rewritten to document process exit timeout |
+These items exist in source with no corresponding spec coverage:
 
-### 4.3 Undocumented Implementation Features — ALL DOCUMENTED
+- **`Session::new_for_test`** — a public constructor used by tests and the CLI. Not
+  documented at all.
+- **`SessionConfig.collect_stdout`** / **`SubprocessConfig.collect_stdout`** —
+  mentioned in passing in `session.md` under `collect_stdout` heading but not shown
+  in any struct-definition code block.
+- **`Session::clone_cancel_writer`** (session.rs:482) — used by runners to pass the
+  cancel-info file writer; entirely absent from `session.md`.
+- **`Session::action_status` accessor** (session.rs:490) — retrieves the current
+  snapshot; undocumented.
+- **`path_mapping_rules` accessor** (session.rs:400) — undocumented.
+- **`environments_entered` accessor** (session.rs:475) — undocumented.
+- **The `helper_binary.rs` module** — embeds the cross-user helper binary at build
+  time via `build.rs`. `embedded-cross-user-helper.md` describes the protocol but
+  not the build-time embedding mechanism (`build.rs` exists; it is not explained).
 
-All previously undocumented features now have spec coverage:
-
-- ~~`enter_environment_with_output()` method~~ → session.md
-- ~~`with_path_mapping()`, `with_library()`, `with_revision_extensions()` builder methods~~ → session.md
-- ~~`get_enabled_extensions()` method~~ → session.md
-- ~~`redact()` method on Session~~ → session.md
-- ~~Windows env var normalization (`normalize_env_key`)~~ → session.md
-- ~~Duplicate environment identifier rejection~~ → session.md
-- ~~`format_command_for_log()` and `process_line()` public functions~~ → subprocess.md (noted as `pub(crate)`)
-- ~~CAP_KILL capability elevation for cross-user SIGKILL~~ → subprocess.md
-- ~~Windows cross-user via `CreateProcessAsUserW`~~ → subprocess.md
-- ~~Windows `CTRL_BREAK_EVENT` and process tree killing~~ → subprocess.md
-- ~~`resolve_action_timeout()` function~~ → runners.md
-- ~~All runner builder methods (`with_redactions`, `with_initial_redacted_values`, etc.)~~ → runners.md
-- ~~`collect_stdout` opt-in~~ → session.md, subprocess.md
-
----
-
-## 5. Code Quality Assessment
-
-### 5.1 Strengths
-
-- **Clean compilation**: Zero warnings, zero clippy lints
-- **Well-organized module structure**: Clear separation of concerns across 15+ modules
-- **Correct async architecture**: The `drive_action` pattern using `tokio::select!` with biased polling and channel-based message passing avoids shared mutable state elegantly
-- **Cross-user helper binary**: Impressive optimization reducing per-action overhead from ~1s to ~1ms
-- **Comprehensive error types**: `SessionError` with `#[non_exhaustive]` and `thiserror` is idiomatic
-- **Platform separation**: Clean `#[cfg(unix)]`/`#[cfg(windows)]` boundaries
-- **Security awareness**: Sticky bit validation, 0o700 permissions, redaction support
-
-### 5.2 Issues Found
-
-#### ~~Missing Trait Implementations~~ — ALL FIXED
-
-| Type | Trait | Status |
-|------|-------|--------|
-| `ScriptRunnerState` | `Display` | ✅ Implemented |
-| `CancelMethod` | `Display` | ✅ Implemented |
-| `ActionState` | `Display` | ✅ Implemented |
-| `ActionMessage` | `Display` | ✅ Implemented |
-| `TempDir` | `Debug` | ✅ Implemented |
-| `TempDir` | `AsRef<Path>` | ✅ Implemented |
-| `ActionStatus` | `Default` | ✅ Implemented |
-
-#### Code Duplication
-
-- **Runner builder methods**: `EnvironmentScriptRunner` and `StepScriptRunner` have near-identical `new()`, `with_redactions()`, `with_initial_redacted_values()`, `with_cancel_token()`, `with_cancel_request_rx()`, `with_helper()`, `take_helper()`, `cancel()`, `state()` methods. A macro or shared trait would eliminate this.
-- ~~**Line truncation**: `64 * 1024` magic number in `cross_user_helper.rs` duplicates `LOG_LINE_MAX_LENGTH` from `subprocess.rs`.~~ **FIXED** — shared `truncate_line()` helper.
-- **`env_script.rs` four-arm match**: The `(let_bindings, embedded_files)` match duplicates `EmbeddedFiles` setup across all arms. The step runner handles this more cleanly with sequential `if let` blocks.
-
-#### ~~Silently Discarded Errors~~ — FIXED
-
-- ~~`chown_for_user()` in `embedded_files.rs`: Both Unix and Windows paths use `let _ =` to discard chown/permission errors.~~ **FIXED** — `chown_for_user()` now returns `Result<(), SessionError>`. Chown runs before chmod (matching Python's security pattern: don't widen permissions if group ownership wasn't set).
-- ~~`write_helper()` in `helper_binary.rs`: Same pattern — `let _ = nix::unistd::chown(...)`.~~ **FIXED** — errors propagated, chown before chmod.
-- All four `let _ = nix::unistd::chown(...)` sites fixed: `embedded_files.rs`, `helper_binary.rs`, `tempdir.rs`, `subprocess.rs`.
-
-#### API Design Concerns
-
-- **`#[allow(clippy::too_many_arguments)]`** on `run_action` (8 params) and `run_env_action` (8 params): A config struct would improve readability.
-- ~~**`parse_end_of_line` is an identity function**~~: **FIXED** — removed, inlined `record.file.end_of_line` directly.
-- ~~**`ActionResult.stderr` is always empty**~~: **FIXED** — removed the field entirely.
-- ~~**`Session::new` misleading name**~~: **FIXED** — renamed to `Session::new_for_test`, gated behind `#[cfg(test)]`.
-- ~~**Unbounded stdout accumulation**~~: **FIXED** — added `collect_stdout: bool` to `SessionConfig` (default `false`). When false, subprocess output is still streamed through the filter/callback in real time, but the collected `String` stays empty. Prevents unbounded memory growth in the worker agent.
-- **`PosixSessionUser` fields are `pub`**: Allows external mutation bypassing validation. Should be private with accessors.
-- **`SessionError::Runtime(String)` overused**: Used for ~10+ distinct error conditions. Dedicated variants like `HelperProtocol`, `PermissionDenied` would enable programmatic error handling.
-- ~~**`CrossUserHelper` lacks `Drop` impl**~~: **FIXED** — added `Drop` for both POSIX and Windows variants. Logs warning and kills/terminates the child if dropped without `shutdown()`.
-- **`symtab_key()` is public**: Leaks internal implementation detail.
-
-#### Naming
-
-- ~~`custom_gettempdir`~~: **FIXED** — renamed to `openjd_temp_dir()`.
-- ~~`Session::new` for a test-only constructor~~: **FIXED** — renamed to `Session::new_for_test`.
-- ~~`_runnable` parameter in `write_embedded_file_with_options`~~: **FIXED** — renamed to `runnable` with `#[cfg_attr(not(unix), allow(unused))]`.
 
 ---
 
-## 6. Test Coverage Assessment
+## 2. Spec coverage gaps
 
-### 6.1 Well-Covered Areas
+Source files or behaviours that deserve a spec section but lack one:
 
-- **Environment variable lifecycle**: Set, override, unset, redact, restore on exit — very thorough (20+ tests)
-- **Path mapping**: All 4 direction combinations (POSIX↔POSIX, POSIX↔Windows, Windows↔POSIX, Windows↔Windows) with 33 tests
-- **Session state machine**: Ready → Running → ReadyEnding → Ended transitions, LIFO enforcement, invalid state errors
-- **Callback coverage**: Fires in ALL code paths — enter/exit with/without script, task success/failure/command-not-found
-- **Let bindings**: All parameter types including PATH, LIST[PATH], RANGE_EXPR, with 18 scenario tests
-- **Cross-user execution**: 13 tests covering subprocess identity, signal delivery, process tree kill, permissions, cleanup
-- **Helper binary protocol**: 8 tests covering startup/shutdown, sequential commands, cancel, crash, env vars, protocol errors
+- **`build.rs`** (2,218 bytes) — compiles the embedded helper binary and sets up
+  linking flags. No spec covers build-time machinery. An operator or packager
+  attempting a cross-build would have to read the code.
+- **`helper/` subcrate** — `helper/src/main.rs`, `protocol.rs`, `runner.rs`,
+  `runner_win.rs`. Only `embedded-cross-user-helper.md` overlaps, and it covers the
+  protocol (IPC messages) — not the helper binary's own lifecycle, arg parsing, or
+  signal-handling.
+- **`win32_permissions.rs`** — ACL management for Windows temp dirs. No spec.
+- **`win32.rs`** — Windows `LogonUserW`, environment block construction, pipe
+  creation. Only referenced obliquely in `subprocess.md`.
+- **`capabilities.rs`** — `CAP_KILL` helper + `CapKillGuard` RAII type. Only a
+  one-paragraph mention in `subprocess.md` §"CAP_KILL Capability Elevation".
+- **`logging.rs` `log_section_banner` / `log_subsection_banner`** — shown in
+  `logging.md` but the exact banner format (column widths, fill characters) is not
+  specified; an alternative consumer parsing the banners cannot rely on a stable
+  format.
+- **`ActionFilter` multi-session behaviour** — `action-filter.md` mentions this in
+  a single sentence: "supports shared log streams where multiple sessions interleave
+  output." No detail on ordering or interleaving semantics.
+- **`EnvironmentScriptRunner::exit()` timeout default of 300s** — mentioned once in
+  `runners.md` §`exit()` but not cross-referenced from the `CancelMethod` table which
+  lists 30s for env scripts. The 30s vs 300s distinction (cancel grace vs overall
+  timeout) should be made explicit.
+- **Dropping a `Session` without calling `cleanup()`** — mentioned in both
+  `session.md` and `tempdir.md` but the exact guarantee (best-effort `remove_dir_all`,
+  no cross-user cleanup, warning emitted) is split across both. A single contract
+  section would reduce confusion.
 
-### 6.2 Coverage Gaps
+### Rationale gaps ("why" is missing)
 
-| Gap | Impact | Recommendation |
-|-----|--------|----------------|
-| No Windows execution tests | All tests use `sh`/`bash`; Windows paths untested | Add Windows-specific scenarios |
-| No concurrent session tests | Thread safety untested | Add multi-session parallel tests |
-| ~~No large output tests~~ | ~~Memory pressure, 64KB truncation untested~~ | **FIXED** — `test_truncate_line_multibyte_boundary` and `test_truncate_line_short_line_unchanged` added |
-| `cancelation` field on `Action` never tested | Grace period, notification command untested | Add tests with `cancelation` set |
-| Timeout with format string resolution untested | Only literal timeout values tested | Add format string timeout tests |
-| `retain_working_dir = true` never tested | Always false in tests | Add retention test |
-| Error message content not asserted | Most tests check `is_err()` only, per AGENTS.md should assert full messages | Add message assertions |
-| Embedded file cleanup not verified | Files created but cleanup not checked | Add cleanup verification |
-| Multiple path mapping rules matching same path | Only single-rule matching tested | Add longest-prefix-match test |
-| End-of-line conversion in session context | Only tested at utility level | Add integration EOL test |
-| Progress boundary values | Invalid values (-0.001, 100.001) not tested at session level | Add boundary tests |
+- **Why the worker agent is the primary consumer** — mentioned; the *design
+  pressure* this exerts (callback speed, real-time streaming, cancellation
+  cascading) could be collected into a single tenets section.
+- **Why `SessionError::Runtime(String)`** is a catch-all — `error-handling.md` says
+  "Used sparingly" but doesn't explain why the alternative (more structured
+  variants) was rejected.
+- **Why the 5-second process-exit grace** in subprocess.rs — the spec mentions the
+  behaviour but doesn't discuss why 5s specifically (not 3s, not 10s).
+- **Why `suppress_filtered` defaults are what they are** — `action-filter.md`
+  doesn't discuss the consumer-choice between passing filtered directives through
+  and suppressing them.
 
-### 6.3 Exploratory Test Results
+### Redundant / repeated content
 
-I wrote and ran 13 exploratory edge-case tests. Results:
+- **Python-vs-Rust comparison tables** appear in `README.md`, `architecture.md`,
+  `action-messages.md`, and `subprocess.md` with overlapping content.
+- **Two-phase embedded-file flow** is described in `embedded-files.md`, `runners.md`,
+  and alluded to in `session.md`. The three versions are broadly consistent but
+  differ in wording in ways that could mislead a reader into thinking they are
+  different.
+- **LIFO environment ordering rule** is stated in both `session.md` and
+  `cross-user.md`.
 
-| Test | Result | Finding |
-|------|--------|---------|
-| Empty redaction value | ✅ Pass | No crash on empty string |
-| Redacted value multiple occurrences | ✅ Pass* | Redaction applies to log output, not raw stdout (by design) |
-| Overlapping redacted values | ✅ Pass* | Same — raw stdout is intentionally unredacted |
-| Extremely long output line | ✅ Pass | Truncated at 64KB, UTF-8 safe via `floor_char_boundary` |
-| Output with no trailing newline | ✅ Pass | Captured correctly |
-| Env var with special chars (hyphen) | ✅ Pass | Properly rejected |
-| Env var with special chars (dot) | ✅ Pass | Properly rejected |
-| Progress at 0.0 | ✅ Pass | Accepted |
-| Progress at 100.0 | ✅ Pass | Accepted |
-| Progress at -0.001 | ✅ Fixed | Error annotation now appears in collected stdout |
-| Progress at 100.001 | ✅ Fixed | Same — collected stdout uses display string with annotations and redaction |
-| Environment re-entry after exit | ✅ Pass | Works correctly |
-| Cleanup after workdir deleted | ✅ Pass | No panic |
-
-*Note: Collected stdout now uses the filter-processed display string, so redacted values appear as `********` and error annotations (e.g., invalid progress) appear inline. This matches what the user sees in logs.
-
----
-
-## 7. Specifications Assessment
-
-### 7.1 Strengths
-
-- **Comprehensive coverage**: 17 spec documents covering all major subsystems
-- **Clear architecture documentation**: Module layout, data flow diagrams, dependency lists
-- **Design rationale**: Key decisions (async-first, channel-based messaging, POSIX-first) are well-explained
-- **Cross-user documentation**: Thorough coverage of sudo-based execution, helper binary, and Docker test infrastructure
-- **Python comparison table**: Useful for understanding design differences
-
-### 7.2 Weaknesses
-
-- ~~**Stale function signatures**~~: **FIXED** — All specs updated to match current code
-- ~~**Missing Windows documentation**~~: **FIXED** — subprocess.md now covers CTRL_BREAK, process tree killing, and CreateProcessAsUserW
-- ~~**Regex vs string parsing**~~: **FIXED** — action-filter.md rewritten to document string-based parsing
-- ~~**Undocumented public API**~~: **FIXED** — All methods now have spec coverage
-- ~~**Drop behavior contradiction**~~: **FIXED** — session.md updated to document best-effort cleanup in Drop
 
 ---
 
-## 8. Recommendations
+## 3. Implementation — Rust quality, API ergonomics
 
-### Priority 1 — Fix Bugs
+### Strengths
 
-1. ~~**Fix UTF-8 panic in line truncation** (BUG-1)~~: **FIXED.** Extracted shared `truncate_line()` helper using `floor_char_boundary()` in both `subprocess.rs` and `cross_user_helper.rs`. Also replaced `tokio::io::Lines` with `read_until` + `from_utf8_lossy` so invalid UTF-8 bytes no longer silently drop remaining output.
+- **No shared-mutable state**: `tokio::select!` + mpsc channel decouples subprocess
+  stdout from `Session::drive_action`. Zero `Mutex` or `RwLock` in the hot path.
+- **`CancellationToken` is used uniformly** for external, per-action, and parent→child
+  cancel propagation. Simpler than Python's `threading.Event` + lock dance.
+- **`#[non_exhaustive]` on `SessionError`** allows adding variants without a semver
+  break.
+- **Grouped private fields** on `Session` (`ActionStatusFields`, `CancelFields`,
+  `CrossUserFields`) keep the struct readable despite ~25 fields.
+- **Builder pattern** (`with_path_mapping`, `with_library`, `with_revision_extensions`)
+  makes optional configuration ergonomic after `with_config`.
+- **Drop safety net** on both `Session` and `TempDir` prevents silent leaks.
+- **`#[cfg(windows)]` / `#[cfg(unix)]` gates** keep platform-specific code from
+  leaking into cross-platform paths.
+- **`shlex::try_join`** is used to quote subprocess args for logging and shell-script
+  wrapping — avoids hand-rolled quoting bugs.
+- **`session_log!` macro** preserves the caller's source location, which a function
+  wrapper could not.
 
-2. ~~**Fix cross-user test runtime flavor** (BUG-2)~~: **FIXED** during this evaluation. Changed `#[tokio::test]` to `#[tokio::test(flavor = "multi_thread")]` on 10 cross-user tests.
+### Friction points
 
-3. ~~**Add `--` separator to `sudo rm -rf`** (ISSUE-1)~~: **FIXED.** Prevents filenames starting with `-` from being interpreted as flags.
+1. **`Session` has ~25 fields** (including those grouped into `*Fields` helpers).
+   The struct would benefit from a `SessionInner` pattern: public `Session` holding
+   an `Arc<SessionInner>` could permit future shared ownership / cloneability.
+2. **`SessionConfig` is a plain struct with ~11 public fields, no builder.** This
+   forces callers to use struct-literal syntax, which is brittle as fields are
+   added (`collect_stdout` was added without a semver break because the field is
+   public — but now all callers who were using `..Default::default()` must adopt
+   it or break). A `SessionConfigBuilder` would be safer.
+3. **`Session::new_for_test` is `pub`** — callers in the same crate test file would
+   be able to use `#[cfg(test)] pub(crate) fn`, but making it fully public risks
+   consumers relying on a test-only path. Document more clearly or gate behind a
+   `test-utils` feature as the spec implies.
+4. **`redact()` allocates repeatedly** — `text.to_string()` + per-value `replace` in
+   a loop. For long command outputs with many redactions this is O(values × length).
+   An Aho-Corasick scanner (or at minimum a single-pass approach that replaces all
+   matches at once) would be cleaner and faster.
+5. **`ActionFilter::filter_message` returns `(Vec<FilterCallback>, bool, String)`** —
+   three-tuple return is hard to use. A `FilterResult { callbacks, pass_through,
+   modified }` struct would be more self-documenting. All 4 call sites in the crate
+   destructure the tuple anyway.
+6. **Error variants mix field names**: `WorkingDirectory { path, source }`,
+   `TempDir { path, source }`, `EmbeddedFile { name, source }`, `SubprocessStart
+   { command, source }`. Consolidating `path` vs `name` vs `command` into a single
+   `target: String` field would be cleaner, but loses type distinctions. The current
+   approach is fine — flagging for consistency review.
+7. **Public `SessionCallbackType = Box<dyn Fn(...)>`** — makes the callback
+   non-cloneable. If tests or middleware want to wrap it, they have to rebuild from
+   scratch. Consider `Arc<dyn Fn>` to enable sharing.
 
-### Priority 2 — ~~Fix Spec Misalignments~~ ALL FIXED
+### Naming consistency
 
-3. ~~**Update function signatures in specs**~~: **FIXED.** session.md, subprocess.md, embedded-files.md, and runners.md all updated to match current code.
+- `SessionConfig` vs `SubprocessConfig` — consistent ✓
+- `Session::with_*` builders vs `EmbeddedFiles::with_user` — consistent ✓
+- `ActionMessageKind` / `ActionMessageValue` / `ActionMessage` — three similar-named
+  types in two modules. `ActionMessageKind`/`Value` are internal to `action_filter.rs`
+  while `ActionMessage` is in `action.rs`. Fine as-is but the distinction is not
+  called out in `action-filter.md`.
+- `SessionState::ReadyEnding` vs `ActionState::Canceled` — `Canceled` vs `Canceling`
+  is intentional (past vs in-progress). `ReadyEnding` is a good name; `Ending` or
+  `Brittle` would also have worked. No change needed.
+- `run_subprocess` appears twice: `subprocess::run_subprocess` (internal) and
+  `Session::run_subprocess` (public, ad-hoc). The ambiguity is managed by module
+  scoping; a comment in both sites cross-linking them would help future maintainers.
 
-4. ~~**Resolve Drop behavior contradiction**~~: **FIXED.** session.md updated to document that Drop does perform best-effort cleanup.
-
-5. ~~**Update action-filter.md**~~: **FIXED.** Replaced regex description with actual string-matching approach, documented env-only malformed command checking with rationale.
-
-6. ~~**Document Windows support**~~: **FIXED.** Added Windows CTRL_BREAK, process tree killing, and CreateProcessAsUserW sections to subprocess.md.
-
-7. ~~**Document undocumented public API**~~: **FIXED.** All ~15 undocumented methods/functions now have spec coverage across session.md, subprocess.md, and runners.md.
-
-### Priority 3 — Improve Code Quality
-
-8. ~~**Add `Display` impls**~~ for `ScriptRunnerState`, `CancelMethod`, `ActionState`, `ActionMessage`: **FIXED.**
-
-9. ~~**Add `Debug` for `TempDir`** and `AsRef<Path>`~~: **FIXED.**
-
-10. **Deduplicate runner builder methods**: Use a macro or trait to eliminate the copy-paste between `EnvironmentScriptRunner` and `StepScriptRunner`.
-
-11. ~~**Log silently discarded errors**~~: **FIXED.** All `let _ =` chown/chmod calls now propagate errors. Chown runs before chmod matching Python's security pattern.
-
-12. ~~**Add `Drop` impl for `CrossUserHelper`**~~: **FIXED.** Both POSIX and Windows variants now have `Drop` impls.
-
-13. ~~**Remove `parse_end_of_line` identity function** and remove or document `ActionResult.stderr`~~: **FIXED.** Identity function removed; `ActionResult.stderr` field removed.
-
-14. ~~**Narrow `is_malformed_env_command`**~~: **FIXED.** Requires colon, space, or end-of-string after directive name to avoid false positives.
-
-15. ~~**Fix malformed `openjd_redacted_env` handling**~~: **FIXED.** Cancel callback now pushed regardless of `redactions_enabled` flag.
-
-### Priority 4 — Improve Test Coverage
-
-16. **Add error message content assertions**: Per AGENTS.md standard, assert full error messages, not just `is_err()`.
-
-17. **Add `cancelation` field tests**: Test grace period and notification command on `Action`.
-
-18. **Add `retain_working_dir = true` test**.
-
-19. **Add format string timeout resolution test**.
-
-20. **Add longest-prefix-match path mapping test** with multiple overlapping rules.
-
-21. **Add end-to-end embedded file EOL conversion test** through the session API.
 
 ---
 
-## 9. Detailed Module Review
+## 4. Error message quality
 
-### 9.1 `session.rs` (~700 lines)
+Errors produced by this crate are generally high quality: they identify the path,
+name, or command that failed and chain the underlying `std::io::Error` via
+`#[source]`. Examples from `error.rs`:
 
-The central module implementing the session state machine. Well-structured with clear state transitions and comprehensive environment variable tracking. The `drive_action` pattern using `tokio::select!` is sound — biased polling ensures cancel/timeout aren't starved by stdout floods, and the single-task model avoids the need for locks.
+- `"Session must be in READY state, current: RUNNING"`
+- `"Environment 'my-env' enter failed: exit code 1"`
+- `"Failed to write embedded file 'MyScript': Permission denied (os error 13)"`
+- `"Failed to start subprocess '/usr/bin/missing': No such file or directory"`
 
-**Reviewed items:**
-- SessionState enum and transitions: ✅ Correct
-- SessionConfig fields and defaults: ✅ Well-designed
-- Environment LIFO enforcement: ✅ Correct, with proper pop-before-exit for failed exits
-- Symbol table construction: ✅ Handles all parameter types including PATH mapping
-- Cancellation flow: ✅ Token cascading works correctly
-- Cleanup: ✅ Fixed — `--` separator added to sudo rm (ISSUE-1)
-- Drop: ⚠️ Contradicts spec (attempts cleanup)
+### Gaps
 
-### 9.2 `subprocess.rs` (~800 lines)
-
-The async subprocess execution engine. Handles same-user and cross-user execution on both POSIX and Windows. The biased `select!` loop with cancel > timeout > stdout priority is well-designed.
-
-**Reviewed items:**
-- Process group isolation via setsid: ✅ Correct
-- Stderr merging via dup2: ✅ Correct
-- Biased select loop: ✅ Sound design
-- Line truncation: ✅ Fixed — uses `floor_char_boundary` via shared `truncate_line()` helper
-- Lossy UTF-8 decoding: ✅ Fixed — uses `read_until` + `from_utf8_lossy` instead of `Lines`
-- Cross-user PGID discovery: ✅ Fixed — handles multiple sudo children (ISSUE-6)
-- Signal delivery: ✅ Correct with CAP_KILL fallback
-- 5-second grace time: ⚠️ Applied to process exit, not stdout drain (spec mismatch)
-
-### 9.3 `action_filter.rs` (~900 lines including tests)
-
-The directive parser for `openjd_*` protocol messages. Comprehensive handling of all directive types with proper redaction support.
-
-**Reviewed items:**
-- Directive parsing: ✅ Correct for all directive types
-- Redaction algorithm (segment merge): ✅ Correct, handles overlapping values
-- Malformed command detection: ✅ Fixed — requires delimiter after directive name (ISSUE-2)
-- JSON-encoded env vars: ✅ Correct
-- Dynamic log level: ✅ Correct
-- Malformed redacted_env when enabled: ✅ Fixed — cancel callback always pushed (ISSUE-5)
-- 126 unit tests inline: ✅ Thorough
-
-### 9.4 `runner/` (mod.rs, env_script.rs, step_script.rs)
-
-Script runner infrastructure with shared base and specialized runners for environment and step scripts.
-
-**Reviewed items:**
-- Two-phase embedded file flow: ✅ Correct, handles circular dependency
-- Format string resolution: ✅ Handles null (skip), list (expand), scalar
-- Cancel method mapping: ✅ Correct
-- Code duplication between runners: ⚠️ Significant (see Section 5.2)
-- Too-many-arguments: ⚠️ 8-parameter methods
-
-### 9.5 `embedded_files.rs`
-
-Two-phase file materialization with proper permission handling.
-
-**Reviewed items:**
-- Allocate/write two-phase flow: ✅ Correct
-- Line ending conversion: ✅ Handles LF, CRLF, Auto
-- Cross-user permissions: ✅ Fixed — errors propagated, chown before chmod
-- Identity function `parse_end_of_line`: ✅ Fixed — removed
-
-### 9.6 `tempdir.rs`
-
-Secure temporary directory management with RAII cleanup.
-
-**Reviewed items:**
-- Random name generation: ✅ UUID-based, unique
-- Permission setting: ✅ 0o700 same-user, 0o770 cross-user
-- Sticky bit validation: ✅ Defense-in-depth
-- Drop safety net: ✅ Best-effort cleanup
-- Missing Debug/AsRef<Path>: ✅ Fixed — both implemented
-
-### 9.7 `cross_user_helper.rs` and `helper/`
-
-Persistent cross-user helper binary that eliminates per-action sudo overhead.
-
-**Reviewed items:**
-- Wire protocol (JSON over stdin/stdout): ✅ Correct
-- Timeout via Condvar: ✅ Cancellable, no orphaned threads
-- Cancel via dup'd stdin fd: ✅ Clever design, avoids borrow conflicts
-- Missing Drop impl: ✅ Fixed — both POSIX and Windows variants have Drop impls
-- Line truncation: ✅ Fixed — uses shared `truncate_line()` helper
-
-### 9.8 `session_user.rs`
-
-Session user identity types for POSIX and Windows.
-
-**Reviewed items:**
-- SessionUser trait: ✅ Send + Sync, extensible
-- PosixSessionUser: ⚠️ Public fields allow mutation
-- WindowsSessionUser: ⚠️ Password stored as plain String
-- `is_process_user()` syscall on every call: ⚠️ Could be cached
-
-### 9.9 `logging.rs`
-
-Structured logging with bitflags and session-aware macros.
-
-**Reviewed items:**
-- LogContent bitflags: ✅ Clean design
-- session_log! macro: ✅ Preserves caller location
-- Banner helpers: ✅ Match Python output format
-- timestamp_usec `as u64` cast: ⚠️ Technically lossy (won't matter until year 586,524 AD)
-
-### 9.10 `error.rs`
-
-Error types with thiserror derivation.
-
-**Reviewed items:**
-- SessionError variants: ✅ Well-designed, #[non_exhaustive]
-- Runtime(String) catch-all: ⚠️ Overused, loses type information
-- Error propagation: ✅ Consistent Result<T, SessionError> throughout
-
-### 9.11 `capabilities.rs`
-
-Linux CAP_KILL support with RAII guard.
-
-**Reviewed items:**
-- CapKillGuard pattern: ✅ Idiomatic RAII
-- Non-Linux stub: ✅ Appropriate
-
-### 9.12 `win32.rs`, `win32_permissions.rs`, `win32_locate.rs`
-
-Windows platform support.
-
-**Reviewed items:**
-- CreateProcessAsUserW/WithLogonW: ✅ Correct Win32 usage
-- DACL permission setting: ✅ Correct
-- win32_locate: ⚠️ Known bug documented in spec (PATH fallback resolves to empty string), `#[allow(dead_code)]` pending integration
+1. **`SessionError::Runtime(String)` is used 20+ times** across `session.rs`,
+   `runner/*.rs`, and `subprocess.rs`. Specific Runtime strings like `"Environment
+   {id} has already been entered in this Session."` could be promoted to structured
+   variants (`DuplicateEnvironmentId { id: String }`). Programmatic consumers
+   cannot distinguish runtime errors without substring matching.
+2. **`format_expected`** produces `"READY or READY_ENDING"`, which is correct but
+   inconsistent — other error messages say `"state: READY"`. Using a consistent
+   phrase like `"state must be one of: READY, READY_ENDING"` would be clearer.
+3. **FormatString error context strings** (e.g., `"action command"`,
+   `"embedded file data for 'MyScript'"`) are hand-written in each call site. A
+   small enum (`FormatStringContext::ActionCommand`, `::EmbeddedFileData(String)`)
+   would prevent drift and enable structured error handling.
+4. **Subprocess errors** surface the raw exit code but don't include a short
+   recommendation (e.g., "command exited with code 127 — check that the command
+   exists in PATH"). Python's equivalent runtime has similar behaviour, so this is
+   not a regression, but it is a place where Rust could improve on Python.
 
 ---
 
-## 10. Performance Assessment
+## 5. Performance concerns
 
-No algorithmic performance issues found. Key observations:
+Ordered by estimated impact:
 
-- **Cross-user helper**: Reduces per-action overhead from ~1s to ~1ms — excellent optimization
-- **Biased select loop**: Prevents stdout floods from starving cancel/timeout — correct priority
-- **Unbounded channel**: Prevents stdout backpressure deadlocks — appropriate for the use case
-- **No O(N²) algorithms detected**: Redaction uses segment merge (O(N log N)), path mapping uses linear scan (appropriate for small rule sets)
-- ~~**Unbounded stdout accumulation**~~: **FIXED** — `collect_stdout` opt-in prevents unbounded memory growth in the worker agent path
-- **Unnecessary clones**: `env_vars.clone()` in `run_action`, `symtab.clone()` in env_script.rs (4 arms), `file.clone()` in `allocate_file_paths` — minor but could be optimized
+| # | File:line | Concern | Complexity |
+|---|---|---|---|
+| 1 | `session.rs:503-513` | `redact()` does one full `String::replace` pass per value in the set, allocating a new String each iteration. For a 1MB log line with 100 redacted values, ~100MB of allocations. Use `aho-corasick` or a single-pass approach. | O(V × L) per line |
+| 2 | `session.rs:1414-…` | `evaluate_env_vars()` clones `HashMap<String,String>` at least 3 times per action (process env → os_env_vars merge → per-environment overlays). At 500+ env vars × 10 environments × per-task invocation, this is measurable. | O(E × V) allocations |
+| 3 | `action_filter.rs:465-…` | `redact_openjd_redacted_env_requests(command)` iterates all redaction values per command formatted for log. Same concern as (1). | O(V × L) |
+| 4 | `subprocess.rs:611-1041` `run_subprocess` | For every stdout line, `truncate_line` → `String::from_utf8_lossy` → to-string → filter → potential redact → format-string log. Each step allocates. A tight subprocess with megabytes/sec of stdout will amplify this. | O(L) per line, high constant |
+| 5 | `action_filter.rs` `filter_message` | Every call rebuilds `msg = message.to_string()` up front even for lines that won't be modified. A `Cow<str>` would avoid allocation on the common-case pass-through. | O(L) per line |
+| 6 | `session.rs:1450-…` `build_symbol_table` | Walks all `job_parameter_values` entries and path-maps each `PATH`/`LIST_PATH` value. For large list parameters (hundreds of entries), the inner loop applies all rules per element. The rules are already sorted by source-path length, so an Aho-Corasick-style index over source paths would let mapping be O(L) per element instead of O(R × L) where R is the rule count. | O(R × L × N) |
+| 7 | `cross_user_helper.rs` `run_via_helper` | Blocking stdin/stdout read loop; fine for the helper's synchronous design but the main helper IPC marshals JSON on every message. For high-frequency actions a length-prefixed binary protocol would be faster. This is a design choice, not a bug — flag for future perf work. | N/A |
+
+### No O(N²) issues found in the hot path
+
+The state-machine transitions are O(1). Environment entry/exit stack is a `Vec`.
+Path-mapping rule sort is O(R log R) once per `with_path_mapping` or `extend_path_mapping_rules` call.
 
 ---
 
-## 11. Summary Scorecard
+## 6. Unwrap / panic / unsafe audit
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Compilation | ⭐⭐⭐⭐⭐ | Zero warnings, zero clippy lints |
-| Test pass rate | ⭐⭐⭐⭐⭐ | 344/344 pass, 13 correctly ignored |
-| Test coverage | ⭐⭐⭐⭐ | Strong core coverage, gaps in edge cases and Windows |
-| Spec alignment | ⭐⭐⭐⭐⭐ | All signatures and behaviors updated to match code |
-| Code quality | ⭐⭐⭐⭐ | Well-structured, some duplication and missing traits |
-| Error handling | ⭐⭐⭐⭐⭐ | Good types, chown/chmod errors now propagated |
-| Performance | ⭐⭐⭐⭐⭐ | No algorithmic issues, excellent helper optimization |
-| Security | ⭐⭐⭐⭐⭐ | Good practices, sudo rm -- separator added |
-| API ergonomics | ⭐⭐⭐⭐ | Clean public surface, some too-many-arguments methods |
-| Rust idioms | ⭐⭐⭐⭐⭐ | All standard trait impls added |
+- **`unsafe`**: limited to:
+  - `subprocess.rs` POSIX `pre_exec` hooks (`setsid`, `dup2`) — well-scoped, both
+    functions are async-signal-safe per POSIX.
+  - `win32*.rs` Windows FFI — every call has a documented safety reason; return
+    values are checked.
+  - `cross_user_helper.rs` — uses `nix`/`libc` for signal delivery; no direct
+    `unsafe` that isn't in a FFI wrapper.
+- **`.unwrap()` / `.expect()` in non-test code**:
+  - `action_filter.rs` regex `LazyLock::new(|| Regex::new(…).unwrap())` — safe,
+    literal pattern verified at compile time.
+  - A handful of sites immediately after a length-check (`child.stdout.take().unwrap()`
+    after `Command::spawn`) — idiomatic, guaranteed.
+- **`panic!`**: none found in library code.
+- **`unreachable!`**: none found.
+
+**Conclusion:** no panic paths reachable from malformed input or normal operation.
+
+
+---
+
+## 7. Test quality
+
+### Strengths
+
+- **338 passing tests**, including integration tests that exercise real subprocess
+  execution, env var propagation, LIFO enforcement, path mapping, and embedded
+  files.
+- **`tests/scenarios/` YAML pairs** (template + scenario) make session integration
+  tests declarative: the test harness loads a template, sets parameter values,
+  runs the action, and asserts against recorded output. 23 scenario pairs
+  covering parameter types (`PATH`, `LIST_PATH`, POSIX↔Windows path mapping),
+  let bindings, and env-file let bindings.
+- **In-source `#[cfg(test)]` modules** in `action_filter.rs` and `subprocess.rs`
+  cover unit behaviour (directive parsing, redaction, env var handling, signal
+  delivery happy/sad paths). `action_filter.rs` tests alone exceed 1,000 lines.
+- **Test helpers** in `tests/support/` provide minimal shell scripts for
+  long-running processes, signal testing, and child-process spawning.
+
+### Gaps
+
+1. **Redaction under load** — no test exercises redaction with many values or long
+   lines. The concern flagged in §5 #1 is not caught by the test suite.
+2. **Unbounded channel backpressure** — `action-messages.md` justifies unbounded
+   channel use. No test injects a stall into the consumer to verify the justification
+   (subprocess does not deadlock when messages pile up).
+3. **Session cancellation from `parent_token`** — `SessionConfig.cancel_token` is
+   documented as cascading to all actions. There is a test that cancels during a
+   running task, but I did not find a test that confirms actions started *after*
+   parent-token cancellation inherit the cancelled state.
+4. **Drop without cleanup** — `TempDir::Drop` is advertised as a safety net. I did
+   not find a direct test that exercises the drop path and asserts the directory is
+   removed.
+5. **`Session::new_for_test`** — public and used in tests, but no test asserts what
+   happens when `with_config` is skipped (e.g., redaction, path mapping, callback
+   all absent).
+6. **Cross-user integration tests are `#[ignore]`** (13 tests). They require Docker
+   images (see `testing_containers/`). The CI workflow file (`.github/workflows/ci.yml`)
+   should be checked to confirm these are actually run in a separate job.
+7. **Malformed-directive test coverage** — the filter detects malformed `openjd_env`
+   / `openjd_redacted_env` / `openjd_unset_env`. Tests exist for obvious cases but a
+   fuzzing pass would be valuable; directive parsing is the attack surface that a
+   malicious (or buggy) action script touches directly.
+8. **Windows tests** — most subprocess and cross-user tests are POSIX-only (`#[cfg(unix)]`).
+   Windows coverage is limited to the CI matrix passing; behaviour-level tests for
+   Windows signals (`CTRL_BREAK_EVENT`), process-tree kill, and cross-user launch
+   were not observed in the test files. This is consistent with the spec's
+   "partially implemented" status.
+9. **Error message quality tests** — AGENTS.md requires tests assert on full error
+   message content. `openjd-sessions` does not yet have a `test_error_messages.rs`
+   file equivalent to `openjd-model` / `openjd-expr`. Adding one would close the
+   consistency gap across crates.
+
+### Organization
+
+Test files are named clearly (`test_session.rs`, `test_session_scenarios.rs`, etc.)
+and use descriptive test-function names. Section comments (`// === … ===`) are used
+in `test_session.rs` to group related tests. Overall, easy to navigate.
+
+---
+
+## 8. Compile/test verification
+
+```
+cargo build -p openjd-sessions --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.30s
+cargo build -p openjd-sessions --all-targets 2>&1 | grep -E "warning|error"
+    (no output)
+cargo clippy -p openjd-sessions --all-targets
+    (no output, clean)
+cargo test -p openjd-sessions --all-targets
+    Total passed: 338 failed: 0 ignored: 13
+```
+
+The 13 ignored tests are cross-user integration tests requiring Docker infrastructure
+documented in `testing_containers/` and `specs/sessions/cross-user-testing.md`.
+
+
+---
+
+## 9. Recommendations
+
+Grouped by category and prioritized within each group.
+
+### Alignment (specs ↔ code)
+
+1. **Add `collect_stdout` to every `SessionConfig` / `SubprocessConfig` struct
+   snippet in the spec.** This is a user-visible field that affects behaviour.
+2. **Fix `Session::new` vs `Session::new_for_test`** — pick one name and remove the
+   "test-utils feature" language from the spec if the fn is always public. Ideally
+   gate it behind a feature flag as the spec implies.
+3. **Update `action-filter.md` to show the correct `filter_message` signature** with
+   the `session_id` parameter and explain why (multi-session log streams).
+4. **Cross-reference `embedded-cross-user-helper.md` and `cross-user.md`** — a
+   single paragraph at the top of each pointing to the other and clarifying which
+   is the primary path would help readers orient.
+5. **Document `Session::new_for_test`, `clone_cancel_writer`, `action_status`,
+   `environments_entered`, and `path_mapping_rules` accessors** in `session.md`.
+6. **Document the `build.rs` embedded-helper-binary mechanism** in either
+   `architecture.md` or `embedded-cross-user-helper.md`. A cross-platform packager
+   must know how the helper is built and where it ends up.
+
+### Spec quality
+
+7. **Collapse repeated Python-vs-Rust comparison tables** into a single
+   `architecture.md` section; other files reference it instead.
+8. **Add rationale sections** for: 5-second process exit grace, unbounded channel
+   choice (already present — good), default cancel grace periods (120s/30s/300s),
+   and when to use `Runtime(String)` vs a structured variant.
+9. **Add a "Session lifecycle contract" section** in `session.md` that collects
+   `Drop` behaviour, `cleanup()` behaviour, cross-user cleanup path, and
+   `retain_working_dir` in one place — it's currently distributed.
+10. **Specify the banner format precisely** in `logging.md` — column widths,
+    padding, so consumers can rely on it or at least know they shouldn't.
+
+### API ergonomics
+
+11. **Replace `filter_message` tuple return with a `FilterResult` struct.** Low-risk
+    refactor; 4 call sites.
+12. **Introduce `SessionConfigBuilder`** — protects against future field additions
+    breaking struct-literal usage.
+13. **Promote the most common `SessionError::Runtime` uses to structured variants**
+    (e.g., `DuplicateEnvironmentId`, `EnvironmentNotEntered`,
+    `InvalidCancelTimeLimit`). Include at least the top 5 by call-site count.
+14. **Make `SessionCallbackType` an `Arc<dyn Fn>`** so middleware can share/wrap it.
+15. **Consider a `SessionInner` pattern** — refactor `Session` into
+    `Session { inner: Arc<SessionInner> }`. Enables cheap cloning (e.g., for
+    monitoring wrappers) without a major API change.
+
+### Performance
+
+16. **Redaction via Aho-Corasick** — build the automaton once when redactions
+    change; re-use across all lines. Closes the O(V × L) concern.
+17. **Pass-through lines avoid allocation** — in `filter_message`, switch the
+    return path to `Cow<str>`; allocate only on redaction / annotation.
+18. **Path-mapping index for large `LIST_PATH` parameters** — trie or Aho-Corasick
+    over source-path prefixes.
+19. **Re-use env var HashMaps** — `evaluate_env_vars` could build once per
+    environment entry and incrementally diff on each action rather than rebuilding.
+
+### Tests
+
+20. **Add a redaction stress test** asserting that 1MB of log lines with 100
+    redacted values completes in a reasonable time budget. Will catch any
+    regression from (16).
+21. **Add a subagent-stalled backpressure test** to confirm `unbounded_channel`
+    does not introduce deadlocks in practice.
+22. **Add a `TempDir::Drop` cleanup test** that drops the dir without calling
+    `cleanup()` and asserts the directory is removed.
+23. **Add `test_error_messages.rs`** for `openjd-sessions`, following the
+    AGENTS.md error-message test pattern used in `openjd-model` and
+    `openjd-expr`. Assert on full error strings to lock down quality.
+24. **Expand Windows behaviour tests** as Windows support matures — behavioural
+    tests for CTRL_BREAK_EVENT, process-tree kill, and cross-user launch.
+
+---
+
+## 10. Summary
+
+**Rating:** production-ready for POSIX/Linux deployment; Windows support is
+explicitly partial and tracks that way.
+
+**Blocking issues:** none.
+
+**High-value next steps:**
+1. Close spec drift (items 1–6).
+2. Replace the tuple return from `ActionFilter::filter_message` (item 11).
+3. Address the redaction performance concern with Aho-Corasick (item 16).
+4. Add `test_error_messages.rs` to align with other crates (item 23).
+
+**Nice-to-have:**
+- `SessionConfigBuilder` for forward-compatibility (item 12).
+- Promote common `Runtime(String)` uses to structured variants (item 13).
+- Rationale pass over the spec (item 8).
+
+The codebase reflects careful engineering — the state machine, async cancellation,
+and cross-user path are all cleanly modeled. Most findings here are about tightening
+alignment between code and specs, not fixing bugs.
