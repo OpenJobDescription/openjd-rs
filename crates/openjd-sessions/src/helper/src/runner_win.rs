@@ -6,7 +6,7 @@
 //! Spawns a child process with CREATE_NEW_PROCESS_GROUP, reads its stdout
 //! on background threads, and handles cancel commands via a channel from main.
 
-use super::protocol::{send, Response, RunCommand};
+use super::protocol::{send, CancelMethod, Response, RunCommand};
 use std::io::BufRead;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -19,7 +19,7 @@ use std::sync::mpsc;
 /// - Cancel signals arrive via `cancel_rx` from the stdin reader in main.rs
 pub fn run_command(
     cmd: &RunCommand,
-    cancel_rx: &mpsc::Receiver<String>,
+    cancel_rx: &mpsc::Receiver<CancelMethod>,
 ) -> Result<i32, String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
@@ -77,10 +77,19 @@ pub fn run_command(
     drop(out_tx);
 
     // Drain output lines, checking for cancel between receives.
+    let mut escalation_deadline: Option<std::time::Instant> = None;
     loop {
         // Check for cancel (non-blocking)
-        if let Ok(sig) = cancel_rx.try_recv() {
-            handle_cancel(child_pid, &sig);
+        if let Ok(method) = cancel_rx.try_recv() {
+            escalation_deadline = handle_cancel(child_pid, &method);
+        }
+
+        // If a soft signal was sent and the grace window expired, escalate.
+        if let Some(deadline) = escalation_deadline {
+            if std::time::Instant::now() >= deadline {
+                kill_process_tree(child_pid);
+                escalation_deadline = None;
+            }
         }
 
         // Read output with a short timeout so we can check cancel periodically
@@ -116,15 +125,28 @@ pub fn run_command(
     Ok(exit_code)
 }
 
-fn handle_cancel(child_pid: u32, signal: &str) {
-    match signal {
-        "TERMINATE" | "SIGKILL" => {
+/// Handle a cancel request. Returns an escalation deadline for soft signals
+/// (the caller must force-kill if the child is still alive after this instant).
+fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Instant> {
+    match method {
+        CancelMethod::Terminate => {
             kill_process_tree(child_pid);
+            None
         }
-        _ => {
-            // CTRL_BREAK or SIGTERM — try graceful first
+        CancelMethod::NotifyThenTerminate {
+            notify_period_in_seconds,
+        } => {
+            // Platform-appropriate soft signal
             if !send_ctrl_break(child_pid) {
+                // Couldn't even deliver the signal; kill immediately.
                 kill_process_tree(child_pid);
+                None
+            } else {
+                // Signal delivered — give the child the notify period to exit.
+                Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_secs(*notify_period_in_seconds),
+                )
             }
         }
     }

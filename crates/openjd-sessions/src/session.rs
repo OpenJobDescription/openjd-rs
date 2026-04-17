@@ -18,6 +18,10 @@ use tokio_util::sync::CancellationToken;
 use crate::action::{ActionMessage, ActionResult, ActionState};
 use crate::action_status::ActionStatus;
 use crate::cross_user_helper::run_via_helper;
+
+/// Default notify period (in seconds) for `NOTIFY_THEN_TERMINATE` cancel when
+/// no explicit time_limit is provided. Matches the OpenJD spec default.
+pub const DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 #[cfg(unix)]
 use crate::cross_user_helper::CrossUserHelper;
 #[cfg(windows)]
@@ -251,6 +255,20 @@ impl Session {
             revision_extensions: None,
             collect_stdout: true, // test constructor — tests need captured stdout
         }
+    }
+
+    /// Test-only: inject a cancel_writer (e.g. the write end of a pipe) so a test
+    /// can observe what `cancel_action` writes.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File) {
+        self.cross_user.cancel_writer = Some(writer);
+    }
+
+    /// Test-only: force the session state (typically to `Running`) so `cancel_action`
+    /// will proceed without needing a full action run.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_state_for_test(&mut self, state: SessionState) {
+        self.state = state;
     }
 
     /// Full constructor from SessionConfig.
@@ -542,19 +560,19 @@ impl Session {
         // Send cancel to the helper process via the dup'd stdin fd.
         if let Some(ref mut writer) = self.cross_user.cancel_writer {
             use std::io::Write;
-            let signal = if cfg!(windows) {
-                match time_limit {
-                    Some(d) if d.is_zero() => "TERMINATE",
-                    _ => "CTRL_BREAK",
-                }
+            let is_terminate = matches!(time_limit, Some(d) if d.is_zero());
+            let cmd = if is_terminate {
+                r#"{"cancel":"TERMINATE"}"#.to_string()
             } else {
-                match time_limit {
-                    Some(d) if d.is_zero() => "SIGKILL",
-                    _ => "SIGTERM",
-                }
+                let notify_period = time_limit
+                    .unwrap_or(Duration::from_secs(DEFAULT_CANCEL_NOTIFY_PERIOD_SECS))
+                    .as_secs();
+                format!(
+                    r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+                )
             };
-            let cmd = format!("{{\"cancel\":\"{signal}\"}}\n");
             let _ = writer.write_all(cmd.as_bytes());
+            let _ = writer.write_all(b"\n");
             let _ = writer.flush();
         }
 

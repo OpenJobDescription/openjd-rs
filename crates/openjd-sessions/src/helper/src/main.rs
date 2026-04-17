@@ -66,7 +66,7 @@ fn run_windows() {
     }
 
     let (main_tx, main_rx) = mpsc::channel::<MainCmd>();
-    let (cancel_tx, cancel_rx) = mpsc::channel::<String>();
+    let (cancel_tx, cancel_rx) = mpsc::channel::<protocol::CancelMethod>();
 
     // Stdin reader thread
     std::thread::spawn(move || {
@@ -104,8 +104,8 @@ fn run_windows() {
                     let _ = main_tx.send(MainCmd::Shutdown);
                     break;
                 }
-                Command::Cancel(sig) => {
-                    let _ = cancel_tx.send(sig);
+                Command::Cancel(req) => {
+                    let _ = cancel_tx.send(req);
                 }
             }
         }

@@ -17,9 +17,9 @@ pub enum CancelMethod {
 ```
 
 Derived from the action's `cancelation` field in the template:
-- `TerminateCancelMethod` → `CancelMethod::Terminate` (immediate SIGKILL)
+- `TerminateCancelMethod` → `CancelMethod::Terminate` (immediate kill)
 - `NotifyThenTerminate` → `CancelMethod::NotifyThenTerminate` with the specified
-  `notifyPeriodInSeconds` (SIGTERM → grace period → SIGKILL)
+  `notifyPeriodInSeconds` (graceful notify → grace period → forced kill)
 
 Default grace periods match the Python library:
 - `onRun` actions: 120 seconds

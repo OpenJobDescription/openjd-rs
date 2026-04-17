@@ -103,11 +103,7 @@ fn test_helper_cancel_terminates_quickly() {
     std::thread::sleep(Duration::from_millis(500));
 
     // Send terminate cancel
-    let cancel_cmd = if cfg!(windows) {
-        r#"{"cancel":"TERMINATE"}"#
-    } else {
-        r#"{"cancel":"SIGKILL"}"#
-    };
+    let cancel_cmd = r#"{"cancel":"TERMINATE"}"#;
     let start = Instant::now();
     send_cmd(&mut stdin, cancel_cmd);
 

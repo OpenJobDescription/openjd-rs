@@ -35,10 +35,24 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
 
     let mut child_buf = std::io::BufReader::new(child_stdout);
     let mut child_killed = false;
+    let mut escalation_deadline: Option<std::time::Instant> = None;
 
     loop {
         let timeout = if child_killed {
             PollTimeout::from(100u16)
+        } else if let Some(deadline) = escalation_deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                // Deadline passed — escalate now.
+                let _ = killpg(child_pid, Signal::SIGKILL);
+                child_killed = true;
+                escalation_deadline = None;
+                PollTimeout::from(100u16)
+            } else {
+                // Poll until the deadline so we can escalate on time.
+                let ms = remaining.as_millis().min(u16::MAX as u128) as u16;
+                PollTimeout::from(ms.max(1))
+            }
         } else {
             PollTimeout::NONE
         };
@@ -59,13 +73,22 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
         {
             let mut line = String::new();
             if stdin_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                if let Ok(HelperCommand::Cancel(sig)) = serde_json::from_str::<HelperCommand>(&line) {
-                    let signal = match sig.as_str() {
-                        "SIGKILL" => Signal::SIGKILL,
-                        _ => Signal::SIGTERM,
-                    };
-                    let _ = killpg(child_pid, signal);
-                    child_killed = true;
+                if let Ok(HelperCommand::Cancel(method)) = serde_json::from_str::<HelperCommand>(&line) {
+                    match method {
+                        super::protocol::CancelMethod::Terminate => {
+                            let _ = killpg(child_pid, Signal::SIGKILL);
+                            child_killed = true;
+                        }
+                        super::protocol::CancelMethod::NotifyThenTerminate {
+                            notify_period_in_seconds,
+                        } => {
+                            let _ = killpg(child_pid, Signal::SIGTERM);
+                            escalation_deadline = Some(
+                                std::time::Instant::now()
+                                    + std::time::Duration::from_secs(notify_period_in_seconds),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -104,8 +127,8 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
             return Ok(status.code().unwrap_or(-1));
         }
 
-        // After kill, poll for child exit even without fd events
-        if child_killed {
+        // After kill or soft signal, poll for child exit even without fd events
+        if child_killed || escalation_deadline.is_some() {
             if let Ok(Some(status)) = child.try_wait() {
                 let mut line = String::new();
                 while child_buf.read_line(&mut line).unwrap_or(0) > 0 {

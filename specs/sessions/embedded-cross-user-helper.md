@@ -55,9 +55,9 @@ Newline-delimited JSON over stdin (commands) and stdout (responses).
 ```json
 {"command": "bash", "args": ["-c", "echo hello"], "env": {"PATH": "/usr/bin"}, "cwd": "/sessions/abc"}
 
-{"cancel": "SIGTERM"}
+{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}
 
-{"cancel": "SIGKILL"}
+{"cancel": "TERMINATE"}
 
 "shutdown"
 ```
@@ -184,7 +184,7 @@ let cancel_writer = File::from_raw_fd(dup_fd);
 
 // In Session::cancel_action:
 if let Some(ref mut writer) = self.cancel_writer {
-    writeln!(writer, "{{\"cancel\":\"SIGTERM\"}}")?;
+    writeln!(writer, "{{\"cancel\":\"NOTIFY_THEN_TERMINATE\",\"notifyPeriodInSeconds\":5}}")?;
     writer.flush()?;
 }
 ```
@@ -204,12 +204,12 @@ if let Some(timeout) = config.timeout {
         let guard = lock.lock().unwrap();
         let (guard, _) = cvar.wait_timeout_while(guard, timeout, |d| !*d).unwrap();
         if *guard { return; } // command finished before timeout
-        writeln!(writer, "{{\"cancel\":\"SIGTERM\"}}");
+        writeln!(writer, "{{\"cancel\":\"NOTIFY_THEN_TERMINATE\",\"notifyPeriodInSeconds\":5}}");
         // Grace period — also cancellable
         let guard = lock.lock().unwrap();
         let (guard, _) = cvar.wait_timeout_while(guard, 5s, |d| !*d).unwrap();
         if *guard { return; }
-        writeln!(writer, "{{\"cancel\":\"SIGKILL\"}}");
+        writeln!(writer, "{{\"cancel\":\"TERMINATE\"}}");
     });
 }
 // DoneGuard sets *done = true and notifies the condvar on any return path
@@ -272,9 +272,9 @@ docker run --rm openjd-cross-user
 # test result: ok. 13 passed; 0 failed
 ```
 
-Tests cover: basic execution, stdout streaming, SIGTERM cancel, SIGKILL cancel,
-process tree kill, CAP_KILL, uid/gid verification, env vars, env isolation,
-cleanup, permissions, and disjoint user rejection.
+Tests cover: basic execution, stdout streaming, notify-then-terminate cancel,
+immediate terminate cancel, process tree kill, CAP_KILL, uid/gid verification,
+env vars, env isolation, cleanup, permissions, and disjoint user rejection.
 
 ## Resolved Decisions
 

@@ -341,6 +341,7 @@ pub(crate) fn run_via_helper(
             .map_err(|e| SessionError::Runtime(format!("Failed to clone cancel_writer: {e}")))?;
         let timed_out = timed_out.clone();
         let done = done.clone();
+        let cancel_method = config.cancel_method.clone();
         let handle = std::thread::spawn(move || {
             let (lock, cvar) = &*done;
             let guard = lock.lock().unwrap();
@@ -350,29 +351,38 @@ pub(crate) fn run_via_helper(
             } // command finished before timeout
             drop(guard);
             timed_out.store(true, std::sync::atomic::Ordering::Release);
-            let cancel_notify = if cfg!(windows) {
-                r#"{"cancel":"CTRL_BREAK"}"#
-            } else {
-                r#"{"cancel":"SIGTERM"}"#
+            let notify_period = match cancel_method {
+                crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
+                    terminate_delay.as_secs()
+                }
+                crate::runner::CancelMethod::Terminate => 0,
             };
-            let _ = writeln!(writer, "{cancel_notify}");
-            let _ = writer.flush();
-            // Grace period — also cancellable
-            let guard = lock.lock().unwrap();
-            let (guard, _) = cvar
-                .wait_timeout_while(guard, std::time::Duration::from_secs(5), |d| !*d)
-                .unwrap();
-            if *guard {
-                return;
+            if notify_period == 0 {
+                // Immediate kill — no grace period.
+                let cancel_terminate = r#"{"cancel":"TERMINATE"}"#;
+                let _ = writeln!(writer, "{cancel_terminate}");
+                let _ = writer.flush();
+            } else {
+                let cancel_notify = format!(
+                    r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+                );
+                let _ = writeln!(writer, "{cancel_notify}");
+                let _ = writer.flush();
+                // Grace period — also cancellable
+                let guard = lock.lock().unwrap();
+                let (guard, _) = cvar
+                    .wait_timeout_while(guard, std::time::Duration::from_secs(notify_period), |d| {
+                        !*d
+                    })
+                    .unwrap();
+                if *guard {
+                    return;
+                }
+                drop(guard);
+                let cancel_terminate = r#"{"cancel":"TERMINATE"}"#;
+                let _ = writeln!(writer, "{cancel_terminate}");
+                let _ = writer.flush();
             }
-            drop(guard);
-            let cancel_terminate = if cfg!(windows) {
-                r#"{"cancel":"TERMINATE"}"#
-            } else {
-                r#"{"cancel":"SIGKILL"}"#
-            };
-            let _ = writeln!(writer, "{cancel_terminate}");
-            let _ = writer.flush();
         });
         Some(handle)
     } else {

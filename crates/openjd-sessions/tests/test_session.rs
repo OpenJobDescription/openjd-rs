@@ -2286,3 +2286,102 @@ async fn test_redactions_disabled_with_no_revision_extensions() {
         "SECRET should not be set with no revision_extensions, got: {out}"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// cancel_action escalation: soft signal followed by a hard TERMINATE
+// after the grace period. Exercised without a real cross-user helper
+// by injecting a file as the cancel_writer and inspecting what was
+// written over time.
+// ══════════════════════════════════════════════════════════════
+
+mod cancel_escalation {
+    use super::*;
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::time::Duration;
+
+    fn read_cancel_messages(path: &std::path::Path) -> Vec<serde_json::Value> {
+        let mut buf = String::new();
+        let mut f = OpenOptions::new().read(true).open(path).unwrap();
+        f.read_to_string(&mut buf).unwrap();
+        buf.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    fn session_with_observable_writer(tmp: &TempDir) -> (Session, std::path::PathBuf) {
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        s.set_state_for_test(SessionState::Running);
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+        (s, writer_path)
+    }
+
+    /// With no time_limit, the default notify period is 5s.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn default_grace_sends_notify_then_terminate() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_with_observable_writer(&tmp);
+
+        s.cancel_action(None, false).expect("cancel_action ok");
+
+        std::thread::sleep(Duration::from_millis(200));
+        let msgs = read_cancel_messages(&path);
+        assert_eq!(
+            msgs.len(),
+            1,
+            "session should send exactly one cancel message"
+        );
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 5);
+
+        // No escalation thread — wait past the grace to confirm nothing else is written.
+        std::thread::sleep(Duration::from_secs(6));
+        let late = read_cancel_messages(&path);
+        assert_eq!(
+            late.len(),
+            1,
+            "session should not send a second message; escalation is in the helper"
+        );
+    }
+
+    /// Custom grace (8s) — e.g. set via a job template's cancelation timeout.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn custom_grace_8s_sends_correct_notify_period() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_with_observable_writer(&tmp);
+
+        s.cancel_action(Some(Duration::from_secs(8)), false)
+            .expect("cancel_action ok");
+
+        std::thread::sleep(Duration::from_millis(200));
+        let msgs = read_cancel_messages(&path);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 8);
+    }
+
+    /// A zero-duration time_limit means "kill now" — TERMINATE is sent directly.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn zero_time_limit_sends_terminate() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_with_observable_writer(&tmp);
+
+        s.cancel_action(Some(Duration::from_secs(0)), false)
+            .expect("cancel_action ok");
+
+        std::thread::sleep(Duration::from_millis(200));
+        let msgs = read_cancel_messages(&path);
+        assert_eq!(msgs.len(), 1, "should send exactly one message");
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+        assert!(
+            msgs[0].get("notifyPeriodInSeconds").is_none(),
+            "TERMINATE should not include notifyPeriodInSeconds"
+        );
+    }
+}

@@ -196,7 +196,7 @@ The `use_session_env_vars` flag controls which env vars the subprocess inherits:
 
 ### Cancelation
 
-Always uses `CancelMethod::Terminate` (immediate SIGKILL). There is no
+Always uses `CancelMethod::Terminate` (immediate kill). There is no
 `NotifyThenTerminate` option for ad-hoc subprocesses.
 
 ### Cross-user routing
@@ -302,7 +302,8 @@ Unset takes precedence over set within the same environment, matching the spec.
 1. Validates state is `Running`
 2. Sets state to `Canceling`
 3. Cancels the `CancellationToken` — the subprocess loop responds by sending the
-   appropriate signal (SIGTERM for notify-then-terminate, SIGKILL for terminate)
+   appropriate cancel command to the helper (`NOTIFY_THEN_TERMINATE` with a notify
+   period for graceful cancel, or `TERMINATE` for immediate kill)
 4. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
 
 The `time_limit` parameter sets a deadline for the cancelation to complete. If the

@@ -35,8 +35,8 @@ Session (agent user)          Helper (job user, via sudo)
     |<-- {"pid": 1234} -----------|
     |<-- {"out": "line..."} ------|   (stdout lines)
     |                              |
-    |-- {"cancel":"SIGTERM"} ---->|-- killpg(child, SIGTERM)
-    |-- {"cancel":"SIGKILL"} ---->|-- killpg(child, SIGKILL)
+    |-- {"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5} -->|-- killpg(child, SIGTERM)
+    |                              |   (grace period, then SIGKILL if still alive)
     |                              |
     |<-- {"exited": 0} ----------|
     |                              |
@@ -54,17 +54,20 @@ Session (agent user)          Helper (job user, via sudo)
 
 ## What Changes for Windows
 
-### Protocol — no changes
+### Protocol — platform-agnostic cancel
 
-Same JSON protocol on both platforms. The cancel signal names change:
+The cancel protocol uses spec-aligned names from the OpenJD
+`cancelationMethod` schema, not platform-specific signal names:
 
-| POSIX | Windows |
-|-------|---------|
-| `{"cancel": "SIGTERM"}` | `{"cancel": "CTRL_BREAK"}` |
-| `{"cancel": "SIGKILL"}` | `{"cancel": "TERMINATE"}` |
+| Cancel method | Wire format |
+|---------------|-------------|
+| Graceful (notify then kill) | `{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": <secs>}` |
+| Immediate kill | `{"cancel": "TERMINATE"}` |
 
-The protocol types in `protocol.rs` already use strings, so no schema change
-is needed — just different values on each platform.
+The helper maps these to the appropriate OS primitives internally:
+- `NOTIFY_THEN_TERMINATE` → SIGTERM on POSIX, CTRL_BREAK on Windows;
+  escalates to SIGKILL / kill_process_tree after the notify period.
+- `TERMINATE` → SIGKILL on POSIX, kill_process_tree on Windows.
 
 ### Helper binary (`helper/src/runner.rs`) — add `#[cfg(windows)]`
 
@@ -93,7 +96,9 @@ The helper already runs as the target user, so no `CreateProcessAsUserW` needed
 inside the helper.
 
 **Cancel handling**:
-- `{"cancel": "CTRL_BREAK"}` → `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)`.
+- `{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": <secs>}` →
+  `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)`. If the child doesn't
+  exit within the notify period, escalates to `kill_process_tree(child_pid)`.
   Works because the helper is in the same user/session as the child.
 - `{"cancel": "TERMINATE"}` → `kill_process_tree(child_pid)` using
   `TerminateProcess` on each process in the tree.
@@ -199,9 +204,9 @@ Updated `build.rs` to compile the helper binary on Windows too, using
 The in-process `AttachConsole` + `GenerateConsoleCtrlEvent` code in
 `subprocess.rs` is no longer needed for cross-user. It remains as a
 fallback for same-user processes (where it works fine). The session's
-`cancel_action` now sends platform-appropriate cancel signals
-(`CTRL_BREAK`/`TERMINATE` on Windows, `SIGTERM`/`SIGKILL` on POSIX)
-through the helper's stdin pipe.
+`cancel_action` now sends platform-agnostic cancel commands
+(`NOTIFY_THEN_TERMINATE` or `TERMINATE`) through the helper's stdin pipe.
+The helper maps these to the appropriate OS primitives internally.
 
 ## Testing
 

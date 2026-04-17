@@ -1,13 +1,27 @@
-// The helper binary is Linux-only for now, so these tests only run on Unix.
-#![cfg(unix)]
+// Integration tests for the helper subprocess on both POSIX and Windows.
+//
+// The helper binary is a standalone child process that the session uses to
+// run commands as a different user. These tests drive the binary directly
+// (without cross-user elevation) to exercise the protocol and cancellation
+// paths on both platforms.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+// ────────────────────────────────────────────────────────────────────
+// Platform helpers: the helper binary, long-running commands, shells.
+// ────────────────────────────────────────────────────────────────────
+
 fn helper_path() -> PathBuf {
-    let p =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/helper/target/release/openjd_helper");
+    let binary = if cfg!(windows) {
+        "openjd_helper.exe"
+    } else {
+        "openjd_helper"
+    };
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src/helper/target/release")
+        .join(binary);
     if !p.exists() {
         panic!(
             "Helper binary not found at {}. Build it first: cd crates/openjd-sessions/src/helper && cargo build --release",
@@ -16,6 +30,100 @@ fn helper_path() -> PathBuf {
     }
     p
 }
+
+/// Temp dir for the helper's `cwd`. Both platforms accept their native temp dir.
+fn tmp_cwd() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+/// A process that just sleeps for a long time and can be cancelled.
+///
+/// On POSIX: `sleep 30`.
+/// On Windows: `ping -n 31 127.0.0.1` (pings once per second, prints to stdout
+/// so CTRL_BREAK can actually interrupt; `timeout` would need a tty).
+fn long_running_cmd() -> (&'static str, Vec<&'static str>) {
+    if cfg!(windows) {
+        ("ping", vec!["-n", "31", "127.0.0.1"])
+    } else {
+        ("sleep", vec!["30"])
+    }
+}
+
+/// A command that prints a fixed string and exits.
+fn echo_cmd(what: &str) -> String {
+    if cfg!(windows) {
+        format!(
+            r#"{{"command": "cmd", "args": ["/c", "echo {}"], "env": {{}}, "cwd": "{}"}}"#,
+            what,
+            tmp_cwd().replace('\\', "\\\\")
+        )
+    } else {
+        format!(
+            r#"{{"command": "echo", "args": ["{}"], "env": {{}}, "cwd": "{}"}}"#,
+            what,
+            tmp_cwd()
+        )
+    }
+}
+
+/// A shell command that exits with the given code.
+fn exit_with_code_cmd(code: i32) -> String {
+    if cfg!(windows) {
+        format!(
+            r#"{{"command": "cmd", "args": ["/c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
+            code,
+            tmp_cwd().replace('\\', "\\\\")
+        )
+    } else {
+        format!(
+            r#"{{"command": "sh", "args": ["-c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
+            code,
+            tmp_cwd()
+        )
+    }
+}
+
+/// A shell command that echoes an env var value.
+fn echo_env_var_cmd(var_name: &str, var_value: &str) -> String {
+    if cfg!(windows) {
+        // cmd echoes the literal %VAR% when the env isn't set at the cmd level,
+        // but Command::envs is applied to the child process env, which cmd inherits.
+        format!(
+            r#"{{"command": "cmd", "args": ["/c", "echo %{}%"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
+            var_name,
+            var_name,
+            var_value,
+            tmp_cwd().replace('\\', "\\\\")
+        )
+    } else {
+        format!(
+            r#"{{"command": "sh", "args": ["-c", "echo ${}"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
+            var_name,
+            var_name,
+            var_value,
+            tmp_cwd()
+        )
+    }
+}
+
+fn long_running_run_json() -> String {
+    let (cmd, args) = long_running_cmd();
+    let args_json = args
+        .iter()
+        .map(|a| format!("\"{a}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"{{"command": "{}", "args": [{}], "env": {{}}, "cwd": "{}"}}"#,
+        cmd,
+        args_json,
+        tmp_cwd().replace('\\', "\\\\")
+    )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Helper driver: wraps the subprocess so tests can send/receive JSON.
+// ────────────────────────────────────────────────────────────────────
 
 struct Helper {
     child: std::process::Child,
@@ -41,7 +149,7 @@ impl Helper {
     }
 
     fn send(&mut self, msg: &str) {
-        writeln!(self.stdin, "{}", msg).expect("write to helper stdin");
+        writeln!(self.stdin, "{msg}").expect("write to helper stdin");
         self.stdin.flush().expect("flush helper stdin");
     }
 
@@ -73,108 +181,95 @@ impl Helper {
     }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// Cross-platform tests (run on POSIX and Windows).
+// ════════════════════════════════════════════════════════════════════
+
 #[test]
 fn test_helper_startup_and_shutdown() {
     let helper = Helper::spawn();
     let status = helper.shutdown();
-    assert!(status.success(), "helper should exit cleanly: {:?}", status);
+    assert!(status.success(), "helper should exit cleanly: {status:?}");
 }
 
 #[test]
 fn test_helper_sequential_commands() {
     let mut h = Helper::spawn();
 
-    // First command
-    h.send(r#"{"command": "echo", "args": ["hello"], "env": {}, "cwd": "/tmp"}"#);
+    h.send(&echo_cmd("hello"));
     let resp = h.read_until_done();
     assert!(
         resp.iter().any(|v| v.get("pid").is_some()),
         "should get pid"
     );
     assert!(
-        resp.iter()
-            .any(|v| v.get("out") == Some(&serde_json::json!("hello"))),
-        "should get hello output"
+        resp.iter().any(|v| v
+            .get("out")
+            .and_then(|o| o.as_str())
+            .is_some_and(|s| s.contains("hello"))),
+        "should get hello output, got: {resp:?}"
     );
-    let last = resp.last().unwrap();
-    assert_eq!(last["exited"], 0, "first command should exit 0");
+    assert_eq!(
+        resp.last().unwrap()["exited"],
+        0,
+        "first command should exit 0"
+    );
 
-    // Second command
-    h.send(r#"{"command": "echo", "args": ["world"], "env": {}, "cwd": "/tmp"}"#);
+    h.send(&echo_cmd("world"));
     let resp = h.read_until_done();
     assert!(
-        resp.iter()
-            .any(|v| v.get("out") == Some(&serde_json::json!("world"))),
-        "should get world output"
+        resp.iter().any(|v| v
+            .get("out")
+            .and_then(|o| o.as_str())
+            .is_some_and(|s| s.contains("world"))),
+        "should get world output, got: {resp:?}"
     );
-    let last = resp.last().unwrap();
-    assert_eq!(last["exited"], 0, "second command should exit 0");
+    assert_eq!(
+        resp.last().unwrap()["exited"],
+        0,
+        "second command should exit 0"
+    );
 
-    let status = h.shutdown();
-    assert!(status.success());
+    assert!(h.shutdown().success());
 }
 
 #[test]
-fn test_helper_cancel_during_execution() {
+fn test_helper_child_exit_code() {
     let mut h = Helper::spawn();
 
-    h.send(r#"{"command": "sleep", "args": ["30"], "env": {}, "cwd": "/tmp"}"#);
-    // Wait for pid response
-    let pid_resp = h.read_line();
-    assert!(pid_resp.get("pid").is_some(), "should get pid");
-
-    // Send cancel
-    h.send(r#"{"cancel": "SIGTERM"}"#);
-
+    h.send(&exit_with_code_cmd(42));
     let resp = h.read_until_done();
-    let last = resp.last().unwrap();
-    assert!(
-        last.get("exited").is_some(),
-        "should get exited after cancel"
-    );
-    assert_ne!(
-        last["exited"], 0,
-        "cancelled process should have non-zero exit code"
+    assert_eq!(
+        resp.last().unwrap()["exited"],
+        42,
+        "should get exit code 42"
     );
 
-    let status = h.shutdown();
-    assert!(status.success());
-}
-
-#[test]
-fn test_helper_child_crash() {
-    let mut h = Helper::spawn();
-
-    h.send(r#"{"command": "sh", "args": ["-c", "exit 42"], "env": {}, "cwd": "/tmp"}"#);
-    let resp = h.read_until_done();
-    let last = resp.last().unwrap();
-    assert_eq!(last["exited"], 42, "should get exit code 42");
-
-    let status = h.shutdown();
-    assert!(status.success());
+    assert!(h.shutdown().success());
 }
 
 #[test]
 fn test_helper_command_not_found() {
     let mut h = Helper::spawn();
 
-    h.send(r#"{"command": "nonexistent_binary_xyz_12345", "args": [], "env": {}, "cwd": "/tmp"}"#);
+    let cwd = tmp_cwd().replace('\\', "\\\\");
+    h.send(&format!(
+        r#"{{"command": "nonexistent_binary_xyz_12345", "args": [], "env": {{}}, "cwd": "{cwd}"}}"#
+    ));
     let resp = h.read_until_done();
-    let last = resp.last().unwrap();
     assert!(
-        last.get("error").is_some(),
-        "should get error for nonexistent binary"
+        resp.last().unwrap().get("error").is_some(),
+        "should get error for nonexistent binary, got: {resp:?}"
     );
 
-    let status = h.shutdown();
-    assert!(status.success());
+    assert!(h.shutdown().success());
 }
 
 #[test]
 fn test_helper_env_vars() {
     let mut h = Helper::spawn();
 
-    h.send(r#"{"command": "sh", "args": ["-c", "echo $MY_VAR"], "env": {"MY_VAR": "test_value"}, "cwd": "/tmp"}"#);
+    h.send(&echo_env_var_cmd("MY_VAR", "test_value"));
     let resp = h.read_until_done();
     assert!(
         resp.iter().any(|v| {
@@ -182,13 +277,11 @@ fn test_helper_env_vars() {
                 .and_then(|o| o.as_str())
                 .is_some_and(|s| s.contains("test_value"))
         }),
-        "output should contain test_value"
+        "output should contain test_value, got: {resp:?}"
     );
-    let last = resp.last().unwrap();
-    assert_eq!(last["exited"], 0);
+    assert_eq!(resp.last().unwrap()["exited"], 0);
 
-    let status = h.shutdown();
-    assert!(status.success());
+    assert!(h.shutdown().success());
 }
 
 #[test]
@@ -205,54 +298,196 @@ fn test_helper_protocol_error() {
     let err_msg = resp["error"].as_str().unwrap();
     assert!(
         err_msg.starts_with("parse error:"),
-        "error should start with 'parse error:', got: {}",
-        err_msg
+        "error should start with 'parse error:', got: {err_msg}"
     );
 
     // Helper should still work after protocol error
-    h.send(r#"{"command": "echo", "args": ["still_alive"], "env": {}, "cwd": "/tmp"}"#);
+    h.send(&echo_cmd("still_alive"));
     let resp = h.read_until_done();
-    assert!(resp
-        .iter()
-        .any(|v| v.get("out") == Some(&serde_json::json!("still_alive"))));
-    let last = resp.last().unwrap();
+    assert!(
+        resp.iter().any(|v| v
+            .get("out")
+            .and_then(|o| o.as_str())
+            .is_some_and(|s| s.contains("still_alive"))),
+        "command after protocol error should produce output"
+    );
     assert_eq!(
-        last["exited"], 0,
+        resp.last().unwrap()["exited"],
+        0,
         "command after protocol error should succeed"
     );
 
-    let status = h.shutdown();
-    assert!(status.success());
+    assert!(h.shutdown().success());
 }
 
+// ════════════════════════════════════════════════════════════════════
+// POSIX-only tests
+// ════════════════════════════════════════════════════════════════════
+
+#[cfg(unix)]
 #[test]
-fn test_helper_crash_during_execution() {
-    // Verify that if the helper process dies mid-command, read_line returns
-    // an error or EOF rather than hanging forever.
+fn test_helper_cancel_during_execution_unix() {
+    let mut h = Helper::spawn();
+
+    h.send(&long_running_run_json());
+    let pid_resp = h.read_line();
+    assert!(pid_resp.get("pid").is_some(), "should get pid");
+
+    h.send(r#"{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}"#);
+
+    let resp = h.read_until_done();
+    let last = resp.last().unwrap();
+    assert!(last.get("exited").is_some());
+    assert_ne!(
+        last["exited"], 0,
+        "cancelled process should have non-zero exit code"
+    );
+
+    assert!(h.shutdown().success());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_helper_crash_during_execution_unix() {
+    // If the helper itself dies mid-command, reading should return EOF/error
+    // rather than hang.
     let mut h = Helper::spawn();
     let helper_pid = h.child.id();
 
-    // Start a long-running command
-    h.send(r#"{"command": "sleep", "args": ["60"], "env": {}, "cwd": "/tmp"}"#);
-
-    // Read the pid response
+    h.send(&long_running_run_json());
     let pid_resp = h.read_line();
-    assert!(pid_resp.get("pid").is_some(), "should get pid response");
+    assert!(pid_resp.get("pid").is_some());
 
-    // Kill the helper process (simulating OOM/crash)
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(helper_pid as i32),
         nix::sys::signal::Signal::SIGKILL,
     )
     .expect("kill helper");
 
-    // Reading should now return EOF or error, not hang
     let mut line = String::new();
-    let result = h.reader.read_line(&mut line);
-    match result {
-        Ok(0) => {}  // EOF — correct behavior
-        Ok(_) => {}  // Got a partial response — acceptable
-        Err(_) => {} // IO error — acceptable
+    let _ = h.reader.read_line(&mut line);
+    // The key assertion: we got here without hanging.
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Windows-only tests
+// ════════════════════════════════════════════════════════════════════
+
+#[cfg(windows)]
+#[test]
+fn test_helper_terminate_during_execution_windows() {
+    // TERMINATE is a hard kill — works regardless of console state, so this
+    // is the reliable cancellation path to assert on.
+    let mut h = Helper::spawn();
+
+    h.send(&long_running_run_json());
+    let pid_resp = h.read_line();
+    assert!(pid_resp.get("pid").is_some(), "should get pid");
+    let child_pid = pid_resp["pid"].as_u64().unwrap() as u32;
+
+    h.send(r#"{"cancel": "TERMINATE"}"#);
+
+    let start = std::time::Instant::now();
+    let resp = h.read_until_done();
+    let elapsed = start.elapsed();
+
+    let last = resp.last().unwrap();
+    assert!(last.get("exited").is_some(), "got: {resp:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "TERMINATE should kill quickly, took {elapsed:?}"
+    );
+
+    // The child PID should no longer exist.
+    assert!(
+        !process_is_alive(child_pid),
+        "child pid {child_pid} should be dead after TERMINATE"
+    );
+
+    assert!(h.shutdown().success());
+}
+
+#[cfg(windows)]
+#[test]
+fn test_helper_ctrl_break_falls_back_to_terminate_windows() {
+    // NOTIFY_THEN_TERMINATE sends a platform-appropriate soft signal (CTRL_BREAK
+    // on Windows) and, if the child doesn't exit within the notify period, the
+    // helper escalates to a hard kill. Either way the child should die and the
+    // helper should report `exited`.
+    let mut h = Helper::spawn();
+
+    h.send(&long_running_run_json());
+    let pid_resp = h.read_line();
+    let child_pid = pid_resp["pid"].as_u64().unwrap() as u32;
+
+    h.send(r#"{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}"#);
+
+    let start = std::time::Instant::now();
+    let resp = h.read_until_done();
+    let elapsed = start.elapsed();
+
+    let last = resp.last().unwrap();
+    assert!(last.get("exited").is_some(), "got: {resp:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "cancel should finish within the grace window, took {elapsed:?}"
+    );
+    assert!(!process_is_alive(child_pid));
+
+    assert!(h.shutdown().success());
+}
+
+#[cfg(windows)]
+#[test]
+fn test_helper_crash_during_execution_windows() {
+    // If the helper itself dies mid-command, reading should return EOF/error
+    // rather than hang.
+    let mut h = Helper::spawn();
+    let helper_pid = h.child.id();
+
+    h.send(&long_running_run_json());
+    let pid_resp = h.read_line();
+    assert!(pid_resp.get("pid").is_some());
+
+    terminate_process(helper_pid);
+
+    let mut line = String::new();
+    let _ = h.reader.read_line(&mut line);
+    // The key assertion: we got here without hanging.
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Windows helpers for the tests above.
+// ────────────────────────────────────────────────────────────────────
+
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(h) => {
+                let mut code: u32 = 0;
+                let alive =
+                    GetExitCodeProcess(h, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
+                let _ = CloseHandle(h);
+                alive
+            }
+            Err(_) => false,
+        }
     }
-    // The key assertion: we got here without hanging
+}
+
+#[cfg(windows)]
+fn terminate_process(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+            let _ = TerminateProcess(h, 1);
+            let _ = CloseHandle(h);
+        }
+    }
 }
