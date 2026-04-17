@@ -60,7 +60,10 @@ pub fn create_job(
 
     let job_name = job_template
         .name
-        .resolve_string_with_format(&symtab, None, &[], PathFormat::Posix)
+        .resolve_string_with(
+            &symtab,
+            &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+        )
         .map_err(|e| OpenJdError::FormatStringError {
             message: format!("Failed to resolve job name: {e}"),
             input: Some(job_template.name.raw().to_string()),

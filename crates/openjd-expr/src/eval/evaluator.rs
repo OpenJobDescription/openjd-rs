@@ -307,7 +307,7 @@ impl<'a> Evaluator<'a> {
     fn collect_symbol_names(&self) -> Vec<String> {
         let mut names = Vec::new();
         for symtab in self.symtabs {
-            symtab.all_paths("", &mut names);
+            names.extend(symtab.all_paths(""));
         }
         names.sort();
         names.dedup();

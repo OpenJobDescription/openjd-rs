@@ -36,38 +36,74 @@ Errors include the position within the format string for precise error reporting
 
 ## Resolution
 
-Two resolution methods serve different purposes:
+Two resolution methods serve different purposes; both take a
+[`FormatStringOptions`](#formatstringoptions) configured via chainable `with_*`
+builders.
 
-### resolve_string — always returns String
+### resolve_string_with — always returns `String`
 
 ```rust
 let fs = FormatString::new("frame_{{Param.Frame}}_{{Param.Name}}")?;
-let result = fs.resolve_string(&symtab, &library, &path_mapping_rules)?;
+let result = fs.resolve_string_with(&symtab, &FormatStringOptions::default())?;
 // → "frame_42_shot_01"
 ```
 
 Concatenates all segments into a single string. Expression results are converted via
-`to_string()`.
+`to_display_string()`. The `target_type` field on the options is ignored here.
 
-### resolve — preserves typed values for single-expression strings
+### resolve_with — preserves typed values for single-expression strings
 
 ```rust
 let fs = FormatString::new("{{Param.Frame}}")?;
-let result = fs.resolve(&symtab, &library, &path_mapping_rules)?;
+let result = fs.resolve_with(&symtab, &FormatStringOptions::default())?;
 // → ExprValue::Int(42)  — not a string!
 ```
 
 Typed-value passthrough applies when the format string consists of **exactly one
 expression segment and zero literal segments**. Any surrounding literal text —
-even a single whitespace character — forces string conversion (the caller is
-asking for a string composition, not a value). When these preconditions aren't
-met, `resolve` falls back to `resolve_string` and wraps the result in
-`ExprValue::String`.
+even a single whitespace character — forces string conversion. When these
+preconditions aren't met, `resolve_with` falls back internally to
+`resolve_string_with` and wraps the result in `ExprValue::String`.
 
-All resolve/validate methods take `library: Option<&FunctionLibrary>`. When
-`None`, the default library (`get_default_library()`) is used — this is the
-common case. Pass `Some(&lib)` only to supply a custom library (e.g., with
-host-context functions registered).
+## FormatStringOptions
+
+```rust
+pub struct FormatStringOptions<'a> { /* private fields */ }
+
+impl<'a> FormatStringOptions<'a> {
+    pub fn new() -> Self;                                          // == Default::default()
+    pub fn with_library(self, lib: impl Into<Option<&FunctionLibrary>>) -> Self;
+    pub fn with_path_mapping_rules(self, rules: &[PathMappingRule]) -> Self;
+    pub fn with_path_format(self, fmt: PathFormat) -> Self;
+    pub fn with_target_type(self, t: &ExprType) -> Self;
+}
+```
+
+Defaults:
+
+| Field | Default |
+|---|---|
+| `library` | `None` (use `get_default_library()`) |
+| `path_mapping_rules` | `&[]` |
+| `path_format` | `PathFormat::host()` |
+| `target_type` | `None` |
+
+Example — configure every axis:
+
+```rust
+let opts = FormatStringOptions::new()
+    .with_library(&custom_lib)
+    .with_path_format(PathFormat::Posix)
+    .with_path_mapping_rules(&rules)
+    .with_target_type(&ExprType::PATH);
+
+let value  = fs.resolve_with(&symtab, &opts)?;         // ExprValue
+let string = fs.resolve_string_with(&symtab, &opts)?;  // String (ignores target_type)
+```
+
+The `with_library` method accepts either `&FunctionLibrary` or
+`Option<&FunctionLibrary>` (via `impl Into<Option<...>>`), so callers can plumb
+through an already-optional library value without unwrapping it.
 
 ## Validation
 
@@ -90,26 +126,6 @@ fs.validate_comprehension_vars(&let_binding_names)?;
 
 Checks that list comprehension loop variables in the format string don't shadow
 let-binding names from the enclosing template scope.
-
-## Typed Resolution
-
-### resolve_typed — resolve with target type coercion
-
-```rust
-let val = fs.resolve_typed(&symtab, &library, &rules, &ExprType::FLOAT)?;
-```
-
-Like `resolve` but passes a target type to the evaluator for context-dependent coercion
-(e.g., determining the element type of an empty list, or coercing INT → FLOAT when the
-target context expects a float).
-
-### resolve_typed_with_format — resolve_typed with explicit path format
-
-```rust
-let val = fs.resolve_typed_with_format(&symtab, &library, &rules, PathFormat::Posix, &ExprType::PATH)?;
-```
-
-Combines target type coercion with an explicit path format.
 
 ## Symbol Table Extraction
 

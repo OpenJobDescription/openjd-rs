@@ -112,7 +112,18 @@ pub enum ExprValue {
     Int(i64),
     Float(Float64),
     String(String),
-    Path { value: String, format: PathFormat },
+    /// A PATH value — a string path together with its format.
+    ///
+    /// `#[non_exhaustive]` prevents direct construction outside this crate;
+    /// downstream callers must use [`ExprValue::new_path`], which enforces
+    /// the separator-normalization invariant (`\` ↔ `/` per `PathFormat`,
+    /// and no normalization for URI paths). The fields remain visible for
+    /// pattern matching (using `..` is required from outside the crate).
+    #[non_exhaustive]
+    Path {
+        value: String,
+        format: PathFormat,
+    },
     // Typed list variants (new)
     ListBool(Vec<bool>),
     ListInt(Vec<i64>),
@@ -430,7 +441,11 @@ impl ExprValue {
 
     /// Create a PATH value with separators normalized to the given format.
     ///
-    /// - `Posix`: `\` → `/`
+    /// This is the only public constructor for `ExprValue::Path`; the variant
+    /// itself is `#[non_exhaustive]` so downstream crates cannot bypass the
+    /// separator-normalization invariant by constructing the struct directly.
+    ///
+    /// - `Posix`: no normalization — backslash is a valid filename character
     /// - `Windows`: `/` → `\` (unless the value is a URI)
     /// - `Uri`: no normalization
     pub fn new_path(value: impl Into<String>, format: PathFormat) -> Self {
@@ -705,10 +720,7 @@ impl ExprValue {
             }
             Self::ListPath(v, fmt, _) => Some(
                 v.iter()
-                    .map(|s| ExprValue::Path {
-                        value: s.clone(),
-                        format: *fmt,
-                    })
+                    .map(|s| ExprValue::new_path(s.clone(), *fmt))
                     .collect(),
             ),
             Self::ListList(v, _, _) => Some(v.clone()),
@@ -744,10 +756,7 @@ impl ExprValue {
             Self::ListInt(v) => Some(ExprValue::Int(v[i])),
             Self::ListFloat(v) => Some(ExprValue::Float(v[i].clone())),
             Self::ListString(v, _) => Some(ExprValue::String(v[i].clone())),
-            Self::ListPath(v, fmt, _) => Some(ExprValue::Path {
-                value: v[i].clone(),
-                format: *fmt,
-            }),
+            Self::ListPath(v, fmt, _) => Some(ExprValue::new_path(v[i].clone(), *fmt)),
             Self::ListList(v, _, _) => Some(v[i].clone()),
             _ => None,
         }
@@ -1102,10 +1111,7 @@ impl<'a> Iterator for ListIter<'a> {
             Self::Int(it) => it.next().map(|i| ExprValue::Int(*i)),
             Self::Float(it) => it.next().map(|f| ExprValue::Float(f.clone())),
             Self::String(it) => it.next().map(|s| ExprValue::String(s.clone())),
-            Self::Path(it, fmt) => it.next().map(|s| ExprValue::Path {
-                value: s.clone(),
-                format: *fmt,
-            }),
+            Self::Path(it, fmt) => it.next().map(|s| ExprValue::new_path(s.clone(), *fmt)),
             Self::List(it) => it.next().cloned(),
         }
     }
@@ -1142,10 +1148,10 @@ pub fn format_float(f: f64) -> String {
     }
 }
 
-/// Normalize path separators based on the target format.
+/// Normalize path separators to match `format`.
 ///
-/// - `Posix`: `\` → `/`
-/// - `Windows`: `/` → `\` (skipped for URIs like `s3://...`)
+/// - `Posix`: no normalization — backslashes are valid filename characters
+/// - `Windows`: `/` → `\` (unless the value is a URI)
 /// - `Uri`: no normalization
 #[must_use]
 pub fn normalize_path_separators(value: &str, format: PathFormat) -> String {
@@ -1153,8 +1159,7 @@ pub fn normalize_path_separators(value: &str, format: PathFormat) -> String {
         return value.to_string();
     }
     match format {
-        PathFormat::Posix => value.replace('\\', "/"),
         PathFormat::Windows => value.replace('/', "\\"),
-        PathFormat::Uri => value.to_string(),
+        PathFormat::Posix | PathFormat::Uri => value.to_string(),
     }
 }

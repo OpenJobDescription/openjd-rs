@@ -704,7 +704,12 @@ impl Session {
         if let Some(vars) = &env.variables {
             for (key, fmt_str) in vars {
                 let value = fmt_str
-                    .resolve_string(&symtab, self.lib(), self.rules())
+                    .resolve_string_with(
+                        &symtab,
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_library(self.lib())
+                            .with_path_mapping_rules(self.rules()),
+                    )
                     .map_err(|e| SessionError::FormatString {
                         context: format!("env var '{key}'"),
                         reason: e.to_string(),
@@ -1415,10 +1420,10 @@ impl Session {
         symtab
             .set(
                 "Session.PathMappingRulesFile",
-                openjd_expr::ExprValue::Path {
-                    value: filename.to_string_lossy().to_string(),
-                    format: openjd_expr::path_mapping::PathFormat::host(),
-                },
+                openjd_expr::ExprValue::new_path(
+                    filename.to_string_lossy().to_string(),
+                    openjd_expr::path_mapping::PathFormat::host(),
+                ),
             )
             .map_err(|e| {
                 SessionError::Runtime(format!("Failed to set PathMappingRulesFile: {e}"))
@@ -1496,10 +1501,10 @@ impl Session {
                         let key = format!("Param.{name}");
                         s.set(
                             &key,
-                            openjd_expr::ExprValue::Path {
-                                value: mapped,
-                                format: openjd_expr::path_mapping::PathFormat::host(),
-                            },
+                            openjd_expr::ExprValue::new_path(
+                                mapped,
+                                openjd_expr::path_mapping::PathFormat::host(),
+                            ),
                         )
                         .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
                     }
@@ -1509,10 +1514,10 @@ impl Session {
                                 .iter()
                                 .map(|s| {
                                     let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::Path {
-                                        value: m,
-                                        format: openjd_expr::path_mapping::PathFormat::host(),
-                                    }
+                                    openjd_expr::ExprValue::new_path(
+                                        m,
+                                        openjd_expr::path_mapping::PathFormat::host(),
+                                    )
                                 })
                                 .collect();
                             let key = format!("Param.{name}");
@@ -1549,10 +1554,10 @@ impl Session {
                             _ => "",
                         };
                         let mapped = self.apply_path_mapping_to_string(raw);
-                        openjd_expr::ExprValue::Path {
-                            value: mapped,
-                            format: openjd_expr::path_mapping::PathFormat::host(),
-                        }
+                        openjd_expr::ExprValue::new_path(
+                            mapped,
+                            openjd_expr::path_mapping::PathFormat::host(),
+                        )
                     }
                     JobParameterType::ListPath => match &param.value {
                         openjd_expr::ExprValue::ListString(elements, _) => {
@@ -1560,10 +1565,10 @@ impl Session {
                                 .iter()
                                 .map(|s| {
                                     let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::Path {
-                                        value: m,
-                                        format: openjd_expr::path_mapping::PathFormat::host(),
-                                    }
+                                    openjd_expr::ExprValue::new_path(
+                                        m,
+                                        openjd_expr::path_mapping::PathFormat::host(),
+                                    )
                                 })
                                 .collect();
                             openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
@@ -1583,10 +1588,10 @@ impl Session {
         symtab
             .set(
                 "Session.WorkingDirectory",
-                openjd_expr::ExprValue::Path {
-                    value: self.working_directory.to_string_lossy().to_string(),
-                    format: host_path_format,
-                },
+                openjd_expr::ExprValue::new_path(
+                    self.working_directory.to_string_lossy().to_string(),
+                    host_path_format,
+                ),
             )
             .map_err(|e| SessionError::Runtime(format!("Failed to set WorkingDirectory: {e}")))?;
 
@@ -1608,10 +1613,10 @@ impl Session {
                             _ => "",
                         };
                         let mapped = self.apply_path_mapping_to_string(s);
-                        openjd_expr::ExprValue::Path {
-                            value: mapped,
-                            format: openjd_expr::path_mapping::PathFormat::host(),
-                        }
+                        openjd_expr::ExprValue::new_path(
+                            mapped,
+                            openjd_expr::path_mapping::PathFormat::host(),
+                        )
                     }
                     _ => tv.value.clone(),
                 };
@@ -1643,13 +1648,11 @@ impl Session {
             openjd_expr::ExprValue::Path {
                 value: path_str,
                 format,
+                ..
             } => {
                 for rule in self.path_mapping_rules.iter() {
                     if let Some(mapped) = rule.apply(path_str) {
-                        return openjd_expr::ExprValue::Path {
-                            value: mapped,
-                            format: *format,
-                        };
+                        return openjd_expr::ExprValue::new_path(mapped, *format);
                     }
                 }
                 value.clone()
@@ -1660,10 +1663,7 @@ impl Session {
                     .map(|s| {
                         let mapped_s =
                             openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
-                        openjd_expr::ExprValue::Path {
-                            value: mapped_s,
-                            format: *fmt,
-                        }
+                        openjd_expr::ExprValue::new_path(mapped_s, *fmt)
                     })
                     .collect();
                 openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()

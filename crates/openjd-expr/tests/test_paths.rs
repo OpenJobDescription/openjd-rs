@@ -45,10 +45,7 @@ fn posix_st(key: &str, path: &str) -> SymbolTable {
     let mut st = SymbolTable::new();
     st.set(
         key,
-        ExprValue::Path {
-            value: path.to_string(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path(path.to_string(), PathFormat::Posix),
     )
     .unwrap();
     st
@@ -70,10 +67,7 @@ fn windows_st(key: &str, path: &str) -> SymbolTable {
     let mut st = SymbolTable::new();
     st.set(
         key,
-        ExprValue::Path {
-            value: path.to_string(),
-            format: PathFormat::Windows,
-        },
+        ExprValue::new_path(path.to_string(), PathFormat::Windows),
     )
     .unwrap();
     st
@@ -630,10 +624,7 @@ fn with_number_with_variable() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/renders/shot_####.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/renders/shot_####.exr", PathFormat::Posix),
     )
     .unwrap();
     st.set("F", ExprValue::Int(42)).unwrap();
@@ -719,18 +710,12 @@ fn filesystem_vs_uri() {
     let mut st = SymbolTable::new();
     st.set(
         "F",
-        ExprValue::Path {
-            value: "/local/file.txt".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/local/file.txt", PathFormat::Posix),
     )
     .unwrap();
     st.set(
         "U",
-        ExprValue::Path {
-            value: "s3://bucket/file.txt".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("s3://bucket/file.txt", PathFormat::Posix),
     )
     .unwrap();
     assert_eq!(eval_posix("F.name", &st).to_display_string(), "file.txt");
@@ -945,10 +930,7 @@ fn with_variable() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/renders/shot_####.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/renders/shot_####.exr", PathFormat::Posix),
     )
     .unwrap();
     st.set("Frame", ExprValue::Int(42)).unwrap();

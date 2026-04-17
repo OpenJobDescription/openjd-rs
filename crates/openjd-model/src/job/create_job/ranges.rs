@@ -22,7 +22,10 @@ pub(super) fn resolve_to_f64(
     context: &str,
 ) -> Result<f64, OpenJdError> {
     let resolved = fs
-        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+        .resolve_string_with(
+            symtab,
+            &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+        )
         .map_err(|e| OpenJdError::FormatStringError {
             message: format!("{context}: {e}"),
             input: Some(fs.raw().to_string()),
@@ -41,13 +44,16 @@ pub(super) fn resolve_string_list(
 ) -> Result<Vec<String>, OpenJdError> {
     vals.iter()
         .map(|fs| {
-            fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
-                .map_err(|e| OpenJdError::FormatStringError {
-                    message: e.to_string(),
-                    input: Some(fs.raw().to_string()),
-                    start: None,
-                    end: None,
-                })
+            fs.resolve_string_with(
+                symtab,
+                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            )
+            .map_err(|e| OpenJdError::FormatStringError {
+                message: e.to_string(),
+                input: Some(fs.raw().to_string()),
+                start: None,
+                end: None,
+            })
         })
         .collect()
 }
@@ -101,7 +107,11 @@ fn resolve_task_parameter(
                 template::IntOrFormatString::Int(n) => (*n).max(1) as usize,
                 template::IntOrFormatString::FormatString(fs) => {
                     let resolved = fs
-                        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                        .resolve_string_with(
+                            symtab,
+                            &openjd_expr::FormatStringOptions::new()
+                                .with_path_format(PathFormat::Posix),
+                        )
                         .map_err(|e| {
                             OpenJdError::Expression(format!("chunks.defaultTaskCount: {e}"))
                         })?;
@@ -120,7 +130,7 @@ fn resolve_task_parameter(
                 .map(|v| match v {
                     template::IntOrFormatString::Int(n) => Ok((*n).max(0) as usize),
                     template::IntOrFormatString::FormatString(fs) => {
-                        let resolved = fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                        let resolved = fs.resolve_string_with(symtab, &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix))
                             .map_err(|e| OpenJdError::Expression(format!("chunks.targetRuntimeSeconds: {e}")))?;
                         resolved.trim().parse::<i64>()
                             .map(|n| n.max(0) as usize)
@@ -164,7 +174,10 @@ fn resolve_int_range(
             // concatenates segments and parses the result as a range expression.
             // Any real evaluation errors (division by zero, type errors) will be
             // caught by the string resolution fallback path.
-            if let Ok(val) = expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
+            if let Ok(val) = expr.resolve_with(
+                symtab,
+                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            ) {
                 match val {
                     ExprValue::RangeExpr(r) => {
                         if r.len() > limits.max_task_param_range_len {
@@ -204,7 +217,10 @@ fn resolve_int_range(
                 }
             }
             let resolved = expr
-                .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                .resolve_string_with(
+                    symtab,
+                    &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+                )
                 .map_err(|e| OpenJdError::Expression(e.to_string()))?;
             let range_expr: RangeExpr =
                 resolved
@@ -238,7 +254,11 @@ fn resolve_float_range(
                 template::FloatRangeItem::Float(f) => Ok(*f),
                 template::FloatRangeItem::FormatString(fs) => {
                     let resolved = fs
-                        .resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
+                        .resolve_string_with(
+                            symtab,
+                            &openjd_expr::FormatStringOptions::new()
+                                .with_path_format(PathFormat::Posix),
+                        )
                         .map_err(|e| OpenJdError::Expression(e.to_string()))?;
                     resolved.parse::<f64>().map_err(|_| {
                         OpenJdError::Expression(format!("Cannot parse '{}' as float", resolved))
@@ -249,7 +269,10 @@ fn resolve_float_range(
         template::FloatRange::Expression(expr) => {
             // Typed evaluation — must yield a list. Propagate the actual error
             // if evaluation fails.
-            match expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
+            match expr.resolve_with(
+                symtab,
+                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            ) {
                 Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements
@@ -299,14 +322,20 @@ fn resolve_string_range(
         template::StringRange::List(items) => items
             .iter()
             .map(|fs| {
-                fs.resolve_string_with_format(symtab, None, &[], PathFormat::Posix)
-                    .map_err(|e| OpenJdError::Expression(e.to_string()))
+                fs.resolve_string_with(
+                    symtab,
+                    &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+                )
+                .map_err(|e| OpenJdError::Expression(e.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?,
         template::StringRange::Expression(expr) => {
             // Typed evaluation — must yield a list. Propagate the actual error
             // if evaluation fails (e.g., division by zero, undefined variable).
-            match expr.resolve_with_format(symtab, None, &[], PathFormat::Posix) {
+            match expr.resolve_with(
+                symtab,
+                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            ) {
                 Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements.iter().map(|e| e.to_display_string()).collect()

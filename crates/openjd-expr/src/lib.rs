@@ -32,6 +32,7 @@ pub use eval::{
 };
 pub use format_string::escape_format_string;
 pub use format_string::FormatString;
+pub use format_string::FormatStringOptions;
 pub use format_string::FormatStringValidationError;
 pub use path_mapping::{PathFormat, PathMappingRule};
 pub use range_expr::{RangeExpr, RangeExprError};

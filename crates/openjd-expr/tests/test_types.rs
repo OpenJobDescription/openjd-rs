@@ -1324,10 +1324,7 @@ fn value_from_string() {
 
 #[test]
 fn value_from_path() {
-    let val = ExprValue::Path {
-        value: "/tmp/test".to_string(),
-        format: PathFormat::Posix,
-    };
+    let val = ExprValue::new_path("/tmp/test".to_string(), PathFormat::Posix);
     assert_eq!(val.expr_type(), ExprType::PATH);
     assert_eq!(val.to_display_string(), "/tmp/test");
 }
@@ -1424,10 +1421,7 @@ fn value_list_nested() {
 #[test]
 fn value_list_path_string_mix() {
     let items = vec![
-        ExprValue::Path {
-            value: "/a".to_string(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/a".to_string(), PathFormat::Posix),
         ExprValue::String("b".to_string()),
     ];
     let val = ExprValue::make_list(items, ExprType::STRING).unwrap();

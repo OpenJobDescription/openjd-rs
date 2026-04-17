@@ -30,17 +30,22 @@ a child `SymbolTable` containing `"Frame"` → `ExprValue::Int(42)`.
 // Empty
 let symtab = SymbolTable::new();
 
-// From pairs — dotted keys auto-nest
+// From pairs — accepts any IntoIterator<Item = (&str, ExprValue)>.
+// Vec, arrays, map() chains, and other iterators all work without a collect().
 let symtab = SymbolTable::from_pairs(vec![
     ("Param.Frame", ExprValue::Int(42)),
     ("Param.Name", ExprValue::String("shot_01".into())),
 ]);
+let symtab = SymbolTable::from_pairs([("X", ExprValue::Int(1))]);
+let symtab = SymbolTable::from_pairs(
+    params.iter().map(|(k, v)| (k.as_str(), v.clone())),
+);
 
 // Macro for concise construction
 let symtab = symtab! {
     "Param.Frame" => 42,
     "Param.Name" => "shot_01",
-    "Param.OutputDir" => ExprValue::Path { value: "/out".into(), format: PathFormat::Posix },
+    "Param.OutputDir" => ExprValue::new_path("/out", PathFormat::Posix),
 };
 ```
 
@@ -71,6 +76,7 @@ Accessor summary:
 | `get_value(key)` | `Option<&ExprValue>` | When you only want a value (None if table or missing) |
 | `get_string(key)` | `Option<&str>` | When you only want a string/path, no type check |
 | `get_table(key)` | `Option<&SymbolTable>` | For subtree iteration |
+| `all_paths(prefix)` | `Vec<String>` | Collect every leaf path; `prefix` is prepended to each (use `""` for top-level) |
 
 ## Path Conflict Detection
 

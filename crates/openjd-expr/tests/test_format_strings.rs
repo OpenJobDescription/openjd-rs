@@ -5,26 +5,26 @@
 //! Complements the inline unit tests in src/format_string.rs by exercising end-to-end
 //! resolution through the expression evaluator with real symbol tables.
 
-use openjd_expr::{symtab, ExprType, ExprValue, FormatString, SymbolTable};
+use openjd_expr::{symtab, ExprType, ExprValue, FormatString, FormatStringOptions, SymbolTable};
 
 fn resolve_str(input: &str, st: &SymbolTable) -> String {
     FormatString::new(input)
         .unwrap()
-        .resolve_string(st, None, &[])
+        .resolve_string_with(st, &FormatStringOptions::default())
         .unwrap()
 }
 
 fn resolve_val(input: &str, st: &SymbolTable) -> ExprValue {
     FormatString::new(input)
         .unwrap()
-        .resolve(st, None, &[])
+        .resolve_with(st, &FormatStringOptions::default())
         .unwrap()
 }
 
 fn resolve_err(input: &str, st: &SymbolTable) -> String {
     FormatString::new(input)
         .unwrap()
-        .resolve_string(st, None, &[])
+        .resolve_string_with(st, &FormatStringOptions::default())
         .unwrap_err()
         .to_string()
 }

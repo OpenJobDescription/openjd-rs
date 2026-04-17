@@ -272,20 +272,14 @@ pub fn path_div(ctx: Ctx, a: &[ExprValue]) -> R {
         _ => return Err(ExpressionError::type_error("type error")),
     };
     ctx.count_string_ops(l.len() + r.len())?;
-    Ok(ExprValue::Path {
-        value: super::path::join(l, r, format),
-        format,
-    })
+    Ok(ExprValue::new_path(super::path::join(l, r, format), format))
 }
 
 pub fn add_path_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Path { value: l, format }, ExprValue::String(r)) => {
             ctx.count_string_ops(l.len() + r.len())?;
-            Ok(ExprValue::Path {
-                value: format!("{l}{r}"),
-                format: *format,
-            })
+            Ok(ExprValue::new_path(format!("{l}{r}"), *format))
         }
         _ => Err(ExpressionError::type_error("type error")),
     }

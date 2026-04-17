@@ -36,10 +36,7 @@ fn construct_from_pairs() {
 fn construct_with_path() {
     let st = SymbolTable::from_pairs(vec![(
         "Param.InputFile",
-        ExprValue::Path {
-            value: "/projects/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/projects/render.exr", PathFormat::Posix),
     )])
     .unwrap();
     assert_eq!(
@@ -210,10 +207,7 @@ fn eval_with_symtab() {
 fn eval_with_path() {
     let st = SymbolTable::from_pairs(vec![(
         "P",
-        ExprValue::Path {
-            value: "/a/b/file.txt".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/a/b/file.txt", PathFormat::Posix),
     )])
     .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.name").unwrap();
@@ -461,8 +455,7 @@ fn all_paths_collects_leaves() {
         ("Task.Name", ExprValue::String("t".into())),
     ])
     .unwrap();
-    let mut paths = Vec::new();
-    st.all_paths("", &mut paths);
+    let mut paths = st.all_paths("");
     paths.sort();
     assert_eq!(paths, vec!["Param.X", "Param.Y", "Task.Name"]);
 }
@@ -478,14 +471,8 @@ fn get_string_returns_str() {
 #[test]
 fn get_string_returns_path_value() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a/b".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a/b", PathFormat::Posix))
+        .unwrap();
     assert_eq!(st.get_string("P"), Some("/a/b"));
 }
 
@@ -565,57 +552,33 @@ fn round_trip_null() {
 #[test]
 fn round_trip_path_posix() {
     let mut st = SymbolTable::new();
-    st.set(
-        "x",
-        ExprValue::Path {
-            value: "/tmp/out".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("x", ExprValue::new_path("/tmp/out", PathFormat::Posix))
+        .unwrap();
     let rt = round_trip(&st, PathFormat::Posix);
     assert_eq!(
         rt.get_value("x"),
-        Some(&ExprValue::Path {
-            value: "/tmp/out".into(),
-            format: PathFormat::Posix
-        })
+        Some(&ExprValue::new_path("/tmp/out", PathFormat::Posix))
     );
 }
 
 #[test]
 fn round_trip_path_windows() {
     let mut st = SymbolTable::new();
-    st.set(
-        "x",
-        ExprValue::Path {
-            value: "C:\\out".into(),
-            format: PathFormat::Windows,
-        },
-    )
-    .unwrap();
+    st.set("x", ExprValue::new_path("C:\\out", PathFormat::Windows))
+        .unwrap();
     // Deserialize with a different format — the value is preserved but format comes from the receiver
     let rt = round_trip(&st, PathFormat::Windows);
     assert_eq!(
         rt.get_value("x"),
-        Some(&ExprValue::Path {
-            value: "C:\\out".into(),
-            format: PathFormat::Windows
-        })
+        Some(&ExprValue::new_path("C:\\out", PathFormat::Windows))
     );
 }
 
 #[test]
 fn round_trip_path_format_changes_on_deserialize() {
     let mut st = SymbolTable::new();
-    st.set(
-        "x",
-        ExprValue::Path {
-            value: "/tmp/out".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("x", ExprValue::new_path("/tmp/out", PathFormat::Posix))
+        .unwrap();
     // Deserialize with Windows format — path separators are normalized to the receiver's format
     let rt = round_trip(&st, PathFormat::Windows);
     let v = rt.get_value("x").unwrap();
@@ -701,4 +664,60 @@ fn round_trip_empty_list() {
     let rt = round_trip(&st, PathFormat::Posix);
     let v = rt.get_value("x").unwrap();
     assert_eq!(v.list_len(), Some(0));
+}
+
+// ── Refactor coverage: all_paths return value, from_pairs IntoIterator ──
+
+#[test]
+fn all_paths_returns_owned_vec() {
+    let st = SymbolTable::from_pairs(vec![
+        ("Param.X", ExprValue::Int(1)),
+        ("Param.Y", ExprValue::Int(2)),
+    ])
+    .unwrap();
+    // Consume the returned Vec directly (no out-param plumbing).
+    let mut paths = st.all_paths("");
+    paths.sort();
+    assert_eq!(paths, vec!["Param.X", "Param.Y"]);
+}
+
+#[test]
+fn all_paths_with_prefix() {
+    let st = SymbolTable::from_pairs(vec![("A", ExprValue::Int(1))]).unwrap();
+    assert_eq!(st.all_paths("Task"), vec!["Task.A"]);
+}
+
+#[test]
+fn all_paths_empty_table() {
+    let st = SymbolTable::new();
+    assert!(st.all_paths("").is_empty());
+}
+
+#[test]
+fn from_pairs_accepts_array() {
+    // Arrays implement IntoIterator, so no `vec!` macro needed.
+    let st = SymbolTable::from_pairs([("X", ExprValue::Int(1)), ("Y", ExprValue::Int(2))]).unwrap();
+    assert_eq!(st.get_value("X"), Some(&ExprValue::Int(1)));
+    assert_eq!(st.get_value("Y"), Some(&ExprValue::Int(2)));
+}
+
+#[test]
+fn from_pairs_accepts_iterator_chain() {
+    // Any IntoIterator — e.g., map() — works directly, no collect() needed.
+    let st = SymbolTable::from_pairs(
+        ["x", "y", "z"]
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| (k, ExprValue::Int(i as i64))),
+    )
+    .unwrap();
+    assert_eq!(st.get_value("x"), Some(&ExprValue::Int(0)));
+    assert_eq!(st.get_value("y"), Some(&ExprValue::Int(1)));
+    assert_eq!(st.get_value("z"), Some(&ExprValue::Int(2)));
+}
+
+#[test]
+fn from_pairs_accepts_empty_iter() {
+    let st = SymbolTable::from_pairs(std::iter::empty::<(&str, ExprValue)>()).unwrap();
+    assert!(st.keys().next().is_none());
 }

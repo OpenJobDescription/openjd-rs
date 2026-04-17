@@ -919,10 +919,7 @@ fn unknown_property_in_chain_with_path_symtab() {
     let mut st = SymbolTable::new();
     st.set(
         "Param.X",
-        ExprValue::Path {
-            value: "/test/file.exr".into(),
-            format: PathFormat::host(),
-        },
+        ExprValue::new_path("/test/file.exr", PathFormat::host()),
     )
     .unwrap();
     assert_err_with(
@@ -985,10 +982,7 @@ fn undefined_dotted_variable_with_suggestion() {
     let mut st = SymbolTable::new();
     st.set(
         "Param.InputFile",
-        ExprValue::Path {
-            value: "/test/file.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/test/file.exr", PathFormat::Posix),
     )
     .unwrap();
     assert_err_with(

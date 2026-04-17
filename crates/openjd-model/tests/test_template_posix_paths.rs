@@ -55,10 +55,7 @@ fn param_path_parent_uses_forward_slashes() {
     symtab
         .set(
             "Param.Dir",
-            ExprValue::Path {
-                value: "/projects/shot01/render".to_string(),
-                format: PathFormat::Posix,
-            },
+            ExprValue::new_path("/projects/shot01/render".to_string(), PathFormat::Posix),
         )
         .unwrap();
     let result = eval_posix_with("Param.Dir.parent", &symtab);

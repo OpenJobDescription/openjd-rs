@@ -206,10 +206,7 @@ pub fn coerce_task_params(
             ),
             TaskParameter::Path { .. } => (
                 TaskParameterType::Path,
-                openjd_expr::ExprValue::Path {
-                    value: value.clone(),
-                    format: openjd_expr::PathFormat::host(),
-                },
+                openjd_expr::ExprValue::new_path(value.clone(), openjd_expr::PathFormat::host()),
             ),
             TaskParameter::ChunkInt { .. } => {
                 let r: openjd_expr::RangeExpr =

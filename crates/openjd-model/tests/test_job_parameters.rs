@@ -1644,10 +1644,8 @@ fn path_param_maxlength_uses_chars_not_bytes() {
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "/tmp/héllo" is 10 chars but 11 bytes — should be accepted with maxLength=10
-    let test_value = openjd_expr::ExprValue::Path {
-        value: "/tmp/héllo".to_string(),
-        format: openjd_expr::PathFormat::Posix,
-    };
+    let test_value =
+        openjd_expr::ExprValue::new_path("/tmp/héllo".to_string(), openjd_expr::PathFormat::Posix);
     assert!(
         param.check_constraints(&test_value).is_ok(),
         "10-character path '/tmp/héllo' should pass maxLength=10 (char count, not byte count)"

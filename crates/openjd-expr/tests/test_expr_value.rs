@@ -124,12 +124,9 @@ fn coerce_string_to_int() {
 
 #[test]
 fn coerce_path_to_string() {
-    let v = ExprValue::Path {
-        value: "/a/b".to_string(),
-        format: PathFormat::Posix,
-    }
-    .coerce(&ExprType::STRING, PathFormat::Posix)
-    .unwrap();
+    let v = ExprValue::new_path("/a/b".to_string(), PathFormat::Posix)
+        .coerce(&ExprType::STRING, PathFormat::Posix)
+        .unwrap();
     assert_eq!(v.to_display_string(), "/a/b");
     assert!(matches!(v, ExprValue::String(_)));
 }
@@ -229,10 +226,7 @@ fn repr_list_nested() {
 
 #[test]
 fn repr_path() {
-    let v = ExprValue::Path {
-        value: "/tmp/file".to_string(),
-        format: PathFormat::Posix,
-    };
+    let v = ExprValue::new_path("/tmp/file".to_string(), PathFormat::Posix);
     assert_eq!(
         v.repr_python(),
         "ExprValue('/tmp/file', type='path', path_format=PathFormat.POSIX)"
@@ -257,14 +251,8 @@ fn repr_unresolved() {
 fn repr_list_path_with_format() {
     let v = ExprValue::make_list(
         vec![
-            ExprValue::Path {
-                value: "/a".into(),
-                format: PathFormat::Posix,
-            },
-            ExprValue::Path {
-                value: "/b".into(),
-                format: PathFormat::Posix,
-            },
+            ExprValue::new_path("/a", PathFormat::Posix),
+            ExprValue::new_path("/b", PathFormat::Posix),
         ],
         ExprType::PATH,
     )
@@ -320,10 +308,7 @@ fn transport_bool_roundtrip() {
 
 #[test]
 fn transport_path_roundtrip() {
-    let v = ExprValue::Path {
-        value: "/tmp/file.txt".to_string(),
-        format: PathFormat::Posix,
-    };
+    let v = ExprValue::new_path("/tmp/file.txt".to_string(), PathFormat::Posix);
     let json = v.to_json_transport();
     assert_eq!(json["type"], "path");
     assert_eq!(json["value"], "/tmp/file.txt");
@@ -398,14 +383,8 @@ fn transport_range_expr_roundtrip() {
 fn transport_list_path_roundtrip() {
     let v = ExprValue::make_list(
         vec![
-            ExprValue::Path {
-                value: "/a".into(),
-                format: PathFormat::Posix,
-            },
-            ExprValue::Path {
-                value: "/b".into(),
-                format: PathFormat::Posix,
-            },
+            ExprValue::new_path("/a", PathFormat::Posix),
+            ExprValue::new_path("/b", PathFormat::Posix),
         ],
         ExprType::PATH,
     )
@@ -544,10 +523,7 @@ fn construct_null() {
 
 #[test]
 fn construct_path() {
-    let v = ExprValue::Path {
-        value: "/tmp/test".into(),
-        format: PathFormat::Posix,
-    };
+    let v = ExprValue::new_path("/tmp/test", PathFormat::Posix);
     assert_eq!(v.expr_type().to_string(), "path");
     assert_eq!(v.to_display_string(), "/tmp/test");
 }
@@ -599,11 +575,7 @@ fn to_string_string() {
 #[test]
 fn to_string_path() {
     assert_eq!(
-        ExprValue::Path {
-            value: "/a/b".into(),
-            format: PathFormat::Posix
-        }
-        .to_display_string(),
+        ExprValue::new_path("/a/b", PathFormat::Posix).to_display_string(),
         "/a/b"
     );
 }
@@ -726,10 +698,7 @@ fn eq_list_diff() {
 fn eq_string_path() {
     assert_eq!(
         ExprValue::String("/a/b".into()),
-        ExprValue::Path {
-            value: "/a/b".into(),
-            format: PathFormat::Posix
-        }
+        ExprValue::new_path("/a/b", PathFormat::Posix)
     );
 }
 
@@ -853,10 +822,7 @@ fn list_nested_int_float_mix() {
 fn list_path_string_mix() {
     let v = ExprValue::make_list(
         vec![
-            ExprValue::Path {
-                value: "/a".into(),
-                format: PathFormat::Posix,
-            },
+            ExprValue::new_path("/a", PathFormat::Posix),
             ExprValue::String("b".into()),
         ],
         ExprType::STRING,
@@ -991,18 +957,12 @@ fn coerce_nested_list_type() {
 #[test]
 fn repr_list_list_path_with_format() {
     let inner1 = ExprValue::make_list(
-        vec![ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        }],
+        vec![ExprValue::new_path("/a", PathFormat::Posix)],
         ExprType::PATH,
     )
     .unwrap();
     let inner2 = ExprValue::make_list(
-        vec![ExprValue::Path {
-            value: "/b".into(),
-            format: PathFormat::Posix,
-        }],
+        vec![ExprValue::new_path("/b", PathFormat::Posix)],
         ExprType::PATH,
     )
     .unwrap();
@@ -1189,14 +1149,8 @@ fn coerce_int_value_to_float() {
 fn repr_list_path_with_windows_format() {
     let v = ExprValue::make_list(
         vec![
-            ExprValue::Path {
-                value: "\\a".into(),
-                format: PathFormat::Windows,
-            },
-            ExprValue::Path {
-                value: "\\b".into(),
-                format: PathFormat::Windows,
-            },
+            ExprValue::new_path("\\a", PathFormat::Windows),
+            ExprValue::new_path("\\b", PathFormat::Windows),
         ],
         ExprType::PATH,
     )
@@ -1209,18 +1163,12 @@ fn repr_list_path_with_windows_format() {
 #[test]
 fn repr_list_list_path_with_windows_format() {
     let inner1 = ExprValue::make_list(
-        vec![ExprValue::Path {
-            value: "\\a".into(),
-            format: PathFormat::Windows,
-        }],
+        vec![ExprValue::new_path("\\a", PathFormat::Windows)],
         ExprType::PATH,
     )
     .unwrap();
     let inner2 = ExprValue::make_list(
-        vec![ExprValue::Path {
-            value: "\\b".into(),
-            format: PathFormat::Windows,
-        }],
+        vec![ExprValue::new_path("\\b", PathFormat::Windows)],
         ExprType::PATH,
     )
     .unwrap();
@@ -1254,10 +1202,72 @@ fn coerce_str_to_path_item_value() {
     let v =
         ExprValue::from_str_coerce("/tmp/file.txt", &ExprType::PATH, PathFormat::Posix).unwrap();
     assert_eq!(v.to_display_string(), "/tmp/file.txt");
-    if let ExprValue::Path { value, format } = &v {
+    if let ExprValue::Path { value, format, .. } = &v {
         assert_eq!(value, "/tmp/file.txt");
         assert_eq!(*format, PathFormat::Posix);
     } else {
         panic!("Expected Path");
     }
+}
+
+// ── Refactor coverage: Path encapsulation via new_path ──
+
+#[test]
+fn new_path_normalizes_windows_separators() {
+    // Construction through new_path must normalize separators — this is the
+    // invariant that the #[non_exhaustive] marker on ExprValue::Path protects.
+    let v = ExprValue::new_path("C:/foo/bar".to_string(), PathFormat::Windows);
+    if let ExprValue::Path { value, format, .. } = &v {
+        assert_eq!(
+            value, "C:\\foo\\bar",
+            "forward slashes should normalize to backslashes"
+        );
+        assert_eq!(*format, PathFormat::Windows);
+    } else {
+        panic!("expected Path variant");
+    }
+}
+
+#[test]
+fn new_path_preserves_backslashes_on_posix() {
+    // On POSIX, `\` is a valid filename character — it must NOT be normalized
+    // to `/`. This is the project-wide convention (see openjd-snapshots
+    // path_util) and matches pathlib semantics.
+    let v = ExprValue::new_path("foo\\bar\\baz".to_string(), PathFormat::Posix);
+    if let ExprValue::Path { value, format, .. } = &v {
+        assert_eq!(
+            value, "foo\\bar\\baz",
+            "backslashes must be preserved on POSIX"
+        );
+        assert_eq!(*format, PathFormat::Posix);
+    } else {
+        panic!("expected Path variant");
+    }
+}
+
+#[test]
+fn new_path_preserves_uri() {
+    // URI paths must not be touched by normalization.
+    let v = ExprValue::new_path(
+        "s3://bucket/key\\with\\backslashes".to_string(),
+        PathFormat::Uri,
+    );
+    if let ExprValue::Path { value, .. } = &v {
+        assert_eq!(value, "s3://bucket/key\\with\\backslashes");
+    } else {
+        panic!("expected Path variant");
+    }
+}
+
+// Compile-time test: downstream pattern matches must use `..` because Path is
+// marked `#[non_exhaustive]`. Inside this integration test (external to the
+// crate), the following pattern must type-check with the `..` token.
+#[test]
+fn path_pattern_requires_dotdot_externally() {
+    let v = ExprValue::new_path("/p", PathFormat::Posix);
+    let got_value = match &v {
+        ExprValue::Path { value, .. } => value.as_str(),
+        _ => panic!(),
+    };
+    assert_eq!(got_value, "/p");
 }

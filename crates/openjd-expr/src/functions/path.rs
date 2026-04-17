@@ -290,7 +290,11 @@ pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 
 pub fn apply_path_mapping_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
-    let mapped = crate::path_mapping::apply_rules(ctx.path_mapping_rules(), &path_str);
+    let mapped = crate::path_mapping::apply_rules_with_format(
+        ctx.path_mapping_rules(),
+        &path_str,
+        ctx.path_format(),
+    );
     if mapped == path_str {
         // No rule matched — still normalize separators to the target format
         Ok(ExprValue::new_path(path_str, fmt))

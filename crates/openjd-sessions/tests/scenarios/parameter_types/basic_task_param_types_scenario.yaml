@@ -17,11 +17,19 @@ expect:
     - "INT: 1 x 10 = 10"
     - "FLOAT: 1.5"
     - "STRING: ALPHA"
-    - "PATH: /tmp/a.txt"
     - "PATH.stem: a"
     # Second task: IntParam=2, FloatParam=2.5, StringParam=beta, PathParam=/tmp/b.txt
     - "INT: 2 x 10 = 20"
     - "FLOAT: 2.5"
     - "STRING: BETA"
-    - "PATH: /tmp/b.txt"
     - "PATH.stem: b"
+
+expect_posix:
+  output_contains:
+    - "PATH: /tmp/a.txt"
+    - "PATH: /tmp/b.txt"
+
+expect_windows:
+  output_contains:
+    - "PATH: \\tmp\\a.txt"
+    - "PATH: \\tmp\\b.txt"

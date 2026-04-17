@@ -26,14 +26,8 @@ fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
 
 fn uri_st(key: &str, uri: &str) -> SymbolTable {
     let mut st = SymbolTable::new();
-    st.set(
-        key,
-        ExprValue::Path {
-            value: uri.to_string(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set(key, ExprValue::new_path(uri.to_string(), PathFormat::Posix))
+        .unwrap();
     st
 }
 
@@ -955,10 +949,7 @@ fn uri_join_in_symtab_multi() {
     let mut st = SymbolTable::new();
     st.set(
         "Dir",
-        ExprValue::Path {
-            value: "s3://bucket/assets".to_string(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("s3://bucket/assets".to_string(), PathFormat::Posix),
     )
     .unwrap();
     assert_eq!(

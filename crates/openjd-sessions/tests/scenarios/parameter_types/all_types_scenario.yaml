@@ -26,7 +26,6 @@ expect:
     - "IntParam=100"
     - "IntParam+1=101"
     - "FloatParam=2.5"
-    - "PathParam=/test/path/file.txt"
     - "PathParam.name=file.txt"
     - "BoolParam=false"
     - "RangeExprParam=10-15"
@@ -35,3 +34,11 @@ expect:
     - "sum-ListIntParam=60"
     - "ListPathParam-0-name=a.txt"
     - "ListListIntParam-0-1=6"
+
+expect_posix:
+  output_contains:
+    - "PathParam=/test/path/file.txt"
+
+expect_windows:
+  output_contains:
+    - "PathParam=\\test\\path\\file.txt"

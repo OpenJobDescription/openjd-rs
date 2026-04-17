@@ -989,14 +989,8 @@ fn apply_path_mapping_rejects_path_input() {
         destination_path: "/dst".into(),
     };
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/src/file.txt".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/src/file.txt", PathFormat::Posix))
+        .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
     let lib = openjd_expr::default_library::get_default_library()

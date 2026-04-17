@@ -1221,10 +1221,7 @@ fn repr_py_path() {
     let mut st = openjd_expr::SymbolTable::new();
     st.set(
         "P",
-        openjd_expr::ExprValue::Path {
-            value: "/tmp/file.txt".into(),
-            format: openjd_expr::PathFormat::Posix,
-        },
+        openjd_expr::ExprValue::new_path("/tmp/file.txt", openjd_expr::PathFormat::Posix),
     )
     .unwrap();
     let r = eval_posix_st("repr_py(P)", &st);
@@ -1238,14 +1235,8 @@ fn repr_py_list_path() {
         "P",
         openjd_expr::ExprValue::make_list(
             vec![
-                openjd_expr::ExprValue::Path {
-                    value: "/a".into(),
-                    format: openjd_expr::PathFormat::Posix,
-                },
-                openjd_expr::ExprValue::Path {
-                    value: "/b".into(),
-                    format: openjd_expr::PathFormat::Posix,
-                },
+                openjd_expr::ExprValue::new_path("/a", openjd_expr::PathFormat::Posix),
+                openjd_expr::ExprValue::new_path("/b", openjd_expr::PathFormat::Posix),
             ],
             openjd_expr::ExprType::PATH,
         )
@@ -1262,10 +1253,10 @@ fn repr_json_list_path() {
     st.set(
         "P",
         openjd_expr::ExprValue::make_list(
-            vec![openjd_expr::ExprValue::Path {
-                value: "/a".into(),
-                format: openjd_expr::PathFormat::Posix,
-            }],
+            vec![openjd_expr::ExprValue::new_path(
+                "/a",
+                openjd_expr::PathFormat::Posix,
+            )],
             openjd_expr::ExprType::PATH,
         )
         .unwrap(),
@@ -1280,10 +1271,7 @@ fn repr_pwsh_path() {
     let mut st = openjd_expr::SymbolTable::new();
     st.set(
         "P",
-        openjd_expr::ExprValue::Path {
-            value: "/tmp/file.txt".into(),
-            format: openjd_expr::PathFormat::Posix,
-        },
+        openjd_expr::ExprValue::new_path("/tmp/file.txt", openjd_expr::PathFormat::Posix),
     )
     .unwrap();
     let r = eval_posix_st("repr_pwsh(P)", &st);
@@ -1434,10 +1422,7 @@ fn removesuffix_with_suffixes_join() {
     let mut st = openjd_expr::SymbolTable::new();
     st.set(
         "P",
-        openjd_expr::ExprValue::Path {
-            value: "/data/archive.tar.gz".into(),
-            format: openjd_expr::PathFormat::Posix,
-        },
+        openjd_expr::ExprValue::new_path("/data/archive.tar.gz", openjd_expr::PathFormat::Posix),
     )
     .unwrap();
     let r = eval_posix_st("P.name.removesuffix(P.suffixes.join(''))", &st);

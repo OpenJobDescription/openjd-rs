@@ -16,7 +16,8 @@ pub enum ExprValue {
     Int(i64),
     Float(Float64),
     String(String),
-    Path { value: String, format: PathFormat },
+    #[non_exhaustive]
+    Path { value: String, format: PathFormat },  // construct only via ExprValue::new_path
     ListBool(Vec<bool>),
     ListInt(Vec<i64>),
     ListFloat(Vec<Float64>),
@@ -86,7 +87,7 @@ ExprValue::Int(42)
 ExprValue::Float(Float64::new(3.14))
 ExprValue::Float(Float64::with_str(3.14, "3.14".into()))  // pre-parsed f64 + original string for lossless display
 ExprValue::String("hello".into())
-ExprValue::Path { value: "/tmp/out".into(), format: PathFormat::Posix }
+ExprValue::new_path("/tmp/out", PathFormat::Posix)  // PATH — only public constructor
 ExprValue::Null
 ExprValue::Bool(true)
 
@@ -99,6 +100,30 @@ ExprValue::make_list(vec![], ExprType::INT)  // → ListInt (empty, hint selects
 // Unresolved — type-only placeholder for static checking
 ExprValue::unresolved(ExprType::INT)
 ```
+
+### Path Encapsulation
+
+`ExprValue::Path` is marked `#[non_exhaustive]`, so downstream crates cannot
+use a struct literal (`ExprValue::Path { value, format }`) to construct it
+directly — doing so is a compile error (E0639). The only public constructor is
+`ExprValue::new_path(value, format)`, which normalizes separators according to
+the supplied `PathFormat`:
+
+- `PathFormat::Posix`   → no normalization (backslash is a valid filename character)
+- `PathFormat::Windows` → `/` replaced with `\` (skipped for URI-valued strings)
+- `PathFormat::Uri`     → no normalization (URIs are opaque)
+
+Pattern matching still works from outside the crate, but the `..` token must
+be included (as it must for any non-exhaustive struct/enum-variant):
+
+```rust
+if let ExprValue::Path { value, format, .. } = &v {
+    // ...
+}
+```
+
+This preserves the separator-normalization invariant workspace-wide: every
+`ExprValue::Path` value in existence has been produced by `new_path`.
 
 ### make_list Type Promotion
 

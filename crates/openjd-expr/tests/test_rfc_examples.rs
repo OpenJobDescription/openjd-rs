@@ -66,10 +66,7 @@ fn rfc_path_with_suffix() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/renders/scene.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/renders/scene.exr", PathFormat::Posix),
     )
     .unwrap();
     assert_eq!(
@@ -191,10 +188,7 @@ fn rfc_string_manipulation_path() {
     let mut st = SymbolTable::new();
     st.set(
         "Param.InputFile",
-        ExprValue::Path {
-            value: "/renders/scene_v2.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/renders/scene_v2.exr", PathFormat::Posix),
     )
     .unwrap();
     let r = eval_with_path_format(
@@ -211,18 +205,12 @@ fn rfc_path_division_with_suffix() {
     let mut st = SymbolTable::new();
     st.set(
         "Param.InputFile",
-        ExprValue::Path {
-            value: "/renders/scene.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/renders/scene.exr", PathFormat::Posix),
     )
     .unwrap();
     st.set(
         "Param.OutputDir",
-        ExprValue::Path {
-            value: "/output".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/output", PathFormat::Posix),
     )
     .unwrap();
     let r = eval_with_path_format(

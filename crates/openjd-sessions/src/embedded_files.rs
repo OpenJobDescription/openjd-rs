@@ -217,12 +217,12 @@ impl EmbeddedFiles {
         for file in files {
             let symbol = symtab_key(self.scope, &file.name);
             let filename = if let Some(ref fname_fs) = file.filename {
-                let resolved = fname_fs.resolve_string(symtab, None, &[]).map_err(|e| {
-                    SessionError::FormatString {
+                let resolved = fname_fs
+                    .resolve_string_with(symtab, &openjd_expr::FormatStringOptions::new())
+                    .map_err(|e| SessionError::FormatString {
                         context: format!("embedded file '{}' filename", file.name),
                         reason: e.to_string(),
-                    }
-                })?;
+                    })?;
                 self.target_directory.join(resolved)
             } else {
                 let name = random_hex_filename();
@@ -246,10 +246,7 @@ impl EmbeddedFiles {
             symtab
                 .set(
                     &symbol,
-                    ExprValue::Path {
-                        value: filename.to_string_lossy().to_string(),
-                        format: PathFormat::host(),
-                    },
+                    ExprValue::new_path(filename.to_string_lossy().to_string(), PathFormat::host()),
                 )
                 .map_err(|e| SessionError::Runtime(format!("Failed to set {symbol}: {e}")))?;
             self.records.push(FileRecord {
@@ -270,7 +267,12 @@ impl EmbeddedFiles {
         for record in &self.records {
             if let Some(ref data_fs) = record.file.data {
                 let resolved = data_fs
-                    .resolve_string(symtab, library, rules)
+                    .resolve_string_with(
+                        symtab,
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_library(library)
+                            .with_path_mapping_rules(rules),
+                    )
                     .map_err(|e| SessionError::FormatString {
                         context: format!("embedded file '{}' data", record.file.name),
                         reason: e.to_string(),

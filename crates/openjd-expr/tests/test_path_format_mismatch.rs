@@ -17,10 +17,7 @@ fn matching_format_no_error() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/tmp/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/tmp/render.exr", PathFormat::Posix),
     )
     .unwrap();
     let r = eval_fmt("P", &st, PathFormat::Posix).unwrap();
@@ -30,17 +27,16 @@ fn matching_format_no_error() {
 #[test]
 fn evaluator_defaults_to_host_format() {
     let host = PathFormat::host();
+    let expected = if cfg!(windows) {
+        "\\tmp\\render.exr"
+    } else {
+        "/tmp/render.exr"
+    };
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/tmp/render.exr".into(),
-            format: host,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/tmp/render.exr", host))
+        .unwrap();
     let r = evaluate_expression("P", &st).unwrap();
-    assert_eq!(r.as_str_repr(), "/tmp/render.exr");
+    assert_eq!(r.as_str_repr(), expected);
 }
 
 #[test]
@@ -67,10 +63,7 @@ fn posix_value_in_windows_evaluator() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/tmp/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/tmp/render.exr", PathFormat::Posix),
     )
     .unwrap();
     let err = eval_fmt("P", &st, PathFormat::Windows).unwrap_err();
@@ -85,10 +78,7 @@ fn windows_value_in_posix_evaluator() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: r"C:\renders\shot01".into(),
-            format: PathFormat::Windows,
-        },
+        ExprValue::new_path(r"C:\renders\shot01", PathFormat::Windows),
     )
     .unwrap();
     let err = eval_fmt("P", &st, PathFormat::Posix).unwrap_err();
@@ -105,14 +95,8 @@ fn list_path_matching_no_error() {
         "Paths",
         ExprValue::make_list(
             vec![
-                ExprValue::Path {
-                    value: "/a".into(),
-                    format: PathFormat::Posix,
-                },
-                ExprValue::Path {
-                    value: "/b".into(),
-                    format: PathFormat::Posix,
-                },
+                ExprValue::new_path("/a", PathFormat::Posix),
+                ExprValue::new_path("/b", PathFormat::Posix),
             ],
             ExprType::PATH,
         )
@@ -130,14 +114,8 @@ fn list_path_mismatch() {
         "Paths",
         ExprValue::make_list(
             vec![
-                ExprValue::Path {
-                    value: "/a".into(),
-                    format: PathFormat::Posix,
-                },
-                ExprValue::Path {
-                    value: "/b".into(),
-                    format: PathFormat::Posix,
-                },
+                ExprValue::new_path("/a", PathFormat::Posix),
+                ExprValue::new_path("/b", PathFormat::Posix),
             ],
             ExprType::PATH,
         )
@@ -156,10 +134,7 @@ fn mismatch_error_message_includes_variable_name() {
     let mut st = SymbolTable::new();
     st.set(
         "Param.InputFile",
-        ExprValue::Path {
-            value: "/tmp/test".into(),
-            format: PathFormat::Windows,
-        },
+        ExprValue::new_path("/tmp/test", PathFormat::Windows),
     )
     .unwrap();
     let err = eval_fmt("Param.InputFile", &st, PathFormat::Posix).unwrap_err();

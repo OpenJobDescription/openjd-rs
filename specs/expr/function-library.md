@@ -23,12 +23,18 @@ Making function signatures first-class data provides four key capabilities:
 
 ## FunctionEntry
 
-Each registered overload pairs a type signature with a function pointer:
+Each registered overload pairs a type signature with a function implementation:
 
 ```rust
+pub type FunctionImpl = Arc<
+    dyn Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
+        + Send
+        + Sync,
+>;
+
 pub struct FunctionEntry {
-    pub signature: ExprType,  // TypeCode::Signature — e.g., (int, int) -> int
-    pub implementation: fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
+    pub signature: ExprType,     // TypeCode::Signature — e.g., (int, int) -> int
+    pub implementation: FunctionImpl,
 }
 
 pub struct FunctionLibrary {
@@ -37,12 +43,19 @@ pub struct FunctionLibrary {
 }
 ```
 
+The implementation is an `Arc<dyn Fn … + Send + Sync>` — not a bare `fn`
+pointer — so closures that capture environment (host state, AWS clients,
+config) can be registered alongside plain functions. `Arc` (rather than `Box`)
+keeps `FunctionLibrary` `Clone`, which many call sites rely on when cloning the
+default library to add host-context extensions.
+
 The `host_context_enabled` flag is a runtime marker used by callers (model-layer
 template validation) to discover whether host-only functions like
 `apply_path_mapping` are available on this library instance. It is set by
 `with_host_context()`.
 
-Function pointers (not closures) keep `FunctionEntry` simple, `Clone`, and `Send + Sync`.
+Function pointers and closures both work — `Arc<dyn Fn + Send + Sync>` is
+`Clone` and thread-safe, preserving `FunctionLibrary: Clone + Send + Sync`.
 Functions that need evaluator state (path format, path mapping rules) access it through
 the `EvalContext` trait.
 
@@ -77,13 +90,25 @@ enforcing the separation between evaluation control flow and pure function logic
 ```rust
 let mut lib = FunctionLibrary::new();
 
-// From ExprType signature
+// Plain function pointer
 lib.register("abs", ExprType::signature(vec![ExprType::INT], ExprType::INT), abs_int);
 
 // From spec notation string (convenient for bulk registration)
 lib.register_sig("abs", "(int) -> int", abs_int);
 lib.register_sig("abs", "(float) -> float", abs_float);
 lib.register_sig("min", "(list[T1]) -> T1", min_list);
+
+// Closures work too — useful for host-integrated functions that wrap
+// captured state (AWS clients, config, caches). Must be `Send + Sync + 'static`.
+let prefix = "host-".to_string();
+lib.register_sig(
+    "brand",
+    "(string) -> string",
+    move |_ctx: &mut dyn EvalContext, a: &[ExprValue]| match &a[0] {
+        ExprValue::String(s) => Ok(ExprValue::String(format!("{prefix}{s}"))),
+        _ => Err(ExpressionError::type_error("expected string")),
+    },
+);
 ```
 
 ## Three-Phase Dispatch

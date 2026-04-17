@@ -59,37 +59,51 @@ impl FormatString {
         &self.raw
     }
 
-    /// Resolve all interpolations to a string.
+    /// Resolve to an `ExprValue`.
     ///
-    /// Every segment is evaluated and concatenated. Single-expression format
-    /// strings lose their typed value — use `resolve` when you need the
-    /// native `ExprValue`.
+    /// Configures evaluation via [`FormatStringOptions`]. If the format string
+    /// is a single expression with no surrounding literal text, returns the
+    /// raw typed `ExprValue` (which may be int, list, path, etc.); otherwise
+    /// it concatenates all segments and returns `ExprValue::String`.
     ///
-    /// `path_format` controls how `path()` values are constructed:
-    /// - `PathFormat::Posix` in template context (create_job, let bindings)
-    /// - `PathFormat::host()` in session/host context (action execution)
-    pub fn resolve_string(
+    /// Pass `&FormatStringOptions::default()` for the simplest call. Build
+    /// options with `.with_library(...)`, `.with_path_format(...)`,
+    /// `.with_path_mapping_rules(...)`, and `.with_target_type(...)`.
+    pub fn resolve_with(
         &self,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-    ) -> Result<String, ExpressionError> {
-        self.resolve_string_with_format(
+        opts: &FormatStringOptions<'_>,
+    ) -> Result<ExprValue, ExpressionError> {
+        self.resolve_inner(
             symtab,
-            library,
-            path_mapping_rules,
-            crate::path_mapping::PathFormat::host(),
+            opts.library,
+            opts.path_mapping_rules,
+            opts.path_format,
+            opts.target_type,
         )
     }
 
-    /// Like `resolve_string` but with an explicit path format.
-    pub fn resolve_string_with_format(
+    /// Resolve to `String`, concatenating every segment.
+    ///
+    /// Single-expression format strings lose their typed value — use
+    /// [`resolve_with`](Self::resolve_with) when you need the native
+    /// `ExprValue`. The `target_type` field on `opts` is ignored here.
+    ///
+    /// `path_format` on the options controls how `path()` values are
+    /// constructed:
+    /// - `PathFormat::Posix` in template context (create_job, let bindings)
+    /// - `PathFormat::host()` in session/host context (action execution)
+    pub fn resolve_string_with(
         &self,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-        path_format: crate::path_mapping::PathFormat,
+        opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError> {
+        let FormatStringOptions {
+            library,
+            path_mapping_rules,
+            path_format,
+            target_type: _,
+        } = *opts;
         let mut result = String::new();
         for seg in &self.segments {
             match seg {
@@ -140,72 +154,6 @@ impl FormatString {
         Ok(result)
     }
 
-    /// Resolve to a typed `ExprValue`.
-    ///
-    /// If the format string is a single expression with no surrounding literal
-    /// text, returns the raw `ExprValue` (which may be int, list, path, etc.).
-    /// Otherwise, resolves all segments to strings and concatenates, returning
-    /// `ExprValue::String`.
-    pub fn resolve(
-        &self,
-        symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-    ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_with_format(
-            symtab,
-            library,
-            path_mapping_rules,
-            crate::path_mapping::PathFormat::host(),
-        )
-    }
-
-    /// Like `resolve` but with an explicit path format.
-    pub fn resolve_with_format(
-        &self,
-        symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-        path_format: crate::path_mapping::PathFormat,
-    ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_inner(symtab, library, path_mapping_rules, path_format, None)
-    }
-
-    /// Like `resolve` but with a target type for coercion.
-    pub fn resolve_typed(
-        &self,
-        symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-        target_type: &crate::types::ExprType,
-    ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_inner(
-            symtab,
-            library,
-            path_mapping_rules,
-            crate::path_mapping::PathFormat::host(),
-            Some(target_type),
-        )
-    }
-
-    /// Like `resolve_typed` but with an explicit path format.
-    pub fn resolve_typed_with_format(
-        &self,
-        symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_mapping_rules: &[crate::path_mapping::PathMappingRule],
-        path_format: crate::path_mapping::PathFormat,
-        target_type: &crate::types::ExprType,
-    ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_inner(
-            symtab,
-            library,
-            path_mapping_rules,
-            path_format,
-            Some(target_type),
-        )
-    }
-
     fn resolve_inner(
         &self,
         symtab: &SymbolTable,
@@ -239,8 +187,16 @@ impl FormatString {
                 _ => {}
             }
         }
-        self.resolve_string_with_format(symtab, library, path_mapping_rules, path_format)
-            .map(ExprValue::String)
+        self.resolve_string_with(
+            symtab,
+            &FormatStringOptions {
+                library,
+                path_mapping_rules,
+                path_format,
+                target_type: None,
+            },
+        )
+        .map(ExprValue::String)
     }
 
     fn eval_segment(
@@ -683,6 +639,89 @@ impl std::fmt::Display for FormatStringValidationError {
 
 impl std::error::Error for FormatStringValidationError {}
 
+/// Builder-style options for [`FormatString::resolve_with`] and
+/// [`FormatString::resolve_string_with`].
+///
+/// All fields are optional; defaults match the zero-argument shortcuts on
+/// `FormatString` (host-native path format, no library, no path mapping rules,
+/// no target type coercion). Chain the `with_*` methods to override any subset.
+///
+/// ```
+/// # use openjd_expr::{FormatString, FormatStringOptions, SymbolTable, PathFormat, ExprType};
+/// let fs = FormatString::new("{{Param.Frame}}").unwrap();
+/// let st = SymbolTable::new();
+/// let target = ExprType::INT;
+/// let opts = FormatStringOptions::new()
+///     .with_path_format(PathFormat::Posix)
+///     .with_target_type(&target);
+/// let _ = fs.resolve_with(&st, &opts);
+/// ```
+#[derive(Clone)]
+pub struct FormatStringOptions<'a> {
+    library: Option<&'a crate::function_library::FunctionLibrary>,
+    path_mapping_rules: &'a [crate::path_mapping::PathMappingRule],
+    path_format: crate::path_mapping::PathFormat,
+    target_type: Option<&'a crate::types::ExprType>,
+}
+
+impl<'a> Default for FormatStringOptions<'a> {
+    fn default() -> Self {
+        Self {
+            library: None,
+            path_mapping_rules: &[],
+            path_format: crate::path_mapping::PathFormat::host(),
+            target_type: None,
+        }
+    }
+}
+
+impl<'a> FormatStringOptions<'a> {
+    /// Construct options with all defaults (equivalent to `Default::default()`).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Use the given function library instead of the default (built-in) one.
+    ///
+    /// Accepts either `&FunctionLibrary` or `Option<&FunctionLibrary>`; `None`
+    /// means "use the default library".
+    #[must_use]
+    pub fn with_library(
+        mut self,
+        library: impl Into<Option<&'a crate::function_library::FunctionLibrary>>,
+    ) -> Self {
+        self.library = library.into();
+        self
+    }
+
+    /// Apply these path mapping rules to `apply_path_mapping` calls.
+    #[must_use]
+    pub fn with_path_mapping_rules(
+        mut self,
+        rules: &'a [crate::path_mapping::PathMappingRule],
+    ) -> Self {
+        self.path_mapping_rules = rules;
+        self
+    }
+
+    /// Construct `path()` values in this format (default: host-native).
+    #[must_use]
+    pub fn with_path_format(mut self, fmt: crate::path_mapping::PathFormat) -> Self {
+        self.path_format = fmt;
+        self
+    }
+
+    /// Coerce the resolved value toward this target type.
+    ///
+    /// Ignored by `resolve_string_with`.
+    #[must_use]
+    pub fn with_target_type(mut self, t: &'a crate::types::ExprType) -> Self {
+        self.target_type = Some(t);
+        self
+    }
+}
+
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
 #[must_use]
 pub fn escape_format_string(value: &str) -> String {
@@ -711,7 +750,8 @@ mod tests {
         let fs = FormatString::new("hello").unwrap();
         assert!(fs.is_literal());
         assert_eq!(
-            fs.resolve_string(&SymbolTable::new(), None, &[]).unwrap(),
+            fs.resolve_string_with(&SymbolTable::new(), &FormatStringOptions::default())
+                .unwrap(),
             "hello"
         );
     }
@@ -720,7 +760,11 @@ mod tests {
         let fs = FormatString::new("{{Param.X}}").unwrap();
         let mut st = SymbolTable::new();
         st.set_string("Param.X", "42").unwrap();
-        assert_eq!(fs.resolve_string(&st, None, &[]).unwrap(), "42");
+        assert_eq!(
+            fs.resolve_string_with(&st, &FormatStringOptions::default())
+                .unwrap(),
+            "42"
+        );
     }
     #[test]
     fn complex_parses() {
@@ -744,7 +788,11 @@ mod tests {
         let fs = FormatString::new("{{ Param.X + 3 }}").unwrap();
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::Int(10)).unwrap();
-        assert_eq!(fs.resolve_string(&st, None, &[]).unwrap(), "13");
+        assert_eq!(
+            fs.resolve_string_with(&st, &FormatStringOptions::default())
+                .unwrap(),
+            "13"
+        );
     }
     #[test]
     fn validate_catches_bitwise() {
@@ -863,7 +911,9 @@ mod tests {
         let fs = FormatString::new("{{Param.X}}").unwrap();
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::Int(42)).unwrap();
-        let val = fs.resolve(&st, None, &[]).unwrap();
+        let val = fs
+            .resolve_with(&st, &FormatStringOptions::default())
+            .unwrap();
         assert!(matches!(val, ExprValue::Int(42)));
     }
     #[test]
@@ -872,7 +922,9 @@ mod tests {
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::String("hello".into()))
             .unwrap();
-        let val = fs.resolve(&st, None, &[]).unwrap();
+        let val = fs
+            .resolve_with(&st, &FormatStringOptions::default())
+            .unwrap();
         assert!(matches!(val, ExprValue::String(ref s) if s == "hello"));
     }
     #[test]
@@ -880,13 +932,17 @@ mod tests {
         let fs = FormatString::new("hello {{Param.X}}").unwrap();
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::Int(42)).unwrap();
-        let val = fs.resolve(&st, None, &[]).unwrap();
+        let val = fs
+            .resolve_with(&st, &FormatStringOptions::default())
+            .unwrap();
         assert!(matches!(val, ExprValue::String(ref s) if s == "hello 42"));
     }
     #[test]
     fn resolve_value_pure_literal() {
         let fs = FormatString::new("hello").unwrap();
-        let val = fs.resolve(&SymbolTable::new(), None, &[]).unwrap();
+        let val = fs
+            .resolve_with(&SymbolTable::new(), &FormatStringOptions::default())
+            .unwrap();
         assert!(matches!(val, ExprValue::String(ref s) if s == "hello"));
     }
 
@@ -895,8 +951,12 @@ mod tests {
         let fs = FormatString::new("{{Param.X}}").unwrap();
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::Int(42)).unwrap();
+        let target = crate::types::ExprType::FLOAT;
         let val = fs
-            .resolve_typed(&st, None, &[], &crate::types::ExprType::FLOAT)
+            .resolve_with(
+                &st,
+                &FormatStringOptions::default().with_target_type(&target),
+            )
             .unwrap();
         assert!(matches!(val, ExprValue::Float(ref f) if f.value() == 42.0));
     }
@@ -906,7 +966,9 @@ mod tests {
         let fs = FormatString::new("{{Param.X}}").unwrap();
         let mut st = SymbolTable::new();
         st.set("Param.X", ExprValue::Int(42)).unwrap();
-        let val = fs.resolve(&st, None, &[]).unwrap();
+        let val = fs
+            .resolve_with(&st, &FormatStringOptions::default())
+            .unwrap();
         assert!(matches!(val, ExprValue::Int(42)));
     }
 
@@ -918,12 +980,11 @@ mod tests {
             .unwrap();
         let target = crate::types::ExprType::PATH;
         let val = fs
-            .resolve_typed_with_format(
+            .resolve_with(
                 &st,
-                None,
-                &[],
-                crate::path_mapping::PathFormat::Posix,
-                &target,
+                &FormatStringOptions::default()
+                    .with_path_format(crate::path_mapping::PathFormat::Posix)
+                    .with_target_type(&target),
             )
             .unwrap();
         assert!(matches!(val, ExprValue::Path { ref value, .. } if value == "/foo/bar"));
@@ -1116,5 +1177,87 @@ mod tests {
         assert!(syms.contains("Param.A"));
         assert!(syms.contains("Param.B"));
         assert_eq!(syms.len(), 2);
+    }
+
+    // ── FormatStringOptions builder tests ──
+
+    #[test]
+    fn options_default_matches_host_format() {
+        let opts = FormatStringOptions::new();
+        assert_eq!(opts.path_format, crate::path_mapping::PathFormat::host());
+        assert!(opts.library.is_none());
+        assert!(opts.target_type.is_none());
+        assert!(opts.path_mapping_rules.is_empty());
+    }
+
+    #[test]
+    fn options_with_path_format() {
+        let fs = FormatString::new("{{path('/tmp/out')}}").unwrap();
+        let st = SymbolTable::new();
+        let opts =
+            FormatStringOptions::new().with_path_format(crate::path_mapping::PathFormat::Posix);
+        let val = fs.resolve_with(&st, &opts).unwrap();
+        match val {
+            ExprValue::Path { format, .. } => {
+                assert_eq!(format, crate::path_mapping::PathFormat::Posix);
+            }
+            _ => panic!("expected path value, got {:?}", val),
+        }
+    }
+
+    #[test]
+    fn options_with_target_type_coerces() {
+        let fs = FormatString::new("{{42}}").unwrap();
+        let st = SymbolTable::new();
+        let target = crate::types::ExprType::FLOAT;
+        let opts = FormatStringOptions::new().with_target_type(&target);
+        let val = fs.resolve_with(&st, &opts).unwrap();
+        assert!(matches!(val, ExprValue::Float(_)), "got {:?}", val);
+    }
+
+    #[test]
+    fn options_default_equivalent_to_builder() {
+        // FormatStringOptions::default() behaves the same as manually constructing
+        // with all defaults, and both produce the correct Int result from a
+        // single-expression format string.
+        let fs = FormatString::new("{{Param.X + 1}}").unwrap();
+        let mut st = SymbolTable::new();
+        st.set("Param.X", ExprValue::Int(10)).unwrap();
+
+        let a = fs
+            .resolve_with(&st, &FormatStringOptions::default())
+            .unwrap();
+        let b = fs.resolve_with(&st, &FormatStringOptions::new()).unwrap();
+        match (a, b) {
+            (ExprValue::Int(11), ExprValue::Int(11)) => {}
+            (a, b) => panic!("expected Int(11) for both; got {:?} vs {:?}", a, b),
+        }
+    }
+
+    #[test]
+    fn options_resolve_string_with_ignores_target_type() {
+        // resolve_string_with always concatenates to string; target_type is ignored.
+        let fs = FormatString::new("{{Param.X}}").unwrap();
+        let mut st = SymbolTable::new();
+        st.set("Param.X", ExprValue::Int(42)).unwrap();
+        let t = crate::types::ExprType::FLOAT;
+        let opts = FormatStringOptions::new().with_target_type(&t);
+        let s = fs.resolve_string_with(&st, &opts).unwrap();
+        assert_eq!(s, "42");
+    }
+
+    #[test]
+    fn options_with_library_is_plumbed() {
+        // Build a library that only registers `len`, without `upper`, and confirm that
+        // when we set it on the options, evaluation uses the restricted library.
+        let fs = FormatString::new("{{ upper('hi') }}").unwrap();
+        let st = SymbolTable::new();
+        let mut minimal = crate::function_library::FunctionLibrary::new();
+        minimal.register_sig("len", "(string) -> int", crate::functions::misc::len_string);
+        let opts = FormatStringOptions::new().with_library(&minimal);
+        assert!(
+            fs.resolve_with(&st, &opts).is_err(),
+            "should reject unknown function"
+        );
     }
 }

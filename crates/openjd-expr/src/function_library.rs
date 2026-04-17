@@ -31,13 +31,22 @@ fn friendly_op_name(name: &str) -> Option<&'static str> {
 use crate::types::ExprType;
 use crate::value::ExprValue;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Type alias for a boxed function implementation.
+///
+/// Uses `Arc<dyn Fn>` rather than a bare `fn` pointer so that closures
+/// (capturing environment) can be registered alongside plain functions.
+/// `Arc` (not `Box`) keeps `FunctionLibrary` `Clone`.
+pub type FunctionImpl = Arc<
+    dyn Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError> + Send + Sync,
+>;
 
 /// A registered function overload.
 #[derive(Clone)]
 pub struct FunctionEntry {
     pub signature: ExprType, // TypeCode::Signature
-    pub implementation:
-        fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
+    pub implementation: FunctionImpl,
 }
 
 /// Trait for the evaluator context that function implementations can access.
@@ -92,35 +101,36 @@ impl FunctionLibrary {
         self
     }
 
-    /// Register a function overload with an ExprType::Signature.
-    pub fn register(
-        &mut self,
-        name: &str,
-        signature: ExprType,
-        implementation: fn(
-            &mut dyn EvalContext,
-            &[ExprValue],
-        ) -> Result<ExprValue, ExpressionError>,
-    ) {
+    /// Register a function overload with an `ExprType::Signature`.
+    ///
+    /// Accepts either a bare `fn` pointer or a closure — anything implementing
+    /// `Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>`
+    /// with `Send + Sync + 'static`. Closures enable wrapping host state
+    /// (e.g., AWS clients, config) without plumbing it through `EvalContext`.
+    pub fn register<F>(&mut self, name: &str, signature: ExprType, implementation: F)
+    where
+        F: Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
+            + Send
+            + Sync
+            + 'static,
+    {
         self.functions
             .entry(name.to_string())
             .or_default()
             .push(FunctionEntry {
                 signature,
-                implementation,
+                implementation: Arc::new(implementation),
             });
     }
 
     /// Register from spec notation: `lib.register_sig("len", "(list[T1]) -> int", len_list)`
-    pub fn register_sig(
-        &mut self,
-        name: &str,
-        sig_str: &str,
-        implementation: fn(
-            &mut dyn EvalContext,
-            &[ExprValue],
-        ) -> Result<ExprValue, ExpressionError>,
-    ) {
+    pub fn register_sig<F>(&mut self, name: &str, sig_str: &str, implementation: F)
+    where
+        F: Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
+            + Send
+            + Sync
+            + 'static,
+    {
         let signature =
             ExprType::parse(sig_str).unwrap_or_else(|e| panic!("Bad signature '{sig_str}': {e}"));
         self.register(name, signature, implementation);

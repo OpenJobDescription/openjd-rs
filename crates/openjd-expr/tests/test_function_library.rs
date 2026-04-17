@@ -128,10 +128,7 @@ fn phase2_coercion_path_to_string() {
     let mut lib = FunctionLibrary::new();
     lib.register_sig("f", "(string) -> string", identity);
     let mut ctx = MockCtx;
-    let path = ExprValue::Path {
-        value: "/tmp/test".into(),
-        format: PathFormat::Posix,
-    };
+    let path = ExprValue::new_path("/tmp/test", PathFormat::Posix);
     let r = lib.call("f", &[path], &mut ctx).unwrap();
     assert_eq!(r, ExprValue::String("/tmp/test".into()));
 }
@@ -177,10 +174,7 @@ fn call_method_skips_receiver_coercion() {
     lib.register_sig("upper", "(string) -> string", identity);
     let mut ctx = MockCtx;
     // path.upper() as method → should fail because path receiver can't be coerced
-    let path = ExprValue::Path {
-        value: "/tmp".into(),
-        format: PathFormat::Posix,
-    };
+    let path = ExprValue::new_path("/tmp", PathFormat::Posix);
     let r = lib.call_method("upper", &[path], &mut ctx);
     assert!(r.is_err());
     assert!(r
@@ -207,10 +201,7 @@ fn call_method_coerces_non_receiver_args() {
     lib.register_sig("concat", "(string, string) -> string", concat);
     let mut ctx = MockCtx;
     // "hello".concat(path) → path coerced to string for second arg
-    let path = ExprValue::Path {
-        value: "/tmp".into(),
-        format: PathFormat::Posix,
-    };
+    let path = ExprValue::new_path("/tmp", PathFormat::Posix);
     let r = lib
         .call_method(
             "concat",
@@ -227,10 +218,7 @@ fn call_as_function_coerces_all_args() {
     let mut lib = FunctionLibrary::new();
     lib.register_sig("upper", "(string) -> string", identity);
     let mut ctx = MockCtx;
-    let path = ExprValue::Path {
-        value: "/tmp".into(),
-        format: PathFormat::Posix,
-    };
+    let path = ExprValue::new_path("/tmp", PathFormat::Posix);
     let r = lib.call("upper", &[path], &mut ctx).unwrap();
     assert_eq!(r, ExprValue::String("/tmp".into()));
 }
@@ -487,14 +475,8 @@ fn merge_preserves_distinct_functions() {
 fn evaluator_method_call_skips_receiver_coercion() {
     // path.startswith() should fail — startswith is for string, not path
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/tmp/test".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/tmp/test", PathFormat::Posix))
+        .unwrap();
     let parsed = ParsedExpression::new("P.startswith('/tmp')").unwrap();
     let symtabs = [&st];
     let mut ev = parsed
@@ -508,14 +490,8 @@ fn evaluator_method_call_skips_receiver_coercion() {
 fn evaluator_function_call_coerces_path_to_string() {
     // startswith(path, str) as function call should coerce path → string
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/tmp/test".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/tmp/test", PathFormat::Posix))
+        .unwrap();
     let parsed = ParsedExpression::new("startswith(P, '/tmp')").unwrap();
     let symtabs = [&st];
     let mut ev = parsed
@@ -539,4 +515,83 @@ fn evaluator_multiple_overloads_select_correct() {
     assert_eq!(eval("len('hello')"), ExprValue::Int(5));
     assert_eq!(eval("len([1, 2, 3])"), ExprValue::Int(3));
     assert_eq!(eval("len(range_expr('1-10'))"), ExprValue::Int(10));
+}
+
+// ── Refactor coverage: closure-based function registration ──
+
+#[test]
+fn register_accepts_bare_fn() {
+    // Bare `fn` still works unchanged.
+    fn double_int(_: &mut dyn EvalContext, a: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        match &a[0] {
+            ExprValue::Int(n) => Ok(ExprValue::Int(n * 2)),
+            _ => Err(ExpressionError::type_error("expected int")),
+        }
+    }
+
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig("double", "(int) -> int", double_int);
+
+    let mut ctx = MockCtx;
+    let r = lib.call("double", &[ExprValue::Int(21)], &mut ctx).unwrap();
+    assert!(matches!(r, ExprValue::Int(42)));
+}
+
+#[test]
+fn register_accepts_closure_with_captured_state() {
+    // Closures that capture `Send + Sync + 'static` state can now be registered.
+    // This is the motivating use case for the Arc<dyn Fn> change.
+    use std::sync::Arc;
+    let offset: Arc<i64> = Arc::new(100);
+    let offset_cloned = Arc::clone(&offset);
+
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig(
+        "add_offset",
+        "(int) -> int",
+        move |_ctx: &mut dyn EvalContext, a: &[ExprValue]| match &a[0] {
+            ExprValue::Int(n) => Ok(ExprValue::Int(n + *offset_cloned)),
+            _ => Err(ExpressionError::type_error("expected int")),
+        },
+    );
+
+    let mut ctx = MockCtx;
+    let r = lib
+        .call("add_offset", &[ExprValue::Int(5)], &mut ctx)
+        .unwrap();
+    assert!(matches!(r, ExprValue::Int(105)));
+    // offset is still live via the Arc in the FunctionLibrary.
+    assert_eq!(*offset, 100);
+}
+
+#[test]
+fn function_library_stays_clone_after_closure_registration() {
+    // The Arc<dyn Fn> change preserved Clone on FunctionLibrary.
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig(
+        "id",
+        "(int) -> int",
+        |_: &mut dyn EvalContext, a: &[ExprValue]| Ok(a[0].clone()),
+    );
+    let cloned = lib.clone();
+
+    let mut ctx = MockCtx;
+    let r_orig = lib.call("id", &[ExprValue::Int(7)], &mut ctx).unwrap();
+    let r_clone = cloned.call("id", &[ExprValue::Int(7)], &mut ctx).unwrap();
+    assert!(matches!(r_orig, ExprValue::Int(7)));
+    assert!(matches!(r_clone, ExprValue::Int(7)));
+}
+
+#[test]
+fn function_library_is_send_sync_with_closure_impl() {
+    // Verify the library can cross thread boundaries with a closure-registered
+    // function — this would fail to compile if Arc<dyn Fn> weren't Send + Sync.
+    fn assert_send_sync<T: Send + Sync>(_: &T) {}
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig(
+        "k",
+        "(int) -> int",
+        |_: &mut dyn EvalContext, _: &[ExprValue]| Ok(ExprValue::Int(0)),
+    );
+    assert_send_sync(&lib);
 }

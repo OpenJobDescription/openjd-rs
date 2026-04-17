@@ -745,10 +745,10 @@ fn validate_containment_path_as_path_value() {
         "Dir".into(),
         TaskParameterValue {
             param_type: TaskParameterType::Path,
-            value: openjd_expr::ExprValue::Path {
-                value: "/tmp/b".to_string(),
-                format: openjd_expr::PathFormat::Posix,
-            },
+            value: openjd_expr::ExprValue::new_path(
+                "/tmp/b".to_string(),
+                openjd_expr::PathFormat::Posix,
+            ),
         },
     );
     assert!(

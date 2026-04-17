@@ -59,14 +59,8 @@ fn string_concat_float() {
 #[test]
 fn path_startswith_as_function() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a/b/c".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a/b/c", PathFormat::Posix))
+        .unwrap();
     let parsed = ParsedExpression::new("startswith(string(P), '/a')").unwrap();
     let symtabs = [&st];
     let mut ev = parsed
@@ -77,14 +71,8 @@ fn path_startswith_as_function() {
 #[test]
 fn path_endswith_as_function() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a/b/c.txt".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a/b/c.txt", PathFormat::Posix))
+        .unwrap();
     let parsed = ParsedExpression::new("endswith(string(P), '.txt')").unwrap();
     let symtabs = [&st];
     let mut ev = parsed

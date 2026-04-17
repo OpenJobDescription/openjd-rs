@@ -251,10 +251,7 @@ fn path_stem_without_host_context() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/projects/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/projects/render.exr", PathFormat::Posix),
     )
     .unwrap();
     let parsed = ParsedExpression::new("P.stem").unwrap();
@@ -270,10 +267,7 @@ fn path_suffix_without_host_context() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/projects/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/projects/render.exr", PathFormat::Posix),
     )
     .unwrap();
     let parsed = ParsedExpression::new("P.suffix").unwrap();
@@ -289,10 +283,7 @@ fn path_with_suffix_without_host_context() {
     let mut st = SymbolTable::new();
     st.set(
         "P",
-        ExprValue::Path {
-            value: "/projects/render.exr".into(),
-            format: PathFormat::Posix,
-        },
+        ExprValue::new_path("/projects/render.exr", PathFormat::Posix),
     )
     .unwrap();
     let parsed = ParsedExpression::new("with_suffix(P, '.png')").unwrap();

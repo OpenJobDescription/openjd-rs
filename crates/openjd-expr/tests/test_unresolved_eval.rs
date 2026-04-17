@@ -779,14 +779,8 @@ fn mix_unknown_path_and_concrete_string() {
 #[test]
 fn mix_unknown_string_and_concrete_path() {
     let mut st = st_unresolved(vec![("S", "string")]);
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
+        .unwrap();
     let parsed = ParsedExpression::new("[S, P]").unwrap();
     let symtabs = [&st];
     let mut ev = parsed

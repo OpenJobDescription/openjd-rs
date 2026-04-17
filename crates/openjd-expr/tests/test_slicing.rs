@@ -165,14 +165,8 @@ fn string_slice_negative_indices() {
 #[test]
 fn path_index_not_supported() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a/b".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a/b", PathFormat::Posix))
+        .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P[0]").unwrap();
     let symtabs = [&st];
     let mut ev = parsed

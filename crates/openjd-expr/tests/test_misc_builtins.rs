@@ -181,27 +181,14 @@ fn len_string_empty() {
 #[test]
 fn len_path_basic() {
     let mut st = SymbolTable::new();
-    st.set(
-        "p",
-        ExprValue::Path {
-            value: "/foo/bar".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("p", ExprValue::new_path("/foo/bar", PathFormat::Posix))
+        .unwrap();
     assert_eq!(eval_posix_st("len(p)", &st).to_display_string(), "8");
 }
 #[test]
 fn len_path_direct() {
     // Call len_path directly to ensure coverage
-    let r = len_path(
-        &mut Ctx,
-        &[ExprValue::Path {
-            value: "/x".into(),
-            format: PathFormat::Posix,
-        }],
-    )
-    .unwrap();
+    let r = len_path(&mut Ctx, &[ExprValue::new_path("/x", PathFormat::Posix)]).unwrap();
     assert_eq!(r, ExprValue::Int(2));
 }
 
@@ -235,14 +222,8 @@ fn path_from_string() {
 #[test]
 fn path_from_path() {
     let mut st = SymbolTable::new();
-    st.set(
-        "p",
-        ExprValue::Path {
-            value: "/foo".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("p", ExprValue::new_path("/foo", PathFormat::Posix))
+        .unwrap();
     assert!(matches!(
         eval_posix_st("path(p)", &st),
         ExprValue::Path { .. }

@@ -79,7 +79,14 @@ impl SymbolTable {
     }
 
     /// Construct from a list of (dotted_key, value) pairs.
-    pub fn from_pairs(pairs: Vec<(&str, ExprValue)>) -> Result<Self, SymbolTableError> {
+    /// Build a `SymbolTable` from any iterable of `(dotted_key, value)` pairs.
+    ///
+    /// Accepts any `IntoIterator`, so callers can pass `Vec`, arrays, iterators
+    /// (e.g., from `map`/`filter` chains), or other containers without collecting first.
+    pub fn from_pairs<'a, I>(pairs: I) -> Result<Self, SymbolTableError>
+    where
+        I: IntoIterator<Item = (&'a str, ExprValue)>,
+    {
         let mut st = Self::new();
         for (k, v) in pairs {
             st.set(k, v)?;
@@ -205,7 +212,16 @@ impl SymbolTable {
     }
 
     /// Collect all leaf symbol paths (dotted names) in this table.
-    pub fn all_paths(&self, prefix: &str, out: &mut Vec<String>) {
+    ///
+    /// If `prefix` is non-empty, each returned path is prefixed with
+    /// `"{prefix}."`. Use `""` for a top-level walk.
+    pub fn all_paths(&self, prefix: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        self.collect_paths(prefix, &mut out);
+        out
+    }
+
+    fn collect_paths(&self, prefix: &str, out: &mut Vec<String>) {
         for (key, entry) in &self.table {
             let path = if prefix.is_empty() {
                 key.clone()
@@ -214,7 +230,7 @@ impl SymbolTable {
             };
             match entry {
                 SymbolTableEntry::Value(_) => out.push(path),
-                SymbolTableEntry::Table(sub) => sub.all_paths(&path, out),
+                SymbolTableEntry::Table(sub) => sub.collect_paths(&path, out),
             }
         }
     }
@@ -242,8 +258,7 @@ impl SymbolTable {
 impl serde::Serialize for SymbolTable {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
-        let mut paths = Vec::new();
-        self.all_paths("", &mut paths);
+        let paths = self.all_paths("");
         // Collect only resolved values — skip Unresolved entries
         let entries: Vec<_> = paths
             .iter()

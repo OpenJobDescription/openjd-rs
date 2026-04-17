@@ -106,10 +106,7 @@ fn make_list_string_rejects_non_string() {
 fn make_list_path_rejects_non_path_non_string() {
     let result = ExprValue::make_list(
         vec![
-            ExprValue::Path {
-                value: "/a".into(),
-                format: openjd_expr::PathFormat::Posix,
-            },
+            ExprValue::new_path("/a", openjd_expr::PathFormat::Posix),
             ExprValue::Int(42),
         ],
         ExprType::PATH,

@@ -6,9 +6,11 @@
 **Spec location:** `~/openjd-rs/specs/expr`
 
 > **Update 2026-04-17 (later):** Findings in sections 1, 2, and 3 have been
-> addressed by a follow-up spec-alignment pass. See [§17 Changes applied](#17-changes-applied)
-> for what was modified. Sections 4–16 (implementation, performance, tests, edge
-> cases) are unchanged and still describe the crate as originally evaluated.
+> addressed by a spec-alignment pass, and five friction points in section 4
+> (items 1, 5, 6, 7, 8) have been addressed by an API-refactor pass. See
+> [§17 Changes applied](#17-changes-applied) for what was modified.
+> Sections 5–16 (error messages, performance, tests, edge cases) are unchanged
+> and still describe the crate as originally evaluated.
 
 ## Executive summary
 
@@ -146,14 +148,14 @@ Source modules/areas with no dedicated spec or inadequate coverage:
 - `SerializedSymbolTable` cleanly separates transport format from in-memory structure.
 
 **Friction points:**
-1. `FormatString::resolve` has six entry points (`resolve`, `resolve_with_format`, `resolve_string`, `resolve_string_with_format`, `resolve_typed`, `resolve_typed_with_format`). Consider a `FormatStringOptions` builder.
+1. `FormatString::resolve` has six entry points (`resolve`, `resolve_with_format`, `resolve_string`, `resolve_string_with_format`, `resolve_typed`, `resolve_typed_with_format`). Consider a `FormatStringOptions` builder. **Done** — replaced with two methods (`resolve_with`, `resolve_string_with`) that take `&FormatStringOptions<'_>`; the six pairwise methods have been removed.
 2. `ExprValue::coerce` and `from_str_coerce` return `Result<_, String>`, not `Result<_, ExpressionError>`. Callers repeatedly wrap via `.map_err(ExpressionError::new)` (~10 sites in `evaluator.rs`).
 3. Three error types coexist in related code paths: `ExpressionError`, `SymbolTableError`, `Result<_, String>` from `SerializedSymbolTable::to_symtab`. Unify via `From` impls.
 4. `Float64(pub f64, pub Option<Box<str>>)` has public tuple fields — lets callers bypass the no-NaN/no-Inf invariant enforced in `Float64::new`. Make fields private.
-5. `ExprValue::Path { value, format }` has public fields; the separator-normalization invariant is only enforced by `new_path`. Encapsulate.
-6. `SymbolTable::all_paths(&self, prefix, out: &mut Vec<String>)` is an out-parameter API; return `Vec<String>` or an iterator.
-7. `SymbolTable::from_pairs` takes `Vec<(&str, ExprValue)>` by value; `IntoIterator` would be more flexible.
-8. `FunctionEntry::implementation` is a bare `fn` pointer, not `Box<dyn Fn>`. This blocks closure-based registration — document whether deliberate (performance) or a future change.
+5. `ExprValue::Path { value, format }` has public fields; the separator-normalization invariant is only enforced by `new_path`. Encapsulate. **Done** — variant marked `#[non_exhaustive]`, so external crates can no longer construct it directly (E0639); all construction is funneled through `ExprValue::new_path`. External pattern matches use `..` per the `#[non_exhaustive]` convention.
+6. `SymbolTable::all_paths(&self, prefix, out: &mut Vec<String>)` is an out-parameter API; return `Vec<String>` or an iterator. **Done** — signature is now `fn all_paths(&self, prefix: &str) -> Vec<String>`; out-parameter plumbing removed from the three call sites.
+7. `SymbolTable::from_pairs` takes `Vec<(&str, ExprValue)>` by value; `IntoIterator` would be more flexible. **Done** — signature is now `fn from_pairs<'a, I>(pairs: I) -> Result<Self, _> where I: IntoIterator<Item = (&'a str, ExprValue)>`. Existing `from_pairs(vec![...])` sites are unaffected (`Vec: IntoIterator`).
+8. `FunctionEntry::implementation` is a bare `fn` pointer, not `Box<dyn Fn>`. This blocks closure-based registration — document whether deliberate (performance) or a future change. **Done** — changed to `Arc<dyn Fn(...) + Send + Sync>` (via `FunctionImpl` type alias). `register` and `register_sig` now accept `impl Fn + Send + Sync + 'static`, enabling closure registration with captured state. `Arc` (not `Box`) preserves `FunctionLibrary: Clone`.
 
 **Naming consistency:**
 - Three parallel `evaluate` entry points: `lib::evaluate_expression`, `ParsedExpression::evaluate(&symtab)`, `Evaluator::evaluate(&ast)`. Consider disambiguating (e.g., `eval_once`/`eval_ast`).
@@ -456,3 +458,109 @@ cargo test  -p openjd-expr --lib  → 267 passed; 0 failed
 ```
 
 The only non-comment source change was correcting the `rustpython-parser` reference in the `eval/mod.rs` doc comment. No types, method signatures, field visibilities, or tests were altered. All finding categories in sections 1–3 are now resolved; findings in sections 4–16 (implementation quality, performance, error messages, tests, edge cases) remain as documented and are tracked by the P1/P3/P4 recommendations above.
+
+---
+
+## 18. API refactors applied (section 4 friction points)
+
+A second follow-up pass on 2026-04-17 addressed five of the eight "Friction
+points" listed in §4. The items picked were those the user requested as a
+batch: item 1 (FormatString entry-point sprawl), item 5 (Path encapsulation),
+item 6 (all_paths out-parameter), item 7 (from_pairs inflexible signature),
+and item 8 (fn-pointer-only function registration).
+
+### Summary by item
+
+**4.1 `FormatString::resolve*` — consolidated under a builder.**
+Six pairwise methods (`resolve`, `resolve_with_format`, `resolve_string`,
+`resolve_string_with_format`, `resolve_typed`, `resolve_typed_with_format`)
+removed and replaced with:
+
+```rust
+pub fn resolve_with(&self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>) -> Result<ExprValue, _>;
+pub fn resolve_string_with(&self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>) -> Result<String, _>;
+```
+
+`FormatStringOptions::{new, default, with_library, with_path_format,
+with_path_mapping_rules, with_target_type}` covers every axis previously
+expressed as a separate method. `with_library` accepts
+`impl Into<Option<&FunctionLibrary>>`, so callers plumbing through an
+`Option<&FunctionLibrary>` don't need to unwrap first.
+
+All workspace call sites migrated (openjd-model `create_job/{ranges, mod}`,
+openjd-sessions `runner/embedded_files/session`, openjd-expr integration
+tests).
+
+**4.5 `ExprValue::Path` encapsulated.**
+Variant marked `#[non_exhaustive]`. Downstream crates can no longer construct
+it directly — `ExprValue::new_path(value, format)` is the only way, and it
+enforces the separator-normalization invariant. Pattern matching still works
+but must include `..` per the standard `#[non_exhaustive]` convention. 159
+sites across the workspace were updated (construction → `new_path`, some
+patterns → add `..`).
+
+**4.6 `SymbolTable::all_paths` returns `Vec<String>`.**
+Signature changed from `fn all_paths(&self, prefix, out: &mut Vec<String>)` to
+`fn all_paths(&self, prefix: &str) -> Vec<String>`. The recursive helper
+`collect_paths` keeps the out-parameter form privately, so there is no extra
+allocation per recursion. Three call sites simplified.
+
+**4.7 `SymbolTable::from_pairs` accepts `IntoIterator`.**
+Signature changed from `Vec<(&str, ExprValue)>` to
+`IntoIterator<Item = (&'a str, ExprValue)>`. All existing `from_pairs(vec![...])`
+call sites compile unchanged (`Vec: IntoIterator`); new code can pass arrays,
+`map()` chains, or any iterable directly.
+
+**4.8 `FunctionEntry::implementation` accepts closures.**
+Changed from a bare `fn` pointer to
+`Arc<dyn Fn(...) -> Result<...> + Send + Sync>` (exposed as the
+`FunctionImpl` type alias). `FunctionLibrary::{register, register_sig}` now
+take `impl Fn + Send + Sync + 'static`, so closures with captured state can
+be registered alongside plain functions. `Arc` (rather than `Box`) preserves
+`FunctionLibrary: Clone`, which existing callers depend on.
+
+### Spec updates
+
+- `specs/expr/format-string.md` — "Resolution" section rewritten around the
+  two new methods and `FormatStringOptions`; the old section-by-section
+  walkthrough of the six pairwise methods is gone.
+- `specs/expr/function-library.md` — `FunctionImpl` alias + closure
+  registration example; "not closures" note replaced with the real
+  `Arc<dyn Fn + Send + Sync>` rationale.
+- `specs/expr/symbol-table.md` — accessor summary table lists
+  `all_paths(prefix) -> Vec<String>`; construction example shows
+  `IntoIterator` inputs (array, `map()` chain, `Vec`).
+- `specs/expr/values.md` — `ExprValue::Path` marked `#[non_exhaustive]` in
+  the enum shape; new "Path Encapsulation" subsection explaining the
+  invariant and external-pattern-match requirement.
+
+### New tests
+
+Twenty new tests were added to exercise the new API contracts:
+
+| Target | File | Count |
+|---|---|---|
+| `FormatStringOptions` | `src/format_string.rs` (unit) | 6 |
+| `ExprValue::new_path` / pattern-match contract | `tests/test_expr_value.rs` | 4 |
+| `SymbolTable::all_paths` / `from_pairs` | `tests/test_symbol_table.rs` | 6 |
+| Closure-based registration / `Clone` / `Send + Sync` | `tests/test_function_library.rs` | 4 |
+
+### Verification
+
+```
+cargo fmt --all -- --check                                       clean
+cargo clippy --all-features --all-targets --workspace -- -D warnings  clean
+cargo clippy --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings  clean
+cargo test --workspace                                           6032 passed; 0 failed
+```
+
+(6032 = 6012 before + 20 new tests.)
+
+### Friction points still open
+
+Three of the eight items in §4 were not addressed in this pass and remain on
+the backlog: **4.2** (`coerce` / `from_str_coerce` return `Result<_, String>`
+instead of `Result<_, ExpressionError>`), **4.3** (three error types —
+`ExpressionError`, `SymbolTableError`, `String` — that could be unified via
+`From` impls), and **4.4** (`Float64` tuple fields are `pub`, letting callers
+bypass the NaN/Inf invariant enforced by `Float64::new`).

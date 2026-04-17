@@ -296,14 +296,8 @@ fn list_nested_int_float_promotes() {
 #[test]
 fn list_path_string_promotes() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
+        .unwrap();
     assert_eq!(
         eval_posix("[P, 'b']", &st).expr_type().to_string(),
         "list[string]"
@@ -367,14 +361,8 @@ fn list_three_incompatible_fails() {
 #[test]
 fn list_path_int_fails() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
+        .unwrap();
     let e = eval_posix_err("[P, 1]", &st);
     assert!(
         e.contains("incompatible types") && e.contains("^"),
@@ -739,14 +727,8 @@ fn nested_int_float_promotes() {
 #[test]
 fn path_string_promotes_to_string() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
+        .unwrap();
     assert_eq!(
         eval_posix("[P, 'b']", &st).expr_type().to_string(),
         "list[string]"
@@ -832,14 +814,8 @@ fn three_incompatible_types_fails() {
 #[test]
 fn path_int_fails() {
     let mut st = SymbolTable::new();
-    st.set(
-        "P",
-        ExprValue::Path {
-            value: "/a".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
+        .unwrap();
     let e = eval_posix_err("[P, 1]", &st);
     assert!(
         e.contains("incompatible types") && e.contains("^"),
@@ -1296,28 +1272,16 @@ fn path_in_list() {
         "paths",
         ExprValue::make_list(
             vec![
-                ExprValue::Path {
-                    value: "/a".into(),
-                    format: PathFormat::Posix,
-                },
-                ExprValue::Path {
-                    value: "/b".into(),
-                    format: PathFormat::Posix,
-                },
+                ExprValue::new_path("/a", PathFormat::Posix),
+                ExprValue::new_path("/b", PathFormat::Posix),
             ],
             ExprType::PATH,
         )
         .unwrap(),
     )
     .unwrap();
-    st.set(
-        "p",
-        ExprValue::Path {
-            value: "/b".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("p", ExprValue::new_path("/b", PathFormat::Posix))
+        .unwrap();
     assert_eq!(eval_posix("p in paths", &st).to_display_string(), "true");
 }
 
@@ -1328,28 +1292,16 @@ fn path_not_in_list() {
         "paths",
         ExprValue::make_list(
             vec![
-                ExprValue::Path {
-                    value: "/a".into(),
-                    format: PathFormat::Posix,
-                },
-                ExprValue::Path {
-                    value: "/b".into(),
-                    format: PathFormat::Posix,
-                },
+                ExprValue::new_path("/a", PathFormat::Posix),
+                ExprValue::new_path("/b", PathFormat::Posix),
             ],
             ExprType::PATH,
         )
         .unwrap(),
     )
     .unwrap();
-    st.set(
-        "p",
-        ExprValue::Path {
-            value: "/c".into(),
-            format: PathFormat::Posix,
-        },
-    )
-    .unwrap();
+    st.set("p", ExprValue::new_path("/c", PathFormat::Posix))
+        .unwrap();
     assert_eq!(eval_posix("p in paths", &st).to_display_string(), "false");
 }
 

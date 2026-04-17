@@ -231,12 +231,17 @@ pub(crate) fn resolve_action_timeout(
 ) -> Result<Option<Duration>, SessionError> {
     match &action.timeout {
         Some(fmt) => {
-            let s = fmt.resolve_string(symtab, library, rules).map_err(|e| {
-                SessionError::FormatString {
+            let s = fmt
+                .resolve_string_with(
+                    symtab,
+                    &openjd_expr::FormatStringOptions::new()
+                        .with_library(library)
+                        .with_path_mapping_rules(rules),
+                )
+                .map_err(|e| SessionError::FormatString {
                     context: "timeout".into(),
                     reason: e.to_string(),
-                }
-            })?;
+                })?;
             let secs: u64 = s.parse().map_err(|_| SessionError::FormatString {
                 context: "timeout".into(),
                 reason: format!("timeout must be a positive integer, got '{s}'"),
@@ -262,7 +267,12 @@ pub(crate) fn resolve_action_args(
 ) -> Result<Vec<String>, SessionError> {
     let command = action
         .command
-        .resolve_string(symtab, library, rules)
+        .resolve_string_with(
+            symtab,
+            &openjd_expr::FormatStringOptions::new()
+                .with_library(library)
+                .with_path_mapping_rules(rules),
+        )
         .map_err(|e| SessionError::FormatString {
             context: "command".into(),
             reason: e.to_string(),
@@ -270,7 +280,12 @@ pub(crate) fn resolve_action_args(
     let mut args = vec![command];
     if let Some(arg_fmts) = &action.args {
         for fs in arg_fmts {
-            if let Ok(val) = fs.resolve(symtab, library, rules) {
+            if let Ok(val) = fs.resolve_with(
+                symtab,
+                &openjd_expr::FormatStringOptions::new()
+                    .with_library(library)
+                    .with_path_mapping_rules(rules),
+            ) {
                 match val {
                     ExprValue::Null => continue,
                     val if val.is_list() => {
@@ -284,12 +299,17 @@ pub(crate) fn resolve_action_args(
                     val => args.push(val.to_display_string()),
                 }
             } else {
-                let s = fs.resolve_string(symtab, library, rules).map_err(|e| {
-                    SessionError::FormatString {
+                let s = fs
+                    .resolve_string_with(
+                        symtab,
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_library(library)
+                            .with_path_mapping_rules(rules),
+                    )
+                    .map_err(|e| SessionError::FormatString {
                         context: "argument".into(),
                         reason: e.to_string(),
-                    }
-                })?;
+                    })?;
                 args.push(s);
             }
         }
