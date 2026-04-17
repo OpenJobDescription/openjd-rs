@@ -5,19 +5,8 @@
 Format strings are the interpolation mechanism in OpenJD templates (spec §7.3). They
 contain literal text and `{{...}}` expressions that are resolved against a symbol table.
 
-Defined in `format_string.rs`.
-
-## Why FormatString Lives in openjd-expr
-
-Format strings are the entry point to expression evaluation:
-
-- **Base spec**: `{{Param.Name}}` — simple dotted name lookup
-- **EXPR extension**: `{{Param.X + 3}}` — full EXPR expression evaluation
-
-Placing `FormatString` in `openjd-expr` keeps the evaluation pipeline in one crate.
-The `openjd-model` crate re-exports it for use in serde model types. The Python
-implementation splits this across packages (`openjd.model._format_strings` imports from
-`openjd.expr`); the Rust design avoids that cross-package coupling.
+Defined in `format_string.rs`. For why this module lives in `openjd-expr` rather than
+`openjd-model`, see [architecture.md](architecture.md) § "Why FormatString Lives Here".
 
 ## Parsing
 
@@ -26,9 +15,17 @@ implementation splits this across packages (`openjd.model._format_strings` impor
 ```rust
 enum Segment {
     Literal(String),
-    Expression(ParsedExpression),
+    /// Fast path for simple dotted names like `{{Param.Name}}` — resolved by
+    /// symbol table lookup without spinning up the expression evaluator.
+    SimpleName   { start: usize, end: usize, name: String },
+    /// Full EXPR expression — anything that isn't a simple dotted name.
+    Expression   { start: usize, end: usize, parsed: ParsedExpression },
 }
 ```
+
+Detecting the simple-name case at parse time avoids paying the cost of
+`Evaluator::new()` and AST walking for the base-spec case (unqualified dotted-name
+interpolation), which is common in real templates.
 
 Parsing validates:
 - Matched `{{` and `}}` delimiters
@@ -60,12 +57,17 @@ let result = fs.resolve(&symtab, &library, &path_mapping_rules)?;
 // → ExprValue::Int(42)  — not a string!
 ```
 
-When the format string is a single `{{...}}` expression with no surrounding literal
-text, `resolve` returns the raw `ExprValue`. This matches the specification's behavior
-where `"{{Param.Frame}}"` in a numeric context resolves to an integer, not a string.
+Typed-value passthrough applies when the format string consists of **exactly one
+expression segment and zero literal segments**. Any surrounding literal text —
+even a single whitespace character — forces string conversion (the caller is
+asking for a string composition, not a value). When these preconditions aren't
+met, `resolve` falls back to `resolve_string` and wraps the result in
+`ExprValue::String`.
 
-When there are multiple segments or surrounding text, `resolve` falls back to
-`resolve_string` and wraps the result in `ExprValue::String`.
+All resolve/validate methods take `library: Option<&FunctionLibrary>`. When
+`None`, the default library (`get_default_library()`) is used — this is the
+common case. Pass `Some(&lib)` only to supply a custom library (e.g., with
+host-context functions registered).
 
 ## Validation
 

@@ -5,6 +5,11 @@
 **Crate location:** `~/openjd-rs/crates/openjd-expr`
 **Spec location:** `~/openjd-rs/specs/expr`
 
+> **Update 2026-04-17 (later):** Findings in sections 1, 2, and 3 have been
+> addressed by a follow-up spec-alignment pass. See [§17 Changes applied](#17-changes-applied)
+> for what was modified. Sections 4–16 (implementation, performance, tests, edge
+> cases) are unchanged and still describe the crate as originally evaluated.
+
 ## Executive summary
 
 `openjd-expr` is a high-quality Rust crate. It compiles cleanly with no warnings (`cargo build -p openjd-expr --all-targets`), clippy is clean, and all **2,998** tests pass. No `unsafe` code. No reachable panics on malformed input. Integer overflow is consistently handled with `checked_*` arithmetic. Error messages are exceptional by the standard of most interpreter projects — the AGENTS.md rule that every evaluation error renders as message + expression + caret is followed throughout `tests/test_error_formatting.rs` (1,067 lines) and is largely delivered by the evaluator.
@@ -64,60 +69,71 @@ cargo test    -p openjd-expr                 → 2998 passed; 0 failed; 0 ignore
 
 ### 1. Spec ↔ implementation mismatches
 
+> **Status (2026-04-17 follow-up):** All 19 entries below have been addressed in
+> the spec. See [§17 Changes applied](#17-changes-applied) for per-file details.
+
 Every entry below is a concrete drift where a spec doc describes something that no longer matches the code. Examples in specs are often not-yet-compilable against the current API.
 
-| # | Spec file | Spec claim | Actual implementation | Source |
-|---|---|---|---|---|
-| 1 | architecture.md, evaluator.md | `parsed.evaluator(...).evaluate()?` | `evaluator.evaluate(&parsed.ast)?` (AST arg required) | `eval/evaluator.rs:205` |
-| 2 | architecture.md | Module layout omits `functions/path_parse.rs` | 691-line module exists | `functions/path_parse.rs` |
-| 3 | error-formatting.md | `ExpressionError` has `pub` fields | All fields private; accessor methods only | `error.rs:73-80` |
-| 4 | error-formatting.md | `ExpressionErrorKind` variants are unit (`UndefinedVariable`, `TypeError`) | Struct variants with fields (`UndefinedVariable { name, suggestion }`, …) | `error.rs:14-66` |
-| 5 | error-formatting.md | `ExpressionError::integer_overflow("...")`, `division_by_zero()` | `integer_overflow()` (no arg), `division_by_zero(op: &'static str)` | `error.rs:106-114` |
-| 6 | evaluator.md | BoolOp unresolved → `Unresolved(union[a, b])` | Returns `Unresolved(BOOL)`; operands may still short-circuit | `eval/evaluator.rs:655-708` |
-| 7 | evaluator.md | `ParsedExpression` struct shape | Has `source` + `operation_count` fields not documented | `eval/parse.rs:14-22` |
-| 8 | format-string.md | `Segment { Literal, Expression }` (two variants) | Three variants incl. `SimpleName { start, end, name }` (fast-path) | `format_string.rs:17-27` |
-| 9 | format-string.md | `library: &FunctionLibrary` non-optional | All resolve fns take `Option<&FunctionLibrary>` | `format_string.rs:71-240` |
-| 10 | function-library.md | `arithmetic::library()`, `pub fn default_library()` | Free fns local to `default_library.rs`; public API is `get_default_library()` | `default_library.rs:17-34` |
-| 11 | function-library.md | References `ExprType::LIST_INT` constant | No such constant exists; use `ExprType::list(ExprType::INT)` | `types.rs:38-100` |
-| 12 | function-library.md | `get_or_compile_regex` default uses `Regex::new(...)` | Uses `RegexBuilder::new(pattern).size_limit(1 << 20)` (DoS protection) | `function_library.rs:49-54` |
-| 13 | function-library.md | `FunctionLibrary { functions: HashMap<...> }` | Also has `pub host_context_enabled: bool` | `function_library.rs:58-62` |
-| 14 | path-mapping.md | `rule.apply(path) → (bool, String)` | `rule.apply(path) → Option<String>` | `path_mapping.rs:46` |
-| 15 | path-mapping.md | URI fns named `split_uri`, `uri_parts`, `uri_name`, … | Module `uri_path` exports `parse`, `parts`, `name`, … (no `uri_` prefix) | `uri_path.rs:18-127` |
-| 16 | symbol-table.md | `get(...) → Option<&ExprValue>` | `get → Option<&SymbolTableEntry>`; separate `get_value`, `get_string` | `symbol_table.rs:168-197` |
-| 17 | values.md | `.item()` method panics on unresolved | No `item()` method exists | `value.rs` |
-| 18 | parser.md (implicit) | ruff is the parser | `eval/mod.rs:5-6` doc comment still says "rustpython-parser" | `eval/mod.rs:5-6` |
-| 19 | range-expr.md | `IntRange` stores "original direction separately" | Only canonical ascending form stored; direction normalized away | `range_expr.rs:62-110` |
+| # | Spec file | Spec claim | Actual implementation | Source | Fixed |
+|---|---|---|---|---|---|
+| 1 | architecture.md, evaluator.md | `parsed.evaluator(...).evaluate()?` | `evaluator.evaluate(&parsed.ast)?` (AST arg required) | `eval/evaluator.rs:205` | ✓ |
+| 2 | architecture.md | Module layout omits `functions/path_parse.rs` | 691-line module exists | `functions/path_parse.rs` | ✓ |
+| 3 | error-formatting.md | `ExpressionError` has `pub` fields | All fields private; accessor methods only | `error.rs:73-80` | ✓ |
+| 4 | error-formatting.md | `ExpressionErrorKind` variants are unit (`UndefinedVariable`, `TypeError`) | Struct variants with fields (`UndefinedVariable { name, suggestion }`, …) | `error.rs:14-66` | ✓ |
+| 5 | error-formatting.md | `ExpressionError::integer_overflow("...")`, `division_by_zero()` | `integer_overflow()` (no arg), `division_by_zero(op: &'static str)` | `error.rs:106-114` | ✓ |
+| 6 | evaluator.md | BoolOp unresolved → `Unresolved(union[a, b])` | Returns `Unresolved(BOOL)`; operands may still short-circuit | `eval/evaluator.rs:655-708` | ✓ |
+| 7 | evaluator.md | `ParsedExpression` struct shape | Has `source` + `operation_count` fields not documented | `eval/parse.rs:14-22` | ✓ |
+| 8 | format-string.md | `Segment { Literal, Expression }` (two variants) | Three variants incl. `SimpleName { start, end, name }` (fast-path) | `format_string.rs:17-27` | ✓ |
+| 9 | format-string.md | `library: &FunctionLibrary` non-optional | All resolve fns take `Option<&FunctionLibrary>` | `format_string.rs:71-240` | ✓ |
+| 10 | function-library.md | `arithmetic::library()`, `pub fn default_library()` | Free fns local to `default_library.rs`; public API is `get_default_library()` | `default_library.rs:17-34` | ✓ |
+| 11 | function-library.md | References `ExprType::LIST_INT` constant | No such constant exists; use `ExprType::list(ExprType::INT)` | `types.rs:38-100` | ✓ |
+| 12 | function-library.md | `get_or_compile_regex` default uses `Regex::new(...)` | Uses `RegexBuilder::new(pattern).size_limit(1 << 20)` (DoS protection) | `function_library.rs:49-54` | ✓ |
+| 13 | function-library.md | `FunctionLibrary { functions: HashMap<...> }` | Also has `pub host_context_enabled: bool` | `function_library.rs:58-62` | ✓ |
+| 14 | path-mapping.md | `rule.apply(path) → (bool, String)` | `rule.apply(path) → Option<String>` | `path_mapping.rs:46` | ✓ |
+| 15 | path-mapping.md | URI fns named `split_uri`, `uri_parts`, `uri_name`, … | Module `uri_path` exports `parse`, `parts`, `name`, … (no `uri_` prefix) | `uri_path.rs:18-127` | ✓ |
+| 16 | symbol-table.md | `get(...) → Option<&ExprValue>` | `get → Option<&SymbolTableEntry>`; separate `get_value`, `get_string` | `symbol_table.rs:168-197` | ✓ |
+| 17 | values.md | `.item()` method panics on unresolved | No `item()` method exists | `value.rs` | ✓ |
+| 18 | parser.md (implicit) | ruff is the parser | `eval/mod.rs:5-6` doc comment still says "rustpython-parser" | `eval/mod.rs:5-6` | ✓ (source doc comment updated) |
+| 19 | range-expr.md | `IntRange` stores "original direction separately" | Only canonical ascending form stored; direction normalized away | `range_expr.rs:62-110` | ✓ |
 
 ### 2. Spec coverage gaps
 
+> **Status (2026-04-17 follow-up):** Addressed. Two new spec files added
+> (`edit-distance.md`, `path-parse.md`); existing specs expanded to cover
+> host-context inventory, keyword-rename reverse mapping, SerializedSymbolTable
+> Unresolved skipping, and `from_str_coerce` rules.
+
 Source modules/areas with no dedicated spec or inadequate coverage:
 
-- **`functions/path_parse.rs`** (~20KB): Format-aware POSIX/Windows path parsing without `std::path`. Implements `sep`, `split`, `file_name`, `parent`, `file_stem`, etc. — the core of PATH property semantics that `path-mapping.md` alludes to but doesn't cover. Not listed in architecture module layout.
-- **`edit_distance.rs`**: Referenced twice (architecture + error-formatting) but never described. Levenshtein threshold, suggestion-trigger rules, and public API (`edit_distance`, `suggest_closest`) are undocumented.
-- **`functions/*` per-category modules**: No spec covers which file implements which operator category (arithmetic, comparison, conversion, list, math, misc, path, regex, repr, string). `function-library.md` lists categories abstractly but leaves semantics to the language spec.
-- **`SerializedSymbolTable`**: Wire format is specified at the JSON level, but round-trip rules for `Unresolved` entries are not fully covered (the spec says unresolved entries are *skipped* on serialization — this behavior is not explicitly tested).
-- **Host context registration**: `with_host_context`, `with_unresolved_host_context`, `register_host_context_functions` are mentioned; the actual inventory of host-context functions and their signatures is not enumerated.
-- **Keyword rename reverse mapping**: `parser.md` describes the forward pass; the evaluator-side reverse lookup (in `eval_attribute`) is not documented.
-- **`from_str_coerce` in values.md**: One line, but used at parameter binding and deserves a rules table analogous to the target-type coercion section.
+- **`functions/path_parse.rs`** (~20KB): Format-aware POSIX/Windows path parsing without `std::path`. Implements `sep`, `split`, `file_name`, `parent`, `file_stem`, etc. — the core of PATH property semantics that `path-mapping.md` alludes to but doesn't cover. Not listed in architecture module layout. → **Fixed:** new `specs/expr/path-parse.md`; module now listed in `architecture.md`.
+- **`edit_distance.rs`**: Referenced twice (architecture + error-formatting) but never described. Levenshtein threshold, suggestion-trigger rules, and public API (`edit_distance`, `suggest_closest`) are undocumented. → **Fixed:** new `specs/expr/edit-distance.md`; linked from `error-formatting.md`.
+- **`functions/*` per-category modules**: No spec covers which file implements which operator category (arithmetic, comparison, conversion, list, math, misc, path, regex, repr, string). `function-library.md` lists categories abstractly but leaves semantics to the language spec. → **Not changed:** per-function semantics intentionally defer to the language spec (RFC 0005/0006). `architecture.md` module table already names each file's category.
+- **`SerializedSymbolTable`**: Wire format is specified at the JSON level, but round-trip rules for `Unresolved` entries are not fully covered (the spec says unresolved entries are *skipped* on serialization — this behavior is not explicitly tested). → **Fixed in spec:** `symbol-table.md` now explicitly describes value-only transport semantics; test gap still open (see §12).
+- **Host context registration**: `with_host_context`, `with_unresolved_host_context`, `register_host_context_functions` are mentioned; the actual inventory of host-context functions and their signatures is not enumerated. → **Fixed:** `function-library.md` § "Host-Context Function Inventory" now enumerates `apply_path_mapping` with both runtime and stub behavior.
+- **Keyword rename reverse mapping**: `parser.md` describes the forward pass; the evaluator-side reverse lookup (in `eval_attribute`) is not documented. → **Fixed:** `parser.md` § "Reverse mapping at evaluation".
+- **`from_str_coerce` in values.md**: One line, but used at parameter binding and deserves a rules table analogous to the target-type coercion section. → **Fixed:** `values.md` now has a full per-target-type rules table.
 
 ### 3. Spec quality issues (unclear, redundant, missing rationale)
 
+> **Status (2026-04-17 follow-up):** All items below addressed. Each bullet
+> carries a **→ Fixed** note indicating the resolution.
+
 **Unclear:**
-- evaluator.md BoolOp semantics conflates the null-coalescing rule ("only `null` and `false` are falsy") with a one-off special case. Reword to state the rule once.
-- function-library.md "skip receiver coercion for methods" — the distinction between a method call and a function call happens in the evaluator before dispatch; spec should say how the library knows which it is.
-- format-string.md `resolve` return type ("preserves typed values for single-expression strings") — document the exact precondition (zero literal segments, exactly one expression segment).
-- symbol-table.md only shows `get`; `get_value` and `get_string` coexist and have different semantics.
+- evaluator.md BoolOp semantics conflates the null-coalescing rule ("only `null` and `false` are falsy") with a one-off special case. Reword to state the rule once. → **Fixed:** BoolOp section rewritten to state the falsy rule as a single principle with the Python divergence stated separately; the `Param.Flag or true` special case removed.
+- function-library.md "skip receiver coercion for methods" — the distinction between a method call and a function call happens in the evaluator before dispatch; spec should say how the library knows which it is. → **Fixed:** Three-Phase Dispatch section now describes the UFCS-plus-flag mechanism.
+- format-string.md `resolve` return type ("preserves typed values for single-expression strings") — document the exact precondition (zero literal segments, exactly one expression segment). → **Fixed:** precondition stated explicitly ("exactly one expression segment and zero literal segments").
+- symbol-table.md only shows `get`; `get_value` and `get_string` coexist and have different semantics. → **Fixed:** Accessor summary table added with all four accessors and when to use each.
 
 **Redundant:**
-- "Why FormatString lives here" rationale is duplicated in `architecture.md` and `format-string.md`.
-- "Divergence from Python" sections repeat in most spec files.
-- Implicit coercion tables (INT→FLOAT, PATH→STRING) appear in `type-system.md`, `values.md`, and `function-library.md`.
+- "Why FormatString lives here" rationale is duplicated in `architecture.md` and `format-string.md`. → **Fixed:** removed from `format-string.md`; now a one-line reference to `architecture.md`.
+- "Divergence from Python" sections repeat in most spec files. → **Partially fixed:** the low-value one in `range-expr.md` (just "structurally identical") removed; the remaining ones each carry real content and were kept.
+- Implicit coercion tables (INT→FLOAT, PATH→STRING) appear in `type-system.md`, `values.md`, and `function-library.md`. → **Fixed:** `values.md` Dispatch Coercion subsection now references `type-system.md` as the canonical source rather than restating rationale.
 
 **Missing rationale:**
-- path-mapping.md has only a single sentence on *why* URI paths are opaque. Expand with round-trip fidelity, authority preservation, `%`-encoded segments.
-- range-expr.md contiguous-flag bit-packing rationale mentions "struct size" but not the memory-per-task cost in chunking.
-- values.md Float64 invariants (no NaN/Inf/-0.0) should restate rationale: determinism, cross-language parity, hashability.
-- error-formatting.md smart-caret positioning is a table of decisions; add the underlying principle ("point at the operator or name that failed").
+- path-mapping.md has only a single sentence on *why* URI paths are opaque. Expand with round-trip fidelity, authority preservation, `%`-encoded segments. → **Fixed:** URI Path Operations § "Why URI paths are opaque" now covers all three.
+- range-expr.md contiguous-flag bit-packing rationale mentions "struct size" but not the memory-per-task cost in chunking. → **Fixed:** rationale quantifies cost as "8 MB per million-task step" in concrete terms.
+- values.md Float64 invariants (no NaN/Inf/-0.0) should restate rationale: determinism, cross-language parity, hashability. → **Fixed:** all three rationales now spelled out.
+- error-formatting.md smart-caret positioning is a table of decisions; add the underlying principle ("point at the operator or name that failed"). → **Fixed:** principle now stated above the table.
 
 ### 4. Implementation — Rust quality, API ergonomics
 
@@ -343,14 +359,17 @@ I ran targeted expression probes against the built crate to test hypothesized bu
 
 ### P2 — Spec accuracy
 
-7. Fix the 19 spec-vs-impl mismatches in table 1. Highest-impact items: builder example `evaluate(&parsed.ast)`, `ExpressionError` private fields + struct-variant kinds, `rule.apply → Option<String>`, `uri_path` function names without `uri_` prefix, `SymbolTable::get` accessor family.
-8. Add specs for `functions/path_parse.rs` and `edit_distance.rs`.
-9. Update the `eval/mod.rs` doc comment to reference `ruff` not `rustpython-parser`.
-10. Remove references to non-existent `ExprType::LIST_INT`.
-11. Document `FormatString::Segment::SimpleName` fast-path variant.
-12. Consolidate "divergence from Python" appendix sections to reduce per-file repetition.
-13. Consolidate implicit-coercion tables to a single canonical location.
-14. Add a CI check that extracts and typechecks rustdoc-style code snippets from spec markdown.
+> **Status (2026-04-17 follow-up):** Items 7–13 below have been addressed. Item 14
+> (CI check on rustdoc snippets) remains open.
+
+7. ~~Fix the 19 spec-vs-impl mismatches in table 1. Highest-impact items: builder example `evaluate(&parsed.ast)`, `ExpressionError` private fields + struct-variant kinds, `rule.apply → Option<String>`, `uri_path` function names without `uri_` prefix, `SymbolTable::get` accessor family.~~ **Done.**
+8. ~~Add specs for `functions/path_parse.rs` and `edit_distance.rs`.~~ **Done** (`specs/expr/path-parse.md`, `specs/expr/edit-distance.md`).
+9. ~~Update the `eval/mod.rs` doc comment to reference `ruff` not `rustpython-parser`.~~ **Done.** (Also fixed stale `specs/parser-selection.md` references in `lib.rs`, `Cargo.toml`, `AGENTS.md`, `specs/architecture.md` — they now point at `specs/expr/parser.md`.)
+10. ~~Remove references to non-existent `ExprType::LIST_INT`.~~ **Done.**
+11. ~~Document `FormatString::Segment::SimpleName` fast-path variant.~~ **Done.**
+12. ~~Consolidate "divergence from Python" appendix sections to reduce per-file repetition.~~ **Partial** — the low-value `range-expr.md` one was removed; the others were kept because they carry real information.
+13. ~~Consolidate implicit-coercion tables to a single canonical location.~~ **Done** (`values.md` now references `type-system.md`).
+14. Add a CI check that extracts and typechecks rustdoc-style code snippets from spec markdown. **Open.**
 
 ### P3 — Test quality
 
@@ -394,3 +413,46 @@ No blockers for crate release readiness.
 - **Created:** `~/openjd-rs/reports/expr-quality-evaluation-report.md` (this document).
 - **Unmodified:** All source, spec, and test files in `~/openjd-rs`. Review was read-only.
 - **Temporary probe package** at `/tmp/probe` (can be discarded).
+
+---
+
+## 17. Changes applied
+
+A follow-up pass on 2026-04-17 addressed every finding in sections 1, 2, and 3.
+Summary of the edits by file:
+
+### Spec files (under `~/openjd-rs/specs/expr/`)
+
+- **`architecture.md`** — added `functions/path_parse.rs` and `functions/string.rs` to the module layout; documented `peak_memory_usage`/`operation_count` fields on `ParsedExpression`; linked `edit-distance.md` next to the `edit_distance.rs` module entry.
+- **`evaluator.md`** — corrected the builder example to pass `&parsed.ast` to `Evaluator::evaluate`; changed BoolOp unresolved result from `Unresolved(union[a,b])` to `Unresolved(BOOL)` with short-circuit note; tightened the falsy-definition wording to state the rule once.
+- **`error-formatting.md`** — made `ExpressionError` fields private in the struct shown and documented the accessor methods; rewrote `ExpressionErrorKind` to show the actual struct-variant shapes (data-carrying); corrected `integer_overflow()` (no arg) and `division_by_zero(op)` convenience constructors; added the smart-caret principle ("point at the operator or name that failed") above the decision table; linked to `edit-distance.md`.
+- **`format-string.md`** — added the `SimpleName { start, end, name }` segment variant with its fast-path rationale; documented `library: Option<&FunctionLibrary>`; documented the exact precondition for typed passthrough (zero literal segments, exactly one expression segment); removed the duplicated "Why FormatString lives here" section in favor of a one-line reference to `architecture.md`.
+- **`function-library.md`** — added the `host_context_enabled: bool` field to the `FunctionLibrary` struct; replaced `arithmetic::library()`-style references with the actual module-private `arithmetic()` free functions; replaced `ExprType::LIST_INT` with `ExprType::list(ExprType::INT)`; documented the `RegexBuilder` 1 MiB size-limit default; added a "Host-Context Function Inventory" subsection enumerating `apply_path_mapping` with both runtime and unresolved-stub behavior; clarified the method-vs-function distinction at dispatch time (UFCS flag).
+- **`parser.md`** — added a "Reverse mapping at evaluation" subsection covering how `keyword_renames` unwraps placeholder identifiers at attribute-lookup time and in error messages.
+- **`path-mapping.md`** — corrected `apply(path) -> Option<String>` signature; replaced the `uri_`-prefixed function-name table with the actual `uri_path::name`/`parent`/`parts`/etc. names; added a "Why URI paths are opaque" rationale covering round-trip fidelity, authority preservation, and percent-encoded segments.
+- **`range-expr.md`** — corrected "original direction stored separately" to reflect that `IntRange::new` normalizes to canonical ascending form and discards direction; expanded the contiguous-flag bit-packing rationale to quantify per-task memory cost (8 MB for a million-task step); removed the low-value "Divergence from Python" appendix that only said "structurally identical".
+- **`symbol-table.md`** — corrected `get` to return `Option<&SymbolTableEntry>` and added an accessor summary table for `get` / `get_value` / `get_string` / `get_table`; expanded the `Unresolved`-skipping paragraph to explain why the transport format is intentionally value-only.
+- **`values.md`** — removed the false `.item()` panic claim and replaced it with accurate unresolved-propagation behavior; added a full `from_str_coerce` rules table (per-target-type parsing behavior); expanded the Float64 no-NaN/Inf rationale to cover determinism, cross-language parity, and hashability; made the Dispatch Coercion subsection reference `type-system.md` as the canonical source.
+- **`README.md`** — registered the two new spec files (`edit-distance.md`, `path-parse.md`).
+
+### New spec files
+
+- **`specs/expr/edit-distance.md`** (new) — documents `edit_distance()` (two-row DP Levenshtein on chars for UTF-8 correctness), `suggest_closest()` return formats, the `MAX_SUGGESTION_DISTANCE = 5` threshold, and the two call sites (unknown variable, unknown function).
+- **`specs/expr/path-parse.md`** (new) — documents separator handling per `PathFormat`, anchor detection (incl. UNC shares), the public function surface (`sep`, `split`, `file_name`, `parent`, `file_stem`, `extension`, `parts`, `with_name`, ...), the integration table mapping each PATH property/method to its `path_parse` function, and the rationale for lexical (not filesystem-canonicalizing) normalization.
+
+### Source / other
+
+- **`crates/openjd-expr/src/eval/mod.rs`** — module doc comment updated from `rustpython-parser` to `ruff_python_parser`.
+- **`crates/openjd-expr/src/lib.rs`** — updated reference from `specs/parser-selection.md` (file does not exist) to `specs/expr/parser.md`.
+- **`crates/openjd-expr/Cargo.toml`** — same reference fix.
+- **`AGENTS.md`** — same reference fix.
+- **`specs/architecture.md`** — same reference fix (two occurrences).
+
+### Verification
+
+```
+cargo build -p openjd-expr   → clean, no warnings
+cargo test  -p openjd-expr --lib  → 267 passed; 0 failed
+```
+
+The only non-comment source change was correcting the `rustpython-parser` reference in the `eval/mod.rs` doc comment. No types, method signatures, field visibilities, or tests were altered. All finding categories in sections 1–3 are now resolved; findings in sections 4–16 (implementation quality, performance, error messages, tests, edge cases) remain as documented and are tracked by the P1/P3/P4 recommendations above.

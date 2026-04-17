@@ -53,12 +53,24 @@ are automatically converted.
 symtab.set("Param.Frame", ExprValue::Int(42));
 // Creates: Param → SymbolTable { Frame → Int(42) }
 
-symtab.get("Param.Frame")       // → Some(&ExprValue::Int(42))
-symtab.get("Param")             // → None (it's a table, not a value)
-symtab.get_table("Param")       // → Some(&SymbolTable)
-symtab.contains("Param.Frame")  // → true
-symtab.contains("Param")        // → true (table exists)
+symtab.get("Param.Frame")        // → Some(&SymbolTableEntry::Value(Int(42)))
+symtab.get("Param")              // → Some(&SymbolTableEntry::Table(...))
+symtab.get_value("Param.Frame")  // → Some(&ExprValue::Int(42))
+symtab.get_value("Param")        // → None  (it's a table, not a value)
+symtab.get_string("Param.Name")  // → Some(&str) — also unwraps a Path's string value
+symtab.get_table("Param")        // → Some(&SymbolTable)
+symtab.contains("Param.Frame")   // → true
+symtab.contains("Param")         // → true (table exists)
 ```
+
+Accessor summary:
+
+| Method | Returns | When to use |
+|---|---|---|
+| `get(key)` | `Option<&SymbolTableEntry>` | When you need to distinguish value vs. table |
+| `get_value(key)` | `Option<&ExprValue>` | When you only want a value (None if table or missing) |
+| `get_string(key)` | `Option<&str>` | When you only want a string/path, no type check |
+| `get_table(key)` | `Option<&SymbolTable>` | For subtree iteration |
 
 ## Path Conflict Detection
 
@@ -128,7 +140,11 @@ A `SymbolTable` serializes as a JSON array of entries:
 ```
 
 Each entry has `name` (dotted path), `type` (`ExprType` display string), and `value`
-(string representation). `Unresolved` entries are skipped during serialization.
+(string representation). Entries whose value is `Unresolved` are **skipped** during
+serialization: the serialized form carries only concrete values that survive a
+process boundary. If a caller needs type information to propagate, it must
+re-materialize the unresolved symtab on the receiving side from parameter
+definitions — the transport format is intentionally value-only.
 
 ### Deserialization with Path Format
 

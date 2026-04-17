@@ -3,7 +3,7 @@
 
 //! Expression parsing and evaluation.
 //!
-//! Uses `rustpython-parser` to parse Python expression syntax into an AST,
+//! Uses `ruff_python_parser` to parse Python expression syntax into an AST,
 //! then evaluates with a custom bounded evaluator. This mirrors the Python
 //! implementation which uses `ast.parse()` + a custom `Evaluator` class.
 

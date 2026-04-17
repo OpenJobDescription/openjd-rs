@@ -73,6 +73,16 @@ The solution:
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
 renames keywords before parsing and restores them after.
 
+### Reverse mapping at evaluation
+
+The parse-time replacement only rewrites the source; the resulting AST contains the
+placeholder names (`xf` for `if`, `xlse` for `else`, etc.). The evaluator's
+`eval_attribute` consults the `keyword_renames` map whenever it constructs a symbol
+lookup key from an AST `Attribute` node, so a parsed-as-`Param.xf` access becomes a
+real lookup of `Param.if` in the symbol table. Error messages also undo the
+placeholder: `ExpressionError::with_node` uses the original source text (which still
+contains `if`), so users never see the placeholder in diagnostics.
+
 ## AST Validation
 
 After parsing, the AST is validated against an allowlist of allowed node types. This

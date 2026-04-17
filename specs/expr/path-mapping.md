@@ -38,11 +38,11 @@ pub struct PathMappingRule {
 
 ### Application
 
-`rule.apply(path)` returns `(matched: bool, result: String)`:
-
-1. Check if `path` starts with `source_path` (using format-appropriate comparison)
-2. If matched, replace the `source_path` prefix with `destination_path`
-3. Preserve trailing slashes
+`rule.apply(path) -> Option<String>` returns `Some(mapped)` if `path` starts with the
+rule's `source_path` (using format-appropriate comparison), or `None` if no match.
+When matched, the source prefix is replaced with `destination_path`. Trailing
+slashes are preserved. Output separators use the host-native format — use
+`apply_with_format` for explicit control.
 
 Format-appropriate comparison means:
 - **Posix**: exact byte comparison
@@ -51,9 +51,9 @@ Format-appropriate comparison means:
 
 ### apply_with_format
 
-`rule.apply_with_format(path, output_format)` additionally converts the result path
-to the specified output format (e.g., converting Windows backslashes to POSIX forward
-slashes).
+`rule.apply_with_format(path, output_format) -> Option<String>` is the same as
+`apply` but lets the caller pick the output separator (`/` for Posix/Uri, `\` for
+Windows). The source format still dictates how the prefix match is performed.
 
 ### Serde
 
@@ -72,22 +72,38 @@ slashes).
 `uri_path.rs` provides URI-aware path manipulation for paths with `scheme://authority/path`
 structure. These are used when `PathFormat::Uri` is detected.
 
+All functions live in the `uri_path` module — callers use `uri_path::name(p)`,
+`uri_path::parent(p)`, etc. No `uri_`-prefixed names exist at the function level
+because the module already provides that namespace.
+
 | Function | Purpose |
 |----------|---------|
-| `is_uri(s)` | Check if string is a URI (contains `://`) |
-| `split_uri(s)` | Split into `(scheme://authority, path_portion)` |
-| `uri_parts(s)` | Split path into components |
-| `uri_name(s)` | Last component (like `Path.name`) |
-| `uri_parent(s)` | Parent URI (like `Path.parent`) |
-| `uri_suffix(s)` | File extension |
-| `uri_suffixes(s)` | All extensions (e.g., `.tar.gz` → `[".tar", ".gz"]`) |
-| `uri_stem(s)` | Filename without extension |
-| `uri_join(s, parts)` | Join path components |
-| `uri_from_parts(parts)` | Reconstruct URI from components |
+| `is_uri(s)` | Check if string has a `scheme://` prefix |
+| `parse(s) -> Option<UriParts>` | Parse into `{ authority, path_parts }` or `None` |
+| `name(s)` | Last component (like `Path.name`) |
+| `parent(s)` | Parent URI (like `Path.parent`) |
+| `suffix(s)` | File extension |
+| `suffixes(s)` | All extensions (e.g., `.tar.gz` → `[".tar", ".gz"]`) |
+| `stem(s)` | Filename without extension |
+| `parts(s)` | Split into components: `[authority, seg1, seg2, ...]` |
+| `join(s, child)` | Append a child component to a URI path |
+| `from_parts(parts)` | Reconstruct URI from `parts(...)` output |
 
-URI paths are NOT normalized — consecutive slashes, `.`, and `..` are preserved verbatim.
-This matches the specification's requirement that URI paths are opaque to the expression
-language.
+### Why URI paths are opaque
+
+URI paths are not normalized: consecutive slashes, `.`, and `..` are preserved
+verbatim. The rationale is threefold:
+
+- **Round-trip fidelity.** URIs can encode application-specific meaning in slash
+  patterns (S3 prefixes, HTTP path parameters); folding `//` into `/` would silently
+  rewrite a user-supplied key.
+- **Authority preservation.** The `scheme://host[:port]` portion is a single opaque
+  unit that must survive every operation. URI parsing splits it once up front
+  (`parse`) and never touches it again.
+- **Percent-encoded segments.** Segments may contain `%2F` which decodes to `/` but
+  must not be treated as a separator. Rather than try to teach the path functions
+  about URI encoding, we leave every byte of the path exactly as the user supplied
+  it.
 
 ## Expression Language Integration
 

@@ -18,7 +18,7 @@ serde_json = { workspace = true }
 # maintained Python parser in the Rust ecosystem (daily commits, backed by Astral).
 # Published to crates.io by the RustPython project under the `rustpython-` prefix
 # (https://github.com/RustPython/RustPython/pull/7532).
-# See specs/parser-selection.md for the full evaluation.
+# See specs/expr/parser.md for the full evaluation.
 ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
 ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
 ruff_text_size = { package = "rustpython-ruff_text_size", version = "0.15.8" }

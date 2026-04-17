@@ -10,7 +10,7 @@
 //! - Range expressions and path mapping
 //!
 //! Uses `ruff_python_parser` for EXPR extension expression parsing.
-//! See `specs/parser-selection.md` for rationale.
+//! See `specs/expr/parser.md` for rationale.
 
 pub mod default_library;
 pub(crate) mod edit_distance;

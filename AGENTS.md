@@ -179,6 +179,6 @@ The test runner expects the CLI to have `check` and `run` subcommands with the s
 
 ## Key Design Decisions
 
-- **ruff_python_parser** for expression parsing — the EXPR extension uses Python expression syntax, and the spec recommends ruff for Rust implementations. See `specs/parser-selection.md`.
+- **ruff_python_parser** for expression parsing — the EXPR extension uses Python expression syntax, and the spec recommends ruff for Rust implementations. See `specs/expr/parser.md`.
 - **Typed list variants** in `ExprValue` — instead of a single `List(Vec<ExprValue>)`, uses `ListInt(Vec<i64>)`, `ListString(Vec<String>)`, etc. for memory efficiency. See `specs/typed-list-refactor.md`.
 - **Expression language spec** — the authoritative reference is `openjd-specifications/wiki/2026-02-Expression-Language.md`.
