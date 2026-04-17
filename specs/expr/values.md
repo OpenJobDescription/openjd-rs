@@ -51,7 +51,12 @@ Invariants enforced on construction:
 - -0.0 normalized to 0.0
 
 These match the specification's requirement that float values are always finite and
-that negative zero is not observable.
+that negative zero is not observable. The rationale is threefold: **determinism**
+(NaN breaks reflexive equality and produces implementation-defined sort orders);
+**cross-language parity** (Python OpenJD applies the same invariants, so templates
+evaluate identically in Rust and Python); and **hashability** (NaN's `NaN != NaN`
+would break the `a == b ⇒ hash(a) == hash(b)` contract that `ExprValue` relies on
+for `HashMap` and list deduplication).
 
 ## Typed List Variants
 
@@ -252,7 +257,9 @@ Applied in the second phase of dispatch when exact match fails:
 - INT → FLOAT
 - PATH → STRING
 
-Method calls skip receiver coercion to prevent nonsensical calls like `42.upper()`.
+See [type-system.md § Implicit Coercions](type-system.md#implicit-coercions) for the
+full rationale and rules that govern these two coercions across the crate. Method
+calls skip receiver coercion to prevent nonsensical calls like `42.upper()`.
 
 ### Target Type Coercion (after evaluation, for format string context)
 
@@ -270,8 +277,25 @@ Applied when the evaluation result needs to match an expected type:
 
 ### from_str_coerce
 
-`ExprValue::from_str_coerce(s, target_type)` parses a string into a typed value,
-used when binding parameter values from their string representations.
+`ExprValue::from_str_coerce(s, target_type, path_format)` parses a string into a
+typed value. Used when binding parameter values from their string representations
+(e.g., CLI `-p Frame=42`, template parameter defaults, JSON transport decode).
+
+| `target_type` | Rule | Example |
+|---|---|---|
+| `int` | `i64::from_str` | `"42"` → `Int(42)`; `"3.0"` → error |
+| `float` | `f64::from_str`, rejecting NaN/Inf | `"3.14"` → `Float(3.14)` with `"3.14"` preserved |
+| `bool` | case-insensitive `true`/`yes`/`on`/`1` vs `false`/`no`/`off`/`0` | `"Yes"` → `Bool(true)` |
+| `string` | identity | `"hi"` → `String("hi")` |
+| `path` | wrap with supplied `path_format` (no parsing) | `"/tmp"` → `Path { value: "/tmp", format }` |
+| `range_expr` | `RangeExpr::from_str` | `"1-10"` → `RangeExpr(1..=10)` |
+| `nulltype` | only `"null"` parses | `"null"` → `Null` |
+| any other | error | — |
+
+`from_str_coerce` is intentionally narrower than the target-type coercion table above:
+it's the entry point from outside the expression language, where strings are the only
+transport format. Coercion between already-typed values (e.g., `FLOAT` → `INT` for
+exact wholes) belongs to the target-type coercion path, not here.
 
 ## JSON Transport Format
 
@@ -339,5 +363,10 @@ When any argument to a function is unresolved, the function returns
 `Unresolved(return_type)` instead of computing a value. This propagates type information
 through the entire expression, catching type mismatches at validation time.
 
-Calling `item()` or `to_string()` on an unresolved value panics — they are type-only
-placeholders that must never reach runtime evaluation.
+Unresolved values are **type-only placeholders**: they carry an `ExprType` but no
+concrete data. Because they're wrapped values, they can pass through the evaluator's
+memory tracking and dispatch without a special code path. `Display` on an unresolved
+value renders as `unresolved[T]` for debug/error output. Calling the `.coerce()`
+target-type path on an unresolved value is a no-op (the unresolved wrapper is
+preserved through coercion), so validation-time format string resolution can still
+exercise the full coercion chain symbolically.

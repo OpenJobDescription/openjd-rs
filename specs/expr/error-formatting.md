@@ -25,14 +25,18 @@ Three lines:
 
 ```rust
 pub struct ExpressionError {
-    pub kind: ExpressionErrorKind,
-    pub message: String,
-    pub expr: Option<String>,        // source expression text
-    pub col_offset: Option<usize>,   // start of error span
-    pub end_col_offset: Option<usize>, // end of error span
-    pub caret_offset: Option<usize>, // position of ^ within span (relative to col_offset)
+    kind: ExpressionErrorKind,
+    expr: Option<String>,             // source expression text
+    col_offset: Option<usize>,        // start of error span
+    end_col_offset: Option<usize>,    // end of error span
+    caret_offset: Option<usize>,      // position of ^ within span (relative to col_offset)
 }
 ```
+
+Fields are private; callers access them via `kind()`, `expr()`, `col_offset()`,
+`end_col_offset()`, and `caret_offset()` accessor methods. This keeps the error
+representation free to evolve (e.g., caching precomputed line info) without a
+source-breaking change.
 
 ### with_node — attach AST context
 
@@ -65,24 +69,26 @@ accordingly.
 
 ## ExpressionErrorKind
 
-`ExpressionError` carries a structured `kind` field for programmatic error handling:
+`ExpressionError` carries a structured `kind` field for programmatic error handling.
+Variants carry the data they need for the `Display` impl (via `thiserror`), so each
+error kind is self-describing and its message format is enforced at the type level:
 
 ```rust
 #[non_exhaustive]
 pub enum ExpressionErrorKind {
-    UndefinedVariable,
-    UnknownFunction,
-    TypeError,
+    UndefinedVariable { name: String, suggestion: String },
+    UnknownFunction   { name: String },
+    TypeError         { message: String },
     IntegerOverflow,
-    DivisionByZero,
-    FloatError,
-    IndexOutOfBounds,
-    MemoryLimitExceeded,
+    DivisionByZero    { op: &'static str },  // "Division" or "Modulo"
+    FloatError        { message: String },
+    IndexOutOfBounds  { message: String },
+    MemoryLimitExceeded { used: usize, limit: usize },
     OperationLimitExceeded,
-    UnsupportedSyntax,
-    ExplicitFail,
-    ParseError,
-    Other,
+    UnsupportedSyntax { feature: String },
+    ExplicitFail(String),
+    ParseError(String),
+    Other(String),
 }
 ```
 
@@ -110,14 +116,17 @@ Convenience constructors on `ExpressionError` set the kind automatically:
 ```rust
 ExpressionError::undefined_variable("Param.Missing")
 ExpressionError::type_error("expected int, got string")
-ExpressionError::integer_overflow("result exceeds i64 range")
-ExpressionError::division_by_zero()
+ExpressionError::integer_overflow()           // no arg — message is fixed
+ExpressionError::division_by_zero("Division") // op label: "Division" or "Modulo"
 ```
 
 ## Smart Caret Positioning
 
 The `^` position depends on the AST node type, pointing at the most informative part
-of the expression rather than always at the start:
+of the expression rather than always at the start. The underlying principle is:
+**point at the operator or name that failed**, not at the beginning of the whole
+expression containing it — so `1 + "x"` underlines the full sub-expression but the
+`^` lands on the `+`, the operation that actually couldn't be performed.
 
 | Node Type | Caret Position | Example |
 |-----------|---------------|---------|
@@ -172,7 +181,8 @@ to that line.
 ## "Did You Mean?" Suggestions
 
 When a function name is not found in the library, the error includes a suggestion based
-on edit distance (Levenshtein distance, implemented in `edit_distance.rs`):
+on edit distance (Levenshtein distance, implemented in `edit_distance.rs` — see
+[edit-distance.md](edit-distance.md)):
 
 ```
 Unknown function 'lne'

@@ -28,12 +28,17 @@ let result = parsed.evaluator(&[&symtab])
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
     .with_path_mapping_rules(&rules)
-    .evaluate()?;
+    .evaluate(&parsed.ast)?;
 
 println!("Value: {:?}", result);
 println!("Peak memory: {} bytes", parsed.peak_memory_usage);
 println!("Operations: {}", parsed.operation_count);
 ```
+
+Note: `Evaluator::evaluate` takes the AST node as an argument (not captured by the
+builder). The AST is owned by `ParsedExpression`, so callers pass `&parsed.ast`.
+`ParsedExpression::evaluate(&symtab)` is the convenience shortcut that constructs,
+runs, and tears down the evaluator in one call.
 
 Builder methods on `Evaluator`:
 
@@ -180,19 +185,22 @@ middle operand for the next pair.
 - `a and b` → returns `a` if falsy, else `b`
 - `a or b` → returns `a` if truthy, else `b`
 
-The definition of "falsy" here differs from Python. In Python, `0`, `""`, `[]`, and
-`None` are all falsy. In the OpenJD expression language, only `null` and `false` are
-falsy — `0`, `""`, and `[]` are truthy. This narrower definition was chosen because
-treating empty strings and zero as falsy is a common source of bugs in template
-expressions, where `Param.Name or "default"` should only fall through to the default
-when the parameter is genuinely absent (null), not when it happens to be an empty string.
+**Falsy definition:** In the OpenJD expression language, only `null` and `false` are
+falsy. `0`, `""`, `[]`, and all other values are truthy. This narrower definition
+differs from Python (where `0`, `""`, `[]`, and `None` are all falsy) and was chosen
+because treating empty strings and zero as falsy is a common source of bugs in
+template expressions — `Param.Name or "default"` should only fall through to the
+default when the parameter is genuinely absent (null), not when it happens to be
+an empty string.
 
-This enables null-coalescing patterns like `Param.X or "default"`. The exception is
-`bool`, where `false` is falsy as expected — `Param.Flag or true` evaluates to `true`
-when the flag is false.
+This enables null-coalescing patterns like `Param.X or "default"` while still
+letting `Param.Flag or true` yield `true` when the flag is `false`.
 
-When either operand is unresolved, both branches are evaluated to propagate type
-information, and the result is `Unresolved(union[type_a, type_b])`.
+When an earlier operand is unresolved, subsequent operands are still evaluated (to
+catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
+subsequent concrete operand proves the result by short-circuiting (e.g.,
+`Unresolved and false` returns `false`). Errors in operands past the unresolved one
+are suppressed, since a runtime short-circuit could make them unreachable.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition first, then only the

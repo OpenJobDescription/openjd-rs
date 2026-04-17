@@ -1083,6 +1083,25 @@ type TimestampLog = std::sync::Arc<
     >,
 >;
 
+/// Helper: warm up OS caches (shell binary, DLLs, filesystem metadata) before a
+/// real-time timing test runs. Without this, the first `sh` spawn on a CI
+/// machine — especially Windows — can dwarf the task's actual sleep duration,
+/// making the "callback arrived before completion" assertion racy.
+///
+/// Uses its own TempDir so cleanup-on-drop doesn't touch the caller's tmp.
+async fn warmup_shell() {
+    let warmup_tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(warmup_tmp.path().to_path_buf());
+    let _ = s
+        .run_task(
+            &step("sh", vec!["-c", "echo warmup; sleep 0.05"]),
+            None,
+            None,
+            None,
+        )
+        .await;
+}
+
 /// Helper: create a SessionConfig with a callback that records (elapsed, state, progress).
 fn realtime_test_config(
     tmp: &TempDir,
@@ -1116,6 +1135,8 @@ fn realtime_test_config(
 #[tokio::test]
 async fn test_callback_receives_progress_before_completion() {
     let tmp = TempDir::new().unwrap();
+    // Warm up OS caches so shell startup doesn't dominate the 200ms sleep.
+    warmup_shell().await;
     let ts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut s = Session::with_config(realtime_test_config(&tmp, "rt-prog", ts.clone())).unwrap();
 
@@ -1141,6 +1162,8 @@ async fn test_callback_receives_progress_before_completion() {
 #[tokio::test]
 async fn test_callback_receives_status_before_completion() {
     let tmp = TempDir::new().unwrap();
+    // Warm up OS caches so shell startup doesn't dominate the 200ms sleep.
+    warmup_shell().await;
     let ts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut s = Session::with_config(realtime_test_config(&tmp, "rt-stat", ts.clone())).unwrap();
 
@@ -1168,6 +1191,8 @@ async fn test_callback_receives_status_before_completion() {
 #[tokio::test]
 async fn test_env_enter_callback_receives_progress_before_completion() {
     let tmp = TempDir::new().unwrap();
+    // Warm up OS caches so shell startup doesn't dominate the 200ms sleep.
+    warmup_shell().await;
     let ts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut s = Session::with_config(realtime_test_config(&tmp, "rt-env", ts.clone())).unwrap();
 

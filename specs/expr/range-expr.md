@@ -39,13 +39,21 @@ pub struct RangeExpr {
 
 struct IntRange {
     start: i64,
-    end: i64,   // inclusive
-    step: i64,  // always positive; original direction stored separately
+    end: i64,   // inclusive, actual last value
+    step: i64,  // always positive after construction
 }
 ```
 
 Ranges are stored in ascending order with positive steps regardless of how they were
-specified. Descending ranges like `"10-1:-1"` are normalized to ascending form internally.
+specified. Descending ranges like `"10-1:-1"` are normalized to ascending form during
+`IntRange::new`: the original direction is not retained. Iteration, indexing, and
+`Display` all operate on the canonical ascending form.
+
+This is a deliberate simplification over the Python reference implementation, which
+preserves the user-supplied direction. The Rust crate chose canonical form because
+(a) every consumer of `RangeExpr` in openjd-rs treats a range as an unordered
+sorted set of integers, and (b) it eliminates a whole class of edge cases
+(descending-with-positive-step, one-element ranges) from the indexing arithmetic.
 
 ## Parsing
 
@@ -136,8 +144,11 @@ chunk containing a single frame (e.g., frame 5) must display as `"5-5"` rather t
 `"5"` so that the consuming code can unambiguously parse it as a range chunk.
 
 The flag is packed into the high bit of the `length` field to avoid increasing the
-struct size. It only affects `Display` — it is not preserved through constructors like
-`from_values` and does not affect equality comparison or iteration.
+struct size. The packing matters because `RangeExpr` is instantiated **once per task**
+during step parameter space chunking — a step producing a million tasks allocates a
+million `RangeExpr` chunk descriptors, so an extra 8 bytes per instance would cost
+8 MB for that one step. The flag only affects `Display`; it is not preserved through
+constructors like `from_values` and does not affect equality comparison or iteration.
 
 ## Expression Language Integration
 
@@ -154,9 +165,3 @@ In the expression language, `RangeExpr` values support:
 | `string(r)` | Canonical string form |
 | `r + r2` | Concatenate → `list[int]` |
 | `r + list` / `list + r` | Concatenate → `list[int]` |
-
-## Divergence from Python
-
-The Rust implementation is structurally identical to the Python `RangeExpr` class.
-Both use the same tokenizer/parser approach and binary search indexing. The Rust version
-benefits from stack-allocated `IntRange` values and contiguous `Vec` storage.

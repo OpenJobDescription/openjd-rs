@@ -42,7 +42,7 @@ src/
 ├── path_mapping.rs         PathFormat, PathMappingRule
 ├── uri_path.rs             URI-aware path operations
 ├── error.rs                ExpressionError with caret formatting
-├── edit_distance.rs        Levenshtein distance for "did you mean?" suggestions
+├── edit_distance.rs        Levenshtein distance for "did you mean?" suggestions (see edit-distance.md)
 ├── default_library.rs      Default FunctionLibrary construction
 ├── function_library.rs     FunctionLibrary, FunctionEntry, dispatch
 ├── eval/
@@ -54,6 +54,7 @@ src/
     ├── arithmetic.rs       +, -, *, /, //, %, **, unary +/-
     ├── string.rs           String methods and operations
     ├── path.rs             Path properties and methods
+    ├── path_parse.rs       Format-aware path parsing (sep, split, parts, etc.)
     ├── regex.rs            re_match, re_search, re_findall, re_sub, re_escape, re_split
     ├── repr.rs             repr_sh, repr_cmd, repr_pwsh, repr_py, repr_json
     ├── list.rs             List operations (sorted, reversed, unique, flatten, etc.)
@@ -86,6 +87,10 @@ let mut parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
 parsed.accessed_symbols  // {"Param.Frame"}
 parsed.called_functions  // {}
 parsed.local_bindings    // {}
+
+// After evaluation, resource usage is recorded on the ParsedExpression:
+parsed.peak_memory_usage  // peak bytes during the last evaluate() call
+parsed.operation_count    // operations consumed during the last evaluate() call
 
 // Simple evaluation
 let value = parsed.evaluate(&symtab)?;

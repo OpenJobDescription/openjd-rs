@@ -30,7 +30,17 @@ pub struct FunctionEntry {
     pub signature: ExprType,  // TypeCode::Signature — e.g., (int, int) -> int
     pub implementation: fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>,
 }
+
+pub struct FunctionLibrary {
+    functions: HashMap<String, Vec<FunctionEntry>>,
+    pub host_context_enabled: bool,
+}
 ```
+
+The `host_context_enabled` flag is a runtime marker used by callers (model-layer
+template validation) to discover whether host-only functions like
+`apply_path_mapping` are available on this library instance. It is set by
+`with_host_context()`.
 
 Function pointers (not closures) keep `FunctionEntry` simple, `Clone`, and `Send + Sync`.
 Functions that need evaluator state (path format, path mapping rules) access it through
@@ -53,8 +63,10 @@ pub trait EvalContext {
 ```
 
 `get_or_compile_regex` has a default implementation that compiles the pattern on every
-call. The evaluator overrides it with a caching version that stores compiled regexes
-for reuse across repeated calls with the same pattern.
+call via `RegexBuilder` with a 1 MiB compiled-program size limit (to defend against
+adversarial patterns). The evaluator overrides it with a caching version that stores
+compiled regexes for reuse across repeated calls with the same pattern — the cache
+is per-evaluation, not global.
 
 The evaluator implements `EvalContext` directly. This trait boundary prevents function
 implementations from calling evaluation methods (like `evaluate` or `dispatch`),
@@ -84,6 +96,12 @@ library.call(name, &args, ctx)
 2. **Non-generic with coercion** — try implicit coercions (INT→FLOAT, PATH→STRING);
    skip receiver coercion for method calls to prevent `42.upper()`
 3. **Generic match** — bind type variables (T, T1, T2, T3) and check consistency
+
+The method-vs-function distinction is made by the evaluator before dispatch:
+`eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
+a per-call flag on the dispatch indicating that position 0 is a receiver. The library
+honors that flag in phase 2 by declining to coerce arg 0. Ordinary function calls
+carry no such flag and coerce all arguments uniformly.
 
 If no match is found, the error message includes:
 - The function name (using operator symbols for dunders: `__add__` → `+`)
@@ -139,7 +157,7 @@ The library supports type-level queries without evaluation:
 
 ```rust
 // What type does len(list[int]) return?
-lib.derive_return_type("len", &[ExprType::LIST_INT])  // → Some(ExprType::INT)
+lib.derive_return_type("len", &[ExprType::list(ExprType::INT)])  // → Some(ExprType::INT)
 
 // What type is path.name?
 lib.get_property_type(&ExprType::PATH, "name")  // → Some(ExprType::STRING)
@@ -192,28 +210,29 @@ rejects `(int, string)`).
 
 ## Sub-Library Composition
 
-Each function category is a separate module returning its own `FunctionLibrary`. The
-default library merges them:
+Each function category is a module-private free function returning its own
+`FunctionLibrary`. The default library merges them inside `default_library.rs`:
 
 ```rust
-pub fn default_library() -> FunctionLibrary {
+fn build_default_library() -> FunctionLibrary {
     FunctionLibrary::new()
-        .merge(arithmetic::library())
-        .merge(string_ops::library())
-        .merge(list_ops::library())
-        .merge(comparison::library())
-        .merge(math_ops::library())
-        .merge(string_functions::library())
-        .merge(list_functions::library())
-        .merge(conversion::library())
-        .merge(path_ops::library())
-        .merge(repr_ops::library())
-        .merge(regex_ops::library())
-        .merge(misc::library())
+        .merge(arithmetic())
+        .merge(string_ops())
+        .merge(list_ops())
+        .merge(comparison())
+        .merge(math_ops())
+        .merge(string_functions())
+        .merge(list_functions())
+        .merge(conversion())
+        .merge(path_ops())
+        .merge(repr_ops())
+        .merge(regex_ops())
+        .merge(misc())
 }
 ```
 
-Each sub-library is self-contained and testable in isolation.
+The category builders (`arithmetic()`, `string_ops()`, …) are not part of the public
+API; the only publicly exported constructor is `get_default_library()`.
 
 ## Caching
 
@@ -251,6 +270,20 @@ well-typed without requiring actual path mapping rules.
 
 Cloning copies the `HashMap<String, Vec<FunctionEntry>>` (all `fn` pointers, no
 heap-allocated closures), so this is cheap.
+
+### Host-Context Function Inventory
+
+The host-context namespace is deliberately small. The only function currently
+registered is:
+
+| Function | Signature | Runtime behavior | Validation stub |
+|---|---|---|---|
+| `apply_path_mapping` | `(string) -> path` | Applies the evaluator's path mapping rules to the string, returning a `path` in the configured output format (or the original string normalized to that format if no rule matches). | Returns `Unresolved(path)` so type checking proceeds without real rules. |
+
+Adding a new host-context function requires registering both the real implementation
+in `register_host_context_functions` and the unresolved stub in
+`register_unresolved_host_context_functions`, keeping the two libraries in sync so
+that template validation sees the same signature set as runtime evaluation.
 
 ## Function Coverage
 
