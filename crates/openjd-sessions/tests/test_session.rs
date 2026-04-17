@@ -1140,8 +1140,10 @@ async fn test_callback_receives_progress_before_completion() {
     let ts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut s = Session::with_config(realtime_test_config(&tmp, "rt-prog", ts.clone())).unwrap();
 
-    // Emit progress immediately, then sleep 200ms.
-    let script = step("sh", vec!["-c", "echo 'openjd_progress: 50.0'; sleep 0.2"]);
+    // Emit progress immediately, then sleep long enough that shell startup
+    // overhead (which can be 500ms+ on Windows CI under parallel load) is
+    // negligible relative to the total runtime.
+    let script = step("sh", vec!["-c", "echo 'openjd_progress: 50.0'; sleep 2"]);
     let t0 = std::time::Instant::now();
     s.run_task(&script, None, None, None).await.unwrap();
     let total = t0.elapsed();
@@ -1169,7 +1171,7 @@ async fn test_callback_receives_status_before_completion() {
 
     let script = step(
         "sh",
-        vec!["-c", "echo 'openjd_status: Rendering frame 1'; sleep 0.2"],
+        vec!["-c", "echo 'openjd_status: Rendering frame 1'; sleep 2"],
     );
     let t0 = std::time::Instant::now();
     s.run_task(&script, None, None, None).await.unwrap();
@@ -1199,7 +1201,7 @@ async fn test_env_enter_callback_receives_progress_before_completion() {
     let env = env_with_enter(
         "env1",
         "sh",
-        vec!["-c", "echo 'openjd_progress: 50.0'; sleep 0.2"],
+        vec!["-c", "echo 'openjd_progress: 50.0'; sleep 2"],
     );
     let t0 = std::time::Instant::now();
     s.enter_environment(&env, None, None, None).await.unwrap();
@@ -2116,7 +2118,9 @@ async fn test_cancel_action_with_mark_failed() {
     // Spawn a task that cancels with mark_action_failed after the action starts
     let token_clone = parent_token.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Allow enough time for the malformed openjd_env message to be processed
+        // before the cancel arrives, even under heavy parallel CI load.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         token_clone.cancel();
     });
 
