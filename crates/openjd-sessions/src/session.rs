@@ -517,6 +517,12 @@ impl Session {
         })
     }
 
+    /// Override the action state. Used by the pyo3 binding to convert
+    /// Failed → Canceled when cancel was requested externally.
+    pub fn override_action_state(&mut self, state: ActionState) {
+        self.action.state = Some(state);
+    }
+
     /// Redact sensitive values from output text.
     pub fn redact(&self, text: &str) -> String {
         // Sort by length descending so longer matches are replaced first,

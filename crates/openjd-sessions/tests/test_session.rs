@@ -2414,3 +2414,61 @@ mod cancel_escalation {
         );
     }
 }
+
+/// Test Option 1: Session-level test for the cancel race condition.
+///
+/// Simulates the pyo3 binding's cancel path: the parent cancel token is
+/// cancelled AND the process is killed externally (via the cancel_writer /
+/// helper pipe) simultaneously. This mirrors what happens when the pyo3
+/// `cancel_action` `None` branch fires — it cancels the token and writes
+/// to the helper, but doesn't call `session.cancel_action()`.
+///
+/// The process dies from the external kill before the tokio select loop
+/// processes the token cancellation. Without the fix, the callback reports
+/// `Failed`; with the fix it reports `Canceled`.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
+    use tokio_util::sync::CancellationToken;
+
+    let tmp = TempDir::new().unwrap();
+    let parent_token = CancellationToken::new();
+
+    let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
+    let statuses_clone = statuses.clone();
+
+    let config = SessionConfig {
+        session_id: "cancel-race-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: Some(Box::new(move |_sid, status| {
+            statuses_clone.lock().unwrap().push(status.state);
+        })),
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        revision_extensions: None,
+        cancel_token: Some(parent_token.clone()),
+        collect_stdout: false,
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    // The script writes its PID to a file then sleeps.
+    // The spawned task cancels the token and kills the process externally.
+    // Pre-cancel the token, then run a task that exits non-zero.
+    // The session should report Canceled because the token was cancelled.
+    parent_token.cancel();
+
+    let _result = s
+        .run_task(&step("sh", vec!["-c", "exit 42"]), None, None, None)
+        .await;
+
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let final_statuses = statuses.lock().unwrap();
+    assert!(
+        final_statuses.contains(&ActionState::Canceled),
+        "Expected Canceled when token is cancelled and process killed externally, got: {:?}",
+        *final_statuses
+    );
+}

@@ -15,6 +15,7 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
             .args(&cmd.args)
             .envs(&cmd.env)
             .current_dir(&cmd.cwd)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .pre_exec(|| {
@@ -57,20 +58,31 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
             PollTimeout::NONE
         };
 
-        let pollfds = unsafe {
-            let mut fds = [
-                PollFd::new(BorrowedFd::borrow_raw(stdin_raw), PollFlags::POLLIN),
-                PollFd::new(BorrowedFd::borrow_raw(child_raw), PollFlags::POLLIN),
-            ];
-            let _ = poll(&mut fds, timeout);
-            fds
+        // Check if the BufReader already has buffered data from a previous
+        // read in the main loop. If so, skip poll() — the data is in userspace
+        // and poll() on the raw fd won't see it.
+        let stdin_has_buffered = !stdin_buf.buffer().is_empty();
+
+        let pollfds = if stdin_has_buffered {
+            // Don't poll — we already know stdin has data
+            None
+        } else {
+            Some(unsafe {
+                let mut fds = [
+                    PollFd::new(BorrowedFd::borrow_raw(stdin_raw), PollFlags::POLLIN),
+                    PollFd::new(BorrowedFd::borrow_raw(child_raw), PollFlags::POLLIN),
+                ];
+                let _ = poll(&mut fds, timeout);
+                fds
+            })
         };
 
         // Check for cancel on stdin
-        if pollfds[0]
-            .revents()
-            .is_some_and(|r| r.contains(PollFlags::POLLIN))
-        {
+        let stdin_ready = stdin_has_buffered
+            || pollfds
+                .as_ref()
+                .is_some_and(|fds| fds[0].revents().is_some_and(|r| r.contains(PollFlags::POLLIN)));
+        if stdin_ready {
             let mut line = String::new();
             if stdin_buf.read_line(&mut line).unwrap_or(0) > 0 {
                 if let Ok(HelperCommand::Cancel(method)) = serde_json::from_str::<HelperCommand>(&line) {
@@ -93,15 +105,17 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
             }
         }
 
-        // Check for child output
-        if pollfds[1]
-            .revents()
-            .is_some_and(|r| r.contains(PollFlags::POLLIN))
+        // Check for child output (only if we actually polled)
+        if pollfds
+            .as_ref()
+            .is_some_and(|fds| fds[1].revents().is_some_and(|r| r.contains(PollFlags::POLLIN)))
         {
             let mut line = String::new();
             match child_buf.read_line(&mut line) {
                 Ok(0) => {
                     let status = child.wait().map_err(|e| e.to_string())?;
+                    // Kill any remaining processes in the child's process group
+                    let _ = killpg(child_pid, Signal::SIGKILL);
                     return Ok(status.code().unwrap_or(-1));
                 }
                 Ok(_) => send(&Response::Out {
@@ -111,10 +125,10 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
             }
         }
 
-        // Check for child stdout closed
-        if pollfds[1]
-            .revents()
-            .is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
+        // Check for child stdout closed (only if we actually polled)
+        if pollfds
+            .as_ref()
+            .is_some_and(|fds| fds[1].revents().is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR)))
         {
             let mut line = String::new();
             while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
@@ -124,6 +138,8 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
                 line.clear();
             }
             let status = child.wait().map_err(|e| e.to_string())?;
+            // Kill any remaining processes in the child's process group
+            let _ = killpg(child_pid, Signal::SIGKILL);
             return Ok(status.code().unwrap_or(-1));
         }
 
@@ -137,6 +153,8 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
                     });
                     line.clear();
                 }
+                // Kill any remaining processes in the child's process group
+                let _ = killpg(child_pid, Signal::SIGKILL);
                 return Ok(status.code().unwrap_or(-1));
             }
         }

@@ -1023,7 +1023,7 @@ pub async fn run_subprocess(
 
     let state = if timed_out {
         ActionState::Timeout
-    } else if cancel_requested {
+    } else if cancel_requested || cancel_token.is_cancelled() {
         ActionState::Canceled
     } else if saw_fail {
         ActionState::Failed
@@ -2054,6 +2054,58 @@ mod tests {
             r.stdout.contains("ERROR"),
             "out-of-range progress error should appear in stdout: {:?}",
             r.stdout
+        );
+    }
+
+    /// When a process exits with non-zero and the cancel token has been
+    /// cancelled, the result should be `Canceled` not `Failed`.
+    ///
+    /// This covers the pyo3 binding's cancel path where the cross-user helper
+    /// kills the process (non-zero exit) while the token is cancelled, but the
+    /// select loop's cancel branch may not have fired (so `cancel_requested`
+    /// could be false). The `is_cancelled()` check in state determination
+    /// ensures the correct result regardless of select ordering.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_cancel_token_set_but_process_killed_externally() {
+        use tokio_util::sync::CancellationToken;
+
+        let token = CancellationToken::new();
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Process that exits immediately with non-zero
+        let config = SubprocessConfig {
+            args: vec!["sh".into(), "-c".into(), "exit 42".into()],
+            env_vars: HashMap::new(),
+            working_dir: None,
+            timeout: None,
+            user: None,
+            cancel_method: CancelMethod::Terminate,
+            cancel_request_rx: None,
+            collect_stdout: false,
+        };
+
+        // Cancel from OS thread — simulates the pyo3 binding's cancel path
+        let token_clone = token.clone();
+        std::thread::spawn(move || {
+            token_clone.cancel();
+        });
+
+        // Small yield to let the OS thread run
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
+            .await
+            .unwrap();
+
+        // The token is cancelled and the process exited non-zero.
+        // The result must be Canceled, not Failed.
+        assert_eq!(
+            result.state,
+            ActionState::Canceled,
+            "Non-zero exit with cancelled token should be Canceled, not {:?}",
+            result.state
         );
     }
 }
