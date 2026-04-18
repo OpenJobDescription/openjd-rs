@@ -1059,3 +1059,83 @@ fn bare_multiline_error_shows_correct_line() {
         ],
     );
 }
+
+// === Unified caret rendering across all three sites ===
+// `Display for ExpressionError`, `message_with_expr_prefix`, and the
+// if/else both-branches-fail renderer all share `write_caret_line`.
+// These tests pin the exact output so a regression in any one of them
+// shows up immediately.
+
+#[test]
+fn ifelse_both_branches_fail_exact_caret_format() {
+    // Full multi-line assertion (AGENTS.md standard) — pins the exact
+    // layout produced by the shared `write_caret_line` helper so a
+    // regression in any of the three caret-rendering sites is caught
+    // immediately.
+    let mut st = SymbolTable::new();
+    st.set("cond", ExprValue::unresolved(ExprType::BOOL))
+        .unwrap();
+    st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
+    st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
+    let e = eval_err_with("X + 'a' if cond else Y * 'b'", &st);
+    let expected = "\
+Both branches fail in the if/else:
+  if-branch: Cannot use '+' operator with int and string
+  X + 'a' if cond else Y * 'b'
+  ~~^~~~~
+  else-branch: Cannot use '*' operator with path and string
+  X + 'a' if cond else Y * 'b'
+                       ~~^~~~~
+  X + 'a' if cond else Y * 'b'
+  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~";
+    assert_eq!(e, expected);
+}
+
+#[test]
+fn format_string_parse_error_carries_caret() {
+    // parse_segments now routes through with_span so the error includes
+    // the raw format-string source and a caret over the failing {{...}}.
+    let err = FormatString::new("hello {{ 1 + }} world").unwrap_err();
+    let expected = "\
+Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: Expected an expression
+  hello {{ 1 + }} world
+        ^~~~~~~~~";
+    assert_eq!(err.to_string(), expected);
+}
+
+#[test]
+fn format_string_unclosed_interpolation_carries_caret() {
+    let err = FormatString::new("prefix {{unclosed").unwrap_err();
+    let expected = "\
+Failed to parse interpolation expression at [7, 17]. Reason: Braces mismatch.
+  prefix {{unclosed
+         ^~";
+    assert_eq!(err.to_string(), expected);
+}
+
+#[test]
+fn range_expr_parse_error_carries_caret() {
+    // A parse failure inside range_expr() surfaces with the outer call
+    // expression as the source line and a caret spanning the whole call.
+    // The range-internal position is captured in the message itself
+    // ("Expected integer in '1-xx,5'"), and the outer caret tells the
+    // user which expression node triggered the failure.
+    let err = eval_err("range_expr('1-xx,5')");
+    let expected = "\
+Expected integer in '1-xx,5'
+  range_expr('1-xx,5')
+  ^~~~~~~~~~~~~~~~~~~~";
+    assert_eq!(err, expected);
+}
+
+#[test]
+fn range_expr_parse_error_has_parse_error_kind() {
+    // Previously these all came through ExpressionError::new (Other kind),
+    // losing programmatic classification. Now they carry ParseError kind.
+    let err = evaluate_expression("range_expr('1-xx,5')", &SymbolTable::new()).unwrap_err();
+    assert!(
+        matches!(err.kind(), ExpressionErrorKind::ParseError(_)),
+        "expected ParseError kind, got {:?}",
+        err.kind()
+    );
+}

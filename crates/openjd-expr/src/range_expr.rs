@@ -53,8 +53,19 @@ impl fmt::Display for RangeExprError {
 impl std::error::Error for RangeExprError {}
 
 impl From<RangeExprError> for ExpressionError {
+    /// Lift a range-expression parse error into an `ExpressionError`.
+    ///
+    /// If the error carries a `position`, attach the source string with a
+    /// span covering the single character at that offset so the standard
+    /// caret renderer points at the failure. Without a position, fall
+    /// back to the stringified `Display` form.
     fn from(e: RangeExprError) -> Self {
-        ExpressionError::new(e.to_string())
+        let msg = e.to_string();
+        let err = ExpressionError::parse_error(msg);
+        match e.position {
+            Some(pos) if pos < e.expr.len() => err.with_span(&e.expr, pos, pos + 1),
+            _ => err,
+        }
     }
 }
 
@@ -71,15 +82,15 @@ impl IntRange {
     /// After construction, `start <= end` and `step > 0` always hold.
     pub fn new(start: i64, end: i64, step: i64) -> Result<Self, ExpressionError> {
         if step == 0 {
-            return Err(ExpressionError::new("Range: step must not be zero"));
+            return Err(ExpressionError::parse_error("Range: step must not be zero"));
         }
         if step > 0 && start > end {
-            return Err(ExpressionError::new(
+            return Err(ExpressionError::parse_error(
                 "Range: a descending range must have a negative step",
             ));
         }
         if step < 0 && start < end {
-            return Err(ExpressionError::new(
+            return Err(ExpressionError::parse_error(
                 "Range: an ascending range must have a positive step",
             ));
         }
@@ -267,7 +278,9 @@ impl RangeExpr {
     /// Create from pre-built `IntRange`s. Sorts, merges adjacent ranges, and validates no overlaps.
     pub fn from_ranges(mut ranges: Vec<IntRange>) -> Result<Self, ExpressionError> {
         if ranges.is_empty() {
-            return Err(ExpressionError::new("Range expression cannot be empty"));
+            return Err(ExpressionError::parse_error(
+                "Range expression cannot be empty",
+            ));
         }
         // Sort by start
         ranges.sort_by_key(|r| (r.start, r.end));
@@ -291,7 +304,7 @@ impl RangeExpr {
         // Validate no overlaps
         for i in 1..merged.len() {
             if merged[i].start <= merged[i - 1].end {
-                return Err(ExpressionError::new(format!(
+                return Err(ExpressionError::parse_error(format!(
                     "Range expression has overlapping ranges: {} and {}",
                     merged[i - 1],
                     merged[i]
@@ -370,7 +383,7 @@ impl RangeExpr {
     /// descending sequences.
     pub fn slice(&self, start: i64, stop: i64, step: i64) -> Result<RangeExpr, ExpressionError> {
         if step <= 0 {
-            return Err(ExpressionError::new(
+            return Err(ExpressionError::parse_error(
                 "RangeExpr::slice requires a positive step",
             ));
         }
@@ -503,7 +516,7 @@ impl std::fmt::Display for RangeExpr {
 fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
     let expr = expr.trim();
     if expr.is_empty() {
-        return Err(ExpressionError::new("Empty expression"));
+        return Err(ExpressionError::parse_error("Empty expression"));
     }
 
     let mut ranges = Vec::new();
@@ -521,7 +534,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
                 // Check if the last non-whitespace char before end was a comma
                 let last_content = expr.trim_end();
                 if last_content.ends_with(',') {
-                    return Err(ExpressionError::new(format!(
+                    return Err(ExpressionError::parse_error(format!(
                         "Trailing comma in range expression: '{expr}'"
                     )));
                 }
@@ -547,7 +560,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
         }
 
         if bytes[pos] != b'-' {
-            return Err(ExpressionError::new(format!(
+            return Err(ExpressionError::parse_error(format!(
                 "Unexpected '{}' in '{expr}'",
                 bytes[pos] as char
             )));
@@ -572,7 +585,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
                 ranges.push(IntRange::new(start, end, 1)?);
             } else {
                 // Descending range without step is invalid per spec
-                return Err(ExpressionError::new(format!(
+                return Err(ExpressionError::parse_error(format!(
                     "Descending range {start}-{end} requires a negative step"
                 )));
             }
@@ -583,7 +596,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
         }
 
         if bytes[pos] != b':' {
-            return Err(ExpressionError::new(format!(
+            return Err(ExpressionError::parse_error(format!(
                 "Expected ':' or ',' in '{expr}'"
             )));
         }
@@ -596,7 +609,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
 
         let step = parse_integer(expr, &mut pos)?;
         if step == 0 {
-            return Err(ExpressionError::new("Step must not be zero"));
+            return Err(ExpressionError::parse_error("Step must not be zero"));
         }
 
         ranges.push(IntRange::new(start, end, step)?);
@@ -610,7 +623,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
             if bytes[pos] == b',' {
                 pos += 1;
             } else {
-                return Err(ExpressionError::new(format!(
+                return Err(ExpressionError::parse_error(format!(
                     "Unexpected '{}' in '{expr}'",
                     bytes[pos] as char
                 )));
@@ -619,7 +632,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
     }
 
     if ranges.is_empty() {
-        return Err(ExpressionError::new("Empty expression"));
+        return Err(ExpressionError::parse_error("Empty expression"));
     }
 
     RangeExpr::from_ranges(ranges)
@@ -628,7 +641,7 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
 fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
     let bytes = expr.as_bytes();
     if *pos >= bytes.len() {
-        return Err(ExpressionError::new(format!(
+        return Err(ExpressionError::parse_error(format!(
             "Unexpected end of expression: '{expr}'"
         )));
     }
@@ -639,7 +652,7 @@ fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
     }
 
     if *pos >= bytes.len() || !bytes[*pos].is_ascii_digit() {
-        return Err(ExpressionError::new(format!(
+        return Err(ExpressionError::parse_error(format!(
             "Expected integer in '{expr}'"
         )));
     }
@@ -650,9 +663,9 @@ fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
     }
 
     let num_str = &expr[start..*pos];
-    let value: i64 = num_str
-        .parse()
-        .map_err(|_| ExpressionError::new(format!("Invalid integer '{num_str}' in '{expr}'")))?;
+    let value: i64 = num_str.parse().map_err(|_| {
+        ExpressionError::parse_error(format!("Invalid integer '{num_str}' in '{expr}'"))
+    })?;
 
     Ok(if negative { -value } else { value })
 }

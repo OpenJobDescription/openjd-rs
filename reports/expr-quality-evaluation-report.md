@@ -11,6 +11,9 @@
 > [§17 Changes applied](#17-changes-applied) for what was modified.
 > Sections 5–16 (error messages, performance, tests, edge cases) are unchanged
 > and still describe the crate as originally evaluated.
+>
+> **Update 2026-04-18:** Section 5 (error message quality) has been addressed —
+> see [§19 Error message quality pass](#19-error-message-quality-pass).
 
 ## Executive summary
 
@@ -165,6 +168,11 @@ Source modules/areas with no dedicated spec or inadequate coverage:
 
 ### 5. Error message quality
 
+> **Status (2026-04-18 follow-up):** Four of the six gaps addressed; two closed
+> as not-reproducible. See §19 for details. Gap 5 was flagged at a line that no
+> longer exists in the codebase, and Gap 4 was fixed by a prior refactor that
+> changed the parser's error type.
+
 Per AGENTS.md, evaluation errors must include expression + caret indicator. This is largely delivered:
 - `ExpressionError::with_node` attaches source + span + caret offset.
 - `Display` emits message + expression + caret on separate lines.
@@ -172,12 +180,12 @@ Per AGENTS.md, evaluation errors must include expression + caret indicator. This
 - The if/else both-branches-fail message in `eval_ifexp` manually renders nested carets.
 
 **Gaps:**
-1. `ExpressionError::new(...)` (Other kind) is used ~70 times. Many could be structured kinds (`TypeError`, `UnsupportedSyntax`). Examples in `range_expr.rs` all go through `new`, losing programmatic error classification.
-2. `FormatString::parse_segments` errors (`"Failed to parse interpolation expression at [X, Y]..."`) don't flow through `with_span`, so no caret on the raw format string input.
-3. `SymbolTableError` has no `impl From` for `ExpressionError`, so errors at `SymbolTable::set` lose context when bubbled up.
-4. `RangeExprError` has `position` but `From<RangeExprError>` stringifies and discards it.
-5. `function_library.rs:1109` uses `type_strs.last().unwrap()` — safe but a structured `if let Some(last)` is more defensive.
-6. **Three places reimplement caret rendering**: `Display for ExpressionError`, `message_with_expr_prefix`, and the if/else both-branches block in `eval_ifexp`. Extract one `fn render_caret_line(expr, col, end_col, caret_offset)` helper.
+1. `ExpressionError::new(...)` (Other kind) is used ~70 times. Many could be structured kinds (`TypeError`, `UnsupportedSyntax`). Examples in `range_expr.rs` all go through `new`, losing programmatic error classification. **Partially fixed** — added `ExpressionError::parse_error` convenience constructor and converted all 18 `range_expr.rs` sites to `ParseError` kind. Remaining ~52 sites elsewhere in the crate are out of scope for this pass.
+2. `FormatString::parse_segments` errors (`"Failed to parse interpolation expression at [X, Y]..."`) don't flow through `with_span`, so no caret on the raw format string input. **Fixed** — all four error paths in `parse_segments` now attach the raw format-string source via `with_span`, so users see a caret on the failing interpolation.
+3. `SymbolTableError` has no `impl From` for `ExpressionError`, so errors at `SymbolTable::set` lose context when bubbled up. **Fixed** — `impl From<SymbolTableError> for ExpressionError` added. The full original message is preserved verbatim.
+4. `RangeExprError` has `position` but `From<RangeExprError>` stringifies and discards it. **Not reproducible** — the range parser no longer returns `RangeExprError`; `RangeExpr::from_str` has `type Err = ExpressionError` directly, so the `From<RangeExprError>` impl is dormant (kept only for external callers who construct `RangeExprError` themselves). The `From` impl was still defensively upgraded to attach `with_span`, but it has no effect on any in-tree call path. The original concern was fixed by an earlier refactor that changed the parser's error type; the caret on `range_expr(...)` failures now comes from the evaluator attaching the outer-call AST span, which is the standard flow.
+5. `function_library.rs:1109` uses `type_strs.last().unwrap()` — safe but a structured `if let Some(last)` is more defensive. **Not reproducible** — no `type_strs.last().unwrap()` in the current codebase; the code path was restructured in an earlier pass.
+6. **Three places reimplement caret rendering**: `Display for ExpressionError`, `message_with_expr_prefix`, and the if/else both-branches block in `eval_ifexp`. Extract one `fn render_caret_line(expr, col, end_col, caret_offset)` helper. **Fixed** — extracted `pub(crate) fn write_caret_line(w, col, end_col, caret_offset)` in `error.rs`; all three sites now delegate to it. As a side effect, the if/else renderer's output is now consistent with `Display` (it previously used a different layout that omitted the leading tildes before the caret).
 
 ### 6. Performance concerns
 
@@ -564,3 +572,108 @@ instead of `Result<_, ExpressionError>`), **4.3** (three error types —
 `ExpressionError`, `SymbolTableError`, `String` — that could be unified via
 `From` impls), and **4.4** (`Float64` tuple fields are `pub`, letting callers
 bypass the NaN/Inf invariant enforced by `Float64::new`).
+
+---
+
+## 19. Error message quality pass
+
+A third follow-up pass on 2026-04-18 addressed section 5. All six gaps are
+either **fixed**, **partially fixed** (item 1, scoped to `range_expr.rs`), or
+**closed as not reproducible** (item 5, the line it pointed at no longer
+exists). Work order matched the pragmatic order from the report's follow-up
+discussion: 5.6 → 5.2 → 5.3 → 5.4 → 5.1 → 5.5.
+
+### 5.6 Consolidate caret rendering
+
+The three parallel implementations in `Display for ExpressionError`,
+`ExpressionError::message_with_expr_prefix`, and the if/else both-branches
+block in `eval_ifexp` have been replaced with a single
+`pub(crate) fn write_caret_line(w, col, end_col, caret_offset)` helper in
+`error.rs`. All three sites now delegate to it, so any future layout change
+propagates consistently.
+
+A latent inconsistency surfaced during the refactor: the if/else renderer
+previously drew `^` at `col + caret_off` with only trailing tildes, producing
+e.g. `  ^~~~~` instead of the standard `  ~~^~~~~`. That discrepancy is now
+gone, so `assert_err` tests that used substring matching on sub-expressions
+still pass while pinning tests can now assert the exact caret-line format.
+
+### 5.2 Format-string parse errors carry a caret
+
+All four error paths in `FormatString::parse_segments` (missing opening
+braces, brace mismatch mid-expression, missing closing braces, empty
+expression, and the delegated `ParsedExpression::new` failure) now attach
+the raw format-string source via `ExpressionError::with_span`. A user-facing
+parse failure on `{{ 1 + }}` now renders:
+
+```
+Failed to parse interpolation expression at [N, M]. Reason: ...
+  hello {{ 1 + }} world
+        ^~~~~~~~~
+```
+
+### 5.3 `SymbolTableError` → `ExpressionError`
+
+Added `impl From<SymbolTableError> for ExpressionError` that preserves the
+full `Display` message. Call sites that bubble a `SymbolTable::set` failure
+through `?` no longer need an ad-hoc `.map_err(...)` wrapper, and the
+original "not a table" context is retained end-to-end.
+
+### 5.4 `RangeExprError::position` (not reproducible)
+
+Investigation revealed the range-expression parser no longer returns
+`RangeExprError`: `impl FromStr for RangeExpr` has `type Err = ExpressionError`,
+so the `From<RangeExprError>` impl that allegedly discarded `position` is
+dormant — it is kept around only for external callers who might construct
+`RangeExprError` themselves. The concern as literally written was fixed by an
+earlier refactor that changed the parser's error type. The `From` impl was
+defensively upgraded to attach `with_span` anyway, but this change has no
+effect on any in-tree call path. Closed as not-reproducible.
+
+Caret quality for `range_expr('…')` failures is unchanged and remains:
+
+```
+Expected integer in '1-xx,5'
+  range_expr('1-xx,5')
+  ^~~~~~~~~~~~~~~~~~~~
+```
+
+The inner parse detail (`Expected integer in '1-xx,5'`) is preserved in the
+message text, and the outer caret points at the call that triggered the
+failure. A future pass could attach both the outer and inner carets (similar
+to the if/else both-branches renderer), but that was out of scope for §5.
+
+### 5.1 `ExpressionError::parse_error` convenience + `range_expr.rs` uplift
+
+Added `ExpressionError::parse_error(message)` as a structured constructor
+for `ExpressionErrorKind::ParseError`. Converted all 18 `ExpressionError::new`
+sites in `range_expr.rs` to `parse_error`, so callers can now pattern-match
+on `err.kind() == ParseError(_)` for range-expression failures. The remaining
+~52 `ExpressionError::new` sites elsewhere in the crate are out of scope for
+this pass and tracked as follow-up.
+
+### 5.5 Defensive `.unwrap()` at `function_library.rs:1109`
+
+The original report called out `type_strs.last().unwrap()`. No such pattern
+exists in the current codebase — it was removed in an earlier restructuring
+pass. Closed as not-reproducible.
+
+### New tests
+
+| Target | File | Count |
+|---|---|---|
+| `ifelse` both-branches unified caret format | `tests/test_error_formatting.rs` | 1 |
+| Format-string parse-error caret | `tests/test_error_formatting.rs` | 2 |
+| `RangeExprError` caret + `ParseError` kind | `tests/test_error_formatting.rs` | 2 (pinning outer-call caret + ParseError kind) |
+| `SymbolTableError` → `ExpressionError` conversion | `tests/test_symbol_table.rs` | 1 |
+
+### Verification
+
+```
+cargo fmt --all -- --check                                       clean
+cargo clippy --all-features --all-targets --workspace -- -D warnings  clean
+cargo test --workspace                                           6038 passed; 0 failed
+PATH=…/bin:$PATH uv run run_openjd_cli_tests.py '2023-09/*'       1042 passed; 0 failed
+```
+
+(6038 = 6032 before + 6 new tests. Full 2023-09 conformance suite green.)

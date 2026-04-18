@@ -55,6 +55,18 @@ impl std::fmt::Display for SymbolTableError {
 
 impl std::error::Error for SymbolTableError {}
 
+impl From<SymbolTableError> for crate::error::ExpressionError {
+    /// Bubble a symbol-table conflict up as an `ExpressionError::Other`.
+    ///
+    /// The full `SymbolTableError` message is preserved verbatim so callers
+    /// can still see which key was being set and what it conflicted with.
+    /// Call sites that have an AST node available can further attach
+    /// `.with_node(...)` / `.with_span(...)` for caret-annotated output.
+    fn from(e: SymbolTableError) -> Self {
+        crate::error::ExpressionError::new(e.to_string())
+    }
+}
+
 /// Entry in a symbol table: either a nested table or a value.
 #[derive(Debug, Clone)]
 pub enum SymbolTableEntry {

@@ -5,7 +5,7 @@
 //! Tests ported from Python test_symbol_table.py
 
 use openjd_expr::value::Float64;
-use openjd_expr::{ExprType, ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{ExprType, ExprValue, ExpressionError, PathFormat, SymbolTable};
 
 // ══════════════════════════════════════════════════════════════
 // TestSymbolTable
@@ -720,4 +720,19 @@ fn from_pairs_accepts_iterator_chain() {
 fn from_pairs_accepts_empty_iter() {
     let st = SymbolTable::from_pairs(std::iter::empty::<(&str, ExprValue)>()).unwrap();
     assert!(st.keys().next().is_none());
+}
+
+#[test]
+fn symbol_table_error_converts_to_expression_error() {
+    // The From<SymbolTableError> for ExpressionError impl preserves the
+    // original message verbatim, so no context is lost when bubbling
+    // through `?` in evaluator code paths.
+    let mut st = SymbolTable::new();
+    st.set("A.B", 42).unwrap();
+    let sym_err = st.set("A.B.C", "deep").unwrap_err();
+    let sym_msg = sym_err.to_string();
+
+    let expr_err: ExpressionError = sym_err.into();
+    let expr_msg = expr_err.to_string();
+    assert_eq!(expr_msg, sym_msg);
 }

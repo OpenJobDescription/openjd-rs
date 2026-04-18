@@ -145,6 +145,11 @@ impl ExpressionError {
         Self::from_kind(ExpressionErrorKind::ExplicitFail(message.into()))
     }
 
+    /// A parse-stage error (underlying parser, range expression parser, etc.).
+    pub fn parse_error(message: impl Into<String>) -> Self {
+        Self::from_kind(ExpressionErrorKind::ParseError(message.into()))
+    }
+
     /// The structured error kind.
     pub fn kind(&self) -> &ExpressionErrorKind {
         &self.kind
@@ -242,21 +247,12 @@ impl ExpressionError {
         out.push_str(prefix);
         out.push_str(expr);
         out.push_str("\n  ");
-        let prefix_len = prefix.len();
-        let span_len = end_col.saturating_sub(col);
-        if span_len > 1 {
-            let caret_idx = self
-                .caret_offset
-                .unwrap_or(0)
-                .min(span_len.saturating_sub(1));
-            out.push_str(&" ".repeat(col + prefix_len));
-            out.push_str(&"~".repeat(caret_idx));
-            out.push('^');
-            out.push_str(&"~".repeat(span_len.saturating_sub(caret_idx + 1)));
-        } else {
-            out.push_str(&" ".repeat(col + prefix_len));
-            out.push('^');
-        }
+        let _ = write_caret_line(
+            &mut out,
+            col + prefix.len(),
+            end_col + prefix.len(),
+            self.caret_offset.unwrap_or(0),
+        );
         out
     }
 }
@@ -300,18 +296,7 @@ impl fmt::Display for ExpressionError {
             };
 
             write!(f, "\n  {expr_line}\n  ")?;
-
-            let span_len = line_end_col.saturating_sub(line_col);
-            if span_len > 1 {
-                let caret_idx = self
-                    .caret_offset
-                    .unwrap_or(0)
-                    .min(span_len.saturating_sub(1));
-                write!(f, "{}{}^", " ".repeat(line_col), "~".repeat(caret_idx))?;
-                write!(f, "{}", "~".repeat(span_len.saturating_sub(caret_idx + 1)))?;
-            } else {
-                write!(f, "{}^", " ".repeat(line_col))?;
-            }
+            write_caret_line(f, line_col, line_end_col, self.caret_offset.unwrap_or(0))?;
         }
         Ok(())
     }
@@ -321,6 +306,46 @@ impl std::error::Error for ExpressionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.kind)
     }
+}
+
+/// Render a caret-annotation line matching the format used by
+/// [`ExpressionError`]'s `Display` impl: `col` leading spaces, then
+/// `caret_idx` tildes, then `^`, then trailing tildes to cover
+/// `end_col - col`.
+///
+/// `col`, `end_col`, and `caret_idx` are all zero-based column offsets
+/// measured within the displayed line (so callers that add indentation
+/// should add it into `col` before calling).
+///
+/// If the span is zero- or one-wide, only `^` is drawn (no tildes).
+///
+/// This is the single source of truth for caret rendering across the
+/// crate — `Display for ExpressionError`, `message_with_expr_prefix`,
+/// and the if/else both-branches-fail renderer in `eval_ifexp` all call
+/// it to guarantee identical output.
+pub(crate) fn write_caret_line(
+    w: &mut dyn std::fmt::Write,
+    col: usize,
+    end_col: usize,
+    caret_offset: usize,
+) -> std::fmt::Result {
+    let span_len = end_col.saturating_sub(col);
+    for _ in 0..col {
+        w.write_char(' ')?;
+    }
+    if span_len > 1 {
+        let caret_idx = caret_offset.min(span_len.saturating_sub(1));
+        for _ in 0..caret_idx {
+            w.write_char('~')?;
+        }
+        w.write_char('^')?;
+        for _ in 0..span_len.saturating_sub(caret_idx + 1) {
+            w.write_char('~')?;
+        }
+    } else {
+        w.write_char('^')?;
+    }
+    Ok(())
 }
 
 /// Compute the caret offset within a node's span based on node type.

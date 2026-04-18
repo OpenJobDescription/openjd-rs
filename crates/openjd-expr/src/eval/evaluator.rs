@@ -9,10 +9,33 @@
 
 use ruff_python_ast as ast;
 
-use crate::error::{ExpressionError, ExpressionErrorKind};
+use crate::error::{write_caret_line, ExpressionError, ExpressionErrorKind};
 use crate::path_mapping::PathFormat;
 use crate::symbol_table::SymbolTable;
 use crate::value::{ExprValue, Float64};
+
+/// Append the `"  <expr>\n  <caret-line>\n"` block for a sub-error to
+/// `msg`. No-op if the sub-error has no attached source.
+///
+/// Used by `eval_ifexp` to render both branches of a failing ternary.
+/// `trailing_newline = true` keeps the final newline, `false` strips it
+/// (so the very last sub-error doesn't add a dangling blank line).
+fn append_sub_error(msg: &mut String, err: &ExpressionError, is_last: bool) {
+    let Some(src) = err.expr() else {
+        return;
+    };
+    msg.push_str("  ");
+    msg.push_str(src);
+    msg.push('\n');
+    if let (Some(col), Some(end)) = (err.col_offset(), err.end_col_offset()) {
+        msg.push_str("  ");
+        let caret_off = err.caret_offset().unwrap_or(0);
+        let _ = write_caret_line(msg, col, end, caret_off);
+        if !is_last {
+            msg.push('\n');
+        }
+    }
+}
 
 /// Default memory limit: 100 million bytes.
 pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per spec
@@ -806,31 +829,9 @@ impl<'a> Evaluator<'a> {
                         "Both branches fail in the if/else:\n  if-branch: {}\n",
                         be.message()
                     );
-                    if let Some(src) = be.expr() {
-                        msg.push_str(&format!("  {src}\n"));
-                        if let (Some(col), Some(end)) = (be.col_offset(), be.end_col_offset()) {
-                            let caret_off = be.caret_offset().unwrap_or(0);
-                            let prefix = " ".repeat(2 + col + caret_off);
-                            let width = end.saturating_sub(col).saturating_sub(caret_off);
-                            msg.push_str(&format!(
-                                "{prefix}^{}\n",
-                                "~".repeat(width.saturating_sub(1))
-                            ));
-                        }
-                    }
+                    append_sub_error(&mut msg, &be, false);
                     msg.push_str(&format!("  else-branch: {}\n", oe.message()));
-                    if let Some(src) = oe.expr() {
-                        msg.push_str(&format!("  {src}\n"));
-                        if let (Some(col), Some(end)) = (oe.col_offset(), oe.end_col_offset()) {
-                            let caret_off = oe.caret_offset().unwrap_or(0);
-                            let prefix = " ".repeat(2 + col + caret_off);
-                            let width = end.saturating_sub(col).saturating_sub(caret_off);
-                            msg.push_str(&format!(
-                                "{prefix}^{}",
-                                "~".repeat(width.saturating_sub(1))
-                            ));
-                        }
-                    }
+                    append_sub_error(&mut msg, &oe, true);
                     let mut err = ExpressionError::new(msg);
                     if let Some(src) = self.expr_source {
                         use ruff_text_size::Ranged;

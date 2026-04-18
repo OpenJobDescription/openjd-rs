@@ -562,7 +562,8 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                     let cp = pos + co;
                     return Err(ExpressionError::new(format!(
                         "Failed to parse interpolation expression at [{pos}, {}]. Reason: Missing opening braces.", cp + 2
-                    )));
+                    ))
+                    .with_span(input, cp, cp + 2));
                 }
                 let rest = &input[pos..];
                 if !rest.is_empty() {
@@ -574,9 +575,11 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                 let op = pos + offset;
                 if let Some(co) = input[pos..].find("}}") {
                     if pos + co < op {
+                        let cp = pos + co;
                         return Err(ExpressionError::new(format!(
                             "Failed to parse interpolation expression at [{pos}, {len}]. Reason: Braces mismatch."
-                        )));
+                        ))
+                        .with_span(input, cp, cp + 2));
                     }
                 }
                 if op > pos {
@@ -586,7 +589,8 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                 match input[es..].find("}}") {
                     None => return Err(ExpressionError::new(format!(
                         "Failed to parse interpolation expression at [{op}, {len}]. Reason: Braces mismatch."
-                    ))),
+                    ))
+                    .with_span(input, op, op + 2)),
                     Some(co) => {
                         let ee = es + co;
                         let be = ee + 2;
@@ -594,12 +598,22 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                         if et.is_empty() {
                             return Err(ExpressionError::new(format!(
                                 "Failed to parse interpolation expression at [{op}, {be}]. Reason: Empty expression."
-                            )));
+                            ))
+                            .with_span(input, op, be));
                         }
                         if is_simple_dotted_name(et) {
                             segments.push(Segment::SimpleName { start: op, end: be, name: et.to_string() });
                         } else {
-                            let parsed = crate::eval::ParsedExpression::new(et)?;
+                            let parsed = crate::eval::ParsedExpression::new(et).map_err(|e| {
+                                // Attach the raw format-string source + {{...}} span so
+                                // users see a caret on the failing interpolation rather
+                                // than a bare parse error.
+                                ExpressionError::new(format!(
+                                    "Failed to parse interpolation expression at [{op}, {be}]. Reason: {}",
+                                    e.message()
+                                ))
+                                .with_span(input, op, be)
+                            })?;
                             segments.push(Segment::Expression { start: op, end: be, parsed });
                         }
                         pos = be;
