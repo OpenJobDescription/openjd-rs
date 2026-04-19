@@ -156,7 +156,7 @@ fn validate_catches_undefined_variable() {
     let fs = FormatString::new("{{Param.Missing}}").unwrap();
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     let result = fs.validate_expressions(&SymbolTable::new(), &lib);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -169,7 +169,7 @@ fn validate_passes_with_unresolved_types() {
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::INT));
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     assert!(fs.validate_expressions(&st, &lib).is_ok());
 }
 

@@ -29,9 +29,6 @@ impl EvalContext for MockCtx {
     fn path_format(&self) -> PathFormat {
         PathFormat::Posix
     }
-    fn path_mapping_rules(&self) -> &[path_mapping::PathMappingRule] {
-        &[]
-    }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         Ok(())
     }
@@ -428,7 +425,7 @@ fn derive_return_type_union_expansion() {
 fn with_host_context_enables_apply_path_mapping() {
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 }
 

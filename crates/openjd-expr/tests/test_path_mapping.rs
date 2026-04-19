@@ -19,11 +19,10 @@ fn eval_with_rules_fmt(
     let symtabs = [st];
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(rules);
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules)
         .with_path_format(fmt);
     ev.evaluate(&parsed.ast).unwrap()
 }
@@ -995,12 +994,8 @@ fn apply_path_mapping_rejects_path_input() {
     let symtabs = [&st];
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
-    let rules = vec![rule];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_library(&lib)
-        .with_path_mapping_rules(&rules);
+        .with_host_context(vec![rule]);
+    let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
     let result = ev.evaluate(&parsed.ast);
     assert!(
         result.is_err(),

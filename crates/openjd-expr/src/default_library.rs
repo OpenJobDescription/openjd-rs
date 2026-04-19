@@ -422,13 +422,18 @@ fn regex_ops() -> FunctionLibrary {
     lib
 }
 
-/// Register host-context-only functions (e.g. apply_path_mapping).
-pub fn register_host_context_functions(lib: &mut FunctionLibrary) {
-    use crate::functions::path::apply_path_mapping_fn;
+/// Register host-context-only functions (e.g. `apply_path_mapping`).
+///
+/// `rules` are captured by the registered closure and applied on every
+/// `apply_path_mapping` call during evaluation.
+pub fn register_host_context_functions(
+    lib: &mut FunctionLibrary,
+    rules: std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>,
+) {
     lib.register_sig(
         "apply_path_mapping",
         "(string) -> path",
-        apply_path_mapping_fn,
+        crate::functions::path::make_apply_path_mapping_fn(rules),
     );
 }
 
@@ -764,7 +769,9 @@ mod tests {
 
     #[test]
     fn host_context_has_apply_path_mapping() {
-        let lib = get_default_library().clone().with_host_context();
+        let lib = get_default_library()
+            .clone()
+            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
         assert!(!lib.get_signatures("apply_path_mapping").is_empty());
         assert!(lib.host_context_enabled);
     }

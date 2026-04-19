@@ -15,17 +15,17 @@ Defined in `format_string.rs`. For why this module lives in `openjd-expr` rather
 ```rust
 enum Segment {
     Literal(String),
-    /// Fast path for simple dotted names like `{{Param.Name}}` — resolved by
-    /// symbol table lookup without spinning up the expression evaluator.
-    SimpleName   { start: usize, end: usize, name: String },
-    /// Full EXPR expression — anything that isn't a simple dotted name.
-    Expression   { start: usize, end: usize, parsed: ParsedExpression },
+    /// Parsed EXPR expression — every `{{...}}` is parsed into a
+    /// `ParsedExpression` up-front at construction time.
+    Expression { start: usize, end: usize, parsed: ParsedExpression },
 }
 ```
 
-Detecting the simple-name case at parse time avoids paying the cost of
-`Evaluator::new()` and AST walking for the base-spec case (unqualified dotted-name
-interpolation), which is common in real templates.
+Every `{{...}}` — whether a bare dotted name like `{{Param.Frame}}` or a full
+expression like `{{Param.X + 1}}` — is parsed into a `ParsedExpression` when
+the format string is constructed. `ParsedExpression::as_name_lookup()` is
+used downstream to distinguish the base-spec case (bare dotted name) from
+complex expressions that require the EXPR extension.
 
 Parsing validates:
 - Matched `{{` and `}}` delimiters
@@ -73,7 +73,6 @@ pub struct FormatStringOptions<'a> { /* private fields */ }
 impl<'a> FormatStringOptions<'a> {
     pub fn new() -> Self;                                          // == Default::default()
     pub fn with_library(self, lib: impl Into<Option<&FunctionLibrary>>) -> Self;
-    pub fn with_path_mapping_rules(self, rules: &[PathMappingRule]) -> Self;
     pub fn with_path_format(self, fmt: PathFormat) -> Self;
     pub fn with_target_type(self, t: &ExprType) -> Self;
 }
@@ -84,22 +83,29 @@ Defaults:
 | Field | Default |
 |---|---|
 | `library` | `None` (use `get_default_library()`) |
-| `path_mapping_rules` | `&[]` |
 | `path_format` | `PathFormat::host()` |
 | `target_type` | `None` |
 
 Example — configure every axis:
 
 ```rust
+// Build a library with host context baked in — this is how
+// apply_path_mapping gets its rules.
+let lib = get_default_library().clone().with_host_context(rules);
+
 let opts = FormatStringOptions::new()
-    .with_library(&custom_lib)
+    .with_library(&lib)
     .with_path_format(PathFormat::Posix)
-    .with_path_mapping_rules(&rules)
     .with_target_type(&ExprType::PATH);
 
 let value  = fs.resolve_with(&symtab, &opts)?;         // ExprValue
 let string = fs.resolve_string_with(&symtab, &opts)?;  // String (ignores target_type)
 ```
+
+Path mapping rules are **not** a format-string option. They belong to the
+`apply_path_mapping` closure registered on the library via
+[`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
+Pass the configured library into `with_library` and the closure handles the rest.
 
 The `with_library` method accepts either `&FunctionLibrary` or
 `Option<&FunctionLibrary>` (via `impl Into<Option<...>>`), so callers can plumb

@@ -16,7 +16,7 @@ fn eval_with_host_context(expr: &str) -> ExprValue {
     let symtabs = [&st];
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<PathMappingRule>::new());
     let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
     ev.evaluate(&parsed.ast).unwrap()
 }
@@ -28,7 +28,7 @@ fn eval_with_host_context_fails(expr: &str) -> bool {
     let symtabs = [&st];
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<PathMappingRule>::new());
     let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
     ev.evaluate(&parsed.ast).is_err()
 }
@@ -72,7 +72,9 @@ fn default_library_no_host_context() {
 #[test]
 fn with_host_context_returns_new_library() {
     let lib = default_library::get_default_library().clone();
-    let result = lib.clone().with_host_context();
+    let result = lib
+        .clone()
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     assert!(result.host_context_enabled);
     assert!(!lib.host_context_enabled);
 }
@@ -80,7 +82,7 @@ fn with_host_context_returns_new_library() {
 fn with_host_context_chaining() {
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     assert!(lib.host_context_enabled);
 }
 
@@ -144,7 +146,7 @@ fn method_syntax_with_host_context() {
     let symtabs = [&st];
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert!(matches!(r, ExprValue::Path { .. }));
@@ -158,19 +160,17 @@ fn with_path_mapping_rules() {
         source_path: "/old".into(),
         destination_path: "/new".into(),
     };
-    let rules = [rule];
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/old/file.txt".into()))
         .unwrap();
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules)
         .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/new/file.txt");
@@ -182,19 +182,17 @@ fn unmatched_path_unchanged() {
         source_path: "/old".into(),
         destination_path: "/new".into(),
     };
-    let rules = [rule];
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/other/file.txt".into()))
         .unwrap();
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules)
         .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/other/file.txt");
@@ -204,7 +202,7 @@ fn no_rules_returns_path_unchanged() {
     // Use Posix format so the path isn't normalized to backslashes on Windows
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
     let parsed = ParsedExpression::new("apply_path_mapping('/any/path')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
@@ -307,17 +305,15 @@ fn function_syntax_with_path_mapping_rules() {
         source_path: "/old/path".into(),
         destination_path: "/new/path".into(),
     };
-    let rules = [rule];
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("apply_path_mapping('/old/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules)
         .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/new/path/file.txt");
@@ -329,17 +325,15 @@ fn function_syntax_unmatched_path_unchanged() {
         source_path: "/specific/path".into(),
         destination_path: "/mapped/path".into(),
     };
-    let rules = [rule];
     let lib = default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("apply_path_mapping('/other/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
     let mut ev = parsed
         .evaluator(&symtabs)
         .with_library(&lib)
-        .with_path_mapping_rules(&rules)
         .with_path_format(PathFormat::Posix);
     let r = ev.evaluate(&parsed.ast).unwrap();
     assert_eq!(r.to_display_string(), "/other/path/file.txt");

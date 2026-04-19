@@ -202,7 +202,7 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Build host-context library with path mapping rules
     let host_library = openjd_expr::default_library::get_default_library()
         .clone()
-        .with_host_context();
+        .with_host_context(path_rules.clone());
 
     // Set up session
     let revision_ctx = {

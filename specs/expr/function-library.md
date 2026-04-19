@@ -56,15 +56,17 @@ template validation) to discover whether host-only functions like
 
 Function pointers and closures both work — `Arc<dyn Fn + Send + Sync>` is
 `Clone` and thread-safe, preserving `FunctionLibrary: Clone + Send + Sync`.
-Functions that need evaluator state (path format, path mapping rules) access it through
-the `EvalContext` trait.
+Functions that need evaluator state (path format, resource counting, regex
+cache) access it through the `EvalContext` trait. Functions that need *host*
+state (e.g. path mapping rules for `apply_path_mapping`) capture it via a
+closure registered at library-construction time — see
+[Host Context](#host-context) below.
 
 ## EvalContext Trait
 
 ```rust
 pub trait EvalContext {
     fn path_format(&self) -> PathFormat;
-    fn path_mapping_rules(&self) -> &[PathMappingRule];
     fn count_op(&mut self) -> Result<(), ExpressionError>;
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError>;
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError>;
@@ -274,27 +276,48 @@ pub fn get_default_library() -> &'static FunctionLibrary {
 
 ## Host Context
 
-Host-context functions (like `apply_path_mapping`) are unavailable during template
-validation but available during runtime evaluation on a worker host. They're added
-via `with_host_context()`:
+Host-context functions (like `apply_path_mapping`) need host-supplied state
+(path mapping rules) that the expression evaluator has no knowledge of. They
+are added to a library by capturing that state in a closure registered at
+construction time:
 
 ```rust
-let lib = get_default_library().clone().merge(host_library());
+let rules: Vec<PathMappingRule> = /* ... */;
+let lib = get_default_library().clone().with_host_context(rules);
 ```
 
-For template validation at job creation time (when path mapping rules aren't available
-yet), `with_unresolved_host_context()` registers the host-context function signatures
-with stub implementations that return `Unresolved(PATH)`:
+`with_host_context` accepts either `Vec<PathMappingRule>` (takes ownership) or
+`Arc<Vec<PathMappingRule>>` (shares the allocation across library clones).
+The `apply_path_mapping` closure captures an `Arc<Vec<PathMappingRule>>`
+internally, so applying the same rules to many cloned libraries is cheap.
+
+For template validation at job creation time (when path mapping rules aren't
+available yet), `with_unresolved_host_context()` registers the host-context
+function signatures with stub implementations that return `Unresolved(PATH)`:
 
 ```rust
 let lib = get_default_library().clone().with_unresolved_host_context();
 ```
 
-This allows the type checker to verify that calls to host-context functions are
-well-typed without requiring actual path mapping rules.
+This allows the type checker to verify that calls to host-context functions
+are well-typed without requiring actual rules. The validation stub takes no
+arguments — rules don't matter for a signature-only check.
 
-Cloning copies the `HashMap<String, Vec<FunctionEntry>>` (all `fn` pointers, no
-heap-allocated closures), so this is cheap.
+### Rule-change semantics
+
+Rules are captured at the point of `with_host_context` and the closure holds
+an immutable reference to them for the library's lifetime. If the host's
+rules change (e.g. `openjd-sessions` accumulates path mapping rules across
+let-binding evaluations), the host must rebuild the library:
+
+```rust
+// Rebuild with updated rules
+let updated_lib = base_library.clone().with_host_context(new_rules);
+```
+
+`FunctionLibrary::clone()` copies the `HashMap<String, Vec<FunctionEntry>>`
+of `Arc<dyn Fn>` entries, so rebuilds are cheap — no deep copy of the
+underlying function implementations.
 
 ### Host-Context Function Inventory
 
@@ -303,12 +326,16 @@ registered is:
 
 | Function | Signature | Runtime behavior | Validation stub |
 |---|---|---|---|
-| `apply_path_mapping` | `(string) -> path` | Applies the evaluator's path mapping rules to the string, returning a `path` in the configured output format (or the original string normalized to that format if no rule matches). | Returns `Unresolved(path)` so type checking proceeds without real rules. |
+| `apply_path_mapping` | `(string) -> path` | Applies the closure-captured path mapping rules to the string, returning a `path` in the configured output format (or the original string normalized to that format if no rule matches). | Returns `Unresolved(path)` so type checking proceeds without real rules. |
 
-Adding a new host-context function requires registering both the real implementation
-in `register_host_context_functions` and the unresolved stub in
-`register_unresolved_host_context_functions`, keeping the two libraries in sync so
-that template validation sees the same signature set as runtime evaluation.
+Adding a new host-context function that captures host state:
+
+1. Write a closure factory `make_foo_fn(state: Arc<State>) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> R + Send + Sync + 'static`.
+2. Register it from `register_host_context_functions(lib, ...)` using `lib.register_sig(name, signature, make_foo_fn(state.clone()))`.
+3. Register a matching stub in `register_unresolved_host_context_functions` that returns `Unresolved(expected_type)`.
+
+Functions that don't need host state can be plain fn pointers registered in
+the default library category modules (see `default_library.rs`).
 
 ## Function Coverage
 

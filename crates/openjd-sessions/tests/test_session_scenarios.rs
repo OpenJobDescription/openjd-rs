@@ -250,11 +250,8 @@ async fn run_scenario(scenario_path: &Path) {
     };
     let mut session = Session::with_config(config).unwrap();
 
-    // Set up expression library with host context (enables apply_path_mapping, etc.)
-    let host_library = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context();
-    session = session.with_library(host_library);
+    // Session automatically wraps its library with host-context using the
+    // configured path-mapping rules; no need to register manually here.
 
     let mut all_output = Vec::new();
     // Use a shared vec to capture output from callbacks

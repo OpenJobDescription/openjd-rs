@@ -89,14 +89,12 @@ pub struct Evaluator<'a> {
     operation_count: usize,
     keyword_renames: &'a std::collections::HashMap<String, String>,
     library: &'a crate::function_library::FunctionLibrary,
-    path_mapping_rules: &'a [crate::path_mapping::PathMappingRule],
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
     std::sync::LazyLock::new(std::collections::HashMap::new);
-static EMPTY_RULES: &[crate::path_mapping::PathMappingRule] = &[];
 
 impl<'a> Evaluator<'a> {
     /// Create a new evaluator with default settings.
@@ -116,7 +114,6 @@ impl<'a> Evaluator<'a> {
             operation_count: 0,
             keyword_renames: &EMPTY_KEYWORD_RENAMES,
             library: crate::default_library::get_default_library(),
-            path_mapping_rules: EMPTY_RULES,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
         }
@@ -176,20 +173,6 @@ impl<'a> Evaluator<'a> {
     #[must_use]
     pub fn with_target_type(mut self, t: &crate::types::ExprType) -> Self {
         self.target_type = Some(t.clone());
-        self
-    }
-
-    /// Set path mapping rules for `apply_path_mapping()` calls.
-    ///
-    /// Default: empty (no mappings). These rules are only accessible to
-    /// host-context functions via the [`EvalContext`](crate::function_library::EvalContext)
-    /// trait. First matching rule wins.
-    #[must_use]
-    pub fn with_path_mapping_rules(
-        mut self,
-        rules: &'a [crate::path_mapping::PathMappingRule],
-    ) -> Self {
-        self.path_mapping_rules = rules;
         self
     }
 
@@ -1229,7 +1212,6 @@ impl<'a> Evaluator<'a> {
             operation_count: self.operation_count,
             keyword_renames: self.keyword_renames,
             library: self.library,
-            path_mapping_rules: self.path_mapping_rules,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
         }
@@ -1367,9 +1349,6 @@ impl<'a> Evaluator<'a> {
 impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     fn path_format(&self) -> PathFormat {
         self.path_format
-    }
-    fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule] {
-        self.path_mapping_rules
     }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count = self.operation_count.saturating_add(1);

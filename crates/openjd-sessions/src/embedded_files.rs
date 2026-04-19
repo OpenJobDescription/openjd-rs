@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::ExprValue;
 use openjd_model::job::EmbeddedFile;
 use openjd_model::symbol_table::SymbolTable;
@@ -262,16 +262,13 @@ impl EmbeddedFiles {
         &self,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
     ) -> Result<(), SessionError> {
         for record in &self.records {
             if let Some(ref data_fs) = record.file.data {
                 let resolved = data_fs
                     .resolve_string_with(
                         symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_library(library)
-                            .with_path_mapping_rules(rules),
+                        &openjd_expr::FormatStringOptions::new().with_library(library),
                     )
                     .map_err(|e| SessionError::FormatString {
                         context: format!("embedded file '{}' data", record.file.name),

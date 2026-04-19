@@ -95,20 +95,21 @@ parsed.operation_count    // operations consumed during the last evaluate() call
 // Simple evaluation
 let value = parsed.evaluate(&symtab)?;
 
-// Configured evaluation — custom library, limits, path format, path mapping
+// Configured evaluation — custom library, limits, path format
 let value = parsed.evaluator(&[&job_params, &let_bindings])
     .with_library(&custom_lib)
     .with_memory_limit(50_000_000)
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
-    .with_path_mapping_rules(&rules)
     .evaluate(&parsed.ast)?;
 ```
 
 `ParsedExpression::new` parses once and exposes symbol/function metadata for validation.
 The `evaluator()` builder covers the use cases that the Python implementation handles
-via optional keyword arguments on `ParsedExpression.evaluate()` — library, limits, path
-format, and path mapping rules are all configurable per-evaluation without re-parsing.
+via optional keyword arguments on `ParsedExpression.evaluate()` — library, limits, and
+path format are all configurable per-evaluation without re-parsing. Path mapping rules
+live on the function library (see `FunctionLibrary::with_host_context`) rather than
+the evaluator.
 
 The `accessed_symbols` set also enables dependency analysis between expressions. By
 comparing which symbols one expression writes (via let bindings or parameter definitions)

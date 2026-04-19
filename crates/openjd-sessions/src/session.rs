@@ -185,6 +185,22 @@ struct CrossUserFields {
     cancel_writer: Option<std::fs::File>,
 }
 
+/// Build the derived function library: `base` (or default) merged with a
+/// host-context registration that captures the current path-mapping `rules`.
+///
+/// Called whenever the user-supplied library or the rules change so that
+/// `apply_path_mapping` always reflects the session's current rules.
+fn derive_library(
+    base: Option<&FunctionLibrary>,
+    rules: &Arc<Vec<PathMappingRule>>,
+) -> Arc<FunctionLibrary> {
+    let lib = match base {
+        Some(b) => b.clone(),
+        None => openjd_expr::default_library::get_default_library().clone(),
+    };
+    Arc::new(lib.with_host_context(rules.clone()))
+}
+
 pub struct Session {
     session_id: String,
     state: SessionState,
@@ -204,7 +220,13 @@ pub struct Session {
     process_env: HashMap<String, String>,
     created_env_vars: HashMap<EnvironmentIdentifier, EnvVarChanges>,
     // Expression evaluation
-    library: Option<Arc<FunctionLibrary>>,
+    //
+    // `library_base` is the user-supplied function library (without host
+    // context). `library` is the cached derived library that has
+    // `apply_path_mapping` registered for the current `path_mapping_rules`.
+    // Whenever `path_mapping_rules` change, `library` must be rebuilt.
+    library_base: Option<Arc<FunctionLibrary>>,
+    library: Arc<FunctionLibrary>,
     path_mapping_rules: Arc<Vec<PathMappingRule>>,
     job_parameter_values: JobParameterValues,
     // Grouped fields
@@ -240,7 +262,8 @@ impl Session {
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
-            library: None,
+            library_base: None,
+            library: derive_library(None, &Arc::new(Vec::new())),
             path_mapping_rules: Arc::new(Vec::new()),
             job_parameter_values: HashMap::new(),
             action: ActionStatusFields::new(),
@@ -298,6 +321,7 @@ impl Session {
         let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
         path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         let path_mapping_rules = Arc::new(path_mapping_rules);
+        let library = derive_library(None, &path_mapping_rules);
         let process_env = config.os_env_vars.unwrap_or_default();
 
         // Spawn cross-user helper if needed
@@ -382,7 +406,8 @@ impl Session {
             env_vars: HashMap::new(),
             process_env,
             created_env_vars: HashMap::new(),
-            library: None,
+            library_base: None,
+            library,
             path_mapping_rules,
             job_parameter_values: config.job_parameter_values,
             action: ActionStatusFields::new(),
@@ -402,6 +427,7 @@ impl Session {
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
+        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
         self
     }
 
@@ -412,6 +438,7 @@ impl Session {
         rules.extend(additional);
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
+        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
     }
 
     /// Get the current path mapping rules.
@@ -420,7 +447,8 @@ impl Session {
     }
 
     pub fn with_library(mut self, library: FunctionLibrary) -> Self {
-        self.library = Some(Arc::new(library));
+        self.library_base = Some(Arc::new(library));
+        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
         self
     }
 
@@ -442,11 +470,7 @@ impl Session {
     }
 
     fn lib(&self) -> Option<&FunctionLibrary> {
-        self.library.as_deref()
-    }
-
-    fn rules(&self) -> &[PathMappingRule] {
-        &self.path_mapping_rules
+        Some(&self.library)
     }
 
     /// Fire the callback with the current action status.
@@ -712,9 +736,7 @@ impl Session {
                 let value = fmt_str
                     .resolve_string_with(
                         &symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_library(self.lib())
-                            .with_path_mapping_rules(self.rules()),
+                        &openjd_expr::FormatStringOptions::new().with_library(self.lib()),
                     )
                     .map_err(|e| SessionError::FormatString {
                         context: format!("env var '{key}'"),
@@ -782,9 +804,7 @@ impl Session {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             let lib = self.library.clone();
-            let rules = self.path_mapping_rules.clone();
-            let runner_fut =
-                runner.enter(env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
+            let runner_fut = runner.enter(env, &action_symtab, Some(&lib), &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, &identifier).await;
             self.cross_user.helper = runner.take_helper();
             let result = result?;
@@ -938,9 +958,7 @@ impl Session {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             let lib = self.library.clone();
-            let rules = self.path_mapping_rules.clone();
-            let runner_fut =
-                runner.exit(&env, &action_symtab, lib.as_deref(), &rules, &env_vars, tx);
+            let runner_fut = runner.exit(&env, &action_symtab, Some(&lib), &env_vars, tx);
             let result = self.drive_action(runner_fut, &mut rx, identifier).await;
             self.cross_user.helper = runner.take_helper();
             let result = result?;
@@ -1051,15 +1069,7 @@ impl Session {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let lib = self.library.clone();
-        let rules = self.path_mapping_rules.clone();
-        let runner_fut = runner.run(
-            script,
-            &action_symtab,
-            lib.as_deref(),
-            &rules,
-            &env_vars,
-            tx,
-        );
+        let runner_fut = runner.run(script, &action_symtab, Some(&lib), &env_vars, tx);
         let result = self
             .drive_action(runner_fut, &mut rx, &step_identifier)
             .await;

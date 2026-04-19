@@ -25,7 +25,7 @@ The main gaps are not correctness but alignment:
 2. **Test coverage is uneven** — ~40% of error tests do not meet the AGENTS.md "assert full message + expression + caret" standard; many use `.message()` or `.contains(substring)`.
 3. **Evaluator hot path clones AST subtrees** for error-site range reporting, allocating on every binary op / subscript / call.
 4. **Three parallel caret-rendering code paths** should be consolidated into one helper.
-5. **Two genuine minor findings** were confirmed by live probes: (a) regex validator only covers `\1`–`\5`; `\6`–`\9` fall through to a lower-quality "Invalid regex" error. (b) `FormatString::Segment::SimpleName` (a documented perf fast path) re-parses on every validate/accessed-symbols call instead of caching.
+5. **Two genuine minor findings** were confirmed by live probes: (a) regex validator only covers `\1`–`\5`; `\6`–`\9` fall through to a lower-quality "Invalid regex" error. (b) `FormatString::Segment::SimpleName` (a documented perf fast path) re-parses on every validate/accessed-symbols call instead of caching. *Later: `SimpleName` was removed entirely in favor of always-parsing `{{...}}` at construction time, which eliminates the re-parse without adding a cache. See §6 row 3.*
 
 No blocking issues for the crate's release readiness. Recommendations below are prioritized.
 
@@ -88,7 +88,7 @@ Every entry below is a concrete drift where a spec doc describes something that 
 | 5 | error-formatting.md | `ExpressionError::integer_overflow("...")`, `division_by_zero()` | `integer_overflow()` (no arg), `division_by_zero(op: &'static str)` | `error.rs:106-114` | ✓ |
 | 6 | evaluator.md | BoolOp unresolved → `Unresolved(union[a, b])` | Returns `Unresolved(BOOL)`; operands may still short-circuit | `eval/evaluator.rs:655-708` | ✓ |
 | 7 | evaluator.md | `ParsedExpression` struct shape | Has `source` + `operation_count` fields not documented | `eval/parse.rs:14-22` | ✓ |
-| 8 | format-string.md | `Segment { Literal, Expression }` (two variants) | Three variants incl. `SimpleName { start, end, name }` (fast-path) | `format_string.rs:17-27` | ✓ |
+| 8 | format-string.md | `Segment { Literal, Expression }` (two variants) | Three variants incl. `SimpleName { start, end, name }` (fast-path) | `format_string.rs:17-27` | ✓ (and subsequently reverted: `SimpleName` was removed in a later pass — see §6 row 3) |
 | 9 | format-string.md | `library: &FunctionLibrary` non-optional | All resolve fns take `Option<&FunctionLibrary>` | `format_string.rs:71-240` | ✓ |
 | 10 | function-library.md | `arithmetic::library()`, `pub fn default_library()` | Free fns local to `default_library.rs`; public API is `get_default_library()` | `default_library.rs:17-34` | ✓ |
 | 11 | function-library.md | References `ExprType::LIST_INT` constant | No such constant exists; use `ExprType::list(ExprType::INT)` | `types.rs:38-100` | ✓ |
@@ -191,11 +191,11 @@ Per AGENTS.md, evaluation errors must include expression + caret indicator. This
 
 Ordered by estimated impact:
 
-| # | File:line | Concern | Complexity |
-|---|---|---|---|
-| 1 | `eval/evaluator.rs:566,619,708,...` | `dispatch_with_node(Some(&ast::Expr::BinOp(b.clone())))` — clones entire AST subtree on every binop/unaryop/compare/subscript just to get a range for a possible error. | O(subtree size) per op |
-| 2 | `symbol_table.rs:128,158` | Every `get`/`set` allocates `Vec<&str> = key.split('.').collect()`. Runs millions of times during format-string resolution. | O(N) allocation per call |
-| 3 | `format_string.rs:454-493, 543-570` | `SimpleName` segments re-parse via `ParsedExpression::new(name)` on every `validate_expressions`, `copy_used_symtab_values`, `accessed_symbols` call. Cache at construction. | Extra parse per call |
+| # | File:line | Concern | Complexity | Status |
+|---|---|---|---|---|
+| 1 | `eval/evaluator.rs:566,619,708,...` | `dispatch_with_node(Some(&ast::Expr::BinOp(b.clone())))` — clones entire AST subtree on every binop/unaryop/compare/subscript just to get a range for a possible error. | O(subtree size) per op | |
+| 2 | `symbol_table.rs:128,158` | Every `get`/`set` allocates `Vec<&str> = key.split('.').collect()`. Runs millions of times during format-string resolution. | O(N) allocation per call | |
+| 3 | `format_string.rs:454-493, 543-570` | `SimpleName` segments re-parse via `ParsedExpression::new(name)` on every `validate_expressions`, `copy_used_symtab_values`, `accessed_symbols` call. Cache at construction. | Extra parse per call | **Fixed** — `SimpleName` removed in favor of parsing every `{{...}}` into a `ParsedExpression` at construction. `validate_expressions`, `copy_used_symtab_values`, and `accessed_symbols` all use the cached `ParsedExpression` now. No runtime fast path was re-added; the tradeoff (one extra evaluator setup per simple-name resolve) is considered acceptable until benchmarking says otherwise. |
 | 4 | `eval/evaluator.rs:1180-1187` | `eval_listcomp` clones entire `symtabs` Vec per iteration of the loop. | O(L × S) |
 | 5 | `eval/evaluator.rs:1035-1055` | `eval_list` uses `seen_types: Vec<ExprType>` with linear `contains()` per element. | O(n²) for large literals |
 | 6 | `types.rs:229` | `normalize_union` sorts by `a.to_string()` — renders each type to a string for sorting. | O(n × render) |
@@ -376,7 +376,7 @@ I ran targeted expression probes against the built crate to test hypothesized bu
 8. ~~Add specs for `functions/path_parse.rs` and `edit_distance.rs`.~~ **Done** (`specs/expr/path-parse.md`, `specs/expr/edit-distance.md`).
 9. ~~Update the `eval/mod.rs` doc comment to reference `ruff` not `rustpython-parser`.~~ **Done.** (Also fixed stale `specs/parser-selection.md` references in `lib.rs`, `Cargo.toml`, `AGENTS.md`, `specs/architecture.md` — they now point at `specs/expr/parser.md`.)
 10. ~~Remove references to non-existent `ExprType::LIST_INT`.~~ **Done.**
-11. ~~Document `FormatString::Segment::SimpleName` fast-path variant.~~ **Done.**
+11. ~~Document `FormatString::Segment::SimpleName` fast-path variant.~~ **Done** (and subsequently obviated — `SimpleName` has since been removed; see §6 row 3).
 12. ~~Consolidate "divergence from Python" appendix sections to reduce per-file repetition.~~ **Partial** — the low-value `range-expr.md` one was removed; the others were kept because they carry real information.
 13. ~~Consolidate implicit-coercion tables to a single canonical location.~~ **Done** (`values.md` now references `type-system.md`).
 14. Add a CI check that extracts and typechecks rustdoc-style code snippets from spec markdown. **Open.**

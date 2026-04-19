@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathMappingRule;
 use openjd_model::job::{Action, Environment};
 use openjd_model::symbol_table::SymbolTable;
 use tokio::sync::mpsc;
@@ -107,7 +106,6 @@ impl EnvironmentScriptRunner {
         env: &Environment,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
     ) -> Result<SubprocessResult, SessionError> {
@@ -115,10 +113,8 @@ impl EnvironmentScriptRunner {
             .script
             .as_ref()
             .and_then(|s| s.actions.on_enter.as_ref());
-        self.run_env_action(
-            env, action, symtab, library, rules, env_vars, message_tx, None,
-        )
-        .await
+        self.run_env_action(env, action, symtab, library, env_vars, message_tx, None)
+            .await
     }
 
     /// Run the environment's onExit action.
@@ -127,7 +123,6 @@ impl EnvironmentScriptRunner {
         env: &Environment,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
     ) -> Result<SubprocessResult, SessionError> {
@@ -137,7 +132,6 @@ impl EnvironmentScriptRunner {
             action,
             symtab,
             library,
-            rules,
             env_vars,
             message_tx,
             Some(ENV_EXIT_DEFAULT_TIMEOUT),
@@ -160,7 +154,6 @@ impl EnvironmentScriptRunner {
         action: Option<&Action>,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
         default_timeout: Option<Duration>,
@@ -196,7 +189,7 @@ impl EnvironmentScriptRunner {
                             context: "let bindings".into(),
                             reason: e.to_string(),
                         })?;
-                ef.write_file_contents(&st, library, rules)?;
+                ef.write_file_contents(&st, library)?;
                 st
             }
             (Some(bindings), None) => {
@@ -215,7 +208,7 @@ impl EnvironmentScriptRunner {
                 )
                 .with_user(self.base.user.clone());
                 ef.allocate_file_paths(files, &mut st)?;
-                ef.write_file_contents(&st, library, rules)?;
+                ef.write_file_contents(&st, library)?;
                 st
             }
             (None, None) => symtab.clone(),
@@ -226,7 +219,6 @@ impl EnvironmentScriptRunner {
                 action,
                 &final_symtab,
                 library,
-                rules,
                 env_vars,
                 message_tx,
                 default_timeout,

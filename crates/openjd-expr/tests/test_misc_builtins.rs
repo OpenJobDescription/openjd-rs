@@ -8,7 +8,6 @@
 use openjd_expr::error::ExpressionError;
 use openjd_expr::function_library::EvalContext;
 use openjd_expr::functions::misc::*;
-use openjd_expr::path_mapping::PathMappingRule;
 use openjd_expr::types::ExprType;
 use openjd_expr::{evaluate_expression, ExprValue, PathFormat, RangeExpr, SymbolTable};
 
@@ -47,9 +46,6 @@ struct Ctx;
 impl EvalContext for Ctx {
     fn path_format(&self) -> PathFormat {
         PathFormat::Posix
-    }
-    fn path_mapping_rules(&self) -> &[PathMappingRule] {
-        &[]
     }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         Ok(())

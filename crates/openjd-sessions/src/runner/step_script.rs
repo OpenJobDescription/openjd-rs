@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathMappingRule;
 use openjd_model::job::StepScript;
 use openjd_model::symbol_table::SymbolTable;
 use tokio::sync::mpsc;
@@ -103,7 +102,6 @@ impl StepScriptRunner {
         script: &StepScript,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
     ) -> Result<SubprocessResult, SessionError> {
@@ -126,7 +124,7 @@ impl StepScriptRunner {
             )
             .with_user(self.base.user.clone());
             ef.allocate_file_paths(files, &mut final_symtab)?;
-            ef.write_file_contents(&final_symtab, library, rules)?;
+            ef.write_file_contents(&final_symtab, library)?;
         }
 
         self.base
@@ -134,7 +132,6 @@ impl StepScriptRunner {
                 &script.actions.on_run,
                 &final_symtab,
                 library,
-                rules,
                 env_vars,
                 message_tx,
                 None,

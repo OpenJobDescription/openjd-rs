@@ -27,7 +27,6 @@ let result = parsed.evaluator(&[&symtab])
     .with_memory_limit(50_000_000)
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
-    .with_path_mapping_rules(&rules)
     .evaluate(&parsed.ast)?;
 
 println!("Value: {:?}", result);
@@ -40,6 +39,11 @@ builder). The AST is owned by `ParsedExpression`, so callers pass `&parsed.ast`.
 `ParsedExpression::evaluate(&symtab)` is the convenience shortcut that constructs,
 runs, and tears down the evaluator in one call.
 
+Path mapping rules are **not** an evaluator configuration. They are state owned
+by the `apply_path_mapping` implementation, which is a closure registered on the
+function library via [`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
+The evaluator just calls functions; it has no direct awareness of mapping rules.
+
 Builder methods on `Evaluator`:
 
 | Method | Default | Purpose | Notes |
@@ -49,7 +53,6 @@ Builder methods on `Evaluator`:
 | `with_operation_limit(usize)` | 10,000,000 (10M) | Operation bound | Each call=1, list iteration=N, string ops=ceil(len/256) |
 | `with_path_format(PathFormat)` | Host native | Path normalization format | Also validates that `Path` values in symbol table match |
 | `with_target_type(&ExprType)` | None | Context-dependent coercion | Influences empty list element type and mixed-type coercion |
-| `with_path_mapping_rules(&[PathMappingRule])` | Empty | Path mapping for `apply_path_mapping` | Host-context only; first matching rule wins |
 | `with_expr_source(&str)` | From ParsedExpression | Source text for error messages | Internal — set automatically by `ParsedExpression::evaluator()` |
 | `with_keyword_renames(&HashMap)` | From ParsedExpression | Keyword rename map | Internal — set automatically by `ParsedExpression::evaluator()` |
 

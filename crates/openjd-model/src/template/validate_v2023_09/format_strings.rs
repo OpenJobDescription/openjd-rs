@@ -299,7 +299,7 @@ pub fn validate_format_strings(
 ) {
     let expr_active = ctx.has_extension(KnownExtension::Expr);
     let default_lib = openjd_expr::default_library::get_default_library().clone();
-    let host_lib = default_lib.clone().with_host_context();
+    let host_lib = default_lib.clone().with_unresolved_host_context();
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt);

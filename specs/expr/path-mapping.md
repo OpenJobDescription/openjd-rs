@@ -143,10 +143,14 @@ Path-related operations in the expression language:
 
 ### apply_path_mapping
 
-`apply_path_mapping(path_string)` is a host-context-only function that applies the
-evaluator's path mapping rules to a string, returning a path value. It's unavailable
-during template validation (no path mapping rules in that context) and available during
-runtime evaluation on a worker host.
+`apply_path_mapping(path_string)` is a host-context-only function that applies
+the rules captured in its implementing closure to a string, returning a path
+value. Rules are supplied at library-construction time via
+`FunctionLibrary::with_host_context(rules)` — see
+[function-library.md § Host Context](function-library.md#host-context).
+During template validation (when rules aren't available yet) callers should
+use `FunctionLibrary::with_unresolved_host_context()` instead, which registers
+a stub that returns `Unresolved(path)` for type checking.
 
 ## Divergence from Python
 

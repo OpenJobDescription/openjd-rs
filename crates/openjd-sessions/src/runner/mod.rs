@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathMappingRule;
 use openjd_expr::ExprValue;
 use openjd_model::job::Action;
 use openjd_model::job::CancelationMode;
@@ -137,7 +136,6 @@ impl ScriptRunnerBase {
         action: &Action,
         symtab: &SymbolTable,
         library: Option<&FunctionLibrary>,
-        rules: &[PathMappingRule],
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
         default_timeout: Option<Duration>,
@@ -145,8 +143,8 @@ impl ScriptRunnerBase {
     ) -> Result<SubprocessResult, SessionError> {
         self.state = ScriptRunnerState::Running;
         log_subsection_banner(&self.session_id, "Phase: Running action");
-        let args = resolve_action_args(action, symtab, library, rules)?;
-        let timeout = resolve_action_timeout(action, symtab, library, rules, default_timeout)?;
+        let args = resolve_action_args(action, symtab, library)?;
+        let timeout = resolve_action_timeout(action, symtab, library, default_timeout)?;
         let cancel_method = cancel_method_for_action(&action.cancelation, default_cancel_period);
         let config = SubprocessConfig {
             args,
@@ -226,7 +224,6 @@ pub(crate) fn resolve_action_timeout(
     action: &Action,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
-    rules: &[PathMappingRule],
     default: Option<Duration>,
 ) -> Result<Option<Duration>, SessionError> {
     match &action.timeout {
@@ -234,9 +231,7 @@ pub(crate) fn resolve_action_timeout(
             let s = fmt
                 .resolve_string_with(
                     symtab,
-                    &openjd_expr::FormatStringOptions::new()
-                        .with_library(library)
-                        .with_path_mapping_rules(rules),
+                    &openjd_expr::FormatStringOptions::new().with_library(library),
                 )
                 .map_err(|e| SessionError::FormatString {
                     context: "timeout".into(),
@@ -263,15 +258,12 @@ pub(crate) fn resolve_action_args(
     action: &Action,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
-    rules: &[PathMappingRule],
 ) -> Result<Vec<String>, SessionError> {
     let command = action
         .command
         .resolve_string_with(
             symtab,
-            &openjd_expr::FormatStringOptions::new()
-                .with_library(library)
-                .with_path_mapping_rules(rules),
+            &openjd_expr::FormatStringOptions::new().with_library(library),
         )
         .map_err(|e| SessionError::FormatString {
             context: "command".into(),
@@ -282,9 +274,7 @@ pub(crate) fn resolve_action_args(
         for fs in arg_fmts {
             if let Ok(val) = fs.resolve_with(
                 symtab,
-                &openjd_expr::FormatStringOptions::new()
-                    .with_library(library)
-                    .with_path_mapping_rules(rules),
+                &openjd_expr::FormatStringOptions::new().with_library(library),
             ) {
                 match val {
                     ExprValue::Null => continue,
@@ -302,9 +292,7 @@ pub(crate) fn resolve_action_args(
                 let s = fs
                     .resolve_string_with(
                         symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_library(library)
-                            .with_path_mapping_rules(rules),
+                        &openjd_expr::FormatStringOptions::new().with_library(library),
                     )
                     .map_err(|e| SessionError::FormatString {
                         context: "argument".into(),

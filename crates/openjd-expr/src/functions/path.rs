@@ -288,18 +288,25 @@ pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
-pub fn apply_path_mapping_fn(ctx: Ctx, a: &[ExprValue]) -> R {
-    let (path_str, fmt) = get_path(&a[0], ctx)?;
-    let mapped = crate::path_mapping::apply_rules_with_format(
-        ctx.path_mapping_rules(),
-        &path_str,
-        ctx.path_format(),
-    );
-    if mapped == path_str {
-        // No rule matched — still normalize separators to the target format
-        Ok(ExprValue::new_path(path_str, fmt))
-    } else {
-        Ok(ExprValue::new_path(mapped, fmt))
+/// Build a closure for `apply_path_mapping` that captures the given rules.
+///
+/// The rules are stored in an `Arc` so many `FunctionLibrary` clones can
+/// share them cheaply. This factory is the only way to produce an
+/// `apply_path_mapping` implementation; the host crate passes its rules
+/// at library-construction time rather than plumbing them through the
+/// evaluator on every call.
+pub fn make_apply_path_mapping_fn(
+    rules: std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>,
+) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> R + Send + Sync + 'static {
+    move |ctx, a| {
+        let (path_str, fmt) = get_path(&a[0], ctx)?;
+        let mapped =
+            crate::path_mapping::apply_rules_with_format(&rules, &path_str, ctx.path_format());
+        if mapped == path_str {
+            Ok(ExprValue::new_path(path_str, fmt))
+        } else {
+            Ok(ExprValue::new_path(mapped, fmt))
+        }
     }
 }
 

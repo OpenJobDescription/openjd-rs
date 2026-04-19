@@ -49,10 +49,30 @@ pub struct FunctionEntry {
     pub implementation: FunctionImpl,
 }
 
+/// Convertible to an `Arc<Vec<PathMappingRule>>` for
+/// [`FunctionLibrary::with_host_context`].
+///
+/// Implemented for `Vec<PathMappingRule>` (takes ownership) and
+/// `Arc<Vec<PathMappingRule>>` (shares the existing allocation).
+pub trait IntoHostContextRules {
+    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>;
+}
+
+impl IntoHostContextRules for Vec<crate::path_mapping::PathMappingRule> {
+    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
+        std::sync::Arc::new(self)
+    }
+}
+
+impl IntoHostContextRules for std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
+    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
+        self
+    }
+}
+
 /// Trait for the evaluator context that function implementations can access.
 pub trait EvalContext {
     fn path_format(&self) -> crate::path_mapping::PathFormat;
-    fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule];
     fn count_op(&mut self) -> Result<(), ExpressionError>;
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError>;
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError>;
@@ -80,11 +100,22 @@ impl FunctionLibrary {
     }
 
     /// Return a copy with host-only functions (like `apply_path_mapping`) enabled.
+    ///
+    /// The supplied `rules` are captured in the closure registered for
+    /// `apply_path_mapping`, so the evaluator does not need to plumb them
+    /// through separately. Accepts any of:
+    /// - `Vec<PathMappingRule>` (common case)
+    /// - `Arc<Vec<PathMappingRule>>` (share rules across libraries cheaply)
+    ///
+    /// If rules change, re-derive the library.
     #[must_use]
-    pub fn with_host_context(mut self) -> Self {
+    pub fn with_host_context<R>(mut self, rules: R) -> Self
+    where
+        R: IntoHostContextRules,
+    {
         if !self.host_context_enabled {
             self.host_context_enabled = true;
-            crate::default_library::register_host_context_functions(&mut self);
+            crate::default_library::register_host_context_functions(&mut self, rules.into_arc());
         }
         self
     }
@@ -637,9 +668,6 @@ mod tests {
     impl EvalContext for MockCtx {
         fn path_format(&self) -> crate::path_mapping::PathFormat {
             crate::path_mapping::PathFormat::Posix
-        }
-        fn path_mapping_rules(&self) -> &[crate::path_mapping::PathMappingRule] {
-            &[]
         }
         fn count_op(&mut self) -> Result<(), ExpressionError> {
             Ok(())
