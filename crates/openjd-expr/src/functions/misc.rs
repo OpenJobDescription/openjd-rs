@@ -92,7 +92,9 @@ pub fn abs_int(_: Ctx, a: &[ExprValue]) -> R {
 
 pub fn abs_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(f) => Ok(ExprValue::Float(crate::value::Float64::new(f.0.abs())?)),
+        ExprValue::Float(f) => Ok(ExprValue::Float(crate::value::Float64::new(
+            f.value().abs(),
+        )?)),
         _ => Err(ExpressionError::type_error("type error")),
     }
 }

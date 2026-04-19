@@ -146,14 +146,14 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
                 })
                 .unwrap_or(0);
             if !has_ndigits {
-                let v = round_half_even(f.0);
+                let v = round_half_even(f.value());
                 if v.abs() > i64::MAX as f64 {
                     return Err(ExpressionError::integer_overflow());
                 }
                 Ok(ExprValue::Int(v as i64))
             } else if ndigits >= 0 {
                 let factor = 10f64.powi(ndigits as i32);
-                let rounded = round_half_even(f.0 * factor) / factor;
+                let rounded = round_half_even(f.value() * factor) / factor;
                 if ndigits == 0 {
                     Ok(ExprValue::Float(Float64::with_str(
                         rounded,
@@ -168,7 +168,7 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
             } else {
                 let factor = 10f64.powi((-ndigits) as i32);
                 Ok(ExprValue::Float(Float64::new(
-                    round_half_even(f.0 / factor) * factor,
+                    round_half_even(f.value() / factor) * factor,
                 )?))
             }
         }
@@ -211,7 +211,7 @@ pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
                 }
                 ExprValue::Float(f) => {
                     is_float = true;
-                    float_sum += f.0;
+                    float_sum += f.value();
                 }
                 _ => return Err(ExpressionError::new("sum() elements must be numeric")),
             }

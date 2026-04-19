@@ -497,7 +497,7 @@ impl JobListFloatParameterDefinition {
         if let Some(item) = &self.item {
             for (i, v) in items.iter().enumerate() {
                 if let Some(min) = &item.min_value {
-                    if v.0 < min.0 {
+                    if v.value() < min.0 {
                         return Err(format!(
                             "Parameter '{}': item[{i}] {} is less than minimum {}",
                             self.name, v, min.0
@@ -505,7 +505,7 @@ impl JobListFloatParameterDefinition {
                     }
                 }
                 if let Some(max) = &item.max_value {
-                    if v.0 > max.0 {
+                    if v.value() > max.0 {
                         return Err(format!(
                             "Parameter '{}': item[{i}] {} exceeds maximum {}",
                             self.name, v, max.0
@@ -513,7 +513,7 @@ impl JobListFloatParameterDefinition {
                     }
                 }
                 if let Some(allowed) = &item.allowed_values {
-                    if !allowed.iter().any(|a| a.0 == v.0) {
+                    if !allowed.iter().any(|a| a.0 == v.value()) {
                         return Err(format!(
                             "Parameter '{}': item[{i}] {} is not in allowed values",
                             self.name, v

@@ -207,14 +207,14 @@ pub fn pow_float(_: Ctx, a: &[ExprValue]) -> R {
 
 pub fn neg_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(-n.0)?)),
+        ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(-n.value())?)),
         _ => Err(ExpressionError::type_error("type error")),
     }
 }
 
 pub fn pos_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(n.0)?)),
+        ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(n.value())?)),
         _ => Err(ExpressionError::type_error("type error")),
     }
 }
@@ -391,12 +391,12 @@ pub fn not_bool(_: Ctx, a: &[ExprValue]) -> R {
 
 fn get_two_floats(a: &[ExprValue]) -> Result<(f64, f64), ExpressionError> {
     let l = match &a[0] {
-        ExprValue::Float(f) => f.0,
+        ExprValue::Float(f) => f.value(),
         ExprValue::Int(i) => *i as f64,
         _ => return Err(ExpressionError::type_error("type error")),
     };
     let r = match &a[1] {
-        ExprValue::Float(f) => f.0,
+        ExprValue::Float(f) => f.value(),
         ExprValue::Int(i) => *i as f64,
         _ => return Err(ExpressionError::type_error("type error")),
     };

@@ -9,12 +9,19 @@ use crate::types::{ExprType, TypeCode};
 
 /// A float with optional original string representation for passthrough.
 /// 16 bytes: 8 for f64, 8 for `Option<Box<str>>` (NULL or heap pointer).
+///
+/// Fields are private. Construction goes through [`Float64::new`] or
+/// [`Float64::with_str`], which enforce the no-NaN / no-Inf / no-`-0.0`
+/// invariants that the `Hash` and `PartialEq` impls on `ExprValue` depend on.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct Float64(pub f64, pub Option<Box<str>>);
+pub struct Float64 {
+    value: f64,
+    original: Option<Box<str>>,
+}
 
 impl std::hash::Hash for Float64 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
+        self.value.to_bits().hash(state);
     }
 }
 
@@ -41,7 +48,10 @@ impl Float64 {
                 "Float operation produced infinity",
             ));
         }
-        Ok(Self(v, None))
+        Ok(Self {
+            value: v,
+            original: None,
+        })
     }
     /// Create a `Float64` preserving the original string representation for lossless display.
     pub fn with_str(v: f64, s: String) -> Result<Self, crate::error::ExpressionError> {
@@ -56,25 +66,25 @@ impl Float64 {
                 "Float operation produced infinity",
             ));
         }
-        Ok(Self(
-            v,
-            if v == 0.0 && s != "0.0" {
+        Ok(Self {
+            value: v,
+            original: if v == 0.0 && s != "0.0" {
                 None
             } else {
                 Some(s.into_boxed_str())
             },
-        ))
+        })
     }
     /// The underlying `f64` value.
     pub fn value(&self) -> f64 {
-        self.0
+        self.value
     }
     /// Display string: the original literal if preserved, otherwise formatted.
     pub fn to_display_string(&self) -> String {
-        if let Some(s) = &self.1 {
+        if let Some(s) = &self.original {
             s.to_string()
         } else {
-            format_float(self.0)
+            format_float(self.value)
         }
     }
 }
@@ -88,19 +98,19 @@ impl std::fmt::Display for Float64 {
 impl std::ops::Deref for Float64 {
     type Target = f64;
     fn deref(&self) -> &f64 {
-        &self.0
+        &self.value
     }
 }
 
 impl PartialEq<f64> for Float64 {
     fn eq(&self, other: &f64) -> bool {
-        self.0 == *other
+        self.value == *other
     }
 }
 
 impl PartialOrd<f64> for Float64 {
     fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(other)
+        self.value.partial_cmp(other)
     }
 }
 
@@ -154,7 +164,7 @@ impl std::hash::Hash for ExprValue {
             // Float hashes as Int when it's an exact integer in i64 range,
             // otherwise uses float tag + f64 bits.
             Self::Float(f) => {
-                let v = f.0;
+                let v = f.value;
                 if v.fract() == 0.0 && v >= i64::MIN as f64 && v <= i64::MAX as f64 {
                     2u8.hash(state);
                     (v as i64).hash(state);
@@ -192,7 +202,7 @@ impl std::hash::Hash for ExprValue {
             Self::ListFloat(v) => {
                 4u8.hash(state);
                 for f in v {
-                    let fv = f.0;
+                    let fv = f.value;
                     if fv.fract() == 0.0 && fv >= i64::MIN as f64 && fv <= i64::MAX as f64 {
                         2u8.hash(state);
                         (fv as i64).hash(state);
@@ -553,7 +563,7 @@ impl ExprValue {
             Self::Bool(b) => format!("ExprValue({})", if *b { "True" } else { "False" }),
             Self::Int(i) => format!("ExprValue({i})"),
             Self::Float(f) => {
-                if f.1.is_some() {
+                if f.original.is_some() {
                     format!("ExprValue('{}', type='float')", f.to_display_string())
                 } else {
                     format!("ExprValue({})", f.to_display_string())
@@ -933,7 +943,7 @@ impl ExprValue {
         use std::mem::size_of;
         match self {
             Self::Null | Self::Bool(_) | Self::Int(_) | Self::Unresolved(_) => 0,
-            Self::Float(f) => f.1.as_ref().map_or(0, |s| s.len()),
+            Self::Float(f) => f.original.as_ref().map_or(0, |s| s.len()),
             Self::String(s) | Self::Path { value: s, .. } => s.capacity(),
             Self::ListBool(v) => v.capacity(),
             Self::ListInt(v) => v.capacity() * size_of::<i64>(),
@@ -950,7 +960,7 @@ impl ExprValue {
             Self::Null => false,
             Self::Bool(b) => *b,
             Self::Int(i) => *i != 0,
-            Self::Float(fv) => fv.0 != 0.0,
+            Self::Float(fv) => fv.value != 0.0,
             Self::String(s) => !s.is_empty(),
             Self::Path { value, .. } => !value.is_empty(),
             Self::ListBool(v) => !v.is_empty(),
@@ -970,9 +980,9 @@ impl ExprValue {
             (Self::Null, Self::Null) => true,
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Int(a), Self::Int(b)) => a == b,
-            (Self::Float(a), Self::Float(b)) => a.0 == b.0,
-            (Self::Int(a), Self::Float(b)) => (*a as f64) == b.0,
-            (Self::Float(a), Self::Int(b)) => a.0 == (*b as f64),
+            (Self::Float(a), Self::Float(b)) => a.value == b.value,
+            (Self::Int(a), Self::Float(b)) => (*a as f64) == b.value,
+            (Self::Float(a), Self::Int(b)) => a.value == (*b as f64),
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => a == b,
             (Self::String(a), Self::Path { value: b, .. })
@@ -1006,17 +1016,17 @@ impl ExprValue {
     ) -> Result<std::cmp::Ordering, crate::error::ExpressionError> {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => Ok(a.cmp(b)),
-            (Self::Float(a), Self::Float(b)) => {
-                a.0.partial_cmp(&b.0)
-                    .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN"))
-            }
-            (Self::Int(a), Self::Float(b)) => (*a as f64)
-                .partial_cmp(&b.0)
+            (Self::Float(a), Self::Float(b)) => a
+                .value
+                .partial_cmp(&b.value)
                 .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
-            (Self::Float(a), Self::Int(b)) => {
-                a.0.partial_cmp(&(*b as f64))
-                    .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN"))
-            }
+            (Self::Int(a), Self::Float(b)) => (*a as f64)
+                .partial_cmp(&b.value)
+                .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
+            (Self::Float(a), Self::Int(b)) => a
+                .value
+                .partial_cmp(&(*b as f64))
+                .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
             (Self::Bool(a), Self::Bool(b)) => Ok(a.cmp(b)),
             (Self::String(a), Self::String(b)) => Ok(a.cmp(b)),
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => Ok(a.cmp(b)),

@@ -53,7 +53,7 @@ fn repr_py(val: &ExprValue) -> String {
         ExprValue::Null => "None".to_string(),
         ExprValue::Int(i) => i.to_string(),
         ExprValue::Float(f) => {
-            if f.0.fract() == 0.0 {
+            if f.value().fract() == 0.0 {
                 format!("{:.1}", f)
             } else {
                 f.to_string()
@@ -110,7 +110,7 @@ fn repr_json(val: &ExprValue) -> String {
         ExprValue::Null => "null".to_string(),
         ExprValue::Int(i) => i.to_string(),
         ExprValue::Float(f) => {
-            if f.0.fract() == 0.0 {
+            if f.value().fract() == 0.0 {
                 format!("{:.1}", f)
             } else {
                 f.to_string()
@@ -138,7 +138,7 @@ fn repr_sh(val: &ExprValue) -> String {
         ExprValue::Null => "''".to_string(),
         ExprValue::Int(i) => i.to_string(),
         ExprValue::Float(f) => {
-            if f.0.fract() == 0.0 {
+            if f.value().fract() == 0.0 {
                 format!("{:.1}", f)
             } else {
                 f.to_string()
@@ -169,7 +169,7 @@ fn repr_cmd(val: &ExprValue) -> String {
         ExprValue::Null => "\"\"".to_string(),
         ExprValue::Int(i) => i.to_string(),
         ExprValue::Float(f) => {
-            if f.0.fract() == 0.0 {
+            if f.value().fract() == 0.0 {
                 format!("{:.1}", f)
             } else {
                 f.to_string()
@@ -196,7 +196,7 @@ fn repr_pwsh(val: &ExprValue) -> String {
         ExprValue::Null => "$null".to_string(),
         ExprValue::Int(i) => i.to_string(),
         ExprValue::Float(f) => {
-            if f.0.fract() == 0.0 {
+            if f.value().fract() == 0.0 {
                 format!("{:.1}", f)
             } else {
                 f.to_string()

@@ -323,12 +323,12 @@ impl<'a> Evaluator<'a> {
     fn track(&mut self, value: ExprValue) -> Result<ExprValue, ExpressionError> {
         // Check for infinity/NaN in float results
         if let ExprValue::Float(f) = &value {
-            if f.0.is_infinite() {
+            if f.value().is_infinite() {
                 return Err(ExpressionError::float_error(
                     "Float operation produced infinity",
                 ));
             }
-            if f.0.is_nan() {
+            if f.value().is_nan() {
                 return Err(ExpressionError::float_error("Float operation produced NaN"));
             }
         }

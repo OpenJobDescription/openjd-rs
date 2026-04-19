@@ -154,7 +154,7 @@ Source modules/areas with no dedicated spec or inadequate coverage:
 1. `FormatString::resolve` has six entry points (`resolve`, `resolve_with_format`, `resolve_string`, `resolve_string_with_format`, `resolve_typed`, `resolve_typed_with_format`). Consider a `FormatStringOptions` builder. **Done** — replaced with two methods (`resolve_with`, `resolve_string_with`) that take `&FormatStringOptions<'_>`; the six pairwise methods have been removed.
 2. `ExprValue::coerce` and `from_str_coerce` return `Result<_, String>`, not `Result<_, ExpressionError>`. Callers repeatedly wrap via `.map_err(ExpressionError::new)` (~10 sites in `evaluator.rs`).
 3. Three error types coexist in related code paths: `ExpressionError`, `SymbolTableError`, `Result<_, String>` from `SerializedSymbolTable::to_symtab`. Unify via `From` impls.
-4. `Float64(pub f64, pub Option<Box<str>>)` has public tuple fields — lets callers bypass the no-NaN/no-Inf invariant enforced in `Float64::new`. Make fields private.
+4. `Float64(pub f64, pub Option<Box<str>>)` has public tuple fields — lets callers bypass the no-NaN/no-Inf invariant enforced in `Float64::new`. Make fields private. **Done** — `Float64` is now a named-fields struct with private `value: f64` and `original: Option<Box<str>>`. All construction goes through `Float64::new(v)` or `Float64::with_str(v, s)`, which enforce NaN / Inf / `-0.0` normalization. Existing public accessors (`.value()`, `.to_display_string()`, `Deref<Target=f64>`) cover all read access.
 5. `ExprValue::Path { value, format }` has public fields; the separator-normalization invariant is only enforced by `new_path`. Encapsulate. **Done** — variant marked `#[non_exhaustive]`, so external crates can no longer construct it directly (E0639); all construction is funneled through `ExprValue::new_path`. External pattern matches use `..` per the `#[non_exhaustive]` convention.
 6. `SymbolTable::all_paths(&self, prefix, out: &mut Vec<String>)` is an out-parameter API; return `Vec<String>` or an iterator. **Done** — signature is now `fn all_paths(&self, prefix: &str) -> Vec<String>`; out-parameter plumbing removed from the three call sites.
 7. `SymbolTable::from_pairs` takes `Vec<(&str, ExprValue)>` by value; `IntoIterator` would be more flexible. **Done** — signature is now `fn from_pairs<'a, I>(pairs: I) -> Result<Self, _> where I: IntoIterator<Item = (&'a str, ExprValue)>`. Existing `from_pairs(vec![...])` sites are unaffected (`Vec: IntoIterator`).
@@ -392,7 +392,7 @@ I ran targeted expression probes against the built crate to test hypothesized bu
 
 ### P4 — Polish
 
-21. Make `Float64` fields private; require `Float64::new`/`with_str` for construction; provide `.value()` and `.display_str()`.
+21. ~~Make `Float64` fields private; require `Float64::new`/`with_str` for construction; provide `.value()` and `.display_str()`.~~ **Done** — see §4.4.
 22. Consider `Arc<FunctionLibrary>` instead of `&'a FunctionLibrary` to decouple evaluator lifetime from library borrow.
 23. Shrink `ExprValue` enum size (box `ExprType` for `Unresolved` and the `ListList` tail).
 24. Add `#[inline]` to tiny hot-path helpers (`Float64::value`, `ExprValue::is_list`, `Evaluator::count_op`).

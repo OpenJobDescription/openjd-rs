@@ -528,7 +528,7 @@ fn round_trip_float() {
     st.set("x", ExprValue::Float(Float64::new(3.14).unwrap()))
         .unwrap();
     let rt = round_trip(&st, PathFormat::Posix);
-    assert!(matches!(rt.get_value("x"), Some(ExprValue::Float(f)) if f.0 == 3.14));
+    assert!(matches!(rt.get_value("x"), Some(ExprValue::Float(f)) if f.value() == 3.14));
 }
 
 #[test]

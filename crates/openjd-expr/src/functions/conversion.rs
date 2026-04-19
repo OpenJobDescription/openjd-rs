@@ -24,15 +24,15 @@ pub fn int_from_int(_: Ctx, a: &[ExprValue]) -> R {
 pub fn int_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
-            if f.0.fract() != 0.0 {
+            if f.value().fract() != 0.0 {
                 return Err(ExpressionError::new(format!(
                     "Cannot convert {f} to int: not a whole number"
                 )));
             }
-            if f.0 >= i64::MAX as f64 || f.0 < i64::MIN as f64 {
+            if f.value() >= i64::MAX as f64 || f.value() < i64::MIN as f64 {
                 return Err(ExpressionError::integer_overflow());
             }
-            Ok(ExprValue::Int(f.0 as i64))
+            Ok(ExprValue::Int(f.value() as i64))
         }
         _ => Err(ExpressionError::type_error("type error")),
     }
@@ -60,7 +60,7 @@ pub fn int_from_string(_: Ctx, a: &[ExprValue]) -> R {
 
 pub fn float_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        ExprValue::Float(f) => Ok(ExprValue::Float(Float64::new(f.0)?)),
+        ExprValue::Float(f) => Ok(ExprValue::Float(Float64::new(f.value())?)),
         _ => Err(ExpressionError::type_error("type error")),
     }
 }

@@ -695,9 +695,9 @@ mod tests {
         args: &[ExprValue],
     ) -> Result<ExprValue, ExpressionError> {
         match (&args[0], &args[1]) {
-            (ExprValue::Float(a), ExprValue::Float(b)) => {
-                Ok(ExprValue::Float(crate::value::Float64::new(a.0 + b.0)?))
-            }
+            (ExprValue::Float(a), ExprValue::Float(b)) => Ok(ExprValue::Float(
+                crate::value::Float64::new(a.value() + b.value())?,
+            )),
             _ => Err(ExpressionError::type_error("type error")),
         }
     }

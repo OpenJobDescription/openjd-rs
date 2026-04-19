@@ -64,7 +64,7 @@ fn identity(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue,
 fn add_float(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
     match (&args[0], &args[1]) {
         (ExprValue::Float(a), ExprValue::Float(b)) => {
-            Ok(ExprValue::Float(Float64::new(a.0 + b.0)?))
+            Ok(ExprValue::Float(Float64::new(a.value() + b.value())?))
         }
         _ => Err(ExpressionError::type_error("type error")),
     }

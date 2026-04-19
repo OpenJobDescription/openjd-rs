@@ -251,7 +251,7 @@ fn test_bool_rejects_float() {
         user_interface: None,
     };
     assert!(p
-        .check_value_constraints(&ExprValue::Float(Float64(0.5, None)))
+        .check_value_constraints(&ExprValue::Float(Float64::new(0.5).unwrap()))
         .is_err());
 }
 
