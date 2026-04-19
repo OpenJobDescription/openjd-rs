@@ -320,10 +320,10 @@ fn add_string_path_coerces_to_string_concat() {
     let parsed = openjd_expr::ParsedExpression::new("'prefix' + path('/tmp')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(openjd_expr::PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "prefix/tmp");
 }
 
@@ -333,10 +333,10 @@ fn add_path_path_coerces_to_string_concat() {
     let parsed = openjd_expr::ParsedExpression::new("path('/a') + path('/b')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(openjd_expr::PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/a/b");
 }
 

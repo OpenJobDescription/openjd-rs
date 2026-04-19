@@ -15,8 +15,7 @@ fn eval_fmt(expr: &str, fmt: PathFormat) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed.with_path_format(fmt).evaluate(&symtabs).unwrap()
 }
 
 #[allow(dead_code)]
@@ -35,10 +34,10 @@ fn assert_err(expr: &str, expected: &[&str]) {
 fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 
 // === TestStrings ===

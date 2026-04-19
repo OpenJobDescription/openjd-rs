@@ -18,8 +18,6 @@ pub struct ParsedExpression {
     pub accessed_symbols: HashSet<String>,
     pub called_functions: HashSet<String>,
     pub local_bindings: HashSet<String>,
-    pub peak_memory_usage: usize,
-    pub operation_count: usize,
 }
 
 use std::collections::HashSet;
@@ -110,8 +108,6 @@ impl ParsedExpression {
                         accessed_symbols,
                         called_functions,
                         local_bindings,
-                        peak_memory_usage: 0,
-                        operation_count: 0,
                     });
                 }
                 Err(e) => {
@@ -167,29 +163,59 @@ impl ParsedExpression {
         }
     }
 
-    /// Evaluate this parsed expression.
+    /// Evaluate this parsed expression against a single symbol table.
+    ///
+    /// Convenience shortcut that returns just the value. To also observe
+    /// resource usage, use `parsed.with_*(...).evaluate_with_metrics(...)`
+    /// (or call `evaluate_with_metrics` directly on the builder).
     pub fn evaluate(
-        &mut self,
+        &self,
         values: &crate::symbol_table::SymbolTable,
     ) -> Result<crate::value::ExprValue, crate::error::ExpressionError> {
-        let symtabs = [values];
-        let mut evaluator = crate::eval::Evaluator::new(&symtabs)
-            .with_keyword_renames(&self.keyword_renames)
-            .with_expr_source(&self.expr);
-        let result = evaluator.evaluate(&self.ast)?;
-        let peak = evaluator.peak_memory();
-        let ops = evaluator.operation_count();
-        drop(evaluator);
-        self.peak_memory_usage = peak;
-        self.operation_count = ops;
-        Ok(result)
+        EvaluationBuilder::new(self).evaluate(&[values])
+    }
+
+    /// Start a configured evaluation using the [`EvaluationBuilder`].
+    pub fn with_library<'a>(
+        &'a self,
+        library: &'a crate::function_library::FunctionLibrary,
+    ) -> EvaluationBuilder<'a> {
+        EvaluationBuilder::new(self).with_library(library)
+    }
+
+    /// Start a configured evaluation with a memory limit.
+    pub fn with_memory_limit(&self, limit: usize) -> EvaluationBuilder<'_> {
+        EvaluationBuilder::new(self).with_memory_limit(limit)
+    }
+
+    /// Start a configured evaluation with an operation limit.
+    pub fn with_operation_limit(&self, limit: usize) -> EvaluationBuilder<'_> {
+        EvaluationBuilder::new(self).with_operation_limit(limit)
+    }
+
+    /// Start a configured evaluation with an explicit path format.
+    pub fn with_path_format(
+        &self,
+        format: crate::path_mapping::PathFormat,
+    ) -> EvaluationBuilder<'_> {
+        EvaluationBuilder::new(self).with_path_format(format)
+    }
+
+    /// Start a configured evaluation with a target type for coercion.
+    pub fn with_target_type<'a>(
+        &'a self,
+        target_type: &'a crate::types::ExprType,
+    ) -> EvaluationBuilder<'a> {
+        EvaluationBuilder::new(self).with_target_type(target_type)
     }
 
     /// Create an Evaluator pre-configured with this expression's internal
-    /// state (keyword renames, source context). Callers can further customize
-    /// with `.with_path_format()`, `.with_library()`, etc. before calling
-    /// `evaluator.evaluate(&parsed.ast)`.
-    pub fn evaluator<'a>(
+    /// state (keyword renames, source context).
+    ///
+    /// Private: called only by [`EvaluationBuilder::build_evaluator`].
+    /// The public API routes through `with_*(...).evaluate(&symtabs)` on
+    /// `ParsedExpression` / `EvaluationBuilder`.
+    fn evaluator<'a>(
         &'a self,
         symtabs: &'a [&'a crate::symbol_table::SymbolTable],
     ) -> crate::eval::Evaluator<'a> {
@@ -212,6 +238,130 @@ impl ParsedExpression {
             }
         }
         None
+    }
+}
+
+/// A builder bound to a [`ParsedExpression`] that defers choosing symbol
+/// tables until [`evaluate`](Self::evaluate) is called.
+///
+/// Obtained from `parsed.with_*(...)` on a [`ParsedExpression`]. Every
+/// `with_*` method is chainable. The terminal `evaluate(&symtabs)` and
+/// `evaluate_with_metrics(&symtabs)` methods build an internal evaluator
+/// from the captured configuration and run it.
+///
+/// ```
+/// use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
+///
+/// let parsed = ParsedExpression::new("Param.Frame * 2").unwrap();
+/// let mut st = SymbolTable::new();
+/// st.set("Param.Frame", 5).unwrap();
+///
+/// let value = parsed
+///     .with_path_format(PathFormat::Posix)
+///     .with_memory_limit(50_000_000)
+///     .evaluate(&[&st])
+///     .unwrap();
+/// assert_eq!(value, ExprValue::Int(10));
+/// ```
+#[must_use]
+pub struct EvaluationBuilder<'a> {
+    parsed: &'a ParsedExpression,
+    library: Option<&'a crate::function_library::FunctionLibrary>,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
+    path_format: Option<crate::path_mapping::PathFormat>,
+    target_type: Option<&'a crate::types::ExprType>,
+}
+
+impl<'a> EvaluationBuilder<'a> {
+    fn new(parsed: &'a ParsedExpression) -> Self {
+        Self {
+            parsed,
+            library: None,
+            memory_limit: None,
+            operation_limit: None,
+            path_format: None,
+            target_type: None,
+        }
+    }
+
+    /// Use the given function library instead of the default one.
+    pub fn with_library(mut self, library: &'a crate::function_library::FunctionLibrary) -> Self {
+        self.library = Some(library);
+        self
+    }
+
+    /// Cap evaluation memory (bytes). Default: [`DEFAULT_MEMORY_LIMIT`](crate::DEFAULT_MEMORY_LIMIT).
+    pub fn with_memory_limit(mut self, limit: usize) -> Self {
+        self.memory_limit = Some(limit);
+        self
+    }
+
+    /// Cap evaluation operations. Default: [`DEFAULT_OPERATION_LIMIT`](crate::DEFAULT_OPERATION_LIMIT).
+    pub fn with_operation_limit(mut self, limit: usize) -> Self {
+        self.operation_limit = Some(limit);
+        self
+    }
+
+    /// Normalize path values according to `format`. Default: host-native.
+    pub fn with_path_format(mut self, format: crate::path_mapping::PathFormat) -> Self {
+        self.path_format = Some(format);
+        self
+    }
+
+    /// Coerce the final value toward `target_type`. Default: no coercion.
+    pub fn with_target_type(mut self, target_type: &'a crate::types::ExprType) -> Self {
+        self.target_type = Some(target_type);
+        self
+    }
+
+    /// Build the configured evaluator against the supplied symbol tables.
+    ///
+    /// Private helper shared by `evaluate` and `evaluate_with_metrics`.
+    fn build_evaluator(
+        &self,
+        symtabs: &'a [&'a crate::symbol_table::SymbolTable],
+    ) -> crate::eval::Evaluator<'a> {
+        let mut ev = self.parsed.evaluator(symtabs);
+        if let Some(lib) = self.library {
+            ev = ev.with_library(lib);
+        }
+        if let Some(limit) = self.memory_limit {
+            ev = ev.with_memory_limit(limit);
+        }
+        if let Some(limit) = self.operation_limit {
+            ev = ev.with_operation_limit(limit);
+        }
+        if let Some(fmt) = self.path_format {
+            ev = ev.with_path_format(fmt);
+        }
+        if let Some(tt) = self.target_type {
+            ev = ev.with_target_type(tt);
+        }
+        ev
+    }
+
+    /// Evaluate against the supplied symbol tables and return the resulting value.
+    pub fn evaluate(
+        self,
+        symtabs: &'a [&'a crate::symbol_table::SymbolTable],
+    ) -> Result<crate::value::ExprValue, crate::error::ExpressionError> {
+        let mut ev = self.build_evaluator(symtabs);
+        ev.evaluate(&self.parsed.ast)
+    }
+
+    /// Evaluate and return the value alongside resource-usage metrics.
+    pub fn evaluate_with_metrics(
+        self,
+        symtabs: &'a [&'a crate::symbol_table::SymbolTable],
+    ) -> Result<crate::eval::EvaluationResult, crate::error::ExpressionError> {
+        let mut ev = self.build_evaluator(symtabs);
+        let value = ev.evaluate(&self.parsed.ast)?;
+        Ok(crate::eval::EvaluationResult {
+            value,
+            peak_memory: ev.peak_memory(),
+            operation_count: ev.operation_count(),
+        })
     }
 }
 

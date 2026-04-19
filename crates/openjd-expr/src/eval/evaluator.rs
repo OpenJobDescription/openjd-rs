@@ -59,23 +59,23 @@ pub struct EvaluationResult {
 ///
 /// # Builder Pattern
 ///
-/// Create via [`super::ParsedExpression::evaluator`] or [`Evaluator::new`], then
-/// configure with `with_*` methods before calling [`evaluate`](Self::evaluate):
+/// `Evaluator` is crate-private. The public API exposes equivalent builder
+/// methods on [`ParsedExpression`](super::ParsedExpression) that return a
+/// [`EvaluationBuilder`](super::EvaluationBuilder), e.g.
 ///
 /// ```
 /// use openjd_expr::{ParsedExpression, SymbolTable, PathFormat, ExprValue};
-/// use openjd_expr::path_mapping::PathMappingRule;
 ///
 /// let parsed = ParsedExpression::new("Param.Frame * 2").unwrap();
 /// let mut symtab = SymbolTable::new();
 /// symtab.set("Param.Frame", 5).unwrap();
-/// let symtabs = [&symtab];
 ///
-/// let mut ev = parsed.evaluator(&symtabs)
+/// let result = parsed
 ///     .with_path_format(PathFormat::Posix)
 ///     .with_memory_limit(50_000_000)
-///     .with_operation_limit(1_000_000);
-/// let result = ev.evaluate(&parsed.ast).unwrap();
+///     .with_operation_limit(1_000_000)
+///     .evaluate(&[&symtab])
+///     .unwrap();
 /// assert_eq!(result, ExprValue::Int(10));
 /// ```
 pub struct Evaluator<'a> {
@@ -1441,6 +1441,3 @@ fn resolve_keyword_renames(
 }
 
 use crate::types::ExprType;
-
-// Re-export for backward compatibility
-pub use crate::uri_path::{parse as parse_uri_parts, UriParts};

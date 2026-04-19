@@ -72,9 +72,7 @@ fn library_function_called_from_evaluator() {
 
     let parsed = ParsedExpression::new("custom_add(3, 7)").unwrap();
     let st = SymbolTable::new();
-    let symtabs = [&st];
-    let mut evaluator = parsed.evaluator(&symtabs).with_library(&lib);
-    let result = evaluator.evaluate(&parsed.ast).unwrap();
+    let result = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
     assert_eq!(result, ExprValue::Int(307));
 }
 
@@ -86,9 +84,7 @@ fn library_function_with_unresolved() {
     let mut st = SymbolTable::new();
     st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
     let parsed = ParsedExpression::new("custom_add(X, 7)").unwrap();
-    let symtabs = [&st];
-    let mut evaluator = parsed.evaluator(&symtabs).with_library(&lib);
-    let result = evaluator.evaluate(&parsed.ast).unwrap();
+    let result = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
     assert!(result.is_unresolved());
     assert_eq!(result.expr_type(), ExprType::unresolved(ExprType::INT));
 }
@@ -476,10 +472,11 @@ fn evaluator_method_call_skips_receiver_coercion() {
         .unwrap();
     let parsed = ParsedExpression::new("P.startswith('/tmp')").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let e = ev.evaluate(&parsed.ast).unwrap_err().to_string();
+    let e = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("not available for path"), "got: {e}");
 }
 
@@ -490,11 +487,13 @@ fn evaluator_function_call_coerces_path_to_string() {
     st.set("P", ExprValue::new_path("/tmp/test", PathFormat::Posix))
         .unwrap();
     let parsed = ParsedExpression::new("startswith(P, '/tmp')").unwrap();
-    let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    assert_eq!(ev.evaluate(&parsed.ast).unwrap(), ExprValue::Bool(true));
+    assert_eq!(
+        parsed
+            .with_path_format(PathFormat::Posix)
+            .evaluate(&[&st])
+            .unwrap(),
+        ExprValue::Bool(true)
+    );
 }
 
 #[test]

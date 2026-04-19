@@ -10,18 +10,18 @@ fn eval(expr: &str) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 
 fn uri_st(key: &str, uri: &str) -> SymbolTable {

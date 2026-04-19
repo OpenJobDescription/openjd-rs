@@ -452,12 +452,11 @@ pub fn validate_format_strings(
                             if !name.is_empty() && !expr_str.is_empty() {
                                 match openjd_expr::eval::ParsedExpression::new(expr_str) {
                                     Ok(parsed) => {
-                                        let symtabs = [&range_symtab as &SymbolTable];
-                                        let mut evaluator = parsed
-                                            .evaluator(&symtabs)
+                                        match parsed
                                             .with_path_format(PathFormat::Posix)
-                                            .with_library(&default_lib);
-                                        match evaluator.evaluate(&parsed.ast) {
+                                            .with_library(&default_lib)
+                                            .evaluate(&[&range_symtab as &SymbolTable])
+                                        {
                                             Ok(val) => {
                                                 let _ = range_symtab.set(name, val);
                                             }
@@ -1031,9 +1030,7 @@ fn validate_let_bindings(
         let prefix = &binding[..expr_start];
         match ParsedExpression::new(expr) {
             Ok(parsed) => {
-                let symtabs = [symtab as &SymbolTable];
-                let mut evaluator = parsed.evaluator(&symtabs).with_library(lib);
-                match evaluator.evaluate(&parsed.ast) {
+                match parsed.with_library(lib).evaluate(&[symtab as &SymbolTable]) {
                     Ok(result) => {
                         // Set the binding in the symtab with its inferred value/type
                         // so subsequent bindings and format strings see the correct type.

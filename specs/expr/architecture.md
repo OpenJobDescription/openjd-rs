@@ -81,33 +81,37 @@ pub fn evaluate_expression_bounded(
 For more control, parse once and evaluate with a builder:
 
 ```rust
-let mut parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
+let parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
 
 // Inspect parse metadata
 parsed.accessed_symbols  // {"Param.Frame"}
 parsed.called_functions  // {}
 parsed.local_bindings    // {}
 
-// After evaluation, resource usage is recorded on the ParsedExpression:
-parsed.peak_memory_usage  // peak bytes during the last evaluate() call
-parsed.operation_count    // operations consumed during the last evaluate() call
+// `ParsedExpression` is immutable — it represents a pure parsed AST plus
+// metadata. Resource-usage metrics (peak memory, operation count) come
+// back from evaluation via `evaluate_with_metrics(&symtabs)`, which
+// returns an `EvaluationResult { value, peak_memory, operation_count }`.
 
-// Simple evaluation
+// Simple evaluation (single symbol table, default config)
 let value = parsed.evaluate(&symtab)?;
 
 // Configured evaluation — custom library, limits, path format
-let value = parsed.evaluator(&[&job_params, &let_bindings])
+let value = parsed
     .with_library(&custom_lib)
     .with_memory_limit(50_000_000)
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
-    .evaluate(&parsed.ast)?;
+    .evaluate(&[&job_params, &let_bindings])?;
 ```
 
 `ParsedExpression::new` parses once and exposes symbol/function metadata for validation.
-The `evaluator()` builder covers the use cases that the Python implementation handles
-via optional keyword arguments on `ParsedExpression.evaluate()` — library, limits, and
-path format are all configurable per-evaluation without re-parsing. Path mapping rules
+Any `with_*` call produces a `EvaluationBuilder` that captures configuration and
+defers symbol-table binding until its terminal `.evaluate(&symtabs)` (or
+`.evaluate_with_metrics(&symtabs)`). This covers the use cases that the Python
+implementation handles via optional keyword arguments on `ParsedExpression.evaluate()`
+— library, limits, and path format are all configurable per-evaluation without re-parsing.
+Path mapping rules
 live on the function library (see `FunctionLibrary::with_host_context`) rather than
 the evaluator.
 
@@ -127,7 +131,7 @@ and further extensions such as incremental re-evaluation when a subset of inputs
 | `Float64` | f64 wrapper preserving original string representation |
 | `SymbolTable` | Hierarchical variable bindings with dotted paths |
 | `ParsedExpression` | Parsed AST with metadata, builder for evaluation |
-| `Evaluator` | Builder-pattern evaluator with configurable limits |
+| `EvaluationBuilder` | Chained configuration for a `ParsedExpression`'s evaluation |
 | `EvaluationResult` | Value + peak_memory + operation_count |
 | `FormatString` | `{{...}}` interpolation with serde integration |
 | `FunctionLibrary` | Signature-based multiple dispatch registry |

@@ -234,18 +234,21 @@ fn local_nested_comprehension() {
 
 #[test]
 fn parsed_evaluate_basic() {
-    let mut parsed = ParsedExpression::new("1 + 2").unwrap();
-    let result = parsed.evaluate(&SymbolTable::new()).unwrap();
-    assert_eq!(result.to_display_string(), "3");
-    assert!(parsed.peak_memory_usage > 0);
-    assert!(parsed.operation_count > 0);
+    let parsed = ParsedExpression::new("1 + 2").unwrap();
+    let metrics = parsed
+        .with_memory_limit(openjd_expr::DEFAULT_MEMORY_LIMIT)
+        .evaluate_with_metrics(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(metrics.value.to_display_string(), "3");
+    assert!(metrics.peak_memory > 0);
+    assert!(metrics.operation_count > 0);
 }
 
 #[test]
 fn parsed_evaluate_with_symtab() {
     let st = SymbolTable::from_pairs(vec![("X", ExprValue::Int(10)), ("Y", ExprValue::Int(20))])
         .unwrap();
-    let mut parsed = ParsedExpression::new("X + Y").unwrap();
+    let parsed = ParsedExpression::new("X + Y").unwrap();
     let result = parsed.evaluate(&st).unwrap();
     assert_eq!(result.to_display_string(), "30");
 }

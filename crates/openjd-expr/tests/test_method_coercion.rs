@@ -13,20 +13,21 @@ fn eval_posix(expr: &str) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 
 fn eval_posix_err(expr: &str) -> String {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap_err().to_string()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string()
 }
 
 // === TestMethodCallNoReceiverCoercion ===
@@ -62,11 +63,10 @@ fn path_startswith_as_function() {
     st.set("P", ExprValue::new_path("/a/b/c", PathFormat::Posix))
         .unwrap();
     let parsed = ParsedExpression::new("startswith(string(P), '/a')").unwrap();
-    let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    assert!(ev.evaluate(&parsed.ast).is_ok());
+    assert!(parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .is_ok());
 }
 #[test]
 fn path_endswith_as_function() {
@@ -74,11 +74,10 @@ fn path_endswith_as_function() {
     st.set("P", ExprValue::new_path("/a/b/c.txt", PathFormat::Posix))
         .unwrap();
     let parsed = ParsedExpression::new("endswith(string(P), '.txt')").unwrap();
-    let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    assert!(ev.evaluate(&parsed.ast).is_ok());
+    assert!(parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .is_ok());
 }
 #[test]
 fn string_method_on_string_works() {

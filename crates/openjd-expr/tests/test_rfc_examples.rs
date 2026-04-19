@@ -112,8 +112,7 @@ fn eval_with_path_format(expr: &str, st: &SymbolTable, fmt: PathFormat) -> ExprV
     use openjd_expr::ParsedExpression;
     let parsed = ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed.with_path_format(fmt).evaluate(&symtabs).unwrap()
 }
 
 // === Tests ported from Python test_rfc_examples.py ===

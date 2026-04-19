@@ -10,15 +10,21 @@ fn eval_op(expr: &str, limit: usize) -> Result<EvaluationResult, ExpressionError
 }
 
 fn op_count(expr: &str) -> usize {
-    let mut parsed = ParsedExpression::new(expr).unwrap();
-    parsed.evaluate(&SymbolTable::new()).unwrap();
-    parsed.operation_count
+    let parsed = ParsedExpression::new(expr).unwrap();
+    parsed
+        .with_memory_limit(DEFAULT_MEMORY_LIMIT)
+        .evaluate_with_metrics(&[&SymbolTable::new()])
+        .unwrap()
+        .operation_count
 }
 
 fn op_count_with(expr: &str, st: &SymbolTable) -> usize {
-    let mut parsed = ParsedExpression::new(expr).unwrap();
-    parsed.evaluate(st).unwrap();
-    parsed.operation_count
+    let parsed = ParsedExpression::new(expr).unwrap();
+    parsed
+        .with_memory_limit(DEFAULT_MEMORY_LIMIT)
+        .evaluate_with_metrics(&[st])
+        .unwrap()
+        .operation_count
 }
 
 // === TestDefaultOperationLimit ===
@@ -653,9 +659,8 @@ fn operation_limit_error_kind_from_evaluator() {
     symtab.set("x", ExprValue::Int(1)).unwrap();
     let parsed = ParsedExpression::new("x + x + x + x").unwrap();
     let err = parsed
-        .evaluator(&[&symtab])
         .with_operation_limit(2)
-        .evaluate(&parsed.ast)
+        .evaluate(&[&symtab])
         .unwrap_err();
     assert!(
         matches!(err.kind(), ExpressionErrorKind::OperationLimitExceeded),

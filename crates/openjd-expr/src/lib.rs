@@ -28,7 +28,8 @@ pub mod value;
 
 pub use error::{ExpressionError, ExpressionErrorKind};
 pub use eval::{
-    EvaluationResult, Evaluator, ParsedExpression, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT,
+    EvaluationBuilder, EvaluationResult, ParsedExpression, DEFAULT_MEMORY_LIMIT,
+    DEFAULT_OPERATION_LIMIT,
 };
 pub use format_string::escape_format_string;
 pub use format_string::FormatString;
@@ -46,7 +47,7 @@ pub use value::ExprValue;
 /// host-native path format and the default function library.
 ///
 /// For custom `path_format`, `library`, or resource limits, use
-/// [`ParsedExpression`] with the builder pattern on [`Evaluator`]:
+/// [`ParsedExpression`]'s builder methods:
 ///
 /// ```
 /// use openjd_expr::{ParsedExpression, SymbolTable, PathFormat, ExprValue};
@@ -55,19 +56,17 @@ pub use value::ExprValue;
 /// let symtab = SymbolTable::new();
 /// let lib = get_default_library();
 /// let parsed = ParsedExpression::new("1 + 2").unwrap();
-/// let symtabs = [&symtab];
-/// let mut ev = parsed.evaluator(&symtabs)
+/// let result = parsed
 ///     .with_path_format(PathFormat::Posix)
 ///     .with_library(lib)
-///     .with_memory_limit(10_000_000);
-/// let result = ev.evaluate(&parsed.ast).unwrap();
+///     .with_memory_limit(10_000_000)
+///     .evaluate(&[&symtab])
+///     .unwrap();
 /// assert_eq!(result, ExprValue::Int(3));
 /// ```
 pub fn evaluate_expression(expr: &str, symtab: &SymbolTable) -> Result<ExprValue, ExpressionError> {
     let parsed = ParsedExpression::new(expr)?;
-    let symtabs = [symtab];
-    let mut evaluator = parsed.evaluator(&symtabs);
-    evaluator.evaluate(&parsed.ast)
+    parsed.evaluate(symtab)
 }
 
 /// Evaluate with explicit resource limits.
@@ -81,15 +80,8 @@ pub fn evaluate_expression_bounded(
     operation_limit: usize,
 ) -> Result<EvaluationResult, ExpressionError> {
     let parsed = ParsedExpression::new(expr)?;
-    let symtabs = [symtab];
-    let mut evaluator = parsed
-        .evaluator(&symtabs)
+    parsed
         .with_memory_limit(memory_limit)
-        .with_operation_limit(operation_limit);
-    let value = evaluator.evaluate(&parsed.ast)?;
-    Ok(EvaluationResult {
-        value,
-        peak_memory: evaluator.peak_memory(),
-        operation_count: evaluator.operation_count(),
-    })
+        .with_operation_limit(operation_limit)
+        .evaluate_with_metrics(&[symtab])
 }

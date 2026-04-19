@@ -17,8 +17,7 @@ fn eval_with_host_context(expr: &str) -> ExprValue {
     let lib = default_library::get_default_library()
         .clone()
         .with_host_context(Vec::<PathMappingRule>::new());
-    let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed.with_library(&lib).evaluate(&symtabs).unwrap()
 }
 
 #[allow(dead_code)]
@@ -29,8 +28,7 @@ fn eval_with_host_context_fails(expr: &str) -> bool {
     let lib = default_library::get_default_library()
         .clone()
         .with_host_context(Vec::<PathMappingRule>::new());
-    let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
-    ev.evaluate(&parsed.ast).is_err()
+    parsed.with_library(&lib).evaluate(&symtabs).is_err()
 }
 
 // === Default library availability ===
@@ -143,12 +141,10 @@ fn method_syntax_with_host_context() {
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/some/path".into())).unwrap();
-    let symtabs = [&st];
     let lib = default_library::get_default_library()
         .clone()
         .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
-    let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
     assert!(matches!(r, ExprValue::Path { .. }));
 }
 
@@ -168,11 +164,11 @@ fn with_path_mapping_rules() {
         .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    let r = parsed
         .with_library(&lib)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/new/file.txt");
 }
 #[test]
@@ -190,11 +186,11 @@ fn unmatched_path_unchanged() {
         .with_host_context(vec![rule]);
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    let r = parsed
         .with_library(&lib)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/other/file.txt");
 }
 #[test]
@@ -206,11 +202,11 @@ fn no_rules_returns_path_unchanged() {
     let parsed = ParsedExpression::new("apply_path_mapping('/any/path')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    let r = parsed
         .with_library(&lib)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/any/path");
 }
 #[test]
@@ -254,10 +250,10 @@ fn path_stem_without_host_context() {
     .unwrap();
     let parsed = ParsedExpression::new("P.stem").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "render");
 }
 #[test]
@@ -270,10 +266,10 @@ fn path_suffix_without_host_context() {
     .unwrap();
     let parsed = ParsedExpression::new("P.suffix").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), ".exr");
 }
 #[test]
@@ -286,10 +282,10 @@ fn path_with_suffix_without_host_context() {
     .unwrap();
     let parsed = ParsedExpression::new("with_suffix(P, '.png')").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert!(
         r.to_display_string().ends_with("render.png"),
         "got: {}",
@@ -311,11 +307,11 @@ fn function_syntax_with_path_mapping_rules() {
     let parsed = ParsedExpression::new("apply_path_mapping('/old/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    let r = parsed
         .with_library(&lib)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/new/path/file.txt");
 }
 #[test]
@@ -331,10 +327,10 @@ fn function_syntax_unmatched_path_unchanged() {
     let parsed = ParsedExpression::new("apply_path_mapping('/other/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    let r = parsed
         .with_library(&lib)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "/other/path/file.txt");
 }

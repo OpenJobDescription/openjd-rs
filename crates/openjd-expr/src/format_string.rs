@@ -128,15 +128,14 @@ impl FormatString {
         path_format: crate::path_mapping::PathFormat,
         target_type: Option<&crate::types::ExprType>,
     ) -> Result<ExprValue, ExpressionError> {
-        let symtabs = [symtab];
-        let mut evaluator = parsed.evaluator(&symtabs).with_path_format(path_format);
+        let mut builder = parsed.with_path_format(path_format);
         if let Some(lib) = library {
-            evaluator = evaluator.with_library(lib);
+            builder = builder.with_library(lib);
         }
         if let Some(tt) = target_type {
-            evaluator = evaluator.with_target_type(tt);
+            builder = builder.with_target_type(tt);
         }
-        evaluator.evaluate(&parsed.ast)
+        builder.evaluate(&[symtab])
     }
 
     /// Validate all expressions in this format string against a symbol table.
@@ -153,9 +152,7 @@ impl FormatString {
                 Segment::Literal(_) => continue,
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
             };
-            let symtabs = [symtab];
-            let mut evaluator = parsed.evaluator(&symtabs).with_library(lib);
-            if let Err(e) = evaluator.evaluate(&parsed.ast) {
+            if let Err(e) = parsed.with_library(lib).evaluate(&[symtab]) {
                 return Err(FormatStringValidationError {
                     message: e.to_string(),
                     input: self.raw.clone(),

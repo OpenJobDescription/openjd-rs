@@ -45,14 +45,13 @@ pub(super) fn instantiate_step(
                             openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
                                 OpenJdError::Expression(format!("let binding '{name}': {e}"))
                             })?;
-                        let symtabs = [&step_symtab as &SymbolTable];
-                        let mut evaluator = parsed
-                            .evaluator(&symtabs)
+                        let val = parsed
                             .with_path_format(PathFormat::Posix)
-                            .with_library(&lib);
-                        let val = evaluator.evaluate(&parsed.ast).map_err(|e| {
-                            OpenJdError::Expression(format!("let binding '{name}': {e}"))
-                        })?;
+                            .with_library(&lib)
+                            .evaluate(&[&step_symtab as &SymbolTable])
+                            .map_err(|e| {
+                                OpenJdError::Expression(format!("let binding '{name}': {e}"))
+                            })?;
                         step_symtab.set(name, val)?;
                     }
                 }
@@ -167,14 +166,15 @@ pub(super) fn instantiate_step(
                                         "script let binding '{name}': {e}"
                                     ))
                                 })?;
-                            let symtabs = [&check_symtab as &SymbolTable];
-                            let mut evaluator = parsed
-                                .evaluator(&symtabs)
+                            let val = parsed
                                 .with_path_format(PathFormat::Posix)
-                                .with_library(&lib);
-                            let val = evaluator.evaluate(&parsed.ast).map_err(|e| {
-                                OpenJdError::Expression(format!("script let binding '{name}': {e}"))
-                            })?;
+                                .with_library(&lib)
+                                .evaluate(&[&check_symtab as &SymbolTable])
+                                .map_err(|e| {
+                                    OpenJdError::Expression(format!(
+                                        "script let binding '{name}': {e}"
+                                    ))
+                                })?;
                             check_symtab.set(name, val)?;
                         }
                     }
@@ -399,12 +399,11 @@ pub fn evaluate_let_bindings(
                 e.message_with_expr_prefix(prefix)
             ))
         })?;
-        let symtabs = [&result as &SymbolTable];
-        let mut evaluator = parsed.evaluator(&symtabs).with_path_format(path_format);
+        let mut builder = parsed.with_path_format(path_format);
         if let Some(lib) = library {
-            evaluator = evaluator.with_library(lib);
+            builder = builder.with_library(lib);
         }
-        let value = evaluator.evaluate(&parsed.ast).map_err(|e| {
+        let value = builder.evaluate(&[&result as &SymbolTable]).map_err(|e| {
             OpenJdError::Expression(format!(
                 "Error evaluating let binding '{name}': {}",
                 e.message_with_expr_prefix(prefix)

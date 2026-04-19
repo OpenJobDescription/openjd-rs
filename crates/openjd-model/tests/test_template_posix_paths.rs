@@ -11,20 +11,18 @@ use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 fn eval_posix(expr: &str) -> ExprValue {
     let symtab = SymbolTable::new();
     let parsed = ParsedExpression::new(expr).unwrap();
-    let symtabs = [&symtab];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&symtab])
+        .unwrap()
 }
 
 fn eval_posix_with(expr: &str, symtab: &SymbolTable) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
-    let symtabs = [symtab];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[symtab])
+        .unwrap()
 }
 
 // ══════════════════════════════════════════════════════════════

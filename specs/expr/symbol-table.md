@@ -98,7 +98,9 @@ table and let-binding variables in another:
 
 ```rust
 let parsed = ParsedExpression::new("Param.Frame + offset")?;
-let result = parsed.evaluator(&[&job_params, &let_bindings]).evaluate()?;
+let result = parsed
+    .with_path_format(PathFormat::host())
+    .evaluate(&[&job_params, &let_bindings])?;
 ```
 
 The evaluator's `eval_name` and `eval_attribute` methods walk the symbol tables for

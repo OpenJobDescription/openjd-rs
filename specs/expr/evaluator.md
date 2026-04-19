@@ -13,7 +13,7 @@ counters propagated back via `absorb_counters()`.
 
 ## Builder Pattern
 
-Evaluation is configured through a builder on `ParsedExpression`:
+Evaluation is configured through builder methods on `ParsedExpression`:
 
 ```rust
 let parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
@@ -22,29 +22,36 @@ let parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
 let value = parsed.evaluate(&symtab)?;
 
 // Configured — custom limits, path format, library
-let result = parsed.evaluator(&[&symtab])
+let result = parsed
     .with_library(&custom_lib)
     .with_memory_limit(50_000_000)
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
-    .evaluate(&parsed.ast)?;
+    .evaluate(&[&symtab])?;
 
-println!("Value: {:?}", result);
-println!("Peak memory: {} bytes", parsed.peak_memory_usage);
-println!("Operations: {}", parsed.operation_count);
+// Configured, with resource-usage metrics
+let result = parsed
+    .with_memory_limit(50_000_000)
+    .evaluate_with_metrics(&[&symtab])?;
+println!("Value: {:?}", result.value);
+println!("Peak memory: {} bytes", result.peak_memory);
+println!("Operations: {}", result.operation_count);
 ```
 
-Note: `Evaluator::evaluate` takes the AST node as an argument (not captured by the
-builder). The AST is owned by `ParsedExpression`, so callers pass `&parsed.ast`.
-`ParsedExpression::evaluate(&symtab)` is the convenience shortcut that constructs,
-runs, and tears down the evaluator in one call.
+Calling any `with_*` method on `ParsedExpression` produces a
+`EvaluationBuilder<'_>` that borrows the parsed expression and captures
+configuration. Subsequent `with_*` calls chain on the builder. The terminal
+`.evaluate(&symtabs)` takes the symbol tables as an argument and runs the
+internal evaluator; `.evaluate_with_metrics(&symtabs)` additionally returns
+peak memory and operation count in an `EvaluationResult`.
 
 Path mapping rules are **not** an evaluator configuration. They are state owned
 by the `apply_path_mapping` implementation, which is a closure registered on the
 function library via [`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
 The evaluator just calls functions; it has no direct awareness of mapping rules.
 
-Builder methods on `Evaluator`:
+Builder methods on `EvaluationBuilder` (also available as shortcut
+methods on `ParsedExpression`):
 
 | Method | Default | Purpose | Notes |
 |--------|---------|---------|-------|
@@ -53,13 +60,11 @@ Builder methods on `Evaluator`:
 | `with_operation_limit(usize)` | 10,000,000 (10M) | Operation bound | Each call=1, list iteration=N, string ops=ceil(len/256) |
 | `with_path_format(PathFormat)` | Host native | Path normalization format | Also validates that `Path` values in symbol table match |
 | `with_target_type(&ExprType)` | None | Context-dependent coercion | Influences empty list element type and mixed-type coercion |
-| `with_expr_source(&str)` | From ParsedExpression | Source text for error messages | Internal — set automatically by `ParsedExpression::evaluator()` |
-| `with_keyword_renames(&HashMap)` | From ParsedExpression | Keyword rename map | Internal — set automatically by `ParsedExpression::evaluator()` |
 
-The last two methods (`with_expr_source`, `with_keyword_renames`) are internal plumbing
-that `ParsedExpression::evaluator()` configures automatically. Users building an
-`Evaluator` directly via `Evaluator::new()` would need to set these manually to get
-correct error messages and keyword-as-attribute support (e.g., `Param.if`).
+The underlying `Evaluator` struct is crate-private. Keyword renames and
+expression source text for error messages are wired up automatically by
+`EvaluationBuilder` using fields already on `ParsedExpression`, so
+downstream callers never have to set them.
 
 ## Resource Bounding
 

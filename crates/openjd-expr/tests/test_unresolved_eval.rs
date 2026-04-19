@@ -782,11 +782,10 @@ fn mix_unknown_string_and_concrete_path() {
     st.set("P", ExprValue::new_path("/a", PathFormat::Posix))
         .unwrap();
     let parsed = ParsedExpression::new("[S, P]").unwrap();
-    let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    assert!(ev.evaluate(&parsed.ast).is_ok());
+    assert!(parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .is_ok());
 }
 #[test]
 fn all_concrete_same_type() {
@@ -1323,10 +1322,10 @@ fn list_mix_unknown_string_and_concrete_path_type() {
     let st = st_unresolved(vec![("X", "string")]);
     let parsed = ParsedExpression::new("[X, path('/a')]").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.expr_type(), tp("unresolved[list[string]]"));
 }
 

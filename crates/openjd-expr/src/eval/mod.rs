@@ -7,8 +7,9 @@
 //! then evaluates with a custom bounded evaluator. This mirrors the Python
 //! implementation which uses `ast.parse()` + a custom `Evaluator` class.
 
-pub mod evaluator;
+pub(crate) mod evaluator;
 mod parse;
 
-pub use evaluator::{EvaluationResult, Evaluator, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
-pub use parse::ParsedExpression;
+pub(crate) use evaluator::Evaluator;
+pub use evaluator::{EvaluationResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
+pub use parse::{EvaluationBuilder, ParsedExpression};

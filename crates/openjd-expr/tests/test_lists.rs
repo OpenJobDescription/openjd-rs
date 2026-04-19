@@ -11,27 +11,28 @@ fn eval(expr: &str) -> ExprValue {
 fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 fn eval_posix_no_st(expr: &str) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 fn eval_posix_err(expr: &str, st: &SymbolTable) -> String {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap_err().to_string()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string()
 }
 fn eval_fails(expr: &str) -> bool {
     evaluate_expression(expr, &SymbolTable::new()).is_err()
@@ -1592,10 +1593,10 @@ fn mixed_list_with_string_target() {
     let st = SymbolTable::new();
     let parsed = openjd_expr::ParsedExpression::new(r#"["--quality", 5]"#).unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_target_type(&ExprType::parse("list[string]").unwrap());
-    let result = ev.evaluate(&parsed.ast).unwrap();
+    let result = parsed
+        .with_target_type(&ExprType::parse("list[string]").unwrap())
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(result.expr_type().to_string(), "list[string]");
     let elems = result.list_elements().unwrap();
     assert_eq!(elems[0].to_display_string(), "--quality");
@@ -1608,10 +1609,10 @@ fn nested_mixed_list_with_int_target() {
     let st = SymbolTable::new();
     let parsed = openjd_expr::ParsedExpression::new(r#"[["1", 2.0, 3], ["4"]]"#).unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_target_type(&ExprType::parse("list[list[int]]").unwrap());
-    let result = ev.evaluate(&parsed.ast).unwrap();
+    let result = parsed
+        .with_target_type(&ExprType::parse("list[list[int]]").unwrap())
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(result.expr_type().to_string(), "list[list[int]]");
 }
 
@@ -1632,10 +1633,10 @@ fn scalar_with_string_target() {
     let st = SymbolTable::new();
     let parsed = openjd_expr::ParsedExpression::new("42").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_target_type(&ExprType::STRING);
-    let result = ev.evaluate(&parsed.ast).unwrap();
+    let result = parsed
+        .with_target_type(&ExprType::STRING)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(result.to_display_string(), "42");
     assert_eq!(result.expr_type(), ExprType::STRING);
 }

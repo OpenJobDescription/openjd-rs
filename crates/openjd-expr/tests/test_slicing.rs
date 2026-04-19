@@ -169,10 +169,11 @@ fn path_index_not_supported() {
         .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P[0]").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let e = ev.evaluate(&parsed.ast).unwrap_err().to_string();
+    let e = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
     assert!(
         e.contains(&["Cannot subscript type path\n", "  P[0]\n", "  ~^~~"].concat()),
         "got:\n{e}"

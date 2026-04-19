@@ -16,10 +16,10 @@ fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
 fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 
 #[allow(dead_code)]

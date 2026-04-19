@@ -20,11 +20,11 @@ fn eval_with_rules_fmt(
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
         .with_host_context(rules);
-    let mut ev = parsed
-        .evaluator(&symtabs)
+    parsed
         .with_library(&lib)
-        .with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap()
+        .with_path_format(fmt)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 
 // === TestPathMappingRuleFromPosix ===
@@ -991,12 +991,10 @@ fn apply_path_mapping_rejects_path_input() {
     st.set("P", ExprValue::new_path("/src/file.txt", PathFormat::Posix))
         .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.apply_path_mapping()").unwrap();
-    let symtabs = [&st];
     let lib = openjd_expr::default_library::get_default_library()
         .clone()
         .with_host_context(vec![rule]);
-    let mut ev = parsed.evaluator(&symtabs).with_library(&lib);
-    let result = ev.evaluate(&parsed.ast);
+    let result = parsed.with_library(&lib).evaluate(&[&st]);
     assert!(
         result.is_err(),
         "apply_path_mapping should reject path input, only string is allowed"

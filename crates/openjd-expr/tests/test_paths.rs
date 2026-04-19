@@ -33,10 +33,11 @@ fn assert_err_with(expr: &str, st: &SymbolTable, expected: &[&str]) {
 fn assert_err_posix(expr: &str, st: &SymbolTable, expected: &[&str]) {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let e = ev.evaluate(&parsed.ast).unwrap_err().to_string();
+    let e = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
     let joined = expected.concat();
     assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
 }
@@ -54,8 +55,7 @@ fn posix_st(key: &str, path: &str) -> SymbolTable {
 fn eval_with_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed.with_path_format(fmt).evaluate(&symtabs).unwrap()
 }
 
 /// Evaluate with a POSIX symtab — uses PathFormat::Posix so path format checks pass.
@@ -734,14 +734,12 @@ fn path_from_parts_roundtrip() {
 fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed.with_path_format(fmt).evaluate(&symtabs).unwrap()
 }
 fn eval_fmt_fails(expr: &str, st: &SymbolTable, fmt: PathFormat) -> bool {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).is_err()
+    parsed.with_path_format(fmt).evaluate(&symtabs).is_err()
 }
 
 // === Exact Python name matches ===
@@ -1323,8 +1321,11 @@ fn is_relative_to_filesystem_vs_uri() {
 fn eval_fmt_err(expr: &str, st: &SymbolTable, fmt: PathFormat) -> String {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast).unwrap_err().to_string()
+    parsed
+        .with_path_format(fmt)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string()
 }
 
 #[test]

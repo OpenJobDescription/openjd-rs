@@ -21,18 +21,18 @@ fn eval_posix(expr: &str) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    ev.evaluate(&parsed.ast).unwrap()
+    parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
     let e = evaluate_expression(expr, &SymbolTable::new())

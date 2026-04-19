@@ -212,10 +212,10 @@ fn eval_with_path() {
     .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.name").unwrap();
     let symtabs = [&st];
-    let mut ev = parsed
-        .evaluator(&symtabs)
-        .with_path_format(PathFormat::Posix);
-    let r = ev.evaluate(&parsed.ast).unwrap();
+    let r = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
     assert_eq!(r.to_display_string(), "file.txt");
 }
 

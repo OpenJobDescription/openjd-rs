@@ -8,8 +8,7 @@ use openjd_expr::*;
 fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> Result<ExprValue, ExpressionError> {
     let parsed = ParsedExpression::new(expr)?;
     let symtabs = [st];
-    let mut ev = parsed.evaluator(&symtabs).with_path_format(fmt);
-    ev.evaluate(&parsed.ast)
+    parsed.with_path_format(fmt).evaluate(&symtabs)
 }
 
 #[test]
