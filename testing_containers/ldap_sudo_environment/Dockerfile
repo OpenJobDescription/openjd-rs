@@ -28,7 +28,7 @@ COPY testing_containers/ldap_sudo_environment/start_ldap.sh /config
 # Remove -v from debconf-set-selections (exits non-zero on warnings for note/error/boolean types).
 # Remove template lines rejected by newer slapd packages.
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive && \
-    apt-get install -y gcc libcap2-bin psmisc vim screen slapd ldap-utils && \
+    apt-get install -y psmisc vim screen slapd ldap-utils && \
     echo "slapd slapd/password1 password" | debconf-set-selections && \
     echo "slapd slapd/password2 password" | debconf-set-selections && \
     echo "slapd slapd/internal/adminpw password" | debconf-set-selections && \
@@ -81,9 +81,7 @@ RUN rm -f /run/slapd/slapd.pid /run/nslcd/nslcd.pid && \
 COPY . /code/
 WORKDIR /code
 
-RUN gcc -Wall crates/openjd-sessions/tests/support/output_signal_sender.c \
-        -o crates/openjd-sessions/tests/support/output_signal_sender && \
-    cargo build --tests -p openjd-sessions --features test-utils
+RUN cargo build --tests -p openjd-sessions --features test-utils
 
 ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup

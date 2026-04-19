@@ -2472,3 +2472,84 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
         *final_statuses
     );
 }
+
+/// Verify that the session callback fires with intermediate progress values
+/// as `openjd_progress:` messages are printed to stdout, not just on completion.
+#[tokio::test]
+async fn test_callback_reports_intermediate_progress() {
+    let tmp = TempDir::new().unwrap();
+
+    // Collect all (state, progress) pairs from callbacks
+    #[allow(clippy::type_complexity)]
+    let updates: Arc<Mutex<Vec<(ActionState, Option<f64>)>>> = Arc::new(Mutex::new(Vec::new()));
+    let updates_clone = updates.clone();
+
+    let config = SessionConfig {
+        session_id: "progress-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: Some(Box::new(move |_sid, status| {
+            updates_clone
+                .lock()
+                .unwrap()
+                .push((status.state, status.progress));
+        })),
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        collect_stdout: false,
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    // Script prints progress 25 and 75, with a status message
+    let result = s
+        .run_task(
+            &step(
+                "sh",
+                vec![
+                    "-c",
+                    "echo 'openjd_progress: 25'; echo 'openjd_status: working'; echo 'openjd_progress: 75'; echo 'openjd_status: almost done'",
+                ],
+            ),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.state, ActionState::Success);
+
+    let all_updates = updates.lock().unwrap();
+
+    // There should be intermediate Running callbacks with progress values
+    let running_with_progress: Vec<_> = all_updates
+        .iter()
+        .filter(|(state, progress)| {
+            *state == ActionState::Running && progress.is_some() && *progress != Some(0.0)
+        })
+        .collect();
+
+    assert!(
+        !running_with_progress.is_empty(),
+        "Expected intermediate progress callbacks while Running, got: {:?}",
+        *all_updates
+    );
+
+    // Specifically, we should see progress 25 and 75
+    let progress_values: Vec<f64> = all_updates.iter().filter_map(|(_, p)| *p).collect();
+
+    assert!(
+        progress_values.contains(&25.0),
+        "Expected progress 25.0 in callbacks, got: {:?}",
+        progress_values
+    );
+    assert!(
+        progress_values.contains(&75.0),
+        "Expected progress 75.0 in callbacks, got: {:?}",
+        progress_values
+    );
+}

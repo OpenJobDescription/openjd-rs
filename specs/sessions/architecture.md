@@ -16,7 +16,6 @@ openjd-sessions
 ├── tokio           # Async runtime (rt-multi-thread, process, io-util, time, sync)
 ├── tokio-util      # CancellationToken for cooperative cancelation
 ├── nix             # POSIX signals (killpg), process groups (setsid), user IDs
-├── caps            # Linux CAP_KILL capability management (linux-only)
 ├── serde/json/yaml # Serialization for path mapping rules, cancel_info.json
 ├── regex           # openjd_* directive parsing in ActionFilter
 ├── thiserror       # SessionError enum derivation
@@ -45,7 +44,6 @@ src/
 ├── session_user.rs         # SessionUser trait, PosixSessionUser
 ├── tempdir.rs              # Secure temp directory creation
 ├── logging.rs              # LogContent bitflags, session_log! macro, banners
-├── capabilities.rs         # Linux CAP_KILL support (no-op on non-Linux)
 └── error.rs                # SessionError enum
 ```
 

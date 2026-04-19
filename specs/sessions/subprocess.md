@@ -174,14 +174,11 @@ ensures child processes spawned by the action are also signaled.
 
 ### Cross-user
 
-For processes running as a different user, direct signal delivery may fail with EPERM.
-The fallback chain is:
-
-1. Try direct `killpg()` — works if the process has CAP_KILL
-2. Fall back to `sudo -u <user> -i kill -s <signal> -- -<pgid>`
-
-The process group ID for the sudo child is found via `find_sudo_child_pgid()`, which
-reads `/proc/<pid>/task/*/children` (Linux procfs) with a `pgrep -P` fallback.
+Cross-user signal delivery is handled entirely by the embedded cross-user helper
+(see `cross-user.md` and `embedded-cross-user-helper.md`). The helper process runs
+as the target user and signals its child's process group locally via `killpg`,
+so the worker-agent process never needs to deliver cross-user signals and no
+special capabilities (e.g. `CAP_KILL`) are required.
 
 ## Cancelation Flow
 
@@ -279,19 +276,6 @@ logging. Sets `saw_fail` when an `openjd_fail` directive is encountered.
 
 This function is shared between `run_subprocess` (async path) and `run_via_helper`
 (cross-user synchronous path).
-
-## CAP_KILL Capability Elevation
-
-On Linux, cross-user signal delivery may fail with EPERM even when using `sudo kill`.
-The `capabilities.rs` module provides `try_use_cap_kill()` which:
-
-1. Checks if `CAP_KILL` is in the thread's effective capability set
-2. If not, checks the permitted set and temporarily elevates it
-3. Returns an RAII `CapKillGuard` that clears the capability on drop
-
-This allows direct `killpg()` calls to succeed for cross-user processes without
-falling back to `sudo kill`. The worker agent's systemd unit grants `CAP_KILL` in the
-permitted set via `AmbientCapabilities=CAP_KILL`.
 
 ## Windows Signal Delivery
 

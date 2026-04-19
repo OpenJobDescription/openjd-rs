@@ -7,7 +7,7 @@ ENV OPENJD_TEST_SUDO_SHARED_GROUP=sharedgroup
 ENV OPENJD_TEST_SUDO_DISJOINT_USER=disjointuser
 ENV OPENJD_TEST_SUDO_DISJOINT_GROUP=disjointgroup
 
-RUN apt-get update && apt-get install -y gcc libcap2-bin psmisc sudo && \
+RUN apt-get update && apt-get install -y psmisc sudo && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
     addgroup sharedgroup && \
@@ -21,8 +21,6 @@ USER hostuser
 COPY --chown=hostuser:hostuser . /code/
 WORKDIR /code
 
-RUN gcc -Wall crates/openjd-sessions/tests/support/output_signal_sender.c \
-        -o crates/openjd-sessions/tests/support/output_signal_sender && \
-    cargo build --tests -p openjd-sessions --features test-utils
+RUN cargo build --tests -p openjd-sessions --features test-utils
 
 CMD ["cargo", "test", "-p", "openjd-sessions", "--features", "test-utils", "--", "--include-ignored"]

@@ -42,7 +42,7 @@ identified.
 `action_filter.rs` (1,462 incl. tests), `cross_user_helper.rs` (503),
 `runner/{mod,env_script,step_script}.rs`, `embedded_files.rs`, `tempdir.rs`,
 `session_user.rs`, `action.rs`, `action_status.rs`, `logging.rs`, `error.rs`,
-`capabilities.rs`, `win32.rs`, `win32_permissions.rs`, `win32_locate.rs`,
+`win32.rs`, `win32_permissions.rs`, `win32_locate.rs`,
 `helper_binary.rs`, `helper/` (embedded helper binary).
 
 ### Tests
@@ -117,8 +117,6 @@ Source files or behaviours that deserve a spec section but lack one:
 - **`win32_permissions.rs`** — ACL management for Windows temp dirs. No spec.
 - **`win32.rs`** — Windows `LogonUserW`, environment block construction, pipe
   creation. Only referenced obliquely in `subprocess.md`.
-- **`capabilities.rs`** — `CAP_KILL` helper + `CapKillGuard` RAII type. Only a
-  one-paragraph mention in `subprocess.md` §"CAP_KILL Capability Elevation".
 - **`logging.rs` `log_section_banner` / `log_subsection_banner`** — shown in
   `logging.md` but the exact banner format (column widths, fill characters) is not
   specified; an alternative consumer parsing the banners cannot rely on a stable

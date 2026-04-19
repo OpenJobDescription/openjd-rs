@@ -3,17 +3,17 @@
 ## Overview
 
 Cross-user tests validate that the sessions crate correctly executes subprocesses as a
-different OS user via `sudo`, delivers signals across user boundaries, manages file
-ownership, and handles Linux capabilities (`CAP_KILL`). These tests cannot run in a
-normal CI environment because they require multiple OS users, passwordless sudo, and
-optionally LDAP-based user management.
+different OS user via the embedded cross-user helper, delivers signals across user
+boundaries, and manages file ownership. These tests cannot run in a normal CI
+environment because they require multiple OS users, passwordless sudo, and optionally
+LDAP-based user management.
 
 The infrastructure uses Docker containers to create isolated environments with the
 required user/group/sudo configuration. Tests are gated by `#[ignore]` and only run
 inside these containers via `--include-ignored`.
 
 This design was ported from the Python `openjd-sessions-for-python` library's Docker
-test infrastructure, achieving full parity with all 13 Python cross-user tests.
+test infrastructure.
 
 ## Docker Environments
 
@@ -22,7 +22,7 @@ provisioned:
 
 | Environment | Directory | User provisioning | Purpose |
 |---|---|---|---|
-| localuser | `testing_containers/localuser_sudo_environment/` | `/etc/passwd` (local) | Primary cross-user testing + CAP_KILL |
+| localuser | `testing_containers/localuser_sudo_environment/` | `/etc/passwd` (local) | Primary cross-user testing |
 | LDAP | `testing_containers/ldap_sudo_environment/` | OpenLDAP via `nslcd`/`nscd` | Validates NSS/PAM integration |
 
 The LDAP variant ensures that `nix::unistd::User::from_name()`,
@@ -49,10 +49,9 @@ when the session user can't share a group.
 
 ### Localuser Dockerfile
 
-Based on `rust:1-bookworm`. Installs `gcc` (for `output_signal_sender.c`), `libcap2-bin`
-(for `capsh`), `psmisc`, and `sudo`. Creates users via `useradd`. Copies the workspace,
-compiles the C test helper and builds tests as `hostuser`. The default CMD runs all
-tests including ignored ones.
+Based on `rust:1-bookworm`. Installs `psmisc` and `sudo`. Creates users via `useradd`.
+Copies the workspace and builds tests as `hostuser`. The default CMD runs all tests
+including ignored ones.
 
 ### LDAP Dockerfile
 
@@ -144,17 +143,6 @@ process user.
 | `test_cross_user_tempdir_cleanup` | Cleanup works when target user has created files inside |
 | `test_cross_user_tempdir_disjoint_fails` | TempDir with disjoint user (no shared group) fails or has wrong group |
 
-### CAP_KILL Test (1)
-
-| Test | Validates |
-|---|---|
-| `test_cross_user_cap_kill_direct_signal` | Signal delivery works with CAP_KILL capability |
-
-Uses `output_signal_sender.c` — a C program that registers a SIGTERM handler via
-`sigaction` with `SA_SIGINFO`, then reports the PID of the signal sender via
-`siginfo_t.si_pid`. This verifies that the signal came directly from the host process
-(via `killpg` with CAP_KILL) rather than from a sudo intermediary.
-
 ## Entry Script
 
 `scripts/run_cross_user_tests.sh` orchestrates the full test run:
@@ -166,36 +154,7 @@ Usage: run_cross_user_tests.sh [--ldap] [--build-only]
 ### Execution Flow
 
 1. Build the Docker image (localuser or LDAP variant)
-2. Run all tests with `--include-ignored` (13 cross-user + all normal tests)
-3. For localuser only, run CAP_KILL tests twice via `capsh`:
-   - With `CAP_KILL` in both effective and permitted sets (direct signal delivery)
-   - With `CAP_KILL` in permitted set only (tests that the library elevates it)
-
-### CAP_KILL capsh Invocation
-
-The `capsh` command chain is complex because Linux capabilities must be carefully
-threaded through privilege transitions:
-
-```bash
-capsh \
-    --caps='cap_setuid,cap_setgid,cap_setpcap=ep cap_kill=eip' \
-    --keep=1 \
-    --user=hostuser \
-    --addamb=cap_kill \
-    -- \
-    -c 'capsh --noamb --caps=cap_kill=ep -- -c "cargo test ..."'
-```
-
-1. Start as root with `cap_setuid,cap_setgid,cap_setpcap` effective+permitted and
-   `cap_kill` in effective+inheritable+permitted
-2. `--keep=1` preserves capabilities across the UID change
-3. `--user=hostuser` drops to the test user
-4. `--addamb=cap_kill` adds CAP_KILL to the ambient set (survives exec)
-5. Inner `capsh --noamb --caps=cap_kill=ep` clears ambient and sets only CAP_KILL
-   effective+permitted for the test process
-
-The second run uses `--caps=cap_kill=p` (permitted only, not effective) to test that
-the `capabilities.rs` code correctly elevates CAP_KILL into the effective set when needed.
+2. Run all tests with `--include-ignored`
 
 ## Support Files
 
@@ -203,8 +162,7 @@ the `capabilities.rs` code correctly elevates CAP_KILL into the effective set wh
 crates/openjd-sessions/tests/support/
 ├── long_running.sh          # 20-iteration loop, traps SIGTERM, exits on trap
 ├── long_running_ignore.sh   # Same but trap doesn't exit (tests SIGKILL)
-├── spawn_child.sh           # Spawns long_running.sh as child process
-└── output_signal_sender.c   # C program reporting SIGTERM sender PID
+└── spawn_child.sh           # Spawns long_running.sh as child process
 ```
 
 These replace the Python scripts (`app_20s_run.py`, `run_app_20s_run.py`) used in the
@@ -227,11 +185,8 @@ Docker container.
 | TempDir permissions | `test_defaults` | `test_cross_user_tempdir_permissions` | ✅ |
 | TempDir cleanup | `test_cleanup` | `test_cross_user_tempdir_cleanup` | ✅ |
 | TempDir disjoint | `test_cannot_change_to_group` | `test_cross_user_tempdir_disjoint_fails` | ✅ |
-| CAP_KILL signal | `test_cancel_notify_direct_signal_with_cap_kill` | `test_cross_user_cap_kill_direct_signal` | ✅ |
 | Localuser Docker | ✅ | ✅ | ✅ |
 | LDAP Docker | ✅ | ✅ | ✅ |
-| CAP_KILL effective+permitted | ✅ | ✅ | ✅ |
-| CAP_KILL permitted-only | ✅ | ✅ | ✅ |
 
 Windows cross-user tests from the Python library are out of scope — the Rust crate does
 not yet have Windows cross-user support.

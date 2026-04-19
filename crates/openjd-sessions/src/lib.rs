@@ -8,7 +8,6 @@
 pub mod action;
 pub(crate) mod action_filter;
 pub mod action_status;
-pub(crate) mod capabilities;
 pub(crate) mod cross_user_helper;
 pub mod embedded_files;
 pub mod error;

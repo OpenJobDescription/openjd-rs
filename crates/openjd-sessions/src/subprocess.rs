@@ -90,167 +90,21 @@ mod platform {
         .map_err(std::io::Error::other)
     }
 
-    /// Send SIGTERM for cross-user: signal the sudo process directly (sudo forwards SIGTERM).
-    pub fn notify_cross_user(sudo_pid: i32) -> Result<(), std::io::Error> {
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(sudo_pid),
-            nix::sys::signal::Signal::SIGTERM,
-        )
-        .map_err(std::io::Error::other)
+    /// Send SIGKILL to the process group.
+    pub fn send_terminate(pid: i32) {
+        let _ = terminate_process_group(pid);
     }
 
-    /// Send SIGKILL for cross-user: try direct killpg with CAP_KILL elevation, fall back to sudo kill.
-    pub fn terminate_cross_user(pgid: i32, user: &dyn SessionUser) {
-        // Try using CAP_KILL for direct signal delivery
-        let (has_cap_kill, _guard) = crate::capabilities::try_use_cap_kill();
-        if has_cap_kill
-            && nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pgid),
-                nix::sys::signal::Signal::SIGKILL,
-            )
-            .is_ok()
-        {
-            return;
-        }
-        // Fall back to sudo kill
-        let _ = std::process::Command::new("sudo")
-            .args([
-                "-u",
-                user.user(),
-                "-i",
-                "kill",
-                "-s",
-                "kill",
-                "--",
-                &format!("-{pgid}"),
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+    /// Send SIGTERM to the process group.
+    pub fn send_notify(pid: i32) {
+        let _ = notify_process_group(pid);
     }
 
-    /// Send a terminate signal (SIGKILL) to the process, handling cross-user via sudo.
-    pub fn send_terminate(pid: i32, sudo_child_pgid: Option<i32>, user: Option<&dyn SessionUser>) {
-        if let Some(user) = user.filter(|u| !u.is_process_user()) {
-            if let Some(pgid) = sudo_child_pgid {
-                terminate_cross_user(pgid, user);
-            }
-        } else {
-            let _ = terminate_process_group(pid);
-        }
-    }
-
-    /// Send a notify signal (SIGTERM) to the process, handling cross-user via sudo.
-    pub fn send_notify(pid: i32, user: Option<&dyn SessionUser>) {
-        if let Some(_user) = user.filter(|u| !u.is_process_user()) {
-            let _ = notify_cross_user(pid);
-        } else {
-            let _ = notify_process_group(pid);
-        }
-    }
-
-    /// Find the child process group ID of a sudo process.
-    ///
-    /// Retries for up to 1 second since sudo takes time to fork.
-    pub fn find_sudo_child_pgid(sudo_pid: u32) -> Option<i32> {
-        let start = std::time::Instant::now();
-        let timeout = Duration::from_secs(1);
-        let sudo_pgid = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(sudo_pid as i32)))
-            .ok()
-            .map(|p| p.as_raw());
-
-        loop {
-            let child_pids = find_child_pids_procfs(sudo_pid)
-                .or_else(|| find_child_pids_pgrep(sudo_pid))
-                .unwrap_or_default();
-
-            for child_pid in &child_pids {
-                if let Ok(pgid) = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(*child_pid)))
-                {
-                    let pgid = pgid.as_raw();
-                    // Wait until the child has its own process group (not sudo's)
-                    if sudo_pgid != Some(pgid) {
-                        return Some(pgid);
-                    }
-                }
-            }
-
-            if start.elapsed() >= timeout {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    fn find_child_pids_procfs(parent_pid: u32) -> Option<Vec<i32>> {
-        let task_dir = format!("/proc/{parent_pid}/task");
-        let mut child_pids = std::collections::HashSet::new();
-        if let Ok(entries) = std::fs::read_dir(&task_dir) {
-            for entry in entries.flatten() {
-                let children_path = entry.path().join("children");
-                if let Ok(contents) = std::fs::read_to_string(&children_path) {
-                    for token in contents.split_whitespace() {
-                        if let Ok(pid) = token.parse::<i32>() {
-                            child_pids.insert(pid);
-                        }
-                    }
-                }
-            }
-        }
-        if child_pids.is_empty() {
-            None
-        } else {
-            Some(child_pids.into_iter().collect())
-        }
-    }
-
-    fn find_child_pids_pgrep(parent_pid: u32) -> Option<Vec<i32>> {
-        let output = std::process::Command::new("pgrep")
-            .args(["-P", &parent_pid.to_string()])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let pids: Vec<i32> = stdout
-            .trim()
-            .lines()
-            .filter_map(|l| l.trim().parse().ok())
-            .collect();
-        if pids.is_empty() {
-            None
-        } else {
-            Some(pids)
-        }
-    }
-
-    /// Spawn a delayed SIGKILL after a grace period, handling cross-user via sudo.
-    pub fn spawn_delayed_terminate(
-        pid: i32,
-        sudo_child_pgid: Option<i32>,
-        user: Option<Arc<dyn SessionUser>>,
-        delay: Duration,
-    ) {
-        if let Some(ref user) = user {
-            if !user.is_process_user() {
-                let pgid = sudo_child_pgid;
-                let u = user.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(delay).await;
-                    if let Some(pgid) = pgid {
-                        terminate_cross_user(pgid, &*u);
-                    }
-                });
-                return;
-            }
-        }
-        let cancel_pid = pid;
+    /// Spawn a delayed SIGKILL after a grace period.
+    pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
-            let _ = terminate_process_group(cancel_pid);
+            let _ = terminate_process_group(pid);
         });
     }
 
@@ -405,34 +259,20 @@ mod platform {
     }
 
     /// Terminate: kill the entire process tree.
-    pub fn send_terminate(
-        pid: i32,
-        _sudo_child_pgid: Option<i32>,
-        _user: Option<&dyn SessionUser>,
-    ) {
+    pub fn send_terminate(pid: i32) {
         kill_process_tree(pid as u32);
     }
 
     /// Notify: send CTRL_BREAK_EVENT for graceful shutdown.
-    pub fn send_notify(pid: i32, _user: Option<&dyn SessionUser>) {
+    pub fn send_notify(pid: i32) {
         if !send_ctrl_break(pid as u32) {
             log::warn!(target: "openjd.sessions", "Failed to send CTRL_BREAK to pid {pid}, falling back to terminate");
-            send_terminate(pid, None, None);
+            send_terminate(pid);
         }
     }
 
-    /// No sudo on Windows.
-    pub fn find_sudo_child_pgid(_sudo_pid: u32) -> Option<i32> {
-        None
-    }
-
     /// Delayed terminate: kill the process tree after a grace period.
-    pub fn spawn_delayed_terminate(
-        pid: i32,
-        _sudo_child_pgid: Option<i32>,
-        _user: Option<Arc<dyn SessionUser>>,
-        delay: Duration,
-    ) {
+    pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             kill_process_tree(pid as u32);
@@ -864,13 +704,6 @@ pub async fn run_subprocess(
         "Output:"
     );
 
-    // For cross-user, find sudo's child process group ID
-    let sudo_child_pgid = if cross_user.is_some() {
-        find_sudo_child_pgid(pid as u32)
-    } else {
-        None
-    };
-
     // Read merged stdout+stderr from the child
     let mut cancel_requested = false;
     let mut timed_out = false;
@@ -916,11 +749,11 @@ pub async fn run_subprocess(
                     match (&config.cancel_method, time_limit) {
                         (_, Some(limit)) if limit.is_zero() => {
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Urgent cancel (time_limit=0), sending SIGKILL to process group {}", pid);
-                            send_terminate(pid, sudo_child_pgid, config.user.as_deref());
+                            send_terminate(pid);
                         }
                         (CancelMethod::Terminate, _) => {
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Sending SIGKILL to process group {}", pid);
-                            send_terminate(pid, sudo_child_pgid, config.user.as_deref());
+                            send_terminate(pid);
                         }
                         (CancelMethod::NotifyThenTerminate { terminate_delay }, _) => {
                             let delay = match time_limit {
@@ -931,8 +764,8 @@ pub async fn run_subprocess(
                                 write_cancel_info(dir, delay);
                             }
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Sending SIGTERM to process group {} (grace period: {:?})", pid, delay);
-                            send_notify(pid, config.user.as_deref());
-                            spawn_delayed_terminate(pid, sudo_child_pgid, config.user.clone(), delay);
+                            send_notify(pid);
+                            spawn_delayed_terminate(pid, delay);
                         }
                     }
                 }
@@ -942,7 +775,7 @@ pub async fn run_subprocess(
                     cancel_requested = true;
                     drain_deadline.as_mut().reset(tokio::time::Instant::now() + STDOUT_DRAIN_AFTER_KILL);
                     session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Action timed out, sending SIGKILL to process group");
-                    send_terminate(pid, sudo_child_pgid, config.user.as_deref());
+                    send_terminate(pid);
                 }
 
                 n = reader.read_until(b'\n', &mut line_buf) => {
@@ -977,11 +810,11 @@ pub async fn run_subprocess(
         match tokio::time::timeout(STDOUT_GRACE_TIME, c.wait()).await {
             Ok(Ok(s)) => Some(s),
             Ok(Err(_)) => {
-                send_terminate(pid, sudo_child_pgid, config.user.as_deref());
+                send_terminate(pid);
                 None
             }
             Err(_) => {
-                send_terminate(pid, sudo_child_pgid, config.user.as_deref());
+                send_terminate(pid);
                 c.wait().await.ok()
             }
         }

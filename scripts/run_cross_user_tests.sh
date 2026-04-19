@@ -53,25 +53,3 @@ fi
 
 docker run --name test_openjd_rs_sudo --rm ${ARGS} "${CONTAINER_IMAGE_TAG}:latest"
 
-if test "${USE_LDAP}" != "True"; then
-    # Run capability tests
-    # First with CAP_KILL in effective and permitted capability sets
-    docker run --name test_openjd_rs_sudo --user root --rm ${ARGS} "${CONTAINER_IMAGE_TAG}:latest" \
-        capsh \
-            --caps='cap_setuid,cap_setgid,cap_setpcap=ep cap_kill=eip' \
-            --keep=1 \
-            --user=hostuser \
-            --addamb=cap_kill \
-            -- \
-                -c 'capsh --noamb --caps=cap_kill=ep -- -c "cargo test -p openjd-sessions --features test-utils -- --ignored test_cross_user_cap_kill"'
-    # Second with CAP_KILL in permitted capability set but not effective capability set
-    # this tests that OpenJD will add CAP_KILL to the effective capability set if needed
-    docker run --name test_openjd_rs_sudo --user root --rm ${ARGS} "${CONTAINER_IMAGE_TAG}:latest" \
-        capsh \
-            --caps='cap_setuid,cap_setgid,cap_setpcap=ep cap_kill=eip' \
-            --keep=1 \
-            --user=hostuser \
-            --addamb=cap_kill \
-            -- \
-                -c 'capsh --noamb --caps=cap_kill=p -- -c "cargo test -p openjd-sessions --features test-utils -- --ignored test_cross_user_cap_kill"'
-fi

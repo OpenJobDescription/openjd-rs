@@ -160,16 +160,15 @@ impl ScriptRunnerBase {
         filter.add_redacted_values(&self.initial_redacted_values);
 
         if let Some(ref mut helper) = self.helper {
-            let result = tokio::task::block_in_place(|| {
-                crate::cross_user_helper::run_via_helper(
-                    helper,
-                    &config,
-                    &mut filter,
-                    &self.session_id,
-                    message_tx,
-                    self.cancel_writer.as_ref(),
-                )
-            })?;
+            let result = crate::cross_user_helper::run_via_helper(
+                helper,
+                &config,
+                &mut filter,
+                &self.session_id,
+                message_tx,
+                self.cancel_writer.as_ref(),
+            )
+            .await?;
             self.state = state_from_action(result.state);
             return Ok(result);
         }

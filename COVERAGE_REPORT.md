@@ -78,7 +78,6 @@ Tests added: **158 new tests** across 3 test files.
 | `runner/step_script.rs` | 78 | 12 | 84.6% | |
 | `tempdir.rs` | 70 | 21 | 70.0% | |
 | `session_user.rs` | 30 | 30 | 0.0% | Linux capabilities |
-| `capabilities.rs` | 17 | 17 | 0.0% | Linux capabilities |
 | `logging.rs` | 14 | 3 | 78.6% | |
 
 ## Per-File Detail: openjd-snapshots
@@ -112,9 +111,9 @@ The process execution engine. Most of the uncovered code is the actual subproces
 spawning, I/O handling, and signal management — hard to unit test but critical for
 correctness.
 
-### 3. openjd-sessions `session_user.rs` + `capabilities.rs` (0%)
-Linux-specific user switching and capability management. Requires root/CAP_SETUID
-to test, so these are typically integration-tested in CI environments.
+### 3. openjd-sessions `session_user.rs` (0%)
+Linux-specific user switching. Requires root/CAP_SETUID
+to test, so this is typically integration-tested in CI environments.
 
 ### 4. openjd-model `parameters.rs` (76%)
 The base parameter types (STRING, INT, FLOAT, PATH). The `check_constraints` and

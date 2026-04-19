@@ -1214,19 +1214,17 @@ impl Session {
             .helper
             .as_mut()
             .expect("caller checked helper.is_some()");
-        let sid = self.session_id.clone();
-        let result = tokio::task::block_in_place(|| {
-            run_via_helper(
-                helper,
-                &config,
-                &mut filter,
-                &sid,
-                tx,
-                self.cross_user.cancel_writer.as_ref(),
-            )
-        });
+        let result = run_via_helper(
+            helper,
+            &config,
+            &mut filter,
+            &self.session_id,
+            tx,
+            self.cross_user.cancel_writer.as_ref(),
+        )
+        .await;
 
-        // Drain any messages sent during the blocking loop.
+        // Process any remaining messages.
         while let Ok(msg) = rx.try_recv() {
             self.apply_message(msg, &subprocess_identifier);
         }

@@ -79,11 +79,22 @@ send a command, read responses until `exited` or `error`, then send the next.
 
 ## Helper Implementation
 
+### Critical design: child stdin isolation
+
+The helper spawns child processes with `stdin(Stdio::null())`. This prevents
+child processes (especially interactive shells like `bash`) from consuming
+cancel commands intended for the helper. Without this, a script like
+`trap 'exit 0' SIGINT; bash; sleep 300` would have the inner `bash` read
+cancel messages as shell input, and the helper would never see them.
+
 ### Critical design: shared stdin reader
 
 The main loop and runner **must share the same `BufReader`** on stdin. If they
 use separate readers, buffering conflicts cause cancel commands to be consumed
 by the main loop's buffer and never seen by the runner's poll loop.
+
+The runner also checks `stdin_buf.buffer().is_empty()` before calling `poll(2)`
+to handle data already buffered by the main loop's `read_line`.
 
 ```rust
 // src/helper/main.rs
@@ -121,6 +132,7 @@ fn run_command(cmd: &RunCommand, stdin_buf: &mut BufReader<StdinLock>) -> Result
         .args(&cmd.args)
         .envs(&cmd.env)
         .current_dir(&cmd.cwd)
+        .stdin(Stdio::null())                       // prevent child from consuming cancel messages
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .pre_exec(|| { dup2(1, 2); Ok(()) })  // merge stderr → stdout
@@ -133,9 +145,11 @@ fn run_command(cmd: &RunCommand, stdin_buf: &mut BufReader<StdinLock>) -> Result
     let mut child_killed = false;
 
     loop {
-        // Short poll timeout after kill to detect exit via try_wait
-        let timeout = if child_killed { 100ms } else { NONE };
-        poll([stdin_fd, child_fd], timeout);
+        // Check BufReader buffer before poll — data may be buffered from main loop
+        let stdin_has_buffered = !stdin_buf.buffer().is_empty();
+        let timeout = if child_killed { 100ms } else if stdin_has_buffered { skip poll } else { NONE };
+
+        if !stdin_has_buffered { poll([stdin_fd, child_fd], timeout); }
 
         // Cancel on stdin → parse as Command::Cancel(signal), killpg(child_pgid, signal)
         if stdin ready { read line, parse Command::Cancel(sig), killpg, child_killed = true }
@@ -144,16 +158,20 @@ fn run_command(cmd: &RunCommand, stdin_buf: &mut BufReader<StdinLock>) -> Result
         if child ready { read line, send }
 
         // Child exited (POLLHUP or try_wait after kill)
-        if child done { return child.wait().code() }
+        // Kill process group to clean up descendants (e.g. grandchild shells)
+        if child done { killpg(child_pgid, SIGKILL); return child.wait().code() }
     }
 }
 ```
 
 Key details:
+- `stdin(Stdio::null())` prevents child processes from reading cancel messages
+- Checks `stdin_buf.buffer()` before `poll(2)` to handle buffered data
 - After `killpg`, uses `try_wait()` with a 100ms poll timeout to detect exit
   even when POLLHUP isn't delivered
 - Checks `POLLHUP | POLLERR` for child stdout close
 - Drains remaining buffered output before returning exit code
+- Kills the child's process group on exit to clean up descendants
 
 ## Session Integration
 
@@ -161,13 +179,15 @@ Key details:
 
 ```rust
 struct CrossUserHelper {
-    child: std::process::Child,                    // the sudo process
-    stdin: BufWriter<std::process::ChildStdin>,    // for sending commands
-    stdout: BufReader<std::process::ChildStdout>,  // for reading responses
+    child: std::process::Child,
+    stdin: BufWriter<std::process::ChildStdin>,
+    async_reader: UnixAsyncHelperReader,  // async channel-based reader
 }
 ```
 
-Methods: `spawn`, `send_command`, `read_response`, `shutdown`.
+Methods: `spawn`, `send_command`, `shutdown`.
+
+Reading is done via the `AsyncHelperReader` trait (see below).
 
 ### Cancel via dup'd stdin fd
 
@@ -191,29 +211,9 @@ if let Some(ref mut writer) = self.cancel_writer {
 
 ### Timeout
 
-Action timeouts use the same cancel_writer mechanism via a timer thread.
-A `Condvar` ensures the thread stops immediately when the command completes,
-preventing orphaned timeout threads from cancelling subsequent commands:
-
-```rust
-if let Some(timeout) = config.timeout {
-    let mut writer = cancel_writer.try_clone()?;
-    let done = done.clone(); // Arc<(Mutex<bool>, Condvar)>
-    std::thread::spawn(move || {
-        let (lock, cvar) = &*done;
-        let guard = lock.lock().unwrap();
-        let (guard, _) = cvar.wait_timeout_while(guard, timeout, |d| !*d).unwrap();
-        if *guard { return; } // command finished before timeout
-        writeln!(writer, "{{\"cancel\":\"NOTIFY_THEN_TERMINATE\",\"notifyPeriodInSeconds\":5}}");
-        // Grace period — also cancellable
-        let guard = lock.lock().unwrap();
-        let (guard, _) = cvar.wait_timeout_while(guard, 5s, |d| !*d).unwrap();
-        if *guard { return; }
-        writeln!(writer, "{{\"cancel\":\"TERMINATE\"}}");
-    });
-}
-// DoneGuard sets *done = true and notifies the condvar on any return path
-```
+Action timeouts use `tokio::time::sleep` in a `select!` branch within the
+async `run_via_helper`. When the timeout fires, a cancel command is written
+to the helper's stdin via the `cancel_writer`. No OS thread needed.
 
 ### Helper ownership during actions
 
@@ -230,17 +230,88 @@ let result = self.drive_action(runner.enter(...), &mut rx, &id).await?;
 self.helper = runner.take_helper();
 ```
 
-### Shared run_via_helper function
+### Async helper I/O
 
-A `pub(crate) fn run_via_helper()` function contains the helper communication
-logic (send command, read responses, feed through ActionFilter). Used by both
-`Session::run_subprocess_via_helper` and the script runners.
+Helper stdout is read asynchronously so that `drive_action`'s `select!` loop
+can process `ActionMessage`s (progress, status, env vars) in real-time while
+the helper runs. Without this, `openjd_progress:` and other messages would be
+buffered until the action completes.
 
-Both call sites wrap `run_via_helper` in `tokio::task::block_in_place` to avoid
-blocking the async runtime during the synchronous helper I/O loop. This tells
-the multi-thread runtime to move other tasks to different worker threads while
-the current thread performs blocking I/O. Unlike `spawn_blocking`, `block_in_place`
-works with `&mut` references since it runs on the current thread.
+Both platforms use a reader thread + `tokio::sync::mpsc` channel:
+
+```rust
+trait AsyncHelperReader: Send {
+    fn next_response(&mut self) -> NextResponseFuture<'_>;
+}
+
+struct UnixAsyncHelperReader {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<Value, SessionError>>,
+    _thread: Option<JoinHandle<()>>,
+}
+
+impl UnixAsyncHelperReader {
+    fn new(stdout: ChildStdout) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let thread = std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => { if tx.send(serde_json::from_str(&line)).is_err() { break; } }
+                    Err(_) => break,
+                }
+            }
+        });
+        Self { rx, _thread: Some(thread) }
+    }
+}
+```
+
+The reader thread performs blocking I/O on the anonymous pipe. The async code
+receives from the channel with `.recv().await`, which yields to the tokio
+runtime between responses. This allows `drive_action`'s `select!` loop to
+interleave message processing naturally.
+
+Windows uses the identical pattern (`WindowsAsyncHelperReader`) over its
+anonymous pipe, preserving the same security model as `std::process::Stdio::piped()`.
+
+### Async `run_via_helper`
+
+`run_via_helper` is an `async fn` that reads from the `AsyncHelperReader` and
+handles timeouts via `tokio::time::sleep` in a `select!` branch:
+
+```rust
+async fn run_via_helper(
+    helper: &mut dyn AsyncHelper,
+    config: &SubprocessConfig,
+    filter: &mut ActionFilter,
+    session_id: &str,
+    message_tx: UnboundedSender<ActionMessage>,
+    cancel_writer: Option<&File>,
+) -> Result<SubprocessResult, SessionError> {
+    helper.send_command(&cmd)?;
+
+    let timeout_fut = match config.timeout {
+        Some(d) => tokio::time::sleep(d).boxed(),
+        None => futures_util::future::pending().boxed(),
+    };
+    tokio::pin!(timeout_fut);
+
+    loop {
+        tokio::select! {
+            resp = helper.async_reader().next_response() => {
+                // process pid/out/exited/error, feed through ActionFilter
+            }
+            _ = &mut timeout_fut, if !timed_out => {
+                // write cancel to helper via cancel_writer
+            }
+        }
+    }
+}
+```
+
+No `block_in_place` or `spawn_blocking` needed — the function is fully async.
 
 ### Routing
 
@@ -269,11 +340,11 @@ localuser container, validating the helper end-to-end:
 cd ~/openjd-rs
 docker build -t openjd-cross-user -f testing_containers/localuser_sudo_environment/Dockerfile .
 docker run --rm openjd-cross-user
-# test result: ok. 13 passed; 0 failed
+# test result: ok. 12 passed; 0 failed
 ```
 
 Tests cover: basic execution, stdout streaming, notify-then-terminate cancel,
-immediate terminate cancel, process tree kill, CAP_KILL, uid/gid verification,
+immediate terminate cancel, process tree kill, uid/gid verification,
 env vars, env isolation, cleanup, permissions, and disjoint user rejection.
 
 ## Resolved Decisions

@@ -18,6 +18,115 @@ use crate::logging::LogContent;
 use crate::session_log;
 use crate::session_user::SessionUser;
 
+// ── Async helper reader ──
+
+/// Future type returned by `AsyncHelperReader::next_response`.
+type NextResponseFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Option<Result<serde_json::Value, SessionError>>>
+            + Send
+            + 'a,
+    >,
+>;
+
+/// Async stream of JSON responses from the helper's stdout.
+/// Both platforms use a reader thread + async channel.
+pub(crate) trait AsyncHelperReader: Send {
+    /// Receive the next JSON response. Returns None when the helper exits.
+    fn next_response(&mut self) -> NextResponseFuture<'_>;
+}
+
+/// Unix: async reads using a reader thread + channel (same pattern as Windows).
+/// While AsyncFd could theoretically provide zero-thread async reads on Unix,
+/// it doesn't implement AsyncRead directly. The reader thread approach is
+/// simple, uniform across platforms, and has negligible overhead.
+#[cfg(unix)]
+pub(crate) struct UnixAsyncHelperReader {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<serde_json::Value, SessionError>>,
+    _thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl UnixAsyncHelperReader {
+    pub fn new(stdout: std::process::ChildStdout) -> Result<Self, SessionError> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let thread = std::thread::spawn(move || {
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let result = serde_json::from_str(line.trim_end())
+                            .map_err(|e| SessionError::Runtime(format!("parse error: {e}")));
+                        if tx.send(result).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Self {
+            rx,
+            _thread: Some(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+/// Windows: reader thread relays lines from the sync pipe to an async channel.
+#[cfg(windows)]
+pub(crate) struct WindowsAsyncHelperReader {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<serde_json::Value, SessionError>>,
+    _thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl WindowsAsyncHelperReader {
+    pub fn new(stdout: std::fs::File) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let thread = std::thread::spawn(move || {
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let result = serde_json::from_str(line.trim_end())
+                            .map_err(|e| SessionError::Runtime(format!("parse error: {e}")));
+                        if tx.send(result).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Self {
+            rx,
+            _thread: Some(thread),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl AsyncHelperReader for WindowsAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
 /// Manages a long-lived helper process for cross-user command execution (POSIX).
 ///
 /// On POSIX: launched via `sudo -u <user> -i <helper_path>`.
@@ -26,7 +135,7 @@ use crate::session_user::SessionUser;
 pub(crate) struct CrossUserHelper {
     child: std::process::Child,
     stdin: std::io::BufWriter<std::process::ChildStdin>,
-    stdout: std::io::BufReader<std::process::ChildStdout>,
+    pub(crate) async_reader: UnixAsyncHelperReader,
 }
 
 /// Windows variant: the child is a raw process handle from `CreateProcessAsUserW`,
@@ -35,7 +144,7 @@ pub(crate) struct CrossUserHelper {
 pub(crate) struct CrossUserHelperWin {
     process_handle: windows::Win32::Foundation::HANDLE,
     stdin: std::io::BufWriter<std::fs::File>,
-    stdout: std::io::BufReader<std::fs::File>,
+    pub(crate) async_reader: WindowsAsyncHelperReader,
 }
 
 // SAFETY: Windows HANDLE is a kernel object handle that is safe to send across
@@ -77,13 +186,14 @@ impl CrossUserHelper {
         let cancel_writer = unsafe { std::os::unix::io::FromRawFd::from_raw_fd(dup_fd) };
 
         let stdin = std::io::BufWriter::new(child_stdin);
-        let stdout = std::io::BufReader::new(child.stdout.take().expect("stdout was piped"));
+        let async_reader =
+            UnixAsyncHelperReader::new(child.stdout.take().expect("stdout was piped"))?;
 
         Ok((
             Self {
                 child,
                 stdin,
-                stdout,
+                async_reader,
             },
             cancel_writer,
         ))
@@ -101,22 +211,6 @@ impl CrossUserHelper {
             .flush()
             .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
         Ok(())
-    }
-
-    /// Read one line from the helper's stdout and parse as JSON.
-    pub fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
-        use std::io::BufRead;
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).map_err(|e| {
-            SessionError::Runtime(format!("Failed to read from helper stdout: {e}"))
-        })?;
-        if line.is_empty() {
-            return Err(SessionError::Runtime(
-                "Helper process closed stdout unexpectedly".into(),
-            ));
-        }
-        serde_json::from_str(line.trim_end())
-            .map_err(|e| SessionError::Runtime(format!("Failed to parse helper response: {e}")))
     }
 
     /// Send "shutdown" and wait for the child to exit.
@@ -207,13 +301,13 @@ impl CrossUserHelperWin {
         let stdout_file: std::fs::File = spawned.stdout_read.into();
 
         let stdin = std::io::BufWriter::new(stdin_file);
-        let stdout = std::io::BufReader::new(stdout_file);
+        let async_reader = WindowsAsyncHelperReader::new(stdout_file);
 
         Ok((
             Self {
                 process_handle: spawned.process_handle,
                 stdin,
-                stdout,
+                async_reader,
             },
             cancel_writer,
         ))
@@ -231,22 +325,6 @@ impl CrossUserHelperWin {
             .flush()
             .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
         Ok(())
-    }
-
-    /// Read one line from the helper's stdout and parse as JSON.
-    pub fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
-        use std::io::BufRead;
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).map_err(|e| {
-            SessionError::Runtime(format!("Failed to read from helper stdout: {e}"))
-        })?;
-        if line.is_empty() {
-            return Err(SessionError::Runtime(
-                "Helper process closed stdout unexpectedly".into(),
-            ));
-        }
-        serde_json::from_str(line.trim_end())
-            .map_err(|e| SessionError::Runtime(format!("Failed to parse helper response: {e}")))
     }
 
     /// Send "shutdown" and wait for the process to exit.
@@ -275,131 +353,45 @@ impl Drop for CrossUserHelperWin {
     }
 }
 
-/// Trait for the shared helper interface used by `run_via_helper`.
-/// Both `CrossUserHelper` (POSIX) and `CrossUserHelperWin` (Windows) implement this.
-pub(crate) trait HelperIO {
+/// Trait for helpers that provide both async reading and sync command sending.
+pub(crate) trait AsyncHelper: Send {
+    fn async_reader(&mut self) -> &mut dyn AsyncHelperReader;
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError>;
-    fn read_response(&mut self) -> Result<serde_json::Value, SessionError>;
 }
 
 #[cfg(unix)]
-impl HelperIO for CrossUserHelper {
-    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
-        self.send_command(cmd)
+impl AsyncHelper for CrossUserHelper {
+    fn async_reader(&mut self) -> &mut dyn AsyncHelperReader {
+        &mut self.async_reader
     }
-    fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
-        self.read_response()
+    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+        CrossUserHelper::send_command(self, cmd)
     }
 }
 
 #[cfg(windows)]
-impl HelperIO for CrossUserHelperWin {
-    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
-        self.send_command(cmd)
+impl AsyncHelper for CrossUserHelperWin {
+    fn async_reader(&mut self) -> &mut dyn AsyncHelperReader {
+        &mut self.async_reader
     }
-    fn read_response(&mut self) -> Result<serde_json::Value, SessionError> {
-        self.read_response()
+    fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+        CrossUserHelperWin::send_command(self, cmd)
     }
 }
 
 /// Execute a subprocess via a CrossUserHelper, returning the result.
 ///
-/// This is the shared core used by both `Session::run_subprocess_via_helper`
-/// and the script runners when a helper is available.
-///
-/// Uses `tokio::task::block_in_place` to avoid blocking the async runtime
-/// during the synchronous helper I/O loop. This requires the multi-thread
-/// tokio runtime (which the crate already depends on via `rt-multi-thread`).
-///
-/// # Cancel safety
-///
-/// The cancel_writer (dup'd fd / DuplicateHandle) and helper.stdin both write
-/// to the same underlying pipe, but cannot race in practice:
-/// - `send_command` completes and flushes before the response loop begins
-/// - The timeout thread only wakes after the configured timeout duration,
-///   long after `send_command` has finished
-/// - `Session::cancel_action` requires `&mut self`, which is exclusively held
-///   by the async method that called `run_via_helper`, preventing concurrent
-///   cancel writes during command submission
-pub(crate) fn run_via_helper(
-    helper: &mut dyn HelperIO,
+/// This is async — the helper stdout is read via `AsyncHelperReader`, allowing
+/// `drive_action`'s select loop to process `ActionMessage`s (progress, status,
+/// env vars) concurrently while the helper runs.
+pub(crate) async fn run_via_helper(
+    helper: &mut dyn AsyncHelper,
     config: &crate::subprocess::SubprocessConfig,
     filter: &mut crate::action_filter::ActionFilter,
     session_id: &str,
     message_tx: tokio::sync::mpsc::UnboundedSender<ActionMessage>,
     cancel_writer: Option<&std::fs::File>,
 ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
-    // Spawn timeout thread if configured — sends cancel via the dup'd stdin fd.
-    // Uses a Condvar so the thread stops immediately when the command completes,
-    // preventing orphaned timeout threads from cancelling subsequent commands.
-    let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let done = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
-    let _timeout_guard = if let (Some(timeout), Some(writer)) = (config.timeout, cancel_writer) {
-        use std::io::Write;
-        let mut writer = writer
-            .try_clone()
-            .map_err(|e| SessionError::Runtime(format!("Failed to clone cancel_writer: {e}")))?;
-        let timed_out = timed_out.clone();
-        let done = done.clone();
-        let cancel_method = config.cancel_method.clone();
-        let handle = std::thread::spawn(move || {
-            let (lock, cvar) = &*done;
-            let guard = lock.lock().unwrap();
-            let (guard, _) = cvar.wait_timeout_while(guard, timeout, |d| !*d).unwrap();
-            if *guard {
-                return;
-            } // command finished before timeout
-            drop(guard);
-            timed_out.store(true, std::sync::atomic::Ordering::Release);
-            let notify_period = match cancel_method {
-                crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
-                    terminate_delay.as_secs()
-                }
-                crate::runner::CancelMethod::Terminate => 0,
-            };
-            if notify_period == 0 {
-                // Immediate kill — no grace period.
-                let cancel_terminate = r#"{"cancel":"TERMINATE"}"#;
-                let _ = writeln!(writer, "{cancel_terminate}");
-                let _ = writer.flush();
-            } else {
-                let cancel_notify = format!(
-                    r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
-                );
-                let _ = writeln!(writer, "{cancel_notify}");
-                let _ = writer.flush();
-                // Grace period — also cancellable
-                let guard = lock.lock().unwrap();
-                let (guard, _) = cvar
-                    .wait_timeout_while(guard, std::time::Duration::from_secs(notify_period), |d| {
-                        !*d
-                    })
-                    .unwrap();
-                if *guard {
-                    return;
-                }
-                drop(guard);
-                let cancel_terminate = r#"{"cancel":"TERMINATE"}"#;
-                let _ = writeln!(writer, "{cancel_terminate}");
-                let _ = writer.flush();
-            }
-        });
-        Some(handle)
-    } else {
-        None
-    };
-
-    // Guard that signals the timeout condvar on any exit path (including ? errors).
-    struct DoneGuard(std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
-    impl Drop for DoneGuard {
-        fn drop(&mut self) {
-            let (lock, cvar) = &*self.0;
-            *lock.lock().unwrap() = true;
-            cvar.notify_one();
-        }
-    }
-    let _done_guard = DoneGuard(done);
-
     // Build the env map (only set values; unsets are excluded).
     let env: serde_json::Map<String, serde_json::Value> = config
         .env_vars
@@ -428,86 +420,135 @@ pub(crate) fn run_via_helper(
         crate::subprocess::format_command_for_log(&config.args)
     );
 
+    // Timeout as async future instead of OS thread
+    let timeout_fut = match config.timeout {
+        Some(d) => {
+            use futures_util::FutureExt;
+            tokio::time::sleep(d).boxed()
+        }
+        None => {
+            use futures_util::FutureExt;
+            futures_util::future::pending::<()>().boxed()
+        }
+    };
+    tokio::pin!(timeout_fut);
+    let mut timed_out = false;
+
     let mut stdout_collected = String::new();
     let mut saw_fail = false;
 
     loop {
-        let resp = helper.read_response()?;
+        tokio::select! {
+            biased;
+            resp = helper.async_reader().next_response() => {
+                let resp = match resp {
+                    None => return Err(SessionError::Runtime(
+                        "Helper process closed stdout unexpectedly".into(),
+                    )),
+                    Some(r) => r?,
+                };
 
-        if let Some(pid) = resp.get("pid").and_then(|v| v.as_i64()) {
-            session_log!(
-                info,
-                session_id,
-                LogContent::PROCESS_CONTROL,
-                "Command started as pid: {}",
-                pid
-            );
-            continue;
-        }
+                if let Some(pid) = resp.get("pid").and_then(|v| v.as_i64()) {
+                    session_log!(
+                        info,
+                        session_id,
+                        LogContent::PROCESS_CONTROL,
+                        "Command started as pid: {}",
+                        pid
+                    );
+                    continue;
+                }
 
-        if let Some(line) = resp.get("out").and_then(|v| v.as_str()) {
-            let line = crate::subprocess::truncate_line(line);
-            let (display, pass_through) = crate::subprocess::process_line(
-                line,
-                filter,
-                session_id,
-                &message_tx,
-                &mut saw_fail,
-            );
-            if pass_through && filter.min_log_level() <= 20 {
-                session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
+                if let Some(line) = resp.get("out").and_then(|v| v.as_str()) {
+                    let line = crate::subprocess::truncate_line(line);
+                    let (display, pass_through) = crate::subprocess::process_line(
+                        line,
+                        filter,
+                        session_id,
+                        &message_tx,
+                        &mut saw_fail,
+                    );
+                    if pass_through && filter.min_log_level() <= 20 {
+                        session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
+                    }
+                    if config.collect_stdout {
+                        stdout_collected.push_str(&display);
+                        stdout_collected.push('\n');
+                    }
+                    continue;
+                }
+
+                if let Some(code) = resp.get("exited").and_then(|v| v.as_i64()) {
+                    let exit_code = code as i32;
+                    session_log!(
+                        info,
+                        session_id,
+                        LogContent::PROCESS_CONTROL,
+                        "Process exit code: {}",
+                        exit_code
+                    );
+
+                    let canceled = config
+                        .cancel_request_rx
+                        .as_ref()
+                        .is_some_and(|rx| rx.has_changed().unwrap_or(false));
+
+                    let state = if canceled {
+                        ActionState::Canceled
+                    } else if timed_out {
+                        ActionState::Timeout
+                    } else if saw_fail {
+                        ActionState::Failed
+                    } else if exit_code == 0 {
+                        ActionState::Success
+                    } else {
+                        ActionState::Failed
+                    };
+                    return Ok(crate::subprocess::SubprocessResult {
+                        state,
+                        exit_code: Some(exit_code),
+                        stdout: stdout_collected,
+                    });
+                }
+
+                if let Some(msg) = resp.get("error").and_then(|v| v.as_str()) {
+                    return Err(SessionError::SubprocessStart {
+                        command: config.args[0].clone(),
+                        source: std::io::Error::other(msg.to_string()),
+                    });
+                }
+
+                return Err(SessionError::Runtime(format!(
+                    "Unexpected helper response: {}",
+                    resp
+                )));
             }
-            if config.collect_stdout {
-                stdout_collected.push_str(&display);
-                stdout_collected.push('\n');
+            _ = &mut timeout_fut, if !timed_out => {
+                timed_out = true;
+                // Send cancel to helper via the cancel_writer
+                if let Some(writer) = cancel_writer {
+                    use std::io::Write;
+                    let mut w = writer.try_clone().map_err(|e| {
+                        SessionError::Runtime(format!("Failed to clone cancel_writer: {e}"))
+                    })?;
+                    let cancel_method = &config.cancel_method;
+                    let notify_period = match cancel_method {
+                        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
+                            terminate_delay.as_secs()
+                        }
+                        crate::runner::CancelMethod::Terminate => 0,
+                    };
+                    if notify_period == 0 {
+                        let _ = writeln!(w, r#"{{"cancel":"TERMINATE"}}"#);
+                    } else {
+                        let _ = writeln!(
+                            w,
+                            r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+                        );
+                    }
+                    let _ = w.flush();
+                }
             }
-            continue;
         }
-
-        if let Some(code) = resp.get("exited").and_then(|v| v.as_i64()) {
-            let exit_code = code as i32;
-            session_log!(
-                info,
-                session_id,
-                LogContent::PROCESS_CONTROL,
-                "Process exit code: {}",
-                exit_code
-            );
-
-            // Check if cancel was requested via the watch channel.
-            let canceled = config
-                .cancel_request_rx
-                .as_ref()
-                .is_some_and(|rx| rx.has_changed().unwrap_or(false));
-
-            let state = if canceled {
-                ActionState::Canceled
-            } else if timed_out.load(std::sync::atomic::Ordering::Acquire) {
-                ActionState::Timeout
-            } else if saw_fail {
-                ActionState::Failed
-            } else if exit_code == 0 {
-                ActionState::Success
-            } else {
-                ActionState::Failed
-            };
-            return Ok(crate::subprocess::SubprocessResult {
-                state,
-                exit_code: Some(exit_code),
-                stdout: stdout_collected,
-            });
-        }
-
-        if let Some(msg) = resp.get("error").and_then(|v| v.as_str()) {
-            return Err(SessionError::SubprocessStart {
-                command: config.args[0].clone(),
-                source: std::io::Error::other(msg.to_string()),
-            });
-        }
-
-        return Err(SessionError::Runtime(format!(
-            "Unexpected helper response: {}",
-            resp
-        )));
     }
 }

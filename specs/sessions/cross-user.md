@@ -52,30 +52,14 @@ cross-user machinery is bypassed — no sudo, no chown, no shell script wrapper.
 
 ## Subprocess Launch
 
-When `SubprocessConfig.user` is set and `!user.is_process_user()`:
-
-1. **Shell script generation**: A wrapper script is written to the session working
-   directory containing env var exports, `cd`, and `exec` of the actual command.
-   This is necessary because `sudo -i` resets the environment.
-
-2. **Launch command**: `sudo -u <user> -i setsid -w <script_path>`
-   - `-u <user>`: run as the target user
-   - `-i`: login shell (loads user's profile)
-   - `setsid -w`: create new process group, wait for child
-   - The script path is the generated wrapper
-
-3. **Process group discovery**: `find_sudo_child_pgid()` finds the actual child's
-   PGID by reading `/proc/<sudo_pid>/task/*/children` (Linux procfs), with a
-   `pgrep -P <sudo_pid>` fallback. Retries for up to 1 second since the child
-   may not appear immediately.
-
-### Why setsid is in the sudo command, not pre_exec
-
-For same-user execution, `setsid` is called in a `pre_exec` hook on the `Command`.
-For cross-user execution, this doesn't work because the `pre_exec` hook runs before
-`sudo` starts — the process group would be created for the sudo process, not the
-actual command. Instead, `setsid -w` is part of the sudo command line, creating the
-process group for the target user's process.
+When `SubprocessConfig.user` is set and `!user.is_process_user()`, subprocess
+launch routes through the embedded cross-user helper (see
+`embedded-cross-user-helper.md`). The helper process is spawned once per session
+via `sudo -u <user> -i /path/to/helper` and persists for the session lifetime.
+Individual actions are dispatched to the helper over its stdin protocol, and the
+helper performs the fork/exec as the target user. This avoids the per-action
+`sudo -i` overhead and keeps the process group local to the helper, which
+simplifies signal delivery (see below).
 
 ## Signal Delivery
 
@@ -86,23 +70,22 @@ its own children.
 
 ### Cross-user signals
 
-The process may not have permission to signal processes owned by another user. The
-fallback chain:
+Cross-user signal delivery is handled entirely by the embedded cross-user helper
+(see `embedded-cross-user-helper.md`), which runs as the target user. The session
+communicates cancel intent via the helper's stdin pipe using the
+`TERMINATE` / `NOTIFY_THEN_TERMINATE` protocol. The helper sends the appropriate
+signal (SIGTERM, SIGKILL) to the child's process group locally — a same-user
+operation that requires no special capabilities.
 
-1. **Direct killpg**: Try `killpg(pgid, signal)`. Works if the process has `CAP_KILL`
-   capability.
-2. **sudo kill**: Fall back to `sudo -u <user> -i kill -s <signal> -- -<pgid>`. The
-   negative PGID with `--` separator ensures `kill` interprets it as a process group.
+### Process hierarchy
 
-### SIGTERM delivery to sudo
+The helper persists for the session lifetime and handles multiple actions
+(envEnter, taskRun, envExit) over its stdin/stdout protocol, avoiding
+per-action `sudo -i` login costs. The resulting process tree is:
 
-For SIGTERM (notify), the signal is sent to the sudo process directly rather than the
-child's process group. Sudo forwards SIGTERM to its child, which is the expected behavior
-for graceful shutdown. This avoids the need to discover the child PGID for the notify
-phase.
-
-For SIGKILL (terminate), the signal must go to the child's process group directly because
-sudo doesn't forward SIGKILL.
+```
+worker-agent → sudo → openjd_helper → script
+```
 
 ## File Ownership
 
@@ -126,29 +109,6 @@ sudo doesn't forward SIGKILL.
 
 The two-phase cleanup is necessary because files created by the cross-user subprocess
 are owned by that user and may not be deletable by the process user.
-
-## CAP_KILL Capability
-
-`capabilities.rs` provides Linux-specific `CAP_KILL` support:
-
-```rust
-pub fn try_use_cap_kill() -> Option<CapKillGuard>;
-
-pub struct CapKillGuard { /* RAII — clears CAP_KILL on drop */ }
-```
-
-When the process has `CAP_KILL` in its permitted set, `try_use_cap_kill()` temporarily
-elevates it to the effective set, returning a guard that clears it on drop. This allows
-direct `killpg()` for cross-user signal delivery without falling back to sudo.
-
-The `caps` crate provides the Linux capability API. On non-Linux platforms, these
-functions are no-ops.
-
-### Why RAII for capability management
-
-Capabilities should be held for the minimum necessary duration (principle of least
-privilege). The guard pattern ensures `CAP_KILL` is cleared even if the caller returns
-early or panics.
 
 ## Windows Support
 
