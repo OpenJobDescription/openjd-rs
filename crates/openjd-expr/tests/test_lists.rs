@@ -3,10 +3,12 @@
 
 //! Tests ported from Python test_lists.py
 
-use openjd_expr::{evaluate_expression, ExprType, ExprValue, PathFormat, RangeExpr, SymbolTable};
+use openjd_expr::{ExprType, ExprValue, ParsedExpression, PathFormat, RangeExpr, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
@@ -35,10 +37,13 @@ fn eval_posix_err(expr: &str, st: &SymbolTable) -> String {
         .to_string()
 }
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -372,7 +377,8 @@ fn list_path_int_fails() {
 }
 #[test]
 fn list_three_level_nesting_fails() {
-    let e = evaluate_expression("[[[1]]]", &SymbolTable::new())
+    let e = ParsedExpression::new("[[[1]]]")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -400,7 +406,9 @@ fn list_single_trailing_comma() {
 fn comp_with_outer_var() {
     let mut st = SymbolTable::new();
     st.set("Base", ExprValue::Int(100)).unwrap();
-    let r = evaluate_expression("[Base + x for x in [1, 2, 3]]", &st).unwrap();
+    let r = ParsedExpression::new("[Base + x for x in [1, 2, 3]]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.list_len(), Some(3));
 }
 
@@ -435,7 +443,9 @@ fn list_concat_range_expr_list() {
         ExprValue::RangeExpr("1-3".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    let r = evaluate_expression("R + [10, 11]", &st).unwrap();
+    let r = ParsedExpression::new("R + [10, 11]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert!(r.list_len().unwrap() >= 4);
 }
 #[test]
@@ -446,7 +456,9 @@ fn list_concat_list_range_expr() {
         ExprValue::RangeExpr("1-3".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    let r = evaluate_expression("[10, 11] + R", &st).unwrap();
+    let r = ParsedExpression::new("[10, 11] + R")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert!(r.list_len().unwrap() >= 4);
 }
 #[test]
@@ -462,7 +474,9 @@ fn list_concat_range_range() {
         ExprValue::RangeExpr("10-12".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    let r = evaluate_expression("R1 + R2", &st).unwrap();
+    let r = ParsedExpression::new("R1 + R2")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert!(r.list_len().unwrap() >= 5);
 }
 #[test]
@@ -906,7 +920,10 @@ fn concat_with_symtab() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("L + [3, 4]", &st).unwrap().list_len(),
+        ParsedExpression::new("L + [3, 4]")
+            .and_then(|p| p.evaluate(&st))
+            .unwrap()
+            .list_len(),
         Some(4)
     );
 }
@@ -1153,7 +1170,8 @@ fn nested_path_string_coerces_values() {
 
 #[test]
 fn three_level_nesting_in_comprehension_fails() {
-    let e = evaluate_expression("[[[x]] for x in [1, 2]]", &SymbolTable::new())
+    let e = ParsedExpression::new("[[[x]] for x in [1, 2]]")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -1177,7 +1195,9 @@ fn comprehension_filter_gt2() {
 fn comprehension_outer_var_values() {
     let mut st = SymbolTable::new();
     st.set("Param.Base", ExprValue::Int(100)).unwrap();
-    let r = evaluate_expression("[Param.Base + i for i in [1, 2, 3]]", &st).unwrap();
+    let r = ParsedExpression::new("[Param.Base + i for i in [1, 2, 3]]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "[101, 102, 103]");
 }
 
@@ -1260,7 +1280,9 @@ fn concat_symtab_range_expr() {
         .unwrap(),
     )
     .unwrap();
-    let r = evaluate_expression("frames + extra", &st).unwrap();
+    let r = ParsedExpression::new("frames + extra")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "[1, 2, 3, 4, 5, 100, 200]");
 }
 
@@ -1513,7 +1535,9 @@ fn coerce_bool_to_string() {
 
 #[test]
 fn mixed_int_bool_error_message() {
-    let e = evaluate_expression("[1, True]", &SymbolTable::new()).unwrap_err();
+    let e = ParsedExpression::new("[1, True]")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err();
     assert!(
         e.message().contains("incompatible types")
             && e.message().contains("int")
@@ -1525,7 +1549,9 @@ fn mixed_int_bool_error_message() {
 
 #[test]
 fn mixed_string_bool_error_message() {
-    let e = evaluate_expression(r#"["a", True]"#, &SymbolTable::new()).unwrap_err();
+    let e = ParsedExpression::new(r#"["a", True]"#)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err();
     assert!(
         e.message().contains("incompatible types")
             && e.message().contains("string")
@@ -1537,7 +1563,9 @@ fn mixed_string_bool_error_message() {
 
 #[test]
 fn three_incompatible_types_lists_all() {
-    let e = evaluate_expression("[1, 2.0, 'a']", &SymbolTable::new()).unwrap_err();
+    let e = ParsedExpression::new("[1, 2.0, 'a']")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err();
     assert!(
         e.message().contains("int")
             && e.message().contains("float")
@@ -1559,10 +1587,10 @@ fn coerce_float_to_int_not_whole_number() {
 #[test]
 fn unique_range_expr_preserves_type() {
     let st = SymbolTable::new();
-    let r = evaluate_expression(
+    let r = ParsedExpression::new(
         r#"unique([range_expr("1-3"), range_expr("4-6"), range_expr("1-3")])"#,
-        &st,
     )
+    .and_then(|p| p.evaluate(&st))
     .unwrap();
     assert_eq!(r.expr_type().to_string(), "list[range_expr]");
     assert_eq!(r.list_len(), Some(2));
@@ -1572,10 +1600,10 @@ fn unique_range_expr_preserves_type() {
 fn unique_range_expr_normalized_duplicates() {
     // "1-3" and "1,2,3" and "3-1:-1" all represent {1,2,3} — unique should deduplicate them
     let st = SymbolTable::new();
-    let r = evaluate_expression(
+    let r = ParsedExpression::new(
         r#"unique([range_expr("1-3"), range_expr("1,2,3"), range_expr("3-1:-1")])"#,
-        &st,
     )
+    .and_then(|p| p.evaluate(&st))
     .unwrap();
     assert_eq!(
         r.list_len(),
@@ -1619,7 +1647,9 @@ fn nested_mixed_list_with_int_target() {
 #[test]
 fn mixed_list_without_target_still_errors() {
     // ["--quality", 5] without target type should still error
-    let e = evaluate_expression(r#"["--quality", 5]"#, &SymbolTable::new()).unwrap_err();
+    let e = ParsedExpression::new(r#"["--quality", 5]"#)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err();
     assert!(
         e.message().contains("incompatible types"),
         "got: {}",

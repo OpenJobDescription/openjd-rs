@@ -165,56 +165,66 @@ impl ParsedExpression {
 
     /// Evaluate this parsed expression against a single symbol table.
     ///
-    /// Convenience shortcut that returns just the value. To also observe
-    /// resource usage, use `parsed.with_*(...).evaluate_with_metrics(...)`
-    /// (or call `evaluate_with_metrics` directly on the builder).
+    /// Convenience shortcut that returns just the value. See
+    /// [`evaluate_with_metrics`](Self::evaluate_with_metrics) to also
+    /// observe resource usage.
     pub fn evaluate(
         &self,
         values: &crate::symbol_table::SymbolTable,
     ) -> Result<crate::value::ExprValue, crate::error::ExpressionError> {
-        EvaluationBuilder::new(self).evaluate(&[values])
+        EvalBuilder::new(self).evaluate(&[values])
     }
 
-    /// Start a configured evaluation using the [`EvaluationBuilder`].
+    /// Evaluate this parsed expression and return the value alongside
+    /// resource-usage metrics.
+    ///
+    /// Convenience shortcut equivalent to
+    /// `parsed.with_*(default).evaluate_with_metrics(&symtabs)` — call this
+    /// when you don't need any `with_*` configuration.
+    pub fn evaluate_with_metrics(
+        &self,
+        symtabs: &[&crate::symbol_table::SymbolTable],
+    ) -> Result<crate::eval::EvalResult, crate::error::ExpressionError> {
+        EvalBuilder::new(self).evaluate_with_metrics(symtabs)
+    }
+
+    /// Start a configured evaluation using the [`EvalBuilder`].
     pub fn with_library<'a>(
         &'a self,
         library: &'a crate::function_library::FunctionLibrary,
-    ) -> EvaluationBuilder<'a> {
-        EvaluationBuilder::new(self).with_library(library)
+    ) -> EvalBuilder<'a> {
+        EvalBuilder::new(self).with_library(library)
     }
 
     /// Start a configured evaluation with a memory limit.
-    pub fn with_memory_limit(&self, limit: usize) -> EvaluationBuilder<'_> {
-        EvaluationBuilder::new(self).with_memory_limit(limit)
+    pub fn with_memory_limit(&self, limit: usize) -> EvalBuilder<'_> {
+        EvalBuilder::new(self).with_memory_limit(limit)
     }
 
     /// Start a configured evaluation with an operation limit.
-    pub fn with_operation_limit(&self, limit: usize) -> EvaluationBuilder<'_> {
-        EvaluationBuilder::new(self).with_operation_limit(limit)
+    pub fn with_operation_limit(&self, limit: usize) -> EvalBuilder<'_> {
+        EvalBuilder::new(self).with_operation_limit(limit)
     }
 
     /// Start a configured evaluation with an explicit path format.
-    pub fn with_path_format(
-        &self,
-        format: crate::path_mapping::PathFormat,
-    ) -> EvaluationBuilder<'_> {
-        EvaluationBuilder::new(self).with_path_format(format)
+    pub fn with_path_format(&self, format: crate::path_mapping::PathFormat) -> EvalBuilder<'_> {
+        EvalBuilder::new(self).with_path_format(format)
     }
 
     /// Start a configured evaluation with a target type for coercion.
     pub fn with_target_type<'a>(
         &'a self,
         target_type: &'a crate::types::ExprType,
-    ) -> EvaluationBuilder<'a> {
-        EvaluationBuilder::new(self).with_target_type(target_type)
+    ) -> EvalBuilder<'a> {
+        EvalBuilder::new(self).with_target_type(target_type)
     }
 
     /// Create an Evaluator pre-configured with this expression's internal
     /// state (keyword renames, source context).
     ///
-    /// Private: called only by [`EvaluationBuilder::build_evaluator`].
+    /// Private: called only by [`EvalBuilder::build_evaluator`].
     /// The public API routes through `with_*(...).evaluate(&symtabs)` on
-    /// `ParsedExpression` / `EvaluationBuilder`.
+    /// `ParsedExpression` / `EvalBuilder`.
     fn evaluator<'a>(
         &'a self,
         symtabs: &'a [&'a crate::symbol_table::SymbolTable],
@@ -264,7 +274,7 @@ impl ParsedExpression {
 /// assert_eq!(value, ExprValue::Int(10));
 /// ```
 #[must_use]
-pub struct EvaluationBuilder<'a> {
+pub struct EvalBuilder<'a> {
     parsed: &'a ParsedExpression,
     library: Option<&'a crate::function_library::FunctionLibrary>,
     memory_limit: Option<usize>,
@@ -273,7 +283,7 @@ pub struct EvaluationBuilder<'a> {
     target_type: Option<&'a crate::types::ExprType>,
 }
 
-impl<'a> EvaluationBuilder<'a> {
+impl<'a> EvalBuilder<'a> {
     fn new(parsed: &'a ParsedExpression) -> Self {
         Self {
             parsed,
@@ -354,10 +364,10 @@ impl<'a> EvaluationBuilder<'a> {
     pub fn evaluate_with_metrics(
         self,
         symtabs: &'a [&'a crate::symbol_table::SymbolTable],
-    ) -> Result<crate::eval::EvaluationResult, crate::error::ExpressionError> {
+    ) -> Result<crate::eval::EvalResult, crate::error::ExpressionError> {
         let mut ev = self.build_evaluator(symtabs);
         let value = ev.evaluate(&self.parsed.ast)?;
-        Ok(crate::eval::EvaluationResult {
+        Ok(crate::eval::EvalResult {
             value,
             peak_memory: ev.peak_memory(),
             operation_count: ev.operation_count(),

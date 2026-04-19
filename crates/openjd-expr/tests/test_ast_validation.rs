@@ -4,10 +4,11 @@
 //! Tests for AST validation — unsupported Python constructs must produce
 //! descriptive error messages matching the Python implementation's quality.
 
-use openjd_expr::{evaluate_expression, SymbolTable};
+use openjd_expr::{ParsedExpression, SymbolTable};
 
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();

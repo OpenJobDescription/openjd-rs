@@ -637,17 +637,39 @@ mod tests {
         // Verify zero nyi — all signatures have real implementations
         let st = crate::SymbolTable::new();
         // Test a representative function from each category
-        assert!(crate::evaluate_expression("1 + 2", &st).is_ok()); // arithmetic
-        assert!(crate::evaluate_expression("'hello'.upper()", &st).is_ok()); // string
-        assert!(crate::evaluate_expression("len([1,2,3])", &st).is_ok()); // list
-        assert!(crate::evaluate_expression("abs(-5)", &st).is_ok()); // math
-        assert!(crate::evaluate_expression("int('42')", &st).is_ok()); // conversion
-        assert!(crate::evaluate_expression("repr_py(42)", &st).is_ok()); // repr
-        assert!(crate::evaluate_expression("1 == 1", &st).is_ok()); // comparison
-        assert!(crate::evaluate_expression("2 in [1,2,3]", &st).is_ok()); // contains
-        assert!(crate::evaluate_expression("[1,2,3][0]", &st).is_ok()); // getitem
-        assert!(crate::evaluate_expression("sorted([3,1,2])", &st).is_ok()); // list functions
-        assert!(crate::evaluate_expression("range(5)", &st).is_ok()); // range
+        assert!(crate::ParsedExpression::new("1 + 2")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // arithmetic
+        assert!(crate::ParsedExpression::new("'hello'.upper()")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // string
+        assert!(crate::ParsedExpression::new("len([1,2,3])")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // list
+        assert!(crate::ParsedExpression::new("abs(-5)")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // math
+        assert!(crate::ParsedExpression::new("int('42')")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // conversion
+        assert!(crate::ParsedExpression::new("repr_py(42)")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // repr
+        assert!(crate::ParsedExpression::new("1 == 1")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // comparison
+        assert!(crate::ParsedExpression::new("2 in [1,2,3]")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // contains
+        assert!(crate::ParsedExpression::new("[1,2,3][0]")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // getitem
+        assert!(crate::ParsedExpression::new("sorted([3,1,2])")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // list functions
+        assert!(crate::ParsedExpression::new("range(5)")
+            .and_then(|p| p.evaluate(&st))
+            .is_ok()); // range
     }
 
     #[test]

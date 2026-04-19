@@ -11,17 +11,24 @@ use openjd_expr::*;
 // ── Helpers ──
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 #[allow(dead_code)]
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 #[allow(dead_code)]
 fn eval_err_with(expr: &str, st: &SymbolTable) -> String {
-    evaluate_expression(expr, st).unwrap_err().to_string()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
+        .to_string()
 }
 
 struct MockCtx;
@@ -590,4 +597,136 @@ fn function_library_is_send_sync_with_closure_impl() {
         |_: &mut dyn EvalContext, _: &[ExprValue]| Ok(ExprValue::Int(0)),
     );
     assert_send_sync(&lib);
+}
+
+// ── End-to-end integration: external crate users registering custom functions ──
+//
+// These tests exercise the full public API path an external crate would use
+// to add a custom function: build a FunctionLibrary, register an
+// `impl Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<_, _>`, and
+// evaluate a ParsedExpression through `with_library(&lib).evaluate(&[&st])`.
+// This is the path our own openjd-model and openjd-sessions use, and what
+// any third-party extension would do.
+
+#[test]
+fn external_custom_fn_evaluates_via_with_library() {
+    fn triple(_: &mut dyn EvalContext, a: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        match &a[0] {
+            ExprValue::Int(n) => Ok(ExprValue::Int(n * 3)),
+            _ => Err(ExpressionError::type_error("triple expects int")),
+        }
+    }
+    // Start from the default library so `+`, literals, etc. still work.
+    let mut lib = default_library::get_default_library().clone();
+    lib.register_sig("triple", "(int) -> int", triple);
+
+    let parsed = ParsedExpression::new("triple(7) + 1").unwrap();
+    let r = parsed
+        .with_library(&lib)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(r, ExprValue::Int(22));
+}
+
+#[test]
+fn external_closure_fn_with_captured_state_evaluates() {
+    // Closure captures a scale factor; verify end-to-end that the captured
+    // state survives through the evaluator, not just a direct lib.call.
+    use std::sync::Arc;
+    let scale: Arc<i64> = Arc::new(10);
+    let scale_cloned = Arc::clone(&scale);
+
+    let mut lib = default_library::get_default_library().clone();
+    lib.register_sig(
+        "scaled",
+        "(int) -> int",
+        move |_ctx: &mut dyn EvalContext, a: &[ExprValue]| match &a[0] {
+            ExprValue::Int(n) => Ok(ExprValue::Int(n * *scale_cloned)),
+            _ => Err(ExpressionError::type_error("scaled expects int")),
+        },
+    );
+
+    let parsed = ParsedExpression::new("scaled(5) + scaled(2)").unwrap();
+    let r = parsed
+        .with_library(&lib)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(r, ExprValue::Int(70));
+    drop(scale); // original Arc drop is safe; lib still holds its clone.
+}
+
+#[test]
+fn external_custom_fn_reads_path_format_from_evalcontext() {
+    use std::sync::{Arc, Mutex};
+    // Confirm that an external function accessing `ctx.path_format()` sees the
+    // value the user configured via `.with_path_format(...)` on the builder.
+    let seen: Arc<Mutex<Option<openjd_expr::PathFormat>>> = Arc::new(Mutex::new(None));
+    let seen_cloned = Arc::clone(&seen);
+
+    let mut lib = default_library::get_default_library().clone();
+    lib.register_sig(
+        "probe",
+        "(int) -> int",
+        move |ctx: &mut dyn EvalContext, a: &[ExprValue]| {
+            *seen_cloned.lock().unwrap() = Some(ctx.path_format());
+            Ok(a[0].clone())
+        },
+    );
+
+    let parsed = ParsedExpression::new("probe(1)").unwrap();
+    let _ = parsed
+        .with_library(&lib)
+        .with_path_format(openjd_expr::PathFormat::Windows)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Some(openjd_expr::PathFormat::Windows)
+    );
+}
+
+#[test]
+fn external_custom_fn_error_propagates_through_evaluator() {
+    fn always_fail(_: &mut dyn EvalContext, _: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        Err(ExpressionError::new("boom"))
+    }
+    let mut lib = default_library::get_default_library().clone();
+    lib.register_sig("always_fail", "(int) -> int", always_fail);
+
+    let parsed = ParsedExpression::new("always_fail(1)").unwrap();
+    let err = parsed
+        .with_library(&lib)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap_err();
+    // Evaluator attaches source + caret to the bare error so the user sees
+    // where the failure occurred in their expression.
+    let msg = err.to_string();
+    assert!(msg.contains("boom"), "missing message: {msg}");
+    assert!(msg.contains("always_fail(1)"), "missing source: {msg}");
+    assert!(msg.contains('^'), "missing caret: {msg}");
+}
+
+#[test]
+fn external_custom_fn_respects_operation_limit_via_count_op() {
+    // An external function that calls `ctx.count_op()` inside a tight loop
+    // gets properly cut off when the user sets a tight operation limit.
+    fn busy_loop(ctx: &mut dyn EvalContext, _: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        for _ in 0..1_000_000 {
+            ctx.count_op()?;
+        }
+        Ok(ExprValue::Int(0))
+    }
+    let mut lib = default_library::get_default_library().clone();
+    lib.register_sig("busy_loop", "(int) -> int", busy_loop);
+
+    let parsed = ParsedExpression::new("busy_loop(0)").unwrap();
+    let err = parsed
+        .with_library(&lib)
+        .with_operation_limit(100)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap_err();
+    assert!(matches!(
+        err.kind(),
+        openjd_expr::ExpressionErrorKind::OperationLimitExceeded
+    ));
 }

@@ -3,21 +3,28 @@
 
 //! Tests ported from Python test_paths.py
 
-use openjd_expr::{evaluate_expression, ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 #[allow(dead_code)]
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 #[allow(dead_code)]
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -25,7 +32,10 @@ fn assert_err(expr: &str, expected: &[&str]) {
 }
 #[allow(dead_code)]
 fn assert_err_with(expr: &str, st: &SymbolTable, expected: &[&str]) {
-    let e = evaluate_expression(expr, st).unwrap_err().to_string();
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
+        .to_string();
     let joined = expected.concat();
     assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
 }

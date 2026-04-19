@@ -5,23 +5,25 @@
 
 use openjd_expr::*;
 
-fn eval_op(expr: &str, limit: usize) -> Result<EvaluationResult, ExpressionError> {
-    evaluate_expression_bounded(expr, &SymbolTable::new(), usize::MAX, limit)
+fn eval_op(expr: &str, limit: usize) -> Result<EvalResult, ExpressionError> {
+    ParsedExpression::new(expr).and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(limit)
+            .evaluate_with_metrics(&[&SymbolTable::new()])
+    })
 }
 
 fn op_count(expr: &str) -> usize {
-    let parsed = ParsedExpression::new(expr).unwrap();
-    parsed
-        .with_memory_limit(DEFAULT_MEMORY_LIMIT)
+    ParsedExpression::new(expr)
+        .unwrap()
         .evaluate_with_metrics(&[&SymbolTable::new()])
         .unwrap()
         .operation_count
 }
 
 fn op_count_with(expr: &str, st: &SymbolTable) -> usize {
-    let parsed = ParsedExpression::new(expr).unwrap();
-    parsed
-        .with_memory_limit(DEFAULT_MEMORY_LIMIT)
+    ParsedExpression::new(expr)
+        .unwrap()
         .evaluate_with_metrics(&[st])
         .unwrap()
         .operation_count
@@ -334,7 +336,9 @@ fn small_comprehension_within_limit() {
 
 #[test]
 fn default_limit_handles_normal() {
-    let r = evaluate_expression("sum(range(100))", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("sum(range(100))")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "4950");
 }
 
@@ -421,19 +425,34 @@ fn nested_comprehension_accumulates() {
 // === Additional operation limit tests ===
 #[test]
 fn constant_has_zero_operations_v2() {
-    let r =
-        evaluate_expression_bounded("42", &SymbolTable::new(), 100_000_000, 10_000_000).unwrap();
+    let r = ParsedExpression::new("42")
+        .and_then(|p| {
+            p.with_memory_limit(100_000_000)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
+        .unwrap();
     assert_eq!(r.operation_count, 0);
 }
 #[test]
 fn single_function_call_is_one_v2() {
-    let r = evaluate_expression_bounded("abs(-5)", &SymbolTable::new(), 100_000_000, 10_000_000)
+    let r = ParsedExpression::new("abs(-5)")
+        .and_then(|p| {
+            p.with_memory_limit(100_000_000)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
         .unwrap();
     assert!(r.operation_count >= 1);
 }
 #[test]
 fn range_counts_call_plus_iterations_v2() {
-    let r = evaluate_expression_bounded("range(5)", &SymbolTable::new(), 100_000_000, 10_000_000)
+    let r = ParsedExpression::new("range(5)")
+        .and_then(|p| {
+            p.with_memory_limit(100_000_000)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
         .unwrap();
     assert!(r.operation_count >= 5);
 }
@@ -618,7 +637,11 @@ fn sorted_exceeds_limit_via_symtab() {
         ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap(),
     )
     .unwrap();
-    let r = evaluate_expression_bounded("sorted(L)", &st, usize::MAX, 100);
+    let r = ParsedExpression::new("sorted(L)").and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(100)
+            .evaluate_with_metrics(&[&st])
+    });
     assert!(
         r.is_err(),
         "sorted(1000 elements) with limit 100 should fail"
@@ -633,7 +656,11 @@ fn unique_exceeds_limit_via_symtab() {
         ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap(),
     )
     .unwrap();
-    let r = evaluate_expression_bounded("unique(L)", &st, usize::MAX, 100);
+    let r = ParsedExpression::new("unique(L)").and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(100)
+            .evaluate_with_metrics(&[&st])
+    });
     assert!(
         r.is_err(),
         "unique(1000 elements) with limit 100 should fail"
@@ -648,7 +675,11 @@ fn min_exceeds_limit_via_symtab() {
         ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap(),
     )
     .unwrap();
-    let r = evaluate_expression_bounded("min(L)", &st, usize::MAX, 100);
+    let r = ParsedExpression::new("min(L)").and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(100)
+            .evaluate_with_metrics(&[&st])
+    });
     assert!(r.is_err(), "min(1000 elements) with limit 100 should fail");
 }
 

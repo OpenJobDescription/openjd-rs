@@ -3,13 +3,12 @@
 
 //! Tests ported from Python test_memory.py — memory-bounded evaluation.
 
-use openjd_expr::{
-    evaluate_expression, evaluate_expression_bounded, ExprValue, SymbolTable,
-    DEFAULT_OPERATION_LIMIT,
-};
+use openjd_expr::{ExprValue, ParsedExpression, SymbolTable, DEFAULT_OPERATION_LIMIT};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 // === TestEvaluateExpressionReturnsExprValue ===
@@ -25,21 +24,30 @@ fn has_type() {
 fn eval_bounded(
     expr: &str,
     mem: usize,
-) -> Result<openjd_expr::EvaluationResult, openjd_expr::ExpressionError> {
-    evaluate_expression_bounded(expr, &SymbolTable::new(), mem, DEFAULT_OPERATION_LIMIT)
+) -> Result<openjd_expr::EvalResult, openjd_expr::ExpressionError> {
+    ParsedExpression::new(expr).and_then(|p| {
+        p.with_memory_limit(mem)
+            .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+            .evaluate_with_metrics(&[&SymbolTable::new()])
+    })
 }
 fn eval_peak(expr: &str) -> usize {
-    evaluate_expression_bounded(
-        expr,
-        &SymbolTable::new(),
-        usize::MAX,
-        DEFAULT_OPERATION_LIMIT,
-    )
-    .unwrap()
-    .peak_memory
+    ParsedExpression::new(expr)
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
+        .unwrap()
+        .peak_memory
 }
 fn eval_peak_with(expr: &str, st: &SymbolTable) -> usize {
-    evaluate_expression_bounded(expr, st, usize::MAX, DEFAULT_OPERATION_LIMIT)
+    ParsedExpression::new(expr)
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[st])
+        })
         .unwrap()
         .peak_memory
 }
@@ -181,13 +189,13 @@ fn peak_memory_for_string() {
 #[test]
 fn intermediate_values_released() {
     // (1+2) + (3+4) should release intermediate results
-    let r = evaluate_expression_bounded(
-        "(1 + 2) + (3 + 4)",
-        &SymbolTable::new(),
-        usize::MAX,
-        DEFAULT_OPERATION_LIMIT,
-    )
-    .unwrap();
+    let r = ParsedExpression::new("(1 + 2) + (3 + 4)")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
+        .unwrap();
     assert_eq!(r.value.to_display_string(), "10");
     assert!(r.peak_memory > 0);
 }
@@ -225,12 +233,14 @@ fn nested_comprehension_releases_inner_lists() {
 
 #[test]
 fn deeply_nested_comprehension_bounded_memory() {
-    let r = evaluate_expression_bounded(
+    let r = ParsedExpression::new(
         "[len([i for i in [len(range(100)) for j in range(100)]]) for k in range(100)]",
-        &SymbolTable::new(),
-        usize::MAX,
-        DEFAULT_OPERATION_LIMIT,
     )
+    .and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+            .evaluate_with_metrics(&[&SymbolTable::new()])
+    })
     .unwrap();
     assert!(r.peak_memory < 1_000_000, "peak_memory={}", r.peak_memory);
 }

@@ -3,14 +3,17 @@
 
 //! Tests for max 2 nesting level validation in make_list.
 
-use openjd_expr::{evaluate_expression, ExprType, ExprValue, SymbolTable};
+use openjd_expr::{ExprType, ExprValue, ParsedExpression, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string()
 }

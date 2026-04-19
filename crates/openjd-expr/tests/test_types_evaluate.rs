@@ -3,20 +3,25 @@
 
 //! Tests ported from Python test_types_evaluate.py
 
-use openjd_expr::{evaluate_expression, ExprValue, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 #[allow(dead_code)]
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -25,7 +30,8 @@ fn assert_err(expr: &str, expected: &[&str]) {
 
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .message()
 }
@@ -76,7 +82,8 @@ fn nested_list_type() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("nested", &st)
+        ParsedExpression::new("nested")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .expr_type()
             .to_string(),

@@ -9,13 +9,17 @@ use openjd_expr::error::ExpressionError;
 use openjd_expr::function_library::EvalContext;
 use openjd_expr::functions::misc::*;
 use openjd_expr::types::ExprType;
-use openjd_expr::{evaluate_expression, ExprValue, PathFormat, RangeExpr, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, RangeExpr, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 fn eval_posix(expr: &str) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
@@ -35,7 +39,8 @@ fn eval_posix_st(expr: &str, st: &SymbolTable) -> ExprValue {
         .unwrap()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();

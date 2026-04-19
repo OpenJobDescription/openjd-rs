@@ -7,7 +7,9 @@ use openjd_expr::*;
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 fn eval_with_host_context(expr: &str) -> ExprValue {
@@ -34,31 +36,45 @@ fn eval_with_host_context_fails(expr: &str) -> bool {
 // === Default library availability ===
 #[test]
 fn path_functions_available_without_host_context() {
-    assert!(evaluate_expression("path('/a/b').name", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("path('/a/b').name")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn string_functions_available() {
-    assert!(evaluate_expression("'hello'.upper()", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("'hello'.upper()")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn math_functions_available() {
-    assert!(evaluate_expression("abs(-5)", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("abs(-5)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn repr_functions_available() {
-    assert!(evaluate_expression("repr_py(42)", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("repr_py(42)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn regex_functions_available() {
-    assert!(evaluate_expression(r"re_search('abc', r'\w+')", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new(r"re_search('abc', r'\w+')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn list_functions_available() {
-    assert!(evaluate_expression("sorted([3, 1, 2])", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("sorted([3, 1, 2])")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn conversion_functions_available() {
-    assert!(evaluate_expression("int('42')", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("int('42')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 
 // === Host context ===
@@ -87,7 +103,8 @@ fn with_host_context_chaining() {
 // === apply_path_mapping availability ===
 #[test]
 fn not_available_without_host_context() {
-    let e = evaluate_expression("apply_path_mapping('/path')", &SymbolTable::new())
+    let e = ParsedExpression::new("apply_path_mapping('/path')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -104,7 +121,8 @@ fn not_available_without_host_context() {
 }
 #[test]
 fn not_available_with_default_library() {
-    let e = evaluate_expression("apply_path_mapping('/path')", &SymbolTable::new())
+    let e = ParsedExpression::new("apply_path_mapping('/path')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -121,7 +139,8 @@ fn available_with_host_context() {
 fn method_syntax_without_host_context() {
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/path".into())).unwrap();
-    let e = evaluate_expression("P.apply_path_mapping()", &st)
+    let e = ParsedExpression::new("P.apply_path_mapping()")
+        .and_then(|p| p.evaluate(&st))
         .unwrap_err()
         .to_string();
     assert!(
@@ -212,30 +231,44 @@ fn no_rules_returns_path_unchanged() {
 #[test]
 fn submission_functions_available() {
     // All non-host functions should work without host context
-    assert!(evaluate_expression("len('hello')", &SymbolTable::new()).is_ok());
-    assert!(evaluate_expression("sorted([3, 1, 2])", &SymbolTable::new()).is_ok());
-    assert!(evaluate_expression("path('/a/b').name", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("len('hello')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
+    assert!(ParsedExpression::new("sorted([3, 1, 2])")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
+    assert!(ParsedExpression::new("path('/a/b').name")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 
 // === Submission context with value assertions (from Python parametrized tests) ===
 #[test]
 fn submission_arithmetic_value() {
-    let r = evaluate_expression("1 + 2", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("1 + 2")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r, ExprValue::Int(3));
 }
 #[test]
 fn submission_min_value() {
-    let r = evaluate_expression("min(5, 3)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("min(5, 3)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r, ExprValue::Int(3));
 }
 #[test]
 fn submission_upper_value() {
-    let r = evaluate_expression("upper('hello')", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("upper('hello')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "HELLO");
 }
 #[test]
 fn submission_len_value() {
-    let r = evaluate_expression("len('test')", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("len('test')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r, ExprValue::Int(4));
 }
 

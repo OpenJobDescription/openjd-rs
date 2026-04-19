@@ -3,10 +3,12 @@
 
 //! Tests ported from Python test_method_coercion.py and test_target_type_propagation.py
 
-use openjd_expr::{evaluate_expression, ExprValue, ParsedExpression, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 fn eval_posix(expr: &str) -> ExprValue {
@@ -81,23 +83,28 @@ fn path_endswith_as_function() {
 }
 #[test]
 fn string_method_on_string_works() {
-    assert!(evaluate_expression("'hello'.upper()", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("'hello'.upper()")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn function_call_coerces_all_args() {
-    assert!(evaluate_expression("startswith('hello', 'hel')", &SymbolTable::new()).is_ok());
+    assert!(ParsedExpression::new("startswith('hello', 'hel')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok());
 }
 #[test]
 fn method_call_coerces_non_receiver() {
-    assert!(evaluate_expression(
-        "'hello world'.replace('world', 'rust')",
-        &SymbolTable::new()
-    )
-    .is_ok());
+    assert!(
+        ParsedExpression::new("'hello world'.replace('world', 'rust')")
+            .and_then(|p| p.evaluate(&SymbolTable::new()))
+            .is_ok()
+    );
 }
 #[test]
 fn int_method_coercion_blocked() {
-    let e = evaluate_expression("(42).upper()", &SymbolTable::new())
+    let e = ParsedExpression::new("(42).upper()")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(

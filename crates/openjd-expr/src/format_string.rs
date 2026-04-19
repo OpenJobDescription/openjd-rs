@@ -662,7 +662,8 @@ mod tests {
     fn validate_catches_empty_regex_pattern() {
         // First verify the expression itself errors
         let st = SymbolTable::new();
-        let result = crate::evaluate_expression("re_replace('hello', '', 'x')", &st);
+        let result = crate::ParsedExpression::new("re_replace('hello', '', 'x')")
+            .and_then(|p| p.evaluate(&st));
         assert!(
             result.is_err(),
             "Direct eval should error, got: {:?}",
@@ -684,14 +685,16 @@ mod tests {
     fn validate_catches_regex_group_ref() {
         let st = SymbolTable::new();
         // Backslash group ref
-        let result = crate::evaluate_expression(r"re_replace('hello', '(h)', r'\1')", &st);
+        let result = crate::ParsedExpression::new(r"re_replace('hello', '(h)', r'\1')")
+            .and_then(|p| p.evaluate(&st));
         assert!(
             result.is_err(),
             "Should reject \\1 group ref, got: {:?}",
             result.map(|v| v.to_display_string())
         );
         // Dollar group ref
-        let result = crate::evaluate_expression("re_replace('hello', '(h)', '$1')", &st);
+        let result = crate::ParsedExpression::new("re_replace('hello', '(h)', '$1')")
+            .and_then(|p| p.evaluate(&st));
         assert!(
             result.is_err(),
             "Should reject $1 group ref, got: {:?}",

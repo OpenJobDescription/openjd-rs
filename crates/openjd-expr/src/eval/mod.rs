@@ -11,5 +11,5 @@ pub(crate) mod evaluator;
 mod parse;
 
 pub(crate) use evaluator::Evaluator;
-pub use evaluator::{EvaluationResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
-pub use parse::{EvaluationBuilder, ParsedExpression};
+pub use evaluator::{EvalResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
+pub use parse::{EvalBuilder, ParsedExpression};

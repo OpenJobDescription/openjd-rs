@@ -189,7 +189,7 @@ fn contains_namespace() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Integration: SymbolTable with evaluate_expression
+// Integration: SymbolTable with ParsedExpression::evaluate
 // ══════════════════════════════════════════════════════════════
 
 #[test]
@@ -199,7 +199,9 @@ fn eval_with_symtab() {
         ("Param.Name", ExprValue::String("test".into())),
     ])
     .unwrap();
-    let r = openjd_expr::evaluate_expression("Param.Frame + 1", &st).unwrap();
+    let r = openjd_expr::ParsedExpression::new("Param.Frame + 1")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "43");
 }
 
@@ -230,7 +232,9 @@ fn eval_with_list() {
         .unwrap(),
     )])
     .unwrap();
-    let r = openjd_expr::evaluate_expression("Items[0] + Items[1]", &st).unwrap();
+    let r = openjd_expr::ParsedExpression::new("Items[0] + Items[1]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "30");
 }
 
@@ -373,7 +377,9 @@ fn symtab_macro_eval() {
         "Param.X" => 10,
         "Param.Y" => 20,
     };
-    let r = openjd_expr::evaluate_expression("Param.X + Param.Y", &st).unwrap();
+    let r = openjd_expr::ParsedExpression::new("Param.X + Param.Y")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "30");
 }
 

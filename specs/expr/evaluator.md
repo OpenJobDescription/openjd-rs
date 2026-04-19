@@ -39,18 +39,18 @@ println!("Operations: {}", result.operation_count);
 ```
 
 Calling any `with_*` method on `ParsedExpression` produces a
-`EvaluationBuilder<'_>` that borrows the parsed expression and captures
+`EvalBuilder<'_>` that borrows the parsed expression and captures
 configuration. Subsequent `with_*` calls chain on the builder. The terminal
 `.evaluate(&symtabs)` takes the symbol tables as an argument and runs the
 internal evaluator; `.evaluate_with_metrics(&symtabs)` additionally returns
-peak memory and operation count in an `EvaluationResult`.
+peak memory and operation count in an `EvalResult`.
 
 Path mapping rules are **not** an evaluator configuration. They are state owned
 by the `apply_path_mapping` implementation, which is a closure registered on the
 function library via [`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
 The evaluator just calls functions; it has no direct awareness of mapping rules.
 
-Builder methods on `EvaluationBuilder` (also available as shortcut
+Builder methods on `EvalBuilder` (also available as shortcut
 methods on `ParsedExpression`):
 
 | Method | Default | Purpose | Notes |
@@ -63,7 +63,7 @@ methods on `ParsedExpression`):
 
 The underlying `Evaluator` struct is crate-private. Keyword renames and
 expression source text for error messages are wired up automatically by
-`EvaluationBuilder` using fields already on `ParsedExpression`, so
+`EvalBuilder` using fields already on `ParsedExpression`, so
 downstream callers never have to set them.
 
 ## Resource Bounding

@@ -10,22 +10,27 @@
 //!   "hello🌍"  — 6 codepoints, 8 UTF-8 bytes (🌍 = U+1F30D, 4 bytes)
 //!   "👨\u{200D}👩\u{200D}👧" — 5 codepoints (ZWJ family emoji, 1 grapheme cluster)
 
-use openjd_expr::{evaluate_expression, ExprValue, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string()
 }
 
 #[allow(dead_code)]
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 
 // === len — codepoint count, not byte count ===

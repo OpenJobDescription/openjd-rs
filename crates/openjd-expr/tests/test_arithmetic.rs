@@ -4,14 +4,18 @@
 //! Tests ported from Python test_arithmetic.py
 
 use openjd_expr::value::Float64;
-use openjd_expr::{evaluate_expression, ExprValue, ExpressionError, SymbolTable};
+use openjd_expr::{ExprValue, ExpressionError, ParsedExpression, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 fn eval_err(expr: &str) -> ExpressionError {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
 }
 
 fn assert_err(expr: &str, expected: &[&str]) {
@@ -21,7 +25,9 @@ fn assert_err(expr: &str, expected: &[&str]) {
 }
 
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 // === TestArithmetic ===

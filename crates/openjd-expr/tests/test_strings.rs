@@ -3,11 +3,13 @@
 
 //! Tests ported from Python test_strings.py
 
-use openjd_expr::{evaluate_expression, ExprValue, ParsedExpression, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 #[allow(dead_code)]
@@ -20,7 +22,8 @@ fn eval_fmt(expr: &str, fmt: PathFormat) -> ExprValue {
 
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string()
 }
@@ -1987,7 +1990,9 @@ fn membership_via_symtab() {
     .unwrap();
     st.set("needle", openjd_expr::ExprValue::String("world".into()))
         .unwrap();
-    let r = openjd_expr::evaluate_expression("needle in haystack", &st).unwrap();
+    let r = openjd_expr::ParsedExpression::new("needle in haystack")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "true");
 }
 
@@ -2373,7 +2378,9 @@ fn pwsh_range_expr_as_list() {
         openjd_expr::ExprValue::RangeExpr("1-3".parse::<openjd_expr::RangeExpr>().unwrap()),
     )
     .unwrap();
-    let r = openjd_expr::evaluate_expression("repr_pwsh(list(Frames))", &st).unwrap();
+    let r = openjd_expr::ParsedExpression::new("repr_pwsh(list(Frames))")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "@(1, 2, 3)");
 }
 

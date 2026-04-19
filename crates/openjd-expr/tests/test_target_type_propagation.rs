@@ -6,7 +6,9 @@
 use openjd_expr::*;
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 
 #[test]
@@ -71,12 +73,16 @@ fn equality_with_string_target() {
 #[test]
 fn subtraction_in_range_context() {
     // range(10 - 5) should work — subtraction result used as range stop
-    let r = evaluate_expression("range(10 - 5)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("range(10 - 5)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.list_len(), Some(5));
 }
 #[test]
 fn floor_division_in_range_context() {
-    let r = evaluate_expression("range(10 // 2)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("range(10 // 2)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.list_len(), Some(5));
 }
 
@@ -89,7 +95,9 @@ fn eval_with_params(expr: &str, params: &[(&str, ExprValue)]) -> ExprValue {
     for (k, v) in params {
         st.set(k, v.clone()).unwrap();
     }
-    evaluate_expression(expr, &st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&st))
+        .unwrap()
 }
 
 #[test]

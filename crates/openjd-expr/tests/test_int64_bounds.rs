@@ -3,22 +3,28 @@
 
 //! Tests ported from Python test_int64_bounds.py
 
-use openjd_expr::{evaluate_expression, ExprValue, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .message()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -51,7 +57,8 @@ fn int64_min_plus_max() {
 // === TestInt64OverflowLiterals ===
 #[test]
 fn positive_literal_overflow() {
-    let e = evaluate_expression("9223372036854775808", &SymbolTable::new())
+    let e = ParsedExpression::new("9223372036854775808")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -199,7 +206,10 @@ fn float_to_int_overflow_message() {
 fn negate_int_min_via_variable() {
     let mut st = SymbolTable::new();
     st.set("x", ExprValue::Int(i64::MIN)).unwrap();
-    let e = evaluate_expression("-x", &st).unwrap_err().to_string();
+    let e = ParsedExpression::new("-x")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("Integer overflow"), "got:\n{e}");
 }
 

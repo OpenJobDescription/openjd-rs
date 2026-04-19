@@ -75,7 +75,7 @@ pub fn evaluate_expression(expr: &str, symtab: &SymbolTable) -> Result<ExprValue
 pub fn evaluate_expression_bounded(
     expr: &str, symtab: &SymbolTable,
     memory_limit: usize, operation_limit: usize,
-) -> Result<EvaluationResult, ExpressionError>;
+) -> Result<EvalResult, ExpressionError>;
 ```
 
 For more control, parse once and evaluate with a builder:
@@ -91,7 +91,7 @@ parsed.local_bindings    // {}
 // `ParsedExpression` is immutable — it represents a pure parsed AST plus
 // metadata. Resource-usage metrics (peak memory, operation count) come
 // back from evaluation via `evaluate_with_metrics(&symtabs)`, which
-// returns an `EvaluationResult { value, peak_memory, operation_count }`.
+// returns an `EvalResult { value, peak_memory, operation_count }`.
 
 // Simple evaluation (single symbol table, default config)
 let value = parsed.evaluate(&symtab)?;
@@ -106,7 +106,7 @@ let value = parsed
 ```
 
 `ParsedExpression::new` parses once and exposes symbol/function metadata for validation.
-Any `with_*` call produces a `EvaluationBuilder` that captures configuration and
+Any `with_*` call produces a `EvalBuilder` that captures configuration and
 defers symbol-table binding until its terminal `.evaluate(&symtabs)` (or
 `.evaluate_with_metrics(&symtabs)`). This covers the use cases that the Python
 implementation handles via optional keyword arguments on `ParsedExpression.evaluate()`
@@ -131,8 +131,8 @@ and further extensions such as incremental re-evaluation when a subset of inputs
 | `Float64` | f64 wrapper preserving original string representation |
 | `SymbolTable` | Hierarchical variable bindings with dotted paths |
 | `ParsedExpression` | Parsed AST with metadata, builder for evaluation |
-| `EvaluationBuilder` | Chained configuration for a `ParsedExpression`'s evaluation |
-| `EvaluationResult` | Value + peak_memory + operation_count |
+| `EvalBuilder` | Chained configuration for a `ParsedExpression`'s evaluation |
+| `EvalResult` | Value + peak_memory + operation_count |
 | `FormatString` | `{{...}}` interpolation with serde integration |
 | `FunctionLibrary` | Signature-based multiple dispatch registry |
 | `FunctionEntry` | Single overload: signature + fn pointer |

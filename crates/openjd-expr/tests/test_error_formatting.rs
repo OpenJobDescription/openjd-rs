@@ -9,13 +9,17 @@
 use openjd_expr::*;
 
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string()
 }
 
 fn eval_err_with(expr: &str, st: &SymbolTable) -> String {
-    evaluate_expression(expr, st).unwrap_err().to_string()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
+        .to_string()
 }
 
 fn assert_err(expr: &str, expected: &[&str]) {
@@ -248,7 +252,8 @@ fn undefined_variable_with_suggestion() {
         openjd_expr::ExprValue::String("forest".into()),
     )
     .unwrap();
-    let result = openjd_expr::evaluate_expression("Param.Frane + 1", &st);
+    let result =
+        openjd_expr::ParsedExpression::new("Param.Frane + 1").and_then(|p| p.evaluate(&st));
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("Did you mean: Param.Frame"),
@@ -261,7 +266,8 @@ fn undefined_variable_no_suggestion_when_distant() {
     let mut st = openjd_expr::SymbolTable::new();
     st.set("Param.Frame", openjd_expr::ExprValue::Int(1))
         .unwrap();
-    let result = openjd_expr::evaluate_expression("CompletelyWrong + 1", &st);
+    let result =
+        openjd_expr::ParsedExpression::new("CompletelyWrong + 1").and_then(|p| p.evaluate(&st));
     let err = result.unwrap_err().to_string();
     assert!(
         !err.contains("Did you mean"),
@@ -684,20 +690,25 @@ fn multiline_error_shows_correct_line() {
 
 #[test]
 fn multiline_addition() {
-    let r = evaluate_expression("(\n  1 +\n  2 +\n  3\n)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("(\n  1 +\n  2 +\n  3\n)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "6");
 }
 
 #[test]
 fn multiline_comparison() {
-    let r = evaluate_expression("(\n  1 <\n  2\n)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("(\n  1 <\n  2\n)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "true");
 }
 
 #[test]
 fn multiline_three_lines() {
-    let r =
-        evaluate_expression("(\n  'hello' +\n  ' ' +\n  'world'\n)", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("(\n  'hello' +\n  ' ' +\n  'world'\n)")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "hello world");
 }
 
@@ -765,19 +776,25 @@ fn error_on_first_line_multiline() {
 
 #[test]
 fn multiline_addition_works() {
-    let r = evaluate_expression("1 +\n2", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("1 +\n2")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "3");
 }
 
 #[test]
 fn multiline_comparison_works() {
-    let r = evaluate_expression("1 <\n2", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("1 <\n2")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "true");
 }
 
 #[test]
 fn multiline_three_lines_works() {
-    let r = evaluate_expression("1 +\n2 +\n3", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("1 +\n2 +\n3")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert_eq!(r.to_display_string(), "6");
 }
 
@@ -786,11 +803,15 @@ fn multiline_three_lines_works() {
 // ══════════════════════════════════════════════════════════════
 
 fn eval_err_obj(expr: &str) -> ExpressionError {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
 }
 
 fn eval_err_obj_with(expr: &str, st: &SymbolTable) -> ExpressionError {
-    evaluate_expression(expr, st).unwrap_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
 }
 
 #[test]
@@ -1132,7 +1153,9 @@ Expected integer in '1-xx,5'
 fn range_expr_parse_error_has_parse_error_kind() {
     // Previously these all came through ExpressionError::new (Other kind),
     // losing programmatic classification. Now they carry ParseError kind.
-    let err = evaluate_expression("range_expr('1-xx,5')", &SymbolTable::new()).unwrap_err();
+    let err = ParsedExpression::new("range_expr('1-xx,5')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err();
     assert!(
         matches!(err.kind(), ExpressionErrorKind::ParseError(_)),
         "expected ParseError kind, got {:?}",

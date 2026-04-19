@@ -3,17 +3,22 @@
 
 //! Tests ported from Python test_range_expr.py
 
-use openjd_expr::{evaluate_expression, ExprValue, RangeExpr, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, RangeExpr, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -163,7 +168,9 @@ fn range_expr_sum() {
 // === Additional range_expr tests ===
 #[test]
 fn range_expr_from_list_v2() {
-    let r = evaluate_expression("range_expr([1, 2, 3])", &SymbolTable::new()).unwrap();
+    let r = ParsedExpression::new("range_expr([1, 2, 3])")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap();
     assert!(matches!(r, ExprValue::RangeExpr(_)));
 }
 #[test]
@@ -175,7 +182,8 @@ fn range_expr_min_v2() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("min(R)", &st)
+        ParsedExpression::new("min(R)")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "3"
@@ -190,7 +198,8 @@ fn range_expr_max_v2() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("max(R)", &st)
+        ParsedExpression::new("max(R)")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "7"
@@ -204,7 +213,9 @@ fn range_expr_sum_v2() {
         ExprValue::RangeExpr("1-3".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    let r = evaluate_expression("sum(R)", &st).unwrap();
+    let r = ParsedExpression::new("sum(R)")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "6");
 }
 

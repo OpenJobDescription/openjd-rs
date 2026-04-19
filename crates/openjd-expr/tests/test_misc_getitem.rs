@@ -4,23 +4,31 @@
 //! Coverage tests for getitem operators in functions/misc.rs:
 //! getitem_list, getitem_string, getitem_range
 
-use openjd_expr::{evaluate_expression, ExprValue, RangeExpr, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, RangeExpr, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
     assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
 }
 fn assert_err_with(expr: &str, st: &SymbolTable, expected: &[&str]) {
-    let e = evaluate_expression(expr, st).unwrap_err().to_string();
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
+        .to_string();
     let joined = expected.concat();
     assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
 }

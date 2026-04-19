@@ -3,14 +3,18 @@
 
 //! Tests ported from Python test_comparison.py
 
-use openjd_expr::{evaluate_expression, ExprValue, ParsedExpression, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
@@ -24,14 +28,18 @@ fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
 
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .message()
 }
 
 #[allow(dead_code)]
 fn eval_err_with(expr: &str, st: &SymbolTable) -> String {
-    evaluate_expression(expr, st).unwrap_err().message()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap_err()
+        .message()
 }
 
 // === TestComparison ===
@@ -313,7 +321,8 @@ fn string_lt_path() {
 // === TestCrossTypeOrderingErrors ===
 #[test]
 fn string_lt_int_errors() {
-    let e = evaluate_expression("\"5\" < 5", &SymbolTable::new())
+    let e = ParsedExpression::new("\"5\" < 5")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -330,7 +339,8 @@ fn string_lt_int_errors() {
 }
 #[test]
 fn string_gt_int_errors() {
-    let e = evaluate_expression("\"abc\" > 123", &SymbolTable::new())
+    let e = ParsedExpression::new("\"abc\" > 123")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -347,7 +357,8 @@ fn string_gt_int_errors() {
 }
 #[test]
 fn bool_lt_int_errors() {
-    let e = evaluate_expression("True < 0", &SymbolTable::new())
+    let e = ParsedExpression::new("True < 0")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -373,7 +384,8 @@ fn bool_ordering() {
 
 #[test]
 fn int_lt_string_errors() {
-    let e = evaluate_expression("5 < \"5\"", &SymbolTable::new())
+    let e = ParsedExpression::new("5 < \"5\"")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(
@@ -390,7 +402,8 @@ fn int_lt_string_errors() {
 }
 #[test]
 fn float_gt_string_errors() {
-    let e = evaluate_expression("3.14 > \"pi\"", &SymbolTable::new())
+    let e = ParsedExpression::new("3.14 > \"pi\"")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     assert!(

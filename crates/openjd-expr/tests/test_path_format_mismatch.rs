@@ -34,7 +34,9 @@ fn evaluator_defaults_to_host_format() {
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::new_path("/tmp/render.exr", host))
         .unwrap();
-    let r = evaluate_expression("P", &st).unwrap();
+    let r = ParsedExpression::new("P")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.as_str_repr(), expected);
 }
 

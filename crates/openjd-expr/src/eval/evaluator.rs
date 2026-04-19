@@ -45,7 +45,7 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
 /// Result of expression evaluation.
 #[derive(Debug)]
-pub struct EvaluationResult {
+pub struct EvalResult {
     pub value: ExprValue,
     pub peak_memory: usize,
     pub operation_count: usize,
@@ -61,7 +61,7 @@ pub struct EvaluationResult {
 ///
 /// `Evaluator` is crate-private. The public API exposes equivalent builder
 /// methods on [`ParsedExpression`](super::ParsedExpression) that return a
-/// [`EvaluationBuilder`](super::EvaluationBuilder), e.g.
+/// [`EvalBuilder`](super::EvalBuilder), e.g.
 ///
 /// ```
 /// use openjd_expr::{ParsedExpression, SymbolTable, PathFormat, ExprValue};

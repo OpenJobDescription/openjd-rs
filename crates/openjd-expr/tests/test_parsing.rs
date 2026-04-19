@@ -3,24 +3,32 @@
 
 //! Tests ported from Python test_parsing.py
 
-use openjd_expr::{evaluate_expression, ExprValue, ParsedExpression, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 #[allow(dead_code)]
 fn eval_ok(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_ok()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_ok()
 }
 
 #[allow(dead_code)]
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 fn parse_ok(expr: &str) -> bool {
     ParsedExpression::new(expr).is_ok()
@@ -31,13 +39,15 @@ fn parse_fails(expr: &str) -> bool {
     ParsedExpression::new(expr).is_err()
 }
 fn eval_err_msg(expr: &str) -> String {
-    evaluate_expression(expr, &SymbolTable::new())
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .message()
 }
 
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();

@@ -5,8 +5,12 @@
 
 use openjd_expr::*;
 
-fn eval_bounded(expr: &str, mem: usize, ops: usize) -> Result<EvaluationResult, ExpressionError> {
-    evaluate_expression_bounded(expr, &SymbolTable::new(), mem, ops)
+fn eval_bounded(expr: &str, mem: usize, ops: usize) -> Result<EvalResult, ExpressionError> {
+    ParsedExpression::new(expr).and_then(|p| {
+        p.with_memory_limit(mem)
+            .with_operation_limit(ops)
+            .evaluate_with_metrics(&[&SymbolTable::new()])
+    })
 }
 
 /// Assert that a bounded evaluation produces an exact 3-line error message.

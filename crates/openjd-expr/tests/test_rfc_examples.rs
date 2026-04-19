@@ -3,13 +3,17 @@
 
 //! Tests ported from Python test_rfc_examples.py
 
-use openjd_expr::{evaluate_expression, ExprValue, PathFormat, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_with(expr: &str, st: &SymbolTable) -> ExprValue {
-    evaluate_expression(expr, st).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(st))
+        .unwrap()
 }
 
 // Basic RFC examples
@@ -89,27 +93,32 @@ fn rfc_repr_sh_list() {
 fn rfc_gpu_flag_true() {
     let mut st = SymbolTable::new();
     st.set("UseGPU", ExprValue::Bool(true)).unwrap();
-    let r = evaluate_expression("'--gpu' if UseGPU else ''", &st).unwrap();
+    let r = ParsedExpression::new("'--gpu' if UseGPU else ''")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "--gpu");
 }
 #[test]
 fn rfc_gpu_flag_false() {
     let mut st = SymbolTable::new();
     st.set("UseGPU", ExprValue::Bool(false)).unwrap();
-    let r = evaluate_expression("'--gpu' if UseGPU else ''", &st).unwrap();
+    let r = ParsedExpression::new("'--gpu' if UseGPU else ''")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "");
 }
 #[test]
 fn rfc_quality_list() {
     let mut st = SymbolTable::new();
     st.set("Quality", ExprValue::String("high".into())).unwrap();
-    let r = evaluate_expression("'--quality ' + Quality", &st).unwrap();
+    let r = ParsedExpression::new("'--quality ' + Quality")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(r.to_display_string(), "--quality high");
 }
 
 // Helper for evaluating with a specific path format
 fn eval_with_path_format(expr: &str, st: &SymbolTable, fmt: PathFormat) -> ExprValue {
-    use openjd_expr::ParsedExpression;
     let parsed = ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
     parsed.with_path_format(fmt).evaluate(&symtabs).unwrap()

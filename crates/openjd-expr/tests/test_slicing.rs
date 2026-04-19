@@ -3,16 +3,21 @@
 
 //! Tests ported from Python test_slicing.py
 
-use openjd_expr::{evaluate_expression, ExprType, ExprValue, PathFormat, RangeExpr, SymbolTable};
+use openjd_expr::{ExprType, ExprValue, ParsedExpression, PathFormat, RangeExpr, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
-    evaluate_expression(expr, &SymbolTable::new()).unwrap()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap()
 }
 fn eval_fails(expr: &str) -> bool {
-    evaluate_expression(expr, &SymbolTable::new()).is_err()
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .is_err()
 }
 fn assert_err(expr: &str, expected: &[&str]) {
-    let e = evaluate_expression(expr, &SymbolTable::new())
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err()
         .to_string();
     let joined = expected.concat();
@@ -116,7 +121,8 @@ fn slice_with_var() {
     let mut st = SymbolTable::new();
     st.set("N", ExprValue::Int(2)).unwrap();
     assert_eq!(
-        evaluate_expression("[10, 20, 30, 40, 50][:N]", &st)
+        ParsedExpression::new("[10, 20, 30, 40, 50][:N]")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "[10, 20]"
@@ -199,7 +205,10 @@ fn slice_with_variable_bounds() {
     st.set("S", ExprValue::Int(1)).unwrap();
     st.set("E", ExprValue::Int(3)).unwrap();
     assert_eq!(
-        evaluate_expression("L[S:E]", &st).unwrap().list_len(),
+        ParsedExpression::new("L[S:E]")
+            .and_then(|p| p.evaluate(&st))
+            .unwrap()
+            .list_len(),
         Some(2)
     );
 }
@@ -303,7 +312,9 @@ fn range_basic_slice() {
     )
     .unwrap();
     assert!(matches!(
-        evaluate_expression("R[1:3]", &st).unwrap(),
+        ParsedExpression::new("R[1:3]")
+            .and_then(|p| p.evaluate(&st))
+            .unwrap(),
         ExprValue::RangeExpr(_)
     ));
 }
@@ -316,7 +327,9 @@ fn range_slice_with_step() {
     )
     .unwrap();
     assert!(matches!(
-        evaluate_expression("R[::2]", &st).unwrap(),
+        ParsedExpression::new("R[::2]")
+            .and_then(|p| p.evaluate(&st))
+            .unwrap(),
         ExprValue::RangeExpr(_)
     ));
 }
@@ -328,7 +341,10 @@ fn range_slice_reverse() {
         ExprValue::RangeExpr("1-5".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    assert!(evaluate_expression("R[::-1]", &st).unwrap().is_list());
+    assert!(ParsedExpression::new("R[::-1]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap()
+        .is_list());
 }
 #[test]
 fn slice_negative_indices() {
@@ -350,7 +366,8 @@ fn slice_large_range_no_materialization() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("R[0:3]", &st)
+        ParsedExpression::new("R[0:3]")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "1-3"
@@ -366,7 +383,8 @@ fn slice_large_range_reverse_tail() {
     )
     .unwrap();
     assert_eq!(
-        evaluate_expression("R[-3:]", &st)
+        ParsedExpression::new("R[-3:]")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "999999998-1000000000"
@@ -381,7 +399,9 @@ fn slice_large_range_returns_range_expr() {
         ExprValue::RangeExpr("1-1000000000".parse::<RangeExpr>().unwrap()),
     )
     .unwrap();
-    let result = evaluate_expression("R[0:3]", &st).unwrap();
+    let result = ParsedExpression::new("R[0:3]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert!(matches!(result, ExprValue::RangeExpr(_)));
 }
 
@@ -444,7 +464,8 @@ fn slice_with_start_end_vars() {
     st.set("start", ExprValue::Int(1)).unwrap();
     st.set("end", ExprValue::Int(4)).unwrap();
     assert_eq!(
-        evaluate_expression("[1, 2, 3, 4, 5][start:end]", &st)
+        ParsedExpression::new("[1, 2, 3, 4, 5][start:end]")
+            .and_then(|p| p.evaluate(&st))
             .unwrap()
             .to_display_string(),
         "[2, 3, 4]"

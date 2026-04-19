@@ -235,13 +235,8 @@ fn local_nested_comprehension() {
 #[test]
 fn parsed_evaluate_basic() {
     let parsed = ParsedExpression::new("1 + 2").unwrap();
-    let metrics = parsed
-        .with_memory_limit(openjd_expr::DEFAULT_MEMORY_LIMIT)
-        .evaluate_with_metrics(&[&SymbolTable::new()])
-        .unwrap();
-    assert_eq!(metrics.value.to_display_string(), "3");
-    assert!(metrics.peak_memory > 0);
-    assert!(metrics.operation_count > 0);
+    let value = parsed.evaluate(&SymbolTable::new()).unwrap();
+    assert_eq!(value.to_display_string(), "3");
 }
 
 #[test]
@@ -251,6 +246,47 @@ fn parsed_evaluate_with_symtab() {
     let parsed = ParsedExpression::new("X + Y").unwrap();
     let result = parsed.evaluate(&st).unwrap();
     assert_eq!(result.to_display_string(), "30");
+}
+
+// === ParsedExpression::evaluate_with_metrics shortcut ===
+
+#[test]
+fn parsed_evaluate_with_metrics_returns_value_and_metrics() {
+    // No `with_*` config needed — this shortcut runs with defaults.
+    let parsed = ParsedExpression::new("1 + 2").unwrap();
+    let r = parsed
+        .evaluate_with_metrics(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "3");
+    assert!(
+        r.peak_memory > 0,
+        "peak_memory should be > 0, got {}",
+        r.peak_memory
+    );
+    assert!(
+        r.operation_count > 0,
+        "operation_count should be > 0, got {}",
+        r.operation_count
+    );
+}
+
+#[test]
+fn parsed_evaluate_with_metrics_multi_symtab() {
+    // Multiple stacked symbol tables resolve in order, same as the builder.
+    let base = SymbolTable::from_pairs(vec![("X", ExprValue::Int(10))]).unwrap();
+    let overlay = SymbolTable::from_pairs(vec![("Y", ExprValue::Int(20))]).unwrap();
+    let parsed = ParsedExpression::new("X + Y").unwrap();
+    let r = parsed.evaluate_with_metrics(&[&base, &overlay]).unwrap();
+    assert_eq!(r.value.to_display_string(), "30");
+}
+
+#[test]
+fn parsed_evaluate_with_metrics_propagates_error() {
+    let parsed = ParsedExpression::new("fail('boom')").unwrap();
+    let err = parsed
+        .evaluate_with_metrics(&[&SymbolTable::new()])
+        .unwrap_err();
+    assert!(err.to_string().contains("boom"), "got: {err}");
 }
 
 // === Additional parse_expression tests ===
@@ -402,7 +438,9 @@ fn func_and_method_combined_exact() {
 fn evaluate_expression_with_dict_values() {
     let st =
         SymbolTable::from_pairs(vec![("X", ExprValue::Int(1)), ("Y", ExprValue::Int(2))]).unwrap();
-    let result = openjd_expr::evaluate_expression("X + Y", &st).unwrap();
+    let result = openjd_expr::ParsedExpression::new("X + Y")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap();
     assert_eq!(result.to_display_string(), "3");
 }
 
