@@ -1,47 +1,47 @@
 # Validation Pipeline
 
-The `template::validate_v2023_09` module (crate-private) implements a multi-pass validation
-pipeline that runs after serde deserialization. It validates semantic constraints that serde
-can't express. The module lives inside `template/` because validation is a template concern,
-and is version-scoped to `v2023_09` because validation rules are specific to a spec revision.
+The `template::validate_v2023_09` module implements a multi-pass validation pipeline that
+runs after serde deserialization. It validates semantic constraints that serde can't express.
+The module lives inside `template/` because validation is a template concern, and is
+version-scoped to `v2023_09` because validation rules are specific to a spec revision.
 
 ## Entry Points
 
 ```rust
-// Called by decode_job_template
 pub(crate) fn validate_job_template(
     jt: &JobTemplate,
     ctx: &ValidationContext,
 ) -> Result<(), OpenJdError>
 
-// Called by decode_environment_template
 pub(crate) fn validate_environment_template(
     et: &EnvironmentTemplate,
     ctx: &ValidationContext,
 ) -> Result<(), OpenJdError>
 ```
 
+Both functions are crate-private — external callers use `decode_job_template` and
+`decode_environment_template`, which call these internally.
+
 Both functions compute `EffectiveLimits` and `EffectiveRules` from the context, run all
 applicable passes, and return accumulated errors as `OpenJdError::ModelValidation`.
 
 ## Pass Architecture
 
-Passes run sequentially. Each pass receives the template and the computed limits/rules,
-and appends errors to a shared `ValidationErrors` collector. All passes run regardless
-of earlier errors (no short-circuiting), so users see all problems at once.
+The validation pipeline is passes 5–9 of the overall decode pipeline (passes 1–4 are in
+the `parse` module — see [parsing.md](parsing.md)). Passes run sequentially. Each pass
+receives the template and the computed limits/rules, and appends errors to a shared
+`ValidationErrors` collector. All passes run regardless of earlier errors (no
+short-circuiting), so users see all problems at once.
 
 | Pass | File | Purpose |
 |------|------|---------|
-| 2 | `limits.rs` | Enforce numeric limits (name lengths, counts); FEATURE_BUNDLE_1 raises many limits |
-| 3 | `structure.rs` | Structural validation (uniqueness, required fields, dependencies) |
-| 4 | `feature_bundle_1.rs` | Gate FEATURE_BUNDLE_1 features (simple actions, endOfLine) |
-| 5 | `format_strings.rs` | Validate format string variable references; adapts scopes and expression complexity based on EXPR |
-| 6 | `task_chunking.rs` | Gate TASK_CHUNKING features (ChunkInt parameters) |
+| 5 | `limits.rs` | Enforce numeric limits (name lengths, counts); FEATURE_BUNDLE_1 raises many limits |
+| 6 | `structure.rs` | Structural validation (uniqueness, required fields, dependencies) |
+| 7 | `feature_bundle_1.rs` | Gate FEATURE_BUNDLE_1 features (simple actions, endOfLine) |
+| 8 | `format_strings.rs` | Validate format string variable references; adapts scopes and expression complexity based on EXPR |
+| 9 | `task_chunking.rs` | Gate TASK_CHUNKING features (ChunkInt parameters) |
 
-Passes are numbered starting at 2 because Pass 0 (YAML/JSON parsing) and Pass 1
-(version dispatch + serde deserialization) happen in the `parse` module.
-
-## Pass 2: Limits Enforcement
+## Pass 5: Limits Enforcement
 
 Walks the template tree checking every name length, list count, and string length against
 `EffectiveLimits`. Pure numeric checks with no extension branching.
@@ -53,9 +53,9 @@ Checks include:
 - Step name lengths vs `max_step_name_len`
 - Embedded file name/filename lengths
 - Task parameter name lengths
-- Environment name lengths
+- Environment name lengths vs `max_env_name_len`
 
-## Pass 3: Structural Validation
+## Pass 6: Structural Validation
 
 The largest pass. Validates template structure using `EffectiveRules`. Key checks:
 
@@ -80,7 +80,8 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Must have `script` or exactly one simple action field (mutually exclusive)
 - Dependencies: no self-dependency, target must exist, no duplicates
 - Host requirements: amounts/attributes validation, capability name patterns,
-  reserved scope checks, standard capability value validation
+  reserved scope checks (reserved scopes: `worker`, `job`, `step`, `task`),
+  standard capability value validation
 - Parameter space: ≤16 task parameters, no duplicate names, type allowed,
   range validation per type, combination expression validation
 - Script actions: command non-empty, length limits, `Task.File.*` references
@@ -89,14 +90,15 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
   data required, filename no path separators
 
 **Cycle detection:**
-- Kahn's algorithm on step dependency graph
+- Iterative DFS with tri-state marking (Unvisited/Started/Completed) on the step
+  dependency graph
 
 **Combination expression validation:**
 - Character allowlist, balanced parentheses, tokenization
 - All referenced parameters must exist and appear exactly once
 - All defined parameters must appear in the expression
 
-## Pass 4: FEATURE_BUNDLE_1 Gating
+## Pass 7: FEATURE_BUNDLE_1 Gating
 
 Validates or rejects features gated behind `FEATURE_BUNDLE_1`:
 
@@ -105,7 +107,7 @@ Validates or rejects features gated behind `FEATURE_BUNDLE_1`:
 - **`endOfLine` on embedded files**: Rejected without extension; must be `LF`, `CRLF`, or
   `AUTO` when enabled
 
-## Pass 5: Format String Validation
+## Pass 8: Format String Validation
 
 The most complex pass. Validates that all format string references resolve to defined
 variables by building scope-appropriate symbol tables.
@@ -139,7 +141,9 @@ Let bindings are validated with these rules:
 - No shadowing of enclosing scope names
 - No self-references (checked via regex on non-string-literal portions)
 - Expression parsed and type-checked; result type added to symtab for subsequent bindings
-- On error, added as `unresolved(ANY)` to prevent cascading errors
+- On error, the binding is added as `unresolved(ANY)` to the symbol table to prevent
+  cascading type errors in subsequent bindings that reference it. (The `unresolved(ANY)`
+  type is from the `openjd-expr` type system — see `specs/expr/type-system.md`.)
 
 ### Function Libraries
 
@@ -147,7 +151,7 @@ Two libraries control available functions in expressions:
 - **`default_lib`** — Template-scope expressions (no host functions)
 - **`host_lib`** — `default_lib.with_host_context()` for task/session-scope expressions
 
-## Pass 6: TASK_CHUNKING Gating
+## Pass 9: TASK_CHUNKING Gating
 
 Validates or rejects features gated behind `TASK_CHUNKING`:
 
@@ -176,9 +180,11 @@ and error formatting.
 
 | Constant | Values |
 |----------|--------|
-| `STANDARD_AMOUNT_CAPABILITIES` | `worker.vcpu`, `worker.memory`, `worker.gpu`, `worker.gpu.memory`, `worker.disk.scratch` |
-| `STANDARD_ATTRIBUTE_CAPABILITIES` | `worker.os.family`, `worker.cpu.arch` |
+| `STANDARD_AMOUNT_CAPABILITIES` | `amount.worker.vcpu`, `amount.worker.memory`, `amount.worker.gpu`, `amount.worker.gpu.memory`, `amount.worker.disk.scratch` |
+| `STANDARD_ATTRIBUTE_CAPABILITIES` | `attr.worker.os.family`, `attr.worker.cpu.arch` |
 | `RESERVED_SCOPES` | `worker`, `job`, `step`, `task` |
+
+Note: Standard capability names include their `amount.` or `attr.` prefix.
 
 ### Utility Functions
 

@@ -41,20 +41,22 @@ pub enum DecodedTemplate {
 }
 ```
 
-## Pipeline Phases
+## Decode Pipeline
 
-Decoding proceeds through five phases:
+The `decode_*` functions run passes 1–9 of the template processing pipeline. Passes 1–4
+live in the `parse` module; passes 5–9 live in the `validate_v2023_09` module (see
+[validation.md](validation.md)).
 
-### Phase 1: Raw Parsing
+### Pass 1: Raw Parsing
 
 `document_string_to_object` parses a raw string into a `serde_yaml::Value` tree. The
-`DocumentType` parameter selects JSON or YAML parsing. This phase catches syntax errors
+`DocumentType` parameter selects JSON or YAML parsing. This pass catches syntax errors
 (malformed YAML, invalid JSON).
 
-Callers typically handle this phase themselves — the `decode_*` functions accept a
+Callers typically handle this pass themselves — the `decode_*` functions accept a
 pre-parsed `serde_yaml::Value`.
 
-### Phase 2: Version Dispatch
+### Pass 2: Version Dispatch
 
 The `specificationVersion` field is read from the value tree and mapped to a
 `TemplateSpecificationVersion` enum:
@@ -68,7 +70,7 @@ Unrecognized versions produce `OpenJdError::UnsupportedSchema`.
 
 `decode_template` auto-detects the template type from this field.
 
-### Phase 3: Serde Deserialization
+### Pass 3: Serde Deserialization
 
 The value tree is deserialized into the appropriate struct via `serde_yaml::from_value`.
 All template types use `#[serde(deny_unknown_fields)]`, so unexpected fields produce errors.
@@ -83,7 +85,7 @@ Custom deserializers handle:
 - **`FlexInt`/`FlexFloat`** — Accepts multiple YAML value representations
 - **`BoolValue`** — Accepts boolean, numeric, and string representations
 
-### Phase 4: Extension Resolution
+### Pass 4: Extension Resolution
 
 Each extension the template requests (via its `extensions` field) must be present in the
 caller's `supported_extensions` list. If a requested extension is not supported, decoding
@@ -93,13 +95,13 @@ defaults to an empty set — no extensions are supported.
 The resulting extension set is stored in a `ValidationContext`.
 
 > **Empty extensions list asymmetry:** For environment templates, an empty `extensions: []`
-> list is caught during parsing (Phase 4) and produces an immediate `DecodeValidation` error.
-> For job templates, the same check is deferred to structural validation (Pass 3 in the
-> validation pipeline). Both produce equivalent errors, but the detection point differs
-> because the job template validation pipeline handles this as part of its accumulated
-> error reporting, while the environment template parser checks it eagerly.
+> list is caught during pass 4 and produces an immediate `DecodeValidation` error.
+> For job templates, the same check is deferred to pass 6 (structural validation). Both
+> produce equivalent errors, but the detection point differs because the job template
+> validation pipeline handles this as part of its accumulated error reporting, while the
+> environment template parser checks it eagerly.
 
-### Phase 5: Validation
+### Passes 5–9: Validation
 
 The deserialized template is passed through the multi-pass validation pipeline
 (see [validation.md](validation.md)). Validation errors are accumulated and returned
@@ -114,7 +116,7 @@ The decode functions accept `serde_yaml::Value` rather than `&str` because:
 1. Callers may need to inspect the raw value tree before decoding (e.g., to read
    `specificationVersion` for routing)
 2. The same value tree can be used for both JSON and YAML sources
-3. It separates syntax parsing (Phase 1) from semantic decoding (Phases 2–5)
+3. It separates syntax parsing (pass 1) from semantic decoding (passes 2–9)
 
 ### Comparison with Python
 

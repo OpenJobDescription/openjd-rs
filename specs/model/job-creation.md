@@ -11,7 +11,7 @@ workflow: templates + user-provided parameter values → a `job::Job` ready for 
 pub fn merge_job_parameter_definitions(
     job_template: &JobTemplate,
     environment_templates: &[EnvironmentTemplate],
-) -> Result<Vec<MergedParameter>, OpenJdError>
+) -> Result<Vec<MergedParameterDefinition>, OpenJdError>
 ```
 
 Merges parameter definitions from environment templates (processed in order) then the job
@@ -23,8 +23,8 @@ installation to provide, while the job template defines that parameter's default
 the software the job needs. The merge rules accommodate this and similar use cases where
 multiple templates collaborate on the same parameters.
 
-Returns a list of `MergedParameter` entries, each containing the merged definition and its
-source template.
+Returns a list of `MergedParameterDefinition` entries, each containing the merged definition
+and its source template.
 
 **Merge rules:**
 - All definitions of the same parameter must have the same type
@@ -43,13 +43,23 @@ pub fn preprocess_job_parameters(
     job_template: &JobTemplate,
     input_values: &JobParameterInputValues,
     environment_templates: &[EnvironmentTemplate],
-    job_template_dir: &Path,
-    current_working_dir: &Path,
-    allow_walk_up: bool,
+    path_options: &PathParameterOptions<'_>,
 ) -> Result<JobParameterValues, OpenJdError>
 ```
 
 Validates and coerces user-provided parameter values against merged definitions.
+
+`PathParameterOptions` consolidates path-related options:
+
+```rust
+pub struct PathParameterOptions<'a> {
+    pub job_template_dir: &'a Path,
+    pub current_working_dir: &'a Path,
+    pub allow_template_dir_walk_up: bool,
+    pub path_format: PathFormat,
+    pub allow_uri_path_values: bool,
+}
+```
 
 **Pipeline:**
 1. Merge parameter definitions from all templates
@@ -65,7 +75,7 @@ Validates and coerces user-provided parameter values against merged definitions.
 - User-provided relative paths joined to `current_working_dir`
 - Default relative paths joined to `job_template_dir`
 - URI paths (`s3://`, `https://`) preserved as-is when EXPR extension is enabled
-- `allow_walk_up` controls whether paths can traverse above `job_template_dir`
+- `allow_template_dir_walk_up` controls whether paths can traverse above `job_template_dir`
 
 **Value coercion:**
 - `coerce_from_str` — Parses string input (CLI): numeric parsing, boolean aliases
@@ -78,11 +88,13 @@ Validates and coerces user-provided parameter values against merged definitions.
 ```rust
 pub fn build_symbol_table(
     params: &JobParameterValues,
-) -> SymbolTable
+) -> Result<SymbolTable, OpenJdError>
 ```
 
 Builds a `SymbolTable` with `Param.*` and `RawParam.*` entries from processed parameter
-values. PATH types are stored as `Unresolved(PATH)` since the source path format may differ
+values. Returns `Result` because symbol table insertion can fail.
+
+PATH types are stored as `Unresolved(PATH)` since the source path format may differ
 from the host path format — the value must be preserved exactly as a string until path
 mapping is applied at session time. `RawParam.*` for PATH types is forced to STRING.
 
@@ -92,11 +104,12 @@ mapping is applied at session time. `RawParam.*` for PATH types is forced to STR
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
-    environment_templates: &[EnvironmentTemplate],
 ) -> Result<job::Job, OpenJdError>
 ```
 
-Full template instantiation pipeline:
+Full template instantiation pipeline. Takes 2 arguments — environment templates should
+already be merged into `job_parameter_values` via `preprocess_job_parameters` before
+calling this function.
 
 1. Build symbol table from parameter values
 2. Resolve template-scope fields:
@@ -114,14 +127,14 @@ Full template instantiation pipeline:
 ### convert_environment
 
 ```rust
-pub fn convert_environment(
-    env: &template::Environment,
-    symtab: &SymbolTable,
-) -> Result<job::Environment, OpenJdError>
+pub fn convert_environment(env: &template::Environment) -> job::Environment
 ```
 
-Converts a template environment to a resolved job environment. Environment variables and
-script fields remain as FormatString (session-scope).
+Converts a template environment to a resolved job environment. Takes 1 argument and is
+infallible. Environment variables and script fields remain as FormatString (session-scope).
+
+A separate `convert_environment_with_symtab` function accepts an optional `&SymbolTable`
+to filter the symbol table to only symbols referenced by the environment's format strings.
 
 ### evaluate_let_bindings
 
@@ -129,13 +142,17 @@ script fields remain as FormatString (session-scope).
 pub fn evaluate_let_bindings(
     bindings: &[String],
     symtab: &SymbolTable,
-    library: &FunctionLibrary,
+    library: Option<&FunctionLibrary>,
+    path_format: PathFormat,
 ) -> Result<SymbolTable, OpenJdError>
 ```
 
 Evaluates `"name = expression"` bindings sequentially. Each binding sees the results of
 all prior bindings in the same block. Returns a new symbol table with the binding results
 added.
+
+The `library` parameter is optional (pass `None` for template-scope bindings that don't
+need host functions). `path_format` controls path construction behavior.
 
 ## Design Decisions
 

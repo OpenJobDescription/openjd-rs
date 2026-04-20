@@ -61,15 +61,21 @@ pub struct ValidationError {
 Accumulator for collecting multiple validation errors:
 
 ```rust
+#[derive(Default)]
+pub struct ValidationErrors {
+    pub errors: Vec<ValidationError>,
+}
+
 impl ValidationErrors {
-    pub fn new() -> Self
-    pub fn add(&mut self, path: Vec<PathElement>, message: String)
+    pub fn add(&mut self, path: &[PathElement], msg: impl Into<String>)
     pub fn is_empty(&self) -> bool
     pub fn len(&self) -> usize
     pub fn into_result(self, model_name: &str) -> Result<(), OpenJdError>
     pub fn format(&self, model_name: &str) -> String
 }
 ```
+
+There is no `new()` constructor; use `ValidationErrors::default()` instead.
 
 `into_result` converts the accumulated errors into `Ok(())` if empty, or
 `Err(OpenJdError::ModelValidation(...))` with all errors formatted.
@@ -89,12 +95,17 @@ Errors are formatted to match Pydantic's output format for consistency with the 
 implementation:
 
 ```
-steps[0] -> script -> actions -> onRun -> command
+N validation error(s) for ModelName
+steps[0] -> script -> actions -> onRun -> command:
 	Format string references undefined variable 'Param.Foo'
 ```
 
-The path is rendered as `field[index] -> field -> field`, with the message indented
-below. This format is important because:
+The count line uses singular "error" when N=1 and plural "errors" otherwise, matching
+Python Pydantic's behavior.
+
+The path is rendered as `field[index] -> field -> field`, where `PathElement::Index`
+attaches to the preceding field (e.g., `steps[0]` rather than `steps -> [0]`). The
+message is indented below with a tab character. This format is important because:
 
 1. Users familiar with the Python library see consistent error messages
 2. Tooling that parses error output works with both implementations

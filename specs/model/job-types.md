@@ -30,11 +30,14 @@ pub struct Job {
     pub name: String,                                    // Resolved from FormatString
     pub description: Option<String>,
     pub extensions: Option<Vec<String>>,
-    pub parameters: HashMap<String, JobParameter>,
+    pub parameters: IndexMap<String, JobParameter>,      // Insertion-ordered
     pub steps: Vec<Step>,
     pub job_environments: Option<Vec<Environment>>,
 }
 ```
+
+`parameters` uses `IndexMap` (not `HashMap`) to preserve insertion order for deterministic
+output.
 
 ### JobParameter
 
@@ -47,9 +50,11 @@ pub struct JobParameter {
 ```
 
 Stores the final typed value as an `ExprValue` (from `openjd-expr`), preserving the full
-type information. PATH values are stored as `ExprValue::String` at this stage because the
-source path format may differ from the host path format — the value must be preserved
-exactly as a string until path mapping is applied at session time.
+type information. PATH values are stored as `ExprValue::String` because the source path
+format may differ from the host path format. During the TEMPLATE scope, `Param.X` is not
+accessible for PATH types — only `RawParam.X` is available (as a string). Later, in
+SESSION and TASK scope, the session applies path mapping rules and `Param.X` becomes
+available as `ExprValue::Path`.
 
 ### Step
 
@@ -62,7 +67,7 @@ pub struct Step {
     pub parameter_space: Option<StepParameterSpace>,
     pub host_requirements: Option<HostRequirements>,
     pub dependencies: Option<Vec<StepDependency>>,
-    pub resolved_symtab: Option<SymbolTable>,
+    pub resolved_symtab: Option<SerializedSymbolTable>,
 }
 ```
 
@@ -70,9 +75,11 @@ pub struct Step {
 `RawParam.*`, non-PATH `Param.*` values, `Job.Name`, `Step.Name`, and step-level let
 bindings. PATH-typed `Param.*` entries and any `apply_path_mapping` results are excluded
 because path mapping rules aren't available until session time. The session layers these
-plus `Session.*` and `Task.*` values on top at runtime. Serialized as `resolvedSymTab` in a
-Python-compatible transport format (`[{"name": str, "value": ..., "type": str}]`) for
-cross-host transfer.
+plus `Session.*` and `Task.*` values on top at runtime.
+
+The type is `SerializedSymbolTable` (not `SymbolTable`) — a wire-format type serialized as
+`[{"name": str, "value": ..., "type": str}]` for cross-host transfer in a Python-compatible
+format.
 
 ### StepScript, StepActions, Action
 
@@ -106,6 +113,7 @@ pub struct Environment {
     pub description: Option<String>,
     pub script: Option<EnvironmentScript>,
     pub variables: Option<HashMap<String, FormatString>>,  // Session-scope
+    pub resolved_symtab: Option<SerializedSymbolTable>,
 }
 
 pub struct EnvironmentScript {
@@ -120,32 +128,49 @@ pub struct EnvironmentActions {
 }
 ```
 
+`resolved_symtab` on `Environment` contains a filtered symbol table with only the symbols
+referenced by this environment's format strings (variables, actions, embedded files, let
+bindings).
+
 ### EmbeddedFile, CancelationMode
 
 ```rust
 pub struct EmbeddedFile {
     pub name: String,
-    pub file_type: String,
+    pub file_type: FileType,                             // Typed enum, not String
     pub filename: Option<FormatString>,                  // Session/task-scope
     pub data: Option<FormatString>,                      // Session/task-scope
     pub runnable: Option<bool>,
-    pub end_of_line: Option<String>,
-}
-
-pub struct CancelationMode {
-    pub mode: Option<String>,
-    pub notify_period_in_seconds: Option<FormatString>,
+    pub end_of_line: Option<EndOfLine>,                  // Typed enum, not String
 }
 ```
+
+`file_type` is `FileType` (an enum) and `end_of_line` is `Option<EndOfLine>` (an enum),
+not raw strings.
+
+```rust
+pub enum CancelationMode {
+    Terminate,
+    NotifyThenTerminate {
+        notify_period_in_seconds: Option<FormatString>,
+    },
+}
+```
+
+`CancelationMode` is an enum (same pattern as the template side), serialized with
+`#[serde(tag = "mode", rename_all = "SCREAMING_SNAKE_CASE")]`.
 
 ### StepParameterSpace
 
 ```rust
 pub struct StepParameterSpace {
-    pub task_parameter_definitions: HashMap<String, TaskParameter>,
+    pub task_parameter_definitions: IndexMap<String, TaskParameter>,  // Insertion-ordered
     pub combination: Option<String>,
 }
 ```
+
+`task_parameter_definitions` uses `IndexMap` (not `HashMap`) to preserve definition order,
+which matters for the default product combination.
 
 ### TaskParameter
 
@@ -214,10 +239,12 @@ pub struct StepDependency {
 
 | Template Type | Job Type | Key Differences |
 |--------------|----------|----------------|
-| `template::JobTemplate` | `job::Job` | `name` is `String` not `FormatString`; parameters carry resolved values |
-| `template::StepTemplate` | `job::Step` | `name` resolved; `host_requirements` values resolved; carries `resolved_symtab` |
+| `template::JobTemplate` | `job::Job` | `name` is `String` not `FormatString`; parameters carry resolved values; `parameters` is `IndexMap` |
+| `template::StepTemplate` | `job::Step` | `name` resolved; `host_requirements` values resolved; carries `resolved_symtab: Option<SerializedSymbolTable>` |
 | `template::StepScript` | `job::StepScript` | Structurally identical; action fields remain `FormatString` |
-| `template::Environment` | `job::Environment` | `variables` values remain `FormatString` (session-scope) |
+| `template::Environment` | `job::Environment` | `variables` values remain `FormatString` (session-scope); adds `resolved_symtab` |
 | `template::HostRequirements` | `job::HostRequirements` | `min`/`max` are `f64`; `any_of`/`all_of` are `Vec<String>` |
-| `template::StepParameterSpaceDefinition` | `job::StepParameterSpace` | Ranges resolved to concrete values; definitions keyed by name |
+| `template::EmbeddedFile` | `job::EmbeddedFile` | `file_type` is `FileType` enum; `end_of_line` is `Option<EndOfLine>` enum |
+| `template::CancelationMode` | `job::CancelationMode` | Both are enums with `Terminate` and `NotifyThenTerminate` variants |
+| `template::StepParameterSpaceDefinition` | `job::StepParameterSpace` | Ranges resolved to concrete values; definitions keyed by name in `IndexMap` |
 | `template::TaskParameterDefinition` | `job::TaskParameter` | Enum with resolved ranges and optional chunks |

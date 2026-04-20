@@ -19,14 +19,12 @@ openjd-cli ──► openjd-sessions ──► openjd-model ──► openjd-exp
 ```
 src/
 ├── lib.rs                    # Public API re-exports
-├── parse.rs                  # YAML/JSON decoding, version dispatch
 ├── error.rs                  # OpenJdError, ValidationErrors, PathElement
 ├── types.rs                  # Shared types: ValidationContext, parameter types, limits, rules
-├── create_job.rs             # Job creation pipeline
-├── step_param_space.rs       # Lazy parameter space iteration
-├── step_dependency_graph.rs  # Step dependency graph
+├── capabilities.rs           # Standard capability constants and validation functions
 ├── template/                 # Unresolved template types (phase 1)
 │   ├── mod.rs
+│   ├── parse.rs              # YAML/JSON decoding, version dispatch
 │   ├── job_template.rs       # JobTemplate (§1.1)
 │   ├── environment_template.rs # EnvironmentTemplate (§1.2)
 │   ├── parameters.rs         # Job parameter definitions (§2.1-2.4)
@@ -46,7 +44,14 @@ src/
 │       ├── task_chunking.rs  # Pass 6: TASK_CHUNKING gating
 │       └── helpers.rs        # Shared regex patterns, constants, utilities
 └── job/                      # Instantiated job types (phase 2)
-    └── mod.rs                # Job, Step, StepScript, Environment, etc.
+    ├── mod.rs                # Job, Step, StepScript, Environment, etc.
+    ├── create_job/           # Job creation pipeline
+    │   ├── mod.rs            # create_job() entry point
+    │   ├── parameters.rs     # Parameter merging, preprocessing, symbol table
+    │   ├── instantiate.rs    # Template → job type conversion
+    │   └── ranges.rs         # Range expression evaluation
+    ├── step_param_space.rs   # Lazy parameter space iteration
+    └── step_dependency_graph.rs # Step dependency graph
 ```
 
 ## Public API Surface
@@ -67,8 +72,15 @@ The crate re-exports a curated public API from `lib.rs`:
 - `StepParameterSpaceIterator` — Lazy parameter space iteration
 - `StepDependencyGraph` — Step dependency graph
 - `TaskParameterDefinition` — Task parameter definition (from template module)
-- Everything from `types` module (re-exported via `pub use types::*`)
+- `MergedParameterDefinition` — Merged parameter from multiple templates
+- `PathParameterOptions` — Options for PATH parameter resolution
 - `FormatString`, `SymbolTable` — Re-exported from `openjd-expr`
+- `format_string`, `symbol_table` — Modules re-exported wholesale from `openjd-expr`
+- From `types` module: `DataFlow`, `EndOfLine`, `Extensions`, `FileType`,
+  `JobParameterInputValues`, `JobParameterType`, `JobParameterValue`, `JobParameterValues`,
+  `KnownExtension`, `ObjectType`, `SpecificationRevision`, `TaskParameterSet`,
+  `TaskParameterType`, `TaskParameterValue`, `TemplateSpecificationVersion`,
+  `ValidationContext`
 
 **Error types:**
 - `OpenJdError` — Primary error enum
@@ -130,5 +142,6 @@ for users and tooling that parse error output.
 ### Re-exports from openjd-expr
 
 `FormatString` and `SymbolTable` are re-exported because they appear in the public API
-(in `job::*` types and function signatures). Consumers of `openjd-model` shouldn't need
-to depend on `openjd-expr` directly for common operations.
+(in `job::*` types and function signatures). The `format_string` and `symbol_table` modules
+are also re-exported wholesale so consumers of `openjd-model` don't need to depend on
+`openjd-expr` directly for common operations.

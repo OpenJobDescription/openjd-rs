@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pass 3: Structural validation.
+//! Pass 6: Structural validation.
 //!
 //! Validates template structure using EffectiveRules. Never calls has_extension().
 
@@ -1028,7 +1028,7 @@ fn validate_task_param_range(
                 }
             }
         }
-        TaskParameterDefinition::ChunkInt(tp) => match &tp.range {
+        TaskParameterDefinition::CHUNK_INT(tp) => match &tp.range {
             IntRange::List(items) => {
                 if items.is_empty() {
                     errors.add(

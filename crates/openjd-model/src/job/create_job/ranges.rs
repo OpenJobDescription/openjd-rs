@@ -101,7 +101,7 @@ fn resolve_task_parameter(
             let range = resolve_string_range(&p.range, symtab, p.name.as_str(), true, limits)?;
             Ok(job::TaskParameter::Path { range })
         }
-        template::TaskParameterDefinition::ChunkInt(p) => {
+        template::TaskParameterDefinition::CHUNK_INT(p) => {
             let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits)?;
             let default_task_count = match &p.chunks.default_task_count {
                 template::IntOrFormatString::Int(n) => (*n).max(1) as usize,

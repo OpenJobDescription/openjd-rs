@@ -7,7 +7,8 @@ template) and task parameters (values that vary per task within a step's paramet
 
 ### JobParameterType Enum
 
-Maps to the `type` field in `parameterDefinitions` (§2):
+Maps to the `type` field in `parameterDefinitions` (§2). Variants use PascalCase (Rust
+convention) with `as_spec_str()` returning the wire-format name:
 
 | Variant | Spec Name | Extension | ExprType |
 |---------|-----------|-----------|----------|
@@ -33,36 +34,37 @@ Methods:
 
 Discriminated union deserialized from the `type` field with a custom `Deserialize` impl
 that performs case-insensitive type matching and strips the `type` field before delegating
-to variant-specific deserialization.
+to variant-specific deserialization. Variant names use SCREAMING_SNAKE_CASE to match the
+serde tag values (e.g., `STRING`, `INT`, `LIST_STRING`).
 
 Base type variants (§2.1–2.4):
 
 | Variant | Key Constraints |
 |---------|----------------|
-| `String` | `allowedValues`, `minLength`, `maxLength`, `userInterface` (LINE_EDIT, MULTILINE_EDIT, DROPDOWN_LIST, CHECK_BOX, HIDDEN) |
-| `Int` | `allowedValues` (NullableVec<FlexInt>), `minValue`, `maxValue`, `userInterface` (SPIN_BOX, DROPDOWN_LIST, HIDDEN) |
-| `Float` | `allowedValues` (NullableVec<FlexFloat>), `minValue`, `maxValue`, `userInterface` (SPIN_BOX with decimals, DROPDOWN_LIST, HIDDEN) |
-| `Path` | `allowedValues`, `minLength`, `maxLength`, `objectType` (FILE/DIRECTORY), `dataFlow` (NONE/IN/OUT/INOUT), `userInterface` (CHOOSE_INPUT_FILE, CHOOSE_OUTPUT_FILE, CHOOSE_DIRECTORY, DROPDOWN_LIST, HIDDEN) with `fileFilters` |
+| `STRING` | `allowedValues`, `minLength`, `maxLength`, `userInterface` (LINE_EDIT, MULTILINE_EDIT, DROPDOWN_LIST, CHECK_BOX, HIDDEN) |
+| `INT` | `allowedValues` (NullableVec<FlexInt>), `minValue`, `maxValue`, `userInterface` (SPIN_BOX, DROPDOWN_LIST, HIDDEN) |
+| `FLOAT` | `allowedValues` (NullableVec<FlexFloat>), `minValue`, `maxValue`, `userInterface` (SPIN_BOX with decimals, DROPDOWN_LIST, HIDDEN) |
+| `PATH` | `allowedValues`, `minLength`, `maxLength`, `objectType` (FILE/DIRECTORY), `dataFlow` (NONE/IN/OUT/INOUT), `userInterface` (CHOOSE_INPUT_FILE, CHOOSE_OUTPUT_FILE, CHOOSE_DIRECTORY, DROPDOWN_LIST, HIDDEN) with `fileFilters` |
 
 EXPR extension variants (§2.9–2.16):
 
 | Variant | Key Constraints |
 |---------|----------------|
-| `Bool` | `default` (BoolValue) |
-| `RangeExpr` | `default`, `minLength`, `maxLength` |
-| `ListString` | `default`, `minLength`, `maxLength`, `item` constraints |
-| `ListPath` | `default`, `objectType`, `dataFlow`, `minLength`, `maxLength`, `item` constraints |
-| `ListInt` | `default`, `minLength`, `maxLength`, `item` constraints (allowedValues, min/maxValue) |
-| `ListFloat` | `default`, `minLength`, `maxLength`, `item` constraints |
-| `ListBool` | `default`, `minLength`, `maxLength` |
-| `ListListInt` | `default`, `minLength`, `maxLength`, nested `item` constraints |
+| `BOOL` | `default` (BoolValue) |
+| `RANGE_EXPR` | `default`, `minLength`, `maxLength` |
+| `LIST_STRING` | `default`, `minLength`, `maxLength`, `item` constraints |
+| `LIST_PATH` | `default`, `objectType`, `dataFlow`, `minLength`, `maxLength`, `item` constraints |
+| `LIST_INT` | `default`, `minLength`, `maxLength`, `item` constraints (allowedValues, min/maxValue) |
+| `LIST_FLOAT` | `default`, `minLength`, `maxLength`, `item` constraints |
+| `LIST_BOOL` | `default`, `minLength`, `maxLength` |
+| `LIST_LIST_INT` | `default`, `minLength`, `maxLength`, nested `item` constraints |
 
 Common methods on all variants:
 - `name() -> &str`
 - `job_param_type() -> JobParameterType`
-- `default_value() -> Option<&ExprValue>` (or equivalent)
-- `check_constraints(&ExprValue) -> Result<()>` — Runtime value validation
-- `validate_definition(&EffectiveLimits) -> Result<()>` — Template-level consistency
+- `default_value() -> Option<String>` — Returns the default as a string representation
+- `check_constraints(&ExprValue) -> Result<(), String>` — Runtime value validation
+- `validate_definition(&EffectiveLimits) -> Result<(), Vec<String>>` — Template-level consistency (accumulates errors)
 
 ### Constraint Checking vs Definition Validation
 
@@ -84,6 +86,8 @@ These are two distinct operations:
 ## Task Parameter Types
 
 ### TaskParameterType Enum
+
+Variants use PascalCase (Rust convention):
 
 | Variant | Spec Name | Extension |
 |---------|-----------|----------|
@@ -174,15 +178,27 @@ Numeric limits derived from context. FEATURE_BUNDLE_1 raises many limits:
 | `max_identifier_len` | 64 | 512 |
 | `max_job_name_len` | 128 | 512 |
 | `max_step_name_len` | 64 | 512 |
+| `max_env_name_len` | 64 | 512 |
 | `max_param_count` | 50 | 200 |
+| `max_filename_len` | 64 | 256 |
+| `max_task_param_range_len` | 1024 | 1024 |
+| `max_task_param_string_len` | 1024 | 1024 |
+| `max_job_param_string_len` | 1024 | 1024 |
+| `max_command_len` | 1024 | 1024 |
+| `max_description_len` | 2048 | 2048 |
 
 ### EffectiveRules
 
-Structural rules derived from context. The EXPR extension enables:
-- Additional parameter types (Bool, RangeExpr, List*)
-- Complex expression syntax in format strings
-- Additional scopes: `Step.Name` and `Job.Name` in step scripts, `Step.Name` in step environment scripts
-- Format strings in numeric fields (host requirement amounts, timeouts)
+Structural rules derived from context:
 
-Scope lists (`step_script_scopes`, `env_script_scopes`, etc.) control which variable
-scopes are available in different template contexts.
+```rust
+pub struct EffectiveRules {
+    pub allowed_job_param_types: HashSet<JobParameterType>,
+    pub allowed_task_param_types: HashSet<TaskParameterType>,
+    pub allow_fmtstring_in_numeric_fields: bool,
+}
+```
+
+The EXPR extension adds `Bool`, `RangeExpr`, and `List*` types to `allowed_job_param_types`.
+The TASK_CHUNKING extension adds `ChunkInt` to `allowed_task_param_types`.
+FEATURE_BUNDLE_1 sets `allow_fmtstring_in_numeric_fields` to `true`.

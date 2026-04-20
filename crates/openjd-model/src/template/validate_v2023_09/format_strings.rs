@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pass 5: Format string validation.
+//! Pass 8: Format string validation.
 //!
 //! Validates all format string references resolve to defined variables by
 //! building scope-appropriate symbol tables and evaluating expressions against
@@ -191,7 +191,7 @@ fn build_task_scope_symtab(
         for tp in &ps.task_parameter_definitions {
             let tp_type = match tp {
                 TaskParameterDefinition::INT(_) => ExprType::INT,
-                TaskParameterDefinition::ChunkInt(_) => ExprType::RANGE_EXPR,
+                TaskParameterDefinition::CHUNK_INT(_) => ExprType::RANGE_EXPR,
                 TaskParameterDefinition::FLOAT(_) => ExprType::FLOAT,
                 TaskParameterDefinition::STRING(_) => ExprType::STRING,
                 TaskParameterDefinition::PATH(_) => ExprType::PATH,
@@ -518,7 +518,7 @@ pub fn validate_format_strings(
                             }
                         }
                     }
-                    TaskParameterDefinition::ChunkInt(t) => {
+                    TaskParameterDefinition::CHUNK_INT(t) => {
                         if let crate::template::IntRange::Expression(expr) = &t.range {
                             validate_fs(
                                 expr,

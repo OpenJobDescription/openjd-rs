@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pass 2: Enforce limits.
+//! Pass 5: Enforce limits.
 //!
 //! Walks the template and checks every name length, list count, and string length
 //! against `EffectiveLimits`. No extension checks — just enforces computed limits.

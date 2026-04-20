@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pass 4: FEATURE_BUNDLE_1 — validate or reject.
+//! Pass 7: FEATURE_BUNDLE_1 — validate or reject.
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;

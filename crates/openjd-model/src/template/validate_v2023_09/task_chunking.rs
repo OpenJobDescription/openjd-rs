@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Pass 6: TASK_CHUNKING — validate or reject.
+//! Pass 9: TASK_CHUNKING — validate or reject.
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
@@ -21,7 +21,7 @@ pub fn validate_task_chunking(
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
             let mut chunk_count = 0;
             for (j, param) in ps.task_parameter_definitions.iter().enumerate() {
-                if let TaskParameterDefinition::ChunkInt(cp) = param {
+                if let TaskParameterDefinition::CHUNK_INT(cp) = param {
                     let p_path = path_index(&tpd_path, j);
                     if !active {
                         errors.add(&p_path, "CHUNK[INT] requires the TASK_CHUNKING extension.");
@@ -58,7 +58,7 @@ pub fn validate_task_chunking(
             if active && chunk_count > 0 {
                 if let Some(comb) = &ps.combination {
                     for param in &ps.task_parameter_definitions {
-                        if let TaskParameterDefinition::ChunkInt(cp) = param {
+                        if let TaskParameterDefinition::CHUNK_INT(cp) = param {
                             let chunk_name = cp.name.as_str();
                             // Check if chunk_name appears inside parentheses
                             let mut in_parens = false;

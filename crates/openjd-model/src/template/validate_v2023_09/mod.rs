@@ -3,12 +3,12 @@
 
 //! Template validation pipeline.
 //!
-//! Validates templates through multiple passes:
-//! - Pass 2: Enforce limits (EffectiveLimits)
-//! - Pass 3: Structural validation (EffectiveRules)
-//! - Pass 4: FEATURE_BUNDLE_1 (validate or reject)
-//! - Pass 5: Format strings (base or EXPR profile)
-//! - Pass 6: TASK_CHUNKING (validate or reject)
+//! Validates templates through multiple passes (passes 5–9 of the decode pipeline):
+//! - Pass 5: Enforce limits (EffectiveLimits)
+//! - Pass 6: Structural validation (EffectiveRules)
+//! - Pass 7: FEATURE_BUNDLE_1 (validate or reject)
+//! - Pass 8: Format strings (base or EXPR profile)
+//! - Pass 9: TASK_CHUNKING (validate or reject)
 
 mod feature_bundle_1;
 mod format_strings;
@@ -130,24 +130,27 @@ impl EffectiveRules {
 }
 
 /// Validate a job template through all passes.
-pub fn validate_job_template(jt: &JobTemplate, ctx: &ValidationContext) -> Result<(), OpenJdError> {
+pub(crate) fn validate_job_template(
+    jt: &JobTemplate,
+    ctx: &ValidationContext,
+) -> Result<(), OpenJdError> {
     let limits = EffectiveLimits::from_context(ctx);
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();
 
-    // Pass 2: Enforce limits
+    // Pass 5: Enforce limits
     limits::enforce_limits(jt, &limits, &mut errors);
 
-    // Pass 3: Structural validation
+    // Pass 6: Structural validation
     structure::validate_structure(jt, &limits, &rules, &mut errors);
 
-    // Pass 4: FEATURE_BUNDLE_1 (validate or reject)
+    // Pass 7: FEATURE_BUNDLE_1 (validate or reject)
     feature_bundle_1::validate_feature_bundle_1(jt, ctx, &mut errors);
 
-    // Pass 5: Format strings (base or EXPR profile)
+    // Pass 8: Format strings (base or EXPR profile)
     format_strings::validate_format_strings(jt, ctx, &mut errors);
 
-    // Pass 6: TASK_CHUNKING (validate or reject)
+    // Pass 9: TASK_CHUNKING (validate or reject)
     task_chunking::validate_task_chunking(jt, ctx, &mut errors);
 
     errors.into_result("JobTemplate")

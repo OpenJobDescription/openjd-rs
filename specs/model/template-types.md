@@ -46,6 +46,7 @@ an empty slice when `parameter_definitions` is `None`.
 ```rust
 pub struct EnvironmentTemplate {
     pub specification_version: String,
+    pub extensions: Option<Vec<ExtensionName>>,
     pub parameter_definitions: Option<Vec<JobParameterDefinition>>,
     pub environment: Environment,
 }
@@ -157,17 +158,20 @@ pub struct EnvironmentActions {
 
 ### CancelationMode
 
-```rust
-pub struct CancelationMode {
-    pub mode: Option<CancelationModeType>,
-    pub notify_period_in_seconds: Option<FormatString>,
-}
+Discriminated union on the `mode` field, implemented as a Rust enum with a custom
+`Deserialize` impl:
 
-pub enum CancelationModeType {
-    NotifyThenTerminate,
+```rust
+pub enum CancelationMode {
     Terminate,
+    NotifyThenTerminate {
+        notify_period_in_seconds: Option<FormatString>,
+    },
 }
 ```
+
+The `Terminate` variant rejects any extra fields. The `NotifyThenTerminate` variant
+accepts an optional `notifyPeriodInSeconds` field.
 
 ## StepScript (§3.5)
 
@@ -213,15 +217,17 @@ pub struct StepParameterSpaceDefinition {
 
 ### TaskParameterDefinition
 
-Discriminated union via `#[serde(tag = "type")]`:
+Discriminated union via `#[serde(tag = "type")]`. Variant names use SCREAMING_CASE to
+match the serde tag values directly, with `#[serde(rename = "CHUNK[INT]")]` on `CHUNK_INT`
+since brackets aren't valid in Rust identifiers:
 
 | Variant | Type Field | Range Type | Extra Fields |
 |---------|-----------|------------|-------------|
-| `Int` | `"INT"` | `IntRange` | — |
-| `Float` | `"FLOAT"` | `FloatRange` | — |
-| `String` | `"STRING"` | `StringRange` | — |
-| `Path` | `"PATH"` | `StringRange` | — |
-| `ChunkInt` | `"CHUNK[INT]"` | `IntRange` | `chunks: ChunksDefinition` |
+| `INT` | `"INT"` | `IntRange` | — |
+| `FLOAT` | `"FLOAT"` | `FloatRange` | — |
+| `STRING` | `"STRING"` | `StringRange` | — |
+| `PATH` | `"PATH"` | `StringRange` | — |
+| `CHUNK_INT` | `"CHUNK[INT]"` | `IntRange` | `chunks: ChunksDefinition` |
 
 ### Range Types
 
@@ -239,13 +245,21 @@ pub enum StringRange {
 }
 
 pub enum FloatRange {
-    List(Vec<serde_yaml::Value>),
+    List(Vec<FloatRangeItem>),
     Expression(FormatString),
 }
 ```
 
-`FloatRange::List` uses `serde_yaml::Value` because YAML float parsing has edge cases
-(NaN, Infinity) that need deferred handling.
+`FloatRange::List` uses `FloatRangeItem` — an enum that accepts either a plain `f64` or
+a `FormatString` — to handle YAML float edge cases and format string interpolation in
+float ranges:
+
+```rust
+pub enum FloatRangeItem {
+    Float(f64),
+    FormatString(FormatString),
+}
+```
 
 ### ChunksDefinition
 
@@ -253,7 +267,7 @@ pub enum FloatRange {
 pub struct ChunksDefinition {
     pub default_task_count: IntOrFormatString,
     pub target_runtime_seconds: Option<IntOrFormatString>,
-    pub range_constraint: Option<RangeConstraint>,
+    pub range_constraint: RangeConstraint,  // Required field
 }
 
 pub enum IntOrFormatString {

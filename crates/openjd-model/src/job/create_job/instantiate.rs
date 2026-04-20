@@ -113,7 +113,7 @@ pub(super) fn instantiate_step(
                             crate::template::TaskParameterDefinition::INT(_) => {
                                 openjd_expr::ExprType::INT
                             }
-                            crate::template::TaskParameterDefinition::ChunkInt(_) => {
+                            crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
                                 openjd_expr::ExprType::RANGE_EXPR
                             }
                             crate::template::TaskParameterDefinition::FLOAT(_) => {

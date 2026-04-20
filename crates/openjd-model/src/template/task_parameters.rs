@@ -11,13 +11,14 @@ use serde::Deserialize;
 /// §3.4.1 TaskParameterDefinition — discriminated union on `type`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
+#[allow(non_camel_case_types)]
 pub enum TaskParameterDefinition {
     INT(IntTaskParameterDefinition),
     FLOAT(FloatTaskParameterDefinition),
     STRING(StringTaskParameterDefinition),
     PATH(PathTaskParameterDefinition),
     #[serde(rename = "CHUNK[INT]")]
-    ChunkInt(ChunkIntTaskParameterDefinition),
+    CHUNK_INT(ChunkIntTaskParameterDefinition),
 }
 
 impl TaskParameterDefinition {
@@ -28,7 +29,7 @@ impl TaskParameterDefinition {
             Self::FLOAT(_) => TaskParameterType::Float,
             Self::STRING(_) => TaskParameterType::String,
             Self::PATH(_) => TaskParameterType::Path,
-            Self::ChunkInt(_) => TaskParameterType::ChunkInt,
+            Self::CHUNK_INT(_) => TaskParameterType::ChunkInt,
         }
     }
 
@@ -38,7 +39,7 @@ impl TaskParameterDefinition {
             Self::FLOAT(p) => p.name.as_str(),
             Self::STRING(p) => p.name.as_str(),
             Self::PATH(p) => p.name.as_str(),
-            Self::ChunkInt(p) => p.name.as_str(),
+            Self::CHUNK_INT(p) => p.name.as_str(),
         }
     }
 }
