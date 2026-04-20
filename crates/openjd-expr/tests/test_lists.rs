@@ -1531,6 +1531,39 @@ fn coerce_bool_to_string() {
     assert_eq!(coerced.to_display_string(), "true");
 }
 
+// === Empty sublists mixed with typed sublists ===
+
+#[test]
+fn list_literal_empty_with_typed_sublists() {
+    // [[], [1], [2, 3]] should be list[list[int]], not rejected as 3-level nesting
+    let r = eval("[[], [1], [2, 3]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+}
+
+#[test]
+fn list_literal_empty_in_middle() {
+    let r = eval("[[1], [], [2]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+}
+
+#[test]
+fn list_literal_all_empty() {
+    let r = eval("[[], [], []]");
+    assert_eq!(r.expr_type().to_string(), "list[list[nulltype]]");
+}
+
+#[test]
+fn list_literal_empty_at_end() {
+    let r = eval("[[1, 2], []]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+}
+
+#[test]
+fn list_literal_empty_at_start() {
+    let r = eval("[[], [1]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+}
+
 // ── Incompatible type error messages ──
 
 #[test]

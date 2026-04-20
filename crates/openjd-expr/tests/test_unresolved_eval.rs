@@ -1621,3 +1621,33 @@ fn round_float_unresolved_ndigits_returns_union() {
     let r = eval_u("round(31.5, x)", &st);
     assert_eq!(r.expr_type(), tp("unresolved[float | int]"));
 }
+
+// === List comprehension filter: unresolved type checking ===
+
+#[test]
+fn comp_filter_unresolved_int_is_error() {
+    let st = st_unresolved(vec![("L", "list[int]"), ("P", "int")]);
+    assert_err_w(
+        "[x for x in L if P]",
+        &st,
+        &[
+            "List comprehension filter must be a boolean, got int\n",
+            "  [x for x in L if P]\n",
+            "                   ^",
+        ],
+    );
+}
+
+#[test]
+fn comp_filter_unresolved_bool_succeeds() {
+    let st = st_unresolved(vec![("L", "list[int]"), ("P", "bool")]);
+    let r = eval_u("[x for x in L if P]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}
+
+#[test]
+fn comp_filter_unresolved_unconstrained_succeeds() {
+    let st = st_unresolved(vec![("L", "list[int]"), ("P", "unresolved")]);
+    let r = eval_u("[x for x in L if P]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}

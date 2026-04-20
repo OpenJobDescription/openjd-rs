@@ -249,6 +249,149 @@ pub fn suffixes(path: &str, fmt: PathFormat) -> Vec<String> {
     result
 }
 
+/// Join path parts using Python pathlib constructor semantics.
+///
+/// Matches `PurePosixPath(*parts)` or `PureWindowsPath(*parts)` behavior:
+/// - Absolute components reset the accumulator
+/// - Empty strings and `.` segments are removed
+/// - Duplicate separators are collapsed
+/// - `..` is preserved (not resolved)
+pub fn join_pathlib(parts: &[String], fmt: PathFormat) -> String {
+    match fmt {
+        PathFormat::Posix | PathFormat::Uri => join_pathlib_posix(parts),
+        PathFormat::Windows => join_pathlib_windows(parts),
+    }
+}
+
+fn join_pathlib_posix(parts: &[String]) -> String {
+    let mut segments: Vec<&str> = Vec::new();
+    let mut is_absolute = false;
+
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+        let sub_components: Vec<&str> = part.split('/').collect();
+        for (i, c) in sub_components.iter().enumerate() {
+            if c.is_empty() && i == 0 {
+                // Leading empty = this part starts with '/'
+                is_absolute = true;
+                segments.clear();
+            } else if *c == "." {
+                // Skip '.' segments
+            } else if !c.is_empty() {
+                segments.push(c);
+            }
+        }
+    }
+
+    if is_absolute {
+        if segments.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", segments.join("/"))
+        }
+    } else if segments.is_empty() {
+        ".".to_string()
+    } else {
+        segments.join("/")
+    }
+}
+
+/// Parse Windows drive from a path string. Returns (drive, rest).
+/// Drive can be "C:" or "\\\\server\\share" (UNC).
+fn win_parse_drive(s: &str) -> (&str, &str) {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        (&s[..2], &s[2..])
+    } else if bytes.len() >= 2
+        && is_sep(bytes[0] as char, PathFormat::Windows)
+        && is_sep(bytes[1] as char, PathFormat::Windows)
+    {
+        // UNC: \\server\share
+        let rest = &s[2..];
+        let server_end = rest
+            .find(|c: char| is_sep(c, PathFormat::Windows))
+            .unwrap_or(rest.len());
+        let after_server = 2 + server_end;
+        if after_server < s.len() {
+            let share_rest = &s[after_server + 1..];
+            let share_end = share_rest
+                .find(|c: char| is_sep(c, PathFormat::Windows))
+                .unwrap_or(share_rest.len());
+            let end = after_server + 1 + share_end;
+            (&s[..end], &s[end..])
+        } else {
+            (s, "")
+        }
+    } else {
+        ("", s)
+    }
+}
+
+fn join_pathlib_windows(parts: &[String]) -> String {
+    // Track accumulated drive, root, and relative parts separately.
+    // For each new part, parse its drive and root, then apply pathlib rules.
+    let mut drive = String::new();
+    let mut root = String::new();
+    let mut segments: Vec<String> = Vec::new();
+
+    for part in parts {
+        let (new_drive, after_drive) = win_parse_drive(part);
+        let has_root = !after_drive.is_empty()
+            && is_sep(after_drive.as_bytes()[0] as char, PathFormat::Windows);
+        let new_root = if has_root { "\\" } else { "" };
+        let rel = if has_root {
+            &after_drive[1..]
+        } else {
+            after_drive
+        };
+
+        if !new_drive.is_empty() {
+            if !new_drive.is_empty() && !drive.is_empty() && !new_drive.eq_ignore_ascii_case(&drive)
+            {
+                // Different drive → replace everything
+                drive = new_drive.to_string();
+                root = new_root.to_string();
+                segments.clear();
+            } else {
+                // Same drive (or first drive)
+                drive = new_drive.to_string();
+                if !new_root.is_empty() {
+                    root = new_root.to_string();
+                    segments.clear();
+                }
+            }
+        } else if !new_root.is_empty() {
+            // Root without drive → keep existing drive, replace from root
+            root = new_root.to_string();
+            segments.clear();
+        }
+        // Append relative components, filtering empty and '.'
+        for c in rel.split(|c: char| is_sep(c, PathFormat::Windows)) {
+            if c == "." || c.is_empty() {
+                continue;
+            }
+            segments.push(c.to_string());
+        }
+    }
+
+    // Reconstruct
+    let mut result = format!("{}{}", drive, root);
+    if !segments.is_empty() {
+        if !result.is_empty() && !result.ends_with('\\') && !result.ends_with(':') {
+            result.push('\\');
+        }
+        result.push_str(&segments.join("\\"));
+    }
+
+    if result.is_empty() {
+        ".".to_string()
+    } else {
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

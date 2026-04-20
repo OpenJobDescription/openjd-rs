@@ -57,7 +57,8 @@ pub fn any_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         .ok_or_else(|| ExpressionError::new("any() argument must be a list"))?;
     for e in iter {
         ctx.count_op()?;
-        if e.is_truthy() {
+        // Signature restricts to list[bool]; match directly (no truthy semantics).
+        if let ExprValue::Bool(true) = e {
             return Ok(ExprValue::Bool(true));
         }
     }
@@ -73,7 +74,8 @@ pub fn all_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         .ok_or_else(|| ExpressionError::new("all() argument must be a list"))?;
     for e in iter {
         ctx.count_op()?;
-        if !e.is_truthy() {
+        // Signature restricts to list[bool]; match directly (no truthy semantics).
+        if let ExprValue::Bool(false) = e {
             return Ok(ExprValue::Bool(false));
         }
     }
@@ -150,17 +152,7 @@ pub fn path_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                     format!("{}/{}", parts[0], parts[1..].join("/"))
                 }
             } else {
-                let sep = super::path_parse::sep(ctx.path_format());
-                let mut result = parts[0].clone();
-                for (i, part) in parts[1..].iter().enumerate() {
-                    // Don't add separator after a root indicator (/ or \)
-                    let needs_sep = i > 0 || !(result == "/" || result == "\\");
-                    if needs_sep {
-                        result.push(sep);
-                    }
-                    result.push_str(part);
-                }
-                result
+                super::path_parse::join_pathlib(&parts, ctx.path_format())
             }
         }
         _ => {

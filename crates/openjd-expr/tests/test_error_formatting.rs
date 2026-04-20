@@ -1162,3 +1162,58 @@ fn range_expr_parse_error_has_parse_error_kind() {
         err.kind()
     );
 }
+
+// === List comprehension filter must be boolean ===
+
+#[test]
+fn listcomp_filter_int_is_error() {
+    assert_err(
+        "[x for x in [1, 2, 3] if x]",
+        &[
+            "List comprehension filter must be a boolean, got int\n",
+            "  [x for x in [1, 2, 3] if x]\n",
+            "                           ^",
+        ],
+    );
+}
+
+#[test]
+fn listcomp_filter_string_is_error() {
+    assert_err(
+        "[x for x in ['a', 'b', 'c'] if x]",
+        &[
+            "List comprehension filter must be a boolean, got string\n",
+            "  [x for x in ['a', 'b', 'c'] if x]\n",
+            "                                 ^",
+        ],
+    );
+}
+
+#[test]
+fn listcomp_filter_float_is_error() {
+    assert_err(
+        "[x for x in [1.0, 2.0] if x]",
+        &[
+            "List comprehension filter must be a boolean, got float\n",
+            "  [x for x in [1.0, 2.0] if x]\n",
+            "                            ^",
+        ],
+    );
+}
+
+#[test]
+fn listcomp_filter_bool_happy_path() {
+    // [x for x in [1, 2, 3] if x > 1] should work fine
+    let r = openjd_expr::ParsedExpression::new("[x for x in [1, 2, 3] if x > 1]")
+        .and_then(|p| p.evaluate(&openjd_expr::SymbolTable::new()))
+        .unwrap();
+    assert_eq!(r.to_display_string(), "[2, 3]");
+}
+
+#[test]
+fn listcomp_no_filter_happy_path() {
+    let r = openjd_expr::ParsedExpression::new("[x for x in [1, 2, 3]]")
+        .and_then(|p| p.evaluate(&openjd_expr::SymbolTable::new()))
+        .unwrap();
+    assert_eq!(r.to_display_string(), "[1, 2, 3]");
+}

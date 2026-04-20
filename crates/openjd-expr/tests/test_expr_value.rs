@@ -833,59 +833,6 @@ fn list_path_string_mix() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// is_truthy
-// ══════════════════════════════════════════════════════════════
-
-#[test]
-fn truthy_null() {
-    assert!(!ExprValue::Null.is_truthy());
-}
-#[test]
-fn truthy_bool_true() {
-    assert!(ExprValue::Bool(true).is_truthy());
-}
-#[test]
-fn truthy_bool_false() {
-    assert!(!ExprValue::Bool(false).is_truthy());
-}
-#[test]
-fn truthy_int_zero() {
-    assert!(!ExprValue::Int(0).is_truthy());
-}
-#[test]
-fn truthy_int_nonzero() {
-    assert!(ExprValue::Int(42).is_truthy());
-}
-#[test]
-fn truthy_float_zero() {
-    assert!(!ExprValue::Float(Float64::new(0.0).unwrap()).is_truthy());
-}
-#[test]
-fn truthy_float_nonzero() {
-    assert!(ExprValue::Float(Float64::new(1.0).unwrap()).is_truthy());
-}
-#[test]
-fn truthy_string_empty() {
-    assert!(!ExprValue::String("".into()).is_truthy());
-}
-#[test]
-fn truthy_string_nonempty() {
-    assert!(ExprValue::String("x".into()).is_truthy());
-}
-#[test]
-fn truthy_list_empty() {
-    assert!(!ExprValue::make_list(vec![], ExprType::NULLTYPE)
-        .unwrap()
-        .is_truthy());
-}
-#[test]
-fn truthy_list_nonempty() {
-    assert!(ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT)
-        .unwrap()
-        .is_truthy());
-}
-
-// ══════════════════════════════════════════════════════════════
 // repr_python — additional cases
 // ══════════════════════════════════════════════════════════════
 

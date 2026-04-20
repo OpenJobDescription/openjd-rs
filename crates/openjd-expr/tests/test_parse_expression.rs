@@ -7,13 +7,22 @@ use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 use std::collections::HashSet;
 
 fn syms(expr: &str) -> HashSet<String> {
-    ParsedExpression::new(expr).unwrap().accessed_symbols
+    ParsedExpression::new(expr)
+        .unwrap()
+        .accessed_symbols()
+        .clone()
 }
 fn funcs(expr: &str) -> HashSet<String> {
-    ParsedExpression::new(expr).unwrap().called_functions
+    ParsedExpression::new(expr)
+        .unwrap()
+        .called_functions()
+        .clone()
 }
 fn locals(expr: &str) -> HashSet<String> {
-    ParsedExpression::new(expr).unwrap().local_bindings
+    ParsedExpression::new(expr)
+        .unwrap()
+        .local_bindings()
+        .clone()
 }
 fn set(items: &[&str]) -> HashSet<String> {
     items.iter().map(|s| s.to_string()).collect()
@@ -293,50 +302,50 @@ fn parsed_evaluate_with_metrics_propagates_error() {
 #[test]
 fn parse_list_comprehension_with_filter() {
     let p = ParsedExpression::new("[x for x in L if x > 0]").unwrap();
-    assert!(p.accessed_symbols.contains("L"));
+    assert!(p.accessed_symbols().contains("L"));
 }
 #[test]
 fn parse_list_comprehension_nested() {
     let p = ParsedExpression::new("[x + Y for x in L]").unwrap();
-    assert!(p.accessed_symbols.contains("L"));
-    assert!(p.accessed_symbols.contains("Y"));
+    assert!(p.accessed_symbols().contains("L"));
+    assert!(p.accessed_symbols().contains("Y"));
 }
 #[test]
 fn parse_same_name_outside_and_inside() {
     let p = ParsedExpression::new("x + [x for x in L]").unwrap();
-    assert!(p.accessed_symbols.contains("x"));
-    assert!(p.accessed_symbols.contains("L"));
+    assert!(p.accessed_symbols().contains("x"));
+    assert!(p.accessed_symbols().contains("L"));
 }
 #[test]
 fn parse_no_function_calls() {
     let p = ParsedExpression::new("1 + 2").unwrap();
-    assert!(p.called_functions.is_empty());
+    assert!(p.called_functions().is_empty());
 }
 #[test]
 fn parse_builtin_function() {
     let p = ParsedExpression::new("len('hello')").unwrap();
-    assert!(p.called_functions.contains("len"));
+    assert!(p.called_functions().contains("len"));
 }
 #[test]
 fn parse_method_with_args() {
     let p = ParsedExpression::new("'hello'.replace('l', 'r')").unwrap();
-    assert!(p.called_functions.contains("replace"));
+    assert!(p.called_functions().contains("replace"));
 }
 #[test]
 fn parse_chained_methods() {
     let p = ParsedExpression::new("'hello'.upper().strip()").unwrap();
-    assert!(p.called_functions.contains("upper"));
-    assert!(p.called_functions.contains("strip"));
+    assert!(p.called_functions().contains("upper"));
+    assert!(p.called_functions().contains("strip"));
 }
 #[test]
 fn parse_function_in_comprehension() {
     let p = ParsedExpression::new("[len(x) for x in L]").unwrap();
-    assert!(p.called_functions.contains("len"));
+    assert!(p.called_functions().contains("len"));
 }
 #[test]
 fn parse_apply_path_mapping() {
     let p = ParsedExpression::new("P.apply_path_mapping()").unwrap();
-    assert!(p.called_functions.contains("apply_path_mapping"));
+    assert!(p.called_functions().contains("apply_path_mapping"));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -460,9 +469,9 @@ fn local_independent_branches() {
         "[x for x in Param.Values] if Param.Boolean else [[y for y in z] for z in Param.Nested]",
     )
     .unwrap();
-    assert_eq!(p.local_bindings, set(&["x", "y", "z"]));
+    assert_eq!(*p.local_bindings(), set(&["x", "y", "z"]));
     assert_eq!(
-        p.accessed_symbols,
+        *p.accessed_symbols(),
         set(&["Param.Values", "Param.Boolean", "Param.Nested"])
     );
 }
@@ -478,6 +487,6 @@ fn local_nested_shadowing_rejected() {
 #[test]
 fn local_sibling_comprehensions_same_var_allowed() {
     let p = ParsedExpression::new("[x for x in a] + [x for x in b] + [x for x in c]").unwrap();
-    assert_eq!(p.local_bindings, set(&["x"]));
-    assert_eq!(p.accessed_symbols, set(&["a", "b", "c"]));
+    assert_eq!(*p.local_bindings(), set(&["x"]));
+    assert_eq!(*p.accessed_symbols(), set(&["a", "b", "c"]));
 }
