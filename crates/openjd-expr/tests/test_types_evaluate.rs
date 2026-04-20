@@ -3,7 +3,7 @@
 
 //! Tests ported from Python test_types_evaluate.py
 
-use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
+use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
@@ -41,6 +41,37 @@ fn eval_err(expr: &str) -> String {
 fn empty_list_type() {
     assert_eq!(eval("[]").expr_type().to_string(), "list[nulltype]");
 }
+
+#[test]
+fn empty_list_bool_preserves_type() {
+    let v = ExprValue::ListBool(vec![]);
+    assert_eq!(v.expr_type().to_string(), "list[bool]");
+}
+
+#[test]
+fn empty_list_int_preserves_type() {
+    let v = ExprValue::ListInt(vec![]);
+    assert_eq!(v.expr_type().to_string(), "list[int]");
+}
+
+#[test]
+fn empty_list_float_preserves_type() {
+    let v = ExprValue::ListFloat(vec![]);
+    assert_eq!(v.expr_type().to_string(), "list[float]");
+}
+
+#[test]
+fn empty_list_string_preserves_type() {
+    let v = ExprValue::ListString(vec![], 0);
+    assert_eq!(v.expr_type().to_string(), "list[string]");
+}
+
+#[test]
+fn empty_list_path_preserves_type() {
+    let v = ExprValue::ListPath(vec![], PathFormat::Posix, 0);
+    assert_eq!(v.expr_type().to_string(), "list[path]");
+}
+
 #[test]
 fn int_list_type() {
     assert_eq!(eval("[1, 2, 3]").expr_type().to_string(), "list[int]");

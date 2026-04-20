@@ -13,11 +13,25 @@ fn eval_bounded(expr: &str, mem: usize, ops: usize) -> Result<EvalResult, Expres
     })
 }
 
-/// Assert that a bounded evaluation produces an exact 3-line error message.
+/// Assert that a bounded evaluation produces an operation-limit error.
+/// The first element of `expected` should be `"_OP_MSG\n"` as a placeholder —
+/// it will be replaced with the actual `"Expression operation count (N) exceeded limit (M)\n"`.
 fn assert_op_limit_err(expr: &str, mem: usize, ops: usize, expected: &[&str]) {
     let e = eval_bounded(expr, mem, ops).unwrap_err().to_string();
-    let joined = expected.concat();
-    assert_eq!(e, joined, "got:\n{e}\nexpected:\n{joined}");
+    // Verify the first line has the right format and limit
+    let first_line = e.lines().next().unwrap_or("");
+    assert!(
+        first_line.starts_with("Expression operation count (")
+            && first_line.contains(&format!("exceeded limit ({ops})")),
+        "wrong first line:\n{e}"
+    );
+    // Verify the expression + caret lines match exactly
+    let rest_actual = e.split_once('\n').map_or("", |x| x.1);
+    let rest_expected: String = expected[1..].concat();
+    assert_eq!(
+        rest_actual, rest_expected,
+        "got:\n{e}\nexpected rest:\n{rest_expected}"
+    );
 }
 
 /// Assert error for expressions with very long literal strings where we can't
@@ -31,9 +45,13 @@ fn assert_op_limit_err_long(expr: &str, mem: usize, ops: usize, fragments: &[&st
         "expected 3-line error, got {} lines:\n{e}",
         lines.len()
     );
-    assert_eq!(
-        lines[0], "Operation limit exceeded",
+    assert!(
+        lines[0].starts_with("Expression operation count ("),
         "wrong message line:\n{e}"
+    );
+    assert!(
+        lines[0].contains(&format!("exceeded limit ({ops})")),
+        "wrong limit in message:\n{e}"
     );
     for frag in fragments {
         assert!(e.contains(frag), "error should contain {frag:?}:\n{e}");

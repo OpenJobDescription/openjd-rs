@@ -42,7 +42,14 @@ fn default_is_10_million() {
 fn function_calls_count() {
     let e = eval_op("1 + 1", 0).unwrap_err().to_string();
     assert!(
-        e.contains(&["Operation limit exceeded\n", "  1 + 1\n", "  ~~^~~"].concat()),
+        e.contains(
+            &[
+                "Expression operation count (1) exceeded limit (0)\n",
+                "  1 + 1\n",
+                "  ~~^~~"
+            ]
+            .concat()
+        ),
         "got:\n{e}"
     );
 }
@@ -53,7 +60,7 @@ fn range_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (51) exceeded limit (50)\n",
                 "  range(100)\n",
                 "  ^~~~~~~~~~"
             ]
@@ -71,7 +78,7 @@ fn list_comprehension_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (51) exceeded limit (50)\n",
                 "  [x for x in range(1000)]\n",
                 "              ^~~~~~~~~~~"
             ]
@@ -87,7 +94,7 @@ fn sum_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  sum(range(1000))\n",
                 "      ^~~~~~~~~~~"
             ]
@@ -103,7 +110,7 @@ fn min_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  min(range(1000))\n",
                 "      ^~~~~~~~~~~"
             ]
@@ -119,7 +126,7 @@ fn max_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  max(range(1000))\n",
                 "      ^~~~~~~~~~~"
             ]
@@ -135,7 +142,7 @@ fn sorted_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  sorted(range(1000))\n",
                 "         ^~~~~~~~~~~"
             ]
@@ -153,7 +160,7 @@ fn reversed_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  reversed(range(1000))\n",
                 "           ^~~~~~~~~~~"
             ]
@@ -171,7 +178,7 @@ fn join_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (3) exceeded limit (2)\n",
                 "  ['a','b','c','d','e'].join(',')\n",
                 "  ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~"
             ]
@@ -187,7 +194,7 @@ fn contains_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  99 in range(1000)\n",
                 "        ^~~~~~~~~~~"
             ]
@@ -205,7 +212,7 @@ fn list_concat_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  range(500) + range(500)\n",
                 "  ^~~~~~~~~~"
             ]
@@ -221,7 +228,7 @@ fn list_multiply_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  [1, 2, 3] * 1000\n",
                 "  ~~~~~~~~~~^~~~~~"
             ]
@@ -237,7 +244,7 @@ fn any_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  any([False] * 1000)\n",
                 "      ~~~~~~~~^~~~~~"
             ]
@@ -253,7 +260,7 @@ fn all_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  all([True] * 1000)\n",
                 "      ~~~~~~~^~~~~~"
             ]
@@ -271,7 +278,7 @@ fn flatten_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  flatten([[1,2],[3,4]] * 500)\n",
                 "          ~~~~~~~~~~~~~~^~~~~"
             ]
@@ -289,7 +296,7 @@ fn repr_sh_list_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  repr_sh(range(1000))\n",
                 "          ^~~~~~~~~~~"
             ]
@@ -307,7 +314,7 @@ fn list_equality_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (101) exceeded limit (100)\n",
                 "  range(1000) == range(1000)\n",
                 "  ^~~~~~~~~~~"
             ]
@@ -694,7 +701,10 @@ fn operation_limit_error_kind_from_evaluator() {
         .evaluate(&[&symtab])
         .unwrap_err();
     assert!(
-        matches!(err.kind(), ExpressionErrorKind::OperationLimitExceeded),
+        matches!(
+            err.kind(),
+            ExpressionErrorKind::OperationLimitExceeded { .. }
+        ),
         "Expected OperationLimitExceeded, got: {:?}",
         err.kind()
     );

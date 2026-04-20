@@ -82,7 +82,7 @@ fn list_mul_exceeds_limit() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (10000001) exceeded limit (10000000)\n",
                 "  [1, 2, 3] * 10000000\n",
                 "  ~~~~~~~~~~^~~~~~~~~~",
             ]
@@ -100,7 +100,7 @@ fn range_exceeds_limit() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (10000001) exceeded limit (10000000)\n",
                 "  range(10000000)\n",
                 "  ^~~~~~~~~~~~~~~",
             ]
@@ -118,7 +118,7 @@ fn range_start_stop_exceeds_limit() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (10000001) exceeded limit (10000000)\n",
                 "  range(0, 10000000)\n",
                 "  ^~~~~~~~~~~~~~~~~~",
             ]
@@ -136,7 +136,7 @@ fn range_start_stop_step_exceeds_limit() {
     assert!(
         e.contains(
             &[
-                "Operation limit exceeded\n",
+                "Expression operation count (10000001) exceeded limit (10000000)\n",
                 "  range(0, 10000000, 1)\n",
                 "  ^~~~~~~~~~~~~~~~~~~~~",
             ]

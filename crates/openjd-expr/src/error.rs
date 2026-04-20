@@ -45,8 +45,8 @@ pub enum ExpressionErrorKind {
     MemoryLimitExceeded { used: usize, limit: usize },
 
     /// Expression operation count exceeded the configured limit.
-    #[error("Operation limit exceeded")]
-    OperationLimitExceeded,
+    #[error("Expression operation count ({count}) exceeded limit ({limit})")]
+    OperationLimitExceeded { count: usize, limit: usize },
 
     /// A Python syntax feature that is not supported in the expression language.
     #[error("{feature}")]

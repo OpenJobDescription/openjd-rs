@@ -727,6 +727,6 @@ fn external_custom_fn_respects_operation_limit_via_count_op() {
         .unwrap_err();
     assert!(matches!(
         err.kind(),
-        openjd_expr::ExpressionErrorKind::OperationLimitExceeded
+        openjd_expr::ExpressionErrorKind::OperationLimitExceeded { .. }
     ));
 }

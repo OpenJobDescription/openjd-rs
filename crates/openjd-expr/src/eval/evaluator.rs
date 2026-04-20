@@ -302,7 +302,10 @@ impl<'a> Evaluator<'a> {
         self.operation_count = self.operation_count.saturating_add(1);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
-                ExpressionErrorKind::OperationLimitExceeded,
+                ExpressionErrorKind::OperationLimitExceeded {
+                    count: self.operation_count,
+                    limit: self.operation_limit,
+                },
             ))
         } else {
             Ok(())
@@ -1354,7 +1357,10 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.operation_count = self.operation_count.saturating_add(1);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
-                ExpressionErrorKind::OperationLimitExceeded,
+                ExpressionErrorKind::OperationLimitExceeded {
+                    count: self.operation_count,
+                    limit: self.operation_limit,
+                },
             ))
         } else {
             Ok(())
@@ -1364,7 +1370,10 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.operation_count = self.operation_count.saturating_add(n);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
-                ExpressionErrorKind::OperationLimitExceeded,
+                ExpressionErrorKind::OperationLimitExceeded {
+                    count: self.operation_count,
+                    limit: self.operation_limit,
+                },
             ))
         } else {
             Ok(())
@@ -1375,7 +1384,10 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.operation_count = self.operation_count.saturating_add(ops);
         if self.operation_count > self.operation_limit {
             Err(ExpressionError::from_kind(
-                ExpressionErrorKind::OperationLimitExceeded,
+                ExpressionErrorKind::OperationLimitExceeded {
+                    count: self.operation_count,
+                    limit: self.operation_limit,
+                },
             ))
         } else {
             Ok(())

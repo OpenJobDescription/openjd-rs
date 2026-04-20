@@ -295,7 +295,9 @@ impl ExprValue {
                     Self::make_list_path(Vec::new(), PathFormat::host())
                 }
                 crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
-                _ => Self::ListInt(Vec::new()),
+                crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
+                crate::types::TypeCode::Null => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
+                _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
             });
         }
         let has_int = elements.iter().any(|e| matches!(e, Self::Int(_)));
@@ -820,31 +822,11 @@ impl ExprValue {
             Self::Float(_) => ExprType::FLOAT,
             Self::String(_) => ExprType::STRING,
             Self::Path { .. } => ExprType::PATH,
-            Self::ListBool(v) => ExprType::list(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::BOOL
-            }),
-            Self::ListInt(v) => ExprType::list(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::INT
-            }),
-            Self::ListFloat(v) => ExprType::list(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::FLOAT
-            }),
-            Self::ListString(v, _) => ExprType::list(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::STRING
-            }),
-            Self::ListPath(v, _, _) => ExprType::list(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::PATH
-            }),
+            Self::ListBool(_) => ExprType::list(ExprType::BOOL),
+            Self::ListInt(_) => ExprType::list(ExprType::INT),
+            Self::ListFloat(_) => ExprType::list(ExprType::FLOAT),
+            Self::ListString(_, _) => ExprType::list(ExprType::STRING),
+            Self::ListPath(_, _, _) => ExprType::list(ExprType::PATH),
             Self::ListList(_, elem_type, _) => ExprType::list(elem_type.clone()),
             Self::RangeExpr(_) => ExprType::RANGE_EXPR,
             Self::Unresolved(t) => ExprType::unresolved(t.clone()),
