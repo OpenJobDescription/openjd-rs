@@ -782,8 +782,11 @@ pub async fn run_subprocess(
                     match n {
                         Ok(0) => break, // EOF
                         Ok(_) => {
-                            // Strip trailing newline
+                            // Strip trailing newline (and \r on Windows)
                             if line_buf.last() == Some(&b'\n') {
+                                line_buf.pop();
+                            }
+                            if line_buf.last() == Some(&b'\r') {
                                 line_buf.pop();
                             }
                             let line = String::from_utf8_lossy(&line_buf);
