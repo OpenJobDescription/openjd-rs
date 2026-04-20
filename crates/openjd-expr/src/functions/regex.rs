@@ -58,6 +58,10 @@ fn validate_regex_pattern(pattern: &str) -> Result<(), ExpressionError> {
         ("\\3", "backreferences"),
         ("\\4", "backreferences"),
         ("\\5", "backreferences"),
+        ("\\6", "backreferences"),
+        ("\\7", "backreferences"),
+        ("\\8", "backreferences"),
+        ("\\9", "backreferences"),
         ("\\Z", "end-of-string anchor \\Z"),
         ("\\z", "end-of-string anchor \\z"),
     ] {

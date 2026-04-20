@@ -955,14 +955,13 @@ fn re_split_no_match_single_element() {
 // === TestRegexUnsupportedFeatures ===
 #[test]
 fn backreference_rejected() {
-    assert_err(
-        "re_search('aa', r'(a)\\1')",
-        &[
-            "Unsupported regex feature: backreferences\n",
-            "  re_search('aa', r'(a)\\1')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
-        ],
-    );
+    // Cover \1–\9: all must produce the friendly "backreferences" error
+    // rather than falling through to the underlying regex crate's message.
+    for n in 1..=9 {
+        let groups: String = (0..n).map(|_| "(a)").collect();
+        let expr = format!("re_search('a', r'{groups}\\{n}')");
+        assert_err(&expr, &["Unsupported regex feature: backreferences\n"]);
+    }
 }
 #[test]
 fn lookahead_rejected() {
