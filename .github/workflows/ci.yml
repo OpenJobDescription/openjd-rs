@@ -49,6 +49,33 @@ jobs:
       - name: Run helper clippy
         run: cargo clippy --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
 
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-${{ matrix.os }}
+      - name: Build release binary
+        run: cargo build --release
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: openjd-cli-${{ matrix.os }}
+          path: |
+            target/release/openjd-rs
+            target/release/openjd-rs.exe
+          if-no-files-found: error
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -69,6 +96,55 @@ jobs:
         run: cargo test --workspace
       - name: Run helper integration tests
         run: cargo test --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
+
+  conformance:
+    name: Conformance (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            binary: openjd-rs
+          - os: windows-latest
+            binary: openjd-rs.exe
+          - os: macos-latest
+            binary: openjd-rs
+    steps:
+      - name: Download CLI binary
+        uses: actions/download-artifact@v4
+        with:
+          name: openjd-cli-${{ matrix.os }}
+          path: bin
+      - name: Make binary executable
+        if: runner.os != 'Windows'
+        run: chmod +x bin/${{ matrix.binary }}
+      - name: Symlink as openjd
+        if: runner.os != 'Windows'
+        run: ln -s ${{ matrix.binary }} bin/openjd
+      - name: Copy as openjd.exe
+        if: runner.os == 'Windows'
+        run: copy bin\openjd-rs.exe bin\openjd.exe
+        shell: cmd
+      - name: Checkout openjd-specifications
+        uses: actions/checkout@v6
+        with:
+          repository: OpenJobDescription/openjd-specifications
+          path: openjd-specifications
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Run conformance tests (Unix)
+        if: runner.os != 'Windows'
+        working-directory: openjd-specifications/conformance-tests
+        run: PATH="$GITHUB_WORKSPACE/bin:$PATH" uv run run_openjd_cli_tests.py '2023-09/*'
+      - name: Run conformance tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: openjd-specifications/conformance-tests
+        run: |
+          $env:PATH = "$env:GITHUB_WORKSPACE\bin;$env:PATH"
+          uv run run_openjd_cli_tests.py '2023-09/*'
 
   msrv:
     name: MSRV
