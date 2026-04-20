@@ -59,6 +59,10 @@ evaluate identically in Rust and Python); and **hashability** (NaN's `NaN != NaN
 would break the `a == b ⇒ hash(a) == hash(b)` contract that `ExprValue` relies on
 for `HashMap` and list deduplication).
 
+**Precision note:** Integer true-division (`/`) converts both operands to `f64` before
+dividing, so results lose precision for integers above 2^53. This matches Python's
+behavior where `int / int` returns a `float`.
+
 ## Typed List Variants
 
 The Python implementation uses a single `List` with `elements: list[ExprValue]` and

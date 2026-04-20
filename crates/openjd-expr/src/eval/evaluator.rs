@@ -376,6 +376,28 @@ impl<'a> Evaluator<'a> {
         self.track(result)
     }
 
+    /// Like `dispatch_with_node` but uses a `TextRange` for error positioning,
+    /// avoiding the need to clone an AST node just for error context.
+    fn dispatch_with_span(
+        &mut self,
+        name: &str,
+        args: Vec<ExprValue>,
+        range: ruff_text_size::TextRange,
+    ) -> Result<ExprValue, ExpressionError> {
+        self.count_op()?;
+        let input_size: usize = args.iter().map(|a| a.memory_size()).sum();
+        let lib = self.library;
+        let result = lib.call(name, &args, self).map_err(|e| {
+            if let Some(src) = self.expr_source {
+                e.with_span(src, range.start().to_usize(), range.end().to_usize())
+            } else {
+                e
+            }
+        })?;
+        self.current_memory = self.current_memory.saturating_sub(input_size);
+        self.track(result)
+    }
+
     fn eval_number(&mut self, n: &ast::ExprNumberLiteral) -> Result<ExprValue, ExpressionError> {
         match &n.value {
             ast::Number::Int(i) => {
@@ -481,7 +503,7 @@ impl<'a> Evaluator<'a> {
 
     fn eval_attribute(&mut self, a: &ast::ExprAttribute) -> Result<ExprValue, ExpressionError> {
         // Try full dotted path lookup, resolving keyword renames
-        let dotted_path = build_dotted_name(&ast::Expr::Attribute(a.clone()));
+        let dotted_path = build_dotted_name_from_attr(a);
         if let Some(ref path) = dotted_path {
             let resolved = resolve_keyword_renames(path, self.keyword_renames);
             for symtab in self.symtabs.iter().rev() {
@@ -763,9 +785,10 @@ impl<'a> Evaluator<'a> {
                 }
             };
 
-            // Build a synthetic node spanning left..right for error caret positioning
-            let node = ast::Expr::Compare(c.clone());
-            let result_val = self.dispatch_with_node(op_name, args, Some(&node))?;
+            // Use the compare expression's range for error caret positioning
+            // without cloning the entire ExprCompare node.
+            use ruff_text_size::Ranged;
+            let result_val = self.dispatch_with_span(op_name, args, c.range())?;
             let result = match &result_val {
                 ExprValue::Bool(b) => *b,
                 _ => true,
@@ -1447,18 +1470,21 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
     }
 }
 
-fn build_dotted_name(expr: &ast::Expr) -> Option<String> {
-    let mut parts = Vec::new();
-    let mut current = expr;
+/// Walks a chain of `ExprAttribute` nodes by reference and returns the dotted
+/// name (e.g. `Param.Foo.Bar`), or `None` if the chain does not terminate at a
+/// plain `Name`. Avoids cloning the AST.
+fn build_dotted_name_from_attr(a: &ast::ExprAttribute) -> Option<String> {
+    let mut parts: Vec<&str> = vec![a.attr.as_str()];
+    let mut current: &ast::Expr = &a.value;
     loop {
         match current {
             ast::Expr::Name(n) => {
                 parts.push(n.id.as_str());
                 break;
             }
-            ast::Expr::Attribute(a) => {
-                parts.push(a.attr.as_str());
-                current = &a.value;
+            ast::Expr::Attribute(attr) => {
+                parts.push(attr.attr.as_str());
+                current = &attr.value;
             }
             _ => return None,
         }

@@ -13,6 +13,12 @@ Defined in `eval/parse.rs`.
 The `ruff_python_parser` from [astral-sh/ruff](https://github.com/astral-sh/ruff) is
 used via a git dependency pinned to a specific commit.
 
+**Note on crates.io package naming:** The `rustpython-ruff_python_parser` package on
+crates.io is the published version of the same code as `ruff_python_parser` in the
+`astral-sh/ruff` monorepo. The RustPython project republishes it under this name.
+Users seeing `rustpython-ruff_python_parser` in `Cargo.toml` or `Cargo.lock` should
+know it is the same parser, not a fork.
+
 **Why ruff over rustpython-parser:**
 
 - rustpython-parser's README states it is "superseded by" the ruff parser

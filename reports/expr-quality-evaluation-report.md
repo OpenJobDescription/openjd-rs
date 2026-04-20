@@ -36,11 +36,14 @@ The following issues have been **resolved** on the `expr-fixes` branch:
 | Issue | Status | Notes |
 |---|---|---|
 | 5.1 — list comprehension filter silently accepts non-bool | ✅ FIXED | Red/green TDD, 8 new tests |
+| 5.2 — `eval_attribute` clones the AST on every call | ✅ FIXED (2026-04-20) | New `build_dotted_name_from_attr` helper avoids clone |
+| 5.3 — `eval_compare` clones the AST per comparison operator | ✅ FIXED (2026-04-20) | `dispatch_with_span` uses `TextRange` directly |
 | 5.4 — `ParsedExpression` exposes all fields as `pub` | ✅ FIXED | Fields now `pub(crate)`, 4 accessors added |
 | 5.5 — `ParsedExpression` missing `#[must_use]` | ✅ FIXED | Attribute added |
 | 5.6 — `path(list)` diverges from `PurePosixPath`/`PureWindowsPath` | ✅ FIXED | 36 new tests, pathlib semantics |
 | 5.7 — `any()`/`all()` `list[bool]` restriction not documented | ✅ FIXED | Spec note added |
 | 5.9 — `is_truthy()` broader than necessary | ✅ FIXED | Method removed, call sites use explicit `Bool` match |
+| 5.12 — Test-file naming (`test_parsing.rs`) | ✅ FIXED (2026-04-20) | Renamed to `test_evaluation.rs` via `git mv` |
 | **Bonus** — 3 pre-existing conformance failures on `flatten`/`sorted`/`reversed` | ✅ FIXED | Root cause: empty-list nesting-depth misclassification |
 
 Post-fix verification: **6,092 workspace tests pass**, conformance suite
@@ -310,7 +313,7 @@ if let Some(if_clause) = gen.ifs.first() {
 A failing test demonstrating the bug is saved at
 `/tmp/expr_probes/test_listcomp_filter.rs`.
 
-### 5.2 DESIGN-CHOICE-UNDOCUMENTED — `eval_attribute` clones the AST on every call
+### 5.2 DESIGN-CHOICE-UNDOCUMENTED — `eval_attribute` clones the AST on every call ✅ FIXED (2026-04-20)
 
 **File:** `src/eval/evaluator.rs:480`
 
@@ -368,7 +371,7 @@ The error-reporting branch (`let attr_node = ast::Expr::Attribute(a.clone());`)
 at line ~497 still clones, but it only runs when the dotted-path lookup fails
 *and* subsequent evaluation also fails, so it's no longer on the hot path.
 
-### 5.3 DESIGN-CHOICE-UNDOCUMENTED — `eval_compare` clones the AST per comparison operator
+### 5.3 DESIGN-CHOICE-UNDOCUMENTED — `eval_compare` clones the AST per comparison operator ✅ FIXED (2026-04-20)
 
 **File:** `src/eval/evaluator.rs:734-763`
 
@@ -592,7 +595,7 @@ error-path only and is perfectly acceptable; noted here for completeness.
 
 **Verdict: TEST-GAP (non-blocking).**
 
-### 5.12 OBSERVATION — Test-file naming is mildly confusing
+### 5.12 OBSERVATION — Test-file naming is mildly confusing ✅ FIXED (2026-04-20)
 
 `tests/test_parsing.rs` (1,179 lines, 220 tests) primarily exercises expression
 **evaluation**, not parsing. Parsing-behavior tests live in
@@ -698,13 +701,12 @@ Listed in priority order.
 
 ### Medium priority
 
-2. **Eliminate the `eval_attribute` AST clone (§5.2).** The hot-path clone of
-   `ast::ExprAttribute` on every attribute lookup is the single most
-   impactful perf improvement identified. The fix is a trivial refactor to
-   pass `&ast::ExprAttribute` into `build_dotted_name`.
-3. **Reduce `eval_compare` AST clones (§5.3).** Pass the text range (or the
-   `&ast::ExprCompare` borrow) instead of cloning the full compare node for
-   error caret positioning.
+2. ✅ **Eliminate the `eval_attribute` AST clone (§5.2).** DONE. Added
+   `build_dotted_name_from_attr` that takes `&ast::ExprAttribute` directly,
+   removing the hot-path clone.
+3. ✅ **Reduce `eval_compare` AST clones (§5.3).** DONE. Added
+   `dispatch_with_span` that accepts a `TextRange` instead of cloning the
+   full `ExprCompare` node for error positioning.
 4. ✅ **Tighten the public API of `ParsedExpression` (§5.4).** DONE. Fields
    are now `pub(crate)` or private; four accessor methods (`expression()`,
    `accessed_symbols()`, `called_functions()`, `local_bindings()`) form the
@@ -720,18 +722,16 @@ Listed in priority order.
    `specs/expr/function-library.md`.
 7. ✅ **Note in the spec that `any()`/`all()` require `list[bool]` (§5.7).**
    DONE. One-bullet note added to `specs/expr/function-library.md`.
-8. **Clarify list-comprehension `if` clause rule in the language spec.** The
-   language spec's "no truthy concept" should explicitly cover list
-   comprehension filters, not just ternary `if/else`. This avoids the spec
-   ambiguity that allowed §5.1 to slip through.
-9. **Document the `truediv` precision note (§5.8).** Add a small "precision"
-   note to `values.md` or `function-library.md` explaining that integer
-   division returning `float` loses precision above 2^53, mirroring Python.
+8. ✅ **Clarify list-comprehension `if` clause rule in the language spec.** DONE.
+   Added explicit statement in §1.3.7 of the canonical spec that the `if`
+   filter clause requires `bool`, referencing §1.3.5's "no truthy concept" rule.
+9. ✅ **Document the `truediv` precision note (§5.8).** DONE. Added precision
+   note to `specs/expr/values.md` in the Float64 section.
 10. ✅ **Remove `is_truthy()` (§5.9).** DONE. Method deleted; call sites in
     `any()`, `all()`, and `eval_ifexp` now use explicit `Bool` pattern
     matching.
-11. **Rename `tests/test_parsing.rs` to match its content (§5.12).** The file
-    tests evaluation, not parsing.
+11. ✅ **Rename `tests/test_parsing.rs` to match its content (§5.12).** DONE.
+    Renamed to `test_evaluation.rs` via `git mv`.
 
 ### Optional enhancements
 
@@ -744,9 +744,9 @@ Listed in priority order.
 14. **Consider renaming `OpenJdError` → `ModelError` in `openjd-model`** for
     cross-crate consistency (§9). Breaking change; bundle with other v0.x
     breaking changes if any.
-15. **Add parser-package-name note to `specs/expr/parser.md`.** Mention that
-    the `rustpython-ruff_python_parser` crates.io name is the published
-    version of the same code as `astral-sh/ruff`'s parser.
+15. ✅ **Add parser-package-name note to `specs/expr/parser.md`.** DONE.
+    Clarifies that `rustpython-ruff_python_parser` on crates.io is the same
+    code as `ruff_python_parser` in the `astral-sh/ruff` monorepo.
 
 ---
 
@@ -950,6 +950,58 @@ Compared to the pre-fix baseline: +46 tests net in the workspace suite
 unit tests removed with `is_truthy()` in §5.9), and the conformance suite
 improved from 1,039 passed / 3 failed to 1,042 passed / 0 failed.
 
-Remaining open items: §5.2 (`eval_attribute` clone), §5.3 (`eval_compare`
-clone), §5.8 / §5.10–§5.12 (documentation, tests-naming, and optional
-benchmark / fuzz enhancements).
+Remaining open items: §5.8 (truediv precision — documented but no code change
+needed), §5.10 (symbol collection cost — intentional), §5.11 (fuzz/benchmarks —
+optional enhancements).
+
+### 12.8 Fix for §5.2 — eliminate `eval_attribute` AST clone
+
+**Files changed:**
+- `crates/openjd-expr/src/eval/evaluator.rs` — added `build_dotted_name_from_attr`
+  helper that takes `&ast::ExprAttribute` directly and walks the attribute chain
+  without cloning. `eval_attribute` now calls this instead of wrapping in
+  `ast::Expr::Attribute(a.clone())`. The original `build_dotted_name` is retained
+  (with `#[allow(dead_code)]`) for potential future callers.
+
+**Before:** Every `Param.Frame`-style lookup deep-cloned the entire
+`ExprAttribute` AST node (including the `Box<Expr>` receiver chain) just to
+pass it to `build_dotted_name` which only reads by reference.
+
+**After:** Zero clones on the hot path. Error-path clones (for `with_node`
+positioning) remain but only execute on lookup failure.
+
+### 12.9 Fix for §5.3 — eliminate `eval_compare` AST clone
+
+**Files changed:**
+- `crates/openjd-expr/src/eval/evaluator.rs` — added `dispatch_with_span` method
+  that accepts a `ruff_text_size::TextRange` and uses `with_span` for error
+  positioning instead of requiring an `&ast::Expr` node. `eval_compare` now calls
+  `dispatch_with_span(op_name, args, c.range())` instead of cloning the full
+  `ExprCompare` node per comparison operator.
+
+**Before:** For `1 < 2 < 3 < 4`, each iteration cloned the entire `ExprCompare`
+AST node solely for error caret positioning.
+
+**After:** Uses the compare expression's `TextRange` directly — no AST clone.
+Error carets still point at the full compare expression span.
+
+### 12.10 Fix for §5.12 — rename test file
+
+**Files changed:**
+- `crates/openjd-expr/tests/test_parsing.rs` → `test_evaluation.rs` via `git mv`.
+
+The file contains 222 tests that exercise expression **evaluation** (arithmetic,
+comparisons, string ops, list ops, etc.), not parsing. The rename matches the
+content. No Cargo.toml or other references needed updating.
+
+### 12.11 Spec/docs updates
+
+**Files changed:**
+- `~/openjd-specifications/wiki/2026-02-Expression-Language.md` — §1.3.7 (List
+  Comprehensions): added explicit statement that the `if` filter clause requires
+  `bool`, referencing §1.3.5's "no truthy concept" rule.
+- `~/openjd-rs/specs/expr/values.md` — Float64 section: added precision note
+  that integer true-division loses precision above 2^53, matching Python.
+- `~/openjd-rs/specs/expr/parser.md` — added note clarifying that the
+  `rustpython-ruff_python_parser` crates.io package is the published version of
+  the same code as `ruff_python_parser` in the `astral-sh/ruff` monorepo.
