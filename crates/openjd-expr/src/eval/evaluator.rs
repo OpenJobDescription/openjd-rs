@@ -858,7 +858,8 @@ impl<'a> Evaluator<'a> {
                     err
                 });
             }
-            if test.is_truthy() {
+            // Condition is already validated as Bool above; match directly.
+            if matches!(test, ExprValue::Bool(true)) {
                 self.release(&test);
                 self.evaluate(&i.body)
             } else {
@@ -1271,6 +1272,27 @@ impl<'a> Evaluator<'a> {
             let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
             combined.push(&tmp);
             let mut child = self.child_evaluator(&combined);
+            // Check filter clause type if present
+            if let Some(if_clause) = gen.ifs.first() {
+                let cond = child.evaluate(if_clause)?;
+                let cond_inner = unwrap_unresolved(&cond.expr_type());
+                let is_bool_compatible = cond_inner == ExprType::BOOL
+                    || cond_inner.code() == crate::types::TypeCode::Unresolved
+                    || cond_inner.code() == crate::types::TypeCode::Any
+                    || (cond_inner.code() == crate::types::TypeCode::Union
+                        && cond_inner.params().contains(&ExprType::BOOL));
+                if !is_bool_compatible {
+                    let err = ExpressionError::new(format!(
+                        "List comprehension filter must be a boolean, got {}",
+                        cond_inner
+                    ));
+                    return Err(if let Some(src) = self.expr_source {
+                        err.with_node(src, if_clause)
+                    } else {
+                        err
+                    });
+                }
+            }
             let body_val = child.evaluate(&lc.elt)?;
             self.absorb_counters(&child);
             let body_type = unwrap_unresolved(&body_val.expr_type());
@@ -1307,6 +1329,16 @@ impl<'a> Evaluator<'a> {
                 let cond = child.evaluate(if_clause)?;
                 if let ExprValue::Bool(b) = cond {
                     include = b;
+                } else {
+                    let err = ExpressionError::new(format!(
+                        "List comprehension filter must be a boolean, got {}",
+                        cond.expr_type()
+                    ));
+                    return Err(if let Some(src) = self.expr_source {
+                        err.with_node(src, if_clause)
+                    } else {
+                        err
+                    });
                 }
             }
             if include {

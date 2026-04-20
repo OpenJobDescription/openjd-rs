@@ -275,11 +275,49 @@ impl ExprValue {
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
-        // Reject 3+ nesting levels: if any element is itself a ListList, that's too deep
-        if elements.iter().any(|e| matches!(e, Self::ListList(..))) {
+        // Reject 3+ nesting levels: if any element is itself a ListList with a
+        // non-nulltype element type, that's too deep. Empty lists (ListList with
+        // NULLTYPE) represent `list[nulltype]` — a flat empty list, not a nested one.
+        if elements
+            .iter()
+            .any(|e| matches!(e, Self::ListList(_, et, _) if *et != ExprType::NULLTYPE))
+        {
             return Err(crate::error::ExpressionError::new(
                 "Lists may be nested at most 2 levels deep",
             ));
+        }
+        // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
+        // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
+        let has_empty_listlist = elements.iter().any(
+            |e| matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE),
+        );
+        if has_empty_listlist {
+            // Find the first typed list sibling to determine the target variant
+            let sibling_code = elements.iter().find_map(|e| match e {
+                Self::ListBool(v) if !v.is_empty() => Some(crate::types::TypeCode::Bool),
+                Self::ListInt(v) if !v.is_empty() => Some(crate::types::TypeCode::Int),
+                Self::ListFloat(_) => Some(crate::types::TypeCode::Float),
+                Self::ListString(v, _) if !v.is_empty() => Some(crate::types::TypeCode::String),
+                Self::ListPath(v, _, _) if !v.is_empty() => Some(crate::types::TypeCode::Path),
+                _ => None,
+            });
+            if let Some(code) = sibling_code {
+                for e in &mut elements {
+                    if matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE)
+                    {
+                        *e = match code {
+                            crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
+                            crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
+                            crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
+                            crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
+                            crate::types::TypeCode::Path => {
+                                Self::make_list_path(Vec::new(), PathFormat::host())
+                            }
+                            _ => continue,
+                        };
+                    }
+                }
+            }
         }
         if elements.is_empty() {
             // Empty lists are list[nulltype], compatible with any list type.
@@ -933,26 +971,6 @@ impl ExprValue {
             Self::ListString(_, cached) | Self::ListPath(_, _, cached) => *cached,
             Self::ListList(_, _, cached) => *cached,
             Self::RangeExpr(r) => r.heap_size(),
-        }
-    }
-
-    /// Truthiness: only `null` and `false` are falsy (differs from Python).
-    pub fn is_truthy(&self) -> bool {
-        match self {
-            Self::Null => false,
-            Self::Bool(b) => *b,
-            Self::Int(i) => *i != 0,
-            Self::Float(fv) => fv.value != 0.0,
-            Self::String(s) => !s.is_empty(),
-            Self::Path { value, .. } => !value.is_empty(),
-            Self::ListBool(v) => !v.is_empty(),
-            Self::ListInt(v) => !v.is_empty(),
-            Self::ListFloat(v) => !v.is_empty(),
-            Self::ListString(v, _) => !v.is_empty(),
-            Self::ListPath(v, _, _) => !v.is_empty(),
-            Self::ListList(v, _, _) => !v.is_empty(),
-            Self::RangeExpr(r) => !r.is_empty(),
-            Self::Unresolved(_) => true,
         }
     }
 

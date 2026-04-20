@@ -357,5 +357,12 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5)
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6)
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
+- **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /
+  `PureWindowsPath(*parts)` semantics: an absolute component in the list resets the
+  accumulator (discarding earlier components), empty strings are ignored, `.` segments
+  are removed, duplicate separators are collapsed, and `..` is preserved without
+  resolution. For Windows, drive letters and UNC prefixes follow pathlib's rules:
+  a different drive replaces everything, a root-only component replaces from root
+  while keeping the existing drive, and a same-drive relative component appends.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)

@@ -10,14 +10,38 @@ use std::collections::HashMap;
 
 /// A parsed expression ready for evaluation.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct ParsedExpression {
-    pub ast: ast::Expr,
-    pub expr: String,
-    pub source: String,
-    pub keyword_renames: HashMap<String, String>,
-    pub accessed_symbols: HashSet<String>,
-    pub called_functions: HashSet<String>,
-    pub local_bindings: HashSet<String>,
+    pub(crate) ast: ast::Expr,
+    pub(crate) expr: String,
+    #[allow(dead_code)] // preserves original untrimmed input for potential future use
+    source: String,
+    pub(crate) keyword_renames: HashMap<String, String>,
+    pub(crate) accessed_symbols: HashSet<String>,
+    pub(crate) called_functions: HashSet<String>,
+    pub(crate) local_bindings: HashSet<String>,
+}
+
+impl ParsedExpression {
+    /// The trimmed expression string.
+    pub fn expression(&self) -> &str {
+        &self.expr
+    }
+
+    /// Symbol names accessed by this expression (e.g. `Param.Name`).
+    pub fn accessed_symbols(&self) -> &HashSet<String> {
+        &self.accessed_symbols
+    }
+
+    /// Function names called by this expression (e.g. `len`, `upper`).
+    pub fn called_functions(&self) -> &HashSet<String> {
+        &self.called_functions
+    }
+
+    /// Loop variable names bound by list comprehensions in this expression.
+    pub fn local_bindings(&self) -> &HashSet<String> {
+        &self.local_bindings
+    }
 }
 
 use std::collections::HashSet;

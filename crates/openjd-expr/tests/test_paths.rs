@@ -1710,3 +1710,451 @@ cross_format_test!(
     "/unused",
     "file"
 );
+
+// =============================================================================
+// Bug 5.6: path(list[string]) must match PurePosixPath / PureWindowsPath
+// =============================================================================
+
+// ── Posix simple ──
+
+#[test]
+fn path_list_posix_simple_two() {
+    assert_eq!(
+        eval_with_fmt("path(['a', 'b'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_list_posix_simple_three() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', 'b', 'c'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/b/c"
+    );
+}
+
+#[test]
+fn path_list_posix_abs_then_rel() {
+    assert_eq!(
+        eval_with_fmt("path(['/a', 'b'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "/a/b"
+    );
+}
+
+#[test]
+fn path_list_posix_root_then_parts() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['/', 'a', 'b', 'c'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "/a/b/c"
+    );
+}
+
+// ── Posix absolute resets ──
+
+#[test]
+fn path_list_posix_abs_reset() {
+    // PurePosixPath('a', '/b') == '/b'
+    assert_eq!(
+        eval_with_fmt("path(['a', '/b'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "/b"
+    );
+}
+
+#[test]
+fn path_list_posix_abs_reset_mid() {
+    // PurePosixPath('a', 'b', '/c', 'd') == '/c/d'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', 'b', '/c', 'd'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "/c/d"
+    );
+}
+
+#[test]
+fn path_list_posix_abs_reset_both() {
+    // PurePosixPath('/a', '/b') == '/b'
+    assert_eq!(
+        eval_with_fmt("path(['/a', '/b'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "/b"
+    );
+}
+
+#[test]
+fn path_list_posix_abs_reset_chain() {
+    // PurePosixPath('a', 'b', '/c', 'd', '/e') == '/e'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', 'b', '/c', 'd', '/e'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "/e"
+    );
+}
+
+// ── Posix edge cases ──
+
+#[test]
+fn path_list_posix_empty_string() {
+    // PurePosixPath('') == '.'
+    assert_eq!(
+        eval_with_fmt("path([''])", &SymbolTable::new(), PathFormat::Posix).to_display_string(),
+        "."
+    );
+}
+
+#[test]
+fn path_list_posix_a_then_empty() {
+    // PurePosixPath('a', '') == 'a'
+    assert_eq!(
+        eval_with_fmt("path(['a', ''])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "a"
+    );
+}
+
+#[test]
+fn path_list_posix_empty_then_a() {
+    // PurePosixPath('', 'a') == 'a'
+    assert_eq!(
+        eval_with_fmt("path(['', 'a'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "a"
+    );
+}
+
+#[test]
+fn path_list_posix_trailing_slash() {
+    // PurePosixPath('a/', 'b') == 'a/b'
+    assert_eq!(
+        eval_with_fmt("path(['a/', 'b'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_list_posix_dot_then_a() {
+    // PurePosixPath('.', 'a') == 'a'
+    assert_eq!(
+        eval_with_fmt("path(['.', 'a'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "a"
+    );
+}
+
+#[test]
+fn path_list_posix_dotdot_then_a() {
+    // PurePosixPath('..', 'a') == '../a'
+    assert_eq!(
+        eval_with_fmt("path(['..', 'a'])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "../a"
+    );
+}
+
+#[test]
+fn path_list_posix_a_dot_b() {
+    // PurePosixPath('a', '.', 'b') == 'a/b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', '.', 'b'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_list_posix_a_dotdot_b() {
+    // PurePosixPath('a', '..', 'b') == 'a/../b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', '..', 'b'])",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/../b"
+    );
+}
+
+#[test]
+fn path_list_posix_empty_empty() {
+    // PurePosixPath('', '') == '.'
+    assert_eq!(
+        eval_with_fmt("path(['', ''])", &SymbolTable::new(), PathFormat::Posix).to_display_string(),
+        "."
+    );
+}
+
+#[test]
+fn path_list_posix_root_then_empty() {
+    // PurePosixPath('/', '') == '/'
+    assert_eq!(
+        eval_with_fmt("path(['/', ''])", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "/"
+    );
+}
+
+// ── Windows simple ──
+
+#[test]
+fn path_list_windows_simple_two() {
+    assert_eq!(
+        eval_with_fmt("path(['a', 'b'])", &SymbolTable::new(), PathFormat::Windows)
+            .to_display_string(),
+        r"a\b"
+    );
+}
+
+#[test]
+fn path_list_windows_drive_then_rel() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', 'b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\a\b"
+    );
+}
+
+// ── Windows drive/root resets ──
+
+#[test]
+fn path_list_windows_abs_drive_reset() {
+    // PureWindowsPath('a', 'C:\\b') == 'C:\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', 'C:\\\\b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\b"
+    );
+}
+
+#[test]
+fn path_list_windows_diff_drive_reset() {
+    // PureWindowsPath('C:\\a', 'D:\\b') == 'D:\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', 'D:\\\\b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"D:\b"
+    );
+}
+
+#[test]
+fn path_list_windows_root_keeps_drive() {
+    // PureWindowsPath('C:\\a', '\\b') == 'C:\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', '\\\\b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\b"
+    );
+}
+
+#[test]
+fn path_list_windows_fwd_slash_root_keeps_drive() {
+    // PureWindowsPath('C:\\a', '/b') == 'C:\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', '/b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\b"
+    );
+}
+
+#[test]
+fn path_list_windows_drive_relative() {
+    // PureWindowsPath('C:', 'a') == 'C:a'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:', 'a'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "C:a"
+    );
+}
+
+#[test]
+fn path_list_windows_drive_root_then_rel() {
+    // PureWindowsPath('C:/', 'a') == 'C:\\a'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:/', 'a'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\a"
+    );
+}
+
+#[test]
+fn path_list_windows_diff_drive_relative_reset() {
+    // PureWindowsPath('C:\\a', 'D:b') == 'D:b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', 'D:b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "D:b"
+    );
+}
+
+#[test]
+fn path_list_windows_same_drive_no_root_appends() {
+    // PureWindowsPath('C:\\a', 'C:b') == 'C:\\a\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', 'C:b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\a\b"
+    );
+}
+
+#[test]
+fn path_list_windows_same_drive_empty_noop() {
+    // PureWindowsPath('C:\\a', 'C:') == 'C:\\a'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['C:\\\\a', 'C:'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"C:\a"
+    );
+}
+
+// ── Windows UNC ──
+
+#[test]
+fn path_list_windows_unc_then_rel() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['\\\\\\\\server\\\\share', 'a'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"\\server\share\a"
+    );
+}
+
+#[test]
+fn path_list_windows_unc_root_reset() {
+    // PureWindowsPath('\\\\server\\share\\a', '\\b') == '\\\\server\\share\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['\\\\\\\\server\\\\share\\\\a', '\\\\b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"\\server\share\b"
+    );
+}
+
+// ── Windows edge cases ──
+
+#[test]
+fn path_list_windows_empty_string() {
+    assert_eq!(
+        eval_with_fmt("path([''])", &SymbolTable::new(), PathFormat::Windows).to_display_string(),
+        "."
+    );
+}
+
+#[test]
+fn path_list_windows_dot_then_a() {
+    assert_eq!(
+        eval_with_fmt("path(['.', 'a'])", &SymbolTable::new(), PathFormat::Windows)
+            .to_display_string(),
+        "a"
+    );
+}
+
+#[test]
+fn path_list_windows_a_dot_b() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', '.', 'b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"a\b"
+    );
+}
+
+#[test]
+fn path_list_windows_a_dotdot_b() {
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', '..', 'b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"a\..\b"
+    );
+}
+
+#[test]
+fn path_list_windows_no_drive_root_reset() {
+    // PureWindowsPath('a', '\\b') == '\\b'
+    assert_eq!(
+        eval_with_fmt(
+            "path(['a', '\\\\b'])",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        r"\b"
+    );
+}

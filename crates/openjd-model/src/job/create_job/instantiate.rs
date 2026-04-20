@@ -536,7 +536,7 @@ fn collect_all_accessed_symbols(
             if let Some(eq_pos) = binding.find('=') {
                 let expr = binding[eq_pos + 1..].trim();
                 if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
-                    symbols.extend(parsed.accessed_symbols);
+                    symbols.extend(parsed.accessed_symbols().iter().cloned());
                 }
             }
         }
@@ -565,7 +565,7 @@ fn collect_all_accessed_symbols(
                 if let Some(eq_pos) = binding.find('=') {
                     let expr = binding[eq_pos + 1..].trim();
                     if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
-                        symbols.extend(parsed.accessed_symbols);
+                        symbols.extend(parsed.accessed_symbols().iter().cloned());
                     }
                 }
             }
@@ -612,7 +612,7 @@ fn collect_let_binding_refs(bindings: &[String], full: &SymbolTable, filtered: &
             // A parse failure is unreachable but harmless — the symbol just won't
             // appear in the filtered output.
             if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
-                for symbol in &parsed.accessed_symbols {
+                for symbol in parsed.accessed_symbols() {
                     copy_symbol_value(symbol, full, filtered);
                 }
             }
