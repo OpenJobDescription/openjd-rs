@@ -27,6 +27,17 @@ use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 
 // ── Shared utilities ──
 
+/// Compute the product of child node lengths with overflow checking.
+fn checked_product_len(children: &[Box<dyn Node>]) -> Result<usize, OpenJdError> {
+    children.iter().try_fold(1usize, |acc, c| {
+        acc.checked_mul(c.len()).ok_or_else(|| {
+            OpenJdError::DecodeValidation(
+                "Total parameter space size overflow: the product of parameter dimensions is too large.".into(),
+            )
+        })
+    })
+}
+
 /// Tokenize a combination expression into identifiers and operators.
 fn tokenize(expr: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -936,7 +947,7 @@ impl StepParameterSpaceIterator {
             if children.len() == 1 {
                 children.pop().unwrap()
             } else {
-                let length = children.iter().map(|c| c.len()).product();
+                let length = checked_product_len(&children)?;
                 Box::new(ProductNode { children, length })
             }
         } else {
@@ -1124,7 +1135,7 @@ fn parse_node_product(
     if children.len() == 1 {
         Ok(children.pop().unwrap())
     } else {
-        let length = children.iter().map(|c| c.len()).product();
+        let length = checked_product_len(&children)?;
         Ok(Box::new(ProductNode { children, length }))
     }
 }

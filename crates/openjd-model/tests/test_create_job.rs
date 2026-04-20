@@ -3931,3 +3931,104 @@ fn resolved_symtab_does_not_add_raw_param_for_referenced_string_param() {
         "RawParam.Msg should not be added for STRING params — only PATH/LIST[PATH]"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Issue 1.1: Float param NaN/Inf user input must error, not panic
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn float_param_user_input_nan_rejected() {
+    let td = TestDirs::new();
+    let jt_val = minimal_job_template(r#"{"name": "F", "type": "FLOAT"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert("F".into(), openjd_expr::ExprValue::String("NaN".into()));
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
+    assert!(result.is_err(), "NaN user input must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("not a valid float"),
+        "Expected float rejection message, got: {msg}"
+    );
+}
+
+#[test]
+fn float_param_user_input_inf_rejected() {
+    let td = TestDirs::new();
+    let jt_val = minimal_job_template(r#"{"name": "F", "type": "FLOAT"}"#);
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert("F".into(), openjd_expr::ExprValue::String("inf".into()));
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
+    assert!(result.is_err(), "inf user input must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("not a valid float"),
+        "Expected float rejection message, got: {msg}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Issue 1.3: Singular "1 validation error" (not "1 validation errors")
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn single_error_uses_singular_grammar() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let err = decode_job_template(v, None).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("1 validation error for"),
+        "Expected singular 'error' not 'errors', got: {msg}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Issue 1.4: SimpleAction with digit-starting step name must not panic
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn simple_action_digit_starting_step_name() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "steps": [{"name": "9frames", "bash": {"script": "echo hello"}}]
+    }"#,
+    );
+    let result = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]));
+    assert!(
+        result.is_ok(),
+        "Step name starting with digit should not panic: {:?}",
+        result.err()
+    );
+}

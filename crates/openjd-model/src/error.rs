@@ -114,7 +114,9 @@ impl ValidationErrors {
 
     /// Format errors matching the Python Pydantic output format.
     pub fn format(&self, model_name: &str) -> String {
-        let mut out = format!("{} validation errors for {model_name}", self.errors.len());
+        let n = self.errors.len();
+        let word = if n == 1 { "error" } else { "errors" };
+        let mut out = format!("{n} validation {word} for {model_name}");
         for err in &self.errors {
             out.push('\n');
             if err.path.is_empty() {
@@ -219,7 +221,7 @@ mod tests {
         let s = ve.format("JobTemplate");
         assert_eq!(
             s,
-            "1 validation errors for JobTemplate\nname:\n\tmust not be empty"
+            "1 validation error for JobTemplate\nname:\n\tmust not be empty"
         );
     }
 

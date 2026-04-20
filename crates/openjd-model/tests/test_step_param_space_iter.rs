@@ -604,3 +604,51 @@ fn lazy_param_space_range_expr_within_limit() {
     let task = iter.get(1023).unwrap();
     assert_eq!(task.len(), 1);
 }
+
+// ══════════════════════════════════════════════════════════════
+// Issue 1.2: ProductNode length overflow must error, not silently wrap
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn product_node_overflow_is_rejected() {
+    // 7 INT list params each with 1024 values: 1024^7 = 2^70 > u64::MAX
+    let mut params = String::new();
+    for i in 0..7 {
+        if i > 0 {
+            params.push(',');
+        }
+        // Build a list of 1024 values
+        let values: Vec<String> = (0..1024).map(|v| v.to_string()).collect();
+        params.push_str(&format!(
+            r#"{{"name": "P{i}", "type": "INT", "range": [{}]}}"#,
+            values.join(",")
+        ));
+    }
+    let template_str = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{{
+            "name": "step",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [{params}]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    );
+    let template = yaml_val(&template_str);
+    let jt = decode_job_template(template, None).unwrap();
+    let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
+    let job = create_job(&jt, &params).unwrap();
+    let space = job.steps[0].parameter_space.as_ref().unwrap();
+    let result = StepParameterSpaceIterator::new(space);
+    let msg = match result {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("Overflow must be rejected"),
+    };
+    assert!(
+        msg.contains("parameter space") || msg.contains("overflow"),
+        "Expected overflow error message, got: {msg}"
+    );
+}

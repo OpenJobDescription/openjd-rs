@@ -271,7 +271,7 @@ fn test_empty_parameters() {
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
     }"#,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "parameterDefinitions, if provided, must contain at least one element.",
         ],
     );
@@ -293,7 +293,7 @@ fn test_too_many_parameters() {
     check_env_err(
         &s,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "parameterDefinitions must not contain more than 50 elements.",
         ],
     );
@@ -308,7 +308,7 @@ fn test_duplicate_parameter_names() {
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
     }"#,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "Duplicate parameter name: 'P'",
         ],
     );
@@ -340,7 +340,7 @@ fn test_env_empty_variables() {
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}, "variables": {}}
     }"#,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "environment -> variables:\n\tif provided, must not be empty.",
         ],
     );
@@ -369,7 +369,7 @@ fn test_env_name_too_long() {
     check_env_err(
         &s,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "environment -> name:\n\texceeds 64 characters.",
         ],
     );

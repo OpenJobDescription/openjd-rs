@@ -78,6 +78,11 @@ impl StepTemplate {
                 .map(|c| if c.is_alphanumeric() { c } else { '_' })
                 .take(200)
                 .collect();
+            let safe_name = if safe_name.starts_with(|c: char| c.is_ascii_digit()) {
+                format!("_{safe_name}")
+            } else {
+                safe_name
+            };
             let embedded_name = format!("{safe_name}_script");
             let filename = format!("{embedded_name}{ext}");
             let file_ref = format!("{{{{Task.File.{embedded_name}}}}}");

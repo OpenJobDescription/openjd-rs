@@ -141,7 +141,7 @@ fn test_empty_steps() {
         "steps": []
     }"#,
         &[
-            "1 validation errors for JobTemplate\n",
+            "1 validation error for JobTemplate\n",
             "JobTemplate: must have at least one step.",
         ],
     );

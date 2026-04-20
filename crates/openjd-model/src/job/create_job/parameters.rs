@@ -400,12 +400,15 @@ pub(super) fn coerce_from_str(
             .parse::<i64>()
             .map(ExprValue::Int)
             .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?,
-        JobParameterType::Float => s
-            .parse::<f64>()
-            .map(|f| {
-                ExprValue::Float(openjd_expr::value::Float64::with_str(f, s.to_string()).unwrap())
-            })
-            .map_err(|_| format!("Value '{s}' is not a valid float."))?,
+        JobParameterType::Float => {
+            let f = s
+                .parse::<f64>()
+                .map_err(|_| format!("Value '{s}' is not a valid float."))?;
+            ExprValue::Float(
+                openjd_expr::value::Float64::with_str(f, s.to_string())
+                    .map_err(|_| format!("Value '{s}' is not a valid float."))?,
+            )
+        }
         JobParameterType::Bool => match s.to_lowercase().as_str() {
             "true" | "yes" | "on" | "1" => ExprValue::Bool(true),
             "false" | "no" | "off" | "0" => ExprValue::Bool(false),

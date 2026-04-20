@@ -55,7 +55,7 @@ fn empty_steps() {
         "steps": []
     }"#,
         &[
-            "1 validation errors for JobTemplate\n",
+            "1 validation error for JobTemplate\n",
             "JobTemplate: must have at least one step.",
         ],
     );
@@ -264,7 +264,7 @@ fn env_name_too_long() {
     check_env_err(
         &s,
         &[
-            "1 validation errors for EnvironmentTemplate\n",
+            "1 validation error for EnvironmentTemplate\n",
             "environment -> name:\n\texceeds 64 characters.",
         ],
     );
