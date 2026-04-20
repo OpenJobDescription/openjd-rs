@@ -1103,9 +1103,19 @@ mod tests {
         let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
         let (msg_tx, _msg_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Use a script that traps SIGTERM so the process survives until SIGKILL
+        // Use python to reliably ignore SIGTERM in a single process. Using
+        // `sh -c 'trap "" TERM; sleep 30'` is fragile: some sh implementations
+        // install a userspace handler for the trap instead of SIG_IGN, so the
+        // SIG_IGN inheritance rule does not protect the child `sleep`, and
+        // killpg(SIGTERM) kills `sleep` — terminating the script within ms
+        // rather than waiting for the 1s SIGKILL.
         let config = SubprocessConfig {
-            args: vec!["sh".into(), "-c".into(), "trap '' TERM; sleep 30".into()],
+            args: vec![
+                "python3".into(),
+                "-c".into(),
+                "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+                    .into(),
+            ],
             env_vars: HashMap::new(),
             working_dir: None,
             timeout: None,
