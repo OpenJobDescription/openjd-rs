@@ -41,9 +41,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup override set stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
         with:
-          key: ${{ matrix.os }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-clippy-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-clippy-${{ matrix.os }}-
       - name: Run cargo clippy
         run: cargo clippy --all-features --all-targets --workspace -- -D warnings
       - name: Run helper clippy
@@ -62,9 +69,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
         with:
-          key: build-${{ matrix.os }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-build-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-build-${{ matrix.os }}-
       - name: Build release binary
         run: cargo build --release
       - name: Upload CLI binary
@@ -89,9 +103,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
         with:
-          key: ${{ matrix.os }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-test-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-test-${{ matrix.os }}-
       - name: Run tests
         run: cargo test --workspace
       - name: Run helper integration tests
@@ -155,9 +176,16 @@ jobs:
         run: |
           rustup toolchain install 1.92 --profile minimal
           rustup override set 1.92
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
         with:
-          key: msrv
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-msrv-
       - name: Check compilation
         run: cargo check --workspace
 
@@ -170,7 +198,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-doc-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-doc-
       - name: Run cargo doc
         run: cargo doc --no-deps --workspace
         env:
