@@ -1703,3 +1703,13 @@ fn scalar_with_string_target() {
     assert_eq!(result.to_display_string(), "42");
     assert_eq!(result.expr_type(), ExprType::STRING);
 }
+
+#[test]
+fn empty_listcomp_type_is_nulltype() {
+    assert_eq!(
+        eval("[x for x in [1, 2, 3] if False]")
+            .expr_type()
+            .to_string(),
+        "list[nulltype]"
+    );
+}

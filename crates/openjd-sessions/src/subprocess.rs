@@ -1106,19 +1106,24 @@ mod tests {
         let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
         let (msg_tx, _msg_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Use python to reliably ignore SIGTERM in a single process. Using
+        // Use python3 to reliably ignore SIGTERM in a single process. Using
         // `sh -c 'trap "" TERM; sleep 30'` is fragile: some sh implementations
         // install a userspace handler for the trap instead of SIG_IGN, so the
         // SIG_IGN inheritance rule does not protect the child `sleep`, and
         // killpg(SIGTERM) kills `sleep` — terminating the script within ms
         // rather than waiting for the 1s SIGKILL.
+        //
+        // The script writes a sentinel file after installing the handler so
+        // the test can wait for readiness before canceling — avoiding a race
+        // where SIGTERM arrives before SIG_IGN is installed.
+        let ready_dir = tempfile::tempdir().unwrap();
+        let ready_path = ready_dir.path().join("ready");
+        let py_script = format!(
+            "import signal, time, pathlib; signal.signal(signal.SIGTERM, signal.SIG_IGN); pathlib.Path('{}').write_text('ok'); time.sleep(30)",
+            ready_path.display()
+        );
         let config = SubprocessConfig {
-            args: vec![
-                "python3".into(),
-                "-c".into(),
-                "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
-                    .into(),
-            ],
+            args: vec!["python3".into(), "-c".into(), py_script],
             env_vars: HashMap::new(),
             working_dir: None,
             timeout: None,
@@ -1131,8 +1136,15 @@ mod tests {
         };
 
         let t = token.clone();
+        let ready_path_clone = ready_path.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            // Wait for the python process to install its SIGTERM handler
+            for _ in 0..100 {
+                if ready_path_clone.exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
             t.cancel();
         });
 
@@ -1144,14 +1156,15 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(result.state, ActionState::Canceled);
+        // After cancel, the 1s terminate_delay must elapse before SIGKILL
         assert!(
             elapsed >= Duration::from_millis(800),
             "took {:?}, expected >= 800ms",
             elapsed
         );
         assert!(
-            elapsed < Duration::from_secs(5),
-            "took {:?}, expected < 5s",
+            elapsed < Duration::from_secs(10),
+            "took {:?}, expected < 10s",
             elapsed
         );
     }
