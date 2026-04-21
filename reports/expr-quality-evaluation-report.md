@@ -6,9 +6,9 @@
 
 ## Executive Summary
 
-The `openjd-expr` crate is a high-quality Rust implementation of the Open Job Description expression language. It has 14 specification documents, ~20 source files totaling ~400KB, and 2,806+ tests (all passing). The code compiles cleanly with zero `cargo clippy` warnings. The specifications are thorough and well-aligned with the implementation. Three confirmed bugs were found through exploratory testing, along with one confirmed performance issue and several minor improvement opportunities.
+The `openjd-expr` crate is a high-quality Rust implementation of the Open Job Description expression language. It has 14 specification documents, ~20 source files totaling ~400KB, and 2,814+ tests (all passing). The code compiles cleanly with zero `cargo clippy` warnings. The specifications are thorough and well-aligned with the implementation. Three confirmed bugs and one confirmed performance issue were found through exploratory testing; all four have been fixed with validated unit tests. Several minor improvement opportunities remain.
 
-**Overall assessment: Production-ready with minor issues to address.**
+**Overall assessment: Production-ready. All confirmed bugs and performance issues have been resolved.**
 
 ---
 
@@ -66,87 +66,53 @@ The separation of parsing (parse once) from evaluation (run many times) is corre
 
 ### 2.2 Confirmed Bugs
 
-#### BUG-1: `pow_int` u32 truncation for base ∈ {-1, 0, 1} with large exponents (CONFIRMED)
+#### BUG-1: `pow_int` u32 truncation for base ∈ {-1, 0, 1} with large exponents (FIXED)
 
 **File:** `src/functions/arithmetic.rs:97-120`
 **Severity:** Medium
-**Failing test:** `pow_int_0_large_exponent`
+**Commit:** `c1d83bc`
 
-When `base` is in `{-1, 0, 1}` and `exp > 63`, the overflow guard is skipped (correctly, since these bases can't overflow). However, the subsequent `*exp as u32` cast silently truncates the exponent. For `0 ** (2^32)`, the exponent truncates to 0, producing `0^0 = 1` instead of the correct `0`.
+When `base` is in `{-1, 0, 1}` and `exp > 63`, the overflow guard is skipped (correctly, since these bases can't overflow). However, the subsequent `*exp as u32` cast silently truncated the exponent. For `0 ** (2^32)`, the exponent truncated to 0, producing `0^0 = 1` instead of the correct `0`.
 
-```rust
-// Current code (line 112-115):
-if *exp > 63 && !matches!(*base, -1..=1) {
-    return Err(ExpressionError::integer_overflow());
-}
-Ok(ExprValue::Int(base.checked_pow(*exp as u32) ...))
-```
+**Fix applied:** Added special-case handling for base ∈ {-1, 0, 1} when `exp > u32::MAX` before the `checked_pow` call. Returns the mathematically correct result directly: `0^n = 0`, `1^n = 1`, `(-1)^n` based on parity.
 
-**Reproduction:**
-```rust
-assert_eq!(eval("0 ** 4294967296"), ExprValue::Int(0)); // FAILS: returns Int(1)
-```
+**Tests added** (5 in `test_arithmetic.rs`): `int_power_zero_base_large_exp`, `int_power_zero_base_large_exp_odd`, `int_power_one_base_large_exp`, `int_power_neg_one_base_large_even_exp`, `int_power_neg_one_base_large_odd_exp`.
 
-**Fix:** Add special-case handling for base ∈ {-1, 0, 1} before the `checked_pow` call:
-```rust
-match *base {
-    0 => return Ok(ExprValue::Int(0)), // 0^n = 0 for n > 0
-    1 => return Ok(ExprValue::Int(1)), // 1^n = 1
-    -1 => return Ok(ExprValue::Int(if *exp % 2 == 0 { 1 } else { -1 })),
-    _ => {}
-}
-```
-
-#### BUG-2: `rsplit_fn` missing `count_string_ops` for whitespace split (CONFIRMED via code inspection)
+#### BUG-2: `rsplit_fn` missing `count_string_ops` for whitespace split (FIXED)
 
 **File:** `src/functions/string.rs:222-229`
 **Severity:** Low
+**Commit:** `c1d83bc`
 
-The `split_fn` whitespace path (line 193) calls `ctx.count_string_ops(s.len())?;` but the `rsplit_fn` whitespace path (line 224-228) does not. This means `rsplit()` with no separator argument bypasses the string operation resource bound.
+The `split_fn` whitespace path (line 193) calls `ctx.count_string_ops(s.len())?;` but the `rsplit_fn` whitespace path (line 224-228) did not. This meant `rsplit()` with no separator argument bypassed the string operation resource bound.
 
-```rust
-// split_fn whitespace path (line 192-193):
-ctx.count_string_ops(s.len())?;  // ← present
+**Fix applied:** Added `ctx.count_string_ops(s.len())?;` as the first line inside the whitespace split branch of `rsplit_fn`.
 
-// rsplit_fn whitespace path (line 224-228):
-// ← missing count_string_ops call
-let parts: Vec<ExprValue> = s.split_whitespace()...
-```
+**Test added** (1 in `test_string_operation_counting.rs`): `large_string_rsplit_whitespace_exceeds`.
 
-**Fix:** Add `ctx.count_string_ops(s.len())?;` before line 225.
-
-#### BUG-3: `make_list` comment is stale/misleading
+#### BUG-3: `make_list` comment is stale/misleading (FIXED)
 
 **File:** `src/value.rs`
 **Severity:** Cosmetic
+**Commit:** `c1d83bc`
 
-A comment says "ListInt as the canonical empty list[nulltype] representation" but the code for `TypeCode::Null` actually creates `ListList(Vec::new(), ExprType::NULLTYPE, 0)`. The comment should be updated to match.
+A comment said "ListInt as the canonical empty list[nulltype] representation" but the code for `TypeCode::Null` actually creates `ListList(Vec::new(), ExprType::NULLTYPE, 0)`.
+
+**Fix applied:** Updated the comment to accurately describe the `ListList` with `NULLTYPE` behavior.
 
 ### 2.3 Confirmed Performance Issue
 
-#### PERF-1: `max(range_expr)` is O(n) instead of O(1) (CONFIRMED)
+#### PERF-1: `max(range_expr)` is O(n) instead of O(1) (FIXED)
 
 **File:** `src/functions/math.rs:40`
 **Severity:** High (for large ranges)
-**Failing test:** `max_range_expr_performance`
+**Commit:** `c1d83bc`
 
-`min_max_items` uses `r.iter().last()` to get the maximum value of a `RangeExpr`. This iterates every element. For a range of 1 billion elements, this took **15 seconds**.
+`min_max_items` used `r.iter().last()` to get the maximum value of a `RangeExpr`. This iterated every element. For a range of 1 billion elements, this took **15 seconds**.
 
-```rust
-// Current code (line 40):
-Ok(vec![ExprValue::Int(r.iter().last().unwrap())])
-```
+**Fix applied:** Replaced `r.iter().last()` with `r.get(r.len() as i64 - 1)`, using `RangeExpr::get()` which provides O(log n) random access. The billion-element case now completes in microseconds.
 
-`RangeExpr::get(index)` provides O(log n) random access. The fix is trivial:
-
-```rust
-Ok(vec![ExprValue::Int(r.get(r.len() as i64 - 1).unwrap())])
-```
-
-**Reproduction:**
-```rust
-// max(range("1-1000000000")) takes 15+ seconds instead of microseconds
-```
+**Tests added** (2 in `test_range_expr.rs`): `range_expr_max_correctness`, `range_expr_max_large_range_perf` (asserts < 1 second for billion-element range).
 
 ### 2.4 Code Quality Assessment
 
@@ -195,8 +161,8 @@ Ok(vec![ExprValue::Int(r.get(r.len() as i64 - 1).unwrap())])
 
 ### 3.1 Test Statistics
 
-- **Total tests:** 2,806+ (across 35 test files + inline tests)
-- **All passing:** Yes (0 failures, 0 ignored in the existing suite)
+- **Total tests:** 2,814+ (across 34 test files + inline tests)
+- **All passing:** Yes (0 failures, 0 ignored)
 - **Doc tests:** 5 (all passing)
 - **Clippy:** Zero warnings
 
@@ -213,12 +179,12 @@ Tests are well-organized into focused files:
 | test_unresolved_eval.rs | 179 | Static type checking with unresolved values |
 | test_types.rs | 171 | Type system (ExprType) |
 | test_expr_value.rs | 124 | Value construction, coercion, equality, JSON transport |
-| test_arithmetic.rs | 123 | Arithmetic operations, overflow, math functions |
+| test_arithmetic.rs | 128 | Arithmetic operations, overflow, math functions |
 | test_error_formatting.rs | 95 | Error message format, caret positioning |
 | test_comparison.rs | 59 | Comparison operators |
 | test_slicing.rs | 60 | List/string/range slicing |
 | test_symbol_table.rs | 55 | Symbol table operations |
-| test_range_expr.rs | 48 | Range expression parsing, access, slicing |
+| test_range_expr.rs | 50 | Range expression parsing, access, slicing |
 | test_function_library.rs | 42 | Function dispatch, error messages |
 | (other 21 files) | ~822 | Specialized areas (memory, operation limits, URI paths, etc.) |
 
@@ -237,9 +203,6 @@ Tests are well-organized into focused files:
 - ⚠️ Partially compliant: test_evaluation.rs (~20 tests use `.message().contains()` instead of full format), test_lists.rs (~7 tests), test_function_library.rs (~11 tests)
 
 **Coverage gaps (minor):**
-- No test for `pow_int` with base=0 and exponent > u32::MAX (the confirmed BUG-1)
-- No performance test for `max(range_expr)` with large ranges (the confirmed PERF-1)
-- The `rsplit` whitespace path resource bounding is untested (the confirmed BUG-2)
 - `is_relative_to` with mixed-case Windows paths is untested (potential issue P-4)
 
 ---
@@ -250,8 +213,8 @@ Tests are well-organized into focused files:
 
 | Test | Result | Finding |
 |---|---|---|
-| pow_int_0_large_exponent | **FAIL** | BUG-1 confirmed: `0 ** 2^32` returns 1 instead of 0 |
-| max_range_expr_performance | **FAIL** | PERF-1 confirmed: 15 seconds for billion-element range |
+| pow_int_0_large_exponent | **FIXED** | BUG-1: `0 ** 2^32` returned 1 instead of 0 — fixed with special-case handling |
+| max_range_expr_performance | **FIXED** | PERF-1: 15 seconds for billion-element range — fixed with O(log n) `get()` |
 | pow_int_neg1_large_even_exponent | PASS | u32 truncation preserves parity for base=-1 |
 | pow_int_neg1_large_odd_exponent | PASS | Same — parity preserved |
 | pow_int_1_large_exponent | PASS | 1^n always 1 |
@@ -280,11 +243,11 @@ Tests are well-organized into focused files:
 
 ### High Priority
 
-1. **Fix BUG-1 (pow_int u32 truncation):** Add special-case handling for base ∈ {-1, 0, 1} before the `checked_pow` call. This is a correctness bug that produces wrong results.
+1. ~~**Fix BUG-1 (pow_int u32 truncation):**~~ ✅ Fixed in `c1d83bc`. Added special-case handling for base ∈ {-1, 0, 1} when exponent exceeds u32::MAX. 5 regression tests added.
 
-2. **Fix PERF-1 (max on RangeExpr):** Replace `r.iter().last()` with `r.get(r.len() as i64 - 1)` in `min_max_items`. This changes O(n) to O(log n) for a common operation.
+2. ~~**Fix PERF-1 (max on RangeExpr):**~~ ✅ Fixed in `c1d83bc`. Replaced `r.iter().last()` with `r.get(r.len() as i64 - 1)`. 2 tests added including a performance assertion.
 
-3. **Fix BUG-2 (rsplit missing count_string_ops):** Add `ctx.count_string_ops(s.len())?;` to the whitespace split path in `rsplit_fn`. This is a resource bounding bypass.
+3. ~~**Fix BUG-2 (rsplit missing count_string_ops):**~~ ✅ Fixed in `c1d83bc`. Added `ctx.count_string_ops(s.len())?;` to the whitespace split path. 1 regression test added.
 
 ### Medium Priority
 
@@ -296,7 +259,7 @@ Tests are well-organized into focused files:
 
 ### Low Priority
 
-7. **Fix stale comment in `make_list` (BUG-3):** Update the comment about canonical empty list representation.
+7. ~~**Fix stale comment in `make_list` (BUG-3):**~~ ✅ Fixed in `c1d83bc`. Updated comment to match actual `ListList` with `NULLTYPE` behavior.
 
 8. **Consider `SmallVec` for `ExprType::params`:** Most types have 0-1 params. `SmallVec<[ExprType; 2]>` would eliminate heap allocation for the common case.
 
@@ -316,13 +279,13 @@ Tests are well-organized into focused files:
 |---|---|---|
 | Spec completeness | 9/10 | Thorough, minor gaps in symbol-table and evaluator truthiness docs |
 | Spec-implementation alignment | 9/10 | Strong alignment, specs accurately describe implementation |
-| Code correctness | 8/10 | 2 confirmed bugs (pow_int, rsplit resource bound), 1 performance bug |
+| Code correctness | 9/10 | All confirmed bugs fixed (pow_int, rsplit resource bound, stale comment) |
 | Code quality & naming | 9/10 | Consistent, idiomatic Rust, zero clippy warnings |
-| Performance | 8/10 | Good overall (typed lists, caching), but AST cloning and max(range) issues |
+| Performance | 9/10 | Good overall (typed lists, caching); max(range) fixed; AST cloning remains |
 | Error message quality | 10/10 | Excellent 3-line format with smart caret positioning |
-| Test coverage | 9/10 | 2,806+ tests, comprehensive, minor compliance gaps with error assertion pattern |
+| Test coverage | 9/10 | 2,814+ tests, comprehensive, minor compliance gaps with error assertion pattern |
 | Test organization | 9/10 | Well-structured, focused files, clear naming |
 | Rust best practices | 9/10 | Proper use of non_exhaustive, must_use, thiserror, clippy-clean |
 | API ergonomics | 9/10 | Good builder pattern, ParsedExpression reuse, symtab! macro |
 
-**Overall: 8.9/10** — A mature, well-engineered crate with minor issues to address.
+**Overall: 9.1/10** — A mature, well-engineered crate. All confirmed bugs and performance issues have been resolved.

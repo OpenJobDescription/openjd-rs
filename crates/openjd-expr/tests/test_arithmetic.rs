@@ -251,6 +251,31 @@ fn float_zero_to_negative_power_error() {
     );
 }
 
+#[test]
+fn int_power_zero_base_large_exp() {
+    assert_eq!(eval("0 ** 4294967296").to_display_string(), "0");
+}
+
+#[test]
+fn int_power_zero_base_large_exp_odd() {
+    assert_eq!(eval("0 ** 4294967297").to_display_string(), "0");
+}
+
+#[test]
+fn int_power_one_base_large_exp() {
+    assert_eq!(eval("1 ** 4294967296").to_display_string(), "1");
+}
+
+#[test]
+fn int_power_neg_one_base_large_even_exp() {
+    assert_eq!(eval("(-1) ** 4294967296").to_display_string(), "1");
+}
+
+#[test]
+fn int_power_neg_one_base_large_odd_exp() {
+    assert_eq!(eval("(-1) ** 4294967297").to_display_string(), "-1");
+}
+
 // === TestMathFunctions ===
 
 #[test]

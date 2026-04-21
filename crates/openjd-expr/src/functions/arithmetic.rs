@@ -110,6 +110,21 @@ pub fn pow_int(_: Ctx, a: &[ExprValue]) -> R {
             if *exp > 63 && !matches!(*base, -1..=1) {
                 return Err(ExpressionError::integer_overflow());
             }
+            // Special-case base ∈ {-1, 0, 1} to avoid u32 truncation of large exponents
+            if *exp > u32::MAX as i64 {
+                return Ok(ExprValue::Int(match *base {
+                    0 => 0,
+                    1 => 1,
+                    -1 => {
+                        if *exp % 2 == 0 {
+                            1
+                        } else {
+                            -1
+                        }
+                    }
+                    _ => unreachable!(),
+                }));
+            }
             Ok(ExprValue::Int(
                 base.checked_pow(*exp as u32)
                     .ok_or_else(ExpressionError::integer_overflow)?,

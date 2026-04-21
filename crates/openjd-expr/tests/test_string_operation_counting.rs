@@ -545,3 +545,10 @@ fn precise_zfill() {
     let r = eval_bounded("('a' * 300).zfill(500)", 100_000_000, 10_000_000).unwrap();
     assert_eq!(r.operation_count, 6);
 }
+
+#[test]
+fn large_string_rsplit_whitespace_exceeds() {
+    let big = "x ".repeat(500);
+    let expr = format!("'{}'.rsplit()", big);
+    assert_op_limit_err_long(&expr, 100_000_000, 1, &[".rsplit()", "^~~~~~~~"]);
+}

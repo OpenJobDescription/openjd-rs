@@ -37,7 +37,7 @@ fn min_max_items(a: &[ExprValue], name: &str) -> Result<Vec<ExprValue>, Expressi
                 if name == "min" {
                     return Ok(vec![ExprValue::Int(r.iter().next().unwrap())]);
                 } else {
-                    Ok(vec![ExprValue::Int(r.iter().last().unwrap())])
+                    Ok(vec![ExprValue::Int(r.get(r.len() as i64 - 1).unwrap())])
                 }
             }
             _ => Ok(a.to_vec()),

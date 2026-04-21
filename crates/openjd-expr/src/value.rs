@@ -323,8 +323,8 @@ impl ExprValue {
             // Empty lists are list[nulltype], compatible with any list type.
             // When a concrete hint is provided, use the matching typed variant
             // so that subsequent operations (e.g. append) preserve the type.
-            // Otherwise, use ListInt as the canonical empty list[nulltype]
-            // representation (smallest variant, no cached size field).
+            // Otherwise (Null or unknown hint), use ListList with NULLTYPE as the
+            // canonical empty list representation, compatible with any list type.
             return Ok(match hint_type.code() {
                 crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
                 crate::types::TypeCode::Int => Self::ListInt(Vec::new()),

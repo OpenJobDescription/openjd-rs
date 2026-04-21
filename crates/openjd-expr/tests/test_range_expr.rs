@@ -406,3 +406,22 @@ fn range_expr_min_max_from_symtab() {
     assert_eq!(eval_with("min(Frames)", &st).to_display_string(), "10");
     assert_eq!(eval_with("max(Frames)", &st).to_display_string(), "50");
 }
+
+#[test]
+fn range_expr_max_correctness() {
+    assert_eq!(eval("max(range_expr('1-10'))").to_display_string(), "10");
+}
+
+#[test]
+fn range_expr_max_large_range_perf() {
+    let start = std::time::Instant::now();
+    assert_eq!(
+        eval("max(range_expr('1-1000000000'))").to_display_string(),
+        "1000000000"
+    );
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 1,
+        "max(range_expr('1-1000000000')) took {elapsed:?}, expected < 1s"
+    );
+}

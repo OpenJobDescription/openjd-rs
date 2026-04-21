@@ -222,6 +222,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
+        ctx.count_string_ops(s.len())?;
         let parts: Vec<ExprValue> = s
             .split_whitespace()
             .map(|p| ExprValue::String(p.to_string()))
