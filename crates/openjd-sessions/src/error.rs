@@ -73,6 +73,22 @@ pub enum SessionError {
     #[error("{0}")]
     Runtime(String),
 
+    /// Attempted to enter an environment that is already active in this session.
+    #[error("Environment {id} has already been entered in this Session.")]
+    DuplicateEnvironment { id: String },
+
+    /// Referenced an environment identifier that does not exist in this session.
+    #[error("Unknown environment identifier: {identifier}")]
+    UnknownEnvironment { identifier: String },
+
+    /// Failed to set file ownership or permissions (chown/chmod).
+    #[error("Failed to set permissions on '{path}': {reason}")]
+    PathPermissions { path: String, reason: String },
+
+    /// Cross-user helper IPC communication failure.
+    #[error("Cross-user helper error: {0}")]
+    HelperCommunication(String),
+
     /// Attempted to exit an environment out of LIFO order.
     #[error(
         "Must exit the most recently entered environment first. Expected {expected}, got {got}"

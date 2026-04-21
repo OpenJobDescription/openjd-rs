@@ -20,7 +20,7 @@ use std::sync::Arc;
 use openjd_expr::value::Float64;
 use openjd_expr::{ExprValue, RangeExpr};
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::job;
 use crate::template::RangeConstraint;
 use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
@@ -28,10 +28,10 @@ use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 // ── Shared utilities ──
 
 /// Compute the product of child node lengths with overflow checking.
-fn checked_product_len(children: &[Box<dyn Node>]) -> Result<usize, OpenJdError> {
+fn checked_product_len(children: &[Box<dyn Node>]) -> Result<usize, ModelError> {
     children.iter().try_fold(1usize, |acc, c| {
         acc.checked_mul(c.len()).ok_or_else(|| {
-            OpenJdError::DecodeValidation(
+            ModelError::DecodeValidation(
                 "Total parameter space size overflow: the product of parameter dimensions is too large.".into(),
             )
         })
@@ -891,7 +891,7 @@ pub struct StepParameterSpaceIterator {
 
 impl StepParameterSpaceIterator {
     /// Construct from a resolved `StepParameterSpace`.
-    pub fn new(space: &job::StepParameterSpace) -> Result<Self, OpenJdError> {
+    pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError> {
         Self::new_inner(space, None)
     }
 
@@ -900,14 +900,14 @@ impl StepParameterSpaceIterator {
     pub fn new_with_chunk_override(
         space: &job::StepParameterSpace,
         override_count: Option<usize>,
-    ) -> Result<Self, OpenJdError> {
+    ) -> Result<Self, ModelError> {
         Self::new_inner(space, override_count)
     }
 
     fn new_inner(
         space: &job::StepParameterSpace,
         chunk_override: Option<usize>,
-    ) -> Result<Self, OpenJdError> {
+    ) -> Result<Self, ModelError> {
         let names: HashSet<String> = space.task_parameter_definitions.keys().cloned().collect();
 
         if space.task_parameter_definitions.is_empty() {
@@ -1109,11 +1109,11 @@ fn parse_node_expr(
     tokens: &[String],
     space: &job::StepParameterSpace,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-) -> Result<Box<dyn Node>, OpenJdError> {
+) -> Result<Box<dyn Node>, ModelError> {
     let mut pos = 0;
     let result = parse_node_product(tokens, &mut pos, space, adaptive_info)?;
     if pos < tokens.len() {
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "Unexpected token '{}' in combination expression",
             tokens[pos]
         )));
@@ -1126,7 +1126,7 @@ fn parse_node_product(
     pos: &mut usize,
     space: &job::StepParameterSpace,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-) -> Result<Box<dyn Node>, OpenJdError> {
+) -> Result<Box<dyn Node>, ModelError> {
     let mut children = vec![parse_node_element(tokens, pos, space, adaptive_info)?];
     while *pos < tokens.len() && tokens[*pos] == "*" {
         *pos += 1;
@@ -1145,9 +1145,9 @@ fn parse_node_element(
     pos: &mut usize,
     space: &job::StepParameterSpace,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-) -> Result<Box<dyn Node>, OpenJdError> {
+) -> Result<Box<dyn Node>, ModelError> {
     if *pos >= tokens.len() {
-        return Err(OpenJdError::DecodeValidation(
+        return Err(ModelError::DecodeValidation(
             "Unexpected end of combination expression".into(),
         ));
     }
@@ -1159,7 +1159,7 @@ fn parse_node_element(
             children.push(parse_node_product(tokens, pos, space, adaptive_info)?);
         }
         if *pos >= tokens.len() || tokens[*pos] != ")" {
-            return Err(OpenJdError::DecodeValidation(
+            return Err(ModelError::DecodeValidation(
                 "Missing closing parenthesis in combination".into(),
             ));
         }
@@ -1167,14 +1167,14 @@ fn parse_node_element(
         let length = children[0].len();
         for child in children.iter().skip(1) {
             if child.len() != length {
-                return Err(OpenJdError::DecodeValidation(format!(
+                return Err(ModelError::DecodeValidation(format!(
                     "Associative combination: all members must have the same number of values, got {} and {}",
                     length, child.len()
                 )));
             }
         }
         if children.len() == 1 {
-            Err(OpenJdError::DecodeValidation(
+            Err(ModelError::DecodeValidation(
                 "Association expression must have more than one term.".into(),
             ))
         } else {
@@ -1192,9 +1192,9 @@ fn make_leaf_node(
     name: &str,
     space: &job::StepParameterSpace,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-) -> Result<Box<dyn Node>, OpenJdError> {
+) -> Result<Box<dyn Node>, ModelError> {
     let param = space.task_parameter_definitions.get(name).ok_or_else(|| {
-        OpenJdError::DecodeValidation(format!(
+        ModelError::DecodeValidation(format!(
             "Unknown parameter '{name}' in combination expression"
         ))
     })?;
@@ -1247,7 +1247,7 @@ fn make_chunk_node(
     range: &job::TaskParamRange<i64>,
     chunks: &job::ResolvedChunks,
     adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-) -> Result<Box<dyn Node>, OpenJdError> {
+) -> Result<Box<dyn Node>, ModelError> {
     // Check if this parameter should use adaptive chunking
     if let Some((adaptive_name, rc)) = adaptive_info {
         if adaptive_name == name {

@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 
 use openjd_expr::path_mapping::PathFormat;
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::job;
 use crate::template::validate_v2023_09::EffectiveLimits;
 use crate::template::JobTemplate;
@@ -35,7 +35,7 @@ pub use parameters::{
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
-) -> Result<job::Job, OpenJdError> {
+) -> Result<job::Job, ModelError> {
     let mut symtab = build_symbol_table(job_parameter_values)?;
 
     let has_expr = job_template
@@ -64,7 +64,7 @@ pub fn create_job(
             &symtab,
             &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
         )
-        .map_err(|e| OpenJdError::FormatStringError {
+        .map_err(|e| ModelError::FormatStringError {
             message: format!("Failed to resolve job name: {e}"),
             input: Some(job_template.name.raw().to_string()),
             start: None,

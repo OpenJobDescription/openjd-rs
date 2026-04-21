@@ -126,10 +126,13 @@ impl TempDir {
                 // chown before chmod — security: don't grant group access if chown fails
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
                     nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
-                        SessionError::Runtime(format!(
-                            "Could not change ownership of '{}' (error: {e}). Please ensure that uid {} is a member of group {}.",
-                            path.display(), nix::unistd::geteuid(), u.group()
-                        ))
+                        SessionError::PathPermissions {
+                            path: path.display().to_string(),
+                            reason: format!(
+                                "Could not change ownership (error: {e}). Please ensure that uid {} is a member of group {}.",
+                                nix::unistd::geteuid(), u.group()
+                            ),
+                        }
                     })?;
                 }
                 0o770
@@ -154,10 +157,10 @@ impl TempDir {
                         &[process_user.as_str()],
                         &[u.user()],
                     ) {
-                        return Err(SessionError::Runtime(format!(
-                            "Could not set permissions on '{}': {e}",
-                            path.display()
-                        )));
+                        return Err(SessionError::PathPermissions {
+                            path: path.display().to_string(),
+                            reason: e.to_string(),
+                        });
                     }
                 }
             }

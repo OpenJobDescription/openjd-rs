@@ -14,16 +14,16 @@ impl S3CheckCache {
         std::fs::create_dir_all(dir)?;
         let db_path = dir.join("s3_check_cache.db");
         let conn = rusqlite::Connection::open(&db_path)
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS s3checkV1(
                 s3_key text primary key,
                 last_seen_time timestamp
             );",
         )
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -67,7 +67,7 @@ impl S3CheckCache {
     pub fn put_entry(&self, s3_key: &str) -> crate::Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?
             .as_secs_f64();
         let time_str = rusqlite::types::Value::Text(now.to_string());
         let conn = self.conn.lock().unwrap();
@@ -75,7 +75,7 @@ impl S3CheckCache {
             "INSERT OR REPLACE INTO s3checkV1 VALUES(?1, ?2)",
             rusqlite::params![s3_key, time_str],
         )
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         Ok(())
     }
 }

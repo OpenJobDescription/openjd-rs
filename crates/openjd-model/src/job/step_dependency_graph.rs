@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::job;
 
 type NodeIndex = usize;
@@ -42,7 +42,7 @@ pub struct StepDependencyGraph {
 
 impl StepDependencyGraph {
     /// Build the dependency graph from a Job.
-    pub fn new(job: &job::Job) -> Result<Self, OpenJdError> {
+    pub fn new(job: &job::Job) -> Result<Self, ModelError> {
         let name_to_index: HashMap<String, NodeIndex> = job
             .steps
             .iter()
@@ -68,7 +68,7 @@ impl StepDependencyGraph {
             if let Some(deps) = &step.dependencies {
                 for dep in deps {
                     let origin_idx = *name_to_index.get(&dep.depends_on).ok_or_else(|| {
-                        OpenJdError::DecodeValidation(format!(
+                        ModelError::DecodeValidation(format!(
                             "Step '{}' depends on unknown step '{}'",
                             step.name, dep.depends_on
                         ))
@@ -120,7 +120,7 @@ impl StepDependencyGraph {
     /// pushes it onto a stack and explores dependencies (pushed in reverse
     /// template order so the earliest dependency is processed first).
     /// Returns step indices in dependency-respecting, template-stable order.
-    pub fn topo_sorted(&self) -> Result<Vec<usize>, OpenJdError> {
+    pub fn topo_sorted(&self) -> Result<Vec<usize>, ModelError> {
         let n = self.nodes.len();
         // 0 = unvisited, 1 = started, 2 = completed
         let mut state = vec![0u8; n];
@@ -163,7 +163,7 @@ impl StepDependencyGraph {
                                         .map(|&idx| self.nodes[idx].name.as_str())
                                         .collect();
                                     let dep_name = &self.nodes[dep].name;
-                                    return Err(OpenJdError::DecodeValidation(format!(
+                                    return Err(ModelError::DecodeValidation(format!(
                                         "A circular dependency was found in the step dependency graph:\n{} -> {}",
                                         cycle.join(" -> "), dep_name
                                     )));
@@ -180,7 +180,7 @@ impl StepDependencyGraph {
     }
 
     /// Convenience: topological sort returning step names.
-    pub fn topo_sorted_names(&self) -> Result<Vec<String>, OpenJdError> {
+    pub fn topo_sorted_names(&self) -> Result<Vec<String>, ModelError> {
         self.topo_sorted().map(|indices| {
             indices
                 .into_iter()

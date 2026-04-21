@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Error types for the OpenJD model library.
+//!
+//! The primary error type is [`ModelError`], which covers all failure modes
+//! during template parsing, validation, and job creation.
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum OpenJdError {
+pub enum ModelError {
     /// Structural deserialization failure (bad YAML/JSON, missing fields, wrong types).
     #[error("Validation error: {0}")]
     DecodeValidation(String),
@@ -26,8 +29,11 @@ pub enum OpenJdError {
         end: Option<usize>,
     },
 
+    /// Expression evaluation or symbol table error, preserving the full
+    /// [`ExpressionError`](openjd_expr::ExpressionError) with its kind and
+    /// source-location context.
     #[error("Expression error: {0}")]
-    Expression(String),
+    Expression(#[source] openjd_expr::ExpressionError),
 
     #[error("Compatibility error: {0}")]
     Compatibility(String),
@@ -50,15 +56,15 @@ fn format_string_error(
     }
 }
 
-impl From<openjd_expr::SymbolTableError> for OpenJdError {
+impl From<openjd_expr::SymbolTableError> for ModelError {
     fn from(e: openjd_expr::SymbolTableError) -> Self {
-        OpenJdError::Expression(e.to_string())
+        ModelError::Expression(openjd_expr::ExpressionError::from(e))
     }
 }
 
-impl From<openjd_expr::FormatStringValidationError> for OpenJdError {
+impl From<openjd_expr::FormatStringValidationError> for ModelError {
     fn from(e: openjd_expr::FormatStringValidationError) -> Self {
-        OpenJdError::FormatStringError {
+        ModelError::FormatStringError {
             message: e.message,
             input: Some(e.input),
             start: Some(e.start),
@@ -104,11 +110,11 @@ impl ValidationErrors {
         self.errors.len()
     }
 
-    pub fn into_result(self, model_name: &str) -> Result<(), OpenJdError> {
+    pub fn into_result(self, model_name: &str) -> Result<(), ModelError> {
         if self.errors.is_empty() {
             Ok(())
         } else {
-            Err(OpenJdError::ModelValidation(self.format(model_name)))
+            Err(ModelError::ModelValidation(self.format(model_name)))
         }
     }
 
@@ -173,19 +179,19 @@ mod tests {
 
     #[test]
     fn test_unsupported_schema_msg() {
-        let e = OpenJdError::UnsupportedSchema("version".into());
+        let e = ModelError::UnsupportedSchema("version".into());
         assert_eq!(e.to_string(), "Unsupported schema version: version");
     }
 
     #[test]
     fn test_model_validation_msg() {
-        let e = OpenJdError::ModelValidation("bad template".into());
+        let e = ModelError::ModelValidation("bad template".into());
         assert_eq!(e.to_string(), "Model validation error: bad template");
     }
 
     #[test]
     fn test_format_string_error_with_position() {
-        let e = OpenJdError::FormatStringError {
+        let e = ModelError::FormatStringError {
             message: "Undefined variable 'Param.X'".into(),
             input: Some("Hello {{Param.X}}".into()),
             start: Some(6),
@@ -199,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_format_string_error_without_position() {
-        let e = OpenJdError::FormatStringError {
+        let e = ModelError::FormatStringError {
             message: "something went wrong".into(),
             input: None,
             start: None,
@@ -230,7 +236,7 @@ mod tests {
         let mut ve = ValidationErrors::default();
         ve.add(&[PathElement::Field("name".into())], "too long");
         let result = ve.into_result("JobTemplate");
-        assert!(matches!(result, Err(OpenJdError::ModelValidation(_))));
+        assert!(matches!(result, Err(ModelError::ModelValidation(_))));
     }
 
     #[test]

@@ -26,9 +26,9 @@ impl HashCache {
         std::fs::create_dir_all(dir)?;
         let db_path = dir.join("hash_cache.db");
         let conn = rusqlite::Connection::open(&db_path)
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS hashesV4(
                 file_path blob,
@@ -40,7 +40,7 @@ impl HashCache {
                 PRIMARY KEY (file_path, hash_algorithm, range_start, range_end)
             );",
         )
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -102,7 +102,7 @@ impl HashCache {
                 mtime_text
             ],
         )
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
         Ok(())
     }
 

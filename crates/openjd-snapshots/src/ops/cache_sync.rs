@@ -212,7 +212,7 @@ pub async fn cache_sync_manifest(
             let _worker_permit = worker_sem
                 .acquire_owned()
                 .await
-                .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+                .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
             if cancelled.load(Ordering::Relaxed) {
                 return Err(crate::SnapshotError::Cancelled);
@@ -305,7 +305,7 @@ pub async fn cache_sync_manifest(
     for handle in handles {
         match handle.await {
             Ok(r) => results.push(r),
-            Err(e) => results.push(Err(crate::SnapshotError::Other(e.to_string()))),
+            Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
         }
     }
 

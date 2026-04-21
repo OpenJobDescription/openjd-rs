@@ -7,10 +7,11 @@ use openjd_expr::format_string::copy_symbol_value;
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::job;
 use crate::template;
 use crate::template::validate_v2023_09::EffectiveLimits;
+use openjd_expr::ExpressionError;
 
 use super::ranges;
 
@@ -20,7 +21,7 @@ pub(super) fn instantiate_step(
     symtab: &SymbolTable,
     has_expr: bool,
     limits: &EffectiveLimits,
-) -> Result<job::Step, OpenJdError> {
+) -> Result<job::Step, ModelError> {
     let mut step_symtab = symtab.clone();
 
     let step_name = st.name.clone();
@@ -43,14 +44,18 @@ pub(super) fn instantiate_step(
                     if !name.is_empty() && !expr.is_empty() {
                         let parsed =
                             openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
-                                OpenJdError::Expression(format!("let binding '{name}': {e}"))
+                                ModelError::Expression(ExpressionError::new(format!(
+                                    "let binding '{name}': {e}"
+                                )))
                             })?;
                         let val = parsed
                             .with_path_format(PathFormat::Posix)
                             .with_library(&lib)
                             .evaluate(&[&step_symtab as &SymbolTable])
                             .map_err(|e| {
-                                OpenJdError::Expression(format!("let binding '{name}': {e}"))
+                                ModelError::Expression(ExpressionError::new(format!(
+                                    "let binding '{name}': {e}"
+                                )))
                             })?;
                         step_symtab.set(name, val)?;
                     }
@@ -162,18 +167,18 @@ pub(super) fn instantiate_step(
                         if !name.is_empty() && !expr.is_empty() {
                             let parsed =
                                 openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
-                                    OpenJdError::Expression(format!(
+                                    ModelError::Expression(ExpressionError::new(format!(
                                         "script let binding '{name}': {e}"
-                                    ))
+                                    )))
                                 })?;
                             let val = parsed
                                 .with_path_format(PathFormat::Posix)
                                 .with_library(&lib)
                                 .evaluate(&[&check_symtab as &SymbolTable])
                                 .map_err(|e| {
-                                    OpenJdError::Expression(format!(
+                                    ModelError::Expression(ExpressionError::new(format!(
                                         "script let binding '{name}': {e}"
-                                    ))
+                                    )))
                                 })?;
                             check_symtab.set(name, val)?;
                         }
@@ -209,7 +214,7 @@ pub(super) fn instantiate_step(
     });
 
     let script = script.ok_or_else(|| {
-        OpenJdError::DecodeValidation("Step must have a script or SimpleAction".to_string())
+        ModelError::DecodeValidation("Step must have a script or SimpleAction".to_string())
     })?;
     let filtered_symtab = filter_symtab_for_step(
         &step_symtab,
@@ -317,7 +322,7 @@ pub fn convert_environment_with_symtab(
 fn resolve_host_requirements(
     hr: &template::HostRequirements,
     symtab: &SymbolTable,
-) -> Result<job::HostRequirements, OpenJdError> {
+) -> Result<job::HostRequirements, ModelError> {
     let amounts = hr
         .amounts
         .as_ref()
@@ -340,7 +345,7 @@ fn resolve_host_requirements(
                         max,
                     })
                 })
-                .collect::<Result<Vec<_>, OpenJdError>>()
+                .collect::<Result<Vec<_>, ModelError>>()
         })
         .transpose()?;
 
@@ -367,7 +372,7 @@ fn resolve_host_requirements(
                         all_of,
                     })
                 })
-                .collect::<Result<Vec<_>, OpenJdError>>()
+                .collect::<Result<Vec<_>, ModelError>>()
         })
         .transpose()?;
 
@@ -383,34 +388,38 @@ pub fn evaluate_let_bindings(
     symtab: &SymbolTable,
     library: Option<&openjd_expr::function_library::FunctionLibrary>,
     path_format: PathFormat,
-) -> Result<SymbolTable, OpenJdError> {
+) -> Result<SymbolTable, ModelError> {
     let mut result = symtab.clone();
     for binding in bindings {
         let eq_pos = binding.find('=').ok_or_else(|| {
-            OpenJdError::Expression(format!("Missing '=' in let binding: {binding}"))
+            ModelError::Expression(ExpressionError::new(format!(
+                "Missing '=' in let binding: {binding}"
+            )))
         })?;
         let name = binding[..eq_pos].trim();
         let expr = binding[eq_pos + 1..].trim();
         let prefix = &binding
             [..eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len()];
         let parsed = openjd_expr::ParsedExpression::new(expr).map_err(|e| {
-            OpenJdError::Expression(format!(
+            ModelError::Expression(ExpressionError::new(format!(
                 "Error evaluating let binding '{name}': {}",
                 e.message_with_expr_prefix(prefix)
-            ))
+            )))
         })?;
         let mut builder = parsed.with_path_format(path_format);
         if let Some(lib) = library {
             builder = builder.with_library(lib);
         }
         let value = builder.evaluate(&[&result as &SymbolTable]).map_err(|e| {
-            OpenJdError::Expression(format!(
+            ModelError::Expression(ExpressionError::new(format!(
                 "Error evaluating let binding '{name}': {}",
                 e.message_with_expr_prefix(prefix)
-            ))
+            )))
         })?;
         result.set(name, value).map_err(|e| {
-            OpenJdError::Expression(format!("Error setting let binding '{name}': {e}"))
+            ModelError::Expression(ExpressionError::new(format!(
+                "Error setting let binding '{name}': {e}"
+            )))
         })?;
     }
     Ok(result)

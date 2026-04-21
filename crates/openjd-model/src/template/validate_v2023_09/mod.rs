@@ -17,7 +17,7 @@ mod limits;
 mod structure;
 mod task_chunking;
 
-use crate::error::{OpenJdError, ValidationErrors};
+use crate::error::{ModelError, ValidationErrors};
 use crate::template::*;
 use crate::types::{JobParameterType, KnownExtension, TaskParameterType, ValidationContext};
 
@@ -133,7 +133,7 @@ impl EffectiveRules {
 pub(crate) fn validate_job_template(
     jt: &JobTemplate,
     ctx: &ValidationContext,
-) -> Result<(), OpenJdError> {
+) -> Result<(), ModelError> {
     let limits = EffectiveLimits::from_context(ctx);
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();
@@ -160,7 +160,7 @@ pub(crate) fn validate_job_template(
 pub fn validate_environment_template(
     et: &EnvironmentTemplate,
     ctx: &ValidationContext,
-) -> Result<(), OpenJdError> {
+) -> Result<(), ModelError> {
     let limits = EffectiveLimits::from_context(ctx);
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();

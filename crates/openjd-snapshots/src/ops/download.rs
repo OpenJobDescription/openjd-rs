@@ -400,7 +400,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         .worker_threads(num_cpus().max(4))
         .enable_all()
         .build()
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
     let start = start_time;
 
@@ -428,7 +428,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                 let _worker_permit = worker_sem
                     .acquire_owned()
                     .await
-                    .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
                 if cancelled.load(Ordering::Relaxed) {
                     return Err(crate::SnapshotError::Cancelled);
@@ -457,7 +457,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     let fs = file_size;
                     tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
                         .await
-                        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                         .map_err(crate::SnapshotError::Io)?;
 
                     let mut file_offset: u64 = 0;
@@ -509,7 +509,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     for handle in chunk_handles {
                         handle
                             .await
-                            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                             .map_err(crate::SnapshotError::Io)?;
                     }
                     already_written = true;
@@ -535,7 +535,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                             let p = parent.to_path_buf();
                             tokio::task::spawn_blocking(move || std::fs::create_dir_all(&p))
                                 .await
-                                .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                                .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                                 .map_err(crate::SnapshotError::Io)?;
                         }
                         dc.copy_object_to_file(hash, &alg, &tmp)
@@ -544,7 +544,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         let tp = target_path.clone();
                         tokio::task::spawn_blocking(move || std::fs::rename(&tmp, &tp))
                             .await
-                            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                             .map_err(crate::SnapshotError::Io)?;
                         already_written = true;
                         Vec::new()
@@ -575,7 +575,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         Ok(())
                     })
                     .await
-                    .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                     .map_err(crate::SnapshotError::Io)?;
                 }
 
@@ -613,7 +613,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         for handle in handles {
             match handle.await {
                 Ok(r) => results.push(r),
-                Err(e) => results.push(Err(crate::SnapshotError::Other(e.to_string()))),
+                Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
             }
         }
         results
@@ -717,7 +717,7 @@ async fn download_multipart_to_file(
     let fs = file_size;
     tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
         .await
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
         .map_err(crate::SnapshotError::Io)?;
 
     // Download parts in parallel, write each at its offset
@@ -743,7 +743,7 @@ async fn download_multipart_to_file(
     for handle in handles {
         handle
             .await
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
     }
 
     Ok(())
@@ -786,7 +786,7 @@ fn get_mtime(path: &Path) -> crate::Result<u64> {
     let mtime = meta
         .modified()?
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
         .as_micros() as u64;
     Ok(mtime)
 }

@@ -104,24 +104,31 @@ pub fn chown_for_user(
     runnable: bool,
 ) -> Result<(), SessionError> {
     let grp = nix::unistd::Group::from_name(user.group())
-        .map_err(|e| {
-            SessionError::Runtime(format!("Could not look up group '{}': {e}", user.group()))
+        .map_err(|e| SessionError::PathPermissions {
+            path: path.display().to_string(),
+            reason: format!("Could not look up group '{}': {e}", user.group()),
         })?
-        .ok_or_else(|| SessionError::Runtime(format!("Group '{}' not found", user.group())))?;
+        .ok_or_else(|| SessionError::PathPermissions {
+            path: path.display().to_string(),
+            reason: format!("Group '{}' not found", user.group()),
+        })?;
     nix::unistd::chown(path, None, Some(grp.gid))
-        .map_err(|e| SessionError::Runtime(format!(
-            "Could not change ownership of '{}' (error: {e}). Please ensure that uid {} is a member of group {}.",
-            path.display(), nix::unistd::geteuid(), user.group()
-        )))?;
+        .map_err(|e| SessionError::PathPermissions {
+            path: path.display().to_string(),
+            reason: format!(
+                "Could not change ownership (error: {e}). Please ensure that uid {} is a member of group {}.",
+                nix::unistd::geteuid(), user.group()
+            ),
+        })?;
     // Only widen permissions after chown succeeds — security: don't grant group
     // access if the group wasn't actually set.
     use std::os::unix::fs::PermissionsExt;
     let mode = if runnable { 0o770 } else { 0o660 };
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|e| {
-        SessionError::Runtime(format!(
-            "Could not set permissions on '{}': {e}",
-            path.display()
-        ))
+        SessionError::PathPermissions {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        }
     })?;
     Ok(())
 }
@@ -135,18 +142,19 @@ pub fn chown_for_user(
     user: &dyn SessionUser,
     _runnable: bool,
 ) -> Result<(), SessionError> {
-    let process_user = crate::win32::get_process_user()
-        .map_err(|e| SessionError::Runtime(format!("Could not determine process user: {e}")))?;
+    let process_user =
+        crate::win32::get_process_user().map_err(|e| SessionError::PathPermissions {
+            path: path.display().to_string(),
+            reason: format!("Could not determine process user: {e}"),
+        })?;
     crate::win32_permissions::set_permissions(
         &path.to_string_lossy(),
         &[process_user.as_str()],
         &[user.user()],
     )
-    .map_err(|e| {
-        SessionError::Runtime(format!(
-            "Could not set permissions on '{}': {e}",
-            path.display()
-        ))
+    .map_err(|e| SessionError::PathPermissions {
+        path: path.display().to_string(),
+        reason: e.to_string(),
     })?;
     Ok(())
 }

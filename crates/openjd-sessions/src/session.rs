@@ -717,9 +717,7 @@ impl Session {
         let identifier = match identifier {
             Some(id) => {
                 if self.environments.contains_key(id) {
-                    return Err(SessionError::Runtime(format!(
-                        "Environment {id} has already been entered in this Session."
-                    )));
+                    return Err(SessionError::DuplicateEnvironment { id: id.to_string() });
                 }
                 id.to_string()
             }
@@ -871,8 +869,8 @@ impl Session {
         let env = self
             .environments
             .get(identifier)
-            .ok_or_else(|| {
-                SessionError::Runtime(format!("Unknown environment identifier: {identifier}"))
+            .ok_or_else(|| SessionError::UnknownEnvironment {
+                identifier: identifier.to_string(),
             })?
             .clone();
 

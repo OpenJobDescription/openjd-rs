@@ -59,8 +59,9 @@ impl UnixAsyncHelperReader {
                 match reader.read_line(&mut line) {
                     Ok(0) => break,
                     Ok(_) => {
-                        let result = serde_json::from_str(line.trim_end())
-                            .map_err(|e| SessionError::Runtime(format!("parse error: {e}")));
+                        let result = serde_json::from_str(line.trim_end()).map_err(|e| {
+                            SessionError::HelperCommunication(format!("parse error: {e}"))
+                        });
                         if tx.send(result).is_err() {
                             break;
                         }
@@ -103,8 +104,9 @@ impl WindowsAsyncHelperReader {
                 match reader.read_line(&mut line) {
                     Ok(0) => break,
                     Ok(_) => {
-                        let result = serde_json::from_str(line.trim_end())
-                            .map_err(|e| SessionError::Runtime(format!("parse error: {e}")));
+                        let result = serde_json::from_str(line.trim_end()).map_err(|e| {
+                            SessionError::HelperCommunication(format!("parse error: {e}"))
+                        });
                         if tx.send(result).is_err() {
                             break;
                         }
@@ -181,8 +183,9 @@ impl CrossUserHelper {
         // while the helper is owned by a runner.
         use std::os::unix::io::AsRawFd;
         let raw_fd = child_stdin.as_raw_fd();
-        let dup_fd = nix::unistd::dup(raw_fd)
-            .map_err(|e| SessionError::Runtime(format!("Failed to dup helper stdin fd: {e}")))?;
+        let dup_fd = nix::unistd::dup(raw_fd).map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to dup helper stdin fd: {e}"))
+        })?;
         let cancel_writer = unsafe { std::os::unix::io::FromRawFd::from_raw_fd(dup_fd) };
 
         let stdin = std::io::BufWriter::new(child_stdin);
@@ -202,14 +205,15 @@ impl CrossUserHelper {
     /// Send a JSON command to the helper (writes JSON + newline, then flushes).
     pub fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         use std::io::Write;
-        serde_json::to_writer(&mut self.stdin, cmd)
-            .map_err(|e| SessionError::Runtime(format!("Failed to write to helper stdin: {e}")))?;
-        self.stdin.write_all(b"\n").map_err(|e| {
-            SessionError::Runtime(format!("Failed to write newline to helper: {e}"))
+        serde_json::to_writer(&mut self.stdin, cmd).map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to write to helper stdin: {e}"))
         })?;
-        self.stdin
-            .flush()
-            .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
+        self.stdin.write_all(b"\n").map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to write newline to helper: {e}"))
+        })?;
+        self.stdin.flush().map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to flush helper stdin: {e}"))
+        })?;
         Ok(())
     }
 
@@ -270,7 +274,9 @@ impl CrossUserHelperWin {
         })?;
 
         let stdin_write = spawned.stdin_write.ok_or_else(|| {
-            SessionError::Runtime("spawn_as_user_with_stdin did not return stdin pipe".into())
+            SessionError::HelperCommunication(
+                "spawn_as_user_with_stdin did not return stdin pipe".into(),
+            )
         })?;
 
         // Convert OwnedHandle → File for stdin
@@ -292,7 +298,9 @@ impl CrossUserHelperWin {
                 DUPLICATE_SAME_ACCESS,
             )
             .map_err(|e| {
-                SessionError::Runtime(format!("DuplicateHandle for cancel_writer failed: {e}"))
+                SessionError::HelperCommunication(format!(
+                    "DuplicateHandle for cancel_writer failed: {e}"
+                ))
             })?;
             std::fs::File::from_raw_handle(dup_handle.0 as std::os::windows::io::RawHandle)
         };
@@ -316,14 +324,15 @@ impl CrossUserHelperWin {
     /// Send a JSON command to the helper (writes JSON + newline, then flushes).
     pub fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         use std::io::Write;
-        serde_json::to_writer(&mut self.stdin, cmd)
-            .map_err(|e| SessionError::Runtime(format!("Failed to write to helper stdin: {e}")))?;
-        self.stdin.write_all(b"\n").map_err(|e| {
-            SessionError::Runtime(format!("Failed to write newline to helper: {e}"))
+        serde_json::to_writer(&mut self.stdin, cmd).map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to write to helper stdin: {e}"))
         })?;
-        self.stdin
-            .flush()
-            .map_err(|e| SessionError::Runtime(format!("Failed to flush helper stdin: {e}")))?;
+        self.stdin.write_all(b"\n").map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to write newline to helper: {e}"))
+        })?;
+        self.stdin.flush().map_err(|e| {
+            SessionError::HelperCommunication(format!("Failed to flush helper stdin: {e}"))
+        })?;
         Ok(())
     }
 
@@ -442,7 +451,7 @@ pub(crate) async fn run_via_helper(
             biased;
             resp = helper.async_reader().next_response() => {
                 let resp = match resp {
-                    None => return Err(SessionError::Runtime(
+                    None => return Err(SessionError::HelperCommunication(
                         "Helper process closed stdout unexpectedly".into(),
                     )),
                     Some(r) => r?,
@@ -518,7 +527,7 @@ pub(crate) async fn run_via_helper(
                     });
                 }
 
-                return Err(SessionError::Runtime(format!(
+                return Err(SessionError::HelperCommunication(format!(
                     "Unexpected helper response: {}",
                     resp
                 )));
@@ -529,7 +538,7 @@ pub(crate) async fn run_via_helper(
                 if let Some(writer) = cancel_writer {
                     use std::io::Write;
                     let mut w = writer.try_clone().map_err(|e| {
-                        SessionError::Runtime(format!("Failed to clone cancel_writer: {e}"))
+                        SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
                     })?;
                     let cancel_method = &config.cancel_method;
                     let notify_period = match cancel_method {

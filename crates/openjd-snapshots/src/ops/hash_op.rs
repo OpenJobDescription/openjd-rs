@@ -201,7 +201,7 @@ fn hash_manifest<P: Clone, K: Clone>(
             num_threads
         })
         .build()
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
     let on_progress = &options.on_progress;
     let start = start_time;

@@ -480,12 +480,13 @@ impl S3DataCache {
         s3_client: aws_sdk_s3::Client,
         sts_client: aws_sdk_sts::Client,
     ) -> crate::Result<Self> {
-        let resp = sts_client.get_caller_identity().send().await.map_err(|e| {
-            crate::SnapshotError::Other(format!("STS GetCallerIdentity failed: {e}"))
-        })?;
+        let resp =
+            sts_client.get_caller_identity().send().await.map_err(|e| {
+                crate::SnapshotError::S3(format!("STS GetCallerIdentity failed: {e}"))
+            })?;
         let account = resp
             .account()
-            .ok_or_else(|| crate::SnapshotError::Other("STS response missing Account".into()))?
+            .ok_or_else(|| crate::SnapshotError::S3("STS response missing Account".into()))?
             .to_string();
         let mut cache = Self::new(bucket, key_prefix, s3_client);
         cache.expected_bucket_owner = Some(account);

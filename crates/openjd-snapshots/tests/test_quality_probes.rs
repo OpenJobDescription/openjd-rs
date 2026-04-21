@@ -80,18 +80,6 @@ fn hash_file_chunked_consistent_chunk_count() {
     assert_eq!(h3.len(), 4, "Should produce 4 chunks for 3*chunk_size+500");
 }
 
-/// Probe: SnapshotError::HashMismatch is defined but never constructed in production code.
-#[test]
-fn hash_mismatch_error_variant_exists_but_unused() {
-    let err = SnapshotError::HashMismatch {
-        expected: "abc".into(),
-        actual: "def".into(),
-    };
-    let msg = format!("{err}");
-    assert!(msg.contains("abc"));
-    assert!(msg.contains("def"));
-}
-
 /// Probe: Manifest deserialization doesn't enforce phantom type constraints.
 #[test]
 fn manifest_deserialization_ignores_phantom_types() {

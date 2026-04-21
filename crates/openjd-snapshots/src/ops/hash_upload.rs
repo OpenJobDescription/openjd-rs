@@ -121,7 +121,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         .worker_threads(num_cpus().max(4))
         .enable_all()
         .build()
-        .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
     struct WorkItem {
         index: usize,
@@ -258,7 +258,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                 let _worker_permit = worker_sem
                     .acquire_owned()
                     .await
-                    .map_err(|e| crate::SnapshotError::Other(e.to_string()))?;
+                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
                 if cancelled.load(Ordering::Relaxed) {
                     return Err(crate::SnapshotError::Cancelled);
@@ -333,7 +333,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         for handle in handles {
             match handle.await {
                 Ok(r) => results.push(r),
-                Err(e) => results.push(Err(crate::SnapshotError::Other(e.to_string()))),
+                Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
             }
         }
         results
@@ -420,7 +420,7 @@ async fn process_whole_async(
         Ok::<_, crate::SnapshotError>((hash, data))
     })
     .await
-    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
     // Stage 2: Async I/O upload
     let uploaded = if !data_cache
@@ -472,7 +472,7 @@ async fn process_whole_multipart(
         Ok::<_, crate::SnapshotError>(format!("{:032x}", hasher.digest128()))
     })
     .await
-    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
     // Stage 2: Check if already exists
     if data_cache
@@ -515,7 +515,7 @@ async fn process_whole_multipart(
                 Ok::<_, std::io::Error>(buf)
             })
             .await
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))?
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
             .map_err(crate::SnapshotError::Io)?;
 
             let etag = dc
@@ -530,7 +530,7 @@ async fn process_whole_multipart(
     for handle in upload_handles {
         let (part_num, etag) = handle
             .await
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
         parts.push((part_num, etag));
     }
     parts.sort_by_key(|(num, _)| *num);
@@ -576,7 +576,7 @@ async fn process_chunked_async(
         Ok::<_, crate::SnapshotError>(result)
     })
     .await
-    .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+    .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
     // Stage 2: Upload chunks in parallel
     let hashed_bytes: u64 = chunks.iter().map(|(_, c)| c.len() as u64).sum();
@@ -600,7 +600,7 @@ async fn process_chunked_async(
     for handle in upload_handles {
         let (hash, uploaded) = handle
             .await
-            .map_err(|e| crate::SnapshotError::Other(e.to_string()))??;
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
         if uploaded {
             any_uploaded = true;
         }

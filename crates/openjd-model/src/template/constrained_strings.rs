@@ -3,7 +3,7 @@
 
 //! Constrained string types per spec §7.
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use regex::Regex;
 use serde::de::{self, Deserializer};
 use std::sync::LazyLock;
@@ -16,15 +16,15 @@ static IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 
 impl Identifier {
-    pub fn new(s: &str) -> Result<Self, OpenJdError> {
+    pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.is_empty() || s.len() > 512 {
-            return Err(OpenJdError::DecodeValidation(format!(
+            return Err(ModelError::DecodeValidation(format!(
                 "Identifier length must be 1..=512, got {}",
                 s.len()
             )));
         }
         if !IDENTIFIER_RE.is_match(s) {
-            return Err(OpenJdError::DecodeValidation(format!(
+            return Err(ModelError::DecodeValidation(format!(
                 "Identifier '{s}' does not match pattern [A-Za-z_][A-Za-z0-9_]*"
             )));
         }
@@ -60,16 +60,16 @@ impl std::fmt::Display for Identifier {
 pub struct Description(pub String);
 
 impl Description {
-    pub fn new(s: &str) -> Result<Self, OpenJdError> {
+    pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.chars().count() > 2048 {
-            return Err(OpenJdError::DecodeValidation(
+            return Err(ModelError::DecodeValidation(
                 "Description exceeds 2048 characters".into(),
             ));
         }
         if s.chars()
             .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
         {
-            return Err(OpenJdError::DecodeValidation(
+            return Err(ModelError::DecodeValidation(
                 "Description contains control characters".into(),
             ));
         }
@@ -98,9 +98,9 @@ static EXTENSION_NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Z_0-9]{3,128}$").unwrap());
 
 impl ExtensionName {
-    pub fn new(s: &str) -> Result<Self, OpenJdError> {
+    pub fn new(s: &str) -> Result<Self, ModelError> {
         if !EXTENSION_NAME_RE.is_match(s) {
-            return Err(OpenJdError::DecodeValidation(format!(
+            return Err(ModelError::DecodeValidation(format!(
                 "Extension name '{s}' does not match pattern [A-Z_0-9]{{3,128}}"
             )));
         }

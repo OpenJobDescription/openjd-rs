@@ -56,7 +56,7 @@ impl StepTemplate {
     /// If it uses a SimpleAction (bash/python/cmd/powershell/node), transforms
     /// it into a StepScript with an embedded file and onRun action.
     /// Returns `Err` if the SimpleAction script contains malformed format string syntax.
-    pub fn resolve_syntax_sugar(&self) -> Result<Option<StepScript>, crate::OpenJdError> {
+    pub fn resolve_syntax_sugar(&self) -> Result<Option<StepScript>, crate::ModelError> {
         if let Some(script) = &self.script {
             return Ok(Some(script.clone()));
         }
@@ -111,7 +111,7 @@ impl StepTemplate {
                     file_type: crate::types::FileType::Text,
                     filename: Some(FormatString::new(&filename).unwrap()),
                     data: Some(FormatString::new(&sa.script).map_err(|e| {
-                        crate::OpenJdError::DecodeValidation(format!(
+                        crate::ModelError::DecodeValidation(format!(
                             "SimpleAction script format string error: {e}"
                         ))
                     })?),

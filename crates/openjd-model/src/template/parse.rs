@@ -7,7 +7,7 @@
 
 use std::str::FromStr;
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::template::validate_v2023_09 as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
@@ -26,25 +26,25 @@ pub enum DocumentType {
 pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
-) -> Result<serde_yaml::Value, OpenJdError> {
+) -> Result<serde_yaml::Value, ModelError> {
     let parsed = match doc_type {
         DocumentType::Json => {
             let v: serde_json::Value = serde_json::from_str(document).map_err(|e| {
-                OpenJdError::DecodeValidation(format!(
+                ModelError::DecodeValidation(format!(
                     "The document is not a valid JSON document consisting of key-value pairs. {e}"
                 ))
             })?;
-            serde_yaml::to_value(v).map_err(|e| OpenJdError::DecodeValidation(e.to_string()))?
+            serde_yaml::to_value(v).map_err(|e| ModelError::DecodeValidation(e.to_string()))?
         }
         DocumentType::Yaml => serde_yaml::from_str(document).map_err(|e| {
-            OpenJdError::DecodeValidation(format!(
+            ModelError::DecodeValidation(format!(
                 "The document is not a valid YAML document consisting of key-value pairs. {e}"
             ))
         })?,
     };
 
     if !parsed.is_mapping() {
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "The document is not a valid {doc_type:?} document consisting of key-value pairs."
         )));
     }
@@ -56,14 +56,14 @@ pub fn document_string_to_object(
 pub fn decode_job_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<JobTemplate, OpenJdError> {
+) -> Result<JobTemplate, ModelError> {
     // Extract specificationVersion
     let version_str = template
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            OpenJdError::DecodeValidation(
+            ModelError::DecodeValidation(
                 "Template is missing Open Job Description schema version key: specificationVersion"
                     .to_string(),
             )
@@ -72,22 +72,21 @@ pub fn decode_job_template(
     let version = TemplateSpecificationVersion::from_str(&version_str)
         .map_err(|_| {
             let allowed = TemplateSpecificationVersion::JobTemplate2023_09.as_str();
-            OpenJdError::DecodeValidation(format!(
+            ModelError::DecodeValidation(format!(
                 "Unknown template version: {version_str}. Values allowed for 'specificationVersion' in Job Templates are: {allowed}"
             ))
         })?;
 
     if !version.is_job_template() {
         let allowed = TemplateSpecificationVersion::JobTemplate2023_09.as_str();
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "Specification version '{version_str}' is not a Job Template version. \
              Values allowed for 'specificationVersion' in Job Templates are: {allowed}"
         )));
     }
 
-    let jt: JobTemplate = serde_yaml::from_value(template).map_err(|e| {
-        OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
-    })?;
+    let jt: JobTemplate = serde_yaml::from_value(template)
+        .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
 
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
@@ -100,7 +99,7 @@ pub fn decode_job_template(
         for ext in template_exts {
             let ext_str = ext.as_str();
             if !supported.contains(ext_str) {
-                return Err(OpenJdError::DecodeValidation(format!(
+                return Err(ModelError::DecodeValidation(format!(
                     "Unknown or unsupported extension: {ext_str}"
                 )));
             }
@@ -109,7 +108,7 @@ pub fn decode_job_template(
                     extensions.insert(known);
                 }
                 Err(_) => {
-                    return Err(OpenJdError::DecodeValidation(format!(
+                    return Err(ModelError::DecodeValidation(format!(
                         "Unknown or unsupported extension: {ext_str}"
                     )));
                 }
@@ -127,13 +126,13 @@ pub fn decode_job_template(
 pub fn decode_environment_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<EnvironmentTemplate, OpenJdError> {
+) -> Result<EnvironmentTemplate, ModelError> {
     let version_str = template
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            OpenJdError::DecodeValidation(
+            ModelError::DecodeValidation(
                 "Template is missing Open Job Description schema version key: specificationVersion"
                     .to_string(),
             )
@@ -141,28 +140,27 @@ pub fn decode_environment_template(
 
     let version = TemplateSpecificationVersion::from_str(&version_str).map_err(|_| {
         let allowed = TemplateSpecificationVersion::Environment2023_09.as_str();
-        OpenJdError::DecodeValidation(format!(
+        ModelError::DecodeValidation(format!(
             "Unknown template version: {version_str}. Allowed values are: {allowed}"
         ))
     })?;
 
     if !version.is_environment_template() {
         let allowed = TemplateSpecificationVersion::Environment2023_09.as_str();
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "Specification version '{version_str}' is not an Environment Template version. \
              Allowed values for 'specificationVersion' are: {allowed}"
         )));
     }
 
-    let et: EnvironmentTemplate = serde_yaml::from_value(template).map_err(|e| {
-        OpenJdError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
-    })?;
+    let et: EnvironmentTemplate = serde_yaml::from_value(template)
+        .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
 
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
     if let Some(template_exts) = &et.extensions {
         if template_exts.is_empty() {
-            return Err(OpenJdError::DecodeValidation(
+            return Err(ModelError::DecodeValidation(
                 "extensions, if provided, must be a non-empty list.".to_string(),
             ));
         }
@@ -174,7 +172,7 @@ pub fn decode_environment_template(
         for ext in template_exts {
             let ext_str = ext.as_str();
             if !supported.contains(ext_str) {
-                return Err(OpenJdError::DecodeValidation(format!(
+                return Err(ModelError::DecodeValidation(format!(
                     "Unknown or unsupported extension: {ext_str}"
                 )));
             }
@@ -183,7 +181,7 @@ pub fn decode_environment_template(
                     extensions.insert(known);
                 }
                 Err(_) => {
-                    return Err(OpenJdError::DecodeValidation(format!(
+                    return Err(ModelError::DecodeValidation(format!(
                         "Unknown or unsupported extension: {ext_str}"
                     )));
                 }
@@ -210,13 +208,13 @@ pub enum DecodedTemplate {
 pub fn decode_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<DecodedTemplate, OpenJdError> {
+) -> Result<DecodedTemplate, ModelError> {
     let version_str = template
         .get("specificationVersion")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            OpenJdError::DecodeValidation(
+            ModelError::DecodeValidation(
                 "Template is missing Open Job Description schema version key: specificationVersion"
                     .to_string(),
             )
@@ -225,7 +223,7 @@ pub fn decode_template(
     let version = version_str
         .parse::<TemplateSpecificationVersion>()
         .map_err(|_| {
-            OpenJdError::DecodeValidation(format!("Unknown template version: {version_str}"))
+            ModelError::DecodeValidation(format!("Unknown template version: {version_str}"))
         })?;
 
     if version.is_job_template() {

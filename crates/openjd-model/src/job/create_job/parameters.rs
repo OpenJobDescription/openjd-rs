@@ -9,7 +9,7 @@
 use indexmap::IndexMap;
 use openjd_expr::symbol_table::SymbolTable;
 
-use crate::error::OpenJdError;
+use crate::error::ModelError;
 use crate::template::{EnvironmentTemplate, JobParameterDefinition, JobTemplate};
 use crate::types::{
     DataFlow, JobParameterInputValues, JobParameterType, JobParameterValue, JobParameterValues,
@@ -23,15 +23,15 @@ use crate::types::{
 pub fn merge_job_parameter_definitions(
     job_template: &JobTemplate,
     environment_templates: &[EnvironmentTemplate],
-) -> Result<Vec<MergedParameterDefinition>, OpenJdError> {
+) -> Result<Vec<MergedParameterDefinition>, ModelError> {
     let mut merged: IndexMap<String, MergedParameterDefinition> = IndexMap::new();
 
     // Helper: process one parameter definition into the merged map.
-    let mut process_param = |p: &JobParameterDefinition, source: &str| -> Result<(), OpenJdError> {
+    let mut process_param = |p: &JobParameterDefinition, source: &str| -> Result<(), ModelError> {
         let name = p.name().to_string();
         if let Some(existing) = merged.get(&name) {
             if existing.param_type != p.job_param_type() {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{name}' has conflicting types: '{}' in {} and '{}' in {source}",
                     existing.param_type,
                     existing.source,
@@ -43,7 +43,7 @@ pub fn merge_job_parameter_definitions(
                 if let Some(ot) = new_ot {
                     if let Some(eot) = existing.object_type {
                         if eot != ot {
-                            return Err(OpenJdError::Compatibility(format!(
+                            return Err(ModelError::Compatibility(format!(
                                 "Parameter '{name}' has conflicting objectType: '{eot}' in {} and '{ot}' in {source}",
                                 existing.source
                             )));
@@ -53,7 +53,7 @@ pub fn merge_job_parameter_definitions(
                 if let Some(df) = new_df {
                     if let Some(edf) = existing.data_flow {
                         if edf != df {
-                            return Err(OpenJdError::Compatibility(format!(
+                            return Err(ModelError::Compatibility(format!(
                                 "Parameter '{name}' has conflicting dataFlow: '{edf}' in {} and '{df}' in {source}",
                                 existing.source
                             )));
@@ -196,36 +196,36 @@ impl MergedParameterDefinition {
     }
 
     /// Validate that the merged constraints are satisfiable (§1.2.1).
-    pub fn validate_satisfiable(&self) -> Result<(), OpenJdError> {
+    pub fn validate_satisfiable(&self) -> Result<(), ModelError> {
         if let (Some(min), Some(max)) = (self.min_value_i64, self.max_value_i64) {
             if min > max {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged INT constraints have no valid range (min {min} > max {max})", self.name)));
             }
         }
         if let (Some(min), Some(max)) = (self.min_value_f64, self.max_value_f64) {
             if min > max {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged FLOAT constraints have no valid range (min {min} > max {max})", self.name)));
             }
         }
         if let (Some(min), Some(max)) = (self.min_length, self.max_length) {
             if min > max {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged {} constraints have no valid length (minLength {min} > maxLength {max})",
                     self.name, self.param_type)));
             }
         }
         if let Some(allowed) = &self.allowed_values_str {
             if allowed.is_empty() {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged {} allowedValues have no common values",
                     self.name, self.param_type
                 )));
             }
             if let Some(def) = &self.default {
                 if !allowed.iter().any(|a| a == def) {
-                    return Err(OpenJdError::Compatibility(format!(
+                    return Err(ModelError::Compatibility(format!(
                         "Parameter '{}': default '{}' not in merged allowedValues",
                         self.name, def
                     )));
@@ -234,7 +234,7 @@ impl MergedParameterDefinition {
         }
         if let Some(allowed) = &self.allowed_values_int {
             if allowed.is_empty() {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged INT allowedValues have no common values",
                     self.name
                 )));
@@ -242,7 +242,7 @@ impl MergedParameterDefinition {
         }
         if let Some(allowed) = &self.allowed_values_float {
             if allowed.is_empty() {
-                return Err(OpenJdError::Compatibility(format!(
+                return Err(ModelError::Compatibility(format!(
                     "Parameter '{}': merged FLOAT allowedValues have no common values",
                     self.name
                 )));
@@ -252,12 +252,12 @@ impl MergedParameterDefinition {
     }
 
     /// Check a coerced value against the merged constraints.
-    pub fn check_constraints(&self, value: &openjd_expr::ExprValue) -> Result<(), OpenJdError> {
+    pub fn check_constraints(&self, value: &openjd_expr::ExprValue) -> Result<(), ModelError> {
         match value {
             openjd_expr::ExprValue::Int(v) => {
                 if let Some(min) = self.min_value_i64 {
                     if *v < min {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {v} is less than minimum {min}",
                             self.name
                         )));
@@ -265,7 +265,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(max) = self.max_value_i64 {
                     if *v > max {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {v} exceeds maximum {max}",
                             self.name
                         )));
@@ -273,7 +273,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(allowed) = &self.allowed_values_int {
                     if !allowed.contains(v) {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {v} is not in allowed values",
                             self.name
                         )));
@@ -284,7 +284,7 @@ impl MergedParameterDefinition {
                 let f = v.value();
                 if let Some(min) = self.min_value_f64 {
                     if f < min {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {f} is less than minimum {min}",
                             self.name
                         )));
@@ -292,7 +292,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(max) = self.max_value_f64 {
                     if f > max {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {f} exceeds maximum {max}",
                             self.name
                         )));
@@ -300,7 +300,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(allowed) = &self.allowed_values_float {
                     if !allowed.contains(&f) {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value {f} is not in allowed values",
                             self.name
                         )));
@@ -310,7 +310,7 @@ impl MergedParameterDefinition {
             openjd_expr::ExprValue::String(v) | openjd_expr::ExprValue::Path { value: v, .. } => {
                 if let Some(min) = self.min_length {
                     if v.len() < min {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value length {} is less than minimum {min}",
                             self.name,
                             v.len()
@@ -319,7 +319,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(max) = self.max_length {
                     if v.len() > max {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value length {} exceeds maximum {max}",
                             self.name,
                             v.len()
@@ -328,7 +328,7 @@ impl MergedParameterDefinition {
                 }
                 if let Some(allowed) = &self.allowed_values_str {
                     if !allowed.iter().any(|a| a == v) {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': value '{}' is not in allowed values",
                             self.name, v
                         )));
@@ -505,7 +505,7 @@ pub fn preprocess_job_parameters(
     input_values: &JobParameterInputValues,
     environment_templates: &[EnvironmentTemplate],
     path_options: &PathParameterOptions<'_>,
-) -> Result<JobParameterValues, OpenJdError> {
+) -> Result<JobParameterValues, ModelError> {
     let job_template_dir = path_options.job_template_dir;
     let current_working_dir = path_options.current_working_dir;
     let path_format = path_options.path_format;
@@ -515,7 +515,7 @@ pub fn preprocess_job_parameters(
     if !allow_job_template_dir_walk_up
         && !is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format)
     {
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "The value supplied for the job template dir, {}, is not an absolute path. \
              It must be absolute to enforce that PATH parameter defaults are always inside the job template dir.",
             job_template_dir.display()
@@ -530,7 +530,7 @@ pub fn preprocess_job_parameters(
 
     for key in input_values.keys() {
         if !merged.iter().any(|p| p.name == *key) {
-            return Err(OpenJdError::DecodeValidation(format!(
+            return Err(ModelError::DecodeValidation(format!(
                 "Job parameter values provided for parameters that are not defined in the template: {key}"
             )));
         }
@@ -552,7 +552,7 @@ pub fn preprocess_job_parameters(
                 if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
                     // EXPR extension: URI handling depends on allow_uri_path_values
                     if !allow_uri_path_values {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "Parameter '{}': URI path values are not permitted. Got '{}'",
                             param.name, s
                         )));
@@ -578,7 +578,7 @@ pub fn preprocess_job_parameters(
                 input_val.clone()
             };
             let expr_value = coerce_to_type(&coerced, param_type).map_err(|e| {
-                OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
+                ModelError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
             })?;
             param.check_constraints(&expr_value)?;
             result.insert(
@@ -597,13 +597,13 @@ pub fn preprocess_job_parameters(
                     && !allow_uri_path_values
                     && openjd_expr::uri_path::is_uri(default)
                 {
-                    return Err(OpenJdError::DecodeValidation(format!(
+                    return Err(ModelError::DecodeValidation(format!(
                         "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
                         param.name, default
                     )));
                 } else if is_absolute_for_format_no_uri(default, path_format) {
                     if !allow_job_template_dir_walk_up {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
                             param.name
                         )));
@@ -618,7 +618,7 @@ pub fn preprocess_job_parameters(
                     let normalized_dir =
                         normalize_path_str(&job_template_dir.to_string_lossy(), path_format);
                     if !normalized.starts_with(&normalized_dir) {
-                        return Err(OpenJdError::DecodeValidation(format!(
+                        return Err(ModelError::DecodeValidation(format!(
                             "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
                             param.name
                         )));
@@ -633,7 +633,7 @@ pub fn preprocess_job_parameters(
                 default.clone()
             };
             let expr_value = coerce_from_str(&value_str, param_type).map_err(|e| {
-                OpenJdError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
+                ModelError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
             })?;
             result.insert(
                 param.name.clone(),
@@ -649,7 +649,7 @@ pub fn preprocess_job_parameters(
 
     if !missing.is_empty() {
         missing.sort();
-        return Err(OpenJdError::DecodeValidation(format!(
+        return Err(ModelError::DecodeValidation(format!(
             "Values missing for required job parameters: {}",
             missing.join(", ")
         )));
@@ -753,7 +753,7 @@ pub(super) fn json_to_expr_value(val: &serde_json::Value) -> openjd_expr::ExprVa
 }
 
 /// Build a symbol table from processed job parameter values.
-pub fn build_symbol_table(params: &JobParameterValues) -> Result<SymbolTable, OpenJdError> {
+pub fn build_symbol_table(params: &JobParameterValues) -> Result<SymbolTable, ModelError> {
     let mut symtab = SymbolTable::new();
     for (name, pv) in params {
         // PATH and LIST[PATH] Param.* are excluded from the template-scope symtab.

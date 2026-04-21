@@ -31,7 +31,7 @@ fn file_meta(meta: &std::fs::Metadata) -> crate::Result<(u64, u64, bool)> {
     let mtime = meta
         .modified()?
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| SnapshotError::Other(e.to_string()))?
+        .map_err(|e| SnapshotError::Task(e.to_string()))?
         .as_micros() as u64;
     #[cfg(unix)]
     let runnable = {
