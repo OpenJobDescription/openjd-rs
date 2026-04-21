@@ -7,9 +7,9 @@ use openjd_snapshots::hash::hash_data;
 use openjd_snapshots::ContentAddressedDataCache as SyncCache;
 use openjd_snapshots::{
     collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
-    subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, DirEntry, DownloadOptions,
-    FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest, S3DataCache,
-    SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, CopyResult, DirEntry,
+    DownloadOptions, FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
+    S3DataCache, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
 };
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
@@ -148,6 +148,58 @@ fn s3_object_exists_nonexistent_returns_error() {
     // to return Err instead of Ok(false) when used with s3s.
     let (_tmp, cache) = make_s3_fixture();
     assert!(SyncCache::object_exists(&*cache, "nonexistent", "xxh128").is_err());
+}
+
+#[test]
+fn s3_copy_from_between_buckets() {
+    let tmp = TempDir::new().unwrap();
+    let client = make_s3_client(tmp.path());
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        client
+            .create_bucket()
+            .bucket("src-bucket")
+            .send()
+            .await
+            .unwrap();
+        client
+            .create_bucket()
+            .bucket("dst-bucket")
+            .send()
+            .await
+            .unwrap();
+    });
+
+    let src = Arc::new(S3DataCache::new(
+        "src-bucket".to_string(),
+        PREFIX.to_string(),
+        client.clone(),
+    ));
+    let dst = Arc::new(S3DataCache::new(
+        "dst-bucket".to_string(),
+        PREFIX.to_string(),
+        client,
+    ));
+
+    // Put object in source
+    SyncCache::put_object(&*src, "abc123", "xxh128", b"copy me").unwrap();
+
+    // Server-side copy
+    rt.block_on(async {
+        let result = dst
+            .copy_from(src.as_ref() as &dyn AsyncDataCache, "abc123", "xxh128")
+            .await
+            .unwrap();
+        assert_eq!(result, CopyResult::ServerSideCopy);
+    });
+
+    // Verify data arrived
+    let data = SyncCache::get_object(&*dst, "abc123", "xxh128").unwrap();
+    assert_eq!(data, b"copy me");
 }
 
 // ===== Category 2: Hash+Upload with S3 =====

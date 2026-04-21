@@ -387,6 +387,32 @@ mod tests {
         let result = dst.copy_from(&src, "abc", "xxh128").await.unwrap();
         assert_eq!(result, CopyResult::NotSupported);
     }
+
+    #[test]
+    fn format_copy_source_regular_bucket() {
+        let result = super::format_copy_source("my-bucket", "Data/abc123.xxh128");
+        assert_eq!(result, "my-bucket/Data/abc123.xxh128");
+    }
+
+    #[test]
+    fn format_copy_source_access_point_arn() {
+        let arn = "arn:aws:s3:us-west-2:123456789012:accesspoint/my-access-point";
+        let result = super::format_copy_source(arn, "Data/abc123.xxh128");
+        assert_eq!(
+            result,
+            "arn:aws:s3:us-west-2:123456789012:accesspoint/my-access-point/object/Data/abc123.xxh128"
+        );
+    }
+
+    #[test]
+    fn format_copy_source_outpost_arn() {
+        let arn = "arn:aws:s3-outposts:us-west-2:123456789012:outpost/my-outpost";
+        let result = super::format_copy_source(arn, "Data/abc123.xxh128");
+        assert_eq!(
+            result,
+            "arn:aws:s3-outposts:us-west-2:123456789012:outpost/my-outpost/object/Data/abc123.xxh128"
+        );
+    }
 }
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -517,6 +543,18 @@ impl S3DataCache {
     }
 }
 
+/// Format the `x-amz-copy-source` value for S3 CopyObject.
+///
+/// For regular buckets: `{bucket}/{key}`
+/// For access point ARNs: `{arn}/object/{key}`
+fn format_copy_source(bucket: &str, key: &str) -> String {
+    if bucket.starts_with("arn:") {
+        format!("{}/object/{}", bucket, key)
+    } else {
+        format!("{}/{}", bucket, key)
+    }
+}
+
 /// Run a future to completion, handling the case where we're already inside a tokio runtime.
 fn block_on_async<F: std::future::Future>(f: F) -> F::Output {
     match tokio::runtime::Handle::try_current() {
@@ -582,7 +620,7 @@ impl AsyncDataCache for S3DataCache {
         };
         let src_key = src_s3.object_key(hash, algorithm);
         let dst_key = self.object_key(hash, algorithm);
-        let copy_source = format!("{}/{}", src_s3.bucket, src_key);
+        let copy_source = format_copy_source(&src_s3.bucket, &src_key);
         self.client
             .copy_object()
             .bucket(&self.bucket)
