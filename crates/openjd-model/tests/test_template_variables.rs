@@ -78,7 +78,15 @@ fn session_working_directory_not_in_name_scope() {
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    assert!(decode_job_template(v, None).is_err());
+    let err = decode_job_template(v, None).expect_err("Session.WorkingDirectory not in name scope");
+    let msg = err.to_string();
+    let expected = "\
+Model validation error: 1 validation error for JobTemplate
+name:
+\tFailed to parse interpolation expression at [4, 32]. Undefined variable: 'Session.WorkingDirectory'.
+  Session.WorkingDirectory
+  ~~~~~~~~^~~~~~~~~~~~~~~~";
+    assert_eq!(msg, expected);
 }
 
 #[test]
@@ -91,7 +99,15 @@ fn path_parameter_not_in_name_scope() {
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    assert!(decode_job_template(v, None).is_err());
+    let err = decode_job_template(v, None).expect_err("PATH param not in name scope");
+    let msg = err.to_string();
+    let expected = "\
+Model validation error: 1 validation error for JobTemplate
+name:
+\tFailed to parse interpolation expression at [4, 17]. Undefined variable: 'Param.Foo'. Did you mean: RawParam.Foo
+  Param.Foo
+  ~~~~~~^~~";
+    assert_eq!(msg, expected);
 }
 
 // ══════════════════════════════════════════════════════════════

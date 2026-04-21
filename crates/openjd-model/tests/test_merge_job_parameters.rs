@@ -1134,3 +1134,112 @@ fn input_value_rejected_by_env_only_constraint_no_job_constraint() {
     .unwrap_err();
     assert!(err.to_string().contains("foo"), "got: {err}");
 }
+
+// ══════════════════════════════════════════════════════════════
+// merge — LIST and BOOL parameter types (requires EXPR extension)
+// ══════════════════════════════════════════════════════════════
+
+fn expr_job_template(params: &str) -> serde_yaml::Value {
+    yaml_val(&format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{params}],
+        "steps": [{{"name": "Test", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}}}]
+    }}"#
+    ))
+}
+
+fn expr_env_template(name: &str, params: &str) -> serde_yaml::Value {
+    yaml_val(&format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{params}],
+        "environment": {{"name": "{name}", "script": {{"actions": {{"onEnter": {{"command": "bar"}}}}}}}}
+    }}"#
+    ))
+}
+
+#[test]
+fn merge_simple_bool() {
+    let jt = decode_job_template(
+        expr_job_template(r#"{"name": "foo", "type": "BOOL"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        expr_env_template("Env", r#"{"name": "foo", "type": "BOOL"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].param_type, JobParameterType::Bool);
+}
+
+#[test]
+fn merge_simple_list_string() {
+    let jt = decode_job_template(
+        expr_job_template(r#"{"name": "foo", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        expr_env_template("Env", r#"{"name": "foo", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].param_type, JobParameterType::ListString);
+}
+
+#[test]
+fn merge_simple_list_int() {
+    let jt = decode_job_template(
+        expr_job_template(r#"{"name": "foo", "type": "LIST[INT]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        expr_env_template("Env", r#"{"name": "foo", "type": "LIST[INT]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].param_type, JobParameterType::ListInt);
+}
+
+#[test]
+fn merge_type_conflict_bool_int() {
+    let jt = decode_job_template(
+        expr_job_template(r#"{"name": "foo", "type": "BOOL"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        expr_env_template("Env", r#"{"name": "foo", "type": "INT"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let err = merge_job_parameter_definitions(&jt, &[et]).unwrap_err();
+    assert!(err.to_string().contains("conflicting types"), "got: {err}");
+}
+
+#[test]
+fn merge_type_conflict_list_string_string() {
+    let jt = decode_job_template(
+        expr_job_template(r#"{"name": "foo", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        expr_env_template("Env", r#"{"name": "foo", "type": "STRING"}"#),
+        Some(&["EXPR"]),
+    )
+    .unwrap();
+    let err = merge_job_parameter_definitions(&jt, &[et]).unwrap_err();
+    assert!(err.to_string().contains("conflicting types"), "got: {err}");
+}

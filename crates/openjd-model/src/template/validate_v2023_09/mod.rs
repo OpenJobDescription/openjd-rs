@@ -184,7 +184,7 @@ pub fn validate_environment_template(
         }
         let mut param_names = std::collections::HashSet::new();
         for p in params {
-            if !param_names.insert(p.name().to_lowercase()) {
+            if !param_names.insert(p.name().to_string()) {
                 errors.add(&[], format!("Duplicate parameter name: '{}'", p.name()));
             }
         }

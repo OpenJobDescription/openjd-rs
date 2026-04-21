@@ -49,9 +49,12 @@ fn amount_ok(name: &str) {
 }
 
 fn amount_err(name: &str) {
+    let err = decode_job_template(job_with_amount(name), None)
+        .expect_err(&format!("expected error for amount name: {name}"));
+    let msg = err.to_string();
     assert!(
-        decode_job_template(job_with_amount(name), None).is_err(),
-        "expected error for amount name: {name}"
+        msg.contains("amounts[0]") || msg.contains("amounts"),
+        "Expected amounts error path for {name}, got: {msg}"
     );
 }
 
@@ -60,9 +63,12 @@ fn attr_ok(name: &str, value: &str) {
 }
 
 fn attr_err(name: &str) {
+    let err = decode_job_template(job_with_attr(name, "somevalue"), None)
+        .expect_err(&format!("expected error for attr name: {name}"));
+    let msg = err.to_string();
     assert!(
-        decode_job_template(job_with_attr(name, "somevalue"), None).is_err(),
-        "expected error for attr name: {name}"
+        msg.contains("attributes[0]") || msg.contains("attributes"),
+        "Expected attributes error path for {name}, got: {msg}"
     );
 }
 
@@ -304,10 +310,22 @@ fn attr_ends_in_newline() {
 
 #[test]
 fn attr_os_family_invalid_value() {
-    assert!(decode_job_template(job_with_attr("attr.worker.os.family", "invalid"), None).is_err());
+    let err = decode_job_template(job_with_attr("attr.worker.os.family", "invalid"), None)
+        .expect_err("invalid os.family value should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("attr.worker.os.family"),
+        "Expected os.family error, got: {msg}"
+    );
 }
 
 #[test]
 fn attr_cpu_arch_invalid_value() {
-    assert!(decode_job_template(job_with_attr("attr.worker.cpu.arch", "invalid"), None).is_err());
+    let err = decode_job_template(job_with_attr("attr.worker.cpu.arch", "invalid"), None)
+        .expect_err("invalid cpu.arch value should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("attr.worker.cpu.arch"),
+        "Expected cpu.arch error, got: {msg}"
+    );
 }

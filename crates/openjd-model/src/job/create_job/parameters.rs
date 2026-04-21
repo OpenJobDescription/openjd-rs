@@ -360,7 +360,7 @@ pub(super) fn coerce_to_type(
         }
         (ExprValue::Float(f), JobParameterType::Int) => {
             let v = f.value();
-            if v.fract() == 0.0 {
+            if v.fract() == 0.0 && v >= i64::MIN as f64 && v < i64::MAX as f64 {
                 return Ok(ExprValue::Int(v as i64));
             }
         }
@@ -696,28 +696,30 @@ fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat)
     };
 
     // Detect and preserve the root prefix
-    let (root, rest) = if path.len() >= 3
+    let (root, rest, min_components) = if path.len() >= 3
         && path.as_bytes()[0].is_ascii_alphabetic()
         && path.as_bytes()[1] == b':'
         && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
     {
         // Windows drive root: "C:\" or "C:/"
         let root = format!("{}:{sep}", path.chars().next().unwrap());
-        (root, &path[3..])
+        (root, &path[3..], 0)
     } else if path.starts_with("\\\\") || path.starts_with("//") {
-        // UNC path
-        (format!("{sep}{sep}"), &path[2..])
+        // UNC path — server and share components must be preserved
+        (format!("{sep}{sep}"), &path[2..], 2)
     } else if path.starts_with('/') || path.starts_with('\\') {
-        (sep.to_string(), &path[1..])
+        (sep.to_string(), &path[1..], 0)
     } else {
-        (String::new(), path)
+        (String::new(), path, 0)
     };
 
     let mut components: Vec<&str> = Vec::new();
     for part in rest.split(['/', '\\']) {
         match part {
             ".." => {
-                components.pop();
+                if components.len() > min_components {
+                    components.pop();
+                }
             }
             "." | "" => {}
             _ => components.push(part),
@@ -788,4 +790,33 @@ pub fn build_symbol_table(params: &JobParameterValues) -> Result<SymbolTable, Mo
         symtab.set(&format!("RawParam.{name}"), raw_value)?;
     }
     Ok(symtab)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openjd_expr::path_mapping::PathFormat;
+
+    #[test]
+    fn normalize_unc_dotdot_preserves_server_share() {
+        // \\server\share\.. should not pop below the server\share components
+        let result = normalize_path_str(r"\\server\share\..", PathFormat::Windows);
+        assert_eq!(
+            result, r"\\server\share",
+            "UNC path should preserve server\\share: got {result}"
+        );
+    }
+
+    #[test]
+    fn normalize_unc_double_dotdot_preserves_server_share() {
+        let result = normalize_path_str(r"\\server\share\a\..\..", PathFormat::Windows);
+        assert_eq!(result, r"\\server\share", "got {result}");
+    }
+
+    #[test]
+    fn normalize_unc_excessive_dotdot_preserves_server_share() {
+        // More .. than components should clamp at server\share
+        let result = normalize_path_str(r"\\server\share\..\..\..\..", PathFormat::Windows);
+        assert_eq!(result, r"\\server\share", "got {result}");
+    }
 }

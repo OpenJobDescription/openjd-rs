@@ -422,3 +422,44 @@ fn whitespace_only_combination_rejected() {
         "Whitespace-only combination should be rejected"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// BUG-1: Combination expression parser must reject malformed input
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn error_double_comma_rejected() {
+    let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(A,,B)");
+    let v = yaml_val(&t);
+    let err = decode_job_template(v, None).expect_err("(A,,B) should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("empty element in combination expression."),
+        "Expected empty element error, got: {msg}"
+    );
+}
+
+#[test]
+fn error_leading_comma_rejected() {
+    let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(,A,B)");
+    let v = yaml_val(&t);
+    let err = decode_job_template(v, None).expect_err("(,A,B) should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("empty element in combination expression."),
+        "Expected empty element error, got: {msg}"
+    );
+}
+
+#[test]
+fn error_trailing_comma_rejected() {
+    let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(A,B,)");
+    let v = yaml_val(&t);
+    let err = decode_job_template(v, None).expect_err("(A,B,) should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("empty group in combination expression.")
+            || msg.contains("empty element in combination expression."),
+        "Expected empty group/element error, got: {msg}"
+    );
+}

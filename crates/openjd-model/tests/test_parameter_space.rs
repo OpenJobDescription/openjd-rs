@@ -488,7 +488,7 @@ fn combination_unclosed_paren_single() {
 #[test]
 fn combination_comma_after_operator() {
     check_err(&job_with_param_space(r#"{"taskParameterDefinitions": [{"name": "A", "type": "INT", "range": [1]}], "combination": "A * ,"}"#), &[
-        "steps[0] -> parameterSpace -> combination:\n\ttrailing operator in combination expression.",
+        "steps[0] -> parameterSpace -> combination:\n\tempty element in combination expression.",
     ]);
 }
 

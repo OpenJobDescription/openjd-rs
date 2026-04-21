@@ -782,9 +782,17 @@ fn validate_combination_expr(
                 prev_was_name = false;
             }
             Token::RParen => {
+                if !prev_was_name {
+                    errors.add(path, "empty group in combination expression.");
+                    return;
+                }
                 prev_was_name = true; // ) acts like a name for operator adjacency
             }
             Token::Comma => {
+                if !prev_was_name {
+                    errors.add(path, "empty element in combination expression.");
+                    return;
+                }
                 prev_was_name = false;
             }
         }

@@ -4032,3 +4032,41 @@ fn simple_action_digit_starting_step_name() {
         result.err()
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// ISSUE-5: Float→Int coercion must reject values outside i64 range
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_preprocess_float_to_int_overflow_rejected() {
+    let td = TestDirs::new();
+    let jt_val = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "test",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(jt_val, None).unwrap();
+    let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
+    let et = decode_environment_template(et_val, None).unwrap();
+    let mut input = JobParameterInputValues::new();
+    // 1e19 has fract() == 0.0 but exceeds i64::MAX
+    input.insert(
+        "Foo".into(),
+        openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(1e19).unwrap()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[et],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    );
+    assert!(result.is_err(), "1e19 should not silently coerce to i64");
+}

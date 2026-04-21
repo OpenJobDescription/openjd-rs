@@ -630,3 +630,23 @@ fn test_env_on_exit_empty_command_validated() {
         &["environment -> script -> actions -> onExit -> command:\n\tmust not be empty."],
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// BUG-2: Case-sensitivity consistency — parameter names should be
+// case-sensitive (matching job template behavior)
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_case_different_params_accepted() {
+    // "Foo" and "foo" are different names — should be accepted (case-sensitive)
+    decode_ok(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [
+            {"name": "Foo", "type": "INT"},
+            {"name": "foo", "type": "INT"}
+        ],
+        "environment": {"name": "Env", "script": {"actions": {"onEnter": {"command": "bar"}}}}
+    }"#,
+    );
+}

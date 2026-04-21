@@ -47,9 +47,12 @@ fn job_ok(embedded_json: &str) {
 }
 
 fn job_err(embedded_json: &str) {
+    let err = decode_job_template(job_with_embedded(embedded_json), None)
+        .expect_err(&format!("expected error for embedded: {embedded_json}"));
+    let msg = err.to_string();
     assert!(
-        decode_job_template(job_with_embedded(embedded_json), None).is_err(),
-        "expected error for embedded: {embedded_json}"
+        msg.contains("embeddedFiles"),
+        "Expected embeddedFiles error path, got: {msg}"
     );
 }
 
@@ -58,9 +61,12 @@ fn env_ok(embedded_json: &str) {
 }
 
 fn env_err(embedded_json: &str) {
+    let err = decode_environment_template(env_with_embedded(embedded_json), None)
+        .expect_err(&format!("expected error for embedded: {embedded_json}"));
+    let msg = err.to_string();
     assert!(
-        decode_environment_template(env_with_embedded(embedded_json), None).is_err(),
-        "expected error for embedded: {embedded_json}"
+        !msg.is_empty(),
+        "Expected non-empty error message, got: {msg}"
     );
 }
 
@@ -110,12 +116,26 @@ fn runnable_false() {
 
 #[test]
 fn runnable_must_be_bool() {
-    env_err(r#"{"name": "Foo", "type": "TEXT", "data": "hello", "runnable": "True"}"#);
+    let v = env_with_embedded(
+        r#"{"name": "Foo", "type": "TEXT", "data": "hello", "runnable": "True"}"#,
+    );
+    let err = decode_environment_template(v, None).expect_err("runnable must be bool");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("expected a boolean"),
+        "Expected boolean type error, got: {msg}"
+    );
 }
 
 #[test]
 fn type_case_sensitive() {
-    env_err(r#"{"name": "Foo", "type": "text", "data": "hello"}"#);
+    let v = env_with_embedded(r#"{"name": "Foo", "type": "text", "data": "hello"}"#);
+    let err = decode_environment_template(v, None).expect_err("type is case-sensitive");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("unknown variant `text`, expected `TEXT`"),
+        "Expected unknown variant error, got: {msg}"
+    );
 }
 
 #[test]
