@@ -1384,7 +1384,7 @@ impl<'a> Evaluator<'a> {
             }
         }
         let elem_type = if result.is_empty() {
-            ExprType::INT
+            ExprType::NULLTYPE
         } else {
             result[0].expr_type()
         };

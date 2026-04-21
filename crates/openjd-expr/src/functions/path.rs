@@ -249,10 +249,18 @@ fn extract_unc_root(path: &str) -> Option<&str> {
     Some(&path[..sep_after_share])
 }
 
+fn path_starts_with(path: &str, base: &str, fmt: PathFormat) -> bool {
+    if fmt == PathFormat::Windows {
+        path.len() >= base.len() && path[..base.len()].eq_ignore_ascii_case(base)
+    } else {
+        path.starts_with(base)
+    }
+}
+
 pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
-    let (path_str, _) = get_path(&a[0], ctx)?;
+    let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
-    let is_rel = path_str.starts_with(&base)
+    let is_rel = path_starts_with(&path_str, &base, fmt)
         && (path_str.len() == base.len()
             || base.ends_with('/')
             || base.ends_with('\\')
@@ -263,7 +271,7 @@ pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
-    let is_rel = path_str.starts_with(&base)
+    let is_rel = path_starts_with(&path_str, &base, fmt)
         && (path_str.len() == base.len()
             || base.ends_with('/')
             || base.ends_with('\\')
@@ -273,9 +281,7 @@ pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             "relative_to failed: '{path_str}' is not relative to '{base}'"
         )));
     }
-    let rel = path_str
-        .strip_prefix(&base)
-        .unwrap_or(&path_str)
+    let rel = path_str[base.len()..]
         .trim_start_matches('/')
         .trim_start_matches('\\');
     Ok(ExprValue::new_path(

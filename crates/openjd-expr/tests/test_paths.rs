@@ -2158,3 +2158,84 @@ fn path_list_windows_no_drive_root_reset() {
         r"\b"
     );
 }
+
+// === Bug P-4: Windows case-insensitive is_relative_to / relative_to ===
+
+#[test]
+fn windows_is_relative_to_case_insensitive() {
+    let st = windows_st("P", "C:\\Users\\Bob");
+    assert_eq!(
+        eval_windows("P.is_relative_to('c:\\\\users')", &st).to_display_string(),
+        "true"
+    );
+}
+
+#[test]
+fn windows_relative_to_case_insensitive() {
+    // Should match case-insensitively but preserve original case in result
+    let st = windows_st("P", "C:\\Users\\Bob");
+    assert_eq!(
+        eval_windows("P.relative_to('c:\\\\users')", &st).to_display_string(),
+        "Bob"
+    );
+}
+
+#[test]
+fn windows_is_relative_to_case_sensitive_posix() {
+    // POSIX must remain case-sensitive
+    let st = posix_st("P", "/A/B");
+    assert_eq!(
+        eval_posix("P.is_relative_to('/a')", &st).to_display_string(),
+        "false"
+    );
+}
+
+#[test]
+fn windows_relative_to_case_sensitive_posix() {
+    // POSIX relative_to must remain case-sensitive — should error
+    assert_err_posix(
+        "P.relative_to('/a')",
+        &posix_st("P", "/A/B"),
+        &["relative_to failed"],
+    );
+}
+
+// === is_relative_to / relative_to partial component boundary ===
+
+#[test]
+fn posix_is_relative_to_partial_component_false() {
+    // "/mnt/data" does NOT start with "/mnt/dat" — must match at component boundary
+    let st = posix_st("P", "/mnt/data");
+    assert_eq!(
+        eval_posix("P.is_relative_to('/mnt/dat')", &st).to_display_string(),
+        "false"
+    );
+}
+
+#[test]
+fn posix_is_relative_to_full_component_true() {
+    let st = posix_st("P", "/mnt/data");
+    assert_eq!(
+        eval_posix("P.is_relative_to('/mnt')", &st).to_display_string(),
+        "true"
+    );
+}
+
+#[test]
+fn windows_is_relative_to_partial_component_false() {
+    let st = windows_st("P", "C:\\Users\\Bob");
+    assert_eq!(
+        eval_windows("P.is_relative_to('C:\\\\Users\\\\Bo')", &st).to_display_string(),
+        "false"
+    );
+}
+
+#[test]
+fn windows_is_relative_to_partial_component_case_insensitive_false() {
+    // Case-insensitive match but still partial component — must be false
+    let st = windows_st("P", "C:\\Users\\Bob");
+    assert_eq!(
+        eval_windows("P.is_relative_to('c:\\\\users\\\\bo')", &st).to_display_string(),
+        "false"
+    );
+}
