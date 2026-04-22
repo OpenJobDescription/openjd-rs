@@ -1,344 +1,355 @@
 # openjd-model Crate Quality Evaluation Report
 
-**Date:** 2026-04-21
-**Evaluator:** AI-assisted review
-**Crate:** `openjd-model` v0.1.0
-**Location:** `~/openjd-rs/crates/openjd-model`
+**Date:** 2026-04-22
+**Crate:** `openjd-model` (`crates/openjd-model`)
+**Artifacts Reviewed:**
+- Specifications: `specs/model/` (12 files)
+- Implementation: `crates/openjd-model/src/` (35 files, ~500KB)
+- Tests: `crates/openjd-model/tests/` (29 files, ~600KB)
 
 ---
 
 ## Executive Summary
 
-The `openjd-model` crate is a well-engineered Rust implementation of the Open Job Description template parsing, validation, and job creation pipeline. It comprises ~15,000 lines of implementation source and ~20,000 lines of integration tests (1,595 test functions), all of which compile cleanly with zero warnings and pass successfully.
-
-The specifications are thorough and well-organized across 12 documents. The implementation faithfully follows the specs and maintains Pydantic-compatible error formatting for cross-implementation consistency with the Python reference.
-
-This evaluation identified **1 confirmed bug** (combination expression parser accepts malformed input), **1 confirmed inconsistency** (case-sensitivity mismatch in parameter name duplicate detection), and several minor issues and improvement opportunities.
+The `openjd-model` crate is a well-engineered Rust implementation of the OpenJD 2023-09 template model. It compiles cleanly with zero warnings, passes all 1,501 tests, and has zero clippy warnings. The specifications are thorough and accurately describe the implementation. The test suite is comprehensive with excellent error message coverage. A few issues were found during deep analysis, including one potential panic bug and several minor concerns, but overall the crate is high quality and production-ready.
 
 ---
 
 ## 1. Specifications Review
 
-### Files Reviewed (12 total in `specs/model/`)
+### Files Reviewed
 
-| File | Size | Coverage |
-|------|------|----------|
-| `README.md` | 4,122 B | High-level overview, document index |
-| `architecture.md` | 7,767 B | Module layout, dependency graph, public API |
-| `parsing.md` | 4,769 B | YAML/JSON decoding pipeline (passes 1-4) |
-| `template-types.md` | 8,375 B | Unresolved template types (phase 1) |
-| `validation.md` | 8,141 B | Multi-pass validation pipeline (passes 5-9) |
-| `parameters.md` | 8,920 B | Job/task parameter type systems |
-| `parameter-space.md` | 6,723 B | Lazy parameter space iteration |
-| `job-creation.md` | 7,343 B | Job creation pipeline |
-| `job-types.md` | 8,871 B | Instantiated job types (phase 2) |
-| `error-handling.md` | 5,167 B | Error types and formatting |
-| `step-dependencies.md` | 3,260 B | Dependency graph and topological sort |
-| `capabilities.md` | 1,809 B | Standard capability constants |
+| File | Topic | Lines |
+|------|-------|-------|
+| `README.md` | Crate overview, two-phase type system | ~100 |
+| `architecture.md` | Module layout, dependency graph, public API | ~200 |
+| `parsing.md` | 9-pass decode pipeline (passes 1-4) | ~120 |
+| `validation.md` | Semantic validation (passes 5-9) | ~200 |
+| `template-types.md` | Phase 1 unresolved types | ~220 |
+| `job-types.md` | Phase 2 resolved types | ~250 |
+| `parameters.md` | Parameter type systems, coercion | ~220 |
+| `parameter-space.md` | Lazy parameter space iteration | ~170 |
+| `job-creation.md` | Template → Job pipeline | ~190 |
+| `step-dependencies.md` | Dependency graph, topo sort | ~80 |
+| `error-handling.md` | Error types, Pydantic-compatible formatting | ~130 |
+| `capabilities.md` | Standard capability constants | ~50 |
 
-### Specification Quality Assessment
+### Assessment
 
-**Strengths:**
-- The two-phase type system (template → job) is clearly motivated and consistently documented
-- Extension system (`EffectiveLimits`/`EffectiveRules`) is well-designed and cleanly separates extension effects from validation logic
-- Error handling spec explicitly targets Pydantic-compatible output for cross-implementation consistency
-- Architecture doc provides a complete module tree and public API listing
+**Completeness: Excellent.** The specs cover every module and every public API function. The architecture spec provides a clear dependency graph and module layout. Each spec explains both *what* the code does and *why* design decisions were made.
 
-**Gaps identified:**
-- `SerializedSymbolTable` wire format: exact value serialization per type is not specified
-- `AdaptiveChunkNode` consumer implications: how schedulers handle sequential-only iteration is not discussed
-- Security implications of `allow_template_dir_walk_up` are not documented
+**Accuracy: Very Good.** The specs accurately describe the implementation with a few minor discrepancies:
 
-### Specification-Implementation Alignment: ✅ Strong
+1. **Association length validation timing:** The `parameter-space.md` spec says "validated during construction" (referring to `StepParameterSpaceIterator::new()`), which is accurate. However, the OpenJD specification says this should be validated at template decode time. The Rust implementation defers this check to iterator construction, meaning `decode_job_template()` accepts templates with mismatched association lengths. This is a spec-implementation alignment issue — the internal spec documents the actual behavior, but the behavior may not match the upstream OpenJD specification's intent.
 
-The specifications accurately represent the implementation. All major design decisions documented in the specs are faithfully implemented. The numbered validation passes (5-9) map directly to source files.
+2. **Error type naming:** The spec refers to `OpenJdError` but the implementation uses `ModelError`. The spec should be updated to match.
+
+**Goals and Design Rationale: Excellent.** Each spec clearly explains the goals (e.g., lazy evaluation for parameter spaces, Pydantic-compatible error formatting for cross-implementation consistency, extension-aware validation via computed limits/rules). The two-phase type system (template types → job types) is well-motivated and clearly documented.
 
 ---
 
-## 2. Implementation Source Review
+## 2. Implementation Review
 
-### Files Reviewed (30+ source files, ~15,000 lines)
+### Architecture
 
-#### Core Modules
+The crate follows a clean 3-layer architecture:
 
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `lib.rs` | 100 | Module declarations and re-exports |
-| `error.rs` | 289 | Error types with Pydantic-compatible formatting |
-| `types.rs` | 581 | Core types, enums, type aliases |
-| `capabilities.rs` | 60 | Standard capability constants and validation |
+- **`template/`** — Parsing layer: YAML/JSON → typed Rust structs via serde, then multi-pass validation
+- **`job/`** — Instantiation layer: validated templates → resolved `Job` structs
+- **`types/` + `error/` + `capabilities/`** — Shared infrastructure
 
-#### Template Parsing & Validation
+The `template` module is `pub(crate)` with selected types re-exported through `lib.rs`. This is good encapsulation.
 
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `template/parse.rs` | 398 | YAML/JSON decoding and version dispatch |
-| `template/parameters.rs` | 1,351 | Job parameter definitions (12 variants) |
-| `template/expr_parameters.rs` | 965 | EXPR extension parameter types |
-| `template/constrained_strings.rs` | 905 | Validated string types (Identifier, Description, etc.) |
-| `template/task_parameters.rs` | 283 | Task parameter definitions and range types |
-| `template/step.rs` | 250 | Step template with SimpleAction syntax sugar |
-| `template/validate_v2023_09/structure.rs` | 1,067 | Structural validation (pass 6) |
-| `template/validate_v2023_09/format_strings.rs` | 1,064 | Format string validation (pass 8) |
-| `template/validate_v2023_09/mod.rs` | 205 | EffectiveLimits/EffectiveRules orchestration |
+### Public API Surface
 
-#### Job Creation
+The public API is well-organized with clear entry points:
 
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `job/create_job/parameters.rs` | 791 | Parameter merging, preprocessing, path normalization |
-| `job/create_job/instantiate.rs` | 665 | Step/environment instantiation |
-| `job/create_job/ranges.rs` | 382 | Range resolution |
-| `job/step_param_space.rs` | 1,645 | Lazy parameter space iteration (most complex module) |
-| `job/step_dependency_graph.rs` | 191 | Dependency graph and topological sort |
+- **Parsing:** `decode_job_template`, `decode_environment_template`, `decode_template`, `document_string_to_object`
+- **Job Creation:** `create_job`, `preprocess_job_parameters`, `merge_job_parameter_definitions`, `build_symbol_table`, `evaluate_let_bindings`, `convert_environment`
+- **Iteration:** `StepParameterSpaceIterator` (lazy, O(D) random access)
+- **Graph:** `StepDependencyGraph` (topo sort, cycle detection)
+- **Capabilities:** `standard_amount_capability_names`, `validate_amount_capability_name`, etc.
 
-### Code Quality Assessment
+Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriate since they appear in the public API.
+
+### Code Quality
+
+**Naming:** Consistent and clear. Types use `PascalCase`, functions use `snake_case`. Spec section references in doc comments (e.g., `/// §2.1 JobStringParameterDefinition`) aid traceability. `#[serde(rename_all = "camelCase", deny_unknown_fields)]` is consistently applied.
+
+**Error Messages:** High quality. Pydantic-compatible format (`field[index] -> nested:\n\tmessage`) enables cross-implementation consistency. The `ValidationErrors` accumulator ensures users see all problems at once rather than one-at-a-time.
+
+**Rust Best Practices:**
+- `#[non_exhaustive]` on `ModelError` and `SpecificationRevision` for forward compatibility
+- `thiserror` for error type derivation
+- `IndexMap` for deterministic ordering where needed
+- No `unsafe` code anywhere in the crate
+- Zero clippy warnings
+
+### Detailed File Analysis
+
+#### `step_param_space.rs` (1645 lines)
 
 **Strengths:**
-- Clean compilation with zero warnings (both `cargo build` and `cargo clippy`)
-- Consistent naming following Rust conventions
-- Spec section references (§1.1, §2.2, etc.) in doc comments for traceability
-- `deny_unknown_fields` on all serde structs catches template typos
-- `#[non_exhaustive]` on `OpenJdError` for forward compatibility
-- `IndexMap` for deterministic output ordering
-- Lazy parameter space evaluation with O(1) memory for billion-element ranges
-- ProductNode divmod decomposition is correct and efficient (O(D) random access)
+- Lazy parameter space iteration with O(D) random access via divmod indexing
+- `checked_mul` for overflow detection in `ProductNode`
+- Adaptive chunking via `Arc<AtomicUsize>` for thread-safe runtime adjustment
+- Chunk boundary calculations use the standard "distribute N into K buckets" formula — verified correct
 
 **Issues Found:**
+- 14 `expect()` calls in production code on `RangeExpr::get()` and `.parse::<RangeExpr>()`. These are internal invariant assertions on computed indices/strings, so they are low risk but not zero risk.
+- `Float64::new(f).unwrap()` at line 1224 could panic if a float parameter value is NaN/infinity and upstream validation doesn't catch it.
+- `AdaptiveChunkNode::validate_containment()` uses `Vec::contains()` in a loop — O(N²) for large ranges. A `HashSet` would be O(N).
+- Duplicated `chunk_range_expr()` logic between `StaticChunkNode` and `StaticChunkIterator` (~40 lines each).
+- `usize as i64` casts are safe in practice due to `checked_mul` overflow guard but theoretically imprecise on 64-bit targets.
 
-#### BUG-1: Combination Expression Parser Accepts Malformed Input (Confirmed)
+#### `format_strings.rs` (1059 lines)
 
-The combination expression tokenizer/validator in `structure.rs` does not reject double commas. Input like `(A,,B)` is silently accepted as valid.
+**Strengths:**
+- Four distinct symbol table scopes (template, session, task, range) ensure format strings are validated against exactly the variables available at their evaluation point
+- On let binding error, adds `unresolved(ANY)` to prevent cascading errors — good UX
+- All 24 `.expect("symtab")` calls are on hardcoded key paths after earlier validation — safe
 
-**Reproduction:** See `test_quality_evaluation_probes.rs::combination_double_comma_rejected` — this test fails, confirming the bug.
+**Issues Found:**
+- `validate_format_strings()` is ~400 lines — could benefit from decomposition into smaller helper functions per scope
+- Repeated pattern of building symtabs with `Job.Name`/`Step.Name` in multiple places
 
-**Root cause:** The parser checks for adjacent names without operators and trailing operators, but doesn't validate that comma-separated groups each contain at least one parameter. The second comma sets `prev_was_name = false` (already false), and no error is raised.
+#### `parameters.rs` (813 lines)
 
-**Severity:** Medium — malformed templates are silently accepted.
+**Strengths:**
+- Comprehensive type coercion with proper edge case handling (NaN/Inf rejection, Float→Int overflow check, Unicode char counting)
+- `normalize_path_str()` handles UNC paths correctly
+- `preprocess_job_parameters()` is well-structured despite its length
 
-#### BUG-2: Case-Sensitivity Inconsistency in Parameter Name Duplicate Detection (Confirmed)
+**Issues Found:**
+- **BUG: `make_list(...).unwrap()` at line 742** in `json_to_expr_value()` — deeply nested JSON arrays (3+ levels) will panic instead of returning an error. This is a real bug.
+- `json_to_expr_value()` silently converts JSON objects to their string representation — surprising behavior
+- `json_to_expr_value()` for `Value::Null` returns `ExprValue::Null` which may not be handled well inside list types
 
-| Validation Location | Case-Sensitive? | Method |
-|---|---|---|
-| Job template `parameterDefinitions` | YES | `.to_string()` |
-| Environment template `parameterDefinitions` | NO | `.to_lowercase()` |
-| Step `taskParameterDefinitions` | YES | `.to_string()` |
-| Combination expression duplicate refs | YES | `.clone()` |
-| Host requirements amounts/attributes | NO | `.to_lowercase()` |
+#### `error.rs` (297 lines)
 
-**Reproduction:** See `test_quality_evaluation_probes.rs` — `job_template_case_different_params_accepted` passes (case-sensitive) while `env_template_case_different_params_rejected` also passes (case-insensitive). The behavior should be consistent.
+**Strengths:**
+- Clean, well-tested (8 unit tests covering all formatting paths)
+- Correct Pydantic-compatible formatting for all edge cases (consecutive indices, root-level errors, empty paths)
+- Zero `unwrap()`/`expect()` calls in production code
 
-**Severity:** Medium — inconsistent behavior between job and environment templates.
+**No issues found.**
 
-#### ISSUE-3: `normalize_path_str` UNC Path Component Popping
+### Algorithm Complexity
 
-For UNC paths like `\\server\share\..`, the `..` can pop the server and share components, producing invalid UNC paths like `\\` or `\\server`. Python's `ntpath.normpath` preserves the server component. The `starts_with` check in the caller catches most exploits, but the normalization itself is semantically incorrect for UNC paths.
-
-**Severity:** Low-Medium — only affects UNC paths with `..` traversal, and the caller's `starts_with` check provides a safety net.
-
-#### ISSUE-4: `FlexFloat::Display` Boundary Edge Case
-
-The guard `self.0 <= i64::MAX as f64` is imprecise because `i64::MAX as f64` rounds up (i64::MAX is not exactly representable as f64). Values at the boundary display as `9223372036854775807` (i64::MAX) when the actual float value is `9223372036854775808.0`. This is cosmetically incorrect but functionally harmless because both integers map to the same f64 value.
-
-**Severity:** Low — cosmetic issue at extreme boundary.
-
-#### ISSUE-5: `coerce_to_type` Float→Int Silent Saturation
-
-`v as i64` for float values beyond `i64::MIN..=i64::MAX` saturates silently. A float like `1e19` with `fract() == 0.0` would be converted to `i64::MAX` without error. A bounds check before the cast would be more correct.
-
-**Severity:** Low-Medium — unlikely in practice but could produce wrong parameter values for extreme inputs.
-
-#### ISSUE-6: Capability Constant Duplication — ✅ Fixed
-
-`capabilities.rs` is now the single source of truth. The duplicate constants in `helpers.rs`
-have been removed and replaced with functions parameterized by `SpecificationRevision` and
-`Extensions`, making it straightforward to add new capabilities for future spec revisions
-or extensions.
-
-#### ISSUE-7: `wrapping_sub` Trick in Combination Parser
-
-The combination expression validator uses `i.wrapping_sub(1)` when `i == 0`, relying on `tokens.get(usize::MAX)` returning `None`. This works but is fragile and non-obvious. An explicit `i > 0 && ...` check would be clearer.
-
-**Severity:** Low — works correctly but is fragile.
-
-#### ISSUE-8: Self-Reference Detection Heuristic Limitations
-
-The let binding self-reference detection in `format_strings.rs` uses a regex to strip string literals before checking for the binding name. The regex doesn't handle escaped quotes, triple-quoted strings, or raw strings. This is a best-effort heuristic that could have false negatives.
-
-**Severity:** Low — unlikely to cause real issues with typical OpenJD expressions.
-
-#### ISSUE-9: Per-Name Regex Compilation in Let Binding Validation
-
-A new regex is compiled for every let binding that contains its own name as a substring. The `STRING_LITERAL_RE` is correctly cached with `LazyLock`, but the per-name regex is not. Minor performance impact since let bindings are capped at 50.
-
-**Severity:** Low — minor performance issue.
-
-### Naming and Ergonomics
-
-- Naming is consistent within the crate and follows Rust conventions
-- `check_constraints` vs `check_value_constraints` naming inconsistency between base and EXPR parameter types
-- `JobParameterDefinition` enum has significant boilerplate (~96 match arms across 8 accessor methods × 12 variants). A trait-based approach could reduce this, though the current explicit approach is compiler-verified
-- Error messages are high quality and match the Python Pydantic format
-
-### Performance
-
-- No O(N²) or worse algorithms in hot paths
-- `RangeListNode::validate_containment` for ChunkInt is O(N*M) where a HashSet could make it O(N+M), but this is not a hot path
-- Lazy parameter space evaluation is well-designed — O(1) memory for arbitrarily large spaces
-- `ProductNode` checked product length prevents overflow
+| Algorithm | Complexity | Assessment |
+|-----------|-----------|------------|
+| Cycle detection (Kahn's) | O(V + E) | ✅ Optimal |
+| Topological sort (DFS) | O(V + E) | ✅ Optimal, template-stable |
+| Parameter space random access | O(D) per access | ✅ Optimal |
+| Parameter space iteration | O(1) per element | ✅ Optimal |
+| Combination expression parsing | O(T) | ✅ Optimal |
+| Validation pipeline | O(S × P × F) | ✅ Linear in template size |
+| Association containment | O(L × K) | ✅ Acceptable |
+| AdaptiveChunkNode containment | O(V × N) | ⚠️ O(N²) — could use HashSet |
 
 ---
 
-## 3. Test Review
+## 3. Test Suite Review
 
-### Test Statistics
+### Coverage Summary
 
-- **28 integration test files** in `tests/`
-- **8 source files** with inline `#[cfg(test)]` modules
-- **1,595 total test functions**
-- **~20,000 lines** of test code
-- **All 1,595 tests pass** ✅
-- **Zero warnings** from clippy ✅
-
-### Test Files Reviewed
-
-| File | Tests | Coverage |
-|------|-------|----------|
-| `test_job_parameters.rs` | 165 | STRING/INT/FLOAT/PATH params, UI controls |
+| Test File | Tests | Coverage Area |
+|-----------|-------|---------------|
+| `test_create_job.rs` | 138 | Job creation, parameter preprocessing, scope boundaries |
+| `test_job_parameters.rs` | 165 | Parameter definition validation (all 12 types) |
 | `test_expr_parameters.rs` | 159 | EXPR extension parameter types |
-| `test_create_job.rs` | 137 | Full pipeline: preprocess → create_job |
-| `test_host_requirements.rs` | 76 | Amount/attribute capabilities |
-| `test_parameter_space.rs` | 72 | Task parameter ranges, combination expressions |
-| `test_let_bindings.rs` | 71 | Let binding validation and evaluation |
-| `test_actions_and_steps.rs` | 67 | Action/step validation |
-| `test_range_expr.rs` | 64 | Range expression parsing |
+| `test_let_bindings.rs` | 71 | Let binding validation |
+| `test_merge_job_parameters.rs` | 43 | Parameter merging across templates |
+| `test_host_requirements.rs` | 76 | Host requirements validation |
 | `test_feature_bundle_1.rs` | 57 | FEATURE_BUNDLE_1 extension |
+| `test_chunk_int.rs` | 50 | TASK_CHUNKING extension |
+| `test_parameter_space.rs` | 72 | Task parameter space definitions |
+| `test_range_expr.rs` | 64 | Range expression parsing |
 | `test_capabilities.rs` | 55 | Capability name validation |
-| `test_chunk_int.rs` | 50 | CHUNK[INT] task parameter type |
-| `test_environment_template.rs` | 42 | Environment template validation |
-| `test_merge_job_parameters.rs` | 38 | Parameter merging across templates |
-| `test_job_template.rs` | 27 | Job template structural validation |
-| `test_combination_expr.rs` | 22 | Combination expression iteration |
-| `test_parse.rs` | 22 | Document parsing and version dispatch |
-| `test_step_param_space_iter.rs` | 21 | End-to-end parameter space iteration |
-| `test_misc_v2023_09.rs` | 20 | Miscellaneous validation |
-| `test_path_param_scope.rs` | 19 | PATH parameter scope rules |
-| `test_simple_action_let.rs` | 18 | Simple action let bindings |
-| `test_error_messages.rs` | 16 | Gold standard error message formatting |
-| `test_step_dependency_graph.rs` | 14 | Dependency graph algorithms |
-| `test_scope_library_split.rs` | 14 | Function library scope split |
-| `test_embedded.rs` | 14 | Embedded file validation |
+| `test_environment_template.rs` | 42 | Environment template parsing |
+| `test_actions_and_steps.rs` | 67 | Action and step validation |
+| `test_step_param_space_iter.rs` | 21 | Parameter space iteration |
 | `test_resolved_bindings.rs` | 10 | Symbol table serialization |
+| `test_step_dependency_graph.rs` | 14 | Dependency graph and topo sort |
+| `test_error_messages.rs` | 16 | Error message format verification |
+| `test_combination_expr.rs` | 25 | Combination expression parsing |
+| `test_scope_library_split.rs` | 14 | Function library scope split |
+| `test_simple_action_let.rs` | 18 | Let bindings in SimpleAction |
+| `test_path_param_scope.rs` | 19 | PATH parameter scope rules |
 | `test_template_variables.rs` | 9 | Template variable references |
-| `test_template_posix_paths.rs` | 7 | POSIX path operations |
+| `test_parse.rs` | 22 | Document parsing, version detection |
+| `test_misc_v2023_09.rs` | 20 | Miscellaneous validation |
+| `test_job_template.rs` | 27 | Job template top-level validation |
+| `test_embedded.rs` | 14 | Embedded file parsing |
+| `test_template_posix_paths.rs` | 7 | POSIX path semantics |
+| `test_template_windows_paths.rs` | 7 | Windows path semantics |
 | `test_redacted_env_vars.rs` | 4 | REDACTED_ENV_VARS extension |
+| **In-crate unit tests** | **296** | Internal module tests |
+| **Total** | **1,501** | |
 
 ### Test Quality Assessment
 
 **Strengths:**
-- Most error tests follow the AGENTS.md gold standard: assert full error path + message content
-- Full pipeline integration tests (decode → preprocess → create_job → iterate)
-- Laziness tests use 100-billion-element ranges to prove non-materialization
-- Extensive edge case coverage for parameter constraints, path handling, and type coercion
-- Tests are well-organized by feature area
+- Gold standard error message assertions: nearly every validation error path has a test asserting the exact error message format including field paths
+- Comprehensive scope boundary testing: thorough verification that TEMPLATE vs SESSION/TASK scope resolution is correct
+- Cross-platform path handling: both POSIX and Windows path formats tested
+- Type coercion edge cases: extensive testing of all type conversions
+- Extension interaction testing: good coverage of how extensions enable/disable features
+- Unicode/char-vs-byte semantics: tests verify character counting (not byte counting)
+- Determinism tests: iteration order verified with repeated runs
+- Tests are ported from the Python reference implementation with clear source attribution
 
-**Gaps identified:**
+**Gaps Identified:**
+1. No `StepParameterSpaceIterator::get()` tests with complex combinations (products, associations) — only simple single-param spaces tested for random access
+2. Limited serialization round-trip testing beyond `test_resolved_bindings.rs`
+3. No concurrent/parallel execution tests
+4. YAML-specific features (anchors, aliases, multi-line strings) not tested
+5. No fuzz/property-based testing for parser robustness
+6. REDACTED_ENV_VARS has only 4 tests — minimal behavioral coverage
+7. No stress tests for large templates (many steps, many params)
+8. Environment template extension handling noted as not yet implemented (some Python tests skipped)
 
-1. **Some tests use `is_err()` without message assertions** — Files like `test_embedded.rs`, `test_capabilities.rs`, and `test_template_variables.rs` have tests that only check `is_err()` without verifying the error message, violating the AGENTS.md gold standard.
+### Exploratory Test Results
 
-2. **No Windows path format tests** — `test_template_posix_paths.rs` only tests POSIX. No equivalent Windows path tests exist.
+17 edge-case tests were written and executed. Results:
 
-3. **No LIST parameter merge tests** — `test_merge_job_parameters.rs` doesn't test merging LIST[*] or BOOL parameter types.
-
-4. **No CHUNK[INT] iteration tests** — `test_chunk_int.rs` validates parsing but doesn't test actual chunked iteration behavior through the full pipeline.
-
-5. **No circular let binding detection tests** — `test_let_bindings.rs` tests self-reference but not mutual circular references (a = b, b = a). Note: the probe test showed this is handled correctly (sequential evaluation catches undefined 'b' when evaluating 'a = b').
-
-6. **No performance/stress tests** — No tests for very large templates, deeply nested structures, or large parameter spaces beyond the overflow test.
-
-7. **Missing INT allowedValues vs minValue/maxValue cross-validation** — Noted in `test_job_parameters.rs` as not yet ported from Python.
-
-8. **No deserialization-from-Python tests** — `test_resolved_bindings.rs` tests round-trip but not consuming Python-generated JSON.
+| Test | Result | Notes |
+|------|--------|-------|
+| Deeply nested combination expr | ✅ Pass | `((A * B) * C)` parses correctly |
+| Max 50 let bindings | ❌ Fail | Test authoring issue — `let` requires EXPR extension |
+| 51 let bindings rejected | ✅ Pass | Correctly rejected |
+| Unicode combining chars in step name | ✅ Pass | Accepted correctly |
+| Empty parameter name | ✅ Pass | Correctly rejected |
+| Duplicate env names | ✅ Pass | Correctly rejected |
+| Self-dependency | ✅ Pass | Correctly rejected |
+| Large INT range expr (1B elements) | ❌ Fail | Correctly rejected — range expansion limit is 1024 at decode time |
+| Undefined format string variable | ✅ Pass | Correctly rejected |
+| Null in parameter definitions | ✅ Pass | Correctly rejected |
+| INT overflow default | ❌ Fail | YAML parser rejects before reaching openjd-model — expected |
+| All params in association | ✅ Pass | `(A, B)` works, produces 3 tasks |
+| Mismatched association lengths | ✅ Pass | Accepted at decode time (see Finding #3) |
+| Random access with product | ❌ Fail | HashMap key ordering differs between `get()` and iteration (see Finding #4) |
+| Control chars in description | ✅ Pass | Correctly rejected |
+| Empty steps list | ✅ Pass | Correctly rejected |
+| Topo sort stability | ✅ Pass | Deterministic: `["A", "B", "C"]` |
 
 ---
 
-## 4. Build and Test Results
+## 4. Build & Tooling
 
 | Check | Result |
 |-------|--------|
-| `cargo build --package openjd-model` | ✅ Clean (0 warnings) |
-| `cargo clippy --package openjd-model` | ✅ Clean (0 warnings) |
-| `cargo doc --package openjd-model --no-deps` | ✅ Clean (0 warnings) |
-| `cargo test --package openjd-model` | ✅ 1,595 passed, 0 failed |
+| `cargo build --package openjd-model` | ✅ Clean — no errors or warnings |
+| `cargo test --package openjd-model` | ✅ 1,501 tests passed, 0 failed, 0 ignored |
+| `cargo clippy --package openjd-model -- -W clippy::all` | ✅ No warnings |
 
 ---
 
-## 5. Probe Test Results
+## 5. Findings
 
-A test file `tests/test_quality_evaluation_probes.rs` was created to verify potential issues:
+### Finding #1: Potential Panic in `json_to_expr_value()` (Bug)
 
-| Test | Result | Finding |
-|------|--------|---------|
-| `combination_double_comma_rejected` | ❌ FAIL | **BUG CONFIRMED**: Parser accepts `(A,,B)` |
-| `job_template_case_different_params_accepted` | ✅ PASS | Job template uses case-sensitive duplicate detection |
-| `env_template_case_different_params_rejected` | ✅ PASS | Env template uses case-insensitive duplicate detection |
-| `combination_whitespace_only_rejected` | ✅ PASS | Whitespace-only combination correctly rejected |
-| `let_binding_mutual_circular_reference` | ✅ PASS | Sequential evaluation catches undefined symbol |
-| `float_param_extreme_value_coercion` | ✅ PASS | Float params handle extreme values correctly |
-| `flexfloat_display_near_i64_max_boundary` | ✅ PASS | Documents cosmetic edge case (not a functional bug) |
+**File:** `src/job/create_job/parameters.rs`, line 742
+**Severity:** Medium
+**Description:** `ExprValue::make_list(...).unwrap()` in `json_to_expr_value()` will panic if a JSON array is nested 3+ levels deep (e.g., `[[[1]]]`). The `make_list` function returns a `Result` that should be propagated rather than unwrapped.
+**Recommendation:** Replace `.unwrap()` with `?` or `.map_err(...)` to return a proper error.
+
+### Finding #2: Potential Panic in Float Parameter Space Construction
+
+**File:** `src/job/step_param_space.rs`, line 1224
+**Severity:** Low
+**Description:** `Float64::new(f).unwrap()` could panic if a float parameter value is NaN or infinity and upstream validation doesn't catch it. While the validation pipeline should reject NaN/Inf, this is a defense-in-depth concern.
+**Recommendation:** Replace with `Float64::new(f).map_err(...)` or add a comment explaining why the unwrap is safe.
+
+### Finding #3: Mismatched Association Length Validation Timing
+
+**File:** `src/job/step_param_space.rs` (AssociationNode construction)
+**Severity:** Low
+**Description:** Templates with mismatched association lengths (e.g., `(A, B)` where A has 3 elements and B has 2) are accepted by `decode_job_template()`. The mismatch is only caught later when `StepParameterSpaceIterator::new()` is called. The OpenJD specification says this should be validated at template time. The internal spec documents the actual behavior but this may not match the upstream spec's intent.
+**Recommendation:** Consider moving the association length check into the validation pipeline (pass 6, structure validation) so it's caught at decode time.
+
+### Finding #4: HashMap Key Ordering in `TaskParameterSet`
+
+**File:** `src/job/step_param_space.rs`
+**Severity:** Informational
+**Description:** `TaskParameterSet` is a `HashMap<String, TaskParameterValue>`, so key iteration order is non-deterministic. The `get(index)` random access method and the sequential `Iterator` implementation may produce `TaskParameterSet` values with different internal HashMap ordering for the same logical task. This is not a correctness bug (the values are semantically identical), but could cause issues if downstream code depends on iteration order or uses debug-format comparison.
+**Recommendation:** Consider using `IndexMap` for `TaskParameterSet` if deterministic key ordering is desired, or document that ordering is not guaranteed.
+
+### Finding #5: O(N²) Algorithm in AdaptiveChunkNode
+
+**File:** `src/job/step_param_space.rs`, `AdaptiveChunkNode::validate_containment()`
+**Severity:** Low
+**Description:** Uses `Vec::contains()` in a loop, resulting in O(V × N) complexity where V = values in the chunk and N = total values. For large ranges this could be slow.
+**Recommendation:** Use a `HashSet` for O(V) containment checking.
+
+### Finding #6: Duplicated Chunk Logic
+
+**File:** `src/job/step_param_space.rs`
+**Severity:** Informational
+**Description:** `StaticChunkNode::chunk_range_expr()` and `StaticChunkIterator::chunk_range_expr()` contain ~40 lines of identical logic for computing chunk boundaries as range expressions.
+**Recommendation:** Extract into a shared helper function.
+
+### Finding #7: Long Validation Function
+
+**File:** `src/template/validate_v2023_09/format_strings.rs`
+**Severity:** Informational
+**Description:** `validate_format_strings()` is ~400 lines. While the logic is correct, the function handles four distinct scopes (job name, host requirements, environments, steps) in a single function body.
+**Recommendation:** Consider decomposing into per-scope helper functions for readability and maintainability.
+
+### Finding #8: Spec Uses Wrong Error Type Name
+
+**File:** `specs/model/error-handling.md`, `specs/model/architecture.md`
+**Severity:** Informational
+**Description:** The specs refer to `OpenJdError` but the implementation uses `ModelError`.
+**Recommendation:** Update the specs to use `ModelError` consistently.
+
+### Finding #9: Silent JSON Object Conversion
+
+**File:** `src/job/create_job/parameters.rs`, `json_to_expr_value()`
+**Severity:** Informational
+**Description:** When a JSON object appears inside a list parameter value, `json_to_expr_value()` silently converts it to its JSON string representation via `val.to_string()`. This may be intentional for forward compatibility but is surprising behavior that could mask user errors.
+**Recommendation:** Consider returning an error for unexpected JSON types, or document this behavior in the spec.
 
 ---
 
 ## 6. Recommendations
 
-### High Priority
+### Priority 1 (Should Fix)
 
-1. **Fix combination expression parser** (BUG-1): Add validation that comma-separated groups each contain at least one parameter. Reject inputs like `(A,,B)`, `(,B)`, `(A,)`.
+1. **Fix the `make_list().unwrap()` panic** in `json_to_expr_value()` — replace with proper error propagation.
 
-2. **Resolve case-sensitivity inconsistency** (BUG-2): Determine whether parameter names should be case-sensitive or case-insensitive, and apply the same logic in both job and environment template validation. Check the OpenJD specification for the authoritative answer.
+### Priority 2 (Should Consider)
 
-### Medium Priority
+2. **Move association length validation** to decode time (pass 6) to match the OpenJD specification's intent.
+3. **Replace `Float64::new(f).unwrap()`** in step_param_space.rs with error propagation or a safety comment.
+4. **Use HashSet** in `AdaptiveChunkNode::validate_containment()` for O(N) instead of O(N²).
 
-3. **Add bounds check to Float→Int coercion** (ISSUE-5): Before `v as i64`, verify the value is within `i64::MIN..=i64::MAX` range. Use round-trip check: `let i = v as i64; if (i as f64) != v { return Err(...) }`.
+### Priority 3 (Nice to Have)
 
-4. **Fix `normalize_path_str` for UNC paths** (ISSUE-3): Prevent `..` from popping below the server/share components of UNC paths. Track the minimum component count (2 for UNC paths) and refuse to pop below it.
+5. **Extract duplicated `chunk_range_expr()` logic** into a shared function.
+6. **Decompose `validate_format_strings()`** into per-scope helpers.
+7. **Update specs** to use `ModelError` instead of `OpenJdError`.
+8. **Add tests for `StepParameterSpaceIterator::get()`** with product and association combinations.
+9. **Consider `IndexMap` for `TaskParameterSet`** if deterministic key ordering is desired.
+10. **Add error handling for unexpected JSON types** in `json_to_expr_value()`.
 
-5. **Upgrade `is_err()` tests to gold standard**: Convert tests in `test_embedded.rs`, `test_capabilities.rs`, and `test_template_variables.rs` that only check `is_err()` to also assert the error message content, per the AGENTS.md test quality standard.
+### Priority 4 (Future Improvements)
 
-6. **Add LIST parameter merge tests**: Extend `test_merge_job_parameters.rs` to cover merging LIST[*] and BOOL parameter types.
-
-### Low Priority
-
-7. ~~**Deduplicate capability constants** (ISSUE-6)~~: ✅ Fixed — `capabilities.rs` is now the single source of truth with functions parameterized by revision + extensions.
-
-8. **Replace `wrapping_sub` trick** (ISSUE-7): Use explicit `i > 0 && matches!(tokens.get(i - 1), ...)` instead of relying on `wrapping_sub` + out-of-bounds `get`.
-
-9. **Fix `FlexFloat::Display` boundary** (ISSUE-4): Change the upper bound check from `self.0 <= i64::MAX as f64` to `self.0 < i64::MAX as f64` (strict less-than) to avoid the imprecise boundary.
-
-10. **Add Windows path tests**: Create a `test_template_windows_paths.rs` counterpart to the existing POSIX path tests.
-
-11. **Add CHUNK[INT] iteration tests**: Extend test coverage to verify chunked iteration behavior through the full pipeline.
-
-12. **Consider reducing `JobParameterDefinition` boilerplate**: Evaluate whether a trait-based approach or macro could reduce the ~96 match arms while maintaining the current level of type safety.
-
-13. **Cache per-name regex in let binding validation** (ISSUE-9): Minor performance improvement for templates with many let bindings.
-
-14. **Add `#[must_use]` to query methods**: Add `#[must_use]` to `ValidationErrors::is_empty()` and `len()`.
+11. Add YAML-specific edge case tests (anchors, aliases, multi-line strings).
+12. Add fuzz/property-based testing for parser robustness.
+13. Expand REDACTED_ENV_VARS test coverage beyond the current 4 tests.
+14. Add stress tests for large templates.
+15. Complete environment template extension handling (noted as not yet implemented).
 
 ---
 
-## 7. Overall Assessment
+## 7. Conclusion
 
-The `openjd-model` crate is **high quality** with strong alignment between specifications, implementation, and tests. The codebase is well-structured, follows Rust best practices, and maintains excellent cross-implementation compatibility with the Python reference.
+The `openjd-model` crate is a high-quality Rust implementation with:
+- **Thorough specifications** that accurately document the implementation and design rationale
+- **Clean, well-structured code** following Rust best practices with zero warnings
+- **Comprehensive test suite** (1,501 tests) with excellent error message coverage
+- **Good algorithmic choices** (lazy parameter spaces, O(D) random access, O(V+E) graph algorithms)
+- **No unsafe code** and strong type safety throughout
 
-| Dimension | Rating | Notes |
-|-----------|--------|-------|
-| Spec completeness | ⭐⭐⭐⭐ | Thorough, minor gaps in edge case documentation |
-| Spec-implementation alignment | ⭐⭐⭐⭐⭐ | Faithful implementation of all spec decisions |
-| Code quality | ⭐⭐⭐⭐ | Clean, consistent, minor boilerplate |
-| Error messages | ⭐⭐⭐⭐⭐ | Pydantic-compatible, high quality |
-| Test coverage | ⭐⭐⭐⭐ | 1,595 tests, some gaps in edge cases |
-| Performance | ⭐⭐⭐⭐⭐ | No algorithmic issues, lazy evaluation |
-| Build cleanliness | ⭐⭐⭐⭐⭐ | Zero warnings from build, clippy, and docs |
-
-The two confirmed issues (combination parser bug and case-sensitivity inconsistency) are the most important items to address. The remaining recommendations are improvements rather than critical fixes.
+The one real bug found (potential panic in `json_to_expr_value()`) is in an edge case involving deeply nested JSON arrays. The remaining findings are minor improvements to code quality, spec accuracy, and test coverage. Overall, the crate is production-ready with high confidence in its correctness.
