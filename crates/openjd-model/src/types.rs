@@ -88,6 +88,7 @@ impl fmt::Display for DataFlow {
 
 /// Specification revision identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum SpecificationRevision {
     V2023_09,
 }

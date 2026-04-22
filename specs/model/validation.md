@@ -62,7 +62,7 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 **Template level:**
 - At least one step required
 - Job name non-empty, no control characters
-- Extensions list non-empty if present
+- Extensions list non-empty if present (enforced early in pass 4)
 - Description length and control character validation
 
 **Parameter definitions:**

@@ -94,12 +94,9 @@ defaults to an empty set — no extensions are supported.
 
 The resulting extension set is stored in a `ValidationContext`.
 
-> **Empty extensions list asymmetry:** For environment templates, an empty `extensions: []`
-> list is caught during pass 4 and produces an immediate `DecodeValidation` error.
-> For job templates, the same check is deferred to pass 6 (structural validation). Both
-> produce equivalent errors, but the detection point differs because the job template
-> validation pipeline handles this as part of its accumulated error reporting, while the
-> environment template parser checks it eagerly.
+An empty `extensions: []` list is rejected for both job and environment templates during
+pass 4 with a `DecodeValidation` error. If a template does not use any extensions, the
+`extensions` field should be omitted entirely.
 
 ### Passes 5–9: Validation
 

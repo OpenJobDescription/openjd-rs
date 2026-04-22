@@ -142,7 +142,7 @@ pub(crate) fn validate_job_template(
     limits::enforce_limits(jt, &limits, &mut errors);
 
     // Pass 6: Structural validation
-    structure::validate_structure(jt, &limits, &rules, &mut errors);
+    structure::validate_structure(jt, &limits, &rules, ctx, &mut errors);
 
     // Pass 7: FEATURE_BUNDLE_1 (validate or reject)
     feature_bundle_1::validate_feature_bundle_1(jt, ctx, &mut errors);

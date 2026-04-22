@@ -535,7 +535,7 @@ fn test_env_template_extensions_unknown() {
 
 #[test]
 fn test_env_template_extensions_empty_list() {
-    // Empty extensions list should fail (spec says "non-empty list" if provided)
+    // Empty extensions list is rejected early in parsing.
     check_env_err_with_exts(
         r#"{
         "specificationVersion": "environment-2023-09",

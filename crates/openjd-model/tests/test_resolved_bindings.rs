@@ -586,3 +586,66 @@ fn test_job_env_resolved_symtab_includes_embedded_file_refs() {
         "Param.Unused should be excluded from env resolved_symtab"
     );
 }
+
+/// When a job environment references a PATH-typed parameter via `Param.X`,
+/// the environment's resolved_symtab should include `RawParam.X` (since
+/// `Param.X` is not available at template scope for PATH types).
+/// Uses `Param.OutDir.name` (property access) to verify the fallback
+/// correctly extracts the parameter name from dotted symbol references.
+#[test]
+fn test_job_env_resolved_symtab_includes_raw_param_for_path() {
+    let td = TestDirs::new();
+    let template = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "EnvPathTest",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [
+            {"name": "OutDir", "type": "PATH", "default": "/out/renders"}
+        ],
+        "jobEnvironments": [{
+            "name": "PathEnv",
+            "script": {
+                "actions": {
+                    "onEnter": {"command": "echo", "args": ["{{Param.OutDir.name}}"]}
+                }
+            }
+        }],
+        "steps": [{
+            "name": "Step1",
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+
+    let jt = decode_job_template(template, Some(&["EXPR"])).unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.path(),
+            current_working_dir: td.path(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let job = create_job(&jt, &params).unwrap();
+
+    let env = &job.job_environments.as_ref().unwrap()[0];
+    let env_st = env
+        .resolved_symtab
+        .as_ref()
+        .expect("env should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+
+    // Param.OutDir is PATH type — not in template-scope symtab
+    // RawParam.OutDir should be included so the session can path-map it
+    assert!(
+        env_st.get_value("RawParam.OutDir").is_some(),
+        "RawParam.OutDir should be in env resolved_symtab for PATH param"
+    );
+}

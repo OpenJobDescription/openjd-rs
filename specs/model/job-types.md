@@ -71,9 +71,16 @@ pub struct Step {
 }
 ```
 
-`resolved_symtab` carries the symbol table that was resolvable at job creation time:
-`RawParam.*`, non-PATH `Param.*` values, `Job.Name`, `Step.Name`, and step-level let
-bindings. PATH-typed `Param.*` entries and any `apply_path_mapping` results are excluded
+`resolved_symtab` exists to transport symbol values across the network to the worker host
+that runs the job. The worker only evaluates host-context (SESSION and TASK scope) format
+strings, so `resolved_symtab` is filtered to contain exactly the symbols referenced by
+those format strings. For a Step, the host-context format strings are: the step script's
+actions (command, args, timeout, cancelation), embedded files, script-level let bindings,
+step-level let bindings, and any step-scoped environments' variables, actions, and embedded
+files.
+
+Contents include `RawParam.*`, non-PATH `Param.*` values, `Job.Name`, `Step.Name`, and
+let bindings. PATH-typed `Param.*` entries and any `apply_path_mapping` results are excluded
 because path mapping rules aren't available until session time. The session layers these
 plus `Session.*` and `Task.*` values on top at runtime.
 
@@ -128,9 +135,12 @@ pub struct EnvironmentActions {
 }
 ```
 
-`resolved_symtab` on `Environment` contains a filtered symbol table with only the symbols
-referenced by this environment's format strings (variables, actions, embedded files, let
-bindings).
+`resolved_symtab` on `Environment` serves the same purpose as on `Step`: transporting
+symbol values to the worker host. It is filtered to contain only the symbols referenced
+by this environment's host-context format strings — its variables, script actions,
+embedded files, and script-level let bindings. The same `RawParam` fallback applies:
+if a format string references `Param.X` for a PATH-typed parameter, `RawParam.X` is
+included instead.
 
 ### EmbeddedFile, CancelationMode
 

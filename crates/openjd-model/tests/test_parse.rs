@@ -224,14 +224,21 @@ fn env_decode_success() {
 
 #[test]
 fn job_extensions_empty_list() {
-    check_job_err(
+    // Empty extensions list is rejected early in parsing.
+    let v = yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "extensions": [],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
-        &["extensions:\n\tif provided, must contain at least one element."],
+    );
+    let result = decode_job_template(v, None);
+    assert!(result.is_err(), "empty extensions list should be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("non-empty"),
+        "error should mention non-empty, got: {msg}"
     );
 }
 
@@ -319,7 +326,8 @@ fn job_no_extensions_with_unsupported_in_supported_list() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Empty extensions list asymmetry
+// Empty extensions list — both template types reject consistently
+// (caught early in parse.rs pass 4 for both)
 // ══════════════════════════════════════════════════════════════
 
 #[test]
@@ -332,14 +340,10 @@ fn empty_extensions_job_template() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#,
     );
-    let result = decode_job_template(v, None);
-    let job_result_is_err = result.is_err();
-    if job_result_is_err {
-        let msg = result.unwrap_err().to_string();
-        eprintln!("Job template with empty extensions: REJECTED with: {msg}");
-    } else {
-        eprintln!("Job template with empty extensions: ACCEPTED");
-    }
+    assert!(
+        decode_job_template(v, None).is_err(),
+        "Job template with empty extensions should be rejected"
+    );
 
     let v2 = yaml_val(
         r#"{
@@ -351,19 +355,8 @@ fn empty_extensions_job_template() {
         }
     }"#,
     );
-    let env_result = decode_environment_template(v2, None);
-    let env_result_is_err = env_result.is_err();
-    if env_result_is_err {
-        let msg = env_result.unwrap_err().to_string();
-        eprintln!("Env template with empty extensions: REJECTED with: {msg}");
-    } else {
-        eprintln!("Env template with empty extensions: ACCEPTED");
-    }
-
-    assert_eq!(
-        job_result_is_err, env_result_is_err,
-        "BUG: Asymmetric handling of empty extensions list! \
-         Job template empty extensions is_err={job_result_is_err}, \
-         Env template empty extensions is_err={env_result_is_err}"
+    assert!(
+        decode_environment_template(v2, None).is_err(),
+        "Env template with empty extensions should be rejected"
     );
 }

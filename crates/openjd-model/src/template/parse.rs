@@ -91,6 +91,11 @@ pub fn decode_job_template(
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
     if let Some(template_exts) = &jt.extensions {
+        if template_exts.is_empty() {
+            return Err(ModelError::DecodeValidation(
+                "extensions, if provided, must be a non-empty list.".to_string(),
+            ));
+        }
         let supported: std::collections::HashSet<&str> = supported_extensions
             .unwrap_or(&[])
             .iter()

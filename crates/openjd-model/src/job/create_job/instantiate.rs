@@ -425,7 +425,24 @@ pub fn evaluate_let_bindings(
     Ok(result)
 }
 
-// ── Symbol table filtering ──────────────────────────────────────────
+// ── Host-context symbol table filtering ─────────────────────────────
+//
+// `resolved_symtab` is transported to the worker host that runs the job.
+// The host only evaluates host-context (SESSION/TASK scope) format strings,
+// so we filter the full symbol table down to exactly the symbols those
+// format strings reference.
+//
+// Step and Environment have different sets of host-context format strings:
+//   Step  — step-level let bindings, script (actions, embedded files,
+//           script-level let bindings), and step-scoped environments
+//           (variables, actions, embedded files).
+//   Env   — variables, script (actions, embedded files, script-level
+//           let bindings).
+//
+// Both apply the RawParam fallback uniformly: for PATH-typed parameters,
+// `Param.X` is absent from the template-scope symtab, so when a format
+// string references `Param.X` we include `RawParam.X` instead, allowing
+// the session to construct `Param.X` with path mapping at runtime.
 
 fn filter_symtab_for_step(
     full: &SymbolTable,
@@ -500,16 +517,31 @@ fn filter_symtab_for_step(
     // (host-context only). When a format string references Param.X and it's missing from
     // full, include RawParam.X so the session can construct Param.X with path mapping.
     let all_symbols = collect_all_accessed_symbols(script, step_environments, step_let_bindings);
-    for symbol in &all_symbols {
-        if let Some(param_name) = symbol.strip_prefix("Param.") {
-            if full.get_value(symbol).is_none() {
+    include_raw_param_fallbacks(&all_symbols, full, &mut filtered);
+
+    filtered
+}
+
+/// For PATH/LIST[PATH] params, `Param.X` is excluded from the template-scope symtab
+/// (host-context only). When a format string references `Param.X` and it's missing from
+/// `full`, include `RawParam.X` so the session can construct `Param.X` with path mapping.
+fn include_raw_param_fallbacks(
+    symbols: &std::collections::HashSet<String>,
+    full: &SymbolTable,
+    filtered: &mut SymbolTable,
+) {
+    for symbol in symbols {
+        if let Some(rest) = symbol.strip_prefix("Param.") {
+            // Extract just the parameter name (first component), ignoring
+            // property/method access like Param.X.name or Param.X.upper().
+            let param_name = rest.split('.').next().unwrap_or(rest);
+            let param_key = format!("Param.{param_name}");
+            if full.get_value(&param_key).is_none() {
                 let raw_key = format!("RawParam.{param_name}");
-                copy_symbol_value(&raw_key, full, &mut filtered);
+                copy_symbol_value(&raw_key, full, filtered);
             }
         }
     }
-
-    filtered
 }
 
 /// Collect all symbol names accessed by format strings in a step's script,
@@ -670,5 +702,54 @@ fn filter_symtab_for_environment(env: &job::Environment, full: &SymbolTable) -> 
             collect_let_binding_refs(bindings, full, &mut filtered);
         }
     }
+    let symbols = collect_env_accessed_symbols(env);
+    include_raw_param_fallbacks(&symbols, full, &mut filtered);
     filtered
+}
+
+/// Collect all symbol names accessed by an environment's host-context format strings.
+fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::HashSet<String> {
+    let mut symbols = std::collections::HashSet::new();
+    if let Some(vars) = &env.variables {
+        for fs in vars.values() {
+            symbols.extend(fs.accessed_symbols());
+        }
+    }
+    if let Some(es) = &env.script {
+        for action in [&es.actions.on_enter, &es.actions.on_exit]
+            .into_iter()
+            .flatten()
+        {
+            symbols.extend(action.command.accessed_symbols());
+            if let Some(args) = &action.args {
+                for fs in args {
+                    symbols.extend(fs.accessed_symbols());
+                }
+            }
+            if let Some(t) = &action.timeout {
+                symbols.extend(t.accessed_symbols());
+            }
+        }
+        if let Some(files) = &es.embedded_files {
+            for f in files {
+                if let Some(d) = &f.data {
+                    symbols.extend(d.accessed_symbols());
+                }
+                if let Some(n) = &f.filename {
+                    symbols.extend(n.accessed_symbols());
+                }
+            }
+        }
+        if let Some(bindings) = &es.let_bindings {
+            for binding in bindings {
+                if let Some(eq_pos) = binding.find('=') {
+                    let expr = binding[eq_pos + 1..].trim();
+                    if let Ok(parsed) = openjd_expr::eval::ParsedExpression::new(expr) {
+                        symbols.extend(parsed.accessed_symbols().iter().cloned());
+                    }
+                }
+            }
+        }
+    }
+    symbols
 }

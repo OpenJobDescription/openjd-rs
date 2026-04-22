@@ -3,19 +3,22 @@
 
 //! Pass 6: Structural validation.
 //!
-//! Validates template structure using EffectiveRules. Never calls has_extension().
+//! Validates template structure using EffectiveRules.
 
 use std::collections::{HashMap, HashSet};
 
 use super::helpers::*;
 use super::EffectiveRules;
+use crate::capabilities;
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
+use crate::types::ValidationContext;
 
 pub fn validate_structure(
     jt: &JobTemplate,
     limits: &super::EffectiveLimits,
     rules: &EffectiveRules,
+    ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
     let root: Vec<PathElement> = vec![];
@@ -31,14 +34,7 @@ pub fn validate_structure(
         errors.add(&path_field(&root, "name"), "contains control characters.");
     }
 
-    if let Some(exts) = &jt.extensions {
-        if exts.is_empty() {
-            errors.add(
-                &path_field(&root, "extensions"),
-                "if provided, must contain at least one element.",
-            );
-        }
-    }
+    // Empty extensions list is rejected early in parse.rs (pass 4).
 
     if let Some(desc) = &jt.description {
         let dp = path_field(&root, "description");
@@ -197,12 +193,32 @@ pub fn validate_structure(
 
         // Host requirements
         if let Some(hr) = &step.host_requirements {
-            validate_host_requirements(
-                hr,
-                &path_field(&step_path, "hostRequirements"),
-                rules,
-                errors,
-            );
+            let hr_path = path_field(&step_path, "hostRequirements");
+            match (
+                capabilities::standard_amount_capability_names(ctx.revision, &ctx.extensions),
+                capabilities::standard_attribute_capability_names(ctx.revision, &ctx.extensions),
+            ) {
+                (Ok(std_amounts), Ok(std_attrs)) => {
+                    validate_host_requirements(
+                        hr,
+                        &hr_path,
+                        rules,
+                        std_amounts,
+                        &std_attrs,
+                        errors,
+                    );
+                }
+                _ => {
+                    let ext_list: Vec<_> = ctx.extensions.iter().map(|e| e.as_str()).collect();
+                    errors.add(
+                        &hr_path,
+                        format!(
+                            "cannot validate: no capability definitions for revision {} with extensions {:?}.",
+                            ctx.revision, ext_list
+                        ),
+                    );
+                }
+            }
         }
 
         // Parameter space
@@ -429,6 +445,8 @@ fn validate_host_requirements(
     hr: &HostRequirements,
     path: &[PathElement],
     rules: &EffectiveRules,
+    standard_amounts: &[&str],
+    standard_attrs: &[&str],
     errors: &mut ValidationErrors,
 ) {
     let has_amounts = hr.amounts.as_ref().is_some_and(|a| !a.is_empty());
@@ -465,12 +483,7 @@ fn validate_host_requirements(
                     ),
                 );
             }
-            check_capability_reserved_scope(
-                &amt.name,
-                STANDARD_AMOUNT_CAPABILITIES,
-                &amt_path,
-                errors,
-            );
+            check_capability_reserved_scope(&amt.name, standard_amounts, &amt_path, errors);
             if amt.min.is_none() && amt.max.is_none() {
                 errors.add(&amt_path, "must have at least one of min or max.");
             }
@@ -538,12 +551,7 @@ fn validate_host_requirements(
                     ),
                 );
             }
-            check_capability_reserved_scope(
-                &attr.name,
-                STANDARD_ATTRIBUTE_CAPABILITIES,
-                &attr_path,
-                errors,
-            );
+            check_capability_reserved_scope(&attr.name, standard_attrs, &attr_path, errors);
             if attr.any_of.is_none() && attr.all_of.is_none() {
                 errors.add(&attr_path, "must have at least one of anyOf or allOf.");
             }

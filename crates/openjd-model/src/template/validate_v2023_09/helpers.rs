@@ -20,15 +20,6 @@ pub static ATTR_CAP_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub static ATTR_VALUE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_\-]*$").unwrap());
 
-pub const STANDARD_AMOUNT_CAPABILITIES: &[&str] = &[
-    "amount.worker.vcpu",
-    "amount.worker.memory",
-    "amount.worker.gpu",
-    "amount.worker.gpu.memory",
-    "amount.worker.disk.scratch",
-];
-pub const STANDARD_ATTRIBUTE_CAPABILITIES: &[&str] =
-    &["attr.worker.os.family", "attr.worker.cpu.arch"];
 pub const RESERVED_SCOPES: &[&str] = &["worker", "job", "step", "task"];
 
 pub fn has_control_chars(s: &str) -> bool {

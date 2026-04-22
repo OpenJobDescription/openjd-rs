@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-The `openjd-model` crate is a well-engineered Rust implementation of the Open Job Description template parsing, validation, and job creation pipeline. It comprises ~15,000 lines of implementation source and ~20,000 lines of integration tests (1,581 test functions), all of which compile cleanly with zero warnings and pass successfully.
+The `openjd-model` crate is a well-engineered Rust implementation of the Open Job Description template parsing, validation, and job creation pipeline. It comprises ~15,000 lines of implementation source and ~20,000 lines of integration tests (1,595 test functions), all of which compile cleanly with zero warnings and pass successfully.
 
 The specifications are thorough and well-organized across 12 documents. The implementation faithfully follows the specs and maintains Pydantic-compatible error formatting for cross-implementation consistency with the Python reference.
 
@@ -48,8 +48,6 @@ This evaluation identified **1 confirmed bug** (combination expression parser ac
 - `SerializedSymbolTable` wire format: exact value serialization per type is not specified
 - `AdaptiveChunkNode` consumer implications: how schedulers handle sequential-only iteration is not discussed
 - Security implications of `allow_template_dir_walk_up` are not documented
-- The empty extensions list asymmetry between job and environment templates is acknowledged but not explained
-- `resolved_symtab` filtering strategy differences between Step and Environment lack rationale
 
 ### Specification-Implementation Alignment: ✅ Strong
 
@@ -150,11 +148,12 @@ The guard `self.0 <= i64::MAX as f64` is imprecise because `i64::MAX as f64` rou
 
 **Severity:** Low-Medium — unlikely in practice but could produce wrong parameter values for extreme inputs.
 
-#### ISSUE-6: Capability Constant Duplication
+#### ISSUE-6: Capability Constant Duplication — ✅ Fixed
 
-`capabilities.rs` and `validate_v2023_09/helpers.rs` both define `STANDARD_AMOUNT_CAPABILITIES` and `STANDARD_ATTRIBUTE_CAPABILITIES`. The `capabilities.rs` version includes values while `helpers.rs` has names only. Same constant name in different modules is confusing.
-
-**Severity:** Low — code quality/maintainability issue, not a bug.
+`capabilities.rs` is now the single source of truth. The duplicate constants in `helpers.rs`
+have been removed and replaced with functions parameterized by `SpecificationRevision` and
+`Extensions`, making it straightforward to add new capabilities for future spec revisions
+or extensions.
 
 #### ISSUE-7: `wrapping_sub` Trick in Combination Parser
 
@@ -196,9 +195,9 @@ A new regex is compiled for every let binding that contains its own name as a su
 
 - **28 integration test files** in `tests/`
 - **8 source files** with inline `#[cfg(test)]` modules
-- **1,581 total test functions**
+- **1,595 total test functions**
 - **~20,000 lines** of test code
-- **All 1,581 tests pass** ✅
+- **All 1,595 tests pass** ✅
 - **Zero warnings** from clippy ✅
 
 ### Test Files Reviewed
@@ -216,7 +215,7 @@ A new regex is compiled for every let binding that contains its own name as a su
 | `test_feature_bundle_1.rs` | 57 | FEATURE_BUNDLE_1 extension |
 | `test_capabilities.rs` | 55 | Capability name validation |
 | `test_chunk_int.rs` | 50 | CHUNK[INT] task parameter type |
-| `test_environment_template.rs` | 41 | Environment template validation |
+| `test_environment_template.rs` | 42 | Environment template validation |
 | `test_merge_job_parameters.rs` | 38 | Parameter merging across templates |
 | `test_job_template.rs` | 27 | Job template structural validation |
 | `test_combination_expr.rs` | 22 | Combination expression iteration |
@@ -229,7 +228,7 @@ A new regex is compiled for every let binding that contains its own name as a su
 | `test_step_dependency_graph.rs` | 14 | Dependency graph algorithms |
 | `test_scope_library_split.rs` | 14 | Function library scope split |
 | `test_embedded.rs` | 14 | Embedded file validation |
-| `test_resolved_bindings.rs` | 9 | Symbol table serialization |
+| `test_resolved_bindings.rs` | 10 | Symbol table serialization |
 | `test_template_variables.rs` | 9 | Template variable references |
 | `test_template_posix_paths.rs` | 7 | POSIX path operations |
 | `test_redacted_env_vars.rs` | 4 | REDACTED_ENV_VARS extension |
@@ -270,7 +269,7 @@ A new regex is compiled for every let binding that contains its own name as a su
 | `cargo build --package openjd-model` | ✅ Clean (0 warnings) |
 | `cargo clippy --package openjd-model` | ✅ Clean (0 warnings) |
 | `cargo doc --package openjd-model --no-deps` | ✅ Clean (0 warnings) |
-| `cargo test --package openjd-model` | ✅ 1,581 passed, 0 failed |
+| `cargo test --package openjd-model` | ✅ 1,595 passed, 0 failed |
 
 ---
 
@@ -310,7 +309,7 @@ A test file `tests/test_quality_evaluation_probes.rs` was created to verify pote
 
 ### Low Priority
 
-7. **Deduplicate capability constants** (ISSUE-6): Make `capabilities.rs` the single source of truth and have `helpers.rs` import from it.
+7. ~~**Deduplicate capability constants** (ISSUE-6)~~: ✅ Fixed — `capabilities.rs` is now the single source of truth with functions parameterized by revision + extensions.
 
 8. **Replace `wrapping_sub` trick** (ISSUE-7): Use explicit `i > 0 && matches!(tokens.get(i - 1), ...)` instead of relying on `wrapping_sub` + out-of-bounds `get`.
 
@@ -338,7 +337,7 @@ The `openjd-model` crate is **high quality** with strong alignment between speci
 | Spec-implementation alignment | ⭐⭐⭐⭐⭐ | Faithful implementation of all spec decisions |
 | Code quality | ⭐⭐⭐⭐ | Clean, consistent, minor boilerplate |
 | Error messages | ⭐⭐⭐⭐⭐ | Pydantic-compatible, high quality |
-| Test coverage | ⭐⭐⭐⭐ | 1,581 tests, some gaps in edge cases |
+| Test coverage | ⭐⭐⭐⭐ | 1,595 tests, some gaps in edge cases |
 | Performance | ⭐⭐⭐⭐⭐ | No algorithmic issues, lazy evaluation |
 | Build cleanliness | ⭐⭐⭐⭐⭐ | Zero warnings from build, clippy, and docs |
 
