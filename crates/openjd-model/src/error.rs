@@ -14,8 +14,10 @@ pub enum ModelError {
     DecodeValidation(String),
 
     /// Semantic validation failure (template parsed but violates spec rules).
+    /// Contains structured [`ValidationErrors`] with per-field paths.
+    /// Use `Display` / `.to_string()` for the formatted message.
     #[error("Model validation error: {0}")]
-    ModelValidation(String),
+    ModelValidation(ValidationErrors),
 
     /// Format string interpolation error with optional position info.
     #[error("{}", format_string_error(.message, .input, .start, .end))]
@@ -91,6 +93,15 @@ pub struct ValidationError {
 #[derive(Debug, Default)]
 pub struct ValidationErrors {
     pub errors: Vec<ValidationError>,
+    /// Model name used for Display formatting (set by `into_result`).
+    model_name: Option<String>,
+}
+
+impl std::fmt::Display for ValidationErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = self.model_name.as_deref().unwrap_or("Template");
+        write!(f, "{}", self.format(name))
+    }
 }
 
 impl ValidationErrors {
@@ -116,8 +127,18 @@ impl ValidationErrors {
         if self.errors.is_empty() {
             Ok(())
         } else {
-            Err(ModelError::ModelValidation(self.format(model_name)))
+            // Store the model name in the formatted output via Display
+            // The ValidationErrors struct is moved into the enum variant
+            Err(ModelError::ModelValidation(
+                self.with_model_name(model_name),
+            ))
         }
+    }
+
+    /// Set the model name for Display formatting and return self.
+    fn with_model_name(mut self, name: &str) -> Self {
+        self.model_name = Some(name.to_string());
+        self
     }
 
     /// Format errors matching the Python Pydantic output format.
@@ -187,8 +208,13 @@ mod tests {
 
     #[test]
     fn test_model_validation_msg() {
-        let e = ModelError::ModelValidation("bad template".into());
-        assert_eq!(e.to_string(), "Model validation error: bad template");
+        let mut ve = ValidationErrors::default();
+        ve.add(&[PathElement::Field("name".into())], "bad template");
+        let e = ModelError::ModelValidation(ve.with_model_name("JobTemplate"));
+        assert_eq!(
+            e.to_string(),
+            "Model validation error: 1 validation error for JobTemplate\nname:\n\tbad template"
+        );
     }
 
     #[test]
@@ -293,5 +319,37 @@ mod tests {
         assert_eq!(with_field.len(), 3);
         let with_index = path_index(&base, 1);
         assert_eq!(with_index.len(), 3);
+    }
+
+    #[test]
+    fn test_model_validation_structured_access() {
+        let mut ve = ValidationErrors::default();
+        ve.add(
+            &[PathElement::Field("steps".into()), PathElement::Index(0)],
+            "missing script",
+        );
+        ve.add(&[PathElement::Field("name".into())], "too long");
+        let err = ve.into_result("JobTemplate").unwrap_err();
+        let errors = match &err {
+            ModelError::ModelValidation(e) => e,
+            other => panic!("expected ModelValidation, got: {other}"),
+        };
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors.errors[0].path,
+            vec![PathElement::Field("steps".into()), PathElement::Index(0)]
+        );
+        assert_eq!(errors.errors[0].message, "missing script");
+        assert_eq!(
+            errors.errors[1].path,
+            vec![PathElement::Field("name".into())]
+        );
+        assert_eq!(errors.errors[1].message, "too long");
+        assert_eq!(
+            err.to_string(),
+            "Model validation error: 2 validation errors for JobTemplate\n\
+             steps[0]:\n\tmissing script\n\
+             name:\n\ttoo long"
+        );
     }
 }

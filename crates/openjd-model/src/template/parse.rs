@@ -457,4 +457,77 @@ mod tests {
         let err = decode_template(v, None, &CallerLimits::default()).unwrap_err();
         assert!(err.to_string().contains("Unknown template version"));
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════
+    // ModelValidation structured errors via decode_job_template
+    // ══════════════════════════════════════════════════════════════
+    #[test]
+    fn validation_error_has_structured_paths() {
+        // Step name exceeds 64 chars — triggers ModelValidation
+        let long_name = "a".repeat(128);
+        let v = yaml_val(&format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "test",
+            "steps": [{{"name": "{long_name}", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+        }}"#,
+        ));
+        let err = decode_job_template(v, None).unwrap_err();
+        let errors = match &err {
+            crate::error::ModelError::ModelValidation(e) => e,
+            other => panic!("expected ModelValidation, got: {other}"),
+        };
+        assert_eq!(errors.len(), 1);
+        let e = &errors.errors[0];
+        assert_eq!(
+            e.path,
+            vec![
+                crate::error::PathElement::Field("steps".into()),
+                crate::error::PathElement::Index(0),
+                crate::error::PathElement::Field("name".into()),
+            ]
+        );
+        assert!(
+            e.message.contains("64"),
+            "expected message about 64-char limit, got: {}",
+            e.message
+        );
+        // Display output matches the Pydantic-compatible format
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> name:\n\t{}",
+                e.message
+            )
+        );
+    }
+
+    #[test]
+    fn validation_error_paths_contain_steps() {
+        // Missing 'script' — step has no actions
+        let v = yaml_val(
+            r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "test",
+            "steps": [{"name": "s"}]
+        }"#,
+        );
+        let err = decode_job_template(v, None).unwrap_err();
+        let errors = match &err {
+            crate::error::ModelError::ModelValidation(e) => e,
+            other => panic!("expected ModelValidation, got: {other}"),
+        };
+        assert!(!errors.is_empty());
+        // Every error should reference steps[0]
+        for e in &errors.errors {
+            assert!(
+                e.path.len() >= 2,
+                "expected path with at least 2 elements, got: {:?}",
+                e.path
+            );
+            assert_eq!(e.path[0], crate::error::PathElement::Field("steps".into()),);
+            assert_eq!(e.path[1], crate::error::PathElement::Index(0),);
+        }
+    }
 }

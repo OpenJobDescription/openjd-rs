@@ -3,3 +3,7 @@
 /coverage/
 package*.json
 crates/openjd-sessions/src/helper/target/
+
+# Build artifacts
+js/node_modules/
+pkg/
