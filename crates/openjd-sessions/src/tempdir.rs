@@ -219,4 +219,88 @@ mod tests {
         let p: &std::path::Path = td.as_ref();
         assert_eq!(p, td.path());
     }
+
+    /// Mirrors Python TestSession::test_posix_permissions_warning.
+    /// Creates a world-writable dir without the sticky bit and verifies the warning.
+    #[cfg(unix)]
+    #[test]
+    fn validate_sticky_bit_warns_on_world_writable_without_sticky() {
+        use std::os::unix::fs::PermissionsExt;
+        testing_logger::setup();
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("world_writable");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let child = dir.join("child");
+        std::fs::create_dir(&child).unwrap();
+
+        validate_sticky_bit(&child);
+
+        testing_logger::validate(|captured_logs| {
+            assert!(
+                captured_logs.iter().any(|log| {
+                    log.level == log::Level::Warn && log.body.contains("Sticky bit is not set")
+                }),
+                "Expected a warning about missing sticky bit"
+            );
+        });
+    }
+
+    /// Mirrors Python TestSession::test_posix_permissions_no_warning.
+    /// A dir with the sticky bit set should not trigger a warning.
+    #[cfg(unix)]
+    #[test]
+    fn validate_sticky_bit_no_warn_when_sticky_set() {
+        use std::os::unix::fs::PermissionsExt;
+        testing_logger::setup();
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("sticky_dir");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+
+        let child = dir.join("child");
+        std::fs::create_dir(&child).unwrap();
+
+        validate_sticky_bit(&child);
+
+        testing_logger::validate(|captured_logs| {
+            assert!(
+                !captured_logs
+                    .iter()
+                    .any(|log| { log.body.contains("Sticky bit is not set") }),
+                "Should not warn when sticky bit is set"
+            );
+        });
+    }
+
+    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — warns when PROGRAMDATA unset.
+    #[cfg(windows)]
+    #[test]
+    fn openjd_temp_dir_warns_when_programdata_unset() {
+        testing_logger::setup();
+        // Temporarily remove PROGRAMDATA
+        let original = std::env::var("PROGRAMDATA").ok();
+        unsafe {
+            std::env::remove_var("PROGRAMDATA");
+        }
+        let result = openjd_temp_dir();
+        // Restore
+        if let Some(val) = original {
+            unsafe {
+                std::env::set_var("PROGRAMDATA", val);
+            }
+        }
+        assert!(result.is_ok());
+        testing_logger::validate(|captured_logs| {
+            assert!(
+                captured_logs.iter().any(|log| {
+                    log.level == log::Level::Warn && log.body.contains("PROGRAMDATA")
+                }),
+                "Expected a warning about PROGRAMDATA not being set"
+            );
+        });
+    }
 }

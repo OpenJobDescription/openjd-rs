@@ -2108,6 +2108,7 @@ dependencies = [
  "serde_yaml",
  "shlex",
  "tempfile",
+ "testing_logger",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -3270,6 +3271,15 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "testing_logger"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d92b727cb45d33ae956f7f46b966b25f1bc712092aeef9dba5ac798fc89f720"
+dependencies = [
+ "log",
 ]
 
 [[package]]

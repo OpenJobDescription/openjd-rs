@@ -72,6 +72,26 @@ fn test_tempdir_posix_permissions() {
     tmp.cleanup().unwrap();
 }
 
+/// Mirrors Python TestTempDirPosix::test_defaults — checks uid/gid ownership.
+#[cfg(unix)]
+#[test]
+fn test_tempdir_posix_default_ownership() {
+    use std::os::unix::fs::MetadataExt;
+    let parent = tempfile::TempDir::new().unwrap();
+    let tmp = TempDir::new(Some(parent.path()), None, None).unwrap();
+    let meta = fs::metadata(tmp.path()).unwrap();
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "Owner is this process's uid"
+    );
+    assert_eq!(
+        meta.gid(),
+        nix::unistd::getegid().as_raw(),
+        "Group is this process's gid"
+    );
+}
+
 // === OS detection tests ===
 
 #[test]

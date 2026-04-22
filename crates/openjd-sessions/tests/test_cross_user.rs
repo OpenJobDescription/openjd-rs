@@ -390,3 +390,78 @@ async fn test_cross_user_tempdir_disjoint_fails() {
     }
     // Err is also acceptable — means the crate properly rejects it
 }
+
+// === Cross-user embedded files permission tests ===
+// Mirrors Python TestMaterializeFilePosix::test_changes_owner and test_changes_owner_runnable.
+
+/// Embedded file with cross-user: group is changed, mode is 0o660 (non-runnable).
+#[tokio::test]
+#[ignore]
+async fn test_cross_user_embedded_file_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let user = require_target_user();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("testfile.txt");
+
+    openjd_sessions::embedded_files::write_embedded_file_with_options(
+        &path,
+        "some text data",
+        false,
+        None,
+    )
+    .unwrap();
+    openjd_sessions::embedded_files::chown_for_user(&path, &*user, false).unwrap();
+
+    let meta = std::fs::metadata(&path).unwrap();
+    let expected_gid = nix::unistd::Group::from_name(&user.group)
+        .unwrap()
+        .unwrap()
+        .gid
+        .as_raw();
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "File owner is this process's owner"
+    );
+    assert_eq!(meta.gid(), expected_gid, "File group is the user's group");
+    let mode = meta.permissions().mode();
+    assert_eq!(mode & 0o700, 0o600, "Owner has r/w");
+    assert_eq!(mode & 0o070, 0o060, "Group has r/w");
+    assert_eq!(mode & 0o007, 0, "Others have no permissions");
+}
+
+/// Embedded file with cross-user + runnable: group is changed, mode is 0o770.
+#[tokio::test]
+#[ignore]
+async fn test_cross_user_embedded_file_runnable_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let user = require_target_user();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("testfile.sh");
+
+    openjd_sessions::embedded_files::write_embedded_file_with_options(
+        &path,
+        "#!/bin/bash",
+        true,
+        None,
+    )
+    .unwrap();
+    openjd_sessions::embedded_files::chown_for_user(&path, &*user, true).unwrap();
+
+    let meta = std::fs::metadata(&path).unwrap();
+    let expected_gid = nix::unistd::Group::from_name(&user.group)
+        .unwrap()
+        .unwrap()
+        .gid
+        .as_raw();
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "File owner is this process's owner"
+    );
+    assert_eq!(meta.gid(), expected_gid, "File group is the user's group");
+    let mode = meta.permissions().mode();
+    assert_eq!(mode & 0o700, 0o700, "Owner has r/w/x");
+    assert_eq!(mode & 0o070, 0o070, "Group has r/w/x");
+    assert_eq!(mode & 0o007, 0, "Others have no permissions");
+}

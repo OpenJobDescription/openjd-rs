@@ -80,6 +80,58 @@ async fn test_initialize_with_root_dir() {
     assert_eq!(session.working_directory(), tmp.path());
 }
 
+/// Mirrors Python TestSession::test_root_dir_permissions — POSIX: owner rwx, group r/x, other r/x.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_root_dir_permissions_posix() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let config = SessionConfig {
+        session_id: "test-perms".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        collect_stdout: true,
+    };
+    let session = Session::with_config(config).unwrap();
+    // The working dir is created by TempDir::new with mode 0o700 when no user is given.
+    let working_mode = std::fs::metadata(session.working_directory())
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(
+        working_mode & 0o777,
+        0o700,
+        "working dir is 0o700 (no user)"
+    );
+}
+
+/// Mirrors Python: Session dropped without cleanup() should log a warning.
+#[tokio::test]
+async fn test_session_drop_without_cleanup_warns() {
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    {
+        let _session = Session::new_for_test(tmp.path().to_path_buf());
+        // drop without calling cleanup()
+    }
+    testing_logger::validate(|captured_logs| {
+        assert!(
+            captured_logs.iter().any(|log| {
+                log.level == log::Level::Warn
+                    && log.body.contains("dropped without calling cleanup()")
+            }),
+            "Expected a warning about session dropped without cleanup"
+        );
+    });
+}
+
 // === TestSessionRunTask_2023_09 ===
 
 #[tokio::test]

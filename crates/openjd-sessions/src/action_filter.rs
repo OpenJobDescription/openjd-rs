@@ -1452,11 +1452,21 @@ mod tests {
     fn test_malformed_redacted_env_when_redactions_enabled() {
         // When redactions ARE enabled, a malformed openjd_redacted_env should NOT
         // cancel the action — it just logs a warning (matches Python behavior).
+        testing_logger::setup();
         let mut f = make_filter(false, true);
         let (cbs, _, _) = f.filter_message("openjd_redacted_env: bad_no_equals", "foo");
         assert!(
             !cbs.iter().any(|cb| cb.cancel),
             "malformed redacted_env with redactions enabled should NOT cancel: {cbs:?}"
         );
+        testing_logger::validate(|captured_logs| {
+            assert!(
+                captured_logs.iter().any(|log| {
+                    log.level == log::Level::Warn
+                        && log.body.contains("Malformed openjd_redacted_env command")
+                }),
+                "Expected a warning about malformed openjd_redacted_env"
+            );
+        });
     }
 }

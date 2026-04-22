@@ -40,6 +40,65 @@ fn test_writes_file() {
     }
 }
 
+/// Mirrors Python TestMaterializeFilePosix::test_writes_file uid/gid assertions.
+#[cfg(unix)]
+#[test]
+fn test_writes_file_posix_ownership() {
+    use std::os::unix::fs::MetadataExt;
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("testfile.txt");
+    write_embedded_file_with_options(&path, "data", false, None).unwrap();
+    let meta = fs::metadata(&path).unwrap();
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "File owner is this process's owner"
+    );
+    assert_eq!(
+        meta.gid(),
+        nix::unistd::getegid().as_raw(),
+        "File group is this process's group"
+    );
+}
+
+/// Mirrors Python TestMaterializeFilePosix::test_writes_file — full permission check.
+#[cfg(unix)]
+#[test]
+fn test_writes_file_posix_no_group_or_other_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("testfile.txt");
+    write_embedded_file_with_options(&path, "data", false, None).unwrap();
+    let mode = fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o070, 0, "Group has no permissions");
+    assert_eq!(mode & 0o007, 0, "Others have no permissions");
+}
+
+/// Mirrors Python TestMaterializeFilePosix::test_writes_file_runnable — full permission check.
+#[cfg(unix)]
+#[test]
+fn test_writes_file_runnable_posix_ownership_and_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("testfile.sh");
+    write_embedded_file_with_options(&path, "#!/bin/bash", true, None).unwrap();
+    let meta = fs::metadata(&path).unwrap();
+    assert_eq!(
+        meta.uid(),
+        nix::unistd::geteuid().as_raw(),
+        "File owner is this process's owner"
+    );
+    assert_eq!(
+        meta.gid(),
+        nix::unistd::getegid().as_raw(),
+        "File group is this process's group"
+    );
+    let mode = meta.permissions().mode();
+    assert_eq!(mode & 0o700, 0o700, "Owner has r/w/x");
+    assert_eq!(mode & 0o070, 0, "Group has no permissions");
+    assert_eq!(mode & 0o007, 0, "Others have no permissions");
+}
+
 #[test]
 fn test_truncates_file() {
     let tmp = TempDir::new().unwrap();
