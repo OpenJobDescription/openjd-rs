@@ -31,10 +31,6 @@ pub enum SnapshotError {
     /// A background task (tokio spawn/runtime) failed.
     #[error("Task error: {0}")]
     Task(String),
-
-    /// Any other error that doesn't fit a structured variant.
-    #[error("{0}")]
-    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, SnapshotError>;

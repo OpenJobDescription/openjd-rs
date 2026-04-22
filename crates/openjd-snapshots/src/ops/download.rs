@@ -1,6 +1,7 @@
 use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
+use crate::hash::hash_data;
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, FileEntry, Manifest, SymlinkPolicy};
 use std::collections::HashMap;
@@ -27,7 +28,12 @@ fn preallocate_file(path: &std::path::Path, size: u64) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::io::AsRawFd;
-        let _ = unsafe { libc::posix_fallocate(f.as_raw_fd(), 0, size as libc::off_t) };
+        let ret = unsafe { libc::posix_fallocate(f.as_raw_fd(), 0, size as libc::off_t) };
+        if ret != 0 {
+            // posix_fallocate can fail on filesystems that don't support it (e.g. ZFS,
+            // NFS, tmpfs). Fall back to set_len which uses ftruncate.
+            f.set_len(size)?;
+        }
     }
     #[cfg(target_os = "windows")]
     {
@@ -231,8 +237,10 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
             .copied()
             .collect();
         let mut sorted = Vec::with_capacity(symlink_indices.len());
+        let mut sorted_set = std::collections::HashSet::with_capacity(symlink_indices.len());
         while let Some(idx) = queue.pop_front() {
             sorted.push(idx);
+            sorted_set.insert(idx);
             if let Some(deps) = dependents.get(&idx) {
                 for &d in deps {
                     let deg = in_degree.get_mut(&d).unwrap();
@@ -244,7 +252,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
             }
         }
         for &i in &symlink_indices {
-            if !sorted.contains(&i) {
+            if !sorted_set.contains(&i) {
                 sorted.push(i);
             }
         }
@@ -495,13 +503,34 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                                 }));
                             }
                         } else {
-                            // Small chunk - single GetObject
+                            // Small chunk - single GetObject with inline hash verification
                             let dc = dc.clone();
                             let alg = alg.clone();
                             let tp = target_path.clone();
                             let off = file_offset;
+                            let expected_hash = h.clone();
                             chunk_handles.push(tokio::spawn(async move {
-                                dc.write_object_to_file_at_offset(&h, &alg, &tp, off).await
+                                let data = dc.get_object(&expected_hash, &alg).await?;
+                                let actual_hash = hash_data(&data);
+                                if actual_hash != expected_hash {
+                                    return Err(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        format!(
+                                            "hash mismatch for chunk at offset {off}: expected {expected_hash}, got {actual_hash}"
+                                        ),
+                                    ));
+                                }
+                                let len = data.len() as u64;
+                                let tp2 = tp.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    use std::io::{Seek, SeekFrom, Write};
+                                    let mut f = std::fs::OpenOptions::new().write(true).open(&tp2)?;
+                                    f.seek(SeekFrom::Start(off))?;
+                                    f.write_all(&data)?;
+                                    Ok::<_, std::io::Error>(len)
+                                })
+                                .await
+                                .map_err(std::io::Error::other)?
                             }));
                         }
                         file_offset += this_chunk_size;
@@ -528,26 +557,23 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         already_written = true;
                         Vec::new()
                     } else {
-                        // Use copy_object_to_file for zero-copy on filesystem,
-                        // then atomic rename
-                        let tmp = target_path.with_extension(format!("tmp{}", std::process::id()));
-                        if let Some(parent) = target_path.parent() {
-                            let p = parent.to_path_buf();
-                            tokio::task::spawn_blocking(move || std::fs::create_dir_all(&p))
-                                .await
-                                .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                                .map_err(crate::SnapshotError::Io)?;
+                        // Small whole file - get_object with inline hash verification
+                        let data = dc
+                            .get_object(hash, &alg)
+                            .await
+                            .map_err(crate::SnapshotError::Io)?;
+                        let actual_hash = hash_data(&data);
+                        if actual_hash != *hash {
+                            return Err(crate::SnapshotError::Io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!(
+                                    "hash mismatch for {}: expected {hash}, got {actual_hash}",
+                                    file_path
+                                ),
+                            )));
                         }
-                        dc.copy_object_to_file(hash, &alg, &tmp)
-                            .await
-                            .map_err(crate::SnapshotError::Io)?;
-                        let tp = target_path.clone();
-                        tokio::task::spawn_blocking(move || std::fs::rename(&tmp, &tp))
-                            .await
-                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                            .map_err(crate::SnapshotError::Io)?;
-                        already_written = true;
-                        Vec::new()
+                        already_written = false;
+                        data
                     }
                 } else {
                     return Err(crate::SnapshotError::Validation(format!(

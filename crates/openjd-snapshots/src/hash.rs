@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::Path;
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Default};
 
@@ -49,16 +49,38 @@ pub fn hash_file(path: &Path) -> std::io::Result<String> {
 }
 
 /// Hashes file in chunks, returns vec of hex hash strings.
+///
+/// Uses `read_exact` to ensure chunk boundaries are determined by `chunk_size`,
+/// not by how many bytes a single `read()` call returns.
 pub fn hash_file_chunked(path: &Path, chunk_size: u64) -> std::io::Result<Vec<String>> {
     let mut file = File::open(path)?;
     let mut hashes = Vec::new();
     let mut buf = vec![0u8; chunk_size as usize];
     loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
+        match file.read_exact(&mut buf) {
+            Ok(()) => {
+                hashes.push(hash_data(&buf));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // Final partial chunk: read whatever remains
+                let mut tail = Vec::new();
+                file.read_to_end(&mut tail)?;
+                // read_exact consumed some bytes into buf before failing;
+                // we need to account for them. Re-read from where the last
+                // successful chunk ended.
+                // Actually, read_exact's behavior on UnexpectedEof is that buf
+                // contents are unspecified. Re-seek and read the remainder.
+                let consumed = hashes.len() as u64 * chunk_size;
+                file.seek(std::io::SeekFrom::Start(consumed))?;
+                let mut remainder = Vec::new();
+                file.read_to_end(&mut remainder)?;
+                if !remainder.is_empty() {
+                    hashes.push(hash_data(&remainder));
+                }
+                break;
+            }
+            Err(e) => return Err(e),
         }
-        hashes.push(hash_data(&buf[..n]));
     }
     if hashes.is_empty() {
         hashes.push(hash_data(&[]));

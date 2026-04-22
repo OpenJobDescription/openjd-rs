@@ -134,7 +134,24 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let work_items: Vec<WorkItem> = rt.block_on(async {
         let mut items = Vec::new();
 
-        for (i, file) in result.files.iter_mut().enumerate() {
+        // Phase 1: Gather cache hits that need existence checks
+        enum CacheCandidate {
+            Whole {
+                index: usize,
+                hash: String,
+                file_size: u64,
+            },
+            Chunked {
+                index: usize,
+                hashes: Vec<String>,
+                file_size: u64,
+            },
+        }
+        let mut candidates: Vec<CacheCandidate> = Vec::new();
+        // Track which indices are candidates so we don't add them to work items yet
+        let mut candidate_indices = std::collections::HashSet::new();
+
+        for (i, file) in result.files.iter().enumerate() {
             if file.symlink_target.is_some() || file.deleted {
                 continue;
             }
@@ -150,7 +167,6 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                 && chunk_size != WHOLE_FILE_CHUNK_SIZE
                 && file_size as i64 > chunk_size;
 
-            // Try hash cache for full skip
             if let Some(ref cache) = options.hash_cache {
                 if !options.force_rehash {
                     if use_chunks {
@@ -171,38 +187,117 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                             offset = end;
                         }
                         if all_cached && !cached_hashes.is_empty() {
-                            let mut all_exist = true;
-                            for h in &cached_hashes {
-                                if !data_cache.object_exists(h, alg_str).await.unwrap_or(false) {
-                                    all_exist = false;
-                                    break;
-                                }
-                            }
-                            if all_exist {
-                                file.chunk_hashes = Some(cached_hashes);
-                                debug!(path = %file.path, "skipped (cache hit, chunked)");
-                                stats.skipped_files += 1;
-                                stats.skipped_bytes += file_size;
-                                continue;
-                            }
+                            candidates.push(CacheCandidate::Chunked {
+                                index: i,
+                                hashes: cached_hashes,
+                                file_size,
+                            });
+                            candidate_indices.insert(i);
+                            continue;
                         }
                     } else if let Some(cached_hash) =
                         cache.get_if_fresh(path, alg_str, 0, WHOLE_FILE_RANGE_END, mtime)
                     {
-                        if data_cache
-                            .object_exists(&cached_hash, alg_str)
-                            .await
-                            .unwrap_or(false)
-                        {
-                            file.hash = Some(cached_hash);
-                            debug!(path = %file.path, "skipped (cache hit)");
-                            stats.skipped_files += 1;
-                            stats.skipped_bytes += file_size;
-                            continue;
-                        }
+                        candidates.push(CacheCandidate::Whole {
+                            index: i,
+                            hash: cached_hash,
+                            file_size,
+                        });
+                        candidate_indices.insert(i);
+                        continue;
                     }
                 }
             }
+        }
+
+        // Phase 2: Check all candidates in parallel
+        use futures_util::stream::{FuturesUnordered, StreamExt};
+        type ExistsCheck = std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                    Output = (usize, bool, u64, Option<String>, Option<Vec<String>>),
+                >,
+            >,
+        >;
+        let mut checks: FuturesUnordered<ExistsCheck> = FuturesUnordered::new();
+        for candidate in &candidates {
+            match candidate {
+                CacheCandidate::Whole {
+                    index,
+                    hash,
+                    file_size,
+                } => {
+                    let dc = data_cache.clone();
+                    let h = hash.clone();
+                    let a = alg_str.to_string();
+                    let idx = *index;
+                    let fs = *file_size;
+                    checks.push(Box::pin(async move {
+                        let exists = dc.object_exists(&h, &a).await.unwrap_or(false);
+                        (idx, exists, fs, Some(h), None::<Vec<String>>)
+                    }));
+                }
+                CacheCandidate::Chunked {
+                    index,
+                    hashes,
+                    file_size,
+                } => {
+                    let dc = data_cache.clone();
+                    let hs = hashes.clone();
+                    let a = alg_str.to_string();
+                    let idx = *index;
+                    let fs = *file_size;
+                    checks.push(Box::pin(async move {
+                        let mut all_exist = true;
+                        for h in &hs {
+                            if !dc.object_exists(h, &a).await.unwrap_or(false) {
+                                all_exist = false;
+                                break;
+                            }
+                        }
+                        (idx, all_exist, fs, None::<String>, Some(hs))
+                    }));
+                }
+            }
+        }
+
+        // Collect results and apply skips
+        let mut skipped_indices = std::collections::HashSet::new();
+        while let Some((idx, all_exist, file_size, whole_hash, chunk_hashes)) = checks.next().await
+        {
+            if all_exist {
+                let file = &mut result.files[idx];
+                if let Some(h) = whole_hash {
+                    file.hash = Some(h);
+                } else if let Some(hs) = chunk_hashes {
+                    file.chunk_hashes = Some(hs);
+                }
+                debug!(path = %file.path, "skipped (cache hit)");
+                stats.skipped_files += 1;
+                stats.skipped_bytes += file_size;
+                skipped_indices.insert(idx);
+            }
+        }
+
+        // Phase 3: Build work items for everything not skipped
+        for (i, file) in result.files.iter().enumerate() {
+            if file.symlink_target.is_some() || file.deleted {
+                continue;
+            }
+            if skipped_indices.contains(&i)
+                || (candidate_indices.contains(&i) && !skipped_indices.contains(&i))
+            {
+                // candidate_indices that weren't skipped still need work
+                if skipped_indices.contains(&i) {
+                    continue;
+                }
+            }
+
+            let file_size = file.size.unwrap_or(0);
+            let path_str = file.path.clone();
+            let use_chunks = chunk_size > 0
+                && chunk_size != WHOLE_FILE_CHUNK_SIZE
+                && file_size as i64 > chunk_size;
 
             items.push(WorkItem {
                 index: i,
@@ -555,20 +650,31 @@ async fn process_chunked_async(
 ) -> crate::Result<FileResult> {
     // Stage 1: Read and hash all chunks in blocking thread
     let chunks: Vec<(String, Vec<u8>)> = tokio::task::spawn_blocking(move || {
-        use std::io::Read;
+        use std::io::{Read, Seek};
         let mut f = std::fs::File::open(&path).map_err(|e| {
             crate::SnapshotError::Io(std::io::Error::new(e.kind(), format!("{path}: {e}")))
         })?;
         let mut result = Vec::new();
         let mut buf = vec![0u8; chunk_size as usize];
         loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
+            match f.read_exact(&mut buf) {
+                Ok(()) => {
+                    let hash = hash_data(&buf);
+                    result.push((hash, buf.clone()));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    let consumed = result.len() as u64 * chunk_size;
+                    f.seek(std::io::SeekFrom::Start(consumed))?;
+                    let mut remainder = Vec::new();
+                    f.read_to_end(&mut remainder)?;
+                    if !remainder.is_empty() {
+                        let hash = hash_data(&remainder);
+                        result.push((hash, remainder));
+                    }
+                    break;
+                }
+                Err(e) => return Err(crate::SnapshotError::Io(e)),
             }
-            let chunk = buf[..n].to_vec();
-            let hash = hash_data(&chunk);
-            result.push((hash, chunk));
         }
         if result.is_empty() {
             result.push((hash_data(&[]), vec![]));

@@ -136,7 +136,7 @@ impl S3CheckCache {
 
 ### Expiry
 
-Entries older than 30 days (`ENTRY_EXPIRY_DAYS`) are treated as expired and return `None` from `get_entry()`.
+Entries older than 30 days (`ENTRY_EXPIRY_DAYS`) are treated as expired and return `None` from `get_entry()`. Expired entries are also pruned from the database when the cache is opened via `new()`, keeping the database from growing unboundedly across sessions.
 
 ### Probabilistic Validation
 
@@ -157,3 +157,29 @@ See [snapshot_operation_hash_upload_s3.md](snapshot_operation_hash_upload_s3.md)
 |----------|-------|-------------|
 | `WHOLE_FILE_RANGE_END` | -1 | Sentinel for hash cache `range_end` indicating whole-file hash |
 | `ENTRY_EXPIRY_DAYS` | 30 | S3 check cache entry expiry in days |
+
+## Future Work: Hash Cache Eviction
+
+The hash cache currently has no eviction mechanism. Entries are invalidated at read time when the file's mtime changes, but stale entries for deleted or renamed files accumulate indefinitely.
+
+To support eviction, the `hashesV4` schema would need a new column to track when each entry was last accessed or written — for example, a `last_accessed_time` timestamp updated on both `put` and `get_if_fresh` hits. A prune-on-open step (similar to the S3 check cache) could then delete entries older than a configurable threshold (e.g., 90 days since last access).
+
+Schema change (would require a new table version, e.g., `hashesV5`):
+
+```sql
+CREATE TABLE hashesV5(
+    file_path blob,
+    hash_algorithm text,
+    range_start integer,
+    range_end integer,
+    file_hash text,
+    last_modified_time timestamp,
+    last_accessed_time timestamp,
+    PRIMARY KEY (file_path, hash_algorithm, range_start, range_end)
+);
+```
+
+Considerations:
+- The Python `HashCache` in `deadline-cloud` also lacks eviction. Any schema change should be coordinated so both implementations can read the same database, or a migration path should be provided.
+- Updating `last_accessed_time` on every cache hit adds a write to every read path. This could be mitigated by batching updates or only updating when the existing timestamp is older than some threshold (e.g., 1 day).
+- An alternative to time-based eviction is size-based: prune the least-recently-accessed entries when the database exceeds a configured size. This is more complex but bounds disk usage directly.

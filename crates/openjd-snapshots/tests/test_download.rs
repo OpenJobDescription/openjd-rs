@@ -1511,3 +1511,176 @@ fn download_progress_total_time_increases_monotonically() {
         );
     }
 }
+
+// ===== Corrupted data tests =====
+
+#[test]
+fn download_with_corrupted_cache_object() {
+    // Store wrong content under a valid hash — verification catches it
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+
+    let real_hash = openjd_snapshots::hash::hash_data(b"correct content");
+    // Store wrong bytes under the real hash
+    dc.put_object(&real_hash, "xxh128", b"WRONG").unwrap();
+
+    let dest = tmp.path().join("file.txt");
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 15, 1000);
+    entry.hash = Some(real_hash);
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![entry])),
+        dc.clone(),
+        Default::default(),
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("hash mismatch"),
+        "expected hash mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn download_with_truncated_cache_object() {
+    // Store truncated content — verification catches the mismatch
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+
+    let real_hash = openjd_snapshots::hash::hash_data(b"full file content here");
+    dc.put_object(&real_hash, "xxh128", b"full").unwrap();
+
+    let dest = tmp.path().join("file.txt");
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 21, 1000);
+    entry.hash = Some(real_hash);
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![entry])),
+        dc.clone(),
+        Default::default(),
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("hash mismatch"),
+        "expected hash mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn download_missing_object_returns_error() {
+    // Manifest references a hash not present in the data cache
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+
+    let dest = tmp.path().join("file.txt");
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 10, 1000);
+    entry.hash = Some("nonexistent_hash_value_here00".into());
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![entry])),
+        dc.clone(),
+        Default::default(),
+    );
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("IO error"));
+}
+
+#[test]
+fn stale_hash_cache_triggers_redownload() {
+    // Hash cache has an old hash for the file, but manifest has a new hash.
+    // Download should not skip — it should re-download.
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+    let hc_dir = TempDir::new().unwrap();
+    let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
+
+    let dest = tmp.path().join("file.txt");
+
+    // First: download old content
+    let old_hash = store(&*dc, b"old content");
+    let mut old_entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
+    old_entry.hash = Some(old_hash);
+
+    download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![old_entry])),
+        dc.clone(),
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
+
+    // Now: manifest has new hash, file on disk has old content with cached mtime
+    let new_hash = store(&*dc, b"new content");
+    let actual_mtime = dest
+        .metadata()
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u64;
+    let mut new_entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, actual_mtime);
+    new_entry.hash = Some(new_hash);
+
+    let r = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(vec![new_entry])),
+        dc.clone(),
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Hash cache had old_hash for this mtime, but manifest wants new_hash → re-download
+    assert_eq!(r.statistics.downloaded_files, 1);
+    assert_eq!(r.statistics.skipped_files, 0);
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
+}
+
+#[test]
+fn corrupted_chunked_cache_object() {
+    // One chunk has wrong content — verification catches the mismatch
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+
+    let chunk1_hash = openjd_snapshots::hash::hash_data(b"AAAA");
+    let chunk2_hash = openjd_snapshots::hash::hash_data(b"BBBB");
+
+    // Store chunk1 correctly, chunk2 with wrong content
+    dc.put_object(&chunk1_hash, "xxh128", b"AAAA").unwrap();
+    dc.put_object(&chunk2_hash, "xxh128", b"XX").unwrap();
+
+    let dest = tmp.path().join("chunked.bin");
+    let chunk_size = 4i64;
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 8, 1000);
+    entry.chunk_hashes = Some(vec![chunk1_hash, chunk2_hash]);
+
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![entry]);
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("hash mismatch"),
+        "expected hash mismatch error, got: {err}"
+    );
+}

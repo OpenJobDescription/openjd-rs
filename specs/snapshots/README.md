@@ -13,6 +13,7 @@ and adapted for the idiomatic Rust implementation.
 | [snapshot_data_cache.md](snapshot_data_cache.md) | `ContentAddressedDataCache` / `AsyncDataCache` traits, `S3DataCache`, `FileSystemDataCache` |
 | [snapshot_symlink_handling.md](snapshot_symlink_handling.md) | `SymlinkPolicy` enum, escaping detection, collapsing, cycle handling |
 | [snapshot_hash_cache.md](snapshot_hash_cache.md) | Local SQLite hash cache and S3 check cache |
+| [snapshot_error_handling.md](snapshot_error_handling.md) | `SnapshotError` enum, error conversion strategy, message conventions |
 | [snapshot_operation_collect.md](snapshot_operation_collect.md) | COLLECT — `collect_abs_snapshot()` |
 | [snapshot_operation_hash.md](snapshot_operation_hash.md) | HASH — `hash_abs_manifest()` |
 | [snapshot_operation_hash_upload.md](snapshot_operation_hash_upload.md) | HASH_UPLOAD — `hash_upload_abs_manifest()` |

@@ -8,6 +8,27 @@ use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
 
+/// Returns true if the OS supports creating symlinks.
+/// On Unix this is always true. On Windows it requires Developer Mode or elevated privileges.
+fn symlinks_supported() -> bool {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target");
+    std::fs::write(&target, b"").unwrap();
+    let link = dir.path().join("link");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target, &link).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(&target, &link).is_ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
 fn create_test_tree(dir: &Path) {
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(dir.join("hello.txt"), b"hello world").unwrap();
@@ -300,4 +321,107 @@ fn statistics_are_accurate() {
     assert_eq!(result.statistics.uploaded_files, 2);
     assert_eq!(result.statistics.uploaded_bytes, 6);
     assert_eq!(result.statistics.skipped_files, 0);
+}
+
+#[test]
+fn round_trip_with_symlinks() {
+    if !symlinks_supported() {
+        eprintln!("skipping: symlinks not supported on this OS/configuration");
+        return;
+    }
+
+    let src_dir = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dst_dir = TempDir::new().unwrap();
+
+    // Create source tree with a regular file and a symlink to it
+    std::fs::write(src_dir.path().join("real.txt"), b"real content").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        src_dir.path().join("real.txt"),
+        src_dir.path().join("link.txt"),
+    )
+    .unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(
+        src_dir.path().join("real.txt"),
+        src_dir.path().join("link.txt"),
+    )
+    .unwrap();
+
+    // Collect with CollapseEscaping policy — non-escaping symlinks stay as symlinks
+    let snapshot = collect_abs_snapshot(
+        &[src_dir.path().to_path_buf()],
+        &[] as &[std::path::PathBuf],
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::CollapseEscaping,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Verify collect found the file and preserved the symlink
+    let real = snapshot
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("real.txt"))
+        .unwrap();
+    let link = snapshot
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
+    assert!(real.symlink_target.is_none());
+    assert!(link.symlink_target.is_some());
+
+    // Upload (only the real file gets hashed/uploaded, symlinks pass through)
+    let data_cache = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+    let upload_result = hash_upload_abs_manifest(
+        &AbsManifest::Snapshot(snapshot),
+        data_cache.clone() as Arc<dyn AsyncDataCache>,
+        HashUploadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(upload_result.statistics.uploaded_files, 1);
+
+    // Remap to destination
+    let abs_snap = match upload_result.manifest {
+        AbsManifest::Snapshot(s) => s,
+        _ => panic!("expected snapshot"),
+    };
+    let rel = subtree_snapshot(
+        &abs_snap,
+        &src_dir.path().to_string_lossy(),
+        SymlinkPolicy::CollapseEscaping,
+    )
+    .unwrap();
+    let abs_dl = join_snapshot(&rel, &dst_dir.path().to_string_lossy()).unwrap();
+
+    // Verify the symlink survived subtree+join
+    let dl_link = abs_dl
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("link.txt"))
+        .unwrap();
+    assert!(dl_link.symlink_target.is_some());
+
+    // Download with symlink support
+    download_abs_manifest(
+        &AbsManifest::Snapshot(abs_dl),
+        data_cache.clone() as Arc<dyn AsyncDataCache>,
+        DownloadOptions {
+            symlink_policy: SymlinkPolicy::Preserve,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Verify: real file has correct content
+    assert_eq!(
+        std::fs::read_to_string(dst_dir.path().join("real.txt")).unwrap(),
+        "real content"
+    );
+    // Verify: symlink exists and is actually a symlink
+    let link_meta = dst_dir.path().join("link.txt").symlink_metadata().unwrap();
+    assert!(link_meta.file_type().is_symlink());
 }

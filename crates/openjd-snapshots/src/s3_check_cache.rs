@@ -24,6 +24,19 @@ impl S3CheckCache {
             );",
         )
         .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+
+        // Prune expired entries (older than 30 days) on open
+        let cutoff = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64()
+            - (ENTRY_EXPIRY_DAYS as f64 * 86400.0);
+        conn.execute(
+            "DELETE FROM s3checkV1 WHERE CAST(last_seen_time AS REAL) < ?1",
+            rusqlite::params![cutoff],
+        )
+        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+
         Ok(Self {
             conn: Mutex::new(conn),
         })

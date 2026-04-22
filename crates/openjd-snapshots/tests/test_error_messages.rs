@@ -83,13 +83,3 @@ fn task_error() {
     let err = SnapshotError::Task("task panicked".into());
     assert_eq!(err.to_string(), "Task error: task panicked");
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-// Other
-// ═══════════════════════════════════════════════════════════════════════
-
-#[test]
-fn other_error() {
-    let err = SnapshotError::Other("unexpected condition".into());
-    assert_eq!(err.to_string(), "unexpected condition");
-}

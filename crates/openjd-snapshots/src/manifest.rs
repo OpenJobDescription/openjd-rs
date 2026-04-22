@@ -132,6 +132,19 @@ pub struct Diff;
 
 // --- Manifest ---
 
+/// A content-addressed file tree manifest parameterized by path style and kind.
+///
+/// The phantom type parameters `P` and `K` encode constraints at the type level:
+/// - `P`: `Abs` (absolute paths) or `Rel` (relative paths)
+/// - `K`: `Full` (no deleted entries) or `Diff` (deleted entries allowed)
+///
+/// **Important:** These phantom types are `#[serde(skip)]`, so deserializing JSON
+/// directly via `serde_json::from_str::<Manifest<P, K>>()` will succeed regardless
+/// of whether the paths actually match `P` or the entries match `K`. Always use
+/// the [`decode_v2023`](crate::decode_v2023) / [`decode_v2025`](crate::decode_v2025)
+/// functions to deserialize manifests — they select the correct type based on the
+/// spec version field. If you must deserialize directly, call [`validate()`](Manifest::validate)
+/// on the result to enforce the phantom type constraints at runtime.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest<P, K> {

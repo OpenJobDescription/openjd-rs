@@ -61,15 +61,15 @@ However, the evaluation identified several issues ranging from a potential corre
 
 1. **~~No duplicate path handling specified.~~** *(Fixed)* `validate()` now rejects duplicate paths across files and dirs. Deserialization (`decode_v2023`, `decode_v2025`) also rejects manifests with duplicate paths. The spec has been updated.
 
-2. **Memory pool u32 limitation not documented.** The specs describe the memory pool using tokio::sync::Semaphore but don't mention the u32 permit limit, which caps single allocations at ~4GB despite the pool supporting up to 16GB.
+2. **~~Memory pool u32 limitation not documented.~~** *(Fixed)* The pool now uses 4KB permit granularity, supporting up to ~16TB with u32 permits.
 
-3. **`hash_file_chunked` read semantics not specified.** The hash spec doesn't specify whether chunk boundaries must be exact (i.e., whether partial reads from `file.read()` are acceptable). This matters for cross-platform hash consistency.
+3. **~~`hash_file_chunked` read semantics not specified.~~** *(Fixed)* `hash_file_chunked` and `process_chunked_async` now use `read_exact()` to guarantee chunk boundaries match `chunk_size`. The spec should be updated to document this guarantee.
 
-4. **Error type taxonomy not specified.** There's no spec document for the error handling approach. The `SnapshotError` enum and its variants are not documented in the specs.
+4. **~~Error type taxonomy not specified.~~** *(Fixed)* `snapshot_error_handling.md` documents the `SnapshotError` enum, all variants, the conversion strategy, message conventions, and usage by operation.
 
-5. **`preallocate_file` failure behavior not specified.** The download pipeline spec mentions preallocation but doesn't specify what happens when it fails (currently silently ignored on Linux).
+5. **~~`preallocate_file` failure behavior not specified.~~** *(Fixed)* `preallocate_file` now checks the `posix_fallocate` return value and falls back to `set_len()` on failure. The spec should be updated to document this fallback behavior.
 
-6. **S3 streaming error propagation not specified.** The download pipeline spec doesn't specify behavior when the file writer fails mid-stream (currently the S3 reader continues downloading and discarding data).
+6. **~~S3 streaming error propagation not specified.~~** *(Not applicable)* The current code fully buffers S3 responses before writing; there is no streaming channel pattern where errors could be silently discarded.
 
 ---
 
@@ -116,76 +116,25 @@ However, the evaluation identified several issues ranging from a potential corre
 
 ### 3.3 Issues Found
 
-#### CRITICAL — Memory Pool u32 Truncation Bug
+#### ~~CRITICAL — Memory Pool u32 Truncation Bug~~
 
-**File:** `src/ops/memory_pool.rs`, `acquire()` method
+*(Fixed)* The memory pool now uses a coarser permit granularity of 4096 bytes (1 permit = 4KB) instead of 1 permit = 1 byte. With u32 permits this supports single allocations up to ~16TB, well above the 16GB `MAX_MEMORY_BYTES` limit. The `bytes_to_permits()` helper rounds up using `div_ceil` so sub-granularity requests still acquire at least 1 permit. Two regression tests verify that 8GB values don't truncate and that rounding behaves correctly.
 
-```rust
-pub async fn acquire(&self, size: usize) -> OwnedSemaphorePermit {
-    let clamped = size.min(self.max_bytes) as u32;
-    // ...
-}
-```
+#### ~~HIGH — `hash_file_chunked` Uses Non-Filling Reads~~
 
-The `as u32` cast silently truncates values above `u32::MAX` (~4GB). The pool's `max_bytes` can be up to 16GB (`MAX_MEMORY_BYTES`), and `Semaphore::new()` accepts `usize`, so the semaphore is initialized correctly. But `acquire_many_owned()` takes `u32`, so any single allocation request above ~4GB silently wraps. A 5GB request would acquire only ~0.7GB of permits, allowing the pool to over-commit memory.
+*(Fixed)* Both `hash_file_chunked()` in `src/hash.rs` and `process_chunked_async()` in `src/ops/hash_upload.rs` now use `read_exact()` to fill the buffer completely for each chunk. On `UnexpectedEof` (the final partial chunk), the code seeks back to the known consumed position and uses `read_to_end()` to get the exact remainder. This guarantees chunk boundaries are always determined by `chunk_size`, not by OS buffering behavior.
 
-**Impact:** Could cause OOM on systems with large memory pools processing files >4GB.
+#### ~~HIGH — `preallocate_file` Silently Ignores Errors on Linux~~
 
-**Fix:** Use a coarser permit granularity (e.g., 1 permit = 4096 bytes) to support up to 16TB with u32 permits.
+*(Fixed)* The `posix_fallocate` return value is now checked. On failure (e.g., unsupported filesystem like ZFS, NFS, tmpfs, or disk full), the code falls back to `set_len()` which uses `ftruncate` — universally supported. Disk-full conditions propagate properly since `set_len()` will also fail in that case.
 
-#### HIGH — `hash_file_chunked` Uses Non-Filling Reads
+#### ~~MEDIUM — Sequential `object_exists` Checks in HASH_UPLOAD Work-Item Building~~
 
-**File:** `src/hash.rs`, `hash_file_chunked()` function
+*(Fixed)* The work-item building phase in `hash_upload_manifest` is now structured in three phases: (1) gather cache-hit candidates via local hash cache lookups, (2) fire all `object_exists` calls concurrently via `FuturesUnordered`, and (3) build work items for files that weren't fully skipped. This turns O(N) sequential S3 round-trips into concurrent requests.
 
-```rust
-let n = file.read(&mut buf)?;
-```
+#### ~~MEDIUM — S3 Streaming Silently Discards Send Errors~~
 
-`file.read()` may return fewer bytes than the buffer size even when more data is available. This means chunk boundaries could shift depending on OS buffering behavior, producing different chunk hashes for the same file content. On Linux with local files this is practically deterministic, but the Rust documentation explicitly states that `read()` is not guaranteed to fill the buffer.
-
-The same pattern appears in `src/ops/hash_upload.rs` in `process_chunked_async`.
-
-**Impact:** Theoretically non-deterministic chunk hashes across platforms or under I/O pressure. In practice, local file reads on Linux fill the buffer, so this hasn't manifested as a bug yet.
-
-**Fix:** Replace `file.read(&mut buf)` with a fill loop or `Read::read_exact()` (handling the final partial chunk).
-
-#### HIGH — `preallocate_file` Silently Ignores Errors on Linux
-
-**File:** `src/ops/download.rs`, `preallocate_file()` function
-
-```rust
-let _ = unsafe { libc::posix_fallocate(f.as_raw_fd(), 0, size as libc::off_t) };
-```
-
-The return value of `posix_fallocate` is discarded. If it fails (disk full, unsupported filesystem), the file remains zero-length. Subsequent offset writes will extend the file on demand, but without preallocation the writes may fail partway through or produce fragmented files.
-
-**Impact:** Silent performance degradation or confusing errors on disk-full conditions.
-
-**Fix:** Check the return value; fall back to `set_len()` on failure.
-
-#### MEDIUM — Sequential `object_exists` Checks in HASH_UPLOAD Work-Item Building
-
-**File:** `src/ops/hash_upload.rs`
-
-The work-item building loop calls `data_cache.object_exists()` sequentially for each file's cached hash. For chunked files, this means N sequential HeadObject calls to S3. With a manifest of 1000 chunked files averaging 4 chunks each, this is 4000 sequential S3 round-trips before any upload work begins.
-
-**Impact:** Slow startup for large manifests with many cache hits, especially with S3 backend.
-
-**Fix:** Batch the existence checks or parallelize them using `FuturesUnordered`.
-
-#### MEDIUM — S3 Streaming Silently Discards Send Errors
-
-**File:** `src/data_cache.rs`, three locations in S3DataCache
-
-```rust
-let _ = tx.send(chunk).await;
-```
-
-If the file writer task fails (e.g., disk full), the mpsc sender returns `Err`, but the S3 reader continues downloading and discarding all remaining data. The error is eventually surfaced when `writer.await` completes, but network bandwidth is wasted.
-
-**Impact:** Wasted bandwidth on write failures; delayed error reporting.
-
-**Fix:** Check the send result and break the read loop on error.
+*(Not applicable)* The report described a `let _ = tx.send(chunk).await` pattern with mpsc channels, but the current code does not use streaming channels. S3 downloads use `resp.body.collect().await` to fully buffer the response before writing to disk via `spawn_blocking`. There is no reader/writer pipeline where send errors could be silently discarded.
 
 #### MEDIUM — No Duplicate Path Validation in Manifests
 
@@ -197,25 +146,13 @@ The `validate()` method checks path format, deleted constraints, symlink constra
 
 **Demonstrated by:** `test_quality_probes::validate_allows_duplicate_file_paths` and `validate_allows_duplicate_dir_paths`.
 
-#### MEDIUM — Phantom Type Bypass via Deserialization
+#### ~~MEDIUM — Phantom Type Bypass via Deserialization~~
 
-**File:** `src/manifest.rs`
+*(Documented)* A doc comment has been added to the `Manifest` struct warning that `#[serde(skip)]` on `PhantomData` means direct `serde_json::from_str` bypasses phantom type constraints. The comment directs users to the `decode_v2023`/`decode_v2025` functions and notes that `validate()` must be called if deserializing directly. This is the appropriate fix because the codec functions already produce correctly-typed manifests, and a custom `Deserialize` impl would duplicate `validate()` logic.
 
-Since `PhantomData` is `#[serde(skip)]`, deserializing JSON into any `Manifest<P, K>` variant succeeds regardless of path content. An absolute-path manifest can be deserialized as `Snapshot` (relative). The `validate()` method catches this, but callers must remember to call it.
+#### ~~LOW — `SnapshotError::HashMismatch` Is Dead Code~~
 
-**Impact:** Type safety guarantee is only enforced at runtime via `validate()`, not at deserialization time.
-
-**Demonstrated by:** `test_quality_probes::manifest_deserialization_ignores_phantom_types`.
-
-#### LOW — `SnapshotError::HashMismatch` Is Dead Code
-
-**File:** `src/error.rs`
-
-The `HashMismatch { expected, actual }` variant is defined but never constructed anywhere in the crate. Grep confirms zero usages outside the definition.
-
-**Impact:** Dead code; misleading API surface.
-
-**Fix:** Either use it where hash verification occurs (e.g., in the two-pass streaming upload) or remove it.
+*(Fixed)* The `HashMismatch` variant has been removed from `SnapshotError`.
 
 #### LOW — `SnapshotError::Other(String)` Loses Error Context
 
@@ -227,25 +164,13 @@ SQLite errors are converted via `.map_err(|e| SnapshotError::Other(e.to_string()
 
 **Fix:** Add dedicated variants (e.g., `Sqlite(rusqlite::Error)`, `S3(String)`) or use `#[source]` on `Other`.
 
-#### LOW — Symlink Topological Sort Cycle Fallback Is O(n²)
+#### ~~LOW — Symlink Topological Sort Cycle Fallback Is O(n²)~~
 
-**File:** `src/ops/download.rs`
+*(Fixed)* The cycle fallback now uses a `HashSet` for O(1) membership checks instead of `Vec::contains`.
 
-When symlink cycles exist, the fallback code uses `sorted.contains(&i)` which is O(n), making the overall cycle handling O(n²). Cyclic symlinks are also silently created without warning.
+#### ~~LOW — No Cache Eviction/Pruning~~
 
-**Impact:** Performance degradation with many cyclic symlinks (unlikely in practice).
-
-**Fix:** Use a `HashSet` for the sorted set; log a warning for cyclic symlinks.
-
-#### LOW — No Cache Eviction/Pruning
-
-**Files:** `src/hash_cache.rs`, `src/s3_check_cache.rs`
-
-Neither the hash cache nor the S3 check cache has any eviction or pruning mechanism. The SQLite tables grow indefinitely. The S3 check cache has a 30-day TTL on reads but never deletes expired rows.
-
-**Impact:** Gradual disk usage growth over time.
-
-**Fix:** Add periodic pruning of expired entries, or VACUUM on open.
+*(Partially fixed)* `S3CheckCache::new()` now prunes expired entries (older than 30 days) on open via a `DELETE WHERE` statement. This keeps the S3 check cache bounded across sessions. The hash cache has no natural TTL — staleness is determined at read time by mtime comparison — so it remains unpruned. A future schema change (`hashesV5`) adding a `last_accessed_time` column is documented in the spec as future work.
 
 #### LOW — `expand_dir_symlink` Is O(n) Per Directory Symlink
 
@@ -257,15 +182,9 @@ Neither the hash cache nor the S3 check cache has any eviction or pruning mechan
 
 **Fix:** Pre-build a prefix index or use sorted iteration with binary search.
 
-#### LOW — macOS Memory Detection Falls Back to 256MB
+#### ~~LOW — macOS Memory Detection Falls Back to 256MB~~
 
-**File:** `src/ops/memory_pool.rs`
-
-`detect_system_memory()` only reads `/proc/meminfo` (Linux). On macOS, it falls back to 256MB, which is far below typical available memory.
-
-**Impact:** Suboptimal performance on macOS.
-
-**Fix:** Use `sysctl` on macOS to detect memory.
+*(Fixed)* `detect_system_memory()` now uses `sysctlbyname` on macOS to read `hw.memsize` (total) and `vm.page_free_count * vm.pagesize` (available), instead of falling back to 256MB.
 
 ---
 
@@ -319,17 +238,17 @@ Neither the hash cache nor the S3 check cache has any eviction or pruning mechan
 
 4. **No disk-full/IO-error simulation.** No tests for what happens when disk is full during download, cache write, or preallocation.
 
-5. **No corrupted data tests.** No tests for corrupted cache entries, truncated files, or hash mismatches during download verification.
+5. **~~No corrupted data tests.~~** *(Fixed)* Five tests added to `test_download.rs`: corrupted cache object, truncated cache object, missing object in data cache, stale hash cache entry triggering re-download, and corrupted chunked cache object. Additionally, inline hash verification was added to the download path — small whole files and small chunks are now verified via `hash_data()` on the in-memory bytes before writing to disk. Large files/chunks using multipart byte-range downloads are not verified (no per-range hash to check against).
 
 6. **No v2025 cross-implementation fixtures.** v2023 has extensive Python fixture-based canonical tests, but v2025 only has round-trip tests.
 
-7. **No test for memory pool with large values.** All memory pool tests use small values (100-1024) that fit in u32, missing the truncation bug.
+7. **~~No test for memory pool with large values.~~** *(Fixed)* `large_values_no_truncation` test verifies 8GB values don't truncate. `sub_granularity_rounds_up` tests rounding behavior.
 
-8. **No test for `hash_file_chunked` with large files.** No test verifying chunk boundary correctness with files large enough to trigger partial reads.
+8. **No test for `hash_file_chunked` with large files.** No test verifying chunk boundary correctness with files large enough to trigger multiple `read_exact` calls. The non-filling read bug has been fixed, but a regression test for large files would be valuable.
 
-9. **No round-trip test with symlinks.** `test_round_trip.rs` tests the full pipeline but doesn't include symlinks.
+9. **~~No round-trip test with symlinks.~~** *(Fixed)* `test_round_trip.rs` now includes `round_trip_with_symlinks` covering collect→upload→download with `CollapseAll` policy. Uses a runtime `symlinks_supported()` check so it runs on Unix and on Windows with Developer Mode enabled.
 
-10. **No test for `HashMismatch` error variant usage.** The variant exists but is never tested in a production code path (only in the quality probe test).
+10. **~~No test for `HashMismatch` error variant usage.~~** The variant has been removed, so this gap no longer applies.
 
 ---
 
@@ -341,8 +260,8 @@ Five probe tests were written and added to `tests/test_quality_probes.rs`. All p
 |------|---------------------|
 | `validate_allows_duplicate_file_paths` | `validate()` accepts manifests with duplicate file paths |
 | `validate_allows_duplicate_dir_paths` | `validate()` accepts manifests with duplicate dir paths |
-| `hash_file_chunked_consistent_chunk_count` | Chunk hashing is deterministic on Linux (but uses non-filling reads) |
-| `hash_mismatch_error_variant_exists_but_unused` | `HashMismatch` variant can be constructed but is never used in production |
+| `hash_file_chunked_consistent_chunk_count` | Chunk hashing is deterministic (now uses `read_exact` for guaranteed chunk boundaries) |
+| `hash_mismatch_error_variant_exists_but_unused` | *(Removed)* `HashMismatch` variant no longer exists |
 | `manifest_deserialization_ignores_phantom_types` | Deserialization bypasses phantom type constraints; `validate()` catches it |
 
 ---
@@ -351,43 +270,43 @@ Five probe tests were written and added to `tests/test_quality_probes.rs`. All p
 
 ### Priority 1 — Correctness Fixes
 
-1. **Fix memory pool u32 truncation.** Switch to coarser permit granularity (e.g., 1 permit = 4096 bytes). This is a real bug that could cause OOM with files >4GB on systems with >4GB memory pools.
+1. **~~Fix memory pool u32 truncation.~~** *(Fixed)* Uses 4KB permit granularity (1 permit = 4096 bytes) to support up to ~16TB with u32 permits.
 
-2. **Use filling reads in `hash_file_chunked`.** Replace `file.read(&mut buf)` with a loop that fills the buffer completely (except for the final chunk). This ensures cross-platform chunk hash consistency.
+2. **~~Use filling reads in `hash_file_chunked`.~~** *(Fixed)* Both `hash_file_chunked` and `process_chunked_async` now use `read_exact()` with proper final-chunk handling via seek-back and `read_to_end()`.
 
 3. **Add duplicate path validation to `validate()`.** Build a `HashSet` of paths and reject duplicates. This prevents silent data loss in DIFF and COMPOSE operations.
 
 ### Priority 2 — Robustness Improvements
 
-4. **Check `posix_fallocate` return value.** Fall back to `set_len()` on failure instead of silently ignoring the error.
+4. **~~Check `posix_fallocate` return value.~~** *(Fixed)* Return value is now checked; falls back to `set_len()` on failure.
 
-5. **Propagate S3 streaming errors.** Check `tx.send()` results and break the read loop on error to avoid wasting bandwidth.
+5. **~~Propagate S3 streaming errors.~~** *(Not applicable)* The current code fully buffers S3 responses before writing; there is no streaming channel pattern.
 
-6. **Parallelize `object_exists` checks in HASH_UPLOAD.** Use `FuturesUnordered` or `join_all` for the work-item building phase to avoid sequential S3 round-trips.
+6. **~~Parallelize `object_exists` checks in HASH_UPLOAD.~~** *(Fixed)* Work-item building now uses a three-phase approach with `FuturesUnordered` for concurrent existence checks.
 
 7. **Add validating deserialization.** Consider a `Manifest::deserialize_and_validate()` method that combines deserialization with validation, or implement a custom `Deserialize` that checks path constraints.
 
 ### Priority 3 — Code Quality
 
-8. **Remove or use `HashMismatch` variant.** Either use it in the two-pass streaming upload hash verification, or remove it to reduce dead code.
+8. **~~Remove or use `HashMismatch` variant.~~** *(Fixed)* The variant has been removed.
 
 9. **Improve error type hierarchy.** Add dedicated variants for SQLite and S3 errors to preserve error context and source chains.
 
-10. **Add cache eviction.** Implement periodic pruning of expired S3 check cache entries and optionally stale hash cache entries.
+10. **~~Add cache eviction.~~** *(Partially fixed)* S3 check cache now prunes expired entries on open. Hash cache eviction is documented as future work requiring a schema change.
 
-11. **Fix macOS memory detection.** Use `sysctl` to detect available memory on macOS instead of falling back to 256MB.
+11. **~~Fix macOS memory detection.~~** *(Fixed)* Uses `sysctlbyname` on macOS to detect total and available memory.
 
-12. **Use `HashSet` in symlink topological sort fallback.** Replace `sorted.contains()` with a `HashSet` lookup to avoid O(n²) behavior.
+12. **~~Use `HashSet` in symlink topological sort fallback.~~** *(Fixed)* Cycle fallback now uses `HashSet` for O(1) lookups.
 
 ### Priority 4 — Specification Updates
 
-13. **Add error handling spec.** Document the `SnapshotError` enum, error conversion strategy, and error message format.
+13. **~~Add error handling spec.~~** *(Fixed)* `snapshot_error_handling.md` documents the enum, conversion strategy, message format, and per-operation usage.
 
 14. **Document duplicate path policy.** Specify whether manifests may contain duplicate paths and what the expected behavior is.
 
-15. **Document memory pool u32 limitation.** Either fix the bug and document the new granularity, or document the 4GB single-allocation limit.
+15. **~~Document memory pool u32 limitation.~~** *(Fixed)* The bug is resolved; the pool now uses 4KB granularity.
 
-16. **Document `hash_file_chunked` read semantics.** Specify that chunk boundaries must be exact and reads must fill the buffer.
+16. **~~Document `hash_file_chunked` read semantics.~~** *(Fixed in code)* The implementation now uses `read_exact()` for exact chunk boundaries. The spec should be updated to document this guarantee.
 
 ### Priority 5 — Test Improvements
 
@@ -407,13 +326,13 @@ Five probe tests were written and added to `tests/test_quality_probes.rs`. All p
 |-----------|-------|-------|
 | Specification completeness | 8/10 | Thorough but missing error handling spec and some edge case documentation |
 | Specification accuracy | 9/10 | Accurately represents implementation; minor gaps noted |
-| Implementation correctness | 7/10 | Memory pool u32 bug is significant; partial reads are a latent risk |
+| Implementation correctness | 9/10 | All critical and high issues fixed; remaining items are robustness improvements |
 | Implementation ergonomics | 9/10 | Clean API, good type safety, builder pattern |
-| Implementation performance | 8/10 | Good parallelism; sequential object_exists and O(n²) edge cases |
+| Implementation performance | 9/10 | Good parallelism; sequential object_exists fixed; O(n²) symlink edge case remains |
 | Error quality | 7/10 | Good validation messages; error type hierarchy loses context |
 | Naming consistency | 9/10 | Consistent with other openjd-rs crates |
 | Rust best practices | 8/10 | Good overall; unsafe code is minimal and well-scoped |
 | Test coverage | 8/10 | Excellent happy path and edge case coverage; gaps in error simulation and Windows |
 | Test organization | 9/10 | Well-structured, clear naming, good use of helpers |
 
-**Overall: Strong implementation with a few targeted fixes needed.** The most urgent items are the memory pool u32 truncation (Priority 1, item 1) and the non-filling reads in `hash_file_chunked` (Priority 1, item 2).
+**Overall: Strong implementation with a few targeted fixes needed.** All critical and high-severity issues have been fixed: memory pool u32 truncation (Priority 1, item 1), non-filling reads in `hash_file_chunked` (Priority 1, item 2), silent `posix_fallocate` failures (Priority 2, item 4), and sequential `object_exists` checks in HASH_UPLOAD (Priority 2, item 6). Remaining items are robustness improvements and code quality enhancements.
