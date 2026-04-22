@@ -11,19 +11,19 @@ version-scoped to `v2023_09` because validation rules are specific to a spec rev
 pub(crate) fn validate_job_template(
     jt: &JobTemplate,
     ctx: &ValidationContext,
-) -> Result<(), OpenJdError>
+) -> Result<(), ModelError>
 
 pub(crate) fn validate_environment_template(
     et: &EnvironmentTemplate,
     ctx: &ValidationContext,
-) -> Result<(), OpenJdError>
+) -> Result<(), ModelError>
 ```
 
 Both functions are crate-private — external callers use `decode_job_template` and
 `decode_environment_template`, which call these internally.
 
 Both functions compute `EffectiveLimits` and `EffectiveRules` from the context, run all
-applicable passes, and return accumulated errors as `OpenJdError::ModelValidation`.
+applicable passes, and return accumulated errors as `ModelError::ModelValidation`.
 
 ## Pass Architecture
 

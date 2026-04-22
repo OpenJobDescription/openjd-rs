@@ -640,13 +640,8 @@ fn product_node_overflow_is_rejected() {
     let template = yaml_val(&template_str);
     let jt = decode_job_template(template, None).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
-    let job = create_job(&jt, &params).unwrap();
-    let space = job.steps[0].parameter_space.as_ref().unwrap();
-    let result = StepParameterSpaceIterator::new(space);
-    let msg = match result {
-        Err(e) => e.to_string(),
-        Ok(_) => panic!("Overflow must be rejected"),
-    };
+    // Overflow is caught at create_job time (parameter space iterator validation)
+    let msg = create_job(&jt, &params).unwrap_err().to_string();
     assert!(
         msg.contains("parameter space") || msg.contains("overflow"),
         "Expected overflow error message, got: {msg}"

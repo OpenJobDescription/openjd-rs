@@ -9,22 +9,22 @@ Parsing is the entry point to the crate — all other operations work on the par
 pub fn decode_job_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<JobTemplate, OpenJdError>
+) -> Result<JobTemplate, ModelError>
 
 pub fn decode_environment_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<EnvironmentTemplate, OpenJdError>
+) -> Result<EnvironmentTemplate, ModelError>
 
 pub fn decode_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
-) -> Result<DecodedTemplate, OpenJdError>
+) -> Result<DecodedTemplate, ModelError>
 
 pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
-) -> Result<serde_yaml::Value, OpenJdError>
+) -> Result<serde_yaml::Value, ModelError>
 ```
 
 ### Types
@@ -66,7 +66,7 @@ The `specificationVersion` field is read from the value tree and mapped to a
 | `"jobtemplate-2023-09"` | `JobTemplate2023_09` |
 | `"environment-2023-09"` | `Environment2023_09` |
 
-Unrecognized versions produce `OpenJdError::UnsupportedSchema`.
+Unrecognized versions produce `ModelError::UnsupportedSchema`.
 
 `decode_template` auto-detects the template type from this field.
 
@@ -89,7 +89,7 @@ Custom deserializers handle:
 
 Each extension the template requests (via its `extensions` field) must be present in the
 caller's `supported_extensions` list. If a requested extension is not supported, decoding
-fails with `OpenJdError::DecodeValidation`. When `supported_extensions` is `None`, it
+fails with `ModelError::DecodeValidation`. When `supported_extensions` is `None`, it
 defaults to an empty set — no extensions are supported.
 
 The resulting extension set is stored in a `ValidationContext`.
@@ -102,7 +102,7 @@ pass 4 with a `DecodeValidation` error. If a template does not use any extension
 
 The deserialized template is passed through the multi-pass validation pipeline
 (see [validation.md](validation.md)). Validation errors are accumulated and returned
-as a single `OpenJdError::DecodeValidation` or `OpenJdError::ModelValidation`.
+as a single `ModelError::DecodeValidation` or `ModelError::ModelValidation`.
 
 ## Design Decisions
 

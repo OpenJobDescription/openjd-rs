@@ -7,8 +7,8 @@ the multidimensional space of task parameter values defined by a step's paramete
 
 ```rust
 impl StepParameterSpaceIterator {
-    pub fn new(space: &StepParameterSpace) -> Result<Self, OpenJdError>
-    pub fn new_with_chunk_override(space: &StepParameterSpace, override_count: Option<usize>) -> Result<Self, OpenJdError>
+    pub fn new(space: &StepParameterSpace) -> Result<Self, ModelError>
+    pub fn new_with_chunk_override(space: &StepParameterSpace, override_count: Option<usize>) -> Result<Self, ModelError>
     pub fn names(&self) -> &HashSet<String>
     pub fn len(&self) -> usize
     pub fn is_empty(&self) -> bool
@@ -26,7 +26,7 @@ impl Iterator for StepParameterSpaceIterator {
 }
 ```
 
-`new` returns `Result<Self, OpenJdError>` because construction can fail (e.g., if the
+`new` returns `Result<Self, ModelError>` because construction can fail (e.g., if the
 product of parameter dimensions overflows `usize`). `get` returns `Option<TaskParameterSet>`
 (returns `None` for out-of-bounds indices). `set_chunks_default_task_count` takes `&mut self`
 (no `Arc<AtomicUsize>` indirection).
@@ -75,7 +75,7 @@ the full product. The total length is computed using `checked_mul` to detect ove
 ### AssociationNode
 
 Lockstep iteration: all children advance together. All children must have the same length
-(validated during construction — produces an `OpenJdError::DecodeValidation` if lengths
+(validated during construction — produces a `ModelError::DecodeValidation` if lengths
 differ). Element at index `i` is the union of child[j].get(i) for all children j.
 
 ## Combination Expression Parsing

@@ -40,9 +40,9 @@ The `openjd-model` crate is a well-engineered Rust implementation of the OpenJD 
 
 **Accuracy: Very Good.** The specs accurately describe the implementation with a few minor discrepancies:
 
-1. **Association length validation timing:** The `parameter-space.md` spec says "validated during construction" (referring to `StepParameterSpaceIterator::new()`), which is accurate. However, the OpenJD specification says this should be validated at template decode time. The Rust implementation defers this check to iterator construction, meaning `decode_job_template()` accepts templates with mismatched association lengths. This is a spec-implementation alignment issue — the internal spec documents the actual behavior, but the behavior may not match the upstream OpenJD specification's intent.
+1. ~~**Association length validation timing:**~~ **Resolved.** `create_job()` now validates the resolved parameter space by constructing a `StepParameterSpaceIterator`, catching mismatched association lengths at job creation time rather than deferring to iterator construction. This aligns with the OpenJD specification's intent (section 7.4).
 
-2. **Error type naming:** The spec refers to `OpenJdError` but the implementation uses `ModelError`. The spec should be updated to match.
+2. ~~**Error type naming:**~~ **Resolved.** The specs now use `ModelError` to match the implementation.
 
 **Goals and Design Rationale: Excellent.** Each spec clearly explains the goals (e.g., lazy evaluation for parameter spaces, Pydantic-compatible error formatting for cross-implementation consistency, extension-aware validation via computed limits/rules). The two-phase type system (template types → job types) is well-motivated and clearly documented.
 
@@ -227,7 +227,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | Null in parameter definitions | ✅ Pass | Correctly rejected |
 | INT overflow default | ❌ Fail | YAML parser rejects before reaching openjd-model — expected |
 | All params in association | ✅ Pass | `(A, B)` works, produces 3 tasks |
-| Mismatched association lengths | ✅ Pass | Accepted at decode time (see Finding #3) |
+| Mismatched association lengths | ✅ Pass | Rejected at create_job time (resolved — see Finding #3) |
 | Random access with product | ❌ Fail | HashMap key ordering differs between `get()` and iteration (see Finding #4) |
 | Control chars in description | ✅ Pass | Correctly rejected |
 | Empty steps list | ✅ Pass | Correctly rejected |
@@ -261,12 +261,12 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 **Description:** `Float64::new(f).unwrap()` could panic if a float parameter value is NaN or infinity and upstream validation doesn't catch it. While the validation pipeline should reject NaN/Inf, this is a defense-in-depth concern.
 **Recommendation:** Replace with `Float64::new(f).map_err(...)` or add a comment explaining why the unwrap is safe.
 
-### Finding #3: Mismatched Association Length Validation Timing
+### Finding #3: ~~Mismatched Association Length Validation Timing~~ (Resolved)
 
-**File:** `src/job/step_param_space.rs` (AssociationNode construction)
-**Severity:** Low
-**Description:** Templates with mismatched association lengths (e.g., `(A, B)` where A has 3 elements and B has 2) are accepted by `decode_job_template()`. The mismatch is only caught later when `StepParameterSpaceIterator::new()` is called. The OpenJD specification says this should be validated at template time. The internal spec documents the actual behavior but this may not match the upstream spec's intent.
-**Recommendation:** Consider moving the association length check into the validation pipeline (pass 6, structure validation) so it's caught at decode time.
+**File:** `src/job/create_job/instantiate.rs`
+**Severity:** ~~Low~~ Resolved
+**Description:** Previously, templates with mismatched association lengths (e.g., `(A, B)` where A has 3 elements and B has 2) were accepted by `create_job()` and only caught later when `StepParameterSpaceIterator::new()` was called. This has been fixed — `instantiate_step()` now constructs a `StepParameterSpaceIterator` after resolving the parameter space, triggering validation at job creation time. This aligns with the OpenJD specification's intent (section 7.4) that parameterSpace is fully validated at job creation time.
+**Resolution:** Validation added in `instantiate_step()` via `StepParameterSpaceIterator::new()` call after `resolve_parameter_space()`.
 
 ### Finding #4: HashMap Key Ordering in `TaskParameterSet`
 
@@ -320,7 +320,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 ### Priority 2 (Should Consider)
 
-2. **Move association length validation** to decode time (pass 6) to match the OpenJD specification's intent.
+2. ~~**Move association length validation** to decode time (pass 6) to match the OpenJD specification's intent.~~ **Resolved** — validation now occurs at `create_job` time.
 3. **Replace `Float64::new(f).unwrap()`** in step_param_space.rs with error propagation or a safety comment.
 4. **Use HashSet** in `AdaptiveChunkNode::validate_containment()` for O(N) instead of O(N²).
 
@@ -328,7 +328,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 5. **Extract duplicated `chunk_range_expr()` logic** into a shared function.
 6. **Decompose `validate_format_strings()`** into per-scope helpers.
-7. **Update specs** to use `ModelError` instead of `OpenJdError`.
+7. ~~**Update specs** to use `ModelError` instead of `OpenJdError`.~~ **Resolved.**
 8. **Add tests for `StepParameterSpaceIterator::get()`** with product and association combinations.
 9. **Consider `IndexMap` for `TaskParameterSet`** if deterministic key ordering is desired.
 10. **Add error handling for unexpected JSON types** in `json_to_expr_value()`.

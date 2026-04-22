@@ -7,12 +7,12 @@ dependencies from an instantiated `job::Job`.
 
 ```rust
 impl StepDependencyGraph {
-    pub fn new(job: &Job) -> Result<Self, OpenJdError>
+    pub fn new(job: &Job) -> Result<Self, ModelError>
     pub fn step_node(&self, name: &str) -> Option<&StepDependencyNode>
     pub fn max_indegree(&self) -> usize
     pub fn max_outdegree(&self) -> usize
-    pub fn topo_sorted(&self) -> Result<Vec<usize>, OpenJdError>
-    pub fn topo_sorted_names(&self) -> Result<Vec<String>, OpenJdError>
+    pub fn topo_sorted(&self) -> Result<Vec<usize>, ModelError>
+    pub fn topo_sorted_names(&self) -> Result<Vec<String>, ModelError>
 }
 ```
 

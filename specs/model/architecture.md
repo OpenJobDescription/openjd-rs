@@ -19,7 +19,7 @@ openjd-cli ──► openjd-sessions ──► openjd-model ──► openjd-exp
 ```
 src/
 ├── lib.rs                    # Public API re-exports
-├── error.rs                  # OpenJdError, ValidationErrors, PathElement
+├── error.rs                  # ModelError, ValidationErrors, PathElement
 ├── types.rs                  # Shared types: ValidationContext, parameter types, limits, rules
 ├── capabilities.rs           # Standard capability constants and validation functions
 ├── template/                 # Unresolved template types (phase 1)
@@ -83,7 +83,7 @@ The crate re-exports a curated public API from `lib.rs`:
   `ValidationContext`
 
 **Error types:**
-- `OpenJdError` — Primary error enum
+- `ModelError` — Primary error enum
 
 ## Key Dependencies
 

@@ -2761,7 +2761,7 @@ steps:
       taskParameterDefinitions:
         - name: A
           type: INT
-          range: "1-2"
+          range: "1-3"
         - name: B
           type: INT
           range: "1-3"

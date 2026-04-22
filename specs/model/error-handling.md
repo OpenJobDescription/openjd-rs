@@ -6,7 +6,7 @@ The `error` module defines the crate's error types and validation error infrastr
 
 ```rust
 #[non_exhaustive]
-pub enum OpenJdError {
+pub enum ModelError {
     DecodeValidation(String),
     ModelValidation(String),
     FormatStringError { message: String, input: Option<String>, start: Option<usize>, end: Option<usize> },
@@ -29,8 +29,8 @@ Marked `#[non_exhaustive]` to allow adding variants without breaking downstream 
 
 ### From Conversions
 
-- `openjd_expr::SymbolTableError` → `OpenJdError::Expression`
-- `openjd_expr::FormatStringValidationError` → `OpenJdError::FormatStringError`
+- `openjd_expr::SymbolTableError` → `ModelError::Expression`
+- `openjd_expr::FormatStringValidationError` → `ModelError::FormatStringError`
 
 ## Validation Error Infrastructure
 
@@ -70,7 +70,7 @@ impl ValidationErrors {
     pub fn add(&mut self, path: &[PathElement], msg: impl Into<String>)
     pub fn is_empty(&self) -> bool
     pub fn len(&self) -> usize
-    pub fn into_result(self, model_name: &str) -> Result<(), OpenJdError>
+    pub fn into_result(self, model_name: &str) -> Result<(), ModelError>
     pub fn format(&self, model_name: &str) -> String
 }
 ```
@@ -78,7 +78,7 @@ impl ValidationErrors {
 There is no `new()` constructor; use `ValidationErrors::default()` instead.
 
 `into_result` converts the accumulated errors into `Ok(())` if empty, or
-`Err(OpenJdError::ModelValidation(...))` with all errors formatted.
+`Err(ModelError::ModelValidation(...))` with all errors formatted.
 
 ### Error Path Helpers
 
@@ -132,7 +132,7 @@ identical output for the cases that matter.
 
 ### Non-Exhaustive Error Enum
 
-`OpenJdError` is `#[non_exhaustive]` because new error variants may be needed as the
+`ModelError` is `#[non_exhaustive]` because new error variants may be needed as the
 spec evolves (new extensions, new validation rules). Downstream code must use wildcard
 matches, which is the correct default for error handling — most callers just display
 the error message rather than matching on specific variants.

@@ -200,6 +200,11 @@ pub(super) fn instantiate_step(
         .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits))
         .transpose()?;
 
+    // Validate the resolved parameter space (e.g. association length mismatches)
+    if let Some(ref ps) = parameter_space {
+        let _ = crate::job::step_param_space::StepParameterSpaceIterator::new(ps)?;
+    }
+
     let step_environments = st
         .step_environments
         .as_ref()

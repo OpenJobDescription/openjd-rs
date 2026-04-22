@@ -11,7 +11,7 @@ workflow: templates + user-provided parameter values → a `job::Job` ready for 
 pub fn merge_job_parameter_definitions(
     job_template: &JobTemplate,
     environment_templates: &[EnvironmentTemplate],
-) -> Result<Vec<MergedParameterDefinition>, OpenJdError>
+) -> Result<Vec<MergedParameterDefinition>, ModelError>
 ```
 
 Merges parameter definitions from environment templates (processed in order) then the job
@@ -34,7 +34,7 @@ and its source template.
 - PATH-specific: `objectType` and `dataFlow` must be identical across definitions
 - Default value: last template to define one wins
 
-Conflicts produce `OpenJdError::Compatibility` with details about which templates conflict.
+Conflicts produce `ModelError::Compatibility` with details about which templates conflict.
 
 ### preprocess_job_parameters
 
@@ -44,7 +44,7 @@ pub fn preprocess_job_parameters(
     input_values: &JobParameterInputValues,
     environment_templates: &[EnvironmentTemplate],
     path_options: &PathParameterOptions<'_>,
-) -> Result<JobParameterValues, OpenJdError>
+) -> Result<JobParameterValues, ModelError>
 ```
 
 Validates and coerces user-provided parameter values against merged definitions.
@@ -88,7 +88,7 @@ pub struct PathParameterOptions<'a> {
 ```rust
 pub fn build_symbol_table(
     params: &JobParameterValues,
-) -> Result<SymbolTable, OpenJdError>
+) -> Result<SymbolTable, ModelError>
 ```
 
 Builds a `SymbolTable` with `Param.*` and `RawParam.*` entries from processed parameter
@@ -104,7 +104,7 @@ mapping is applied at session time. `RawParam.*` for PATH types is forced to STR
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
-) -> Result<job::Job, OpenJdError>
+) -> Result<job::Job, ModelError>
 ```
 
 Full template instantiation pipeline. Takes 2 arguments — environment templates should
@@ -144,7 +144,7 @@ pub fn evaluate_let_bindings(
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
     path_format: PathFormat,
-) -> Result<SymbolTable, OpenJdError>
+) -> Result<SymbolTable, ModelError>
 ```
 
 Evaluates `"name = expression"` bindings sequentially. Each binding sees the results of

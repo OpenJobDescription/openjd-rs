@@ -2036,6 +2036,33 @@ fn test_create_job_v2023_09_task_chunking() {
 // === Tests ported from Python test_create_job.py ===
 
 #[test]
+fn test_create_job_rejects_mismatched_association_lengths() {
+    // create_job must catch mismatched association lengths, not defer to iterator
+    let err = parse_and_create_err(
+        r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Job",
+            "steps": [{
+                "name": "Step",
+                "parameterSpace": {
+                    "taskParameterDefinitions": [
+                        {"name": "A", "type": "INT", "range": "1-10"},
+                        {"name": "B", "type": "INT", "range": [1, 2]}
+                    ],
+                    "combination": "(A,B)"
+                },
+                "script": {"actions": {"onRun": {"command": "do something"}}}
+            }]
+        }"#,
+        &[],
+    );
+    assert!(
+        err.contains("same number of values"),
+        "Expected association length mismatch error from create_job, got: {err}"
+    );
+}
+
+#[test]
 fn test_uneven_parameter_space_association() {
     let td = TestDirs::new();
     // Association with mismatched lengths should fail during create_job or iteration
