@@ -3,60 +3,6 @@ use openjd_snapshots::hash::hash_file_chunked;
 /// These tests demonstrate potential issues found during code review.
 use openjd_snapshots::*;
 
-/// Probe: validate() should reject manifests with duplicate file paths.
-/// Currently it does NOT — this test demonstrates the gap.
-#[test]
-fn validate_allows_duplicate_file_paths() {
-    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![
-        FileEntry {
-            path: "a.txt".into(),
-            hash: None,
-            size: Some(10),
-            mtime: Some(100),
-            chunk_hashes: None,
-            symlink_target: None,
-            runnable: false,
-            deleted: false,
-        },
-        FileEntry {
-            path: "a.txt".into(),
-            hash: None,
-            size: Some(20),
-            mtime: Some(200),
-            chunk_hashes: None,
-            symlink_target: None,
-            runnable: false,
-            deleted: false,
-        },
-    ]);
-    // This SHOULD fail validation but currently passes
-    let result = m.validate();
-    assert!(
-        result.is_ok(),
-        "BUG DEMONSTRATION: validate() accepts duplicate paths — this test documents the gap"
-    );
-}
-
-/// Probe: validate() should reject manifests with duplicate directory paths.
-#[test]
-fn validate_allows_duplicate_dir_paths() {
-    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_dirs(vec![
-        DirEntry {
-            path: "dir".into(),
-            deleted: false,
-        },
-        DirEntry {
-            path: "dir".into(),
-            deleted: false,
-        },
-    ]);
-    let result = m.validate();
-    assert!(
-        result.is_ok(),
-        "BUG DEMONSTRATION: validate() accepts duplicate dir paths"
-    );
-}
-
 /// Probe: hash_file_chunked should produce consistent chunk counts.
 #[test]
 fn hash_file_chunked_consistent_chunk_count() {

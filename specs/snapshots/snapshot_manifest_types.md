@@ -134,6 +134,7 @@ All constructors apply `normalize_path()` to the path (and symlink target).
 
 ### Validation Rules
 
+- **No duplicate paths:** A manifest must not contain multiple file entries with the same `path`, multiple directory entries with the same `path`, or a file entry and directory entry with the same `path`. Deserialization (`decode_v2023`, `decode_v2025`) also rejects manifests with duplicate paths.
 - Deleted entries: only `path` and `deleted=true`; all other fields must be `None`/`false`
 - Symlinks: `symlink_target` set; `hash` and `chunk_hashes` must be `None`
 - Regular files: at most one of `hash` or `chunk_hashes`; must have `size` and `mtime`

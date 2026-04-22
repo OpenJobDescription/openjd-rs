@@ -8,7 +8,7 @@ use crate::manifest::{
 use crate::ops::subtree_rel_snapshot;
 use crate::{Result, SnapshotError, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 // --- Public types ---
@@ -381,6 +381,7 @@ pub fn decode_v2023(json: &str) -> Result<Snapshot> {
     let mut m: Snapshot = Manifest::new(hash_alg, WHOLE_FILE_CHUNK_SIZE);
     m.files = files;
     m.total_size = total_size;
+    check_no_duplicate_paths(&m.files, &m.dirs)?;
     Ok(m)
 }
 
@@ -417,6 +418,8 @@ pub fn decode_v2025(json: &str) -> Result<DecodedManifest> {
         .get("fileChunkSizeBytes")
         .and_then(|v| v.as_i64())
         .unwrap_or(DEFAULT_FILE_CHUNK_SIZE);
+
+    check_no_duplicate_paths(&files, &dirs)?;
 
     match spec {
         SPEC_ABS_SNAPSHOT => {
@@ -473,6 +476,28 @@ fn parse_hash_alg(s: Option<&str>) -> Result<HashAlgorithm> {
         ))),
         None => Err(SnapshotError::Validation("missing hashAlg".into())),
     }
+}
+
+/// Reject duplicate paths across files and dirs.
+fn check_no_duplicate_paths(files: &[FileEntry], dirs: &[DirEntry]) -> Result<()> {
+    let mut seen = HashSet::with_capacity(files.len() + dirs.len());
+    for f in files {
+        if !seen.insert(f.path.as_str()) {
+            return Err(SnapshotError::Validation(format!(
+                "duplicate path: {}",
+                f.path
+            )));
+        }
+    }
+    for d in dirs {
+        if !seen.insert(d.path.as_str()) {
+            return Err(SnapshotError::Validation(format!(
+                "duplicate path: {}",
+                d.path
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn utf16_be_bytes(s: &str) -> Vec<u8> {

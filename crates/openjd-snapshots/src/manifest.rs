@@ -1,6 +1,7 @@
 use crate::hash::HashAlgorithm;
 use crate::path_util::{is_absolute_path, normalize_path};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 // --- Helper for serde skip_serializing_if ---
@@ -332,6 +333,25 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                         ch.len()
                     )));
                 }
+            }
+        }
+
+        // Validate no duplicate paths across files and dirs
+        let mut seen = HashSet::with_capacity(self.files.len() + self.dirs.len());
+        for f in &self.files {
+            if !seen.insert(f.path.as_str()) {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "duplicate path: {}",
+                    f.path
+                )));
+            }
+        }
+        for d in &self.dirs {
+            if !seen.insert(d.path.as_str()) {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "duplicate path: {}",
+                    d.path
+                )));
             }
         }
 

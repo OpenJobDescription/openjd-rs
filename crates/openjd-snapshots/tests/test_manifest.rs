@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // Ported from deadline-cloud test_manifest.py
 
-use openjd_snapshots::{AbsSnapshot, AbsSnapshotDiff, Snapshot, SnapshotDiff};
+use openjd_snapshots::{AbsSnapshot, AbsSnapshotDiff, DirEntry, Snapshot, SnapshotDiff};
 use openjd_snapshots::{FileEntry, HashAlgorithm, Manifest, DEFAULT_FILE_CHUNK_SIZE};
 
 fn abs_snapshot(files: Vec<FileEntry>) -> AbsSnapshot {
@@ -122,4 +122,42 @@ fn clear_hashes_mixed_entries() {
     assert_eq!(m.files[2].symlink_target.as_deref(), Some("/a/target"));
     assert!(m.files[3].deleted);
     assert!(m.files[4].hash.is_none());
+}
+
+// --- TestValidateDuplicatePaths ---
+
+#[test]
+fn validate_rejects_duplicate_file_paths() {
+    let m = rel_snapshot(vec![
+        FileEntry::file("a.txt", 10, 100),
+        FileEntry::file("a.txt", 20, 200),
+    ]);
+    let err = m.validate().unwrap_err().to_string();
+    assert!(err.contains("duplicate path: a.txt"));
+}
+
+#[test]
+fn validate_rejects_duplicate_dir_paths() {
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_dirs(vec![DirEntry::new("dir"), DirEntry::new("dir")]);
+    let err = m.validate().unwrap_err().to_string();
+    assert!(err.contains("duplicate path: dir"));
+}
+
+#[test]
+fn validate_rejects_file_dir_same_path() {
+    let mut m = rel_snapshot(vec![FileEntry::file("a", 10, 100)]);
+    m.dirs = vec![DirEntry::new("a")];
+    let err = m.validate().unwrap_err().to_string();
+    assert!(err.contains("duplicate path: a"));
+}
+
+#[test]
+fn validate_accepts_unique_paths() {
+    let mut m = rel_snapshot(vec![
+        FileEntry::file("a.txt", 10, 100),
+        FileEntry::file("b.txt", 20, 200),
+    ]);
+    m.dirs = vec![DirEntry::new("c")];
+    assert!(m.validate().is_ok());
 }

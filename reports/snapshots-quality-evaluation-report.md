@@ -59,7 +59,7 @@ However, the evaluation identified several issues ranging from a potential corre
 
 ### 2.3 Specification Gaps
 
-1. **No duplicate path handling specified.** The manifest types spec defines validation rules for individual entries but does not specify whether duplicate paths are allowed or rejected. The implementation silently accepts them.
+1. **~~No duplicate path handling specified.~~** *(Fixed)* `validate()` now rejects duplicate paths across files and dirs. Deserialization (`decode_v2023`, `decode_v2025`) also rejects manifests with duplicate paths. The spec has been updated.
 
 2. **Memory pool u32 limitation not documented.** The specs describe the memory pool using tokio::sync::Semaphore but don't mention the u32 permit limit, which caps single allocations at ~4GB despite the pool supporting up to 16GB.
 
