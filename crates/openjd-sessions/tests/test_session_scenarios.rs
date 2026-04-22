@@ -192,8 +192,8 @@ async fn run_scenario(scenario_path: &Path) {
         &input_values,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new(""),
-            current_working_dir: std::path::Path::new(""),
+            job_template_dir: "",
+            current_working_dir: "",
             path_format,
             allow_template_dir_walk_up: true,
             allow_uri_path_values: true,

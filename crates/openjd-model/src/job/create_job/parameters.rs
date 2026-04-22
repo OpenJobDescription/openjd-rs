@@ -467,9 +467,9 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
 pub struct PathParameterOptions<'a> {
     /// Directory containing the job template. Relative PATH defaults are joined to this.
-    pub job_template_dir: &'a std::path::Path,
+    pub job_template_dir: &'a str,
     /// Current working directory. Relative PATH user values are joined to this.
-    pub current_working_dir: &'a std::path::Path,
+    pub current_working_dir: &'a str,
     /// How path strings are interpreted for absolute/relative checks.
     /// Use `PathFormat::host()` for local filesystem paths, or `PathFormat::Posix` /
     /// `PathFormat::Windows` when paths originate from a known platform.
@@ -485,10 +485,7 @@ pub struct PathParameterOptions<'a> {
 
 impl<'a> PathParameterOptions<'a> {
     /// Create options with sensible defaults: host path format, no walk-up, no URIs.
-    pub fn new(
-        job_template_dir: &'a std::path::Path,
-        current_working_dir: &'a std::path::Path,
-    ) -> Self {
+    pub fn new(job_template_dir: &'a str, current_working_dir: &'a str) -> Self {
         Self {
             job_template_dir,
             current_working_dir,
@@ -512,13 +509,10 @@ pub fn preprocess_job_parameters(
     let allow_job_template_dir_walk_up = path_options.allow_template_dir_walk_up;
     let allow_uri_path_values = path_options.allow_uri_path_values;
 
-    if !allow_job_template_dir_walk_up
-        && !is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format)
-    {
+    if !allow_job_template_dir_walk_up && !is_absolute_for_format(job_template_dir, path_format) {
         return Err(ModelError::DecodeValidation(format!(
-            "The value supplied for the job template dir, {}, is not an absolute path. \
+            "The value supplied for the job template dir, {job_template_dir}, is not an absolute path. \
              It must be absolute to enforce that PATH parameter defaults are always inside the job template dir.",
-            job_template_dir.display()
         )));
     }
 
@@ -565,9 +559,8 @@ pub fn preprocess_job_parameters(
                     // and right was already checked. However, path::join's is_absolute
                     // still recognizes scheme:// in right. So we do a direct concat
                     // using the format-appropriate separator.
-                    let cwd_str = current_working_dir.to_string_lossy();
                     openjd_expr::ExprValue::String(openjd_expr::functions::path::non_uri_join(
-                        &cwd_str,
+                        current_working_dir,
                         &s,
                         path_format,
                     ))
@@ -610,13 +603,11 @@ pub fn preprocess_job_parameters(
                     }
                     default.clone()
                 } else if !allow_job_template_dir_walk_up
-                    && is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format)
+                    && is_absolute_for_format(job_template_dir, path_format)
                 {
-                    let joined =
-                        join_for_format(&job_template_dir.to_string_lossy(), default, path_format);
+                    let joined = join_for_format(job_template_dir, default, path_format);
                     let normalized = normalize_path_str(&joined, path_format);
-                    let normalized_dir =
-                        normalize_path_str(&job_template_dir.to_string_lossy(), path_format);
+                    let normalized_dir = normalize_path_str(job_template_dir, path_format);
                     if !normalized.starts_with(&normalized_dir) {
                         return Err(ModelError::DecodeValidation(format!(
                             "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
@@ -624,8 +615,8 @@ pub fn preprocess_job_parameters(
                         )));
                     }
                     normalized
-                } else if is_absolute_for_format(&job_template_dir.to_string_lossy(), path_format) {
-                    join_for_format(&job_template_dir.to_string_lossy(), default, path_format)
+                } else if is_absolute_for_format(job_template_dir, path_format) {
+                    join_for_format(job_template_dir, default, path_format)
                 } else {
                     default.clone()
                 }

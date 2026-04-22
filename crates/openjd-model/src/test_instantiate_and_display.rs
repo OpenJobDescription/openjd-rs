@@ -5,7 +5,6 @@
 
 use crate::JobParameterInputValues;
 use crate::{create_job, decode_job_template, preprocess_job_parameters};
-use std::path::Path;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -20,8 +19,8 @@ fn preprocess(
         input,
         &[],
         &crate::PathParameterOptions {
-            job_template_dir: Path::new("/tmp"),
-            current_working_dir: Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             path_format: openjd_expr::path_mapping::PathFormat::Posix,
             allow_template_dir_walk_up: true,
             allow_uri_path_values: true,

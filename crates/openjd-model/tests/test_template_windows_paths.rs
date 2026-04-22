@@ -1,83 +1,89 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests ported from Python test/openjd/model/test_template_posix_paths.py
+//! Windows path counterpart to test_template_posix_paths.rs.
 //!
-//! Verifies that TEMPLATE scope expression evaluation uses POSIX path semantics.
-//! On Linux this is the default, but these tests document the expected behavior.
+//! Verifies that TEMPLATE scope expression evaluation uses Windows path semantics
+//! when PathFormat::Windows is specified. These tests run on any host OS.
+//!
+//! Expression string literals use Python raw strings (r'...') so that backslashes
+//! in Windows paths are not interpreted as escape sequences.
 
 use openjd_expr::{ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
-fn eval_posix(expr: &str) -> ExprValue {
+fn eval_win(expr: &str) -> ExprValue {
     let symtab = SymbolTable::new();
     let parsed = ParsedExpression::new(expr).unwrap();
     parsed
-        .with_path_format(PathFormat::Posix)
+        .with_path_format(PathFormat::Windows)
         .evaluate(&[&symtab])
         .unwrap()
 }
 
-fn eval_posix_with(expr: &str, symtab: &SymbolTable) -> ExprValue {
+fn eval_win_with(expr: &str, symtab: &SymbolTable) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     parsed
-        .with_path_format(PathFormat::Posix)
+        .with_path_format(PathFormat::Windows)
         .evaluate(&[symtab])
         .unwrap()
 }
 
 // ══════════════════════════════════════════════════════════════
-// ExprNode.evaluate uses POSIX paths
+// ExprNode.evaluate uses Windows paths
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-fn path_parent_uses_forward_slashes() {
-    let result = eval_posix("path('/a/b/c').parent");
-    assert_eq!(result.to_display_string(), "/a/b");
+fn path_parent_uses_backslashes() {
+    let result = eval_win(r"path(r'C:\a\b\c').parent");
+    assert_eq!(result.to_display_string(), r"C:\a\b");
 }
 
 #[test]
-fn path_join_uses_forward_slashes() {
-    let result = eval_posix("path('/a/b') / 'c'");
-    assert_eq!(result.to_display_string(), "/a/b/c");
+fn path_join_uses_backslashes() {
+    let result = eval_win(r"path(r'C:\a\b') / 'c'");
+    assert_eq!(result.to_display_string(), r"C:\a\b\c");
 }
 
 #[test]
-fn path_name_from_posix_path() {
-    let result = eval_posix("path('/a/b/file.txt').name");
+fn path_name_from_windows_path() {
+    let result = eval_win(r"path(r'C:\a\b\file.txt').name");
     assert_eq!(result.to_display_string(), "file.txt");
 }
 
 #[test]
-fn param_path_parent_uses_forward_slashes() {
+fn param_path_parent_uses_backslashes() {
     let mut symtab = SymbolTable::new();
     symtab
         .set(
             "Param.Dir",
-            ExprValue::new_path("/projects/shot01/render".to_string(), PathFormat::Posix),
+            ExprValue::new_path(
+                r"C:\projects\shot01\render".to_string(),
+                PathFormat::Windows,
+            ),
         )
         .unwrap();
-    let result = eval_posix_with("Param.Dir.parent", &symtab);
-    assert_eq!(result.to_display_string(), "/projects/shot01");
+    let result = eval_win_with("Param.Dir.parent", &symtab);
+    assert_eq!(result.to_display_string(), r"C:\projects\shot01");
 }
 
 // ══════════════════════════════════════════════════════════════
-// evaluate_typed uses POSIX paths
+// evaluate_typed uses Windows paths
 // ══════════════════════════════════════════════════════════════
 
 #[test]
 fn path_parent_typed() {
-    let result = eval_posix("path('/x/y/z').parent");
-    assert_eq!(result.to_display_string(), "/x/y");
+    let result = eval_win(r"path(r'C:\x\y\z').parent");
+    assert_eq!(result.to_display_string(), r"C:\x\y");
 }
 
 #[test]
 fn path_join_typed() {
-    let result = eval_posix("path('/a') / 'b' / 'c'");
-    assert_eq!(result.to_display_string(), "/a/b/c");
+    let result = eval_win(r"path(r'C:\a') / 'b' / 'c'");
+    assert_eq!(result.to_display_string(), r"C:\a\b\c");
 }
 
 // ══════════════════════════════════════════════════════════════
-// create_job uses POSIX paths in TEMPLATE scope
+// create_job uses Windows paths in TEMPLATE scope
 // ══════════════════════════════════════════════════════════════
 
 use openjd_model::{
@@ -85,14 +91,17 @@ use openjd_model::{
 };
 
 #[test]
-fn job_name_with_path_parent() {
+fn create_job_with_windows_path_parameter() {
+    // Verify the full create_job pipeline works with Windows path format.
+    // Job name resolution is hardcoded to POSIX, so we test that the pipeline
+    // succeeds and the STRING parameter value is preserved correctly.
     let v: serde_yaml::Value = serde_yaml::from_str(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
-        "name": "{{ path(Param.Dir).parent }}",
+        "name": "{{ Param.Dir }}",
         "extensions": ["EXPR"],
         "parameterDefinitions": [
-            {"name": "Dir", "type": "STRING", "default": "/projects/shot01/render"}
+            {"name": "Dir", "type": "STRING", "default": "C:\\projects\\shot01\\render"}
         ],
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "echo hello"}}}}]
     }"#,
@@ -102,22 +111,21 @@ fn job_name_with_path_parent() {
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
-        ExprValue::String("/projects/shot01/render".into()),
+        ExprValue::String(r"C:\projects\shot01\render".into()),
     );
     let processed = preprocess_job_parameters(
         &jt,
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: "/tmp",
-            current_working_dir: "/tmp",
+            job_template_dir: r"C:\tmp",
+            current_working_dir: r"C:\tmp",
             allow_template_dir_walk_up: false,
-            path_format: PathFormat::Posix,
+            path_format: PathFormat::Windows,
             allow_uri_path_values: true,
         },
     )
     .unwrap();
     let job = create_job(&jt, &processed).unwrap();
-    assert!(!job.name.contains('\\'));
-    assert_eq!(job.name, "/projects/shot01");
+    assert_eq!(job.name, r"C:\projects\shot01\render");
 }

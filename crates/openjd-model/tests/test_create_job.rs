@@ -56,15 +56,15 @@ impl TestDirs {
             cwd,
         }
     }
-    fn template(&self) -> &std::path::Path {
-        &self.template_dir
+    fn template(&self) -> &str {
+        self.template_dir.to_str().unwrap()
     }
-    fn cwd(&self) -> &std::path::Path {
-        &self.cwd
+    fn cwd(&self) -> &str {
+        self.cwd.to_str().unwrap()
     }
     /// Join a relative path and normalize separators to match the model's behavior.
-    fn join_normalized(base: &std::path::Path, relative: &str) -> String {
-        let joined = base.join(relative);
+    fn join_normalized(base: &str, relative: &str) -> String {
+        let joined = std::path::Path::new(base).join(relative);
         // The model normalizes all separators to the OS native
         joined
             .to_string_lossy()
@@ -314,7 +314,10 @@ fn test_path_user_value_joined_to_cwd() {
     )
     .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
-        let exp = td.cwd().join("my/output").to_string_lossy().to_string();
+        let exp = std::path::Path::new(td.cwd())
+            .join("my/output")
+            .to_string_lossy()
+            .to_string();
         assert_eq!(s, &exp);
     } else {
         panic!("Expected String");
@@ -327,7 +330,10 @@ fn test_path_absolute_user_value_unchanged() {
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH"}"#);
     let jt = decode_job_template(jt_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
-    let abs_path = td.cwd().join("absolute_test").to_string_lossy().to_string();
+    let abs_path = std::path::Path::new(td.cwd())
+        .join("absolute_test")
+        .to_string_lossy()
+        .to_string();
     input.insert(
         "DataDir".into(),
         openjd_expr::ExprValue::String(abs_path.clone()),
@@ -788,8 +794,8 @@ fn test_posix_absolute_path_recognized_with_posix_format() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/template"),
-            current_working_dir: std::path::Path::new("/cwd"),
+            job_template_dir: "/template",
+            current_working_dir: "/cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,
@@ -817,8 +823,8 @@ fn test_posix_path_is_relative_under_windows_format() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("C:\\template"),
-            current_working_dir: std::path::Path::new("C:\\cwd"),
+            job_template_dir: "C:\\template",
+            current_working_dir: "C:\\cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Windows,
             allow_uri_path_values: true,
@@ -849,8 +855,8 @@ fn test_windows_absolute_path_recognized_with_windows_format() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("C:\\template"),
-            current_working_dir: std::path::Path::new("C:\\cwd"),
+            job_template_dir: "C:\\template",
+            current_working_dir: "C:\\cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Windows,
             allow_uri_path_values: true,
@@ -878,8 +884,8 @@ fn test_windows_path_is_relative_under_posix_format() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/template"),
-            current_working_dir: std::path::Path::new("/cwd"),
+            job_template_dir: "/template",
+            current_working_dir: "/cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,
@@ -912,8 +918,8 @@ fn test_unc_path_recognized_as_absolute() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("C:\\template"),
-            current_working_dir: std::path::Path::new("C:\\cwd"),
+            job_template_dir: "C:\\template",
+            current_working_dir: "C:\\cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Windows,
             allow_uri_path_values: true,
@@ -952,8 +958,7 @@ fn test_relative_path_still_joined_with_expr() {
     .unwrap();
     match &result["LocalFile"].value {
         openjd_expr::ExprValue::String(s) => {
-            let exp = td
-                .cwd()
+            let exp = std::path::Path::new(td.cwd())
                 .join("subdir/file.txt")
                 .to_string_lossy()
                 .to_string();
@@ -3001,7 +3006,7 @@ fn test_relative_template_dir_with_walkup_false_errors() {
         &JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("relative/dir"),
+            job_template_dir: "relative/dir",
             current_working_dir: td.cwd(),
             allow_template_dir_walk_up: false,
             path_format: PathFormat::host(),
@@ -3027,7 +3032,7 @@ fn test_relative_template_dir_with_walkup_true_succeeds() {
         &JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("relative/dir"),
+            job_template_dir: "relative/dir",
             current_working_dir: td.cwd(),
             allow_template_dir_walk_up: true,
             path_format: PathFormat::host(),
@@ -3152,7 +3157,7 @@ fn test_path_default_relative_template_dir() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("relative/template"),
+            job_template_dir: "relative/template",
             current_working_dir: td.cwd(),
             allow_template_dir_walk_up: false,
             path_format: PathFormat::host(),
@@ -3687,8 +3692,8 @@ fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,
@@ -3745,8 +3750,8 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,
@@ -3856,8 +3861,8 @@ fn range_expression_evaluation_error_is_caught() {
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,

@@ -583,8 +583,8 @@ fn create_chunked_job(template_json: &str) -> openjd_model::job::Job {
         &JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: openjd_expr::path_mapping::PathFormat::Posix,
             allow_uri_path_values: true,

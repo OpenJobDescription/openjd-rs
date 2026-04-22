@@ -757,7 +757,10 @@ impl<'de> Deserialize<'de> for FlexFloat {
 
 impl std::fmt::Display for FlexFloat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0.fract() == 0.0 && self.0 >= i64::MIN as f64 && self.0 <= i64::MAX as f64 {
+        // Note: strict `<` on the upper bound because i64::MAX is not exactly representable
+        // as f64 — `i64::MAX as f64` rounds up to 9223372036854775808.0, and casting that
+        // back via `as i64` would saturate to i64::MAX, producing a wrong display value.
+        if self.0.fract() == 0.0 && self.0 >= i64::MIN as f64 && self.0 < i64::MAX as f64 {
             write!(f, "{}", self.0 as i64)
         } else {
             write!(f, "{}", self.0)

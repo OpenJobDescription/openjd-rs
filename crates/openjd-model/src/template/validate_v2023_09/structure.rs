@@ -780,7 +780,7 @@ fn validate_combination_expr(
                 prev_was_name = true;
             }
             Token::Star => {
-                if !prev_was_name && !matches!(tokens.get(i.wrapping_sub(1)), Some(Token::RParen)) {
+                if !(prev_was_name || i > 0 && matches!(tokens.get(i - 1), Some(Token::RParen))) {
                     errors.add(path, "operator '*' without left operand.");
                     return;
                 }

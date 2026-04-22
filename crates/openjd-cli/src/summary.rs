@@ -97,8 +97,8 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         &input_values,
         &env_templates,
         &openjd_model::PathParameterOptions {
-            job_template_dir: &job_template_dir,
-            current_working_dir: &current_working_dir,
+            job_template_dir: job_template_dir.to_str().unwrap_or("."),
+            current_working_dir: current_working_dir.to_str().unwrap_or("."),
             path_format: openjd_expr::path_mapping::PathFormat::host(),
             allow_template_dir_walk_up: false,
             allow_uri_path_values: true,

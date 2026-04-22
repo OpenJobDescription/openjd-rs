@@ -1356,8 +1356,8 @@ fn float_param_large_value_roundtrip() {
         &openjd_model::JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: td.path(),
-            current_working_dir: td.path(),
+            job_template_dir: td.path().to_str().unwrap(),
+            current_working_dir: td.path().to_str().unwrap(),
             allow_template_dir_walk_up: false,
             path_format: PathFormat::host(),
             allow_uri_path_values: true,

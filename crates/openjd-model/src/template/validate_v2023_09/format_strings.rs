@@ -9,7 +9,6 @@
 //! EXPR (full expressions) — the evaluator handles both.
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
 
 use openjd_expr::eval::ParsedExpression;
 use openjd_expr::function_library::FunctionLibrary;
@@ -1011,15 +1010,6 @@ fn validate_let_bindings(
         if enclosing_names.contains(name) {
             errors.add(&b_path, format!("'{name}' shadows enclosing scope."));
         }
-        if expr.contains(name) {
-            let re = regex::Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap();
-            static STRING_LITERAL_RE: LazyLock<regex::Regex> =
-                LazyLock::new(|| regex::Regex::new(r#""[^"]*"|'[^']*'"#).unwrap());
-            let stripped = STRING_LITERAL_RE.replace_all(expr, "");
-            if re.is_match(&stripped) {
-                errors.add(&b_path, format!("'{name}' references itself."));
-            }
-        }
         out_names.insert(name.to_string());
 
         // Evaluate the expression for type checking (Phase 1: static type check).
@@ -1030,6 +1020,11 @@ fn validate_let_bindings(
         let prefix = &binding[..expr_start];
         match ParsedExpression::new(expr) {
             Ok(parsed) => {
+                // Check self-reference using the parsed AST's accessed symbols
+                // rather than heuristic regex matching on the raw expression string.
+                if parsed.accessed_symbols().contains(name) {
+                    errors.add(&b_path, format!("'{name}' references itself."));
+                }
                 match parsed.with_library(lib).evaluate(&[symtab as &SymbolTable]) {
                     Ok(result) => {
                         // Set the binding in the symtab with its inferred value/type

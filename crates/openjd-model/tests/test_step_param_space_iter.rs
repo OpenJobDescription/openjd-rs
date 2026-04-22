@@ -35,8 +35,8 @@ fn create_and_iterate(
         &input,
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp/template"),
-            current_working_dir: std::path::Path::new("/tmp/cwd"),
+            job_template_dir: "/tmp/template",
+            current_working_dir: "/tmp/cwd",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::host(),
             allow_uri_path_values: true,
@@ -83,8 +83,8 @@ fn test_no_param_space() {
         &JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::host(),
             allow_uri_path_values: true,
@@ -476,8 +476,8 @@ fn test_contains_check() {
         &JobParameterInputValues::new(),
         &[],
         &openjd_model::PathParameterOptions {
-            job_template_dir: std::path::Path::new("/tmp"),
-            current_working_dir: std::path::Path::new("/tmp"),
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::host(),
             allow_uri_path_values: true,

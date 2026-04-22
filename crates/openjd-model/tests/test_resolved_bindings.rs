@@ -17,8 +17,8 @@ impl TestDirs {
         let dir = root.path().to_path_buf();
         Self { _root: root, dir }
     }
-    fn path(&self) -> &std::path::Path {
-        &self.dir
+    fn path(&self) -> &str {
+        self.dir.to_str().unwrap()
     }
 }
 
