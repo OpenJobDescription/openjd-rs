@@ -4,10 +4,70 @@ use crate::data_cache::AsyncDataCache;
 use crate::hash::{hash_data, WHOLE_FILE_CHUNK_SIZE};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, Manifest};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
+
+/// Concurrent upload deduplication map. When multiple tasks hash to the same
+/// value, only the first one uploads; the rest subscribe and wait.
+///
+/// The lock is held only for the brief HashMap insert/lookup (nanoseconds),
+/// so this does not become a bottleneck even with large thread pools. The
+/// actual upload happens outside the lock, and waiters use a lock-free
+/// broadcast channel.
+type UploadDedup = Arc<Mutex<HashMap<String, tokio::sync::broadcast::Sender<()>>>>;
+
+/// Try to upload data for `key`, deduplicating concurrent uploads of the same key.
+/// Returns true if this call performed the upload, false if another task did.
+async fn dedup_upload(
+    dedup: &UploadDedup,
+    key: &str,
+    data_cache: &Arc<dyn AsyncDataCache>,
+    hash: &str,
+    alg: &str,
+    data: Vec<u8>,
+) -> crate::Result<bool> {
+    // Fast path: check if already in the data cache (from a previous operation).
+    if data_cache.object_exists(hash, alg).await.unwrap_or(false) {
+        return Ok(false);
+    }
+
+    // Check the dedup map (lock held briefly).
+    let mut rx = {
+        let mut map = dedup.lock().unwrap();
+        if let Some(tx) = map.get(key) {
+            // Another task is already uploading this hash — subscribe and wait.
+            Some(tx.subscribe())
+        } else {
+            // We are the first — insert a broadcast channel and proceed.
+            let (tx, _) = tokio::sync::broadcast::channel(1);
+            map.insert(key.to_string(), tx);
+            None
+        }
+    };
+
+    if let Some(ref mut rx) = rx {
+        // Wait for the uploading task to finish, then return "not uploaded by us".
+        let _ = rx.recv().await;
+        return Ok(false);
+    }
+
+    // We own this hash — upload it.
+    let result = data_cache.put_object(hash, alg, data).await;
+
+    // Notify waiters and remove from map (lock held briefly).
+    {
+        let mut map = dedup.lock().unwrap();
+        if let Some(tx) = map.remove(key) {
+            let _ = tx.send(());
+        }
+    }
+
+    result.map_err(crate::SnapshotError::Io)?;
+    Ok(true)
+}
 
 #[derive(Default)]
 pub struct HashUploadOptions {
@@ -333,6 +393,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
     let memory_pool = Arc::new(MemoryPool::new(max_memory));
     let worker_semaphore = Arc::new(tokio::sync::Semaphore::new(num_workers));
+    let upload_dedup: UploadDedup = Arc::new(Mutex::new(HashMap::new()));
 
     let file_results: Vec<crate::Result<(usize, FileResult)>> = rt.block_on(async {
         let mut handles = Vec::new();
@@ -348,6 +409,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             let alg = alg_str.to_string();
             let cs = chunk_size;
             let start = start_time;
+            let dedup = upload_dedup.clone();
 
             let handle = tokio::spawn(async move {
                 let _worker_permit = worker_sem
@@ -365,11 +427,12 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                 let multipart_threshold = 2 * part_size as u64;
 
                 let fr = if item.use_chunks {
-                    process_chunked_async(item.path, cs as u64, alg, dc).await?
+                    process_chunked_async(item.path, cs as u64, alg, dc, dedup).await?
                 } else if item.file_size >= multipart_threshold {
-                    process_whole_multipart(item.path, item.file_size, alg, dc, part_size).await?
+                    process_whole_multipart(item.path, item.file_size, alg, dc, part_size, dedup)
+                        .await?
                 } else {
-                    process_whole_async(item.path, item.file_size, alg, dc).await?
+                    process_whole_async(item.path, item.file_size, alg, dc, dedup).await?
                 };
 
                 // Update progress
@@ -505,6 +568,7 @@ async fn process_whole_async(
     file_size: u64,
     alg_str: String,
     data_cache: Arc<dyn AsyncDataCache>,
+    dedup: UploadDedup,
 ) -> crate::Result<FileResult> {
     // Stage 1: CPU-bound read + hash
     let (hash, data) = tokio::task::spawn_blocking(move || {
@@ -517,20 +581,9 @@ async fn process_whole_async(
     .await
     .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
-    // Stage 2: Async I/O upload
-    let uploaded = if !data_cache
-        .object_exists(&hash, &alg_str)
-        .await
-        .unwrap_or(false)
-    {
-        data_cache
-            .put_object(&hash, &alg_str, data)
-            .await
-            .map_err(crate::SnapshotError::Io)?;
-        true
-    } else {
-        false
-    };
+    // Stage 2: Deduplicated upload
+    let key = format!("{hash}.{alg_str}");
+    let uploaded = dedup_upload(&dedup, &key, &data_cache, &hash, &alg_str, data).await?;
 
     Ok(FileResult::Whole {
         hash,
@@ -545,6 +598,7 @@ async fn process_whole_multipart(
     alg_str: String,
     data_cache: Arc<dyn AsyncDataCache>,
     part_size: usize,
+    dedup: UploadDedup,
 ) -> crate::Result<FileResult> {
     // Stage 1: Streaming hash
     let path2 = path.clone();
@@ -569,7 +623,7 @@ async fn process_whole_multipart(
     .await
     .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
-    // Stage 2: Check if already exists
+    // Stage 2: Check data cache, then dedup map
     if data_cache
         .object_exists(&hash, &alg_str)
         .await
@@ -582,58 +636,94 @@ async fn process_whole_multipart(
         });
     }
 
-    // Stage 3: Multipart upload
-    let upload_id = data_cache
-        .create_multipart_upload(&hash, &alg_str)
-        .await
-        .map_err(crate::SnapshotError::Io)?;
+    let key = format!("{hash}.{alg_str}");
+    let rx = {
+        let mut map = dedup.lock().unwrap();
+        if let Some(tx) = map.get(&key) {
+            Some(tx.subscribe())
+        } else {
+            let (tx, _) = tokio::sync::broadcast::channel(1);
+            map.insert(key.clone(), tx);
+            None
+        }
+    };
 
-    let num_parts = (file_size as usize).div_ceil(part_size) as i32;
-    let mut upload_handles = Vec::new();
+    if let Some(mut rx) = rx {
+        let _ = rx.recv().await;
+        return Ok(FileResult::Whole {
+            hash,
+            uploaded: false,
+            size: file_size,
+        });
+    }
 
-    for part_num in 1..=num_parts {
-        let offset = (part_num as u64 - 1) * part_size as u64;
-        let this_part_size = std::cmp::min(part_size as u64, file_size - offset) as usize;
-        let path_clone = path.clone();
-        let dc = data_cache.clone();
-        let h = hash.clone();
-        let a = alg_str.clone();
-        let uid = upload_id.clone();
-
-        upload_handles.push(tokio::spawn(async move {
-            let part_data = tokio::task::spawn_blocking(move || {
-                use std::io::{Read, Seek, SeekFrom};
-                let mut f = std::fs::File::open(&path_clone)?;
-                f.seek(SeekFrom::Start(offset))?;
-                let mut buf = vec![0u8; this_part_size];
-                f.read_exact(&mut buf)?;
-                Ok::<_, std::io::Error>(buf)
-            })
+    // Stage 3: Multipart upload (we own this hash)
+    let upload_result = async {
+        let upload_id = data_cache
+            .create_multipart_upload(&hash, &alg_str)
             .await
-            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
             .map_err(crate::SnapshotError::Io)?;
 
-            let etag = dc
-                .upload_part(&h, &a, &uid, part_num, part_data)
+        let num_parts = (file_size as usize).div_ceil(part_size) as i32;
+        let mut upload_handles = Vec::new();
+
+        for part_num in 1..=num_parts {
+            let offset = (part_num as u64 - 1) * part_size as u64;
+            let this_part_size = std::cmp::min(part_size as u64, file_size - offset) as usize;
+            let path_clone = path.clone();
+            let dc = data_cache.clone();
+            let h = hash.clone();
+            let a = alg_str.clone();
+            let uid = upload_id.clone();
+
+            upload_handles.push(tokio::spawn(async move {
+                let part_data = tokio::task::spawn_blocking(move || {
+                    use std::io::{Read, Seek, SeekFrom};
+                    let mut f = std::fs::File::open(&path_clone)?;
+                    f.seek(SeekFrom::Start(offset))?;
+                    let mut buf = vec![0u8; this_part_size];
+                    f.read_exact(&mut buf)?;
+                    Ok::<_, std::io::Error>(buf)
+                })
                 .await
+                .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                 .map_err(crate::SnapshotError::Io)?;
-            Ok::<_, crate::SnapshotError>((part_num, etag))
-        }));
-    }
 
-    let mut parts: Vec<(i32, String)> = Vec::new();
-    for handle in upload_handles {
-        let (part_num, etag) = handle
+                let etag = dc
+                    .upload_part(&h, &a, &uid, part_num, part_data)
+                    .await
+                    .map_err(crate::SnapshotError::Io)?;
+                Ok::<_, crate::SnapshotError>((part_num, etag))
+            }));
+        }
+
+        let mut parts: Vec<(i32, String)> = Vec::new();
+        for handle in upload_handles {
+            let (part_num, etag) = handle
+                .await
+                .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
+            parts.push((part_num, etag));
+        }
+        parts.sort_by_key(|(num, _)| *num);
+
+        data_cache
+            .complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
             .await
-            .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
-        parts.push((part_num, etag));
-    }
-    parts.sort_by_key(|(num, _)| *num);
+            .map_err(crate::SnapshotError::Io)?;
 
-    data_cache
-        .complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
-        .await
-        .map_err(crate::SnapshotError::Io)?;
+        Ok::<_, crate::SnapshotError>(())
+    }
+    .await;
+
+    // Notify waiters and clean up dedup map regardless of success/failure
+    {
+        let mut map = dedup.lock().unwrap();
+        if let Some(tx) = map.remove(&key) {
+            let _ = tx.send(());
+        }
+    }
+
+    upload_result?;
 
     Ok(FileResult::Whole {
         hash,
@@ -647,6 +737,7 @@ async fn process_chunked_async(
     chunk_size: u64,
     alg_str: String,
     data_cache: Arc<dyn AsyncDataCache>,
+    dedup: UploadDedup,
 ) -> crate::Result<FileResult> {
     // Stage 1: Read and hash all chunks in blocking thread
     let chunks: Vec<(String, Vec<u8>)> = tokio::task::spawn_blocking(move || {
@@ -684,21 +775,17 @@ async fn process_chunked_async(
     .await
     .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
 
-    // Stage 2: Upload chunks in parallel
+    // Stage 2: Upload chunks with deduplication
     let hashed_bytes: u64 = chunks.iter().map(|(_, c)| c.len() as u64).sum();
     let mut upload_handles = Vec::with_capacity(chunks.len());
     for (hash, chunk) in chunks {
         let dc = data_cache.clone();
         let alg = alg_str.clone();
+        let dd = dedup.clone();
         upload_handles.push(tokio::spawn(async move {
-            if !dc.object_exists(&hash, &alg).await.unwrap_or(false) {
-                dc.put_object(&hash, &alg, chunk)
-                    .await
-                    .map_err(crate::SnapshotError::Io)?;
-                Ok::<_, crate::SnapshotError>((hash, true))
-            } else {
-                Ok((hash, false))
-            }
+            let key = format!("{hash}.{alg}");
+            let uploaded = dedup_upload(&dd, &key, &dc, &hash, &alg, chunk).await?;
+            Ok::<_, crate::SnapshotError>((hash, uploaded))
         }));
     }
     let mut hashes = Vec::with_capacity(upload_handles.len());

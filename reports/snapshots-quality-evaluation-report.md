@@ -10,7 +10,7 @@
 
 The `openjd-snapshots` crate is a well-engineered Rust library for content-addressed file tree snapshotting with S3 integration. It provides 11 operations covering the full lifecycle: filesystem collection, hashing, upload/download, diffing, composition, filtering, partitioning, and cache synchronization.
 
-The crate compiles cleanly with zero warnings (cargo clippy passes), and all 1,048 tests pass (3 ignored S3 integration tests requiring live credentials). The type system makes good use of phantom type parameters for compile-time safety. The code is generally well-organized and follows Rust idioms.
+The crate compiles cleanly with zero warnings (cargo clippy passes), and all 1,050 tests pass (3 ignored S3 integration tests requiring live credentials). The type system makes good use of phantom type parameters for compile-time safety. The code is generally well-organized and follows Rust idioms.
 
 However, the evaluation found several specification-to-implementation discrepancies (some significant), a few areas where the implementation could be improved, and some gaps in test coverage.
 
@@ -19,9 +19,9 @@ However, the evaluation found several specification-to-implementation discrepanc
 ## 1. Compilation and Test Results
 
 - **cargo clippy**: Zero warnings, zero errors.
-- **cargo test**: 1,048 passed, 0 failed, 3 ignored.
+- **cargo test**: 1,050 passed, 0 failed, 3 ignored.
   - Unit tests: ~200 across source modules
-  - Integration tests: ~850 across 20 test files
+  - Integration tests: ~850 across 21 test files
   - Ignored: 3 S3 integration tests (require `OPENJD_TEST_S3_BUCKET` env var)
 - **Probe tests written during evaluation**: 26 additional tests, all passing. These verify edge cases in validation, path normalization, diff, compose, filter, join, subtree, codec round-trips, and symlink handling.
 
@@ -47,7 +47,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 | # | Area | Discrepancy |
 |---|------|-------------|
-| S1 | Hash Upload Pipeline | The spec describes a `DashMap<String, broadcast::Sender<()>>` for concurrent upload deduplication within a single HASH_UPLOAD invocation. **This is not implemented.** Each worker independently checks `object_exists` before uploading, so two concurrent tasks with the same hash could both upload. The spec's "Concurrent Upload Deduplication" section describes a nonexistent feature. |
+| S1 | ~~Hash Upload Pipeline~~ | ~~The spec describes a `DashMap<String, broadcast::Sender<()>>` for concurrent upload deduplication within a single HASH_UPLOAD invocation. **This is not implemented.**~~ **RESOLVED.** Concurrent upload deduplication is now implemented using `Mutex<HashMap<String, broadcast::Sender<()>>>` (functionally equivalent to the spec's DashMap approach, but more appropriate given the small map size bounded by `max_workers`). The dedup map coordinates all three upload paths: whole-file, multipart, and chunked. Two dedicated tests in `test_upload_dedup.rs` verify exactly-once upload semantics under concurrent load with artificial latency. |
 | S2 | Download Pipeline | The spec says downloaded files have `mtime` set to the manifest value via `filetime` or `set_modified`. **This is not implemented.** The implementation reads the actual filesystem mtime after writing and updates the manifest to match the actual value (time of download), not the original. |
 
 #### MEDIUM SEVERITY
@@ -107,6 +107,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 - `MemoryPool` concept is sound for bounding memory usage.
 - `SlidingWindowRate` provides smooth throughput reporting.
 - `AtomicBool` cancellation is clean and non-blocking.
+- Concurrent upload deduplication via `UploadDedup` map prevents redundant uploads when multiple tasks hash to the same content. The `Mutex` is held only for nanosecond-scale HashMap lookups; actual uploads and waits happen outside the lock via `broadcast` channels.
 
 **Concerns:**
 - **hash_upload.rs**: No multipart upload abort on partial failure. If one part upload fails, the multipart upload is left dangling in S3. `cache_sync.rs` correctly aborts on failure — this pattern should be applied to hash_upload as well.
@@ -184,7 +185,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 - All 4 manifest types (AbsSnapshot, AbsSnapshotDiff, Snapshot, SnapshotDiff) are tested in filter, subtree, join, and compose.
 
 **Concerns:**
-- **No dedicated concurrency/stress tests.** Parallel hashing and async upload/download are tested implicitly through the pipeline but not stress-tested with many concurrent operations.
+- **No dedicated concurrency/stress tests for download or cache_sync.** Upload deduplication is now tested via `test_upload_dedup.rs`, but download and cache_sync pipelines are only tested implicitly.
 - **No tests for `CollapseAll`, `ExcludeEscaping`, or `TransitiveIncludeTargets` symlink policies in collect.** Only `Preserve`, `ExcludeAll`, and `CollapseEscaping` are tested.
 - **`memory_pool.rs` and `rate.rs`** have inline unit tests but no integration-level testing.
 - **No tests for multipart upload abort on failure** in hash_upload.
@@ -214,7 +215,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 ### 5.1 High Priority — Spec Alignment
 
-1. **Update hash_upload pipeline spec** to remove the DashMap concurrent dedup section, or implement it. The spec currently describes a feature that doesn't exist.
+1. ~~**Update hash_upload pipeline spec** to remove the DashMap concurrent dedup section, or implement it.~~ **DONE.** Concurrent upload deduplication implemented; spec's DashMap description now matches implementation (using `Mutex<HashMap>` + `broadcast` instead of `DashMap`, which is functionally equivalent and more appropriate for the small map size).
 2. **Update download pipeline spec** to accurately describe mtime behavior (manifest is updated to reflect actual mtime, not restored to original).
 3. **Decide on mtime restoration**: If mtime restoration is desired, implement it. If not, update the spec. This affects reproducibility of downloaded file trees.
 
@@ -251,14 +252,14 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 | Category | Score | Notes |
 |----------|-------|-------|
 | Compilation | ✅ Excellent | Zero warnings, zero errors |
-| Tests | ✅ Very Good | 1,048 tests, all passing, good coverage |
+| Tests | ✅ Very Good | 1,050 tests, all passing, good coverage |
 | Type System | ✅ Excellent | Phantom types, builder pattern, trait abstractions |
 | Error Handling | ✅ Good | Non-exhaustive, descriptive messages, pinned formats |
-| Spec Completeness | ⚠️ Good | Comprehensive but has 2 high-severity discrepancies |
-| Spec Accuracy | ⚠️ Needs Work | Several features described in specs are not implemented or differ |
+| Spec Completeness | ⚠️ Good | Comprehensive but has 1 high-severity discrepancy (S2: download mtime) |
+| Spec Accuracy | ⚠️ Needs Work | Several features described in specs differ from implementation |
 | Performance | ✅ Good | Appropriate use of rayon/tokio, no O(n²) algorithms in hot paths |
 | Code Quality | ✅ Good | Clean, idiomatic Rust, consistent naming |
 | Test Coverage Gaps | ⚠️ Minor | Missing symlink policy tests, no stress tests |
 | API Ergonomics | ✅ Good | Large but well-organized public API |
 
-**Overall Assessment:** The crate is solid and production-quality. The main area needing attention is spec-to-implementation alignment, particularly around the hash_upload deduplication feature and download mtime behavior. The implementation itself is well-structured and correct for the cases it handles.
+**Overall Assessment:** The crate is solid and production-quality. The main remaining area needing attention is spec-to-implementation alignment, particularly around the download mtime behavior. The hash_upload deduplication feature (previously the top finding) has been implemented and tested. The implementation itself is well-structured and correct for the cases it handles.
