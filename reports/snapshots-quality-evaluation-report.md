@@ -54,9 +54,9 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 | # | Area | Discrepancy |
 |---|------|-------------|
-| S3 | Hash Upload Pipeline | The spec says "1 permit = 1 byte" for the MemoryPool. The implementation uses `PERMIT_GRANULARITY = 4096` (1 permit = 4KB) to avoid u32 overflow. The spec was never updated. |
+| S3 | ~~Hash Upload Pipeline~~ | ~~The spec says "1 permit = 1 byte" for the MemoryPool. The implementation uses `PERMIT_GRANULARITY = 4096` (1 permit = 4KB) to avoid u32 overflow. The spec was never updated.~~ **RESOLVED.** The spec now documents "1 permit = 4KB (`PERMIT_GRANULARITY = 4096`)" with an explanation that the coarser granularity avoids `u32` overflow, supporting pools up to ~16TB. The key design point was also updated to reflect `max_memory_bytes / 4096` permits. |
 | S4 | Download Pipeline | The spec claims downloads are "memory bounded by MemoryPool." The implementation acquires `pool.acquire(1)` (1 byte) for every download regardless of file size, making memory bounding effectively a no-op. Small whole-file downloads buffer the entire file in memory via `get_object`. |
-| S5 | Download Pipeline | The spec says downloads use temp files like `myfile.dat.tmpXXXXXX` (random suffix). The implementation uses `myfile.dat.tmp{PID}` (deterministic). For multipart and chunked downloads, the implementation writes directly to the target path with no temp file, which is not atomic. |
+| S5 | ~~Download Pipeline~~ | ~~The spec says downloads use temp files like `myfile.dat.tmpXXXXXX` (random suffix). The implementation uses `myfile.dat.tmp{PID}` (deterministic). For multipart and chunked downloads, the implementation writes directly to the target path with no temp file, which is not atomic.~~ **RESOLVED.** All three download paths (small whole-file, multipart, and chunked) now use temp files with random hex suffixes via `temp_download_path()` and atomic rename via `atomic_replace()`. The spec was updated to document `myfile.dat.tmp<random_hex>` and note that atomicity applies to all download paths. |
 | S6 | Symlink Handling | The spec says "symlink targets are stored relative to the manifest root." With `Preserve` policy, the implementation stores the absolute resolved target path. Confirmed by probe test `collect_preserve_stores_absolute_target`. |
 | S7 | Hash Upload Pipeline | The spec describes cache checks happening "inside the tokio task." The implementation splits this into two separate phases before task spawning: Phase 1 (hash cache lookup, synchronous) and Phase 2 (parallel `object_exists` via `FuturesUnordered`). |
 
@@ -223,7 +223,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 4. **Add multipart upload abort on failure** in `hash_upload.rs`. The `cache_sync.rs` implementation already does this correctly — apply the same pattern.
 5. **Fix download memory bounding**: Replace `pool.acquire(1)` with `pool.acquire(file_size)` or a reasonable estimate, matching the pattern used in hash_upload and cache_sync.
-6. **Update MemoryPool spec** to reflect the 4KB granularity (not 1-byte-per-permit).
+6. ~~**Update MemoryPool spec** to reflect the 4KB granularity (not 1-byte-per-permit).~~ **DONE.**
 7. **Clarify symlink target storage format** in the spec. Document that `Preserve` policy stores absolute paths, not paths relative to manifest root.
 8. **Remove `abs_normalized_no_follow`** or rename it to make the identical behavior explicit. A comment explaining why both exist would suffice.
 9. **Use the `_symlink_policy` parameter** in `subtree.rs::expand_dir_symlink`, or remove it if nested symlinks should always be resolved.

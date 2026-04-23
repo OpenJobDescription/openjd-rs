@@ -5,11 +5,37 @@ use crate::hash::hash_data;
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, FileEntry, Manifest, SymlinkPolicy};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 use tracing::debug;
+
+/// Generate a temp file path with a random suffix: `<path>.tmp<random_hex>`.
+fn temp_download_path(target: &Path) -> PathBuf {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u64(std::process::id() as u64);
+    let suffix = hasher.finish();
+    target.with_extension(format!(
+        "{}tmp{:08x}",
+        target
+            .extension()
+            .map(|e| format!("{}.", e.to_string_lossy()))
+            .unwrap_or_default(),
+        suffix
+    ))
+}
+
+/// Atomically move `tmp` to `target`, removing `tmp` on error.
+fn atomic_replace(tmp: &Path, target: &Path) -> std::io::Result<()> {
+    if let Err(e) = std::fs::rename(tmp, target) {
+        let _ = std::fs::remove_file(tmp);
+        return Err(e);
+    }
+    Ok(())
+}
 
 /// Pre-allocate a file to the given size using platform-specific sparse allocation.
 ///
@@ -460,8 +486,9 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                 // For multipart files, write directly to file at offsets
                 let already_written;
                 let data = if let Some(chunk_hashes) = file_chunk_hashes {
-                    // Write chunks directly to file at offsets
-                    let tp = target_path.clone();
+                    // Write chunks to a temp file, then atomic rename
+                    let tmp_path = temp_download_path(&target_path);
+                    let tp = tmp_path.clone();
                     let fs = file_size;
                     tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
                         .await
@@ -489,7 +516,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                                 let dc = dc.clone();
                                 let alg = alg.clone();
                                 let h = h.clone();
-                                let tp = target_path.clone();
+                                let tp = tmp_path.clone();
                                 chunk_handles.push(tokio::spawn(async move {
                                     dc.stream_range_to_file_at_offset(
                                         &h,
@@ -506,7 +533,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                             // Small chunk - single GetObject with inline hash verification
                             let dc = dc.clone();
                             let alg = alg.clone();
-                            let tp = target_path.clone();
+                            let tp = tmp_path.clone();
                             let off = file_offset;
                             let expected_hash = h.clone();
                             chunk_handles.push(tokio::spawn(async move {
@@ -541,6 +568,13 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                             .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                             .map_err(crate::SnapshotError::Io)?;
                     }
+                    // Atomic rename from temp to target
+                    let tmp = tmp_path.clone();
+                    let tgt = target_path.clone();
+                    tokio::task::spawn_blocking(move || atomic_replace(&tmp, &tgt))
+                        .await
+                        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+                        .map_err(crate::SnapshotError::Io)?;
                     already_written = true;
                     Vec::new()
                 } else if let Some(ref hash) = file_hash {
@@ -589,16 +623,12 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         if let Some(parent) = tp.parent() {
                             std::fs::create_dir_all(parent)?;
                         }
-                        let tmp = tp.with_extension(format!("tmp{}", std::process::id()));
+                        let tmp = temp_download_path(&tp);
                         if let Err(e) = std::fs::write(&tmp, &data) {
                             let _ = std::fs::remove_file(&tmp);
                             return Err(e);
                         }
-                        if let Err(e) = std::fs::rename(&tmp, &tp) {
-                            let _ = std::fs::remove_file(&tmp);
-                            return Err(e);
-                        }
-                        Ok(())
+                        atomic_replace(&tmp, &tp)
                     })
                     .await
                     .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
@@ -751,15 +781,16 @@ async fn download_multipart_to_file(
     part_size: usize,
     target_path: std::path::PathBuf,
 ) -> crate::Result<()> {
-    // Pre-allocate sparse file
-    let tp = target_path.clone();
+    // Pre-allocate sparse temp file
+    let tmp_path = temp_download_path(&target_path);
+    let tp = tmp_path.clone();
     let fs = file_size;
     tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
         .await
         .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
         .map_err(crate::SnapshotError::Io)?;
 
-    // Download parts in parallel, write each at its offset
+    // Download parts in parallel, write each at its offset in the temp file
     let num_parts = (file_size as usize).div_ceil(part_size);
     let mut handles = Vec::with_capacity(num_parts);
 
@@ -769,7 +800,7 @@ async fn download_multipart_to_file(
         let dc = data_cache.clone();
         let h = hash.to_string();
         let a = alg_str.to_string();
-        let tp = target_path.clone();
+        let tp = tmp_path.clone();
 
         handles.push(tokio::spawn(async move {
             dc.stream_range_to_file_at_offset(&h, &a, start, end, &tp, start)
@@ -784,6 +815,14 @@ async fn download_multipart_to_file(
             .await
             .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
     }
+
+    // Atomic rename from temp to target
+    let tmp = tmp_path;
+    let tgt = target_path;
+    tokio::task::spawn_blocking(move || atomic_replace(&tmp, &tgt))
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+        .map_err(crate::SnapshotError::Io)?;
 
     Ok(())
 }

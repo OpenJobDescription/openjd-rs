@@ -33,7 +33,7 @@ The Rust implementation replaces the Python two-thread-pool + manual memory pool
 
 ### Key Design Points
 
-1. **`tokio::sync::Semaphore`** with `max_memory_bytes` permits replaces the Python memory pool
+1. **`tokio::sync::Semaphore`** with `max_memory_bytes / 4096` permits (4KB granularity) replaces the Python memory pool
 2. **`tokio::task::spawn_blocking`** for disk I/O (read + hash) keeps the async runtime responsive
 3. **`tokio::spawn`** for async S3 uploads via `aws-sdk-s3`
 4. **`DashMap`** for concurrent upload deduplication instead of `Dict + Lock`
@@ -56,7 +56,7 @@ impl MemoryPool {
 }
 ```
 
-- 1 permit = 1 byte. Callers acquire permits before reading data, release by dropping the permit after upload.
+- 1 permit = 4KB (`PERMIT_GRANULARITY = 4096`). Allocations are rounded up to this granularity. This coarser granularity avoids `u32` overflow in `acquire_many_owned`, supporting pools up to ~16TB with `u32` permits.
 - If `size > max_bytes`, it is clamped so a single large allocation can proceed once all other permits are released.
 - Natural backpressure: when the semaphore is exhausted, `acquire()` awaits until uploads free memory.
 

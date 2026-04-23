@@ -52,9 +52,11 @@ for dir_path in sorted_dirs {
 
 All downloads are atomic to ensure target files are never partial or corrupt:
 
-1. **Temporary file creation:** Download to temp file beside target (e.g., `myfile.dat.tmpXXXXXX`)
+1. **Temporary file creation:** Download to temp file beside target (e.g., `myfile.dat.tmp<random_hex>`)
 2. **Atomic move:** `std::fs::rename()` atomically moves temp to final location
 3. **Error cleanup:** Temp file deleted on any error
+
+This applies to all three download paths: small whole-file, multipart, and chunked.
 
 ## S3 Multi-Part Download
 
