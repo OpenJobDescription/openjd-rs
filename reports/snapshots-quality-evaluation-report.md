@@ -64,7 +64,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 | # | Area | Discrepancy |
 |---|------|-------------|
-| S8 | Download Pipeline | The spec shows interleaved directory creation with file download submissions. The implementation creates all directories first, then processes all files separately. |
+| S8 | ~~Download Pipeline~~ | ~~The spec shows interleaved directory creation with file download submissions. The implementation creates all directories first, then processes all files separately.~~ **RESOLVED.** Directory creation is now interleaved with file download submission, matching the spec and Python design. Files are grouped by parent directory; each directory is created once (deduplicated via HashSet) before its files are queued. Redundant per-file `create_dir_all` calls removed from download tasks. |
 | S9 | Compose | The spec describes a unified trie approach for both `compose_snapshot_with_diffs` and `compose_diffs`. The implementation uses different deletion strategies: `compose_snapshot_with_diffs` uses `delete_file` (removes nodes entirely) while `compose_diffs` uses `mark_deleted` with reconciliation. |
 | S10 | Compose | The spec doesn't describe how directories are tracked in `compose_diffs`. The implementation uses a separate `HashMap<String, bool>` (`dir_state`) independent of the trie. |
 

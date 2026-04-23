@@ -2150,6 +2150,10 @@ async fn test_cancel_action_with_mark_failed() {
     let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
     let statuses_clone = statuses.clone();
 
+    // Signal when the Failed callback fires so we know the malformed command was processed.
+    let failed_notify = Arc::new(tokio::sync::Notify::new());
+    let failed_notify_clone = failed_notify.clone();
+
     let config = SessionConfig {
         session_id: "mark-failed-test".into(),
         job_parameter_values: HashMap::new(),
@@ -2157,6 +2161,9 @@ async fn test_cancel_action_with_mark_failed() {
         retain_working_dir: false,
         callback: Some(Box::new(move |_sid, status| {
             statuses_clone.lock().unwrap().push(status.state);
+            if status.state == ActionState::Failed {
+                failed_notify_clone.notify_one();
+            }
         })),
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
@@ -2167,27 +2174,20 @@ async fn test_cancel_action_with_mark_failed() {
     };
     let mut s = Session::with_config(config).unwrap();
 
-    // Spawn a task that cancels with mark_action_failed after the action starts
+    // The malformed openjd_env command triggers CancelMarkFailed which cancels
+    // the action and marks it as Failed. The parent token cancel is only a
+    // safety net to kill the `sleep 30` if something goes wrong.
     let token_clone = parent_token.clone();
     tokio::spawn(async move {
-        // Allow enough time for the malformed openjd_env message to be processed
-        // before the cancel arrives, even under heavy parallel CI load.
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        // Wait for the Failed callback (malformed command processed), or
+        // fall back to a generous timeout so the test doesn't hang.
+        tokio::select! {
+            _ = failed_notify.notified() => {}
+            _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+        }
         token_clone.cancel();
     });
 
-    // Set mark_action_failed before the cancel arrives — cancel_action sets it,
-    // but with parent_cancel_token we need to set it via cancel_action.
-    // Since we can't call cancel_action while run_task holds &mut self,
-    // we use the CancelMarkFailed message path instead: have the script emit
-    // openjd_fail and then the parent token cancels.
-    // Actually, the simplest approach: use cancel_action from a separate context.
-    // But run_task borrows &mut self. The mark_action_failed flag is set by
-    // cancel_action(_, true). With parent_cancel_token, the cancel cascades
-    // but mark_action_failed defaults to false.
-    //
-    // To test mark_action_failed, we use the CancelMarkFailed ActionMessage path:
-    // a malformed openjd_env command triggers it.
     let _result = s
         .run_task(
             &step("sh", vec!["-c", "echo 'openjd_env:badformat'; sleep 30"]),

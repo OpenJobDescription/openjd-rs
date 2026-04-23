@@ -166,6 +166,89 @@ pub fn download_abs_manifest(
     }
 }
 
+/// Evaluate a single file entry for skip/download and push onto work_items.
+#[allow(clippy::too_many_arguments)]
+fn collect_work_item(
+    index: usize,
+    file: &FileEntry,
+    file_chunk_size_bytes: i64,
+    alg_str: &str,
+    hash_cache: &Option<Arc<HashCache>>,
+    conflict_res: FileConflictResolution,
+    stats: &mut DownloadStatistics,
+    work_items: &mut Vec<(usize, bool, u64)>,
+) {
+    let file_size = file.size.unwrap_or(0);
+    stats.total_files += 1;
+    stats.total_bytes += file_size;
+
+    let path = Path::new(&file.path);
+
+    // Check hash cache for skip
+    if let Some(ref cache) = hash_cache {
+        if file.mtime.is_some() && path.exists() {
+            if let Ok(actual_mtime) = get_mtime(path) {
+                if let Some(ref file_hash) = file.hash {
+                    if let Some(cached_hash) =
+                        cache.get_if_fresh(path, alg_str, 0, WHOLE_FILE_RANGE_END, actual_mtime)
+                    {
+                        if cached_hash == *file_hash {
+                            stats.skipped_files += 1;
+                            stats.skipped_bytes += file_size;
+                            work_items.push((index, true, actual_mtime));
+                            return;
+                        }
+                    }
+                }
+                if let Some(ref chunk_hashes) = file.chunk_hashes {
+                    let cs = file_chunk_size_bytes as u64;
+                    if cs > 0 && !chunk_hashes.is_empty() {
+                        let mut all_cached = true;
+                        let mut offset: u64 = 0;
+                        for expected in chunk_hashes {
+                            let end = std::cmp::min(offset + cs, file_size);
+                            if let Some(cached) = cache.get_if_fresh(
+                                path,
+                                alg_str,
+                                offset as i64,
+                                end as i64,
+                                actual_mtime,
+                            ) {
+                                if cached != *expected {
+                                    all_cached = false;
+                                    break;
+                                }
+                            } else {
+                                all_cached = false;
+                                break;
+                            }
+                            offset = end;
+                        }
+                        if all_cached {
+                            stats.skipped_files += 1;
+                            stats.skipped_bytes += file_size;
+                            work_items.push((index, true, actual_mtime));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check conflict resolution
+    if path.exists() && conflict_res == FileConflictResolution::Skip {
+        debug!(path = %file.path, "file exists, skipping per conflict resolution policy");
+        stats.skipped_files += 1;
+        stats.skipped_bytes += file_size;
+        let mtime = get_mtime(path).ok();
+        work_items.push((index, true, mtime.unwrap_or(0)));
+        return;
+    }
+
+    work_items.push((index, false, 0));
+}
+
 fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 'static>(
     manifest: &Manifest<P, K>,
     data_cache: Arc<dyn AsyncDataCache>,
@@ -184,7 +267,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
     let max_workers = options.max_workers;
     let max_memory_bytes = options.max_memory_bytes;
 
-    // Create directories first (sorted so parents come before children)
+    // Collect manifest directories (sorted so parents come before children)
     let mut dir_paths: Vec<&str> = manifest
         .dirs
         .iter()
@@ -192,8 +275,22 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         .map(|d| d.path.as_str())
         .collect();
     dir_paths.sort();
-    for dir_path in &dir_paths {
-        std::fs::create_dir_all(dir_path)?;
+
+    // Track which directories have been created to avoid redundant syscalls
+    let mut created_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Group file indices by parent directory for interleaved creation
+    let mut files_by_parent: std::collections::BTreeMap<String, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, file) in manifest.files.iter().enumerate() {
+        if file.deleted || file.symlink_target.is_some() {
+            continue;
+        }
+        let parent = Path::new(&file.path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        files_by_parent.entry(parent).or_default().push(i);
     }
 
     // Handle deleted entries
@@ -288,7 +385,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         }
     }
 
-    // Build work list for file downloads
+    // Build work list with interleaved directory creation.
+    // Create each directory once, then immediately queue files within it.
     struct WorkItem {
         index: usize,
         file_size: u64,
@@ -296,88 +394,49 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
 
     let mut work_items = Vec::new();
 
-    for (i, file) in result.files.iter().enumerate() {
-        if file.deleted || file.symlink_target.is_some() {
-            continue;
-        }
+    // Helper: ensure a directory exists, deduplicating calls
+    let ensure_dir =
+        |dir: &str, created: &mut std::collections::HashSet<String>| -> crate::Result<()> {
+            if !dir.is_empty() && created.insert(dir.to_string()) {
+                std::fs::create_dir_all(dir)?;
+            }
+            Ok(())
+        };
 
-        let file_size = file.size.unwrap_or(0);
-        stats.total_files += 1;
-        stats.total_bytes += file_size;
-
-        let path = Path::new(&file.path);
-
-        // Check hash cache for skip
-        if let Some(ref cache) = hash_cache {
-            if let Some(_mtime) = file.mtime {
-                if path.exists() {
-                    if let Ok(actual_mtime) = get_mtime(path) {
-                        // Whole-file hash cache check
-                        if let Some(ref file_hash) = file.hash {
-                            if let Some(cached_hash) = cache.get_if_fresh(
-                                path,
-                                alg_str,
-                                0,
-                                WHOLE_FILE_RANGE_END,
-                                actual_mtime,
-                            ) {
-                                if cached_hash == *file_hash {
-                                    stats.skipped_files += 1;
-                                    stats.skipped_bytes += file_size;
-                                    work_items.push((i, true, actual_mtime));
-                                    continue;
-                                }
-                            }
-                        }
-                        // Chunked file hash cache check
-                        if let Some(ref chunk_hashes) = file.chunk_hashes {
-                            let cs = manifest.file_chunk_size_bytes as u64;
-                            if cs > 0 && !chunk_hashes.is_empty() {
-                                let mut all_cached = true;
-                                let mut offset: u64 = 0;
-                                for expected in chunk_hashes {
-                                    let end = std::cmp::min(offset + cs, file_size);
-                                    if let Some(cached) = cache.get_if_fresh(
-                                        path,
-                                        alg_str,
-                                        offset as i64,
-                                        end as i64,
-                                        actual_mtime,
-                                    ) {
-                                        if cached != *expected {
-                                            all_cached = false;
-                                            break;
-                                        }
-                                    } else {
-                                        all_cached = false;
-                                        break;
-                                    }
-                                    offset = end;
-                                }
-                                if all_cached {
-                                    stats.skipped_files += 1;
-                                    stats.skipped_bytes += file_size;
-                                    work_items.push((i, true, actual_mtime));
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
+    // Process manifest directories interleaved with their files
+    for dir_path in &dir_paths {
+        ensure_dir(dir_path, &mut created_dirs)?;
+        if let Some(indices) = files_by_parent.remove(*dir_path) {
+            for i in indices {
+                collect_work_item(
+                    i,
+                    &result.files[i],
+                    manifest.file_chunk_size_bytes,
+                    alg_str,
+                    &hash_cache,
+                    conflict_res,
+                    &mut stats,
+                    &mut work_items,
+                );
             }
         }
+    }
 
-        // Check conflict resolution
-        if path.exists() && conflict_res == FileConflictResolution::Skip {
-            debug!(path = %file.path, "file exists, skipping per conflict resolution policy");
-            stats.skipped_files += 1;
-            stats.skipped_bytes += file_size;
-            let mtime = get_mtime(path).ok();
-            work_items.push((i, true, mtime.unwrap_or(0))); // skipped
-            continue;
+    // Process remaining files whose parent wasn't a manifest directory
+    for (_parent, indices) in files_by_parent {
+        ensure_dir(&_parent, &mut created_dirs)?;
+        for i in indices {
+            collect_work_item(
+                i,
+                &result.files[i],
+                manifest.file_chunk_size_bytes,
+                alg_str,
+                &hash_cache,
+                conflict_res,
+                &mut stats,
+                &mut work_items,
+            );
         }
-
-        work_items.push((i, false, 0)); // needs download
     }
 
     // Separate skipped from needing download
@@ -620,9 +679,6 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                 if !already_written {
                     let tp = target_path.clone();
                     tokio::task::spawn_blocking(move || {
-                        if let Some(parent) = tp.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
                         let tmp = temp_download_path(&tp);
                         if let Err(e) = std::fs::write(&tmp, &data) {
                             let _ = std::fs::remove_file(&tmp);
