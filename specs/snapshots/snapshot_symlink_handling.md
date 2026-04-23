@@ -18,6 +18,8 @@ Symlinks are stored as `FileEntry` entries with `symlink_target` set:
 
 Symlink targets are stored relative to the manifest root, not relative to the symlink location (unlike POSIX filesystem symlinks). This simplifies manifest operations since targets can be looked up directly in the manifest's path index.
 
+The target path style always matches the manifest's path style: absolute in `AbsSnapshot`/`AbsSnapshotDiff`, relative in `Snapshot`/`SnapshotDiff`. For example, COLLECT produces an `AbsSnapshot` so symlink targets are absolute paths. SUBTREE converts to a `Snapshot` and rebases symlink targets to relative paths. Validation enforces that `symlink_target` paths conform to the manifest's path style.
+
 ## SymlinkPolicy Enum
 
 ```rust

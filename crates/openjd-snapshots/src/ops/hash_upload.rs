@@ -140,6 +140,12 @@ enum FileResult {
         uploaded: bool,
         hashed_bytes: u64,
     },
+    /// Cache hit: hash was known and object already exists in data cache.
+    Skipped {
+        size: u64,
+        whole_hash: Option<String>,
+        chunk_hashes: Option<Vec<String>>,
+    },
 }
 
 fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
@@ -186,189 +192,30 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     struct WorkItem {
         index: usize,
         path: String,
+        mtime: u64,
         use_chunks: bool,
         file_size: u64,
     }
 
-    // Build work list inside rt.block_on so we can use async object_exists
-    let work_items: Vec<WorkItem> = rt.block_on(async {
-        let mut items = Vec::new();
-
-        // Phase 1: Gather cache hits that need existence checks
-        enum CacheCandidate {
-            Whole {
-                index: usize,
-                hash: String,
-                file_size: u64,
-            },
-            Chunked {
-                index: usize,
-                hashes: Vec<String>,
-                file_size: u64,
-            },
+    // Build work items for all regular files — cache checks happen inside each worker task
+    let mut work_items = Vec::new();
+    for (i, file) in result.files.iter().enumerate() {
+        if file.symlink_target.is_some() || file.deleted {
+            continue;
         }
-        let mut candidates: Vec<CacheCandidate> = Vec::new();
-        // Track which indices are candidates so we don't add them to work items yet
-        let mut candidate_indices = std::collections::HashSet::new();
-
-        for (i, file) in result.files.iter().enumerate() {
-            if file.symlink_target.is_some() || file.deleted {
-                continue;
-            }
-
-            let file_size = file.size.unwrap_or(0);
-            stats.total_files += 1;
-            stats.total_bytes += file_size;
-
-            let path_str = file.path.clone();
-            let path = Path::new(&path_str);
-            let mtime = file.mtime.unwrap_or(0);
-            let use_chunks = chunk_size > 0
-                && chunk_size != WHOLE_FILE_CHUNK_SIZE
-                && file_size as i64 > chunk_size;
-
-            if let Some(ref cache) = options.hash_cache {
-                if !options.force_rehash {
-                    if use_chunks {
-                        let cs = chunk_size as u64;
-                        let mut all_cached = true;
-                        let mut cached_hashes = Vec::new();
-                        let mut offset: u64 = 0;
-                        while offset < file_size {
-                            let end = std::cmp::min(offset + cs, file_size);
-                            if let Some(h) =
-                                cache.get_if_fresh(path, alg_str, offset as i64, end as i64, mtime)
-                            {
-                                cached_hashes.push(h);
-                            } else {
-                                all_cached = false;
-                                break;
-                            }
-                            offset = end;
-                        }
-                        if all_cached && !cached_hashes.is_empty() {
-                            candidates.push(CacheCandidate::Chunked {
-                                index: i,
-                                hashes: cached_hashes,
-                                file_size,
-                            });
-                            candidate_indices.insert(i);
-                            continue;
-                        }
-                    } else if let Some(cached_hash) =
-                        cache.get_if_fresh(path, alg_str, 0, WHOLE_FILE_RANGE_END, mtime)
-                    {
-                        candidates.push(CacheCandidate::Whole {
-                            index: i,
-                            hash: cached_hash,
-                            file_size,
-                        });
-                        candidate_indices.insert(i);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // Phase 2: Check all candidates in parallel
-        use futures_util::stream::{FuturesUnordered, StreamExt};
-        type ExistsCheck = std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                    Output = (usize, bool, u64, Option<String>, Option<Vec<String>>),
-                >,
-            >,
-        >;
-        let mut checks: FuturesUnordered<ExistsCheck> = FuturesUnordered::new();
-        for candidate in &candidates {
-            match candidate {
-                CacheCandidate::Whole {
-                    index,
-                    hash,
-                    file_size,
-                } => {
-                    let dc = data_cache.clone();
-                    let h = hash.clone();
-                    let a = alg_str.to_string();
-                    let idx = *index;
-                    let fs = *file_size;
-                    checks.push(Box::pin(async move {
-                        let exists = dc.object_exists(&h, &a).await.unwrap_or(false);
-                        (idx, exists, fs, Some(h), None::<Vec<String>>)
-                    }));
-                }
-                CacheCandidate::Chunked {
-                    index,
-                    hashes,
-                    file_size,
-                } => {
-                    let dc = data_cache.clone();
-                    let hs = hashes.clone();
-                    let a = alg_str.to_string();
-                    let idx = *index;
-                    let fs = *file_size;
-                    checks.push(Box::pin(async move {
-                        let mut all_exist = true;
-                        for h in &hs {
-                            if !dc.object_exists(h, &a).await.unwrap_or(false) {
-                                all_exist = false;
-                                break;
-                            }
-                        }
-                        (idx, all_exist, fs, None::<String>, Some(hs))
-                    }));
-                }
-            }
-        }
-
-        // Collect results and apply skips
-        let mut skipped_indices = std::collections::HashSet::new();
-        while let Some((idx, all_exist, file_size, whole_hash, chunk_hashes)) = checks.next().await
-        {
-            if all_exist {
-                let file = &mut result.files[idx];
-                if let Some(h) = whole_hash {
-                    file.hash = Some(h);
-                } else if let Some(hs) = chunk_hashes {
-                    file.chunk_hashes = Some(hs);
-                }
-                debug!(path = %file.path, "skipped (cache hit)");
-                stats.skipped_files += 1;
-                stats.skipped_bytes += file_size;
-                skipped_indices.insert(idx);
-            }
-        }
-
-        // Phase 3: Build work items for everything not skipped
-        for (i, file) in result.files.iter().enumerate() {
-            if file.symlink_target.is_some() || file.deleted {
-                continue;
-            }
-            if skipped_indices.contains(&i)
-                || (candidate_indices.contains(&i) && !skipped_indices.contains(&i))
-            {
-                // candidate_indices that weren't skipped still need work
-                if skipped_indices.contains(&i) {
-                    continue;
-                }
-            }
-
-            let file_size = file.size.unwrap_or(0);
-            let path_str = file.path.clone();
-            let use_chunks = chunk_size > 0
-                && chunk_size != WHOLE_FILE_CHUNK_SIZE
-                && file_size as i64 > chunk_size;
-
-            items.push(WorkItem {
-                index: i,
-                path: path_str,
-                use_chunks,
-                file_size,
-            });
-        }
-
-        items
-    });
+        let file_size = file.size.unwrap_or(0);
+        stats.total_files += 1;
+        stats.total_bytes += file_size;
+        let use_chunks =
+            chunk_size > 0 && chunk_size != WHOLE_FILE_CHUNK_SIZE && file_size as i64 > chunk_size;
+        work_items.push(WorkItem {
+            index: i,
+            path: file.path.clone(),
+            mtime: file.mtime.unwrap_or(0),
+            use_chunks,
+            file_size,
+        });
+    }
 
     if work_items.is_empty() {
         if stats.total_bytes > 0 {
@@ -387,13 +234,15 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         return Ok((result, stats));
     }
 
-    // Process work items in parallel using tokio
+    // Process work items in parallel using tokio — each task does its own cache checks
     let cancelled = Arc::new(AtomicBool::new(false));
     let progress_stats = Arc::new(Mutex::new(stats.clone()));
     let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
     let memory_pool = Arc::new(MemoryPool::new(max_memory));
     let worker_semaphore = Arc::new(tokio::sync::Semaphore::new(num_workers));
     let upload_dedup: UploadDedup = Arc::new(Mutex::new(HashMap::new()));
+    let hash_cache_arc: Option<Arc<HashCache>> = options.hash_cache.clone();
+    let force_rehash = options.force_rehash;
 
     let file_results: Vec<crate::Result<(usize, FileResult)>> = rt.block_on(async {
         let mut handles = Vec::new();
@@ -410,6 +259,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             let cs = chunk_size;
             let start = start_time;
             let dedup = upload_dedup.clone();
+            let hc = hash_cache_arc.clone();
 
             let handle = tokio::spawn(async move {
                 let _worker_permit = worker_sem
@@ -421,6 +271,84 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                     return Err(crate::SnapshotError::Cancelled);
                 }
 
+                // Step 1: Check hash cache (inside the task, parallelized)
+                if let Some(ref cache) = hc {
+                    if !force_rehash {
+                        let path = Path::new(&item.path);
+                        if item.use_chunks {
+                            let csu = cs as u64;
+                            let mut all_cached = true;
+                            let mut cached_hashes = Vec::new();
+                            let mut offset: u64 = 0;
+                            while offset < item.file_size {
+                                let end = std::cmp::min(offset + csu, item.file_size);
+                                if let Some(h) = cache.get_if_fresh(
+                                    path,
+                                    &alg,
+                                    offset as i64,
+                                    end as i64,
+                                    item.mtime,
+                                ) {
+                                    cached_hashes.push(h);
+                                } else {
+                                    all_cached = false;
+                                    break;
+                                }
+                                offset = end;
+                            }
+                            if all_cached && !cached_hashes.is_empty() {
+                                // Step 2: Check if all chunks exist in data cache
+                                let mut all_exist = true;
+                                for h in &cached_hashes {
+                                    if !dc.object_exists(h, &alg).await.unwrap_or(false) {
+                                        all_exist = false;
+                                        break;
+                                    }
+                                }
+                                if all_exist {
+                                    debug!(path = %item.path, "skipped (cache hit)");
+                                    let fr = FileResult::Skipped {
+                                        size: item.file_size,
+                                        whole_hash: None,
+                                        chunk_hashes: Some(cached_hashes),
+                                    };
+                                    update_progress(
+                                        &progress_stats,
+                                        &rate_calc,
+                                        &on_progress,
+                                        &cancelled,
+                                        &fr,
+                                        start,
+                                    )?;
+                                    return Ok((item.index, fr));
+                                }
+                            }
+                        } else if let Some(cached_hash) =
+                            cache.get_if_fresh(path, &alg, 0, WHOLE_FILE_RANGE_END, item.mtime)
+                        {
+                            // Step 2: Check if object exists in data cache
+                            if dc.object_exists(&cached_hash, &alg).await.unwrap_or(false) {
+                                debug!(path = %item.path, "skipped (cache hit)");
+                                let fr = FileResult::Skipped {
+                                    size: item.file_size,
+                                    whole_hash: Some(cached_hash),
+                                    chunk_hashes: None,
+                                };
+                                update_progress(
+                                    &progress_stats,
+                                    &rate_calc,
+                                    &on_progress,
+                                    &cancelled,
+                                    &fr,
+                                    start,
+                                )?;
+                                return Ok((item.index, fr));
+                            }
+                        }
+                    }
+                }
+
+                // Step 3: Need to hash+upload — acquire memory
                 let _mem_permit = pool.acquire(item.file_size as usize).await;
 
                 let part_size = dc.multipart_part_size();
@@ -435,52 +363,14 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                     process_whole_async(item.path, item.file_size, alg, dc, dedup).await?
                 };
 
-                // Update progress
-                {
-                    let mut s = progress_stats.lock().unwrap();
-                    match &fr {
-                        FileResult::Whole { size, uploaded, .. } => {
-                            s.hashed_files += 1;
-                            s.hashed_bytes += size;
-                            if *uploaded {
-                                s.uploaded_files += 1;
-                                s.uploaded_bytes += size;
-                            } else {
-                                s.skipped_files += 1;
-                                s.skipped_bytes += size;
-                            }
-                        }
-                        FileResult::Chunked {
-                            uploaded,
-                            hashed_bytes,
-                            ..
-                        } => {
-                            s.hashed_files += 1;
-                            s.hashed_bytes += hashed_bytes;
-                            if *uploaded {
-                                s.uploaded_files += 1;
-                            }
-                        }
-                    }
-                    let elapsed = start.elapsed().as_secs_f64();
-                    s.total_time = elapsed;
-                    {
-                        let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
-                    }
-                    if s.total_bytes > 0 {
-                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64
-                            / s.total_bytes as f64)
-                            * 100.0;
-                    }
-                    if let Some(ref cb) = on_progress {
-                        if !cb(&s) {
-                            cancelled.store(true, Ordering::Relaxed);
-                            return Err(crate::SnapshotError::Cancelled);
-                        }
-                    }
-                }
-
+                update_progress(
+                    &progress_stats,
+                    &rate_calc,
+                    &on_progress,
+                    &cancelled,
+                    &fr,
+                    start,
+                )?;
                 Ok((item.index, fr))
             });
 
@@ -524,6 +414,17 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                 }
                 file.chunk_hashes = Some(hashes);
             }
+            FileResult::Skipped {
+                whole_hash,
+                chunk_hashes,
+                ..
+            } => {
+                if let Some(h) = whole_hash {
+                    file.hash = Some(h);
+                } else if let Some(hs) = chunk_hashes {
+                    file.chunk_hashes = Some(hs);
+                }
+            }
         }
     }
 
@@ -561,6 +462,61 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     }
 
     Ok((result, stats))
+}
+
+fn update_progress(
+    progress_stats: &Arc<Mutex<UploadStatistics>>,
+    rate_calc: &Arc<Mutex<SlidingWindowRate>>,
+    on_progress: &Option<Arc<super::ProgressFn<UploadStatistics>>>,
+    cancelled: &Arc<AtomicBool>,
+    fr: &FileResult,
+    start: std::time::Instant,
+) -> crate::Result<()> {
+    let mut s = progress_stats.lock().unwrap();
+    match fr {
+        FileResult::Whole { size, uploaded, .. } => {
+            s.hashed_files += 1;
+            s.hashed_bytes += size;
+            if *uploaded {
+                s.uploaded_files += 1;
+                s.uploaded_bytes += size;
+            } else {
+                s.skipped_files += 1;
+                s.skipped_bytes += size;
+            }
+        }
+        FileResult::Chunked {
+            uploaded,
+            hashed_bytes,
+            ..
+        } => {
+            s.hashed_files += 1;
+            s.hashed_bytes += hashed_bytes;
+            if *uploaded {
+                s.uploaded_files += 1;
+            }
+        }
+        FileResult::Skipped { size, .. } => {
+            s.skipped_files += 1;
+            s.skipped_bytes += size;
+        }
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    s.total_time = elapsed;
+    {
+        let mut rc = rate_calc.lock().unwrap();
+        s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
+    }
+    if s.total_bytes > 0 {
+        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+    }
+    if let Some(ref cb) = on_progress {
+        if !cb(&s) {
+            cancelled.store(true, Ordering::Relaxed);
+            return Err(crate::SnapshotError::Cancelled);
+        }
+    }
+    Ok(())
 }
 
 async fn process_whole_async(

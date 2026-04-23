@@ -281,7 +281,13 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                         f.path
                     )));
                 }
-            } else if f.symlink_target.is_some() {
+            } else if let Some(ref target) = f.symlink_target {
+                P::validate_path(target).map_err(|_| {
+                    crate::SnapshotError::Validation(format!(
+                        "symlink_target path style mismatch for {}: {}",
+                        f.path, target
+                    ))
+                })?;
                 if f.hash.is_some() || f.chunk_hashes.is_some() {
                     return Err(crate::SnapshotError::Validation(format!(
                         "symlink must not have hash or chunk_hashes: {}",
@@ -711,6 +717,32 @@ mod tests {
         assert_eq!(rel.files().len(), 1);
         assert_eq!(abs.hash_alg(), HashAlgorithm::Xxh128);
         assert_eq!(abs.file_chunk_size_bytes(), DEFAULT_FILE_CHUNK_SIZE);
+    }
+
+    #[test]
+    fn abs_snapshot_rejects_relative_symlink_target() {
+        let m = make_abs_snapshot(vec![FileEntry::symlink("/tmp/link", "relative/target")]);
+        let err = m.validate().unwrap_err();
+        assert!(err.to_string().contains("symlink_target"));
+    }
+
+    #[test]
+    fn rel_snapshot_rejects_absolute_symlink_target() {
+        let m = make_rel_snapshot(vec![FileEntry::symlink("link", "/absolute/target")]);
+        let err = m.validate().unwrap_err();
+        assert!(err.to_string().contains("symlink_target"));
+    }
+
+    #[test]
+    fn abs_snapshot_accepts_absolute_symlink_target() {
+        let m = make_abs_snapshot(vec![FileEntry::symlink("/tmp/link", "/tmp/target")]);
+        assert!(m.validate().is_ok());
+    }
+
+    #[test]
+    fn rel_snapshot_accepts_relative_symlink_target() {
+        let m = make_rel_snapshot(vec![FileEntry::symlink("link", "target")]);
+        assert!(m.validate().is_ok());
     }
 
     #[test]
