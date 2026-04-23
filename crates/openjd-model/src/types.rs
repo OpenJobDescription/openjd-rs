@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use indexmap::IndexMap;
 use openjd_expr::ExprType;
 use serde::{Deserialize, Serialize};
 
@@ -304,7 +305,7 @@ pub type JobParameterInputValues = HashMap<String, openjd_expr::ExprValue>;
 pub type JobParameterValues = HashMap<String, JobParameterValue>;
 
 /// A single task's parameter values.
-pub type TaskParameterSet = HashMap<String, TaskParameterValue>;
+pub type TaskParameterSet = IndexMap<String, TaskParameterValue>;
 
 /// Set of extensions enabled for a template.
 pub type Extensions = std::collections::HashSet<KnownExtension>;

@@ -199,7 +199,7 @@ async fn test_no_task_run_after_fail() {
 async fn test_run_task_with_variables() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
-    let mut task_params = HashMap::new();
+    let mut task_params = openjd_model::types::TaskParameterSet::new();
     task_params.insert(
         "Greeting".into(),
         openjd_model::types::TaskParameterValue {

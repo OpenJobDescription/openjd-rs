@@ -569,11 +569,10 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
                             tv.value.to_display_string()
                         );
                     }
-                    let task_values: HashMap<String, openjd_model::types::TaskParameterValue> =
-                        task_params
-                            .iter()
-                            .map(|(name, tv)| (name.clone(), tv.clone()))
-                            .collect();
+                    let task_values: openjd_model::types::TaskParameterSet = task_params
+                        .iter()
+                        .map(|(name, tv)| (name.clone(), tv.clone()))
+                        .collect();
 
                     let task_start = Instant::now();
                     let result = session

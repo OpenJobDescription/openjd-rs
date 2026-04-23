@@ -432,7 +432,7 @@ pub(super) fn coerce_from_str(
         | JobParameterType::ListListInt => {
             // Try parsing the string as JSON for list parameter coercion.
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
-                json_to_expr_value(&json_val)
+                json_to_expr_value(&json_val)?
             } else {
                 return Err(format!(
                     "Value '{s}' is not valid JSON for a list parameter."
@@ -720,28 +720,33 @@ fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat)
 }
 
 /// Convert a serde_json::Value to an ExprValue.
-pub(super) fn json_to_expr_value(val: &serde_json::Value) -> openjd_expr::ExprValue {
+pub(super) fn json_to_expr_value(
+    val: &serde_json::Value,
+) -> Result<openjd_expr::ExprValue, String> {
     match val {
-        serde_json::Value::Null => openjd_expr::ExprValue::Null,
-        serde_json::Value::Bool(b) => openjd_expr::ExprValue::Bool(*b),
+        serde_json::Value::Null => Ok(openjd_expr::ExprValue::Null),
+        serde_json::Value::Bool(b) => Ok(openjd_expr::ExprValue::Bool(*b)),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                openjd_expr::ExprValue::Int(i)
+                Ok(openjd_expr::ExprValue::Int(i))
             } else if let Some(f) = n.as_f64() {
-                openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(f).unwrap())
+                openjd_expr::value::Float64::new(f)
+                    .map(openjd_expr::ExprValue::Float)
+                    .map_err(|_| format!("Float value {f} is not finite"))
             } else {
-                openjd_expr::ExprValue::String(n.to_string())
+                Ok(openjd_expr::ExprValue::String(n.to_string()))
             }
         }
-        serde_json::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
+        serde_json::Value::String(s) => Ok(openjd_expr::ExprValue::String(s.clone())),
         serde_json::Value::Array(arr) => {
-            let elements: Vec<openjd_expr::ExprValue> =
-                arr.iter().map(json_to_expr_value).collect();
-            // hint_type is only used by make_list for empty lists; for non-empty
-            // lists it infers the type from elements (with int→float promotion etc.)
-            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE).unwrap()
+            let elements: Vec<openjd_expr::ExprValue> = arr
+                .iter()
+                .map(json_to_expr_value)
+                .collect::<Result<_, _>>()?;
+            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE)
+                .map_err(|e| format!("Invalid list value: {e}"))
         }
-        serde_json::Value::Object(_) => openjd_expr::ExprValue::String(val.to_string()),
+        serde_json::Value::Object(_) => Ok(openjd_expr::ExprValue::String(val.to_string())),
     }
 }
 

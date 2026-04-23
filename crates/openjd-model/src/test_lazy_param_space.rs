@@ -3,8 +3,6 @@
 
 //! Tests for the lazy `StepParameterSpaceIterator`.
 
-use std::collections::HashMap;
-
 use crate::job::{ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter};
 use crate::step_param_space::StepParameterSpaceIterator;
 use crate::template::RangeConstraint;
@@ -47,21 +45,21 @@ fn int_range_expr(expr: &str) -> TaskParameter {
     }
 }
 
-fn get_int(set: &HashMap<String, TaskParameterValue>, name: &str) -> i64 {
+fn get_int(set: &TaskParameterSet, name: &str) -> i64 {
     match &set[name].value {
         ExprValue::Int(i) => *i,
         other => panic!("expected Int for {name}, got {other:?}"),
     }
 }
 
-fn get_float(set: &HashMap<String, TaskParameterValue>, name: &str) -> f64 {
+fn get_float(set: &TaskParameterSet, name: &str) -> f64 {
     match &set[name].value {
         ExprValue::Float(f) => f.value(),
         other => panic!("expected Float for {name}, got {other:?}"),
     }
 }
 
-fn get_string(set: &HashMap<String, TaskParameterValue>, name: &str) -> String {
+fn get_string(set: &TaskParameterSet, name: &str) -> String {
     match &set[name].value {
         ExprValue::String(s) => s.clone(),
         other => panic!("expected String for {name}, got {other:?}"),
@@ -231,7 +229,7 @@ fn test_get_matches_iteration() {
 fn test_contains_positive() {
     let space = make_space(vec![("A", int_list(&[1, 2, 3]))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
-    let mut needle = HashMap::new();
+    let mut needle = TaskParameterSet::new();
     needle.insert(
         "A".to_string(),
         TaskParameterValue {
@@ -246,7 +244,7 @@ fn test_contains_positive() {
 fn test_contains_negative() {
     let space = make_space(vec![("A", int_list(&[1, 2, 3]))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
-    let mut needle = HashMap::new();
+    let mut needle = TaskParameterSet::new();
     needle.insert(
         "A".to_string(),
         TaskParameterValue {
@@ -487,7 +485,7 @@ fn test_contains_optimized_range_expr() {
     let space = make_space(vec![("Frame", int_range_expr("1-1000000"))], None);
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
-    let mut hit = std::collections::HashMap::new();
+    let mut hit = TaskParameterSet::new();
     hit.insert(
         "Frame".to_string(),
         TaskParameterValue {
@@ -496,7 +494,7 @@ fn test_contains_optimized_range_expr() {
         },
     );
 
-    let mut miss = std::collections::HashMap::new();
+    let mut miss = TaskParameterSet::new();
     miss.insert(
         "Frame".to_string(),
         TaskParameterValue {
@@ -526,7 +524,7 @@ fn test_contains_product_node() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
 
     // Matching set: A=2, B="y"
-    let mut matching = std::collections::HashMap::new();
+    let mut matching = TaskParameterSet::new();
     matching.insert(
         "A".to_string(),
         TaskParameterValue {
@@ -544,7 +542,7 @@ fn test_contains_product_node() {
     assert!(iter.contains(&matching));
 
     // Non-matching: A=2, B="z" (z not in range)
-    let mut non_matching = std::collections::HashMap::new();
+    let mut non_matching = TaskParameterSet::new();
     non_matching.insert(
         "A".to_string(),
         TaskParameterValue {
@@ -562,7 +560,7 @@ fn test_contains_product_node() {
     assert!(!iter.contains(&non_matching));
 
     // Non-matching: A=99, B="x" (99 not in range)
-    let mut non_matching2 = std::collections::HashMap::new();
+    let mut non_matching2 = TaskParameterSet::new();
     non_matching2.insert(
         "A".to_string(),
         TaskParameterValue {

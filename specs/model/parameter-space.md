@@ -28,8 +28,12 @@ impl Iterator for StepParameterSpaceIterator {
 
 `new` returns `Result<Self, ModelError>` because construction can fail (e.g., if the
 product of parameter dimensions overflows `usize`). `get` returns `Option<TaskParameterSet>`
-(returns `None` for out-of-bounds indices). `set_chunks_default_task_count` takes `&mut self`
-(no `Arc<AtomicUsize>` indirection).
+(returns `None` for out-of-bounds indices or when sequential iteration is required).
+`set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicUsize>` indirection).
+
+`new_with_chunk_override` accepts an optional chunk size that overrides the template's
+`defaultTaskCount` for all chunk nodes. When `Some(n)`, it also suppresses adaptive
+chunking (the parameter is treated as static with chunk size `n`).
 
 ## Node Tree Architecture
 
@@ -42,8 +46,10 @@ ProductNode (cartesian product)
 ├── AssociationNode (lockstep iteration)
 │   ├── RangeExprNode ("frame": "1-3")
 │   └── RangeListNode ("camera": ["main", "side", "top"])
-└── StaticChunkNode (chunked parameter)
-    └── RangeExprNode ("tile": "1-256")
+├── ContiguousChunkNode (gap-respecting contiguous chunks)
+│   └── range: "1,10-12,18-50"
+└── StaticChunkNode (noncontiguous chunks)
+    └── range: "1-256"
 ```
 
 ### Node Types
@@ -54,8 +60,9 @@ ProductNode (cartesian product)
 | `RangeListNode` | Pre-materialized value list | List length | O(1) |
 | `RangeExprNode` | Integer range expression | Computed from range | O(1) via arithmetic |
 | `ProductNode` | Cartesian product (`*` operator) | Product of children (checked) | O(D) via divmod |
-| `AssociationNode` | Lockstep (`,` in parens) | Min of children | O(1) |
-| `StaticChunkNode` | Lazy chunk boundary computation | Number of chunks | O(1) |
+| `AssociationNode` | Lockstep (`,` in parens) | Same as children | O(1) |
+| `ContiguousChunkNode` | Gap-respecting contiguous chunks | Cached exact count | Sequential only |
+| `StaticChunkNode` | Noncontiguous chunk boundaries | Number of chunks | O(1) |
 | `AdaptiveChunkNode` | Runtime-adjustable chunks | Dynamic | Sequential only |
 
 ### ProductNode Index Arithmetic
@@ -94,27 +101,57 @@ are combined:
    - `(A, B)` creates `AssociationNode`
    - Bare names create leaf nodes (`RangeListNode` or `RangeExprNode`)
 3. Default (no expression): product of all parameters in definition order
+4. When adaptive chunking is active, the adaptive child is moved to the last
+   (innermost) position in the `ProductNode` so it varies fastest during iteration,
+   matching the Python reference implementation's behavior
 
 ## Chunking
 
 Chunking divides a parameter's range into groups (chunks) for batch processing.
+The node type used depends on the `rangeConstraint` and whether adaptive chunking
+is active:
 
-### Static Chunking
+| Condition | Node Type |
+|-----------|-----------|
+| `targetRuntimeSeconds > 0` (adaptive) | `AdaptiveChunkNode` |
+| `rangeConstraint == Contiguous` (static) | `ContiguousChunkNode` |
+| `rangeConstraint == Noncontiguous` (static) | `StaticChunkNode` |
+
+### Contiguous Chunking
+
+`ContiguousChunkNode` respects gaps in the source range. It first identifies contiguous
+intervals (runs of consecutive integers), then divides each interval independently into
+evenly-sized chunks. This matches the Python `divide_int_list_into_contiguous_chunks`
+algorithm.
+
+For example, range `"1,10-12,18-50"` with `defaultTaskCount=10` produces chunks:
+`"1-1"`, `"10-12"`, `"18-27"`, `"28-37"`, `"38-47"`, `"48-50"` — gaps between 1, 10,
+and 18 are never bridged.
+
+**Chunk count computation** uses the `RangeExpr` sub-range structure (`Vec<IntRange>`)
+for O(R) complexity where R is the number of sub-ranges, not O(N) over individual values.
+A 100-billion-element contiguous range like `"1-100000000000"` has one sub-range, so
+counting is instant.
+
+**Even distribution** within each interval uses the Python `divide_chunk_sizes` algorithm:
+`chunk_count = ceil(interval_len / default_task_count)`, then `small = interval_len / chunk_count`
+with leftovers distributed evenly across chunks.
+
+`ContiguousChunkNode` is sequential-only (no random access via `get()`) because chunk
+boundaries depend on scanning for gaps from the beginning. The exact chunk count is
+cached at construction time.
+
+### Noncontiguous Static Chunking
 
 `StaticChunkNode` computes chunk boundaries lazily via O(1) arithmetic. It stores only
 the total range size, chunk count, base chunk size (`small = total / num_chunks`), and
-remainder count (`leftovers = total % num_chunks`). The offset and size of chunk `i` are:
-
-- size = `small + 1` if `i < leftovers`, else `small`
-- offset = `i * small + min(i, leftovers)`
+remainder count (`leftovers = total % num_chunks`). Both `StaticChunkNode` and
+`StaticChunkIterator` delegate to a shared `build_chunk_range_expr()` function.
 
 On `get(i)`, the node slices into the underlying range at the computed offset and builds
-a `RangeExpr` string on the fly. For contiguous chunks this is just `"{start}-{end}"`;
-for noncontiguous chunks, `compress_range_expr()` compresses the slice into compact form
-(e.g., `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
-
-Supports `RangeConstraint::Contiguous` (chunks are contiguous subsequences) and
-`RangeConstraint::Noncontiguous` (chunks can be arbitrary subsets).
+a `RangeExpr` string on the fly. `compress_range_expr()` compresses the slice into compact
+form, detecting constant-step arithmetic sequences (e.g., `[1,3,5]` → `"1-5:2"`,
+`[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`). Step detection requires 3+ values in a run.
 
 ### Adaptive Chunking
 
@@ -126,6 +163,22 @@ is what triggers adaptive (vs static) chunking.
 
 Adaptive chunking disables random access (`get()` returns `None` and `len()` returns 0)
 because chunk boundaries aren't known in advance.
+
+`AdaptiveChunkNode::validate_containment()` uses a `HashSet` for O(N) lookup.
+
+### Chunk Override
+
+`new_with_chunk_override(space, Some(n))` overrides the `defaultTaskCount` for all chunk
+nodes. The override value is threaded through `make_leaf_node` → `make_chunk_node` and
+used in place of `chunks.default_task_count`. When an override is provided, adaptive
+chunking is suppressed (the parameter uses static chunking with the override size).
+
+### Sequential Iteration
+
+When any node in the tree requires sequential iteration (adaptive chunking or contiguous
+chunking), the `StepParameterSpaceIterator` uses the `node_iter` path instead of
+random-access `get()`. The `sequential` flag tracks this. `len()` still returns the
+exact count (except for adaptive, which returns 0).
 
 ## Design Decisions
 

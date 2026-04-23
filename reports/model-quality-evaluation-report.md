@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-The `openjd-model` crate is a well-engineered Rust implementation of the OpenJD 2023-09 template model. It compiles cleanly with zero warnings, passes all 1,501 tests, and has zero clippy warnings. The specifications are thorough and accurately describe the implementation. The test suite is comprehensive with excellent error message coverage. A few issues were found during deep analysis, including one potential panic bug and several minor concerns, but overall the crate is high quality and production-ready.
+The `openjd-model` crate is a well-engineered Rust implementation of the OpenJD 2023-09 template model. It compiles cleanly with zero warnings, passes all 1,628 tests, and has zero clippy warnings. The specifications are thorough and accurately describe the implementation. The test suite is comprehensive with excellent error message coverage and includes 24 tests ported from the Python reference implementation's chunking test suite. A few issues remain (one potential panic bug, some minor concerns), but overall the crate is high quality and production-ready.
 
 ---
 
@@ -87,19 +87,22 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 ### Detailed File Analysis
 
-#### `step_param_space.rs` (1645 lines)
+#### `step_param_space.rs` (~2000 lines)
 
 **Strengths:**
 - Lazy parameter space iteration with O(D) random access via divmod indexing
 - `checked_mul` for overflow detection in `ProductNode`
 - Adaptive chunking via `Arc<AtomicUsize>` for thread-safe runtime adjustment
-- Chunk boundary calculations use the standard "distribute N into K buckets" formula — verified correct
+- `ContiguousChunkNode` respects gaps in source ranges, matching the Python `divide_int_list_into_contiguous_chunks` algorithm
+- Even chunk distribution within contiguous intervals matches Python `divide_chunk_sizes`
+- Chunk count computation uses sub-range structure for O(R) complexity (not O(N) value scanning), enabling instant construction on billion-element ranges
+- `compress_range_expr()` detects constant-step arithmetic sequences (e.g., `[1,3,5]` → `"1-5:2"`)
+- `chunk_override` properly threaded through to all chunk node types
+- Adaptive child moved to innermost position in `ProductNode` for correct iteration order matching Python
+- 24 chunking tests ported from Python reference implementation
 
 **Issues Found:**
 - 14 `expect()` calls in production code on `RangeExpr::get()` and `.parse::<RangeExpr>()`. These are internal invariant assertions on computed indices/strings, so they are low risk but not zero risk.
-- `Float64::new(f).unwrap()` at line 1224 could panic if a float parameter value is NaN/infinity and upstream validation doesn't catch it.
-- `AdaptiveChunkNode::validate_containment()` uses `Vec::contains()` in a loop — O(N²) for large ranges. A `HashSet` would be O(N).
-- Duplicated `chunk_range_expr()` logic between `StaticChunkNode` and `StaticChunkIterator` (~40 lines each).
 - `usize as i64` casts are safe in practice due to `checked_mul` overflow guard but theoretically imprecise on 64-bit targets.
 
 #### `format_strings.rs` (1059 lines)
@@ -121,7 +124,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 - `preprocess_job_parameters()` is well-structured despite its length
 
 **Issues Found:**
-- **BUG: `make_list(...).unwrap()` at line 742** in `json_to_expr_value()` — deeply nested JSON arrays (3+ levels) will panic instead of returning an error. This is a real bug.
+- ~~**BUG: `make_list(...).unwrap()` at line 742**~~ **Resolved** — `json_to_expr_value()` now returns `Result` with proper error propagation for both `make_list` and `Float64::new`.
 - `json_to_expr_value()` silently converts JSON objects to their string representation — surprising behavior
 - `json_to_expr_value()` for `Value::Null` returns `ExprValue::Null` which may not be handled well inside list types
 
@@ -145,7 +148,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | Combination expression parsing | O(T) | ✅ Optimal |
 | Validation pipeline | O(S × P × F) | ✅ Linear in template size |
 | Association containment | O(L × K) | ✅ Acceptable |
-| AdaptiveChunkNode containment | O(V × N) | ⚠️ O(N²) — could use HashSet |
+| AdaptiveChunkNode containment | O(V + N) | ✅ O(N) via HashSet |
 
 ---
 
@@ -155,7 +158,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 | Test File | Tests | Coverage Area |
 |-----------|-------|---------------|
-| `test_create_job.rs` | 138 | Job creation, parameter preprocessing, scope boundaries |
+| `test_create_job.rs` | 139 | Job creation, parameter preprocessing, scope boundaries |
 | `test_job_parameters.rs` | 165 | Parameter definition validation (all 12 types) |
 | `test_expr_parameters.rs` | 159 | EXPR extension parameter types |
 | `test_let_bindings.rs` | 71 | Let binding validation |
@@ -184,8 +187,8 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | `test_template_posix_paths.rs` | 7 | POSIX path semantics |
 | `test_template_windows_paths.rs` | 7 | Windows path semantics |
 | `test_redacted_env_vars.rs` | 4 | REDACTED_ENV_VARS extension |
-| **In-crate unit tests** | **296** | Internal module tests |
-| **Total** | **1,501** | |
+| **In-crate unit tests** | **316** | Internal module tests |
+| **Total** | **1,628** | |
 
 ### Test Quality Assessment
 
@@ -198,6 +201,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 - Unicode/char-vs-byte semantics: tests verify character counting (not byte counting)
 - Determinism tests: iteration order verified with repeated runs
 - Tests are ported from the Python reference implementation with clear source attribution
+- 24 chunking tests ported from Python `test_step_param_space_iter_with_chunks.py` covering contiguous/noncontiguous, static/adaptive, single/multi-param, chunk override, and mid-iteration size changes
 
 **Gaps Identified:**
 1. No `StepParameterSpaceIterator::get()` tests with complex combinations (products, associations) — only simple single-param spaces tested for random access
@@ -240,26 +244,26 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | Check | Result |
 |-------|--------|
 | `cargo build --package openjd-model` | ✅ Clean — no errors or warnings |
-| `cargo test --package openjd-model` | ✅ 1,501 tests passed, 0 failed, 0 ignored |
+| `cargo test --package openjd-model` | ✅ 1,628 tests passed, 0 failed, 0 ignored |
 | `cargo clippy --package openjd-model -- -W clippy::all` | ✅ No warnings |
 
 ---
 
 ## 5. Findings
 
-### Finding #1: Potential Panic in `json_to_expr_value()` (Bug)
+### Finding #1: ~~Potential Panic in `json_to_expr_value()`~~ (Resolved)
 
-**File:** `src/job/create_job/parameters.rs`, line 742
-**Severity:** Medium
-**Description:** `ExprValue::make_list(...).unwrap()` in `json_to_expr_value()` will panic if a JSON array is nested 3+ levels deep (e.g., `[[[1]]]`). The `make_list` function returns a `Result` that should be propagated rather than unwrapped.
-**Recommendation:** Replace `.unwrap()` with `?` or `.map_err(...)` to return a proper error.
+**File:** `src/job/create_job/parameters.rs`
+**Severity:** ~~Medium~~ Resolved
+**Description:** `ExprValue::make_list(...).unwrap()` and `Float64::new(f).unwrap()` in `json_to_expr_value()` could panic on deeply nested JSON arrays or NaN/infinity floats. The function now returns `Result<ExprValue, String>` with proper error propagation for both cases.
+**Resolution:** Changed return type to `Result` and replaced `.unwrap()` calls with `?` and `.map_err()`.
 
-### Finding #2: Potential Panic in Float Parameter Space Construction
+### Finding #2: ~~Potential Panic in Float Parameter Space Construction~~ (Resolved)
 
-**File:** `src/job/step_param_space.rs`, line 1224
-**Severity:** Low
-**Description:** `Float64::new(f).unwrap()` could panic if a float parameter value is NaN or infinity and upstream validation doesn't catch it. While the validation pipeline should reject NaN/Inf, this is a defense-in-depth concern.
-**Recommendation:** Replace with `Float64::new(f).map_err(...)` or add a comment explaining why the unwrap is safe.
+**File:** `src/job/step_param_space.rs`
+**Severity:** ~~Low~~ Resolved
+**Description:** `Float64::new(f).unwrap()` could panic if a float parameter value was NaN or infinity. This has been replaced with proper error propagation via `Float64::new(f).map(ExprValue::Float).map_err(...)`.
+**Resolution:** Replaced with `map_err` that returns `ModelError::DecodeValidation`.
 
 ### Finding #3: ~~Mismatched Association Length Validation Timing~~ (Resolved)
 
@@ -268,26 +272,26 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 **Description:** Previously, templates with mismatched association lengths (e.g., `(A, B)` where A has 3 elements and B has 2) were accepted by `create_job()` and only caught later when `StepParameterSpaceIterator::new()` was called. This has been fixed — `instantiate_step()` now constructs a `StepParameterSpaceIterator` after resolving the parameter space, triggering validation at job creation time. This aligns with the OpenJD specification's intent (section 7.4) that parameterSpace is fully validated at job creation time.
 **Resolution:** Validation added in `instantiate_step()` via `StepParameterSpaceIterator::new()` call after `resolve_parameter_space()`.
 
-### Finding #4: HashMap Key Ordering in `TaskParameterSet`
+### Finding #4: ~~HashMap Key Ordering in `TaskParameterSet`~~ (Resolved)
 
-**File:** `src/job/step_param_space.rs`
-**Severity:** Informational
-**Description:** `TaskParameterSet` is a `HashMap<String, TaskParameterValue>`, so key iteration order is non-deterministic. The `get(index)` random access method and the sequential `Iterator` implementation may produce `TaskParameterSet` values with different internal HashMap ordering for the same logical task. This is not a correctness bug (the values are semantically identical), but could cause issues if downstream code depends on iteration order or uses debug-format comparison.
-**Recommendation:** Consider using `IndexMap` for `TaskParameterSet` if deterministic key ordering is desired, or document that ordering is not guaranteed.
+**File:** `src/types.rs`
+**Severity:** ~~Informational~~ Resolved
+**Description:** `TaskParameterSet` was a `HashMap<String, TaskParameterValue>`, so key iteration order was non-deterministic. Changed to `IndexMap` for deterministic insertion-order iteration, ensuring `get(index)` and sequential `Iterator` produce consistent key ordering.
+**Resolution:** Changed type alias from `HashMap` to `IndexMap`.
 
-### Finding #5: O(N²) Algorithm in AdaptiveChunkNode
+### Finding #5: ~~O(N²) Algorithm in AdaptiveChunkNode~~ (Resolved)
 
 **File:** `src/job/step_param_space.rs`, `AdaptiveChunkNode::validate_containment()`
-**Severity:** Low
-**Description:** Uses `Vec::contains()` in a loop, resulting in O(V × N) complexity where V = values in the chunk and N = total values. For large ranges this could be slow.
-**Recommendation:** Use a `HashSet` for O(V) containment checking.
+**Severity:** ~~Low~~ Resolved
+**Description:** Previously used `Vec::contains()` in a loop, resulting in O(N²) complexity. Now uses `HashSet` for O(N) containment checking.
+**Resolution:** `HashSet<i64>` built from values before the containment loop.
 
-### Finding #6: Duplicated Chunk Logic
+### Finding #6: ~~Duplicated Chunk Logic~~ (Resolved)
 
 **File:** `src/job/step_param_space.rs`
-**Severity:** Informational
-**Description:** `StaticChunkNode::chunk_range_expr()` and `StaticChunkIterator::chunk_range_expr()` contain ~40 lines of identical logic for computing chunk boundaries as range expressions.
-**Recommendation:** Extract into a shared helper function.
+**Severity:** ~~Informational~~ Resolved
+**Description:** `StaticChunkNode` and `StaticChunkIterator` previously had ~40 lines of identical `chunk_range_expr()` logic. Now both delegate to a shared `build_chunk_range_expr()` function.
+**Resolution:** Extracted shared helper function.
 
 ### Finding #7: Long Validation Function
 
@@ -296,12 +300,12 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 **Description:** `validate_format_strings()` is ~400 lines. While the logic is correct, the function handles four distinct scopes (job name, host requirements, environments, steps) in a single function body.
 **Recommendation:** Consider decomposing into per-scope helper functions for readability and maintainability.
 
-### Finding #8: Spec Uses Wrong Error Type Name
+### Finding #8: ~~Spec Uses Wrong Error Type Name~~ (Resolved)
 
-**File:** `specs/model/error-handling.md`, `specs/model/architecture.md`
-**Severity:** Informational
-**Description:** The specs refer to `OpenJdError` but the implementation uses `ModelError`.
-**Recommendation:** Update the specs to use `ModelError` consistently.
+**File:** `specs/model/*.md`
+**Severity:** ~~Informational~~ Resolved
+**Description:** The specs previously referred to `OpenJdError` but the implementation uses `ModelError`. All 31 occurrences have been updated.
+**Resolution:** Renamed in all spec documents.
 
 ### Finding #9: Silent JSON Object Conversion
 
@@ -316,22 +320,23 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 ### Priority 1 (Should Fix)
 
-1. **Fix the `make_list().unwrap()` panic** in `json_to_expr_value()` — replace with proper error propagation.
+1. ~~**Fix the `make_list().unwrap()` panic** in `json_to_expr_value()` — replace with proper error propagation.~~ **Resolved.**
 
 ### Priority 2 (Should Consider)
 
 2. ~~**Move association length validation** to decode time (pass 6) to match the OpenJD specification's intent.~~ **Resolved** — validation now occurs at `create_job` time.
-3. **Replace `Float64::new(f).unwrap()`** in step_param_space.rs with error propagation or a safety comment.
-4. **Use HashSet** in `AdaptiveChunkNode::validate_containment()` for O(N) instead of O(N²).
+3. ~~**Replace `Float64::new(f).unwrap()`** in step_param_space.rs with error propagation or a safety comment.~~ **Resolved.**
+4. ~~**Use HashSet** in `AdaptiveChunkNode::validate_containment()` for O(N) instead of O(N²).~~ **Resolved.**
 
 ### Priority 3 (Nice to Have)
 
-5. **Extract duplicated `chunk_range_expr()` logic** into a shared function.
+5. ~~**Extract duplicated `chunk_range_expr()` logic** into a shared function.~~ **Resolved.**
 6. **Decompose `validate_format_strings()`** into per-scope helpers.
 7. ~~**Update specs** to use `ModelError` instead of `OpenJdError`.~~ **Resolved.**
-8. **Add tests for `StepParameterSpaceIterator::get()`** with product and association combinations.
-9. **Consider `IndexMap` for `TaskParameterSet`** if deterministic key ordering is desired.
+8. ~~**Add tests for `StepParameterSpaceIterator::get()`** with product and association combinations.~~ Partially addressed — 24 chunking tests ported from Python, though `get()` random access tests for complex combinations remain a gap.
+9. ~~**Consider `IndexMap` for `TaskParameterSet`** if deterministic key ordering is desired.~~ **Resolved.**
 10. **Add error handling for unexpected JSON types** in `json_to_expr_value()`.
+11. ~~**Update `parameter-space.md` spec** to document `ContiguousChunkNode`, adaptive child reordering, `chunk_override` threading, and `compress_range_expr` step detection.~~ **Resolved.**
 
 ### Priority 4 (Future Improvements)
 

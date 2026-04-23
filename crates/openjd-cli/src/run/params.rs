@@ -165,7 +165,7 @@ pub fn coerce_task_params(
     use openjd_model::job::TaskParameter;
     use openjd_model::types::{TaskParameterType, TaskParameterValue};
 
-    let mut result = HashMap::new();
+    let mut result = openjd_model::types::TaskParameterSet::new();
     let mut errors = Vec::new();
 
     for name in params.keys() {
