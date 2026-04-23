@@ -259,7 +259,9 @@ jobs:
       - name: Run cross-user tests
         env:
           OPENJD_TEST_WIN_USER_NAME: openjdtestuser
-        run: cargo test -p openjd-sessions --features test-utils -- --include-ignored
+        run: |
+          cargo test -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
+          cargo test -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
       - name: Remove test user
         if: always()
         run: net user openjdtestuser /delete
