@@ -33,7 +33,9 @@ fn store(dc: &dyn ContentAddressedDataCache, content: &[u8]) -> String {
 
 fn hashed_entry(path: &str, content: &[u8], dc: &dyn ContentAddressedDataCache) -> FileEntry {
     let hash = store(dc, content);
-    let mut e = FileEntry::file(path, content.len() as u64, 1000);
+    // Use 2020-01-01T00:00:00 UTC — a realistic timestamp that works on all platforms
+    // (Windows set_modified fails for timestamps near the Unix epoch).
+    let mut e = FileEntry::file(path, content.len() as u64, 1_577_836_800_000_000);
     e.hash = Some(hash);
     e
 }
@@ -139,9 +141,14 @@ fn download_updates_mtime_in_manifest() {
     )
     .unwrap();
 
+    // mtime should be restored to the manifest value (or close, depending on fs precision).
+    // The hashed_entry helper uses 2020-01-01T00:00:00 UTC.
     let actual_mtime = result.manifest.files()[0].mtime.unwrap();
-    assert_ne!(actual_mtime, 1000); // not the placeholder
-    assert!(actual_mtime > 0);
+    let diff = actual_mtime.abs_diff(1_577_836_800_000_000);
+    assert!(
+        diff < 1_000_000,
+        "mtime should be restored to manifest value, got {actual_mtime}"
+    );
 }
 
 #[test]
@@ -1176,7 +1183,7 @@ fn chunked_entry(
             h
         })
         .collect();
-    let mut entry = FileEntry::file(path, total, 1000);
+    let mut entry = FileEntry::file(path, total, 1_577_836_800_000_000);
     entry.chunk_hashes = Some(chunk_hashes);
     let manifest: AbsSnapshot =
         Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![entry.clone()]);
@@ -1285,8 +1292,11 @@ fn download_chunked_file_preserves_mtime() {
     .unwrap();
 
     let actual_mtime = result.manifest.files()[0].mtime.unwrap();
-    assert_ne!(actual_mtime, 1000);
-    assert!(actual_mtime > 0);
+    let diff = actual_mtime.abs_diff(1_577_836_800_000_000);
+    assert!(
+        diff < 1_000_000,
+        "mtime should be restored to manifest value, got {actual_mtime}"
+    );
 }
 
 // ===== Chunked hash cache tests =====
@@ -1683,4 +1693,91 @@ fn corrupted_chunked_cache_object() {
         err.contains("hash mismatch"),
         "expected hash mismatch error, got: {err}"
     );
+}
+
+// ===== mtime restoration tests =====
+
+#[test]
+fn download_restores_mtime_from_manifest() {
+    // The downloaded file's mtime should be set to the manifest value,
+    // not left as the time of download.
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+    let dest = tmp.path().join("file.txt");
+
+    // Use a specific mtime in the past (2020-01-01T00:00:00 UTC in microseconds)
+    let manifest_mtime: u64 = 1_577_836_800_000_000;
+    let hash = store(&*dc, b"mtime test");
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 10, manifest_mtime);
+    entry.hash = Some(hash);
+
+    let manifest = make_snapshot(vec![entry]);
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
+
+    // The file on disk should have mtime close to the manifest value
+    let on_disk_mtime = dest
+        .metadata()
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u64;
+    let diff = on_disk_mtime.abs_diff(manifest_mtime);
+    // Allow up to 1 second of precision loss (FAT32 has 2s granularity,
+    // but ext4/tmpfs should be exact or within microseconds)
+    assert!(
+        diff < 1_000_000,
+        "on-disk mtime {on_disk_mtime} should be close to manifest mtime {manifest_mtime}, diff={diff}us"
+    );
+
+    // The returned manifest should have the read-back mtime (matches disk exactly)
+    let returned_mtime = result.manifest.files()[0].mtime.unwrap();
+    assert_eq!(returned_mtime, on_disk_mtime);
+}
+
+#[test]
+fn download_restores_mtime_chunked() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+    let dest = tmp.path().join("chunked.bin");
+
+    let manifest_mtime: u64 = 1_577_836_800_000_000;
+    let chunk_size = 4i64;
+    let h1 = store(&*dc, b"aaaa");
+    let h2 = store(&*dc, b"bbbb");
+    let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 8, manifest_mtime);
+    entry.chunk_hashes = Some(vec![h1, h2]);
+
+    let manifest: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, chunk_size).with_files(vec![entry]);
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        Default::default(),
+    )
+    .unwrap();
+
+    let on_disk_mtime = dest
+        .metadata()
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u64;
+    let diff = on_disk_mtime.abs_diff(manifest_mtime);
+    assert!(
+        diff < 1_000_000,
+        "on-disk mtime {on_disk_mtime} should be close to manifest mtime {manifest_mtime}, diff={diff}us"
+    );
+    assert_eq!(result.manifest.files()[0].mtime.unwrap(), on_disk_mtime);
 }

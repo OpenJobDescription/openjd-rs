@@ -645,12 +645,25 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
         results
     });
 
-    // Apply mtime updates and cache writes sequentially
+    // Apply mtime restoration and cache writes sequentially
     for r in download_results {
         let (index, target_path) = r?;
         let file = &mut result.files[index];
 
+        // 1. Set the file's mtime to the manifest value
+        if let Some(manifest_mtime) = file.mtime {
+            let system_time = UNIX_EPOCH + std::time::Duration::from_micros(manifest_mtime);
+            // Opening with write(true) is required on Windows for set_modified to succeed.
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&target_path)
+                .and_then(|f| f.set_modified(system_time));
+        }
+
+        // 2. Read back the actual mtime (filesystem precision may have adjusted it)
         let actual_mtime = get_mtime(&target_path)?;
+
+        // 3. Store the read-back mtime so the returned manifest matches disk exactly
         file.mtime = Some(actual_mtime);
 
         if let Some(ref cache) = hash_cache {
@@ -1058,7 +1071,8 @@ mod tests {
         let hash = setup_data_cache_with_file(&data_cache, b"data");
         let dest = tmp.path().join("file.txt");
 
-        let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 4, 999);
+        let mut entry =
+            FileEntry::file(dest.to_string_lossy().to_string(), 4, 1_577_836_800_000_000);
         entry.hash = Some(hash);
 
         let manifest: AbsSnapshot =
@@ -1071,10 +1085,13 @@ mod tests {
         )
         .unwrap();
 
-        // mtime should be updated to actual filesystem value, not the original 999
+        // mtime should be restored to the manifest value (or close, depending on fs precision)
         let actual_mtime = result.manifest.files()[0].mtime.unwrap();
-        assert_ne!(actual_mtime, 999);
-        assert!(actual_mtime > 0);
+        let diff = actual_mtime.abs_diff(1_577_836_800_000_000);
+        assert!(
+            diff < 1_000_000,
+            "mtime should be restored to manifest value, got {actual_mtime}"
+        );
     }
 
     #[test]

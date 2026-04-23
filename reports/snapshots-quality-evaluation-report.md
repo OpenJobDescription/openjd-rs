@@ -10,7 +10,7 @@
 
 The `openjd-snapshots` crate is a well-engineered Rust library for content-addressed file tree snapshotting with S3 integration. It provides 11 operations covering the full lifecycle: filesystem collection, hashing, upload/download, diffing, composition, filtering, partitioning, and cache synchronization.
 
-The crate compiles cleanly with zero warnings (cargo clippy passes), and all 1,050 tests pass (3 ignored S3 integration tests requiring live credentials). The type system makes good use of phantom type parameters for compile-time safety. The code is generally well-organized and follows Rust idioms.
+The crate compiles cleanly with zero warnings (cargo clippy passes), and all 1,052 tests pass (3 ignored S3 integration tests requiring live credentials). The type system makes good use of phantom type parameters for compile-time safety. The code is generally well-organized and follows Rust idioms.
 
 However, the evaluation found several specification-to-implementation discrepancies (some significant), a few areas where the implementation could be improved, and some gaps in test coverage.
 
@@ -19,7 +19,7 @@ However, the evaluation found several specification-to-implementation discrepanc
 ## 1. Compilation and Test Results
 
 - **cargo clippy**: Zero warnings, zero errors.
-- **cargo test**: 1,050 passed, 0 failed, 3 ignored.
+- **cargo test**: 1,052 passed, 0 failed, 3 ignored.
   - Unit tests: ~200 across source modules
   - Integration tests: ~850 across 21 test files
   - Ignored: 3 S3 integration tests (require `OPENJD_TEST_S3_BUCKET` env var)
@@ -48,7 +48,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 | # | Area | Discrepancy |
 |---|------|-------------|
 | S1 | ~~Hash Upload Pipeline~~ | ~~The spec describes a `DashMap<String, broadcast::Sender<()>>` for concurrent upload deduplication within a single HASH_UPLOAD invocation. **This is not implemented.**~~ **RESOLVED.** Concurrent upload deduplication is now implemented using `Mutex<HashMap<String, broadcast::Sender<()>>>` (functionally equivalent to the spec's DashMap approach, but more appropriate given the small map size bounded by `max_workers`). The dedup map coordinates all three upload paths: whole-file, multipart, and chunked. Two dedicated tests in `test_upload_dedup.rs` verify exactly-once upload semantics under concurrent load with artificial latency. |
-| S2 | Download Pipeline | The spec says downloaded files have `mtime` set to the manifest value via `filetime` or `set_modified`. **This is not implemented.** The implementation reads the actual filesystem mtime after writing and updates the manifest to match the actual value (time of download), not the original. |
+| S2 | ~~Download Pipeline~~ | ~~The spec says downloaded files have `mtime` set to the manifest value via `filetime` or `set_modified`. **This is not implemented.**~~ **RESOLVED.** Downloaded files now have their mtime set to the manifest value via `File::set_modified`, then the mtime is read back to account for filesystem precision loss, and the read-back value is stored in the returned manifest. Two dedicated tests in `test_download.rs` verify the three-step behavior for both whole-file and chunked downloads. |
 
 #### MEDIUM SEVERITY
 
@@ -216,8 +216,8 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 ### 5.1 High Priority — Spec Alignment
 
 1. ~~**Update hash_upload pipeline spec** to remove the DashMap concurrent dedup section, or implement it.~~ **DONE.** Concurrent upload deduplication implemented; spec's DashMap description now matches implementation (using `Mutex<HashMap>` + `broadcast` instead of `DashMap`, which is functionally equivalent and more appropriate for the small map size).
-2. **Update download pipeline spec** to accurately describe mtime behavior (manifest is updated to reflect actual mtime, not restored to original).
-3. **Decide on mtime restoration**: If mtime restoration is desired, implement it. If not, update the spec. This affects reproducibility of downloaded file trees.
+2. ~~**Update download pipeline spec** to accurately describe mtime behavior.~~ **DONE.** Download now restores mtime from the manifest via `File::set_modified`, reads it back to account for filesystem precision loss, and stores the read-back value in the returned manifest.
+3. ~~**Decide on mtime restoration**~~ **DONE.** mtime restoration implemented with three-step approach: set → read back → store.
 
 ### 5.2 Medium Priority — Implementation Improvements
 
@@ -252,14 +252,14 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 | Category | Score | Notes |
 |----------|-------|-------|
 | Compilation | ✅ Excellent | Zero warnings, zero errors |
-| Tests | ✅ Very Good | 1,050 tests, all passing, good coverage |
+| Tests | ✅ Very Good | 1,052 tests, all passing, good coverage |
 | Type System | ✅ Excellent | Phantom types, builder pattern, trait abstractions |
 | Error Handling | ✅ Good | Non-exhaustive, descriptive messages, pinned formats |
-| Spec Completeness | ⚠️ Good | Comprehensive but has 1 high-severity discrepancy (S2: download mtime) |
+| Spec Completeness | ✅ Good | All high-severity discrepancies resolved (S1, S2) |
 | Spec Accuracy | ⚠️ Needs Work | Several features described in specs differ from implementation |
 | Performance | ✅ Good | Appropriate use of rayon/tokio, no O(n²) algorithms in hot paths |
 | Code Quality | ✅ Good | Clean, idiomatic Rust, consistent naming |
 | Test Coverage Gaps | ⚠️ Minor | Missing symlink policy tests, no stress tests |
 | API Ergonomics | ✅ Good | Large but well-organized public API |
 
-**Overall Assessment:** The crate is solid and production-quality. The main remaining area needing attention is spec-to-implementation alignment, particularly around the download mtime behavior. The hash_upload deduplication feature (previously the top finding) has been implemented and tested. The implementation itself is well-structured and correct for the cases it handles.
+**Overall Assessment:** The crate is solid and production-quality. Both high-severity spec-to-implementation discrepancies (S1: upload deduplication, S2: download mtime restoration) have been resolved. The remaining areas needing attention are medium-severity spec discrepancies and minor implementation improvements.
