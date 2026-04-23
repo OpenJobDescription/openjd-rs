@@ -724,7 +724,9 @@ pub(super) fn json_to_expr_value(
     val: &serde_json::Value,
 ) -> Result<openjd_expr::ExprValue, String> {
     match val {
-        serde_json::Value::Null => Ok(openjd_expr::ExprValue::Null),
+        serde_json::Value::Null => {
+            Err("Unexpected null in parameter value. List elements must be strings, integers, floats, or booleans.".to_string())
+        }
         serde_json::Value::Bool(b) => Ok(openjd_expr::ExprValue::Bool(*b)),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -746,7 +748,9 @@ pub(super) fn json_to_expr_value(
             openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE)
                 .map_err(|e| format!("Invalid list value: {e}"))
         }
-        serde_json::Value::Object(_) => Ok(openjd_expr::ExprValue::String(val.to_string())),
+        serde_json::Value::Object(_) => {
+            Err("Unexpected JSON object in parameter value. List elements must be strings, integers, floats, or booleans.".to_string())
+        }
     }
 }
 

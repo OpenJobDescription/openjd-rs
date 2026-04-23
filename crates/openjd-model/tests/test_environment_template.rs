@@ -587,6 +587,152 @@ fn test_env_template_multiple_extensions() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Environment template extension handling — ported from Python
+// test_parse.py::test_template_extensions_list and
+// test_feature_bundle_1.py::TestParameterDefinitionsCount,
+// TestEnvironmentNameLength
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_env_template_duplicate_extensions() {
+    // Ported from Python: duplicate extension names should fail
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR", "EXPR"],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
+    }"#,
+        &["EXPR"],
+        &["Duplicate"],
+    );
+}
+
+#[test]
+fn test_env_template_51_params_without_extension_fails() {
+    // Ported from Python: 51 params without FEATURE_BUNDLE_1 → error
+    let params: Vec<String> = (0..51)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{}],
+        "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
+    }}"#,
+        params.join(",")
+    );
+    check_env_err(&s, &["50"]);
+}
+
+#[test]
+fn test_env_template_50_params_without_extension_succeeds() {
+    // Ported from Python: 50 params without extension → succeeds
+    let params: Vec<String> = (0..50)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{}],
+        "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
+    }}"#,
+        params.join(",")
+    );
+    decode_ok(&s);
+}
+
+#[test]
+fn test_env_template_50_params_with_extension_succeeds() {
+    // Ported from Python: 50 params with FEATURE_BUNDLE_1 → succeeds
+    let params: Vec<String> = (0..50)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "parameterDefinitions": [{}],
+        "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
+    }}"#,
+        params.join(",")
+    );
+    decode_with_exts(&s, &["FEATURE_BUNDLE_1"]);
+}
+
+#[test]
+fn test_env_template_51_params_with_extension_still_fails() {
+    // Ported from Python: 51 params with FEATURE_BUNDLE_1 → STILL fails
+    // Environment templates are always capped at 50 parameters, even with FEATURE_BUNDLE_1
+    let params: Vec<String> = (0..51)
+        .map(|i| format!(r#"{{"name": "P{i}", "type": "INT"}}"#))
+        .collect();
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "parameterDefinitions": [{}],
+        "environment": {{"name": "Foo", "script": {{"actions": {{"onEnter": {{"command": "foo"}}}}}}}}
+    }}"#,
+        params.join(",")
+    );
+    check_env_err_with_exts(&s, &["FEATURE_BUNDLE_1"], &["50"]);
+}
+
+#[test]
+fn test_env_name_65_chars_without_extension_fails() {
+    // Ported from Python: environment name > 64 chars without extension → error
+    let long_name = "A".repeat(65);
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "environment": {{"name": "{long_name}", "variables": {{"X": "1"}}}}
+    }}"#
+    );
+    check_env_err(&s, &["64"]);
+}
+
+#[test]
+fn test_env_name_64_chars_without_extension_succeeds() {
+    // Ported from Python: environment name exactly 64 chars → succeeds
+    let name = "A".repeat(64);
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "environment": {{"name": "{name}", "variables": {{"X": "1"}}}}
+    }}"#
+    );
+    decode_ok(&s);
+}
+
+#[test]
+fn test_env_name_512_chars_with_extension_succeeds() {
+    // Ported from Python: 512-char name with FEATURE_BUNDLE_1 → succeeds
+    let name = "A".repeat(512);
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {{"name": "{name}", "variables": {{"X": "1"}}}}
+    }}"#
+    );
+    decode_with_exts(&s, &["FEATURE_BUNDLE_1"]);
+}
+
+#[test]
+fn test_env_name_513_chars_with_extension_fails() {
+    // Ported from Python: 513-char name with FEATURE_BUNDLE_1 → error
+    let name = "A".repeat(513);
+    let s = format!(
+        r#"{{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {{"name": "{name}", "variables": {{"X": "1"}}}}
+    }}"#
+    );
+    check_env_err_with_exts(&s, &["FEATURE_BUNDLE_1"], &["512"]);
+}
+
+// ══════════════════════════════════════════════════════════════
 // Bug fix: onEnter is required per spec §4.3
 // ══════════════════════════════════════════════════════════════
 

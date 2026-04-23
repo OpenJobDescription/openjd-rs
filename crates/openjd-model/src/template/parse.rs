@@ -96,6 +96,16 @@ pub fn decode_job_template(
                 "extensions, if provided, must be a non-empty list.".to_string(),
             ));
         }
+        // Check for duplicate extension names
+        let mut seen = std::collections::HashSet::new();
+        for ext in template_exts {
+            if !seen.insert(ext.as_str()) {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Duplicate values for extension name are not allowed. Duplicate values: {}",
+                    ext.as_str()
+                )));
+            }
+        }
         let supported: std::collections::HashSet<&str> = supported_extensions
             .unwrap_or(&[])
             .iter()
@@ -168,6 +178,16 @@ pub fn decode_environment_template(
             return Err(ModelError::DecodeValidation(
                 "extensions, if provided, must be a non-empty list.".to_string(),
             ));
+        }
+        // Check for duplicate extension names
+        let mut seen = std::collections::HashSet::new();
+        for ext in template_exts {
+            if !seen.insert(ext.as_str()) {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Duplicate values for extension name are not allowed. Duplicate values: {}",
+                    ext.as_str()
+                )));
+            }
         }
         let supported: std::collections::HashSet<&str> = supported_extensions
             .unwrap_or(&[])

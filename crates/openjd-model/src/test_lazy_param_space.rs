@@ -223,6 +223,126 @@ fn test_get_matches_iteration() {
     }
 }
 
+// ── Random access with complex combinations ──
+
+#[test]
+fn test_get_product_three_params() {
+    // Product of 3 params: A(2) * B(3) * C(2) = 12 elements
+    let space = make_space(
+        vec![
+            ("A", int_list(&[1, 2])),
+            ("B", string_list(&["a", "b", "c"])),
+            ("C", int_list(&[-1, -2])),
+        ],
+        Some("A * B * C"),
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert_eq!(iter.len(), 12);
+
+    // Verify get() matches iteration order
+    let iter2 = StepParameterSpaceIterator::new(&space).unwrap();
+    let collected: Vec<_> = iter2.collect();
+    for (i, expected) in collected.iter().enumerate() {
+        let got = iter.get(i).unwrap();
+        assert_eq!(get_int(&got, "A"), get_int(expected, "A"), "index {i} A");
+        assert_eq!(
+            get_string(&got, "B"),
+            get_string(expected, "B"),
+            "index {i} B"
+        );
+        assert_eq!(get_int(&got, "C"), get_int(expected, "C"), "index {i} C");
+    }
+    assert!(iter.get(12).is_none());
+}
+
+#[test]
+fn test_get_association_three_params() {
+    // Association of 3 params: (A, B, C) with 4 elements each
+    let space = make_space(
+        vec![
+            ("A", int_list(&[1, 2, 3, 4])),
+            ("B", string_list(&["a", "b", "c", "d"])),
+            ("C", int_list(&[-1, -2, -3, -4])),
+        ],
+        Some("(A, B, C)"),
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert_eq!(iter.len(), 4);
+
+    for i in 0..4 {
+        let got = iter.get(i).unwrap();
+        assert_eq!(get_int(&got, "A"), (i + 1) as i64);
+        assert_eq!(get_string(&got, "B"), ["a", "b", "c", "d"][i]);
+        assert_eq!(get_int(&got, "C"), -(i as i64 + 1));
+    }
+    assert!(iter.get(4).is_none());
+}
+
+#[test]
+fn test_get_nested_product_association() {
+    // A * (B, C * D): A=[1,2], B=["a","b"], C=[10,11], D=[20,21]
+    // (B, C*D) is association of len 2 (B has 2, C*D has 2*2=4... wait, association needs same len)
+    // Let's use: A=[1,2], B=["a","b","c","d"], C=[10,11], D=[20,21]
+    // C*D = 4 elements, B has 4 elements, so (B, C*D) = 4 elements
+    // A * (B, C*D) = 2 * 4 = 8
+    let space = make_space(
+        vec![
+            ("A", int_list(&[1, 2])),
+            ("B", string_list(&["a", "b", "c", "d"])),
+            ("C", int_range_expr("10-11")),
+            ("D", int_list(&[20, 21])),
+        ],
+        Some("A * (B, C * D)"),
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert_eq!(iter.len(), 8);
+
+    // Verify get() matches iteration
+    let iter2 = StepParameterSpaceIterator::new(&space).unwrap();
+    let collected: Vec<_> = iter2.collect();
+    for (i, expected) in collected.iter().enumerate() {
+        let got = iter.get(i).unwrap();
+        assert_eq!(get_int(&got, "A"), get_int(expected, "A"), "index {i} A");
+        assert_eq!(
+            get_string(&got, "B"),
+            get_string(expected, "B"),
+            "index {i} B"
+        );
+        assert_eq!(get_int(&got, "C"), get_int(expected, "C"), "index {i} C");
+        assert_eq!(get_int(&got, "D"), get_int(expected, "D"), "index {i} D");
+    }
+    assert!(iter.get(8).is_none());
+}
+
+#[test]
+fn test_get_product_with_range_expr() {
+    // Product with range expression: A(range 1-5) * B(["x","y"]) = 10 elements
+    let space = make_space(
+        vec![
+            ("A", int_range_expr("1-5")),
+            ("B", string_list(&["x", "y"])),
+        ],
+        Some("A * B"),
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert_eq!(iter.len(), 10);
+
+    // Spot check specific indices
+    let e0 = iter.get(0).unwrap();
+    assert_eq!(get_int(&e0, "A"), 1);
+    assert_eq!(get_string(&e0, "B"), "x");
+
+    let e1 = iter.get(1).unwrap();
+    assert_eq!(get_int(&e1, "A"), 1);
+    assert_eq!(get_string(&e1, "B"), "y");
+
+    let e9 = iter.get(9).unwrap();
+    assert_eq!(get_int(&e9, "A"), 5);
+    assert_eq!(get_string(&e9, "B"), "y");
+
+    assert!(iter.get(10).is_none());
+}
+
 // ── Containment ──
 
 #[test]

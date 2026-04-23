@@ -125,8 +125,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 **Issues Found:**
 - ~~**BUG: `make_list(...).unwrap()` at line 742**~~ **Resolved** — `json_to_expr_value()` now returns `Result` with proper error propagation for both `make_list` and `Float64::new`.
-- `json_to_expr_value()` silently converts JSON objects to their string representation — surprising behavior
-- `json_to_expr_value()` for `Value::Null` returns `ExprValue::Null` which may not be handled well inside list types
+- `json_to_expr_value()` for `Value::Null` and `Value::Object` now returns informative errors
 
 #### `error.rs` (297 lines)
 
@@ -307,12 +306,12 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 **Description:** The specs previously referred to `OpenJdError` but the implementation uses `ModelError`. All 31 occurrences have been updated.
 **Resolution:** Renamed in all spec documents.
 
-### Finding #9: Silent JSON Object Conversion
+### Finding #9: ~~Silent JSON Object Conversion~~ (Resolved)
 
 **File:** `src/job/create_job/parameters.rs`, `json_to_expr_value()`
-**Severity:** Informational
-**Description:** When a JSON object appears inside a list parameter value, `json_to_expr_value()` silently converts it to its JSON string representation via `val.to_string()`. This may be intentional for forward compatibility but is surprising behavior that could mask user errors.
-**Recommendation:** Consider returning an error for unexpected JSON types, or document this behavior in the spec.
+**Severity:** ~~Informational~~ Bug (Resolved)
+**Description:** `json_to_expr_value()` silently converted JSON objects to their string representation and accepted JSON nulls. Both are user errors that should produce informative error messages. JSON objects and nulls inside list parameter values are not valid per the OpenJD specification.
+**Resolution:** Both `Value::Object` and `Value::Null` now return descriptive errors: "Unexpected JSON object/null in parameter value. List elements must be strings, integers, floats, or booleans."
 
 ---
 
@@ -335,7 +334,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 7. ~~**Update specs** to use `ModelError` instead of `OpenJdError`.~~ **Resolved.**
 8. ~~**Add tests for `StepParameterSpaceIterator::get()`** with product and association combinations.~~ Partially addressed — 24 chunking tests ported from Python, though `get()` random access tests for complex combinations remain a gap.
 9. ~~**Consider `IndexMap` for `TaskParameterSet`** if deterministic key ordering is desired.~~ **Resolved.**
-10. **Add error handling for unexpected JSON types** in `json_to_expr_value()`.
+10. ~~**Add error handling for unexpected JSON types** in `json_to_expr_value()`.~~ **Resolved.**
 11. ~~**Update `parameter-space.md` spec** to document `ContiguousChunkNode`, adaptive child reordering, `chunk_override` threading, and `compress_range_expr` step detection.~~ **Resolved.**
 
 ### Priority 4 (Future Improvements)

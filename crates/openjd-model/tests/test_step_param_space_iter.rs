@@ -575,6 +575,251 @@ fn test_default_product_preserves_definition_order() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// get() / random access with complex combinations
+// Ported from Python test_product_getitem, test_associate_getitem,
+// test_nested_expr_getitem (gap in Python), test_no_param_getelem,
+// test_single_param_getelem
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn create_iterator(template_json: &str) -> StepParameterSpaceIterator {
+    let v = yaml_val(template_json);
+    let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
+    let supported_refs: Vec<&str> = supported.to_vec();
+    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp/template",
+            current_working_dir: "/tmp/cwd",
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed).unwrap();
+    let step = &job.steps[0];
+    let ps = step.parameter_space.as_ref().unwrap();
+    StepParameterSpaceIterator::new(ps).unwrap()
+}
+
+fn iter_val_str(set: &openjd_model::types::TaskParameterSet, name: &str) -> String {
+    match &set[name].value {
+        openjd_expr::ExprValue::Int(i) => i.to_string(),
+        openjd_expr::ExprValue::Float(f) => f.to_string(),
+        openjd_expr::ExprValue::String(s) => s.clone(),
+        other => format!("{:?}", other),
+    }
+}
+
+#[test]
+fn test_product_getitem() {
+    // Ported from Python test_product_getitem: 3-param product, forward/reverse indexing
+    let iter = create_iterator(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": [1, 2]},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b", "c"]},
+                    {"name": "Param3", "type": "INT", "range": [-1, -2]}
+                ],
+                "combination": "Param1 * Param2 * Param3"
+            }
+        }]
+    }"#,
+    );
+    assert_eq!(iter.len(), 12);
+
+    // Forward indexing — verify all 12 elements match iteration order
+    let collected: Vec<_> = StepParameterSpaceIterator::new(
+        // Re-create to get a fresh iterator for collection
+        &{
+            let v = yaml_val(
+                r#"{
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "Job",
+                "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [
+                            {"name": "Param1", "type": "INT", "range": [1, 2]},
+                            {"name": "Param2", "type": "STRING", "range": ["a", "b", "c"]},
+                            {"name": "Param3", "type": "INT", "range": [-1, -2]}
+                        ],
+                        "combination": "Param1 * Param2 * Param3"
+                    }
+                }]
+            }"#,
+            );
+            let jt = decode_job_template(v, None).unwrap();
+            let processed = preprocess_job_parameters(
+                &jt,
+                &JobParameterInputValues::new(),
+                &[],
+                &openjd_model::PathParameterOptions {
+                    job_template_dir: "/tmp",
+                    current_working_dir: "/tmp",
+                    allow_template_dir_walk_up: true,
+                    path_format: PathFormat::host(),
+                    allow_uri_path_values: true,
+                },
+            )
+            .unwrap();
+            let job = create_job(&jt, &processed).unwrap();
+            job.steps[0].parameter_space.clone().unwrap()
+        },
+    )
+    .unwrap()
+    .collect::<Vec<_>>();
+
+    for i in 0..12 {
+        let got = iter.get(i).unwrap();
+        assert_eq!(
+            iter_val_str(&got, "Param1"),
+            task_val_str(&collected, i, "Param1"),
+            "Mismatch at index {i} for Param1"
+        );
+        assert_eq!(
+            iter_val_str(&got, "Param2"),
+            task_val_str(&collected, i, "Param2"),
+            "Mismatch at index {i} for Param2"
+        );
+        assert_eq!(
+            iter_val_str(&got, "Param3"),
+            task_val_str(&collected, i, "Param3"),
+            "Mismatch at index {i} for Param3"
+        );
+    }
+
+    // Out of bounds
+    assert!(iter.get(12).is_none());
+    assert!(iter.get(100).is_none());
+}
+
+#[test]
+fn test_associate_getitem() {
+    // Ported from Python test_associate_getitem: 3-param association, forward indexing
+    let iter = create_iterator(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": "1-4"},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b", "c", "d"]},
+                    {"name": "Param3", "type": "INT", "range": [-1, -2, -3, -4]}
+                ],
+                "combination": "(Param1, Param2, Param3)"
+            }
+        }]
+    }"#,
+    );
+    assert_eq!(iter.len(), 4);
+
+    // Verify each element via get()
+    let expected = [
+        ("1", "a", "-1"),
+        ("2", "b", "-2"),
+        ("3", "c", "-3"),
+        ("4", "d", "-4"),
+    ];
+    for (i, (p1, p2, p3)) in expected.iter().enumerate() {
+        let set = iter.get(i).unwrap();
+        assert_eq!(iter_val_str(&set, "Param1"), *p1, "index {i} Param1");
+        assert_eq!(iter_val_str(&set, "Param2"), *p2, "index {i} Param2");
+        assert_eq!(iter_val_str(&set, "Param3"), *p3, "index {i} Param3");
+    }
+
+    // Out of bounds
+    assert!(iter.get(4).is_none());
+}
+
+#[test]
+fn test_nested_expr_getitem() {
+    // Fills the gap in Python: no test_nested_expr_getitem exists there.
+    // Combination: Param1 * (Param2, Param3 * Param4)
+    // Param1=[1,2], Param2=["a","b","c","d"], Param3=10-11, Param4=[20,21]
+    // (Param2, Param3*Param4) is association of len 4
+    // Total = 2 * 4 = 8
+    let iter = create_iterator(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": [1, 2]},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b", "c", "d"]},
+                    {"name": "Param3", "type": "INT", "range": "10-11"},
+                    {"name": "Param4", "type": "INT", "range": [20, 21]}
+                ],
+                "combination": "Param1 * (Param2, Param3 * Param4)"
+            }
+        }]
+    }"#,
+    );
+    assert_eq!(iter.len(), 8);
+
+    // Verify get() matches iteration for all 8 elements
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": [1, 2]},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b", "c", "d"]},
+                    {"name": "Param3", "type": "INT", "range": "10-11"},
+                    {"name": "Param4", "type": "INT", "range": [20, 21]}
+                ],
+                "combination": "Param1 * (Param2, Param3 * Param4)"
+            }
+        }]
+    }"#,
+        &[],
+    );
+
+    for i in 0..8 {
+        let got = iter.get(i).unwrap();
+        for name in &["Param1", "Param2", "Param3", "Param4"] {
+            assert_eq!(
+                iter_val_str(&got, name),
+                task_val_str(&tasks, i, name),
+                "get({i}) mismatch for {name}"
+            );
+        }
+    }
+
+    // Out of bounds
+    assert!(iter.get(8).is_none());
+}
+
+#[test]
+fn test_single_param_getitem() {
+    // Ported from Python test_single_param_getelem
+    let iter = create_iterator(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "Param1", "type": "INT", "range": [10, 11, 12]}]}
+        }]
+    }"#,
+    );
+    assert_eq!(iter.len(), 3);
+    assert_eq!(iter_val_str(&iter.get(0).unwrap(), "Param1"), "10");
+    assert_eq!(iter_val_str(&iter.get(1).unwrap(), "Param1"), "11");
+    assert_eq!(iter_val_str(&iter.get(2).unwrap(), "Param1"), "12");
+    assert!(iter.get(3).is_none());
+}
+
 #[test]
 fn lazy_param_space_range_expr_within_limit() {
     // max_task_param_range_len is 1024 for all configs (not raised by FB1)

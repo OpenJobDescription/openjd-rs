@@ -165,7 +165,9 @@ pub fn validate_environment_template(
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();
 
-    // Parameter definitions
+    // Parameter definitions — environment templates are always capped at 50
+    // (FEATURE_BUNDLE_1 does NOT raise this limit for environment templates)
+    const ENV_TEMPLATE_MAX_PARAMS: usize = 50;
     if let Some(params) = &et.parameter_definitions {
         if params.is_empty() {
             errors.add(
@@ -173,12 +175,12 @@ pub fn validate_environment_template(
                 "parameterDefinitions, if provided, must contain at least one element.",
             );
         }
-        if params.len() > limits.max_param_count {
+        if params.len() > ENV_TEMPLATE_MAX_PARAMS {
             errors.add(
                 &[],
                 format!(
                     "parameterDefinitions must not contain more than {} elements.",
-                    limits.max_param_count
+                    ENV_TEMPLATE_MAX_PARAMS
                 ),
             );
         }
