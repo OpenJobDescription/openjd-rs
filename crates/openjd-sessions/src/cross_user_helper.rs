@@ -181,12 +181,11 @@ impl CrossUserHelper {
 
         // Dup the stdin fd so we can write cancel commands from Session::cancel_action
         // while the helper is owned by a runner.
-        use std::os::unix::io::AsRawFd;
-        let raw_fd = child_stdin.as_raw_fd();
-        let dup_fd = nix::unistd::dup(raw_fd).map_err(|e| {
+        use std::os::unix::io::{AsFd, FromRawFd, IntoRawFd};
+        let dup_fd = nix::unistd::dup(child_stdin.as_fd()).map_err(|e| {
             SessionError::HelperCommunication(format!("Failed to dup helper stdin fd: {e}"))
         })?;
-        let cancel_writer = unsafe { std::os::unix::io::FromRawFd::from_raw_fd(dup_fd) };
+        let cancel_writer = unsafe { FromRawFd::from_raw_fd(dup_fd.into_raw_fd()) };
 
         let stdin = std::io::BufWriter::new(child_stdin);
         let async_reader =

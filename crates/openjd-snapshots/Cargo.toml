@@ -37,7 +37,7 @@ tempfile = "3"
 s3s = "0.13"
 s3s-fs = "0.13"
 s3s-aws = "0.13"
-aws-config = "1.8.15"
+aws-config = "1"
 
 [[bin]]
 name = "openjd-snapshots-bench"
@@ -50,7 +50,7 @@ features = ["derive"]
 optional = true
 
 [dependencies.rand]
-version = "0.8"
+version = "0.9"
 optional = true
 
 [dependencies.tempfile]
