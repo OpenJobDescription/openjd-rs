@@ -54,12 +54,17 @@ fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool 
 }
 
 /// Expand a directory symlink: find all files under the target directory and remap them.
+///
+/// Nested symlinks inside the expanded directory are handled according to `symlink_policy`:
+/// - `CollapseAll`: nested symlinks are resolved to their real targets.
+/// - `CollapseEscaping`: nested symlinks are preserved (remapped but kept as symlinks),
+///   since the escaping decision was already made on the parent directory symlink.
 fn expand_dir_symlink(
     link_rel_path: &str,
     target: &str,
     files: &[FileEntry],
     file_lookup: &HashMap<&str, &FileEntry>,
-    _symlink_policy: SymlinkPolicy,
+    symlink_policy: SymlinkPolicy,
 ) -> Vec<FileEntry> {
     let target_prefix = format!("{target}/");
     let mut result = Vec::new();
@@ -70,12 +75,21 @@ fn expand_dir_symlink(
         let suffix = &f.path[target_prefix.len()..];
         let new_path = format!("{link_rel_path}/{suffix}");
         if let Some(ref sym_target) = f.symlink_target {
-            // Nested symlink inside directory - resolve it
-            // cycle or missing target - skip
-            if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
-                let mut entry = real.clone();
-                entry.path = new_path;
-                result.push(entry);
+            match symlink_policy {
+                SymlinkPolicy::CollapseAll => {
+                    // Resolve nested symlinks to their real targets
+                    if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
+                        let mut entry = real.clone();
+                        entry.path = new_path;
+                        result.push(entry);
+                    }
+                }
+                _ => {
+                    // Preserve nested symlinks with remapped path
+                    let mut entry = f.clone();
+                    entry.path = new_path;
+                    result.push(entry);
+                }
             }
         } else {
             let mut entry = f.clone();

@@ -527,7 +527,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     return Err(crate::SnapshotError::Cancelled);
                 }
 
-                let _mem_permit = pool.acquire(1).await; // minimal: zero-copy I/O doesn't buffer in memory
+                let _mem_permit = pool.acquire(file_size as usize).await;
 
                 // Async download from data cache
                 let target_path = {

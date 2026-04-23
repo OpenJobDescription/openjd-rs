@@ -614,12 +614,12 @@ async fn process_whole_multipart(
     }
 
     // Stage 3: Multipart upload (we own this hash)
-    let upload_result = async {
-        let upload_id = data_cache
-            .create_multipart_upload(&hash, &alg_str)
-            .await
-            .map_err(crate::SnapshotError::Io)?;
+    let upload_id = data_cache
+        .create_multipart_upload(&hash, &alg_str)
+        .await
+        .map_err(crate::SnapshotError::Io)?;
 
+    let upload_result = async {
         let num_parts = (file_size as usize).div_ceil(part_size) as i32;
         let mut upload_handles = Vec::new();
 
@@ -670,6 +670,13 @@ async fn process_whole_multipart(
         Ok::<_, crate::SnapshotError>(())
     }
     .await;
+
+    // Abort the multipart upload on failure before notifying waiters
+    if let Err(ref _e) = upload_result {
+        let _ = data_cache
+            .abort_multipart_upload(&hash, &alg_str, &upload_id)
+            .await;
+    }
 
     // Notify waiters and clean up dedup map regardless of success/failure
     {

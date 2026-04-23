@@ -1,10 +1,20 @@
-use crate::manifest::{Diff, FileEntry, Full, Manifest};
+use crate::manifest::{Diff, DirEntry, FileEntry, Full, Manifest};
 use std::collections::HashMap;
 
+/// A node in the manifest trie structure.
+///
+/// Each node represents a path component in the directory tree. Nodes can hold:
+/// - A file/symlink entry (for leaf nodes representing files)
+/// - Child nodes (for subdirectories)
+/// - A deleted flag (for diff composition, to track deletion markers)
+///
+/// Any node without a file_entry and without the deleted flag is implicitly a directory.
+/// This enables efficient insertion, deletion of entire subtrees, and traversal to
+/// collect all entries for the final manifest.
 struct TrieNode {
     children: HashMap<String, TrieNode>,
     file_entry: Option<FileEntry>,
-    dir_deleted: bool,
+    deleted: bool,
 }
 
 impl TrieNode {
@@ -12,83 +22,78 @@ impl TrieNode {
         Self {
             children: HashMap::new(),
             file_entry: None,
-            dir_deleted: false,
+            deleted: false,
         }
     }
 
+    /// Navigate to or create the node at the given path.
+    fn insert_path(&mut self, path: &str) -> &mut TrieNode {
+        let parts: Vec<&str> = path.split('/').collect();
+        let mut node = self;
+        for &part in &parts {
+            node = node
+                .children
+                .entry(part.to_string())
+                .or_insert_with(TrieNode::new);
+        }
+        node
+    }
+
+    /// Insert a file entry at the given path, clearing any deleted flag.
     fn insert(&mut self, path: &str, entry: FileEntry) {
+        let node = self.insert_path(path);
+        node.file_entry = Some(entry);
+        node.deleted = false;
+    }
+
+    /// Delete the node at the given path and all its children.
+    fn delete_subtree(&mut self, path: &str) -> bool {
         let parts: Vec<&str> = path.split('/').collect();
-        let mut node = self;
+        if parts.is_empty() {
+            return false;
+        }
+        let mut node = &mut *self;
         for &part in &parts[..parts.len() - 1] {
-            node = node
-                .children
-                .entry(part.to_string())
-                .or_insert_with(TrieNode::new);
-        }
-        let leaf = node
-            .children
-            .entry(parts[parts.len() - 1].to_string())
-            .or_insert_with(TrieNode::new);
-        leaf.file_entry = Some(entry);
-        leaf.dir_deleted = false;
-    }
-
-    fn delete_file(&mut self, path: &str) {
-        let parts: Vec<&str> = path.split('/').collect();
-        self.delete_file_recursive(&parts);
-    }
-
-    fn delete_file_recursive(&mut self, parts: &[&str]) {
-        if parts.is_empty() {
-            return;
-        }
-        if parts.len() == 1 {
-            self.children.remove(parts[0]);
-            return;
-        }
-        if let Some(child) = self.children.get_mut(parts[0]) {
-            child.delete_file_recursive(&parts[1..]);
-        }
-    }
-
-    fn delete_if_empty(&mut self, path: &str) {
-        let parts: Vec<&str> = path.split('/').collect();
-        self.delete_if_empty_recursive(&parts);
-    }
-
-    fn delete_if_empty_recursive(&mut self, parts: &[&str]) {
-        if parts.is_empty() {
-            return;
-        }
-        if parts.len() == 1 {
-            if let Some(node) = self.children.get(parts[0]) {
-                if node.children.is_empty() && node.file_entry.is_none() {
-                    self.children.remove(parts[0]);
-                }
+            match node.children.get_mut(part) {
+                Some(child) => node = child,
+                None => return false,
             }
-            return;
         }
-        if let Some(child) = self.children.get_mut(parts[0]) {
-            child.delete_if_empty_recursive(&parts[1..]);
-        }
+        node.children.remove(parts[parts.len() - 1]).is_some()
     }
 
-    fn mark_deleted(&mut self, path: &str) {
+    /// Delete the node at the given path only if it has no children and no file_entry.
+    fn delete_if_empty(&mut self, path: &str) -> bool {
         let parts: Vec<&str> = path.split('/').collect();
-        let mut node = self;
-        for &part in &parts[..parts.len() - 1] {
-            node = node
-                .children
-                .entry(part.to_string())
-                .or_insert_with(TrieNode::new);
+        if parts.is_empty() {
+            return false;
         }
-        let leaf = node
-            .children
-            .entry(parts[parts.len() - 1].to_string())
-            .or_insert_with(TrieNode::new);
-        leaf.file_entry = None;
-        leaf.children.clear();
-        leaf.dir_deleted = true;
+        let mut node = &mut *self;
+        for &part in &parts[..parts.len() - 1] {
+            match node.children.get_mut(part) {
+                Some(child) => node = child,
+                None => return false,
+            }
+        }
+        let target = parts[parts.len() - 1];
+        if let Some(child) = node.children.get(target) {
+            if child.children.is_empty() && child.file_entry.is_none() {
+                node.children.remove(target);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Mark a path as deleted (for diff composition).
+    ///
+    /// Creates the node if it doesn't exist, clears any file_entry,
+    /// and sets the deleted flag. Does NOT clear children — directory
+    /// deletion markers only represent empty directory deletion.
+    fn mark_deleted(&mut self, path: &str) {
+        let node = self.insert_path(path);
+        node.file_entry = None;
+        node.deleted = true;
     }
 
     fn join_path(prefix: &str, name: &str) -> String {
@@ -101,59 +106,117 @@ impl TrieNode {
         }
     }
 
-    fn collect_entries(&self, prefix: &str) -> Vec<FileEntry> {
+    fn make_path(prefix: &str, name: &str) -> String {
+        if name.is_empty() {
+            "/".to_string()
+        } else {
+            Self::join_path(prefix, name)
+        }
+    }
+
+    /// Collect all non-deleted file entries (for snapshot output).
+    fn collect_files(&self, prefix: &str) -> Vec<FileEntry> {
         let mut result = Vec::new();
         for (name, child) in &self.children {
-            let path = if name.is_empty() {
-                "/".to_string()
-            } else {
-                Self::join_path(prefix, name)
-            };
-            if let Some(ref entry) = child.file_entry {
-                result.push(entry.clone());
+            let path = Self::make_path(prefix, name);
+            if child.file_entry.is_some() && !child.deleted {
+                result.push(child.file_entry.clone().unwrap());
             }
-            result.extend(child.collect_entries(&path));
+            result.extend(child.collect_files(&path));
         }
         result
     }
 
-    fn collect_entries_with_deletions(&self, prefix: &str) -> Vec<FileEntry> {
+    /// Collect all file entries including deletion markers (for diff output).
+    fn collect_files_with_deletions(&self, prefix: &str) -> Vec<FileEntry> {
         let mut result = Vec::new();
         for (name, child) in &self.children {
-            let path = if name.is_empty() {
-                "/".to_string()
-            } else {
-                Self::join_path(prefix, name)
-            };
-            if child.dir_deleted && child.file_entry.is_none() {
+            let path = Self::make_path(prefix, name);
+            if child.deleted && child.file_entry.is_none() && child.children.is_empty() {
+                // Deleted leaf with no file_entry = deleted file marker
                 result.push(FileEntry::deleted(&path));
             } else if let Some(ref entry) = child.file_entry {
-                result.push(entry.clone());
+                if child.deleted {
+                    result.push(FileEntry::deleted(&path));
+                } else {
+                    result.push(entry.clone());
+                }
             }
-            result.extend(child.collect_entries_with_deletions(&path));
+            result.extend(child.collect_files_with_deletions(&path));
         }
         result
     }
 
+    /// Collect all non-deleted directory paths.
+    ///
+    /// A directory is any node that has children, no file_entry, and is not deleted.
+    fn collect_dirs(&self, prefix: &str) -> Vec<DirEntry> {
+        let mut result = Vec::new();
+        for (name, child) in &self.children {
+            let path = Self::make_path(prefix, name);
+            if child.file_entry.is_none() && !child.deleted {
+                result.push(DirEntry::new(&path));
+            }
+            result.extend(child.collect_dirs(&path));
+        }
+        result
+    }
+
+    /// Collect all directory entries including deletion markers (for diff output).
+    ///
+    /// A deleted directory is a node with deleted=true and no file_entry.
+    fn collect_dirs_with_deletions(&self, prefix: &str) -> Vec<DirEntry> {
+        let mut result = Vec::new();
+        for (name, child) in &self.children {
+            let path = Self::make_path(prefix, name);
+            if child.file_entry.is_none() {
+                if child.deleted {
+                    result.push(DirEntry::deleted(&path));
+                } else {
+                    result.push(DirEntry::new(&path));
+                }
+            }
+            result.extend(child.collect_dirs_with_deletions(&path));
+        }
+        result
+    }
+
+    /// Reconcile deleted flags after all diffs have been applied.
+    ///
+    /// A directory that was marked deleted but now has non-deleted children
+    /// must have its deleted flag cleared. This handles the case where:
+    /// 1. diff1 deletes /dir/ and all its contents
+    /// 2. diff2 adds /dir/newfile.txt
+    ///
+    /// After diff2, /dir/ should not be marked as deleted because it has
+    /// a non-deleted child.
+    ///
+    /// Returns true if this node has any non-deleted content.
     fn reconcile_deleted_flags(&mut self) -> bool {
-        let mut has_live_descendant = false;
+        let mut has_non_deleted_children = false;
         for child in self.children.values_mut() {
             if child.reconcile_deleted_flags() {
-                has_live_descendant = true;
+                has_non_deleted_children = true;
             }
         }
-        if has_live_descendant {
-            self.dir_deleted = false;
+
+        let has_non_deleted_file = self.file_entry.is_some() && !self.deleted;
+        let has_non_deleted_content = has_non_deleted_file || has_non_deleted_children;
+
+        if self.deleted && has_non_deleted_children {
+            self.deleted = false;
         }
-        !self.dir_deleted && (self.file_entry.is_some() || has_live_descendant)
+
+        has_non_deleted_content
     }
 }
 
 /// Composes a base snapshot with one or more diff manifests.
 ///
-/// Applies each diff sequentially: file deletions remove entries,
-/// directory deletions remove only empty directories (deepest first),
-/// and additions/modifications update the trie. Returns the final snapshot.
+/// Applies each diff sequentially using a trie that models the directory tree:
+/// file deletions remove subtrees, directory deletions remove only empty directories
+/// (deepest first), and additions/modifications update the trie. Directories are
+/// tracked implicitly by the trie structure. Returns the final snapshot.
 pub fn compose_snapshot_with_diffs<P: Clone>(
     base: &Manifest<P, Full>,
     diffs: &[&Manifest<P, Diff>],
@@ -169,18 +232,20 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
 
     let mut trie = TrieNode::new();
 
-    let mut dir_set: HashMap<String, bool> =
-        base.dirs.iter().map(|d| (d.path.clone(), false)).collect();
-
+    // Load base snapshot into trie
     for f in &base.files {
         trie.insert(&f.path, f.clone());
     }
+    for d in &base.dirs {
+        trie.insert_path(&d.path);
+    }
 
+    // Apply each diff in order
     for diff in diffs {
-        // Apply file deletions
+        // Apply file deletions first
         for f in &diff.files {
             if f.deleted {
-                trie.delete_file(&f.path);
+                trie.delete_subtree(&f.path);
             }
         }
 
@@ -203,21 +268,16 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
             }
         }
 
-        // Apply directory changes
+        // Apply directory additions
         for d in &diff.dirs {
-            if d.deleted {
-                dir_set.remove(&d.path);
-            } else {
-                dir_set.insert(d.path.clone(), false);
+            if !d.deleted {
+                trie.insert_path(&d.path);
             }
         }
     }
 
-    let files = trie.collect_entries("");
-    let dirs = dir_set
-        .into_keys()
-        .map(|path| crate::manifest::DirEntry::new(&path))
-        .collect();
+    let files = trie.collect_files("");
+    let dirs = trie.collect_dirs("");
     let mut result = Manifest::new(base.hash_alg, base.file_chunk_size_bytes);
     result.files = files;
     result.dirs = dirs;
@@ -228,9 +288,11 @@ pub fn compose_snapshot_with_diffs<P: Clone>(
 
 /// Composes multiple diff manifests into a single diff.
 ///
-/// The result is equivalent to applying all input diffs in order.
-/// Uses `reconcile_deleted_flags` to handle directories that are
-/// deleted then re-populated by later diffs.
+/// The result is equivalent to applying all input diffs in order. Uses a trie
+/// with deleted flags to track the cumulative state. After all diffs are applied,
+/// `reconcile_deleted_flags` handles directories that were deleted then
+/// re-populated by later diffs. Directories are tracked implicitly by the trie
+/// structure rather than a separate data structure.
 pub fn compose_diffs<P: Clone>(diffs: &[&Manifest<P, Diff>]) -> crate::Result<Manifest<P, Diff>> {
     if diffs.is_empty() {
         return Err(crate::SnapshotError::Validation(
@@ -251,36 +313,42 @@ pub fn compose_diffs<P: Clone>(diffs: &[&Manifest<P, Diff>]) -> crate::Result<Ma
     let mut trie = TrieNode::new();
 
     for diff in diffs {
+        // Apply file deletions first
         for f in &diff.files {
             if f.deleted {
                 trie.mark_deleted(&f.path);
-            } else {
-                trie.insert(&f.path, f.clone());
+            }
+        }
+
+        // Apply directory deletions
+        for d in &diff.dirs {
+            if d.deleted {
+                trie.mark_deleted(&d.path);
+            }
+        }
+
+        // Apply file additions/modifications
+        for f in &diff.files {
+            if !f.deleted {
+                let node = trie.insert_path(&f.path);
+                node.deleted = false;
+                node.file_entry = Some(f.clone());
+            }
+        }
+
+        // Apply directory additions
+        for d in &diff.dirs {
+            if !d.deleted {
+                let node = trie.insert_path(&d.path);
+                node.deleted = false;
             }
         }
     }
 
     trie.reconcile_deleted_flags();
 
-    // Track directory entries across diffs
-    let mut dir_state: HashMap<String, bool> = HashMap::new(); // path -> deleted
-    for diff in diffs {
-        for d in &diff.dirs {
-            dir_state.insert(d.path.clone(), d.deleted);
-        }
-    }
-
-    let files = trie.collect_entries_with_deletions("");
-    let dirs = dir_state
-        .into_iter()
-        .map(|(path, deleted)| {
-            if deleted {
-                crate::manifest::DirEntry::deleted(&path)
-            } else {
-                crate::manifest::DirEntry::new(&path)
-            }
-        })
-        .collect();
+    let files = trie.collect_files_with_deletions("");
+    let dirs = trie.collect_dirs_with_deletions("");
     let mut result = Manifest::new(diffs[0].hash_alg, diffs[0].file_chunk_size_bytes);
     result.files = files;
     result.dirs = dirs;

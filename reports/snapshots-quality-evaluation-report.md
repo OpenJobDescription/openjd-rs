@@ -55,7 +55,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 | # | Area | Discrepancy |
 |---|------|-------------|
 | S3 | ~~Hash Upload Pipeline~~ | ~~The spec says "1 permit = 1 byte" for the MemoryPool. The implementation uses `PERMIT_GRANULARITY = 4096` (1 permit = 4KB) to avoid u32 overflow. The spec was never updated.~~ **RESOLVED.** The spec now documents "1 permit = 4KB (`PERMIT_GRANULARITY = 4096`)" with an explanation that the coarser granularity avoids `u32` overflow, supporting pools up to ~16TB. The key design point was also updated to reflect `max_memory_bytes / 4096` permits. |
-| S4 | Download Pipeline | The spec claims downloads are "memory bounded by MemoryPool." The implementation acquires `pool.acquire(1)` (1 byte) for every download regardless of file size, making memory bounding effectively a no-op. Small whole-file downloads buffer the entire file in memory via `get_object`. |
+| S4 | ~~Download Pipeline~~ | ~~The spec claims downloads are "memory bounded by MemoryPool." The implementation acquires `pool.acquire(1)` (1 byte) for every download regardless of file size, making memory bounding effectively a no-op. Small whole-file downloads buffer the entire file in memory via `get_object`.~~ **RESOLVED.** Download now acquires `pool.acquire(file_size)`, matching the pattern used in hash_upload and cache_sync. The `MemoryPool::acquire` method clamps to `max_bytes`, so files larger than the pool serialize rather than deadlock. |
 | S5 | ~~Download Pipeline~~ | ~~The spec says downloads use temp files like `myfile.dat.tmpXXXXXX` (random suffix). The implementation uses `myfile.dat.tmp{PID}` (deterministic). For multipart and chunked downloads, the implementation writes directly to the target path with no temp file, which is not atomic.~~ **RESOLVED.** All three download paths (small whole-file, multipart, and chunked) now use temp files with random hex suffixes via `temp_download_path()` and atomic rename via `atomic_replace()`. The spec was updated to document `myfile.dat.tmp<random_hex>` and note that atomicity applies to all download paths. |
 | S6 | ~~Symlink Handling~~ | ~~The spec says "symlink targets are stored relative to the manifest root." With `Preserve` policy, the implementation stores the absolute resolved target path. Confirmed by probe test `collect_preserve_stores_absolute_target`.~~ **RESOLVED.** The spec and implementation are consistent: "relative to the manifest root" means the target uses the same path style as the manifest (absolute in `AbsSnapshot`, relative in `Snapshot`). COLLECT produces `AbsSnapshot` so symlink targets are correctly absolute. The spec's Target Storage Format section was clarified to explain this. Additionally, `validate()` now enforces that `symlink_target` paths match the manifest's path style. |
 | S7 | ~~Hash Upload Pipeline~~ | ~~The spec describes cache checks happening "inside the tokio task." The implementation splits this into two separate phases before task spawning: Phase 1 (hash cache lookup, synchronous) and Phase 2 (parallel `object_exists` via `FuturesUnordered`).~~ **RESOLVED.** Cache checks (hash cache lookup and `object_exists`) are now performed inside each worker task, matching the spec. Skipped items return early without acquiring memory pool permits. The three-phase approach was replaced with a single-phase pipeline where each task handles its own cache checks in parallel. |
@@ -65,8 +65,8 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 | # | Area | Discrepancy |
 |---|------|-------------|
 | S8 | ~~Download Pipeline~~ | ~~The spec shows interleaved directory creation with file download submissions. The implementation creates all directories first, then processes all files separately.~~ **RESOLVED.** Directory creation is now interleaved with file download submission, matching the spec and Python design. Files are grouped by parent directory; each directory is created once (deduplicated via HashSet) before its files are queued. Redundant per-file `create_dir_all` calls removed from download tasks. |
-| S9 | Compose | The spec describes a unified trie approach for both `compose_snapshot_with_diffs` and `compose_diffs`. The implementation uses different deletion strategies: `compose_snapshot_with_diffs` uses `delete_file` (removes nodes entirely) while `compose_diffs` uses `mark_deleted` with reconciliation. |
-| S10 | Compose | The spec doesn't describe how directories are tracked in `compose_diffs`. The implementation uses a separate `HashMap<String, bool>` (`dir_state`) independent of the trie. |
+| S9 | ~~Compose~~ | ~~The spec describes a unified trie approach for both `compose_snapshot_with_diffs` and `compose_diffs`. The implementation uses different deletion strategies: `compose_snapshot_with_diffs` uses `delete_file` (removes nodes entirely) while `compose_diffs` uses `mark_deleted` with reconciliation.~~ **RESOLVED.** Both functions now use a unified trie that tracks files and directories together, matching the Python reference implementation. `compose_snapshot_with_diffs` uses `delete_subtree` (removes nodes) and `delete_if_empty` (for directories); `compose_diffs` uses `mark_deleted` (sets flag without clearing children) with reconciliation. The separate `dir_set`/`dir_state` HashMaps were removed — directories are derived from the trie structure. |
+| S10 | ~~Compose~~ | ~~The spec doesn't describe how directories are tracked in `compose_diffs`. The implementation uses a separate `HashMap<String, bool>` (`dir_state`) independent of the trie.~~ **RESOLVED.** Directories are now tracked implicitly by the trie structure, matching the Python reference. `collect_dirs` and `collect_dirs_with_deletions` derive directory entries from non-file, non-deleted nodes in the trie. |
 
 ---
 
@@ -110,10 +110,10 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 - Concurrent upload deduplication via `UploadDedup` map prevents redundant uploads when multiple tasks hash to the same content. The `Mutex` is held only for nanosecond-scale HashMap lookups; actual uploads and waits happen outside the lock via `broadcast` channels.
 
 **Concerns:**
-- **hash_upload.rs**: No multipart upload abort on partial failure. If one part upload fails, the multipart upload is left dangling in S3. `cache_sync.rs` correctly aborts on failure — this pattern should be applied to hash_upload as well.
+- ~~**hash_upload.rs**: No multipart upload abort on partial failure. If one part upload fails, the multipart upload is left dangling in S3. `cache_sync.rs` correctly aborts on failure — this pattern should be applied to hash_upload as well.~~ **RESOLVED.** `process_whole_multipart` now calls `abort_multipart_upload` on failure before notifying dedup waiters, matching the `cache_sync.rs` pattern.
 - **hash_upload.rs**: `process_chunked_async` reads ALL chunks into memory in one `spawn_blocking` call before uploading. For a file with many chunks, this could exceed the memory pool's intended bounds since the pool permit is acquired for the whole file, not per-chunk.
 - **hash_upload.rs**: Phase 3 work-item filtering logic (building `candidate_indices` and `skipped_indices`) is unnecessarily complex. A simpler approach would be to build the work list directly.
-- **download.rs**: Memory pool `acquire(1)` makes memory bounding meaningless (see S4 above).
+- ~~**download.rs**: Memory pool `acquire(1)` makes memory bounding meaningless (see S4 above).~~ **RESOLVED.** Now acquires `file_size` permits.
 - **download.rs**: `std::sync::Mutex` is used for `DownloadStatistics` inside async context. While held briefly, `tokio::sync::Mutex` would be more idiomatic.
 - **hash_op.rs**: Progress updates use `Arc<Mutex<HashStatistics>>` and `Arc<Mutex<SlidingWindowRate>>` — two separate locks acquired in sequence. This is fine for correctness but could be combined into a single lock.
 
@@ -129,8 +129,8 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 **Concerns:**
 - **partition.rs**: `validate_no_nested_roots` is O(n²) — checks every pair of roots. For typical use cases (few roots), this is fine, but worth noting.
 - **collect.rs**: `is_escaping()` uses string prefix matching (`starts_with(&format!("{p}/"))`) rather than proper path ancestry. The trailing `/` prevents false positives for paths like `/foo/bar` vs `/foo/bar2`, but this is fragile.
-- **collect.rs**: `abs_normalized()` and `abs_normalized_no_follow()` have identical implementations. The naming suggests they should differ, but `std::path::absolute` doesn't follow symlinks, so both are correct. The duplication is confusing.
-- **subtree.rs**: `expand_dir_symlink` receives a `_symlink_policy` parameter (underscore-prefixed) but never uses it. Nested symlinks inside expanded directories are always resolved regardless of policy.
+- ~~**collect.rs**: `abs_normalized()` and `abs_normalized_no_follow()` have identical implementations. The naming suggests they should differ, but `std::path::absolute` doesn't follow symlinks, so both are correct. The duplication is confusing.~~ **RESOLVED.** Removed `abs_normalized_no_follow`; all call sites now use `abs_normalized`, which has a doc comment explaining it is purely lexical.
+- ~~**subtree.rs**: `expand_dir_symlink` receives a `_symlink_policy` parameter (underscore-prefixed) but never uses it. Nested symlinks inside expanded directories are always resolved regardless of policy.~~ **RESOLVED.** `expand_dir_symlink` now uses the `symlink_policy` parameter: `CollapseAll` resolves nested symlinks to their real targets, while `CollapseEscaping` preserves them (remapped but kept as symlinks). Tests added for both behaviors.
 
 ### 3.5 Codec
 
@@ -221,12 +221,12 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 ### 5.2 Medium Priority — Implementation Improvements
 
-4. **Add multipart upload abort on failure** in `hash_upload.rs`. The `cache_sync.rs` implementation already does this correctly — apply the same pattern.
-5. **Fix download memory bounding**: Replace `pool.acquire(1)` with `pool.acquire(file_size)` or a reasonable estimate, matching the pattern used in hash_upload and cache_sync.
+4. ~~**Add multipart upload abort on failure** in `hash_upload.rs`. The `cache_sync.rs` implementation already does this correctly — apply the same pattern.~~ **DONE.**
+5. ~~**Fix download memory bounding**: Replace `pool.acquire(1)` with `pool.acquire(file_size)` or a reasonable estimate, matching the pattern used in hash_upload and cache_sync.~~ **DONE.**
 6. ~~**Update MemoryPool spec** to reflect the 4KB granularity (not 1-byte-per-permit).~~ **DONE.**
 7. **Clarify symlink target storage format** in the spec. Document that `Preserve` policy stores absolute paths, not paths relative to manifest root.
-8. **Remove `abs_normalized_no_follow`** or rename it to make the identical behavior explicit. A comment explaining why both exist would suffice.
-9. **Use the `_symlink_policy` parameter** in `subtree.rs::expand_dir_symlink`, or remove it if nested symlinks should always be resolved.
+8. ~~**Remove `abs_normalized_no_follow`** or rename it to make the identical behavior explicit. A comment explaining why both exist would suffice.~~ **DONE.**
+9. ~~**Use the `_symlink_policy` parameter** in `subtree.rs::expand_dir_symlink`, or remove it if nested symlinks should always be resolved.~~ **DONE.**
 
 ### 5.3 Low Priority — Code Quality
 

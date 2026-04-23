@@ -518,7 +518,7 @@ fn directory_symlink_collapsed_with_implicit_dirs() {
 }
 
 #[test]
-fn directory_symlink_with_nested_symlink_collapsed() {
+fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
     let m = rel(
         vec![
             FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
@@ -543,6 +543,40 @@ fn directory_symlink_with_nested_symlink_collapsed() {
     assert_eq!(reg.hash.as_deref(), Some("h1"));
     assert!(reg.symlink_target.is_none());
 
+    // CollapseEscaping preserves nested symlinks inside expanded directories
+    let nested = by_path["link/nested_link"];
+    assert_eq!(
+        nested.symlink_target.as_deref(),
+        Some("assets/data/actual.png")
+    );
+}
+
+#[test]
+fn directory_symlink_with_nested_symlink_collapse_all_resolves() {
+    let m = rel(
+        vec![
+            FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
+            FileEntry::symlink("assets/shared/v2/nested_link", "assets/data/actual.png"),
+            hf("assets/shared/v2/regular.png", "h1", 100, 1000),
+            hf("assets/data/actual.png", "h2", 200, 2000),
+        ],
+        vec![
+            DirEntry::new("assets"),
+            DirEntry::new("assets/textures"),
+            DirEntry::new("assets/shared"),
+            DirEntry::new("assets/shared/v2"),
+            DirEntry::new("assets/data"),
+        ],
+    );
+    let result = subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseAll).unwrap();
+    let by_path: std::collections::HashMap<_, _> =
+        result.files.iter().map(|f| (f.path.as_str(), f)).collect();
+
+    let reg = by_path["link/regular.png"];
+    assert_eq!(reg.hash.as_deref(), Some("h1"));
+    assert!(reg.symlink_target.is_none());
+
+    // CollapseAll resolves nested symlinks to their real targets
     let nested = by_path["link/nested_link"];
     assert_eq!(nested.hash.as_deref(), Some("h2"));
     assert_eq!(nested.size, Some(200));

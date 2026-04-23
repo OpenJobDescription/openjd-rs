@@ -38,34 +38,44 @@ The result represents the directory tree you would get by:
 
 ## Trie-Based Implementation
 
-Both functions use a trie (prefix tree) where each node represents a path component:
+Both functions use a trie (prefix tree) where each node represents a path component. The trie structurally models the real filesystem, with directories implicit in the tree structure rather than tracked separately:
 
 ```rust
 struct TrieNode {
     children: HashMap<String, TrieNode>,
     file_entry: Option<FileEntry>,
-    dir_deleted: bool,
+    deleted: bool,
 }
 ```
 
+A node is a **file** if it has a `file_entry`. A node is a **directory** if it has no `file_entry` and is not deleted. This means directories don't need separate tracking — they are derived from the trie structure during collection.
+
 ### Why a Trie?
 
-1. **Efficient path operations:** Insert, lookup, delete are O(path depth)
-2. **Natural directory structure:** Mirrors the filesystem hierarchy
-3. **Cascading deletions:** Directory subtrees can be efficiently removed or marked
+1. **Structural filesystem model:** The trie mirrors the directory hierarchy, so directory existence is implicit from having children
+2. **Efficient path operations:** Insert, lookup, delete are O(path depth)
+3. **Cascading deletions:** Directory subtrees can be efficiently removed
+4. **Unified tracking:** Files and directories are managed by the same data structure, preventing state divergence
 
 ### Snapshot + Diffs
 
-1. Insert base snapshot entries into trie
-2. For each diff: deletions remove nodes (`delete_file`), additions/modifications insert or update nodes
-3. Final trie contains only entries that exist after all diffs applied
-4. Deletion markers NOT preserved in output
+For each diff applied in order:
+1. File deletions remove subtrees via `delete_subtree`
+2. Directory deletions remove only empty directories via `delete_if_empty` (deepest first)
+3. File additions/modifications insert or update nodes
+4. Directory additions create nodes in the trie
+
+The final trie contains only entries that exist after all diffs are applied. Directories are collected by traversing the trie for non-file, non-deleted nodes.
 
 ### Diff + Diffs
 
-1. Each node has a `dir_deleted` flag to track deletion markers
-2. Deletions set `dir_deleted=true` via `mark_deleted`; additions clear it and set `file_entry`
-3. After all diffs applied, `reconcile_deleted_flags()` handles the case where a deleted directory has non-deleted children
+For each diff applied in order:
+1. File deletions set `deleted=true` via `mark_deleted` (does NOT clear children)
+2. Directory deletions set `deleted=true` via `mark_deleted`
+3. File additions clear `deleted` and set `file_entry`
+4. Directory additions clear `deleted`
+
+After all diffs are applied, `reconcile_deleted_flags()` handles directories that were deleted then re-populated. Files and directories (including deletion markers) are collected from the trie.
 
 ### The Reconciliation Step
 
@@ -73,7 +83,11 @@ struct TrieNode {
 1. diff1 deletes `/dir/` and all its contents
 2. diff2 adds `/dir/newfile.txt`
 
-After diff2, `/dir/` must NOT be marked as deleted because it has a non-deleted child. The reconciliation traverses the trie depth-first and clears `dir_deleted` on any node with non-deleted descendants.
+After diff2, `/dir/` must NOT be marked as deleted because it has a non-deleted child. The reconciliation traverses the trie depth-first and clears `deleted` on any node with non-deleted descendants.
+
+### Key Design Point: `mark_deleted` Does Not Clear Children
+
+In `compose_diffs`, `mark_deleted` sets the `deleted` flag and clears `file_entry`, but does NOT clear children. This is critical because a directory deletion marker in a diff only represents "this directory was empty and deleted" — it does not cascade to children that may have been added by later diffs.
 
 ## Validation Rules
 

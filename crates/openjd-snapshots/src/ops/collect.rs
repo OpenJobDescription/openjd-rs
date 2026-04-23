@@ -43,18 +43,9 @@ fn file_meta(meta: &std::fs::Metadata) -> crate::Result<(u64, u64, bool)> {
     Ok((size, mtime, runnable))
 }
 
+/// Make a path absolute and normalize it. This is purely lexical
+/// (`std::path::absolute` never touches the filesystem or follows symlinks).
 fn abs_normalized(p: &Path) -> crate::Result<String> {
-    let abs = std::path::absolute(p).map_err(|e| {
-        SnapshotError::Io(std::io::Error::new(
-            e.kind(),
-            format!("{}: {}", p.display(), e),
-        ))
-    })?;
-    Ok(normalize_path(&abs.to_string_lossy()))
-}
-
-/// Like abs_normalized but doesn't follow the final symlink component.
-fn abs_normalized_no_follow(p: &Path) -> crate::Result<String> {
     let abs = std::path::absolute(p).map_err(|e| {
         SnapshotError::Io(std::io::Error::new(
             e.kind(),
@@ -109,7 +100,7 @@ pub fn collect_abs_snapshot(
             let path = entry.path();
 
             if ft.is_symlink() {
-                let norm = abs_normalized_no_follow(path)?;
+                let norm = abs_normalized(path)?;
                 if seen_paths.insert(norm.clone()) {
                     deferred_symlinks.push(DeferredSymlink {
                         path: norm,
@@ -199,7 +190,7 @@ fn collect_single_file(
 ) -> crate::Result<()> {
     let sym_meta = std::fs::symlink_metadata(path)?;
     if sym_meta.file_type().is_symlink() {
-        let norm = abs_normalized_no_follow(path)?;
+        let norm = abs_normalized(path)?;
         if seen.insert(norm.clone()) {
             deferred.push(DeferredSymlink {
                 path: norm,
