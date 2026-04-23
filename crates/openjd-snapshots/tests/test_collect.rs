@@ -1677,6 +1677,34 @@ fn transitive_broken_target_skipped() {
 
 #[cfg(unix)]
 #[test]
+fn transitive_broken_dir_target_skipped() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let nonexistent_dir = tmp.path().join("nonexistent_dir");
+    std::os::unix::fs::symlink(&nonexistent_dir, root.join("broken_dir_link")).unwrap();
+
+    let m = collect_abs_snapshot(
+        &[root],
+        &[] as &[PathBuf],
+        CollectOptions {
+            symlink_policy: SymlinkPolicy::TransitiveIncludeTargets,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Symlink preserved
+    assert!(m.files.iter().any(|f| f.path.ends_with("broken_dir_link")));
+    // Nonexistent directory not in manifest
+    assert!(!m
+        .dirs
+        .iter()
+        .any(|d| d.path == nonexistent_dir.to_str().unwrap()));
+}
+
+#[cfg(unix)]
+#[test]
 fn transitive_filenames_parameter() {
     let tmp = TempDir::new().unwrap();
     let outside = tmp.path().join("outside.txt");

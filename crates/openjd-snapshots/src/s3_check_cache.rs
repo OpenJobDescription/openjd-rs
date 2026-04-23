@@ -43,7 +43,9 @@ impl S3CheckCache {
     }
 
     pub fn open_default() -> crate::Result<Self> {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let home = std::env::var("HOME").map_err(|_| {
+            crate::SnapshotError::Cache("$HOME is not set, cannot locate default cache".into())
+        })?;
         Self::new(PathBuf::from(home).join(".deadline/job_attachments"))
     }
 

@@ -154,7 +154,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 **Concerns:**
 - Both `HashCache` and `S3CheckCache` use `Mutex::lock().unwrap()` which will panic on mutex poisoning. Standard Rust practice but worth noting.
-- `open_default()` falls back to `"."` if `$HOME` is unset, potentially creating cache databases in unexpected locations.
+- ~~`open_default()` falls back to `"."` if `$HOME` is unset, potentially creating cache databases in unexpected locations.~~ **RESOLVED.** Now returns a `Cache` error.
 - No `synchronous` pragma override — defaults to FULL, which is unnecessarily slow for a cache that can be rebuilt.
 
 ### 3.7 Platform Handling
@@ -186,7 +186,7 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 **Concerns:**
 - **No dedicated concurrency/stress tests for download or cache_sync.** Upload deduplication is now tested via `test_upload_dedup.rs`, but download and cache_sync pipelines are only tested implicitly.
-- **No tests for `CollapseAll`, `ExcludeEscaping`, or `TransitiveIncludeTargets` symlink policies in collect.** Only `Preserve`, `ExcludeAll`, and `CollapseEscaping` are tested.
+- ~~**No tests for `CollapseAll`, `ExcludeEscaping`, or `TransitiveIncludeTargets` symlink policies in collect.** Only `Preserve`, `ExcludeAll`, and `CollapseEscaping` are tested.~~ **RESOLVED.** Systematic comparison against the Python test suite confirmed all policies were already covered. One gap found and filled: `transitive_broken_dir_target_skipped`.
 - **`memory_pool.rs` and `rate.rs`** have inline unit tests but no integration-level testing.
 - **No tests for multipart upload abort on failure** in hash_upload.
 - **No tests for download memory bounding** (since it's effectively a no-op with `acquire(1)`).
@@ -230,14 +230,13 @@ The `specs/snapshots/` directory contains 21 specification documents covering:
 
 ### 5.3 Low Priority — Code Quality
 
-10. **Add tests for `CollapseAll`, `ExcludeEscaping`, and `TransitiveIncludeTargets`** symlink policies in collect.
+10. ~~**Add tests for `CollapseAll`, `ExcludeEscaping`, and `TransitiveIncludeTargets`** symlink policies in collect.~~ **DONE.** Systematic comparison against the Python test suite confirmed all policies were already covered. One gap found and filled: `transitive_broken_dir_target_skipped`.
 11. **Add concurrency stress tests** for hash_upload, download, and cache_sync pipelines.
-12. **Consider using `tokio::sync::Mutex`** instead of `std::sync::Mutex` for statistics in async contexts (download.rs, hash_upload.rs).
+12. ~~**Consider using `tokio::sync::Mutex`** instead of `std::sync::Mutex` for statistics in async contexts (download.rs, hash_upload.rs).~~ **No change needed.** The locks are held only for nanosecond-scale field updates and never across `.await` points, so `std::sync::Mutex` is cheaper than `tokio::sync::Mutex` (which yields to the scheduler even when uncontended). Added code comments explaining this.
 13. **Simplify Phase 3 filtering logic** in hash_upload.rs — the `candidate_indices`/`skipped_indices` approach is harder to follow than necessary.
 14. **Add `synchronous = NORMAL` pragma** to hash_cache and s3_check_cache for better write performance (safe for caches).
-15. **Handle `$HOME` unset** more gracefully in cache `open_default()` — return an error instead of falling back to `"."`.
-16. **Re-export `path_util` functions** in `lib.rs` if they are part of the intended public API, or make the module `pub(crate)` if not.
-17. **Add module-level documentation** to `lib.rs` describing the crate's purpose, typical workflow, and how the operations compose.
+15. ~~**Handle `$HOME` unset** more gracefully in cache `open_default()` — return an error instead of falling back to `"."`.~~ **DONE.**16. **Re-export `path_util` functions** in `lib.rs` if they are part of the intended public API, or make the module `pub(crate)` if not.
+17. ~~**Add module-level documentation** to `lib.rs` describing the crate's purpose, typical workflow, and how the operations compose.~~ **DONE.**
 
 ### 5.4 Documentation
 

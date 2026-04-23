@@ -236,6 +236,9 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
 
     // Process work items in parallel using tokio — each task does its own cache checks
     let cancelled = Arc::new(AtomicBool::new(false));
+    // std::sync::Mutex is intentional here: the lock is held only for nanosecond-scale
+    // field updates and never across .await points, so it's cheaper than tokio::sync::Mutex
+    // which would yield to the scheduler even when uncontended.
     let progress_stats = Arc::new(Mutex::new(stats.clone()));
     let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
     let memory_pool = Arc::new(MemoryPool::new(max_memory));
