@@ -359,6 +359,11 @@ impl RangeExpr {
         &self.ranges
     }
 
+    /// Cumulative element counts per sub-range (for index mapping).
+    pub fn cumulative_lengths(&self) -> &[usize] {
+        &self.cumulative_lengths
+    }
+
     /// Iterate over all values in ascending order across all sub-ranges.
     pub fn iter(&self) -> impl Iterator<Item = i64> + '_ {
         self.ranges.iter().flat_map(|r| r.iter())

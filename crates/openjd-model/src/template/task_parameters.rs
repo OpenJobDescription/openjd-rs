@@ -267,7 +267,7 @@ pub struct ChunksDefinition {
     pub range_constraint: RangeConstraint,
 }
 
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RangeConstraint {
     Contiguous,

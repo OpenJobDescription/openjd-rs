@@ -288,9 +288,10 @@ fn test_chunk_int_static() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     // 10 items / 3 per task → ceil(10/3) = 4 chunks
     assert_eq!(iter.len(), 4);
-    // Each value should be a RangeExpr
-    for i in 0..iter.len() {
-        let set = iter.get(i).unwrap();
+    // Collect all chunks via iteration
+    let chunks: Vec<_> = iter.collect();
+    assert_eq!(chunks.len(), 4);
+    for set in &chunks {
         assert_eq!(set["C"].param_type, TaskParameterType::ChunkInt);
         match &set["C"].value {
             ExprValue::RangeExpr(_) => {}
@@ -299,8 +300,7 @@ fn test_chunk_int_static() {
     }
     // Verify the chunks cover all 10 values
     let mut all_vals: Vec<i64> = Vec::new();
-    for i in 0..iter.len() {
-        let set = iter.get(i).unwrap();
+    for set in &chunks {
         if let ExprValue::RangeExpr(r) = &set["C"].value {
             all_vals.extend(r.iter());
         }
@@ -754,5 +754,485 @@ fn validate_containment_path_as_path_value() {
     assert!(
         iter.validate_containment(&params).is_ok(),
         "validate_containment should accept ExprValue::Path for PATH param"
+    );
+}
+
+#[test]
+fn test_chunk_int_contiguous_with_noncontiguous_range() {
+    // Contiguous chunking must respect gaps in the source range.
+    // Range "1,3-4,5-7,10-20" has values [1, 3,4, 5,6,7, 10..20].
+    // Contiguous intervals: [1], [3,4,5,6,7], [10..20].
+    // With default_task_count=20, each interval fits in one chunk:
+    //   "1-1", "3-7", "10-20"
+    // But 3-4 and 5-7 are adjacent (4+1=5), so it's actually [1], [3..7], [10..20].
+    let space = make_space(
+        vec![(
+            "Frame",
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::RangeExpr("1,3-4,5-7,10-20".parse::<RangeExpr>().unwrap()),
+                chunks: ResolvedChunks {
+                    default_task_count: 20,
+                    target_runtime_seconds: None,
+                    range_constraint: RangeConstraint::Contiguous,
+                },
+            },
+        )],
+        None,
+    );
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    let chunk_strs: Vec<String> = iter
+        .map(|c| match &c["Frame"].value {
+            ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("Expected RangeExpr, got {:?}", other),
+        })
+        .collect();
+    assert_eq!(chunk_strs, vec!["1-1", "3-7", "10-20"]);
+}
+
+// ── Tests ported from Python test_step_param_space_iter_with_chunks.py ──
+
+/// Helper: build a single-param chunked space and collect iteration results as strings.
+fn collect_chunk_strs(param: TaskParameter, combination: Option<&str>) -> Vec<String> {
+    let space = make_space(vec![("P", param)], combination);
+    let iter = StepParameterSpaceIterator::new(&space).unwrap();
+    iter.map(|s| match &s["P"].value {
+        ExprValue::RangeExpr(r) => r.to_string(),
+        other => panic!("Expected RangeExpr, got {:?}", other),
+    })
+    .collect()
+}
+
+fn chunk_int_list(vals: &[i64], dtc: usize, constraint: RangeConstraint) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range: TaskParamRange::List(vals.to_vec()),
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: None,
+            range_constraint: constraint,
+        },
+    }
+}
+
+fn chunk_int_range(expr: &str, dtc: usize, constraint: RangeConstraint) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range: TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: None,
+            range_constraint: constraint,
+        },
+    }
+}
+
+fn chunk_int_range_adaptive(
+    expr: &str,
+    dtc: usize,
+    trs: usize,
+    constraint: RangeConstraint,
+) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range: TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: Some(trs),
+            range_constraint: constraint,
+        },
+    }
+}
+
+// -- Single-param contiguous chunking --
+
+#[test]
+fn test_py_contig_chunksize1_short_list() {
+    let r = collect_chunk_strs(
+        chunk_int_list(&[1, 2], 1, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-1", "2-2"]);
+}
+
+#[test]
+fn test_py_contig_chunksize2_short_list() {
+    let r = collect_chunk_strs(
+        chunk_int_list(&[1, 2], 2, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-2"]);
+}
+
+#[test]
+fn test_py_contig_chunksize1_short_range() {
+    let r = collect_chunk_strs(chunk_int_range("1-2", 1, RangeConstraint::Contiguous), None);
+    assert_eq!(r, vec!["1-1", "2-2"]);
+}
+
+#[test]
+fn test_py_contig_chunksize2_short_range() {
+    let r = collect_chunk_strs(chunk_int_range("1-2", 2, RangeConstraint::Contiguous), None);
+    assert_eq!(r, vec!["1-2"]);
+}
+
+#[test]
+fn test_py_contig_chunksize100_noncontig_range() {
+    // Each isolated value becomes its own chunk
+    let r = collect_chunk_strs(
+        chunk_int_range("1,3,5", 100, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-1", "3-3", "5-5"]);
+}
+
+#[test]
+fn test_py_contig_chunksize10_range_1_35() {
+    // Non-adaptive spreads chunks evenly: 35/4 chunks → sizes 9,9,9,8
+    let r = collect_chunk_strs(
+        chunk_int_range("1-35", 10, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-9", "10-18", "19-27", "28-35"]);
+}
+
+#[test]
+fn test_py_contig_chunksize5_negative_frames() {
+    let r = collect_chunk_strs(
+        chunk_int_range("-20--5", 5, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["-20--17", "-16--13", "-12--9", "-8--5"]);
+}
+
+// -- Single-param noncontiguous chunking --
+
+#[test]
+fn test_py_noncontig_chunksize1_short_list() {
+    let r = collect_chunk_strs(
+        chunk_int_list(&[1, 2], 1, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1", "2"]);
+}
+
+#[test]
+fn test_py_noncontig_chunksize2_short_list() {
+    let r = collect_chunk_strs(
+        chunk_int_list(&[1, 2], 2, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1,2"]);
+}
+
+#[test]
+fn test_py_noncontig_chunksize1_short_range() {
+    let r = collect_chunk_strs(
+        chunk_int_range("1-2", 1, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1", "2"]);
+}
+
+#[test]
+fn test_py_noncontig_chunksize2_short_range() {
+    let r = collect_chunk_strs(
+        chunk_int_range("1-2", 2, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1,2"]);
+}
+
+#[test]
+fn test_py_noncontig_chunksize100_noncontig_range() {
+    let r = collect_chunk_strs(
+        chunk_int_range("1,3,5", 100, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-5:2"]);
+}
+
+// -- Single-param adaptive chunking --
+
+#[test]
+fn test_py_adaptive_noncontig_chunksize10_range_1_35() {
+    // Adaptive makes chunks as big as possible, last chunk smaller
+    let r = collect_chunk_strs(
+        chunk_int_range_adaptive("1-35", 10, 20, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["1-10", "11-20", "21-30", "31-35"]);
+}
+
+#[test]
+fn test_py_adaptive_contig_chunksize5_negative() {
+    let r = collect_chunk_strs(
+        chunk_int_range_adaptive("-20--5", 5, 20, RangeConstraint::Contiguous),
+        None,
+    );
+    assert_eq!(r, vec!["-20--16", "-15--11", "-10--6", "-5--5"]);
+}
+
+#[test]
+fn test_py_adaptive_noncontig_chunksize5_negative() {
+    let r = collect_chunk_strs(
+        chunk_int_range_adaptive("-20--5", 5, 20, RangeConstraint::Noncontiguous),
+        None,
+    );
+    assert_eq!(r, vec!["-20--16", "-15--11", "-10--6", "-5"]);
+}
+
+// -- Multi-param chunked iteration --
+
+fn chunk_int_list_adaptive(
+    vals: &[i64],
+    dtc: usize,
+    trs: usize,
+    constraint: RangeConstraint,
+) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range: TaskParamRange::List(vals.to_vec()),
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: Some(trs),
+            range_constraint: constraint,
+        },
+    }
+}
+
+/// Helper: build a 2-param space (chunk + string) and collect as (chunk_str, string_val) tuples.
+fn collect_chunk_product(
+    chunk_param: TaskParameter,
+    string_vals: &[&str],
+    chunk_override: Option<usize>,
+) -> Vec<(String, String)> {
+    let iter = make_chunk_product_iter(chunk_param, string_vals, chunk_override);
+    extract_chunk_product(iter)
+}
+
+fn make_chunk_product_iter(
+    chunk_param: TaskParameter,
+    string_vals: &[&str],
+    chunk_override: Option<usize>,
+) -> StepParameterSpaceIterator {
+    use crate::job;
+    use indexmap::IndexMap;
+
+    let mut defs = IndexMap::new();
+    defs.insert("P1".to_string(), chunk_param);
+    defs.insert(
+        "P2".to_string(),
+        TaskParameter::String {
+            range: string_vals.iter().map(|s| s.to_string()).collect(),
+        },
+    );
+    let space = job::StepParameterSpace {
+        task_parameter_definitions: defs,
+        combination: None,
+    };
+    match chunk_override {
+        Some(n) => StepParameterSpaceIterator::new_with_chunk_override(&space, Some(n)).unwrap(),
+        None => StepParameterSpaceIterator::new(&space).unwrap(),
+    }
+}
+
+fn extract_chunk_product(iter: StepParameterSpaceIterator) -> Vec<(String, String)> {
+    iter.map(|s| {
+        let p1 = match &s["P1"].value {
+            ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("Expected RangeExpr for P1, got {:?}", other),
+        };
+        let p2 = match &s["P2"].value {
+            ExprValue::String(s) => s.clone(),
+            other => panic!("Expected String for P2, got {:?}", other),
+        };
+        (p1, p2)
+    })
+    .collect()
+}
+
+fn next_chunk_product(iter: &mut StepParameterSpaceIterator) -> (String, String) {
+    let s = iter.next().expect("expected another item");
+    let p1 = match &s["P1"].value {
+        ExprValue::RangeExpr(r) => r.to_string(),
+        other => panic!("Expected RangeExpr for P1, got {:?}", other),
+    };
+    let p2 = match &s["P2"].value {
+        ExprValue::String(s) => s.clone(),
+        other => panic!("Expected String for P2, got {:?}", other),
+    };
+    (p1, p2)
+}
+
+#[test]
+fn test_py_multi_contig_chunksize1_adaptive() {
+    // Adaptive dimension should be innermost (varies fastest)
+    let r = collect_chunk_product(
+        chunk_int_list_adaptive(&[1, 2], 1, 20, RangeConstraint::Contiguous),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(
+        r,
+        vec![
+            ("1-1".into(), "A".into()),
+            ("2-2".into(), "A".into()),
+            ("1-1".into(), "B".into()),
+            ("2-2".into(), "B".into()),
+        ]
+    );
+}
+
+#[test]
+fn test_py_multi_contig_chunksize2_adaptive() {
+    let r = collect_chunk_product(
+        chunk_int_list_adaptive(&[1, 2], 2, 20, RangeConstraint::Contiguous),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(
+        r,
+        vec![("1-2".into(), "A".into()), ("1-2".into(), "B".into())]
+    );
+}
+
+#[test]
+fn test_py_multi_noncontig_chunksize2_adaptive_override1() {
+    // Override=1 turns off adaptive, uses chunksize 1
+    let r = collect_chunk_product(
+        chunk_int_list_adaptive(&[1, 2], 2, 20, RangeConstraint::Noncontiguous),
+        &["A", "B"],
+        Some(1),
+    );
+    assert_eq!(
+        r,
+        vec![
+            ("1".into(), "A".into()),
+            ("1".into(), "B".into()),
+            ("2".into(), "A".into()),
+            ("2".into(), "B".into()),
+        ]
+    );
+}
+
+#[test]
+fn test_py_adaptive_contiguous_mid_iteration_size_change() {
+    // Port of test_adaptive_contiguous_chunked_iteration
+    let mut iter = make_chunk_product_iter(
+        chunk_int_range_adaptive("1-20", 2, 20, RangeConstraint::Contiguous),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(next_chunk_product(&mut iter), ("1-2".into(), "A".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("3-4".into(), "A".into()));
+    iter.set_chunks_default_task_count(10);
+    assert_eq!(next_chunk_product(&mut iter), ("5-14".into(), "A".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("15-20".into(), "A".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("1-10".into(), "B".into()));
+    iter.set_chunks_default_task_count(4);
+    assert_eq!(next_chunk_product(&mut iter), ("11-14".into(), "B".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("15-18".into(), "B".into()));
+    iter.set_chunks_default_task_count(1);
+    assert_eq!(next_chunk_product(&mut iter), ("19-19".into(), "B".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("20-20".into(), "B".into()));
+    assert!(iter.next().is_none());
+    assert_eq!(iter.chunks_parameter_name(), Some("P1"));
+}
+
+#[test]
+fn test_py_adaptive_noncontiguous_mid_iteration_size_change() {
+    // Port of test_adaptive_noncontiguous_chunked_iteration
+    let mut iter = make_chunk_product_iter(
+        chunk_int_range_adaptive(
+            "1-10,12,15,18,20-23,1000",
+            2,
+            20,
+            RangeConstraint::Noncontiguous,
+        ),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(next_chunk_product(&mut iter), ("1,2".into(), "A".into()));
+    assert_eq!(next_chunk_product(&mut iter), ("3,4".into(), "A".into()));
+    iter.set_chunks_default_task_count(10);
+    assert_eq!(
+        next_chunk_product(&mut iter),
+        ("5-10,12-18:3,20".into(), "A".into())
+    );
+    assert_eq!(
+        next_chunk_product(&mut iter),
+        ("21-23,1000".into(), "A".into())
+    );
+    assert_eq!(next_chunk_product(&mut iter), ("1-10".into(), "B".into()));
+    iter.set_chunks_default_task_count(4);
+    assert_eq!(
+        next_chunk_product(&mut iter),
+        ("12-18:3,20".into(), "B".into())
+    );
+    assert_eq!(
+        next_chunk_product(&mut iter),
+        ("21-23,1000".into(), "B".into())
+    );
+    assert!(iter.next().is_none());
+    assert_eq!(iter.chunks_parameter_name(), Some("P1"));
+}
+
+#[test]
+fn test_py_multi_contig_chunksize1() {
+    let r = collect_chunk_product(
+        chunk_int_list(&[1, 2], 1, RangeConstraint::Contiguous),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(
+        r,
+        vec![
+            ("1-1".into(), "A".into()),
+            ("1-1".into(), "B".into()),
+            ("2-2".into(), "A".into()),
+            ("2-2".into(), "B".into()),
+        ]
+    );
+}
+
+#[test]
+fn test_py_multi_contig_chunksize2() {
+    let r = collect_chunk_product(
+        chunk_int_list(&[1, 2], 2, RangeConstraint::Contiguous),
+        &["A", "B"],
+        None,
+    );
+    assert_eq!(
+        r,
+        vec![("1-2".into(), "A".into()), ("1-2".into(), "B".into())]
+    );
+}
+
+#[test]
+fn test_py_multi_contig_chunksize1_override5() {
+    // Override chunk size to 5 → single chunk "1-2"
+    let r = collect_chunk_product(
+        chunk_int_list(&[1, 2], 1, RangeConstraint::Contiguous),
+        &["A", "B"],
+        Some(5),
+    );
+    assert_eq!(
+        r,
+        vec![("1-2".into(), "A".into()), ("1-2".into(), "B".into())]
+    );
+}
+
+#[test]
+fn test_py_multi_contig_chunksize2_override1() {
+    // Override chunk size to 1 → two chunks
+    let r = collect_chunk_product(
+        chunk_int_list(&[1, 2], 2, RangeConstraint::Contiguous),
+        &["A", "B"],
+        Some(1),
+    );
+    assert_eq!(
+        r,
+        vec![
+            ("1-1".into(), "A".into()),
+            ("1-1".into(), "B".into()),
+            ("2-2".into(), "A".into()),
+            ("2-2".into(), "B".into()),
+        ]
     );
 }
