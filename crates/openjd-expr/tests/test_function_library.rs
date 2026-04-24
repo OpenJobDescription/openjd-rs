@@ -45,6 +45,9 @@ impl EvalContext for MockCtx {
     fn count_string_ops(&mut self, _len: usize) -> Result<(), ExpressionError> {
         Ok(())
     }
+    fn check_memory(&self, _bytes: usize) -> Result<(), ExpressionError> {
+        Ok(())
+    }
 }
 
 fn custom_add(

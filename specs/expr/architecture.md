@@ -153,14 +153,14 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;  // 10M ops
 
 | Crate | Purpose | Source |
 |-------|---------|--------|
-| `ruff_python_parser` | Python expression parsing | Git (astral-sh/ruff, pinned commit) |
-| `ruff_python_ast` | Python AST types | Git (same pin) |
+| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` v0.15.8) |
+| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` v0.15.8) |
 | `regex` | Regular expression evaluation | crates.io |
 | `xxhash-rust` | Fast hashing (internal) | crates.io |
 | `serde` | Serialization (FormatString, PathMappingRule) | crates.io |
 
-The ruff dependency is a git pin rather than a crates.io dependency because the ruff
-team does not publish their parser crate. See [parser.md](parser.md) for the rationale
+The ruff parser is consumed via the `rustpython-ruff_python_parser` crate on crates.io,
+which republishes the ruff parser code. See [parser.md](parser.md) for the rationale
 behind choosing ruff over rustpython-parser.
 
 ## Design Constraints (from the specification)

@@ -386,8 +386,17 @@ impl ExprType {
 // ── Parsing ──
 
 impl ExprType {
+    const MAX_PARSE_DEPTH: usize = 10;
+
     /// Parse a type string like "int", "list\[string\]", "int?", "int | string", "unresolved\[int\]".
     pub fn parse(s: &str) -> Result<ExprType, String> {
+        Self::parse_inner(s, 0)
+    }
+
+    fn parse_inner(s: &str, depth: usize) -> Result<ExprType, String> {
+        if depth > Self::MAX_PARSE_DEPTH {
+            return Err("Type nesting depth exceeded".to_string());
+        }
         // Signature: (T1, T2) -> T3  — check before union split since return type may contain |
         if s.starts_with('(') {
             if let Some(arrow_pos) = s.find(") -> ") {
@@ -398,17 +407,20 @@ impl ExprType {
                 } else {
                     split_params(params_str)
                         .iter()
-                        .map(|p| ExprType::parse(p))
+                        .map(|p| Self::parse_inner(p, depth + 1))
                         .collect::<Result<Vec<_>, _>>()?
                 };
-                let return_type = ExprType::parse(ret_str)?;
+                let return_type = Self::parse_inner(ret_str, depth + 1)?;
                 return Ok(ExprType::signature(param_types, return_type));
             }
         }
         // Union: split on " | " outside brackets/parens
         let parts = split_union(s);
         if parts.len() > 1 {
-            let types: Result<Vec<_>, _> = parts.iter().map(|p| ExprType::parse(p)).collect();
+            let types: Result<Vec<_>, _> = parts
+                .iter()
+                .map(|p| Self::parse_inner(p, depth + 1))
+                .collect();
             return Ok(ExprType::union(types?));
         }
         // Base types
@@ -427,12 +439,12 @@ impl ExprType {
         }
         // Optional: T?
         if let Some(inner) = s.strip_suffix('?') {
-            let t = ExprType::parse(inner)?;
+            let t = Self::parse_inner(inner, depth + 1)?;
             return Ok(ExprType::union(vec![t, ExprType::NULLTYPE]));
         }
         // list[T]
         if let Some(inner) = s.strip_prefix("list[").and_then(|s| s.strip_suffix(']')) {
-            let elem = ExprType::parse(inner)?;
+            let elem = Self::parse_inner(inner, depth + 1)?;
             return Ok(ExprType::list(elem));
         }
         // unresolved[T]
@@ -440,7 +452,7 @@ impl ExprType {
             .strip_prefix("unresolved[")
             .and_then(|s| s.strip_suffix(']'))
         {
-            let constraint = ExprType::parse(inner)?;
+            let constraint = Self::parse_inner(inner, depth + 1)?;
             return Ok(ExprType::unresolved(constraint));
         }
         // Type variables

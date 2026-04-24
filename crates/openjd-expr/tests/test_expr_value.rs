@@ -1218,3 +1218,21 @@ fn path_pattern_requires_dotdot_externally() {
     };
     assert_eq!(got_value, "/p");
 }
+
+#[test]
+fn from_transport_value_deeply_nested_rejected() {
+    // Build a type list[list[...[int]...]] with 11 levels and matching nested JSON arrays
+    let mut typ = ExprType::parse("int").unwrap();
+    for _ in 0..11 {
+        typ = ExprType::list(typ);
+    }
+    let mut json_val: serde_json::Value = serde_json::json!("42");
+    for _ in 0..11 {
+        json_val = serde_json::json!([json_val]);
+    }
+    let err = ExprValue::from_transport_value(&json_val, &typ, PathFormat::Posix).unwrap_err();
+    assert!(
+        err.contains("depth") || err.contains("nesting"),
+        "got: {err}"
+    );
+}

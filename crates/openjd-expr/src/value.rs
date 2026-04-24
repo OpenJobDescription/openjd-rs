@@ -715,6 +715,18 @@ impl ExprValue {
         target: &ExprType,
         path_format: PathFormat,
     ) -> Result<Self, String> {
+        Self::from_transport_value_inner(value, target, path_format, 0)
+    }
+
+    fn from_transport_value_inner(
+        value: &serde_json::Value,
+        target: &ExprType,
+        path_format: PathFormat,
+        depth: usize,
+    ) -> Result<Self, String> {
+        if depth > 10 {
+            return Err("Transport value nesting depth exceeded".to_string());
+        }
         if target.code() == TypeCode::List {
             let elem_type = target
                 .params()
@@ -723,7 +735,7 @@ impl ExprValue {
             let arr = value.as_array().ok_or("Expected array for list type")?;
             let elements: Result<Vec<_>, _> = arr
                 .iter()
-                .map(|v| Self::from_transport_value(v, elem_type, path_format))
+                .map(|v| Self::from_transport_value_inner(v, elem_type, path_format, depth + 1))
                 .collect();
             return ExprValue::make_list(elements?, elem_type.clone()).map_err(|e| e.to_string());
         }

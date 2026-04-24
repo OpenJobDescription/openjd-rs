@@ -1488,3 +1488,24 @@ fn value_unresolved_is_unresolved() {
     assert!(ExprValue::unresolved(ExprType::INT).is_unresolved());
     assert!(!ExprValue::Int(42).is_unresolved());
 }
+
+#[test]
+fn parse_deeply_nested_type_rejected() {
+    // 10 levels of nesting should fail — limit is 10
+    let mut s = "int".to_string();
+    for _ in 0..11 {
+        s = format!("list[{s}]");
+    }
+    let err = ExprType::parse(&s).unwrap_err();
+    assert!(err.contains("nesting"), "got: {err}");
+}
+
+#[test]
+fn parse_nesting_at_limit_ok() {
+    // 10 levels should succeed
+    let mut s = "int".to_string();
+    for _ in 0..10 {
+        s = format!("list[{s}]");
+    }
+    assert!(ExprType::parse(&s).is_ok());
+}

@@ -2424,3 +2424,17 @@ fn regex_in_list_comprehension_uses_shared_cache() {
         eval(r"[x for x in ['shot_01', 'bg', 'shot_02', 'ref'] if re_search(x, 'shot') != null]");
     assert_eq!(result.list_len(), Some(2));
 }
+
+// --- repr_cmd delayed expansion: ! is intentionally NOT escaped ---
+// repr_cmd targets default cmd.exe rules without EnableDelayedExpansion (see spec §2.2.6).
+#[test]
+fn cmd_string_exclamation_not_escaped() {
+    assert_eq!(eval("repr_cmd('hello!')").to_display_string(), "\"hello!\"");
+}
+#[test]
+fn cmd_string_exclamation_variable_not_escaped() {
+    assert_eq!(
+        eval("repr_cmd('value is !PATH!')").to_display_string(),
+        "\"value is !PATH!\""
+    );
+}

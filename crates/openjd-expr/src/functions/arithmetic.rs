@@ -268,6 +268,7 @@ pub fn mul_string(ctx: Ctx, a: &[ExprValue]) -> R {
             }
             let result_len = s.len() * (*n as usize);
             ctx.count_string_ops(result_len)?;
+            ctx.check_memory(result_len)?;
             Ok(ExprValue::String(s.repeat(*n as usize)))
         }
         _ => Err(ExpressionError::type_error("type error")),

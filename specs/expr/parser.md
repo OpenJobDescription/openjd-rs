@@ -11,13 +11,12 @@ Defined in `eval/parse.rs`.
 ## Parser Selection: ruff_python_parser
 
 The `ruff_python_parser` from [astral-sh/ruff](https://github.com/astral-sh/ruff) is
-used via a git dependency pinned to a specific commit.
+used via the `rustpython-ruff_python_parser` crate on crates.io.
 
-**Note on crates.io package naming:** The `rustpython-ruff_python_parser` package on
-crates.io is the published version of the same code as `ruff_python_parser` in the
-`astral-sh/ruff` monorepo. The RustPython project republishes it under this name.
-Users seeing `rustpython-ruff_python_parser` in `Cargo.toml` or `Cargo.lock` should
-know it is the same parser, not a fork.
+The `rustpython-ruff_python_parser` package on crates.io is a republished version of
+the same code as `ruff_python_parser` in the `astral-sh/ruff` monorepo. The RustPython
+project republishes it under this name. Users seeing `rustpython-ruff_python_parser` in
+`Cargo.toml` or `Cargo.lock` should know it is the same parser, not a fork.
 
 **Why ruff over rustpython-parser:**
 
@@ -25,15 +24,9 @@ know it is the same parser, not a fork.
 - ruff is actively maintained (daily commits, backed by Astral)
 - rustpython-parser has had no substantive code changes since early 2025
 
-**Why a git dependency:**
-
-ruff does not publish its parser crate to crates.io (`publish = false`). The git pin
-provides reproducible builds. This is a manageable tradeoff given ruff's active
-maintenance.
-
 ```toml
-ruff_python_parser = { git = "https://github.com/astral-sh/ruff.git", rev = "0cfec22..." }
-ruff_python_ast = { git = "https://github.com/astral-sh/ruff.git", rev = "0cfec22..." }
+ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
+ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
 ```
 
 ## Parsing Pipeline

@@ -61,6 +61,9 @@ impl EvalContext for Ctx {
     fn count_string_ops(&mut self, _: usize) -> Result<(), ExpressionError> {
         Ok(())
     }
+    fn check_memory(&self, _: usize) -> Result<(), ExpressionError> {
+        Ok(())
+    }
 }
 
 // === fail_fn ===

@@ -225,6 +225,8 @@ fn repr_pwsh(val: &ExprValue) -> String {
 }
 
 fn cmd_quote(s: &str) -> String {
+    // Note: targets default cmd.exe parsing rules WITHOUT EnableDelayedExpansion.
+    // The ! character is intentionally not escaped. See the EXPR specification §2.2.6.
     const NEEDS_QUOTING: &str = " \t\n\r&|<>^\"()%!";
     if !s.is_empty() && !s.chars().any(|c| NEEDS_QUOTING.contains(c)) {
         return s.to_string();

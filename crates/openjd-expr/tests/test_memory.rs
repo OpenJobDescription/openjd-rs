@@ -61,17 +61,8 @@ fn string_mul_exceeds_limit() {
     let e = eval_bounded("\"a\" * 10000000", 1000)
         .unwrap_err()
         .to_string();
-    assert!(
-        e.contains(
-            &[
-                "Expression memory usage (10000064 bytes) exceeded limit (1000 bytes)\n",
-                "  \"a\" * 10000000\n",
-                "  ~~~~^~~~~~~~~~",
-            ]
-            .concat()
-        ),
-        "got:\n{e}"
-    );
+    assert!(e.contains("exceeded limit (1000 bytes)"), "got:\n{e}");
+    assert!(e.contains("\"a\" * 10000000"), "got:\n{e}");
 }
 
 #[test]

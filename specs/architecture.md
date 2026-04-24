@@ -101,7 +101,7 @@ Commands: `check` (validate templates), `summary` (job/step summary), `run` (exe
 
 ## Key Design Decisions
 
-- **Parser**: `ruff_python_parser` via git pin (see `specs/expr/parser.md`)
+- **Parser**: `ruff_python_parser` via crates.io (see `specs/expr/parser.md`)
 - **Serialization**: serde + serde_yaml for template deserialization
 - **Validation**: Post-deserialization validation pass (not inline with serde)
 - **Error handling**: `thiserror`-based enums throughout

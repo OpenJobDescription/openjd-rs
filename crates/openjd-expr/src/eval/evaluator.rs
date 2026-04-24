@@ -1448,6 +1448,19 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
             Ok(())
         }
     }
+    fn check_memory(&self, bytes: usize) -> Result<(), ExpressionError> {
+        let projected = self.current_memory.saturating_add(bytes);
+        if projected > self.memory_limit {
+            Err(ExpressionError::from_kind(
+                ExpressionErrorKind::MemoryLimitExceeded {
+                    used: projected,
+                    limit: self.memory_limit,
+                },
+            ))
+        } else {
+            Ok(())
+        }
+    }
     fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
         if let Some(re) = self.regex_cache.get(pattern) {
             return Ok(re.clone());
