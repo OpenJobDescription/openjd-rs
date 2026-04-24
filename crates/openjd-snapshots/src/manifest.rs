@@ -173,6 +173,11 @@ pub trait ValidatePaths {
 
 impl ValidatePaths for Abs {
     fn validate_path(path: &str) -> crate::Result<()> {
+        if path.is_empty() {
+            return Err(crate::SnapshotError::Validation(
+                "path must not be empty".into(),
+            ));
+        }
         if !is_absolute_path(path) {
             return Err(crate::SnapshotError::Validation(format!(
                 "expected absolute path, got: {path}"
@@ -184,6 +189,11 @@ impl ValidatePaths for Abs {
 
 impl ValidatePaths for Rel {
     fn validate_path(path: &str) -> crate::Result<()> {
+        if path.is_empty() {
+            return Err(crate::SnapshotError::Validation(
+                "path must not be empty".into(),
+            ));
+        }
         if is_absolute_path(path) {
             return Err(crate::SnapshotError::Validation(format!(
                 "expected relative path, got: {path}"
@@ -420,6 +430,7 @@ pub enum AbsManifest {
     Diff(AbsSnapshotDiff),
 }
 
+#[derive(Debug)]
 pub enum RelManifest {
     Snapshot(Snapshot),
     Diff(SnapshotDiff),
@@ -535,6 +546,20 @@ mod tests {
     fn rel_snapshot_rejects_absolute_path() {
         let m = make_rel_snapshot(vec![FileEntry::file("/absolute/path.txt", 10, 1)]);
         assert!(m.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_empty_path_in_rel_manifest() {
+        let m = make_rel_snapshot(vec![FileEntry::file("", 10, 1)]);
+        let err = m.validate().unwrap_err();
+        assert!(err.to_string().contains("must not be empty"), "{err}");
+    }
+
+    #[test]
+    fn rejects_empty_path_in_abs_manifest() {
+        let m = make_abs_snapshot(vec![FileEntry::file("", 10, 1)]);
+        let err = m.validate().unwrap_err();
+        assert!(err.to_string().contains("must not be empty"), "{err}");
     }
 
     #[test]

@@ -205,7 +205,7 @@ If stronger verification is needed, a future `--verify` flag could re-hash data 
 
 | Condition | Behavior |
 |-----------|----------|
-| Source object missing | `SnapshotError::Other` with hash details |
+| Source object missing | `SnapshotError::Io` (surfaced from data cache) |
 | Destination write fails | Error propagated, partial sync is safe (idempotent) |
 | Cancellation via callback | `SnapshotError::Cancelled` |
 | Source and destination are the same cache | No-op for all objects (existence checks all pass) |
