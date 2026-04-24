@@ -258,12 +258,23 @@ fn validate_fs(
         return;
     }
     if let Err(e) = fs.validate_expressions(symtab, lib) {
-        errors.add(
+        let detail = crate::error::ErrorDetail {
+            summary: e.message.clone(),
+            spans: vec![crate::error::DiagnosticSpan {
+                summary: e.message.clone(),
+                source: e.input.clone(),
+                start: e.start,
+                end: e.end,
+                caret: 0,
+            }],
+        };
+        errors.add_with_detail(
             path,
             format!(
                 "Failed to parse interpolation expression at [{}, {}]. {}",
                 e.start, e.end, e.message
             ),
+            detail,
         );
     }
 }
