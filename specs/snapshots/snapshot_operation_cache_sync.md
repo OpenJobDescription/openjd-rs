@@ -119,7 +119,7 @@ This avoids buffering an entire large object in memory.
 
 ### S3-to-S3 Direct Copy
 
-When both source and destination are `S3DataCache`, the pipeline should use S3's server-side copy APIs instead of downloading and re-uploading data:
+When both source and destination are `S3DataCache`, the pipeline uses S3's server-side copy APIs instead of downloading and re-uploading data:
 
 - **`CopyObject`** — For objects ≤ 5GB, a single API call copies data directly between buckets (or prefixes within the same bucket) without the data transiting through the client. This is the common case for content-addressed objects.
 - **`UploadPartCopy`** — For objects > 5GB, use multipart upload with `UploadPartCopy` for each part. Each part is copied server-side.
@@ -129,12 +129,9 @@ This means S3→S3 transfers:
 - Are significantly faster (no download/upload round-trip)
 - Don't consume memory pool permits (no data buffered locally)
 
-The `AsyncDataCache` trait needs a method to support this:
+This is implemented via the `copy_from` method on the `AsyncDataCache` trait:
 
 ```rust
-/// Copy an object from another cache, server-side if possible.
-/// Returns true if a server-side copy was performed, false if the caller
-/// should fall back to get+put.
 async fn copy_from(
     &self,
     source: &dyn AsyncDataCache,
@@ -150,7 +147,7 @@ pub enum CopyResult {
 
 `S3DataCache` implements this by checking if `source` is also an `S3DataCache` (via `Any` downcast), and if so, calling `CopyObject` with `CopySource` pointing to the source bucket/key. `FileSystemDataCache` returns `NotSupported`.
 
-The pipeline flow becomes:
+The pipeline flow is:
 
 ```
 For each unique (hash, algorithm):
@@ -160,9 +157,9 @@ For each unique (hash, algorithm):
      └─► NotSupported → fall back to get_object + put_object (memory-bounded)
 ```
 
-### S3 Batch Operations — TODO/Research
+### Future Work: S3 Batch Operations
 
-For very large syncs (tens of thousands of objects or more), individual `CopyObject` calls may be slow due to per-request overhead. S3 Batch Operations could potentially handle this more efficiently:
+For very large syncs (tens of thousands of objects or more), individual `CopyObject` calls may be slow due to per-request overhead. S3 Batch Operations could potentially handle this more efficiently.
 
 **What to research:**
 
@@ -185,7 +182,7 @@ For very large syncs (tens of thousands of objects or more), individual `CopyObj
 
 4. **Alternative: S3 Replication** — For ongoing cross-region needs, S3 Replication Rules may be more appropriate than CACHE_SYNC. Worth documenting as guidance for users rather than implementing.
 
-This is deferred — the initial implementation should use parallel `CopyObject`/`UploadPartCopy` which is simple, fast for typical workloads, and doesn't require additional IAM setup.
+This is deferred — the current implementation uses parallel `CopyObject`/`UploadPartCopy` which is simple, fast for typical workloads, and doesn't require additional IAM setup.
 
 ### Concurrent Transfer Deduplication
 

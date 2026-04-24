@@ -206,3 +206,314 @@ async fn cache_sync_s3_to_s3_skip_existing() {
     let (_s3d2, dst) = make_s3_cache().await;
     run_sync_skip_test(src, dst).await;
 }
+
+// ===== Cancellation =====
+
+#[tokio::test]
+async fn cache_sync_cancellation_via_progress() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    // Put many objects so cancellation has a chance to fire
+    for i in 0..20 {
+        put(&src, &format!("hash_{i}"), "xxh128", b"data").await;
+    }
+
+    let manifest = test_manifest(
+        (0..20)
+            .map(|i| {
+                let mut e = FileEntry::new(format!("f{i}.txt"));
+                e.hash = Some(format!("hash_{i}"));
+                e.size = Some(4);
+                e
+            })
+            .collect(),
+    );
+
+    let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let cc = call_count.clone();
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst,
+        CacheSyncOptions {
+            on_progress: Some(Box::new(move |_stats| {
+                // Cancel after 2 progress callbacks
+                cc.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 2
+            })),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("cancelled"),
+        "expected Cancelled, got: {err}"
+    );
+    assert!(
+        call_count.load(std::sync::atomic::Ordering::Relaxed) >= 2,
+        "progress should have been called at least twice"
+    );
+}
+
+// ===== Progress callbacks =====
+
+#[tokio::test]
+async fn cache_sync_progress_reports_statistics() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    put(&src, "hash_a", "xxh128", b"alpha").await;
+    put(&src, "hash_b", "xxh128", b"bravo").await;
+
+    let manifest = test_manifest(vec![
+        {
+            let mut e = FileEntry::new("a.txt");
+            e.hash = Some("hash_a".into());
+            e.size = Some(5);
+            e
+        },
+        {
+            let mut e = FileEntry::new("b.txt");
+            e.hash = Some("hash_b".into());
+            e.size = Some(5);
+            e
+        },
+    ]);
+
+    let final_stats = Arc::new(std::sync::Mutex::new(None));
+    let fs = final_stats.clone();
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst,
+        CacheSyncOptions {
+            on_progress: Some(Box::new(move |stats| {
+                *fs.lock().unwrap() = Some(stats.clone());
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.total_objects, 2);
+    assert_eq!(result.statistics.copied_objects, 2);
+
+    // Progress callback should have been invoked with meaningful stats
+    let last = final_stats.lock().unwrap().clone().unwrap();
+    assert!(last.copied_objects > 0 || last.skipped_objects > 0);
+}
+
+// ===== Error: source object missing =====
+
+#[tokio::test]
+async fn cache_sync_missing_source_object_errors() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    // Don't put anything in source — manifest references a hash that doesn't exist
+    let manifest = test_manifest(vec![{
+        let mut e = FileEntry::new("missing.txt");
+        e.hash = Some("nonexistent_hash".into());
+        e.size = Some(100);
+        e
+    }]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst,
+        CacheSyncOptions::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "should error when source object is missing"
+    );
+}
+
+// ===== Mixed manifest types =====
+
+#[tokio::test]
+async fn cache_sync_multiple_manifests_deduplicates() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    put(&src, "shared", "xxh128", b"shared_data").await;
+    put(&src, "unique_a", "xxh128", b"aaa").await;
+    put(&src, "unique_b", "xxh128", b"bbb").await;
+
+    let manifest1 = test_manifest(vec![
+        {
+            let mut e = FileEntry::new("shared.txt");
+            e.hash = Some("shared".into());
+            e.size = Some(11);
+            e
+        },
+        {
+            let mut e = FileEntry::new("a.txt");
+            e.hash = Some("unique_a".into());
+            e.size = Some(3);
+            e
+        },
+    ]);
+    let manifest2 = test_manifest(vec![
+        {
+            let mut e = FileEntry::new("shared_copy.txt");
+            e.hash = Some("shared".into()); // same hash as manifest1
+            e.size = Some(11);
+            e
+        },
+        {
+            let mut e = FileEntry::new("b.txt");
+            e.hash = Some("unique_b".into());
+            e.size = Some(3);
+            e
+        },
+    ]);
+
+    let result = cache_sync_manifest(
+        &[
+            &manifest1 as &dyn ManifestRef,
+            &manifest2 as &dyn ManifestRef,
+        ],
+        src,
+        dst.clone(),
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    // "shared" hash appears in both manifests but should only be copied once
+    assert_eq!(result.statistics.copied_objects, 3); // shared + unique_a + unique_b
+    assert!(exists(&dst, "shared", "xxh128").await);
+    assert!(exists(&dst, "unique_a", "xxh128").await);
+    assert!(exists(&dst, "unique_b", "xxh128").await);
+}
+
+// ===== Skips symlinks, deleted, unhashed =====
+
+#[tokio::test]
+async fn cache_sync_skips_non_syncable_entries() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    put(&src, "real_hash", "xxh128", b"real").await;
+
+    let manifest = test_manifest(vec![
+        {
+            // Hashed file — should sync
+            let mut e = FileEntry::new("real.txt");
+            e.hash = Some("real_hash".into());
+            e.size = Some(4);
+            e
+        },
+        // Symlink — should skip
+        FileEntry::symlink("link.txt", "real.txt"),
+        // Unhashed file — should skip
+        FileEntry::file("unhashed.txt", 100, 1),
+    ]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.total_objects, 1); // only the hashed file
+    assert_eq!(result.statistics.copied_objects, 1);
+    assert!(exists(&dst, "real_hash", "xxh128").await);
+}
+
+// ===== Chunk hashes =====
+
+#[tokio::test]
+async fn cache_sync_handles_chunk_hashes() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    put(&src, "chunk_0", "xxh128", b"part0").await;
+    put(&src, "chunk_1", "xxh128", b"part1").await;
+    put(&src, "chunk_2", "xxh128", b"part2").await;
+
+    let manifest = test_manifest(vec![{
+        let mut e = FileEntry::file("big.bin", 30, 1);
+        e.chunk_hashes = Some(vec!["chunk_0".into(), "chunk_1".into(), "chunk_2".into()]);
+        e
+    }]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.copied_objects, 3); // one per chunk
+    assert!(exists(&dst, "chunk_0", "xxh128").await);
+    assert!(exists(&dst, "chunk_1", "xxh128").await);
+    assert!(exists(&dst, "chunk_2", "xxh128").await);
+}
+
+// ===== Empty manifest =====
+
+#[tokio::test]
+async fn cache_sync_empty_manifest() {
+    let (_sd, src) = make_fs_cache();
+    let (_dd, dst) = make_fs_cache();
+
+    let manifest = test_manifest(vec![]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst,
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.total_objects, 0);
+    assert_eq!(result.statistics.copied_objects, 0);
+    assert_eq!(result.statistics.skipped_objects, 0);
+}
+
+// ===== Same source and destination =====
+
+#[tokio::test]
+async fn cache_sync_same_cache_is_noop() {
+    let (_sd, cache) = make_fs_cache();
+
+    put(&cache, "hash_a", "xxh128", b"alpha").await;
+
+    let manifest = test_manifest(vec![{
+        let mut e = FileEntry::new("a.txt");
+        e.hash = Some("hash_a".into());
+        e.size = Some(5);
+        e
+    }]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        cache.clone(),
+        cache,
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.skipped_objects, 1);
+    assert_eq!(result.statistics.copied_objects, 0);
+}

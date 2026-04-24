@@ -91,7 +91,7 @@ pub fn hash_file_chunked(path: &Path, chunk_size: u64) -> std::io::Result<Vec<St
 /// Formats a byte count as a human-readable string (e.g., "1.5 MB").
 pub fn human_readable_file_size(bytes: u64) -> String {
     let mut size = bytes as f64;
-    for unit in &["B", "KB", "MB", "GB", "TB", "PB"] {
+    for unit in &["B", "KB", "MB", "GB", "TB", "PB", "EB"] {
         let rounded = (size * 100.0).round() / 100.0;
         if rounded < 1000.0 {
             if *unit == "B" {
@@ -101,7 +101,7 @@ pub fn human_readable_file_size(bytes: u64) -> String {
         }
         size /= 1000.0;
     }
-    format!("{} PB", (size * 100.0).round() / 100.0)
+    format!("{} EB", (size * 100.0).round() / 100.0)
 }
 
 #[cfg(test)]
@@ -169,5 +169,45 @@ mod tests {
     #[test]
     fn hash_algorithm_extension() {
         assert_eq!(HashAlgorithm::Xxh128.extension(), "xxh128");
+    }
+
+    #[test]
+    fn human_readable_bytes() {
+        assert_eq!(human_readable_file_size(0), "0 B");
+        assert_eq!(human_readable_file_size(1), "1 B");
+        assert_eq!(human_readable_file_size(999), "999 B");
+    }
+
+    #[test]
+    fn human_readable_kilobytes() {
+        assert_eq!(human_readable_file_size(1_000), "1 KB");
+        assert_eq!(human_readable_file_size(1_500), "1.5 KB");
+    }
+
+    #[test]
+    fn human_readable_megabytes() {
+        assert_eq!(human_readable_file_size(1_000_000), "1 MB");
+        assert_eq!(human_readable_file_size(256 * 1024 * 1024), "268.44 MB");
+    }
+
+    #[test]
+    fn human_readable_gigabytes() {
+        assert_eq!(human_readable_file_size(1_000_000_000), "1 GB");
+    }
+
+    #[test]
+    fn human_readable_terabytes() {
+        assert_eq!(human_readable_file_size(1_000_000_000_000), "1 TB");
+    }
+
+    #[test]
+    fn human_readable_petabytes() {
+        assert_eq!(human_readable_file_size(1_000_000_000_000_000), "1 PB");
+    }
+
+    #[test]
+    fn human_readable_exabytes() {
+        assert_eq!(human_readable_file_size(1_000_000_000_000_000_000), "1 EB");
+        assert_eq!(human_readable_file_size(u64::MAX), "18.45 EB");
     }
 }

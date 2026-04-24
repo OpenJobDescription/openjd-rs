@@ -5,33 +5,37 @@
 
 ## Executive Summary
 
-The `openjd-snapshots` crate is a well-engineered, comprehensive implementation of content-addressed directory tree snapshots with S3 integration. The specifications are thorough and well-organized across 21 documents covering all operations, data types, and design decisions. The implementation faithfully follows the specs with idiomatic Rust patterns including phantom type parameters for compile-time safety, a tokio-based async pipeline, and rayon for CPU-parallel hashing. All 977 tests pass with zero warnings. The crate is missing a dedicated public API spec document, and the CACHE_SYNC spec describes some features (S3 Batch Operations, `copy_from` trait method) that are partially implemented or deferred. The Python comparison reveals close behavioral alignment with appropriate Rust-idiomatic adaptations. Overall, this is a high-quality crate ready for production use with a few areas for improvement.
+The `openjd-snapshots` crate is a well-engineered, comprehensive implementation of content-addressed directory tree snapshots with S3 integration. The specifications are thorough and well-organized across 22 documents (including the public API reference) covering all operations, data types, and design decisions. The implementation faithfully follows the specs with idiomatic Rust patterns including phantom type parameters for compile-time safety, a tokio-based async pipeline, and rayon for CPU-parallel hashing. All 979 tests pass with zero warnings. The Python comparison reveals close behavioral alignment with appropriate Rust-idiomatic adaptations. Overall, this is a high-quality crate ready for production use with a few areas for improvement.
 
 ## 1. Specifications Review
 
 ### 1.1 `snapshot_overview.md`
 Excellent top-level document. Covers glossary, quick start, use cases, manifest classes, operations diagram, design choices, constants, module organization, and dependency graph. The ASCII art operation diagrams are clear and helpful. The design choices section (12 items) provides strong rationale for key decisions.
 
-### 1.2 `snapshot_manifest_types.md`
+### 1.2 `public-api.md`
+Complete public API reference listing all public types, functions, traits, and constants with their signatures. Clearly distinguishes crate-root re-exports from module-path-only items. Verified against the implementation by cross-referencing every `pub use` in `lib.rs`.
+
+### 1.3 `snapshot_manifest_types.md`
 Comprehensive coverage of the `Manifest<P, K>` generic struct, phantom type parameters, `FileEntry`/`DirEntry` structs, validation rules, serde behavior, and `SymlinkPolicy`. The entry state table is particularly useful. Accurately describes the implementation.
 
-### 1.3 `snapshot_data_cache.md`
+### 1.4 `snapshot_data_cache.md`
 Well-structured coverage of both sync and async traits, `FileSystemDataCache`, `S3DataCache`, account ID security, multipart transfers, and the cache hierarchy. The upload flow with all caches section is clear.
 
-### 1.4 `snapshot_hash_cache.md`
+### 1.5 `snapshot_hash_cache.md`
 Thorough documentation of the SQLite hash cache schema, API, lookup behavior, and thread safety. The "Future Work: Hash Cache Eviction" section is a thoughtful addition showing forward planning. Accurately describes the `hashesV4` schema.
 
-### 1.5 `snapshot_symlink_handling.md`
+### 1.6 `snapshot_symlink_handling.md`
 Detailed coverage of all six symlink policies, escaping detection, collapsing behavior, cycle detection, and per-operation support. The policy support matrix table is very useful.
 
-### 1.6 Operation specs (`snapshot_operation_*.md`)
+### 1.7 Operation specs (`snapshot_operation_*.md`)
 All 11 operation specs follow a consistent structure: function signature, parameters, returns, implementation details, and examples. Each is accurate and complete relative to the implementation.
 
-### 1.7 Gaps
+### 1.8 Gaps
 
-- **No dedicated public API spec.** The skill requires "a dedicated public API spec (e.g., `public-api.md`) separate from internal design details." The public API is documented across `lib.rs` re-exports and the overview, but there is no single document listing all public types, functions, and their signatures.
-- **`snapshot_error_handling.md`** lists `SnapshotError::Other` in the CACHE_SYNC usage table, but the actual enum has no `Other` variant. The error table says CACHE_SYNC uses `SnapshotError::Other` — this should be `Io` or `Task`.
-- **`snapshot_operation_cache_sync.md`** describes S3 Batch Operations as "TODO/Research" which is appropriate, but the `copy_from` trait method described in the spec IS implemented, so the spec should note it's implemented rather than leaving it as a proposal.
+No significant spec gaps remain. All previously identified issues have been addressed:
+- ~~No dedicated public API spec~~ → `public-api.md` created
+- ~~`SnapshotError::Other` in error handling spec~~ → Fixed to `SnapshotError::Io`
+- ~~`copy_from` described as proposal in cache_sync spec~~ → Updated to reflect implementation; S3 Batch Operations moved to "Future Work" subsection
 
 ## 2. Public API Review
 
@@ -46,6 +50,8 @@ The public API is exported via `lib.rs` with well-organized re-exports from all 
 - **Codec:** `encode_*` and `decode_*` functions for v2023 and v2025 formats
 - **Constants:** `DEFAULT_FILE_CHUNK_SIZE`, `WHOLE_FILE_CHUNK_SIZE`, `DEFAULT_S3_MULTIPART_PART_SIZE`
 
+The complete API is documented in `specs/snapshots/public-api.md`.
+
 ### 2.2 Ergonomics
 
 The API is well-designed:
@@ -56,14 +62,10 @@ The API is well-designed:
 - `Default` implementations on options structs reduce boilerplate
 - `ManifestRef` trait enables CACHE_SYNC to accept any manifest type
 
-### 2.3 Missing Public API Spec
-
-There is no `specs/snapshots/public-api.md` document. The public API is discoverable from `lib.rs` and the individual spec documents, but a consolidated reference would improve discoverability and serve as a contract for semver compatibility.
-
 ## 3. Implementation Review
 
-### 3.1 `manifest.rs` (757 lines)
-Clean implementation of the core types. The phantom type approach with `ValidatePaths`/`ValidateKind` traits is elegant. The `validate()` method is thorough, checking path style, kind constraints, entry state consistency, chunkhash counts, and duplicate paths. The `is_false` helper for serde is a minor but effective pattern.
+### 3.1 `manifest.rs` (771 lines)
+Clean implementation of the core types. The phantom type approach with `ValidatePaths`/`ValidateKind` traits is elegant. The `validate()` method is thorough, checking path style (including empty path rejection), kind constraints, entry state consistency, chunkhash counts, and duplicate paths. Both `AbsManifest` and `RelManifest` derive `Debug`. The `is_false` helper for serde is a minor but effective pattern.
 
 ### 3.2 `codec.rs` (734 lines)
 Solid encode/decode implementation for both v2023 and v2025 formats. The directory index compression in v2025 (`$N/filename` references) is well-implemented. The `canonical_json` function correctly sorts keys and escapes non-ASCII characters for Python compatibility. The `utf16_be_bytes` sort order for v2023 compatibility is correctly implemented.
@@ -130,11 +132,11 @@ No O(N²) algorithms detected. Key performance characteristics:
 
 ### 4.1 Coverage Assessment
 
-977 total tests across 22 test files (191 unit tests + 786 integration tests). Coverage is comprehensive:
+979 total tests across 22 test files (193 unit tests + 786 integration tests). Coverage is comprehensive:
 
 | Area | Test File(s) | Test Count | Assessment |
 |------|-------------|------------|------------|
-| Manifest types | `test_manifest.rs` + unit tests | ~30 | Good: validation, serde, constructors |
+| Manifest types | `test_manifest.rs` + unit tests | ~32 | Good: validation, serde, constructors, empty path rejection |
 | Codec | `test_codec.rs`, `test_v2023_canonical.rs`, `test_round_trip.rs` | ~100 | Excellent: round-trip, canonical JSON, cross-implementation |
 | Collect | `test_collect.rs` | ~60 | Excellent: all symlink policies, edge cases |
 | Hash | `test_hash.rs` | ~35 | Good: chunked, whole-file, cache integration |
@@ -203,7 +205,7 @@ The Rust and Python implementations are structurally aligned:
 
 ### 5.4 Test Coverage Comparison
 
-The Rust test suite (977 tests) is significantly larger than the Python test suite. The Rust tests cover all Python test scenarios plus additional edge cases for:
+The Rust test suite (979 tests) is significantly larger than the Python test suite. The Rust tests cover all Python test scenarios plus additional edge cases for:
 - File chunking boundary conditions
 - Concurrent upload deduplication
 - S3 mock testing via s3s
@@ -222,10 +224,10 @@ Clean compilation, zero errors, zero warnings.
 
 ### Test Results
 ```
-test result: ok. 191 passed; 0 failed; 0 ignored  (unit tests)
+test result: ok. 193 passed; 0 failed; 0 ignored  (unit tests)
 test result: ok. 786 passed; 0 failed; 3 ignored  (integration tests, 22 test binaries)
 ```
-All 977 tests pass. 3 ignored tests are S3 integration tests requiring credentials (`OPENJD_TEST_S3_BUCKET`).
+All 979 tests pass. 3 ignored tests are S3 integration tests requiring credentials (`OPENJD_TEST_S3_BUCKET`).
 
 ## 7. Exploratory Findings
 
@@ -237,27 +239,19 @@ The `hash_file_chunked` function in `hash.rs` handles the `UnexpectedEof` from `
 
 For `u64::MAX` (18.4 EB), the function would iterate through all units and reach the final `PB` fallback. The loop exits when `rounded < 1000.0`, and for very large values it falls through to the final format. This works correctly but the output would be in PB rather than EB. This is a cosmetic issue — the function doesn't have an EB unit in its list.
 
-### 7.3 Empty path in `FileEntry`
-
-`FileEntry::new("")` produces a `FileEntry` with `path = ""`. This passes through `normalize_path("")` which returns `""`. An empty path is technically valid in the struct but would fail validation for both `Abs` (not absolute) and `Rel` (not relative — `is_absolute_path("")` returns false, but `Rel::validate_path("")` would pass since it only checks `is_absolute_path`). So an empty-path entry in a relative manifest would pass validation, which may be unintended.
-
-### 7.4 `SnapshotError` spec mentions `Other` variant
-
-The `snapshot_error_handling.md` spec mentions `SnapshotError::Other` in the CACHE_SYNC error table, but the actual enum has no `Other` variant. The implementation uses `Io` and `Task` for these cases.
-
-### 7.5 No bugs found in core logic
+### 7.3 No bugs found in core logic
 
 After thorough review of all operations, no logic bugs were found. The trie-based compose, symlink handling, and pipeline architectures are all correctly implemented.
 
 ## 8. Recommendations
 
-### Priority 1 (Should fix)
+### Priority 1 (Should fix) — All addressed
 
-1. **Create `specs/snapshots/public-api.md`** — A dedicated public API specification listing all public types, functions, traits, and constants with their signatures. This is required by the eval-crate skill's alignment criteria.
+1. ~~**Create `specs/snapshots/public-api.md`**~~ — **Done.** Complete public API reference created and verified against the implementation.
 
-2. **Fix `snapshot_error_handling.md` CACHE_SYNC error table** — Replace `SnapshotError::Other` with the actual variants used (`Io`, `Task`).
+2. ~~**Fix `snapshot_error_handling.md` CACHE_SYNC error table**~~ — **Done.** Replaced `SnapshotError::Other` with `SnapshotError::Io`.
 
-3. **Update `snapshot_operation_cache_sync.md`** — Note that `copy_from` is implemented (not just proposed). Move the S3 Batch Operations section to a clearly-labeled "Future Work" subsection.
+3. ~~**Update `snapshot_operation_cache_sync.md`**~~ — **Done.** `copy_from` noted as implemented; S3 Batch Operations moved to "Future Work" subsection.
 
 ### Priority 2 (Should improve)
 
@@ -267,7 +261,7 @@ After thorough review of all operations, no logic bugs were found. The trie-base
 
 6. **Add `human_readable_file_size` EB unit** — The function's unit list stops at PB. Add EB for completeness, or document the PB fallback behavior.
 
-7. **Consider validating empty paths** — An empty string path in a `Rel` manifest passes validation. Consider rejecting empty paths in `Rel::validate_path`.
+7. ~~**Consider validating empty paths**~~ — **Done.** Both `Abs::validate_path` and `Rel::validate_path` now reject empty strings with `"path must not be empty"`.
 
 ### Priority 3 (Nice to have)
 

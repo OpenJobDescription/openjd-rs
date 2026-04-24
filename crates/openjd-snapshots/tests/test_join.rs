@@ -359,3 +359,164 @@ fn is_absolute_path_windows_unc() {
     assert!(is_absolute_path("//server/share"));
     assert!(is_absolute_path("\\\\server\\share"));
 }
+
+// ===== Additional edge-case tests =====
+
+#[test]
+fn empty_manifest_join() {
+    let m = snap(vec![], vec![]);
+    let result = join_snapshot(&m, "/root").unwrap();
+    assert!(result.files.is_empty());
+    assert!(result.dirs.is_empty());
+    assert_eq!(result.total_size, 0);
+}
+
+#[test]
+fn empty_manifest_join_rel() {
+    let m = snap(vec![], vec![]);
+    let result = join_snapshot_rel(&m, "prefix").unwrap();
+    assert!(result.files.is_empty());
+    assert!(result.dirs.is_empty());
+}
+
+#[test]
+fn empty_diff_manifest_join() {
+    let m = snap_diff(vec![], vec![]);
+    let result = join_snapshot_diff(&m, "/root").unwrap();
+    assert!(result.files.is_empty());
+    assert!(result.dirs.is_empty());
+}
+
+#[test]
+fn deeply_nested_paths() {
+    let m = snap(
+        vec![hfile("a/b/c/d/e/f/g/h/deep.txt", "h1", 10, 1)],
+        vec![DirEntry::new("a/b/c/d/e/f/g/h")],
+    );
+    let result = join_snapshot(&m, "/root").unwrap();
+    assert_eq!(result.files[0].path, "/root/a/b/c/d/e/f/g/h/deep.txt");
+    assert_eq!(result.dirs[0].path, "/root/a/b/c/d/e/f/g/h");
+}
+
+#[test]
+fn paths_with_spaces_and_special_chars() {
+    let m = snap(
+        vec![
+            hfile("my project/file (1).txt", "h1", 10, 1),
+            hfile("data/name with spaces.bin", "h2", 20, 2),
+            hfile("special!@#$%/file.txt", "h3", 30, 3),
+        ],
+        vec![DirEntry::new("my project")],
+    );
+    let result = join_snapshot(&m, "/root").unwrap();
+    let paths: Vec<&str> = result.files.iter().map(|f| f.path.as_str()).collect();
+    assert!(paths.contains(&"/root/my project/file (1).txt"));
+    assert!(paths.contains(&"/root/data/name with spaces.bin"));
+    assert!(paths.contains(&"/root/special!@#$%/file.txt"));
+    assert_eq!(result.dirs[0].path, "/root/my project");
+}
+
+#[test]
+fn unicode_paths() {
+    let m = snap(
+        vec![
+            hfile("日本語/ファイル.txt", "h1", 10, 1),
+            hfile("données/café.blend", "h2", 20, 2),
+        ],
+        vec![],
+    );
+    let result = join_snapshot(&m, "/projects").unwrap();
+    assert_eq!(result.files[0].path, "/projects/日本語/ファイル.txt");
+    assert_eq!(result.files[1].path, "/projects/données/café.blend");
+}
+
+#[test]
+fn symlink_chain_targets_all_prefixed() {
+    let m = snap(
+        vec![
+            hfile("real.txt", "h1", 10, 1),
+            FileEntry::symlink("link1", "real.txt"),
+            FileEntry::symlink("link2", "link1"),
+        ],
+        vec![],
+    );
+    let result = join_snapshot(&m, "/root").unwrap();
+    let by_path: std::collections::HashMap<&str, &FileEntry> =
+        result.files.iter().map(|f| (f.path.as_str(), f)).collect();
+    assert_eq!(
+        by_path["/root/link1"].symlink_target.as_deref(),
+        Some("/root/real.txt")
+    );
+    assert_eq!(
+        by_path["/root/link2"].symlink_target.as_deref(),
+        Some("/root/link1")
+    );
+}
+
+#[test]
+fn dir_symlink_target_prefixed() {
+    let m = snap(
+        vec![FileEntry::symlink("link_dir", "actual_dir")],
+        vec![DirEntry::new("actual_dir")],
+    );
+    let result = join_snapshot(&m, "/root").unwrap();
+    assert_eq!(
+        result.files[0].symlink_target.as_deref(),
+        Some("/root/actual_dir")
+    );
+    assert_eq!(result.dirs[0].path, "/root/actual_dir");
+}
+
+#[test]
+fn prefix_with_dotdot_normalized() {
+    let m = snap(vec![hfile("a.txt", "h1", 10, 1)], vec![]);
+    let result = join_snapshot(&m, "/root/sub/../other").unwrap();
+    assert_eq!(result.files[0].path, "/root/other/a.txt");
+}
+
+#[test]
+fn join_manifest_wrapper_snapshot() {
+    use openjd_snapshots::{join_manifest, AbsManifest, RelManifest};
+    let m = RelManifest::Snapshot(snap(vec![hfile("a.txt", "h1", 10, 1)], vec![]));
+    let result = join_manifest(&m, "/root").unwrap();
+    match result {
+        AbsManifest::Snapshot(s) => assert_eq!(s.files[0].path, "/root/a.txt"),
+        AbsManifest::Diff(_) => panic!("expected Snapshot"),
+    }
+}
+
+#[test]
+fn join_manifest_wrapper_diff() {
+    use openjd_snapshots::{join_manifest, AbsManifest, RelManifest};
+    let m = RelManifest::Diff(snap_diff(
+        vec![hfile("a.txt", "h1", 10, 1), FileEntry::deleted("b.txt")],
+        vec![],
+    ));
+    let result = join_manifest(&m, "/root").unwrap();
+    match result {
+        AbsManifest::Diff(d) => {
+            assert_eq!(d.files[0].path, "/root/a.txt");
+            assert_eq!(d.files[1].path, "/root/b.txt");
+            assert!(d.files[1].deleted);
+        }
+        AbsManifest::Snapshot(_) => panic!("expected Diff"),
+    }
+}
+
+#[test]
+fn join_manifest_rel_wrapper() {
+    use openjd_snapshots::{join_manifest_rel, RelManifest};
+    let m = RelManifest::Snapshot(snap(vec![hfile("a.txt", "h1", 10, 1)], vec![]));
+    let result = join_manifest_rel(&m, "sub/dir").unwrap();
+    match result {
+        RelManifest::Snapshot(s) => assert_eq!(s.files[0].path, "sub/dir/a.txt"),
+        RelManifest::Diff(_) => panic!("expected Snapshot"),
+    }
+}
+
+#[test]
+fn single_component_file_at_root() {
+    let m = snap(vec![hfile("readme.md", "h1", 50, 1)], vec![]);
+    let result = join_snapshot(&m, "/").unwrap();
+    assert_eq!(result.files[0].path, "/readme.md");
+}
