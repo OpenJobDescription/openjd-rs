@@ -1455,6 +1455,12 @@ impl Session {
             .iter()
             .map(|(k, v)| (normalize_env_key(k), Some(v.clone())))
             .collect();
+        // Per spec: expose the session working directory as an environment variable
+        // so nested subprocesses can access it without template variable syntax.
+        result.insert(
+            "OPENJD_SESSION_WORKING_DIR".to_string(),
+            Some(self.working_directory.to_string_lossy().into_owned()),
+        );
         if let Some(extra) = extra {
             for (k, v) in extra {
                 result.insert(normalize_env_key(k), Some(v.clone()));
