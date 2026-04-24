@@ -85,8 +85,42 @@ pub enum PathElement {
 /// A single validation error with its location in the template.
 #[derive(Debug, Clone)]
 pub struct ValidationError {
+    /// Location of the error in the template structure (e.g., which field
+    /// in the JSON/YAML tree). Used by consumers to navigate to or annotate
+    /// the affected node.
     pub path: Vec<PathElement>,
+    /// Complete human-readable error text, suitable for direct display.
+    /// Includes source pointers and span context where available.
     pub message: String,
+    /// Structured diagnostic data decomposing the error into a summary
+    /// and source spans. `None` for errors without source position info
+    /// (e.g., duplicate names, missing required fields, limit violations).
+    pub detail: Option<ErrorDetail>,
+}
+
+/// Structured diagnostic data for a validation error.
+#[derive(Debug, Clone)]
+pub struct ErrorDetail {
+    /// Human-readable error summary without source pointers.
+    pub summary: String,
+    /// Diagnostic spans identifying specific character ranges in the
+    /// source text where the error occurs.
+    pub spans: Vec<DiagnosticSpan>,
+}
+
+/// A diagnostic span identifying a specific character range in source text.
+#[derive(Debug, Clone)]
+pub struct DiagnosticSpan {
+    /// Human-readable description of the diagnostic at this source location.
+    pub summary: String,
+    /// The source text containing the error.
+    pub source: String,
+    /// Byte offset of the error start within source.
+    pub start: usize,
+    /// Byte offset of the error end within source.
+    pub end: usize,
+    /// Position of the caret (most relevant character) relative to start.
+    pub caret: usize,
 }
 
 /// Collects multiple validation errors with structured paths.
@@ -110,6 +144,21 @@ impl ValidationErrors {
         self.errors.push(ValidationError {
             path: path.to_vec(),
             message: msg.into(),
+            detail: None,
+        });
+    }
+
+    /// Add an error at the given path with structured diagnostic detail.
+    pub fn add_with_detail(
+        &mut self,
+        path: &[PathElement],
+        msg: impl Into<String>,
+        detail: ErrorDetail,
+    ) {
+        self.errors.push(ValidationError {
+            path: path.to_vec(),
+            message: msg.into(),
+            detail: Some(detail),
         });
     }
 

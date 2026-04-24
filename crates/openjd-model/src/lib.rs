@@ -27,6 +27,7 @@ pub use openjd_expr::symbol_table::SymbolTable;
 mod test_lazy_param_space;
 
 pub use error::ModelError;
+pub use error::{DiagnosticSpan, ErrorDetail};
 pub use error::{PathElement, ValidationError, ValidationErrors};
 pub use job::create_job::{
     build_symbol_table, convert_environment, create_job, evaluate_let_bindings,
