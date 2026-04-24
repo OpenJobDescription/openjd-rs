@@ -1,264 +1,278 @@
 # openjd-snapshots Crate Quality Evaluation Report
 
-**Date:** 2026-04-22
-**Crate:** `openjd-snapshots` (in `~/openjd-rs/crates/openjd-snapshots/`)
-**Evaluator:** AI-assisted review
-
----
+**Date:** 2026-04-24
+**Crate:** `openjd-snapshots`
 
 ## Executive Summary
 
-The `openjd-snapshots` crate is a well-engineered Rust library for content-addressed file tree snapshotting with S3 integration. It provides 11 operations covering the full lifecycle: filesystem collection, hashing, upload/download, diffing, composition, filtering, partitioning, and cache synchronization.
+The `openjd-snapshots` crate is a well-engineered, comprehensive implementation of content-addressed directory tree snapshots with S3 integration. The specifications are thorough and well-organized across 21 documents covering all operations, data types, and design decisions. The implementation faithfully follows the specs with idiomatic Rust patterns including phantom type parameters for compile-time safety, a tokio-based async pipeline, and rayon for CPU-parallel hashing. All 977 tests pass with zero warnings. The crate is missing a dedicated public API spec document, and the CACHE_SYNC spec describes some features (S3 Batch Operations, `copy_from` trait method) that are partially implemented or deferred. The Python comparison reveals close behavioral alignment with appropriate Rust-idiomatic adaptations. Overall, this is a high-quality crate ready for production use with a few areas for improvement.
 
-The crate compiles cleanly with zero warnings (cargo clippy passes), and all 1,052 tests pass (3 ignored S3 integration tests requiring live credentials). The type system makes good use of phantom type parameters for compile-time safety. The code is generally well-organized and follows Rust idioms.
+## 1. Specifications Review
 
-However, the evaluation found several specification-to-implementation discrepancies (some significant), a few areas where the implementation could be improved, and some gaps in test coverage.
+### 1.1 `snapshot_overview.md`
+Excellent top-level document. Covers glossary, quick start, use cases, manifest classes, operations diagram, design choices, constants, module organization, and dependency graph. The ASCII art operation diagrams are clear and helpful. The design choices section (12 items) provides strong rationale for key decisions.
 
----
+### 1.2 `snapshot_manifest_types.md`
+Comprehensive coverage of the `Manifest<P, K>` generic struct, phantom type parameters, `FileEntry`/`DirEntry` structs, validation rules, serde behavior, and `SymlinkPolicy`. The entry state table is particularly useful. Accurately describes the implementation.
 
-## 1. Compilation and Test Results
+### 1.3 `snapshot_data_cache.md`
+Well-structured coverage of both sync and async traits, `FileSystemDataCache`, `S3DataCache`, account ID security, multipart transfers, and the cache hierarchy. The upload flow with all caches section is clear.
 
-- **cargo clippy**: Zero warnings, zero errors.
-- **cargo test**: 1,052 passed, 0 failed, 3 ignored.
-  - Unit tests: ~200 across source modules
-  - Integration tests: ~850 across 21 test files
-  - Ignored: 3 S3 integration tests (require `OPENJD_TEST_S3_BUCKET` env var)
-- **Probe tests written during evaluation**: 26 additional tests, all passing. These verify edge cases in validation, path normalization, diff, compose, filter, join, subtree, codec round-trips, and symlink handling.
+### 1.4 `snapshot_hash_cache.md`
+Thorough documentation of the SQLite hash cache schema, API, lookup behavior, and thread safety. The "Future Work: Hash Cache Eviction" section is a thoughtful addition showing forward planning. Accurately describes the `hashesV4` schema.
 
----
+### 1.5 `snapshot_symlink_handling.md`
+Detailed coverage of all six symlink policies, escaping detection, collapsing behavior, cycle detection, and per-operation support. The policy support matrix table is very useful.
 
-## 2. Specification Review
+### 1.6 Operation specs (`snapshot_operation_*.md`)
+All 11 operation specs follow a consistent structure: function signature, parameters, returns, implementation details, and examples. Each is accurate and complete relative to the implementation.
 
-### 2.1 Spec Coverage
+### 1.7 Gaps
 
-The `specs/snapshots/` directory contains 21 specification documents covering:
-- Overview and glossary
-- Manifest types and phantom type system
-- All 11 operations (collect, hash, hash_upload, download, cache_sync, filter, diff, compose, subtree, partition, join)
-- Data cache and hash cache design
-- Error handling conventions
-- Symlink handling policies
+- **No dedicated public API spec.** The skill requires "a dedicated public API spec (e.g., `public-api.md`) separate from internal design details." The public API is documented across `lib.rs` re-exports and the overview, but there is no single document listing all public types, functions, and their signatures.
+- **`snapshot_error_handling.md`** lists `SnapshotError::Other` in the CACHE_SYNC usage table, but the actual enum has no `Other` variant. The error table says CACHE_SYNC uses `SnapshotError::Other` — this should be `Io` or `Task`.
+- **`snapshot_operation_cache_sync.md`** describes S3 Batch Operations as "TODO/Research" which is appropriate, but the `copy_from` trait method described in the spec IS implemented, so the spec should note it's implemented rather than leaving it as a proposal.
 
-**Assessment:** The specifications are comprehensive and well-organized. Each operation has its own spec document, and cross-cutting concerns (symlinks, errors, caching) have dedicated documents. The README provides a clear index.
+## 2. Public API Review
 
-### 2.2 Spec-to-Implementation Discrepancies
+### 2.1 Completeness
 
-#### HIGH SEVERITY
+The public API is exported via `lib.rs` with well-organized re-exports from all modules. The API surface includes:
 
-| # | Area | Discrepancy |
-|---|------|-------------|
-| S1 | ~~Hash Upload Pipeline~~ | ~~The spec describes a `DashMap<String, broadcast::Sender<()>>` for concurrent upload deduplication within a single HASH_UPLOAD invocation. **This is not implemented.**~~ **RESOLVED.** Concurrent upload deduplication is now implemented using `Mutex<HashMap<String, broadcast::Sender<()>>>` (functionally equivalent to the spec's DashMap approach, but more appropriate given the small map size bounded by `max_workers`). The dedup map coordinates all three upload paths: whole-file, multipart, and chunked. Two dedicated tests in `test_upload_dedup.rs` verify exactly-once upload semantics under concurrent load with artificial latency. |
-| S2 | ~~Download Pipeline~~ | ~~The spec says downloaded files have `mtime` set to the manifest value via `filetime` or `set_modified`. **This is not implemented.**~~ **RESOLVED.** Downloaded files now have their mtime set to the manifest value via `File::set_modified`, then the mtime is read back to account for filesystem precision loss, and the read-back value is stored in the returned manifest. Two dedicated tests in `test_download.rs` verify the three-step behavior for both whole-file and chunked downloads. |
+- **Types:** 4 manifest type aliases, 2 enum wrappers, `FileEntry`, `DirEntry`, `ManifestEntry`, `ManifestRef`, `SymlinkPolicy`, `HashAlgorithm`, `DecodedManifest`, `ManifestFormat`, `CopyResult`
+- **Operations:** 11 primary operations with separate typed variants (e.g., `subtree_snapshot`, `subtree_snapshot_diff`, `subtree_rel_snapshot`, `subtree_rel_snapshot_diff`)
+- **Options/Results:** Dedicated options and result structs for each operation
+- **Caches:** `HashCache`, `S3CheckCache`, `FileSystemDataCache`, `S3DataCache`
+- **Codec:** `encode_*` and `decode_*` functions for v2023 and v2025 formats
+- **Constants:** `DEFAULT_FILE_CHUNK_SIZE`, `WHOLE_FILE_CHUNK_SIZE`, `DEFAULT_S3_MULTIPART_PART_SIZE`
 
-#### MEDIUM SEVERITY
+### 2.2 Ergonomics
 
-| # | Area | Discrepancy |
-|---|------|-------------|
-| S3 | ~~Hash Upload Pipeline~~ | ~~The spec says "1 permit = 1 byte" for the MemoryPool. The implementation uses `PERMIT_GRANULARITY = 4096` (1 permit = 4KB) to avoid u32 overflow. The spec was never updated.~~ **RESOLVED.** The spec now documents "1 permit = 4KB (`PERMIT_GRANULARITY = 4096`)" with an explanation that the coarser granularity avoids `u32` overflow, supporting pools up to ~16TB. The key design point was also updated to reflect `max_memory_bytes / 4096` permits. |
-| S4 | ~~Download Pipeline~~ | ~~The spec claims downloads are "memory bounded by MemoryPool." The implementation acquires `pool.acquire(1)` (1 byte) for every download regardless of file size, making memory bounding effectively a no-op. Small whole-file downloads buffer the entire file in memory via `get_object`.~~ **RESOLVED.** Download now acquires `pool.acquire(file_size)`, matching the pattern used in hash_upload and cache_sync. The `MemoryPool::acquire` method clamps to `max_bytes`, so files larger than the pool serialize rather than deadlock. |
-| S5 | ~~Download Pipeline~~ | ~~The spec says downloads use temp files like `myfile.dat.tmpXXXXXX` (random suffix). The implementation uses `myfile.dat.tmp{PID}` (deterministic). For multipart and chunked downloads, the implementation writes directly to the target path with no temp file, which is not atomic.~~ **RESOLVED.** All three download paths (small whole-file, multipart, and chunked) now use temp files with random hex suffixes via `temp_download_path()` and atomic rename via `atomic_replace()`. The spec was updated to document `myfile.dat.tmp<random_hex>` and note that atomicity applies to all download paths. |
-| S6 | ~~Symlink Handling~~ | ~~The spec says "symlink targets are stored relative to the manifest root." With `Preserve` policy, the implementation stores the absolute resolved target path. Confirmed by probe test `collect_preserve_stores_absolute_target`.~~ **RESOLVED.** The spec and implementation are consistent: "relative to the manifest root" means the target uses the same path style as the manifest (absolute in `AbsSnapshot`, relative in `Snapshot`). COLLECT produces `AbsSnapshot` so symlink targets are correctly absolute. The spec's Target Storage Format section was clarified to explain this. Additionally, `validate()` now enforces that `symlink_target` paths match the manifest's path style. |
-| S7 | ~~Hash Upload Pipeline~~ | ~~The spec describes cache checks happening "inside the tokio task." The implementation splits this into two separate phases before task spawning: Phase 1 (hash cache lookup, synchronous) and Phase 2 (parallel `object_exists` via `FuturesUnordered`).~~ **RESOLVED.** Cache checks (hash cache lookup and `object_exists`) are now performed inside each worker task, matching the spec. Skipped items return early without acquiring memory pool permits. The three-phase approach was replaced with a single-phase pipeline where each task handles its own cache checks in parallel. |
+The API is well-designed:
+- Phantom type parameters prevent misuse at compile time (e.g., passing relative manifests to operations requiring absolute paths)
+- Separate typed functions (e.g., `join_snapshot` vs `join_snapshot_diff`) make type relationships explicit
+- `AbsManifest`/`RelManifest` enum wrappers provide runtime polymorphism where needed
+- Builder-style methods (`with_files`, `with_dirs`, `with_parent_hash`) are convenient
+- `Default` implementations on options structs reduce boilerplate
+- `ManifestRef` trait enables CACHE_SYNC to accept any manifest type
 
-#### LOW SEVERITY
+### 2.3 Missing Public API Spec
 
-| # | Area | Discrepancy |
-|---|------|-------------|
-| S8 | ~~Download Pipeline~~ | ~~The spec shows interleaved directory creation with file download submissions. The implementation creates all directories first, then processes all files separately.~~ **RESOLVED.** Directory creation is now interleaved with file download submission, matching the spec and Python design. Files are grouped by parent directory; each directory is created once (deduplicated via HashSet) before its files are queued. Redundant per-file `create_dir_all` calls removed from download tasks. |
-| S9 | ~~Compose~~ | ~~The spec describes a unified trie approach for both `compose_snapshot_with_diffs` and `compose_diffs`. The implementation uses different deletion strategies: `compose_snapshot_with_diffs` uses `delete_file` (removes nodes entirely) while `compose_diffs` uses `mark_deleted` with reconciliation.~~ **RESOLVED.** Both functions now use a unified trie that tracks files and directories together, matching the Python reference implementation. `compose_snapshot_with_diffs` uses `delete_subtree` (removes nodes) and `delete_if_empty` (for directories); `compose_diffs` uses `mark_deleted` (sets flag without clearing children) with reconciliation. The separate `dir_set`/`dir_state` HashMaps were removed — directories are derived from the trie structure. |
-| S10 | ~~Compose~~ | ~~The spec doesn't describe how directories are tracked in `compose_diffs`. The implementation uses a separate `HashMap<String, bool>` (`dir_state`) independent of the trie.~~ **RESOLVED.** Directories are now tracked implicitly by the trie structure, matching the Python reference. `collect_dirs` and `collect_dirs_with_deletions` derive directory entries from non-file, non-deleted nodes in the trie. |
-
----
+There is no `specs/snapshots/public-api.md` document. The public API is discoverable from `lib.rs` and the individual spec documents, but a consolidated reference would improve discoverability and serve as a contract for semver compatibility.
 
 ## 3. Implementation Review
 
-### 3.1 Type System and API Design
+### 3.1 `manifest.rs` (757 lines)
+Clean implementation of the core types. The phantom type approach with `ValidatePaths`/`ValidateKind` traits is elegant. The `validate()` method is thorough, checking path style, kind constraints, entry state consistency, chunkhash counts, and duplicate paths. The `is_false` helper for serde is a minor but effective pattern.
 
-**Strengths:**
-- Phantom type parameters (`Abs`/`Rel` × `Full`/`Diff`) provide compile-time safety for path style and manifest kind.
-- Type aliases (`AbsSnapshot`, `Snapshot`, `AbsSnapshotDiff`, `SnapshotDiff`) are clear and well-named.
-- Builder pattern (`with_files`, `with_dirs`, `with_parent_hash`) is ergonomic.
-- The `ManifestRef` trait enables generic code over different manifest wrapper types.
-- The `ManifestEntry` enum enables unified filtering over files and directories.
+### 3.2 `codec.rs` (734 lines)
+Solid encode/decode implementation for both v2023 and v2025 formats. The directory index compression in v2025 (`$N/filename` references) is well-implemented. The `canonical_json` function correctly sorts keys and escapes non-ASCII characters for Python compatibility. The `utf16_be_bytes` sort order for v2023 compatibility is correctly implemented.
 
-**Concerns:**
-- The public API surface is very large (~60+ re-exported symbols in `lib.rs`). This is manageable but could benefit from grouping via module-level documentation.
-- `path_util` is a public module but has no re-exports in `lib.rs`, requiring users to use `openjd_snapshots::path_util::normalize_path` instead of `openjd_snapshots::normalize_path`.
-- Serde deserialization does not enforce phantom type constraints — `#[serde(skip)]` on `_phantom` means any JSON can deserialize into any manifest type. Users must call `validate()` after deserialization. This is documented in a code comment and demonstrated by `test_quality_probes::manifest_deserialization_ignores_phantom_types`, but could surprise users.
+### 3.3 `data_cache.rs` (1065 lines)
+Well-structured with clear separation between sync and async traits. The `S3DataCache` implementation properly uses `ExpectedBucketOwner` for security. The `CacheValidationState` with probabilistic verification is correctly implemented with atomics. The `block_on_async` helper handles the nested-runtime case correctly using `block_in_place`. The `format_copy_source` function correctly handles both regular buckets and ARN-based access points.
 
-### 3.2 Error Handling
+### 3.4 `hash.rs` (173 lines)
+Clean hashing implementation. The `hash_file_chunked` function correctly handles the `read_exact` + `UnexpectedEof` edge case by re-seeking and reading the remainder. The `human_readable_file_size` function uses decimal (1000-based) units.
 
-**Strengths:**
-- `SnapshotError` is `#[non_exhaustive]`, allowing future variants without breaking changes.
-- Only `std::io::Error` has `#[from]`; all other error types use `.map_err()` to string, decoupling the public API from internal dependencies.
-- Error messages are descriptive and include relevant context (file paths, expected vs actual values).
-- `test_error_messages.rs` pins all error message formats.
+### 3.5 `ops/collect.rs` (784 lines)
+Comprehensive COLLECT implementation with all six symlink policies. The two-pass algorithm for `CollapseEscaping`/`ExcludeEscaping` is correctly implemented. The `collapse_symlink` function handles nested directory symlinks with internal/external symlink detection. Cycle detection uses a `HashSet<String>` of visited paths.
 
-**Concerns:**
-- The `Cache` and `S3` variants use `String` payloads, losing the original error type. This makes programmatic error handling harder (e.g., distinguishing S3 access denied from S3 not found).
-- `HashCache::get()` uses `unwrap_or(0)` when parsing mtime from text, silently returning 0 on parse failure. This causes false cache misses but not incorrect hashes.
+### 3.6 `ops/hash_op.rs` (535 lines)
+Uses rayon for parallel hashing with proper cancellation support via `AtomicBool`. Progress tracking with `SlidingWindowRate` provides smooth rate estimation. Hash cache integration is correct.
 
-### 3.3 Concurrency and Performance
+### 3.7 `ops/hash_upload.rs` (1005 lines)
+Complex but well-structured pipeline using tokio. Memory bounding via `MemoryPool` (semaphore-based) is correct. Upload deduplication via `DashMap` prevents redundant concurrent uploads. The two-pass approach for files exceeding memory is correctly implemented with per-part hash verification.
 
-**Strengths:**
-- Hash operation uses rayon for CPU-bound parallel hashing — appropriate choice.
-- Upload/download/sync operations use tokio for I/O-bound async work — appropriate choice.
-- Worker semaphore limits concurrent tasks (default 10).
-- `MemoryPool` concept is sound for bounding memory usage.
-- `SlidingWindowRate` provides smooth throughput reporting.
-- `AtomicBool` cancellation is clean and non-blocking.
-- Concurrent upload deduplication via `UploadDedup` map prevents redundant uploads when multiple tasks hash to the same content. The `Mutex` is held only for nanosecond-scale HashMap lookups; actual uploads and waits happen outside the lock via `broadcast` channels.
+### 3.8 `ops/download.rs` (1214 lines)
+Comprehensive download pipeline with atomic file writes (temp file + rename), parallel chunk downloads, multipart byte-range requests, and topological symlink ordering. The `FileConflictResolution` enum provides flexible conflict handling.
 
-**Concerns:**
-- ~~**hash_upload.rs**: No multipart upload abort on partial failure. If one part upload fails, the multipart upload is left dangling in S3. `cache_sync.rs` correctly aborts on failure — this pattern should be applied to hash_upload as well.~~ **RESOLVED.** `process_whole_multipart` now calls `abort_multipart_upload` on failure before notifying dedup waiters, matching the `cache_sync.rs` pattern.
-- **hash_upload.rs**: `process_chunked_async` reads ALL chunks into memory in one `spawn_blocking` call before uploading. For a file with many chunks, this could exceed the memory pool's intended bounds since the pool permit is acquired for the whole file, not per-chunk.
-- **hash_upload.rs**: Phase 3 work-item filtering logic (building `candidate_indices` and `skipped_indices`) is unnecessarily complex. A simpler approach would be to build the work list directly.
-- ~~**download.rs**: Memory pool `acquire(1)` makes memory bounding meaningless (see S4 above).~~ **RESOLVED.** Now acquires `file_size` permits.
-- **download.rs**: `std::sync::Mutex` is used for `DownloadStatistics` inside async context. While held briefly, `tokio::sync::Mutex` would be more idiomatic.
-- **hash_op.rs**: Progress updates use `Arc<Mutex<HashStatistics>>` and `Arc<Mutex<SlidingWindowRate>>` — two separate locks acquired in sequence. This is fine for correctness but could be combined into a single lock.
+### 3.9 `ops/compose.rs` (510 lines)
+Elegant trie-based implementation. The `reconcile_deleted_flags` method correctly handles the delete-then-re-add scenario. The separation of `compose_snapshot_with_diffs` (uses `delete_subtree`) and `compose_diffs` (uses `mark_deleted`) makes the different semantics explicit.
 
-### 3.4 Algorithm Correctness
+### 3.10 `ops/subtree.rs` (535 lines)
+Correct implementation with symlink resolution (up to 64 hops), cycle detection, and directory symlink expansion. The identity subtree (`"."` or `""`) case is handled correctly.
 
-**Strengths:**
-- `diff_snapshots` uses HashMap for O(1) path lookups — correct and efficient.
-- `compose.rs` trie-based approach is appropriate for hierarchical path operations.
-- `compose_diffs` reconciliation step correctly handles delete-then-recreate scenarios. Confirmed by probe test `compose_delete_then_readd`.
-- Topological sort (Kahn's algorithm) in download for symlink chain ordering is correct.
-- `validate_no_nested_roots` in partition prevents ambiguous partitioning.
+### 3.11 `ops/diff.rs` (418 lines)
+Clean implementation with proper hash state validation. The `entries_differ` function correctly handles all entry type transitions. The `preserve_runnable` parameter for cross-platform compatibility is well-designed.
 
-**Concerns:**
-- **partition.rs**: `validate_no_nested_roots` is O(n²) — checks every pair of roots. For typical use cases (few roots), this is fine, but worth noting.
-- **collect.rs**: `is_escaping()` uses string prefix matching (`starts_with(&format!("{p}/"))`) rather than proper path ancestry. The trailing `/` prevents false positives for paths like `/foo/bar` vs `/foo/bar2`, but this is fragile.
-- ~~**collect.rs**: `abs_normalized()` and `abs_normalized_no_follow()` have identical implementations. The naming suggests they should differ, but `std::path::absolute` doesn't follow symlinks, so both are correct. The duplication is confusing.~~ **RESOLVED.** Removed `abs_normalized_no_follow`; all call sites now use `abs_normalized`, which has a doc comment explaining it is purely lexical.
-- ~~**subtree.rs**: `expand_dir_symlink` receives a `_symlink_policy` parameter (underscore-prefixed) but never uses it. Nested symlinks inside expanded directories are always resolved regardless of policy.~~ **RESOLVED.** `expand_dir_symlink` now uses the `symlink_policy` parameter: `CollapseAll` resolves nested symlinks to their real targets, while `CollapseEscaping` preserves them (remapped but kept as symlinks). Tests added for both behaviors.
+### 3.12 `ops/partition.rs` (438 lines)
+Correct auto-root determination with longest common prefix. Handles both absolute and relative manifests. Validates no nested roots.
 
-### 3.5 Codec
+### 3.13 `ops/cache_sync.rs` (813 lines)
+Well-implemented with server-side S3 copy support, multipart handling for large objects, and memory-bounded transfers. Deduplication is done upfront via `HashSet`.
 
-**Strengths:**
-- Canonical JSON output (sorted keys, no whitespace, ASCII-safe) ensures cross-implementation compatibility.
-- UTF-16 BE byte ordering for path sorting matches the Python reference implementation.
-- v2023 encoding gracefully degrades v2025 features with tracing warnings.
-- Dir-index compression in v2025 reduces JSON size effectively.
-- `test_v2023_canonical.rs` verifies byte-for-byte compatibility against Python-generated fixtures.
+### 3.14 `ops/filter.rs` (196 lines)
+Simple and correct. The `IncludeExcludePathsFilter` with glob patterns is a useful built-in.
 
-**Concerns:**
-- No inline tests in `codec.rs` — all testing is in integration test files. This is acceptable but means codec internals (like `build_dir_index`, `canonical_json_value`) are only tested indirectly.
+### 3.15 `ops/join.rs` (180 lines)
+Clean implementation. All four typed variants share a single `join_impl` generic function.
 
-### 3.6 Caching
+### 3.16 `ops/memory_pool.rs` (268 lines)
+Correct semaphore-based memory pool with 4KB granularity to avoid u32 overflow. The `default_max_memory_bytes` formula is well-designed with platform-specific detection.
 
-**Strengths:**
-- All SQL queries use parameterized queries — no SQL injection risk.
-- WAL journal mode for concurrent access.
-- `S3CheckCache` probabilistic validation (100% for first 100, ~1% after) is a good balance of correctness and performance.
-- Cache invalidation via `AtomicBool` is clean.
+### 3.17 `ops/rate.rs` (92 lines)
+Simple sliding window rate calculator. Correct implementation with proper window trimming.
 
-**Concerns:**
-- Both `HashCache` and `S3CheckCache` use `Mutex::lock().unwrap()` which will panic on mutex poisoning. Standard Rust practice but worth noting.
-- ~~`open_default()` falls back to `"."` if `$HOME` is unset, potentially creating cache databases in unexpected locations.~~ **RESOLVED.** Now returns a `Cache` error.
-- No `synchronous` pragma override — defaults to FULL, which is unnecessarily slow for a cache that can be rebuilt.
+### 3.18 Naming Consistency
+Naming is consistent throughout: operations use `verb_noun` pattern (e.g., `collect_abs_snapshot`, `hash_abs_manifest`), options use `VerbOptions` (e.g., `CollectOptions`, `HashOptions`), results use `VerbResult` (e.g., `HashResult`, `UploadResult`). This is consistent with the other openjd crates.
 
-### 3.7 Platform Handling
-
-**Strengths:**
-- `path_util.rs` handles Windows drive letters, UNC paths, and `\\?\` prefix.
-- `normalize_path` correctly preserves backslashes on POSIX (they're valid filename characters).
-- Platform-specific file preallocation in download (`posix_fallocate`, `SetFilePointerEx`, `ftruncate`).
-- Runnable bit detection is Unix-only with appropriate `#[cfg]` guards.
-
-**Concerns:**
-- Windows-specific code paths (`#[cfg(windows)]`) cannot be tested in the current Linux CI environment.
-
----
+### 3.19 Performance
+No O(N²) algorithms detected. Key performance characteristics:
+- COLLECT: O(N) filesystem walk
+- HASH: O(N) parallel via rayon
+- DIFF: O(N) via HashMap lookups
+- COMPOSE: O(N × D) where D is path depth (trie operations)
+- FILTER: O(N) linear scan
+- SUBTREE: O(N) linear scan with O(1) prefix strip
+- PARTITION: O(N × R) where R is number of roots
 
 ## 4. Test Review
 
-### 4.1 Test Organization
+### 4.1 Coverage Assessment
 
-**Strengths:**
-- 20 integration test files covering all operations.
-- Tests are well-organized with descriptive names.
-- Helper functions (`make_snapshot`, `hf`, `abs`, `rel`) keep tests concise.
-- S3 emulation via `s3s` + `s3s-fs` enables realistic testing without network.
-- `test_v2023_canonical.rs` uses Python-generated fixtures for cross-implementation verification.
-- `test_error_messages.rs` pins all error message formats.
-- `test_chunk_size.rs` systematically verifies `file_chunk_size_bytes` preservation across all operations.
-- All 4 manifest types (AbsSnapshot, AbsSnapshotDiff, Snapshot, SnapshotDiff) are tested in filter, subtree, join, and compose.
+977 total tests across 22 test files (191 unit tests + 786 integration tests). Coverage is comprehensive:
 
-**Concerns:**
-- **No dedicated concurrency/stress tests for download or cache_sync.** Upload deduplication is now tested via `test_upload_dedup.rs`, but download and cache_sync pipelines are only tested implicitly.
-- ~~**No tests for `CollapseAll`, `ExcludeEscaping`, or `TransitiveIncludeTargets` symlink policies in collect.** Only `Preserve`, `ExcludeAll`, and `CollapseEscaping` are tested.~~ **RESOLVED.** Systematic comparison against the Python test suite confirmed all policies were already covered. One gap found and filled: `transitive_broken_dir_target_skipped`.
-- **`memory_pool.rs` and `rate.rs`** have inline unit tests but no integration-level testing.
-- **No tests for multipart upload abort on failure** in hash_upload.
-- **No tests for download memory bounding** (since it's effectively a no-op with `acquire(1)`).
-- **No tests for `S3DataCache::new_with_auto_account_id`** (requires STS).
-- **No tests for `CacheValidationState` integration** with actual S3 operations (only unit-tested in isolation).
+| Area | Test File(s) | Test Count | Assessment |
+|------|-------------|------------|------------|
+| Manifest types | `test_manifest.rs` + unit tests | ~30 | Good: validation, serde, constructors |
+| Codec | `test_codec.rs`, `test_v2023_canonical.rs`, `test_round_trip.rs` | ~100 | Excellent: round-trip, canonical JSON, cross-implementation |
+| Collect | `test_collect.rs` | ~60 | Excellent: all symlink policies, edge cases |
+| Hash | `test_hash.rs` | ~35 | Good: chunked, whole-file, cache integration |
+| Hash+Upload | `test_hash_upload.rs`, `test_upload_dedup.rs` | ~65 | Good: pipeline, dedup, cancellation |
+| Download | `test_download.rs` | ~55 | Good: conflict resolution, chunked, symlinks |
+| Diff | `test_diff.rs` | ~45 | Good: all comparison modes, edge cases |
+| Compose | `test_compose.rs` | ~40 | Good: trie operations, reconciliation |
+| Subtree | `test_subtree.rs` | ~47 | Good: all policies, identity, symlink chains |
+| Partition | `test_partition.rs` | ~33 | Good: auto-root, explicit roots, relative |
+| Filter | `test_filter.rs` | ~14 | Adequate: include/exclude patterns |
+| Join | `test_join.rs` | ~7 | Adequate: basic operations |
+| Cache Sync | `test_cache_sync.rs` | ~7 | Adequate: basic operations |
+| S3 Data Cache | `test_s3_data_cache.rs` | ~58 | Good: mock S3 via s3s |
+| S3 Integration | `test_s3_integration.rs` | 2 (ignored) | Real S3 tests, require credentials |
+| Chunk Size | `test_chunk_size.rs` | ~42 | Good: boundary conditions |
+| Error Messages | `test_error_messages.rs` | ~7 | Good: pins error format strings |
+| Quality Probes | `test_quality_probes.rs` | ~2 | Minimal: basic quality checks |
 
-### 4.2 Probe Tests Written During Evaluation
+### 4.2 Organization
 
-26 probe tests were written and added to `tests/test_evaluation_probes.rs`. All pass. They cover:
+Tests are well-organized:
+- Unit tests in each source file cover internal logic
+- Integration tests in `tests/` cover end-to-end workflows
+- Test data fixtures in `tests/data/v2023/` for canonical format verification
+- Clear naming conventions: `test_<operation>.rs`
 
-- Manifest validation edge cases (hash+chunk_hashes, zero-size files, symlink+hash, deleted+data, duplicate paths across files/dirs)
-- Path normalization edge cases (double slashes, bare `..`)
-- Diff edge cases (identical snapshots, mtime changes, new/deleted directories, hash state mismatch)
-- Filter edge cases (empty manifest, chunk size preservation)
-- Compose edge cases (empty diff, delete-then-readd, chunk size mismatch)
-- Join edge cases (symlink target prefixing)
-- Subtree edge cases (root exclusion, metadata preservation)
-- Codec round-trips (dirs, symlinks, deletions in v2025)
-- Partition (single root)
-- Collect symlink behavior (Preserve stores absolute targets)
-- Total size computation (excludes symlinks)
+### 4.3 Gaps
 
----
+- **Join tests are minimal** (7 tests). Could benefit from more edge cases: empty manifests, deeply nested paths, symlink target joining.
+- **Cache sync tests are minimal** (7 tests). The operation is complex (S3-to-S3 copy, multipart, memory bounding) but has limited test coverage beyond basic operations.
+- **No fuzz testing.** The codec (JSON parsing) and path normalization are good candidates for fuzzing.
+- **No property-based tests.** Operations like SUBTREE/JOIN (inverse pair) and PARTITION/JOIN+COMPOSE (inverse) could benefit from property-based testing to verify round-trip invariants.
 
-## 5. Recommendations
+## 5. Python Comparison
 
-### 5.1 High Priority — Spec Alignment
+### 5.1 Structural Alignment
 
-1. ~~**Update hash_upload pipeline spec** to remove the DashMap concurrent dedup section, or implement it.~~ **DONE.** Concurrent upload deduplication implemented; spec's DashMap description now matches implementation (using `Mutex<HashMap>` + `broadcast` instead of `DashMap`, which is functionally equivalent and more appropriate for the small map size).
-2. ~~**Update download pipeline spec** to accurately describe mtime behavior.~~ **DONE.** Download now restores mtime from the manifest via `File::set_modified`, reads it back to account for filesystem precision loss, and stores the read-back value in the returned manifest.
-3. ~~**Decide on mtime restoration**~~ **DONE.** mtime restoration implemented with three-step approach: set → read back → store.
+The Rust and Python implementations are structurally aligned:
 
-### 5.2 Medium Priority — Implementation Improvements
+| Concept | Python | Rust |
+|---------|--------|------|
+| Manifest types | 4 classes with mixins | 4 type aliases with phantom types |
+| Path validation | Runtime mixins | Compile-time traits + runtime `validate()` |
+| Symlink policy | `SymlinkPolicy` enum (str) | `SymlinkPolicy` enum |
+| File entry | `ManifestFilePath` dataclass | `FileEntry` struct |
+| Dir entry | `ManifestDirectoryPath` dataclass | `DirEntry` struct |
+| Error handling | Exceptions | `SnapshotError` enum with `Result<T>` |
 
-4. ~~**Add multipart upload abort on failure** in `hash_upload.rs`. The `cache_sync.rs` implementation already does this correctly — apply the same pattern.~~ **DONE.**
-5. ~~**Fix download memory bounding**: Replace `pool.acquire(1)` with `pool.acquire(file_size)` or a reasonable estimate, matching the pattern used in hash_upload and cache_sync.~~ **DONE.**
-6. ~~**Update MemoryPool spec** to reflect the 4KB granularity (not 1-byte-per-permit).~~ **DONE.**
-7. **Clarify symlink target storage format** in the spec. Document that `Preserve` policy stores absolute paths, not paths relative to manifest root.
-8. ~~**Remove `abs_normalized_no_follow`** or rename it to make the identical behavior explicit. A comment explaining why both exist would suffice.~~ **DONE.**
-9. ~~**Use the `_symlink_policy` parameter** in `subtree.rs::expand_dir_symlink`, or remove it if nested symlinks should always be resolved.~~ **DONE.**
+### 5.2 Behavioral Differences
 
-### 5.3 Low Priority — Code Quality
+1. **`entries_differ` chunked file transition:** Python explicitly checks `parent_is_chunked != current_is_chunked` as a type transition. Rust does not check this explicitly but catches it implicitly through `hash != hash || chunk_hashes != chunk_hashes` comparison. The behavior is equivalent — both detect the transition — but the Python code is more explicit about the intent.
 
-10. ~~**Add tests for `CollapseAll`, `ExcludeEscaping`, and `TransitiveIncludeTargets`** symlink policies in collect.~~ **DONE.** Systematic comparison against the Python test suite confirmed all policies were already covered. One gap found and filled: `transitive_broken_dir_target_skipped`.
-11. **Add concurrency stress tests** for hash_upload, download, and cache_sync pipelines.
-12. ~~**Consider using `tokio::sync::Mutex`** instead of `std::sync::Mutex` for statistics in async contexts (download.rs, hash_upload.rs).~~ **No change needed.** The locks are held only for nanosecond-scale field updates and never across `.await` points, so `std::sync::Mutex` is cheaper than `tokio::sync::Mutex` (which yields to the scheduler even when uncontended). Added code comments explaining this.
-13. **Simplify Phase 3 filtering logic** in hash_upload.rs — the `candidate_indices`/`skipped_indices` approach is harder to follow than necessary.
-14. **Add `synchronous = NORMAL` pragma** to hash_cache and s3_check_cache for better write performance (safe for caches).
-15. ~~**Handle `$HOME` unset** more gracefully in cache `open_default()` — return an error instead of falling back to `"."`.~~ **DONE.**16. **Re-export `path_util` functions** in `lib.rs` if they are part of the intended public API, or make the module `pub(crate)` if not.
-17. ~~**Add module-level documentation** to `lib.rs` describing the crate's purpose, typical workflow, and how the operations compose.~~ **DONE.**
+2. **CACHE_SYNC:** Python has no `cache_sync` operation. This is a Rust-only addition, well-motivated by the spec.
 
-### 5.4 Documentation
+3. **`_is_absolute_path`:** Python checks `path[2] == "/"` for Windows drive letters (requiring `C:/` not just `C:`), while Rust accepts bare `C:` as absolute. This is a minor divergence; the Rust behavior is more permissive and arguably more correct.
 
-18. **Add doc comments** to all public functions and types. Currently, most public items have minimal or no rustdoc comments.
-19. **Add examples** in rustdoc for the most common operations (collect → hash → upload, download, diff → compose).
-20. **Consider a CHANGELOG** entry for the crate documenting the current state and known limitations.
+4. **Manifest validation timing:** Python validates `ManifestFilePath` entries at construction time (in `__init__`). Rust defers validation to an explicit `validate()` call. This is an appropriate Rust adaptation — construction is cheap, validation is opt-in.
 
----
+5. **Error messages:** Both implementations produce high-quality, contextual error messages. The Rust messages are slightly more concise (e.g., `"expected absolute path, got: {path}"` vs `"AbsManifest requires absolute paths. Found relative path: '{path}'"`) but equally informative.
 
-## 6. Summary Scorecard
+### 5.3 API Design Divergences
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Compilation | ✅ Excellent | Zero warnings, zero errors |
-| Tests | ✅ Very Good | 1,052 tests, all passing, good coverage |
-| Type System | ✅ Excellent | Phantom types, builder pattern, trait abstractions |
-| Error Handling | ✅ Good | Non-exhaustive, descriptive messages, pinned formats |
-| Spec Completeness | ✅ Good | All high-severity discrepancies resolved (S1, S2) |
-| Spec Accuracy | ⚠️ Needs Work | Several features described in specs differ from implementation |
-| Performance | ✅ Good | Appropriate use of rayon/tokio, no O(n²) algorithms in hot paths |
-| Code Quality | ✅ Good | Clean, idiomatic Rust, consistent naming |
-| Test Coverage Gaps | ⚠️ Minor | Missing symlink policy tests, no stress tests |
-| API Ergonomics | ✅ Good | Large but well-organized public API |
+- Python uses `Union` type aliases (`AnyManifest`, `RelManifest`, etc.) for runtime polymorphism. Rust uses phantom type parameters for compile-time safety plus enum wrappers for runtime polymorphism. The Rust approach is strictly superior for catching path-style errors at compile time.
+- Python uses keyword-only arguments (`*` in function signatures). Rust uses options structs with `Default`. Both are idiomatic for their respective languages.
+- Python's `diff_snapshots` takes `preserve_runnable` as a keyword argument. Rust puts it in `DiffOptions`. Both are clean.
 
-**Overall Assessment:** The crate is solid and production-quality. Both high-severity spec-to-implementation discrepancies (S1: upload deduplication, S2: download mtime restoration) have been resolved. The remaining areas needing attention are medium-severity spec discrepancies and minor implementation improvements.
+### 5.4 Test Coverage Comparison
+
+The Rust test suite (977 tests) is significantly larger than the Python test suite. The Rust tests cover all Python test scenarios plus additional edge cases for:
+- File chunking boundary conditions
+- Concurrent upload deduplication
+- S3 mock testing via s3s
+- Canonical JSON encoding determinism
+- Cross-implementation fixture verification
+
+## 6. Build and Test Results
+
+### Compilation
+```
+cargo build -p openjd-snapshots
+   Compiling openjd-snapshots v0.1.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.32s
+```
+Clean compilation, zero errors, zero warnings.
+
+### Test Results
+```
+test result: ok. 191 passed; 0 failed; 0 ignored  (unit tests)
+test result: ok. 786 passed; 0 failed; 3 ignored  (integration tests, 22 test binaries)
+```
+All 977 tests pass. 3 ignored tests are S3 integration tests requiring credentials (`OPENJD_TEST_S3_BUCKET`).
+
+## 7. Exploratory Findings
+
+### 7.1 `hash_file_chunked` edge case with `read_exact`
+
+The `hash_file_chunked` function in `hash.rs` handles the `UnexpectedEof` from `read_exact` by re-seeking to the last successful chunk boundary and reading the remainder. This is correct but relies on `read_exact`'s documented behavior that "the contents of buf are unspecified" on `UnexpectedEof`. The re-seek approach is robust.
+
+### 7.2 `human_readable_file_size` overflow
+
+For `u64::MAX` (18.4 EB), the function would iterate through all units and reach the final `PB` fallback. The loop exits when `rounded < 1000.0`, and for very large values it falls through to the final format. This works correctly but the output would be in PB rather than EB. This is a cosmetic issue — the function doesn't have an EB unit in its list.
+
+### 7.3 Empty path in `FileEntry`
+
+`FileEntry::new("")` produces a `FileEntry` with `path = ""`. This passes through `normalize_path("")` which returns `""`. An empty path is technically valid in the struct but would fail validation for both `Abs` (not absolute) and `Rel` (not relative — `is_absolute_path("")` returns false, but `Rel::validate_path("")` would pass since it only checks `is_absolute_path`). So an empty-path entry in a relative manifest would pass validation, which may be unintended.
+
+### 7.4 `SnapshotError` spec mentions `Other` variant
+
+The `snapshot_error_handling.md` spec mentions `SnapshotError::Other` in the CACHE_SYNC error table, but the actual enum has no `Other` variant. The implementation uses `Io` and `Task` for these cases.
+
+### 7.5 No bugs found in core logic
+
+After thorough review of all operations, no logic bugs were found. The trie-based compose, symlink handling, and pipeline architectures are all correctly implemented.
+
+## 8. Recommendations
+
+### Priority 1 (Should fix)
+
+1. **Create `specs/snapshots/public-api.md`** — A dedicated public API specification listing all public types, functions, traits, and constants with their signatures. This is required by the eval-crate skill's alignment criteria.
+
+2. **Fix `snapshot_error_handling.md` CACHE_SYNC error table** — Replace `SnapshotError::Other` with the actual variants used (`Io`, `Task`).
+
+3. **Update `snapshot_operation_cache_sync.md`** — Note that `copy_from` is implemented (not just proposed). Move the S3 Batch Operations section to a clearly-labeled "Future Work" subsection.
+
+### Priority 2 (Should improve)
+
+4. **Add more join tests** — The join operation has only 7 integration tests. Add tests for: empty manifests, deeply nested paths, paths with special characters, symlink target joining edge cases.
+
+5. **Add more cache_sync tests** — Add tests for: cancellation, progress callbacks, error handling (source object missing), large object multipart transfer, mixed manifest types.
+
+6. **Add `human_readable_file_size` EB unit** — The function's unit list stops at PB. Add EB for completeness, or document the PB fallback behavior.
+
+7. **Consider validating empty paths** — An empty string path in a `Rel` manifest passes validation. Consider rejecting empty paths in `Rel::validate_path`.
+
+### Priority 3 (Nice to have)
+
+8. **Property-based testing** — Add proptest or quickcheck tests for round-trip invariants: `join(subtree(m, root), root) ≈ m` and `partition → join+compose ≈ identity`.
+
+9. **Fuzz testing** — Add cargo-fuzz targets for `decode_v2023`, `decode_v2025`, and `normalize_path`.
+
+10. **Doc-tests** — The crate has 0 doc-tests. The `lib.rs` module doc has code examples in `text` blocks rather than `rust` blocks. Converting these to runnable doc-tests would improve documentation quality and catch regressions.
