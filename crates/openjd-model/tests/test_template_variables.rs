@@ -8,6 +8,7 @@
 //! - Failure: invalid references produce the expected number of errors
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -15,13 +16,15 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_job_template(v, None, &CallerLimits::default())
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 #[allow(dead_code)]
 fn check_err_count(s: &str, expected_count: usize) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     // Count error lines (each error starts with a path followed by \n\t)
     let actual = msg.matches("\n\t").count();
@@ -78,7 +81,8 @@ fn session_working_directory_not_in_name_scope() {
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    let err = decode_job_template(v, None).expect_err("Session.WorkingDirectory not in name scope");
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("Session.WorkingDirectory not in name scope");
     let msg = err.to_string();
     let expected = "\
 Model validation error: 1 validation error for JobTemplate
@@ -99,7 +103,8 @@ fn path_parameter_not_in_name_scope() {
         "steps": [{"name": "Step", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    let err = decode_job_template(v, None).expect_err("PATH param not in name scope");
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("PATH param not in name scope");
     let msg = err.to_string();
     let expected = "\
 Model validation error: 1 validation error for JobTemplate
@@ -116,8 +121,12 @@ name:
 
 fn decode_ok_expr(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 #[test]

@@ -9,7 +9,7 @@
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::{
     decode_environment_template, decode_job_template, merge_job_parameter_definitions,
-    preprocess_job_parameters, JobParameterInputValues, JobParameterType,
+    preprocess_job_parameters, CallerLimits, JobParameterInputValues, JobParameterType,
 };
 
 struct TestDirs {
@@ -68,7 +68,12 @@ fn env_template(name: &str, params: &str) -> serde_yaml::Value {
 
 #[test]
 fn merge_simple_int() {
-    let jt = decode_job_template(job_template(r#"{"name": "foo", "type": "INT"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "INT"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "INT"}"#),
         None,
@@ -82,8 +87,12 @@ fn merge_simple_int() {
 
 #[test]
 fn merge_simple_float() {
-    let jt =
-        decode_job_template(job_template(r#"{"name": "foo", "type": "FLOAT"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "FLOAT"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "FLOAT"}"#),
         None,
@@ -96,8 +105,12 @@ fn merge_simple_float() {
 
 #[test]
 fn merge_simple_string() {
-    let jt =
-        decode_job_template(job_template(r#"{"name": "foo", "type": "STRING"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "STRING"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "STRING"}"#),
         None,
@@ -110,7 +123,12 @@ fn merge_simple_string() {
 
 #[test]
 fn merge_simple_path() {
-    let jt = decode_job_template(job_template(r#"{"name": "foo", "type": "PATH"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "PATH"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "PATH"}"#),
         None,
@@ -127,8 +145,12 @@ fn merge_simple_path() {
 
 #[test]
 fn merge_type_conflict_int_float() {
-    let jt =
-        decode_job_template(job_template(r#"{"name": "foo", "type": "FLOAT"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "FLOAT"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "INT"}"#),
         None,
@@ -147,6 +169,7 @@ fn merge_job_template_default_wins() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "default": "10"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -160,7 +183,12 @@ fn merge_job_template_default_wins() {
 
 #[test]
 fn merge_env_default_used_when_job_has_none() {
-    let jt = decode_job_template(job_template(r#"{"name": "foo", "type": "INT"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "INT"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "INT", "default": "8"}"#),
         None,
@@ -179,6 +207,7 @@ fn merge_only_job_template() {
     let jt = decode_job_template(
         job_template(r#"{"name": "Foo", "type": "INT", "maxValue": 50}, {"name": "Bar", "type": "STRING", "minLength": 1}"#),
         None,
+        &CallerLimits::default(),
     ).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[]).unwrap();
     assert_eq!(merged.len(), 2);
@@ -192,7 +221,7 @@ fn merge_only_job_template() {
 
 #[test]
 fn merge_two_environments() {
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template(
             "Env1",
@@ -224,6 +253,7 @@ fn merge_env_and_job_constraints_correct_order() {
             r#"{"name": "Foo", "type": "INT", "minValue": 5, "maxValue": 10, "default": "8"}"#,
         ),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et1 = decode_environment_template(
@@ -256,6 +286,7 @@ fn constraint_non_compatible_int_value_range() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "minValue": 5, "maxValue": 8}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -291,6 +322,7 @@ fn constraint_non_compatible_string_length() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "STRING", "minLength": 5, "maxLength": 8}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -323,6 +355,7 @@ fn constraint_non_compatible_path_object_type() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "PATH", "objectType": "FILE"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -342,6 +375,7 @@ fn constraint_non_compatible_path_data_flow() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "PATH", "dataFlow": "OUT"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -361,6 +395,7 @@ fn constraint_compatible_path_same_object_type() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "PATH", "objectType": "FILE", "dataFlow": "IN"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -387,7 +422,7 @@ fn constraint_compatible_path_same_object_type() {
 #[test]
 fn merge_env_env_type_conflict() {
     // Two env templates define same param with different types → conflict
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template("Env1", r#"{"name": "foo", "type": "INT"}"#),
         None,
@@ -405,7 +440,7 @@ fn merge_env_env_type_conflict() {
 #[test]
 fn merge_env_env_object_type_conflict() {
     // Two env templates define same PATH param with different objectType → conflict
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template(
             "Env1",
@@ -429,7 +464,7 @@ fn merge_env_env_object_type_conflict() {
 #[test]
 fn merge_env_env_data_flow_conflict() {
     // Two env templates define same PATH param with different dataFlow → conflict
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template(
             "Env1",
@@ -453,7 +488,7 @@ fn merge_env_env_data_flow_conflict() {
 #[test]
 fn merge_env_env_same_object_type_ok() {
     // Two env templates with same objectType → no conflict
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template(
             "Env1",
@@ -480,7 +515,7 @@ fn merge_env_env_same_object_type_ok() {
 #[test]
 fn merge_env_env_same_data_flow_ok() {
     let _td = TestDirs::new();
-    let jt = decode_job_template(job_template_no_params(), None).unwrap();
+    let jt = decode_job_template(job_template_no_params(), None, &CallerLimits::default()).unwrap();
     let et1 = decode_environment_template(
         env_template(
             "Env1",
@@ -513,6 +548,7 @@ fn constraint_float_incompatible_range() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "FLOAT", "minValue": 1.0, "maxValue": 5.0}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -546,7 +582,8 @@ fn constraint_float_compatible_range() {
     // Env: minValue=1.0, maxValue=20.0; Job: minValue=5.0, maxValue=15.0
     // Merged: min=5.0, max=15.0 → satisfiable
     let jt = decode_job_template(
-        job_template(r#"{"name": "foo", "type": "FLOAT", "minValue": 5.0, "maxValue": 15.0, "default": "10.0"}"#), None
+        job_template(r#"{"name": "foo", "type": "FLOAT", "minValue": 5.0, "maxValue": 15.0, "default": "10.0"}"#), None,
+        &CallerLimits::default(),
     ).unwrap();
     let et = decode_environment_template(
         env_template(
@@ -579,6 +616,7 @@ fn constraint_float_boundary_equal_range() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "FLOAT", "minValue": 10.0, "default": "10.0"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -617,6 +655,7 @@ fn constraint_string_no_common_allowed_values() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "STRING", "allowedValues": ["c", "d"]}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -650,7 +689,8 @@ fn constraint_string_common_allowed_values_ok() {
     // Env: allowedValues=["a","b","c"]; Job: allowedValues=["b","c","d"]
     // Intersection is ["b","c"] → ok
     let jt = decode_job_template(
-        job_template(r#"{"name": "foo", "type": "STRING", "allowedValues": ["b", "c", "d"], "default": "b"}"#), None
+        job_template(r#"{"name": "foo", "type": "STRING", "allowedValues": ["b", "c", "d"], "default": "b"}"#), None,
+        &CallerLimits::default(),
     ).unwrap();
     let et = decode_environment_template(
         env_template(
@@ -686,6 +726,7 @@ fn constraint_string_default_not_in_merged_allowed() {
             r#"{"name": "foo", "type": "STRING", "allowedValues": ["b", "c"], "default": "c"}"#,
         ),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -726,6 +767,7 @@ fn constraint_string_default_in_merged_allowed_ok() {
             r#"{"name": "foo", "type": "STRING", "allowedValues": ["b", "c"], "default": "b"}"#,
         ),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -763,6 +805,7 @@ fn constraint_int_min_only_max_only_compatible() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "maxValue": 10, "default": "7"}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -793,6 +836,7 @@ fn constraint_int_min_only_max_only_incompatible() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "maxValue": 10}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -830,6 +874,7 @@ fn input_value_rejected_by_env_int_allowed_values() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "allowedValues": [1,2,3,4,5]}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -866,6 +911,7 @@ fn input_value_rejected_by_env_int_min_value() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "minValue": 1}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -899,6 +945,7 @@ fn input_value_rejected_by_env_int_max_value() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "maxValue": 20}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -931,6 +978,7 @@ fn input_value_rejected_by_env_float_min_value() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "FLOAT", "minValue": 1.0}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -970,6 +1018,7 @@ fn input_value_rejected_by_env_string_allowed_values() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "STRING", "allowedValues": ["a","b","c"]}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1005,6 +1054,7 @@ fn input_value_rejected_by_env_string_max_length() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "STRING", "maxLength": 10}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1043,6 +1093,7 @@ fn input_value_rejected_by_env_string_min_length() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "STRING", "minLength": 1}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1079,6 +1130,7 @@ fn input_value_accepted_when_within_all_constraints() {
     let jt = decode_job_template(
         job_template(r#"{"name": "foo", "type": "INT", "allowedValues": [1,2,3,4,5]}"#),
         None,
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1111,7 +1163,12 @@ fn input_value_rejected_by_env_only_constraint_no_job_constraint() {
     // Env: maxValue=10; Job: no constraints. User provides 15.
     // Merged max=10, so 15 must be rejected.
     let td = TestDirs::new();
-    let jt = decode_job_template(job_template(r#"{"name": "foo", "type": "INT"}"#), None).unwrap();
+    let jt = decode_job_template(
+        job_template(r#"{"name": "foo", "type": "INT"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     let et = decode_environment_template(
         env_template("Env", r#"{"name": "foo", "type": "INT", "maxValue": 10}"#),
         None,
@@ -1166,6 +1223,7 @@ fn merge_simple_bool() {
     let jt = decode_job_template(
         expr_job_template(r#"{"name": "foo", "type": "BOOL"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1183,6 +1241,7 @@ fn merge_simple_list_string() {
     let jt = decode_job_template(
         expr_job_template(r#"{"name": "foo", "type": "LIST[STRING]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1200,6 +1259,7 @@ fn merge_simple_list_int() {
     let jt = decode_job_template(
         expr_job_template(r#"{"name": "foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1217,6 +1277,7 @@ fn merge_type_conflict_bool_int() {
     let jt = decode_job_template(
         expr_job_template(r#"{"name": "foo", "type": "BOOL"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(
@@ -1233,6 +1294,7 @@ fn merge_type_conflict_list_string_string() {
     let jt = decode_job_template(
         expr_job_template(r#"{"name": "foo", "type": "LIST[STRING]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let et = decode_environment_template(

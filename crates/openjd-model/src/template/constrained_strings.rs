@@ -133,6 +133,7 @@ mod tests {
 
     use super::{Description, ExtensionName, Identifier};
     use crate::decode_job_template;
+    use crate::CallerLimits;
 
     fn yaml_val(s: &str) -> serde_yaml::Value {
         serde_yaml::from_str(s).unwrap()
@@ -140,13 +141,15 @@ mod tests {
 
     fn decode_ok(s: &str) {
         let v = yaml_val(s);
-        decode_job_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
+        decode_job_template(v, None, &CallerLimits::default())
+            .unwrap_or_else(|_| panic!("Expected success for: {s}"));
     }
 
     /// For validation-pipeline errors (path + message format).
     fn check_err(s: &str, expected: &[&str]) {
         let v = yaml_val(s);
-        let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+        let err = decode_job_template(v, None, &CallerLimits::default())
+            .expect_err(&format!("Expected error for: {s}"));
         let msg = err.to_string();
         for line in expected {
             assert!(
@@ -159,7 +162,8 @@ mod tests {
     /// For serde-level errors (rejected during deserialization).
     fn check_serde_err(s: &str, expected: &[&str]) {
         let v = yaml_val(s);
-        let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+        let err = decode_job_template(v, None, &CallerLimits::default())
+            .expect_err(&format!("Expected error for: {s}"));
         let msg = err.to_string();
         for line in expected {
             assert!(

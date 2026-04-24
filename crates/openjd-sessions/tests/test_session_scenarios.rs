@@ -12,6 +12,7 @@ use openjd_model::create_job::{create_job, preprocess_job_parameters};
 use openjd_model::parse::decode_job_template;
 use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::types::JobParameterInputValues;
+use openjd_model::CallerLimits;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
 use openjd_sessions::PathMappingRule;
 
@@ -165,8 +166,12 @@ async fn run_scenario(scenario_path: &Path) {
     let ext_refs: Vec<&str> = extensions.iter().map(|s| s.as_str()).collect();
 
     // Decode template
-    let job_template = decode_job_template(template_yaml, Some(&ext_refs))
-        .unwrap_or_else(|e| panic!("Failed to decode template for '{}': {e}", scenario.name));
+    let job_template = decode_job_template(
+        template_yaml,
+        Some(&ext_refs),
+        &openjd_model::CallerLimits::default(),
+    )
+    .unwrap_or_else(|e| panic!("Failed to decode template for '{}': {e}", scenario.name));
 
     // Build parameter values
     let input_values = yaml_to_input_values(&scenario.job_parameters);
@@ -202,7 +207,7 @@ async fn run_scenario(scenario_path: &Path) {
     .unwrap_or_else(|e| panic!("Failed to preprocess params for '{}': {e}", scenario.name));
 
     // Create job
-    let job = create_job(&job_template, &job_params)
+    let job = create_job(&job_template, &job_params, &CallerLimits::default())
         .unwrap_or_else(|e| panic!("Failed to create job for '{}': {e}", scenario.name));
 
     // Select step

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::step_param_space::StepParameterSpaceIterator;
+use openjd_model::CallerLimits;
 use openjd_model::JobParameterInputValues;
 use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
 
@@ -22,7 +23,7 @@ fn create_and_iterate(
     let v = yaml_val(template_json);
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
-    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     for (k, val) in params {
         input.insert(
@@ -43,7 +44,7 @@ fn create_and_iterate(
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     let step = &job.steps[0];
     if let Some(ps) = &step.parameter_space {
         let iter = StepParameterSpaceIterator::new(ps).unwrap();
@@ -77,7 +78,7 @@ fn test_no_param_space() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -91,7 +92,7 @@ fn test_no_param_space() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     assert!(job.steps[0].parameter_space.is_none());
 }
 
@@ -470,7 +471,7 @@ fn test_contains_check() {
         }]
     }"#,
     );
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -484,7 +485,7 @@ fn test_contains_check() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     let iter = StepParameterSpaceIterator::new(ps).unwrap();
 
@@ -586,7 +587,7 @@ fn create_iterator(template_json: &str) -> StepParameterSpaceIterator {
     let v = yaml_val(template_json);
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
-    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -600,7 +601,7 @@ fn create_iterator(template_json: &str) -> StepParameterSpaceIterator {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     let step = &job.steps[0];
     let ps = step.parameter_space.as_ref().unwrap();
     StepParameterSpaceIterator::new(ps).unwrap()
@@ -656,7 +657,7 @@ fn test_product_getitem() {
                 }]
             }"#,
             );
-            let jt = decode_job_template(v, None).unwrap();
+            let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
             let processed = preprocess_job_parameters(
                 &jt,
                 &JobParameterInputValues::new(),
@@ -670,7 +671,7 @@ fn test_product_getitem() {
                 },
             )
             .unwrap();
-            let job = create_job(&jt, &processed).unwrap();
+            let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
             job.steps[0].parameter_space.clone().unwrap()
         },
     )
@@ -840,9 +841,9 @@ fn lazy_param_space_range_expr_within_limit() {
                   command: echo
     "#,
     );
-    let jt = decode_job_template(template, None).unwrap();
+    let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
-    let job = create_job(&jt, &params).unwrap();
+    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
     let space = job.steps[0].parameter_space.as_ref().unwrap();
     let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
     assert_eq!(iter.len(), 1024);
@@ -883,10 +884,12 @@ fn product_node_overflow_is_rejected() {
     }}"#
     );
     let template = yaml_val(&template_str);
-    let jt = decode_job_template(template, None).unwrap();
+    let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
     // Overflow is caught at create_job time (parameter space iterator validation)
-    let msg = create_job(&jt, &params).unwrap_err().to_string();
+    let msg = create_job(&jt, &params, &CallerLimits::default())
+        .unwrap_err()
+        .to_string();
     assert!(
         msg.contains("parameter space") || msg.contains("overflow"),
         "Expected overflow error message, got: {msg}"

@@ -8,6 +8,7 @@
 //! - RawParam.<name>: Accessible in all contexts (TEMPLATE, SESSION, and TASK scopes)
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -15,17 +16,18 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn check_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).unwrap();
+    decode_job_template(v, None, &CallerLimits::default()).unwrap();
 }
 
 fn check_ok_ext(s: &str, ext: &[&str]) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(ext)).unwrap();
+    decode_job_template(v, Some(ext), &CallerLimits::default()).unwrap();
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -37,7 +39,8 @@ fn check_err(s: &str, expected: &[&str]) {
 
 fn check_err_ext(s: &str, ext: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(ext)).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(ext), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(

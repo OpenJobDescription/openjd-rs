@@ -80,6 +80,7 @@ fn path_join_typed() {
 // create_job uses POSIX paths in TEMPLATE scope
 // ══════════════════════════════════════════════════════════════
 
+use openjd_model::CallerLimits;
 use openjd_model::{
     create_job, decode_job_template, preprocess_job_parameters, JobParameterInputValues,
 };
@@ -98,7 +99,7 @@ fn job_name_with_path_parent() {
     }"#,
     )
     .unwrap();
-    let jt = decode_job_template(v, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -117,7 +118,7 @@ fn job_name_with_path_parent() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     assert!(!job.name.contains('\\'));
     assert_eq!(job.name, "/projects/shot01");
 }

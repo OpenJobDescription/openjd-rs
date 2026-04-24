@@ -8,6 +8,7 @@
 //! Uses job templates for limit enforcement (filename length) since
 //! the Rust crate enforces limits in the job template validation path.
 
+use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -43,12 +44,21 @@ fn env_with_embedded(embedded_json: &str) -> serde_yaml::Value {
 }
 
 fn job_ok(embedded_json: &str) {
-    decode_job_template(job_with_embedded(embedded_json), None).unwrap();
+    decode_job_template(
+        job_with_embedded(embedded_json),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
 }
 
 fn job_err(embedded_json: &str) {
-    let err = decode_job_template(job_with_embedded(embedded_json), None)
-        .expect_err(&format!("expected error for embedded: {embedded_json}"));
+    let err = decode_job_template(
+        job_with_embedded(embedded_json),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("expected error for embedded: {embedded_json}"));
     let msg = err.to_string();
     assert!(
         msg.contains("embeddedFiles"),

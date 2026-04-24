@@ -7,6 +7,7 @@
 //! and reserved scope checking used in host requirements validation.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -45,11 +46,11 @@ fn job_with_attr(name: &str, value: &str) -> serde_yaml::Value {
 }
 
 fn amount_ok(name: &str) {
-    decode_job_template(job_with_amount(name), None).unwrap();
+    decode_job_template(job_with_amount(name), None, &CallerLimits::default()).unwrap();
 }
 
 fn amount_err(name: &str) {
-    let err = decode_job_template(job_with_amount(name), None)
+    let err = decode_job_template(job_with_amount(name), None, &CallerLimits::default())
         .expect_err(&format!("expected error for amount name: {name}"));
     let msg = err.to_string();
     assert!(
@@ -59,12 +60,16 @@ fn amount_err(name: &str) {
 }
 
 fn attr_ok(name: &str, value: &str) {
-    decode_job_template(job_with_attr(name, value), None).unwrap();
+    decode_job_template(job_with_attr(name, value), None, &CallerLimits::default()).unwrap();
 }
 
 fn attr_err(name: &str) {
-    let err = decode_job_template(job_with_attr(name, "somevalue"), None)
-        .expect_err(&format!("expected error for attr name: {name}"));
+    let err = decode_job_template(
+        job_with_attr(name, "somevalue"),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("expected error for attr name: {name}"));
     let msg = err.to_string();
     assert!(
         msg.contains("attributes[0]") || msg.contains("attributes"),
@@ -310,8 +315,12 @@ fn attr_ends_in_newline() {
 
 #[test]
 fn attr_os_family_invalid_value() {
-    let err = decode_job_template(job_with_attr("attr.worker.os.family", "invalid"), None)
-        .expect_err("invalid os.family value should be rejected");
+    let err = decode_job_template(
+        job_with_attr("attr.worker.os.family", "invalid"),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect_err("invalid os.family value should be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("attr.worker.os.family"),
@@ -321,8 +330,12 @@ fn attr_os_family_invalid_value() {
 
 #[test]
 fn attr_cpu_arch_invalid_value() {
-    let err = decode_job_template(job_with_attr("attr.worker.cpu.arch", "invalid"), None)
-        .expect_err("invalid cpu.arch value should be rejected");
+    let err = decode_job_template(
+        job_with_attr("attr.worker.cpu.arch", "invalid"),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect_err("invalid cpu.arch value should be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("attr.worker.cpu.arch"),

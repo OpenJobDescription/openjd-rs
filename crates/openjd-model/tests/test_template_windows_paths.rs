@@ -86,6 +86,7 @@ fn path_join_typed() {
 // create_job uses Windows paths in TEMPLATE scope
 // ══════════════════════════════════════════════════════════════
 
+use openjd_model::CallerLimits;
 use openjd_model::{
     create_job, decode_job_template, preprocess_job_parameters, JobParameterInputValues,
 };
@@ -107,7 +108,7 @@ fn create_job_with_windows_path_parameter() {
     }"#,
     )
     .unwrap();
-    let jt = decode_job_template(v, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -126,6 +127,6 @@ fn create_job_with_windows_path_parameter() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     assert_eq!(job.name, r"C:\projects\shot01\render");
 }

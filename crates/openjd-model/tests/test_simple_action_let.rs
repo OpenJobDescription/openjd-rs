@@ -6,6 +6,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -13,14 +14,22 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(

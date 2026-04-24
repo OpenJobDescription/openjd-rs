@@ -6,6 +6,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::parse::{document_string_to_object, DocumentType};
+use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -13,8 +14,8 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 }
 
 fn check_parse_err(doc: &str, doc_type: DocumentType, expected: &[&str]) {
-    let err =
-        document_string_to_object(doc, doc_type).expect_err(&format!("Expected error for: {doc}"));
+    let err = document_string_to_object(doc, doc_type, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {doc}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -26,7 +27,8 @@ fn check_parse_err(doc: &str, doc_type: DocumentType, expected: &[&str]) {
 
 fn check_job_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -38,8 +40,8 @@ fn check_job_err(s: &str, expected: &[&str]) {
 
 fn check_job_err_with_ext(s: &str, supported: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(supported)).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(supported), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -67,13 +69,20 @@ fn check_env_err(s: &str, expected: &[&str]) {
 
 #[test]
 fn doc_string_to_object_json_success() {
-    let result = document_string_to_object(r#"{"key": "value"}"#, DocumentType::Json).unwrap();
+    let result = document_string_to_object(
+        r#"{"key": "value"}"#,
+        DocumentType::Json,
+        &CallerLimits::default(),
+    )
+    .unwrap();
     assert_eq!(result["key"].as_str().unwrap(), "value");
 }
 
 #[test]
 fn doc_string_to_object_yaml_success() {
-    let result = document_string_to_object("key: value\n", DocumentType::Yaml).unwrap();
+    let result =
+        document_string_to_object("key: value\n", DocumentType::Yaml, &CallerLimits::default())
+            .unwrap();
     assert_eq!(result["key"].as_str().unwrap(), "value");
 }
 
@@ -168,7 +177,7 @@ fn job_decode_success() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    decode_job_template(v, None).unwrap();
+    decode_job_template(v, None, &CallerLimits::default()).unwrap();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -233,7 +242,7 @@ fn job_extensions_empty_list() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    let result = decode_job_template(v, None);
+    let result = decode_job_template(v, None, &CallerLimits::default());
     assert!(result.is_err(), "empty extensions list should be rejected");
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -296,7 +305,7 @@ fn job_extensions_invalid_name_format() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    assert!(decode_job_template(v, None).is_err());
+    assert!(decode_job_template(v, None, &CallerLimits::default()).is_err());
 }
 
 #[test]
@@ -309,7 +318,7 @@ fn job_extensions_supported_succeeds() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"])).unwrap();
+    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default()).unwrap();
 }
 
 #[test]
@@ -322,7 +331,7 @@ fn job_no_extensions_with_unsupported_in_supported_list() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
     );
-    decode_job_template(v, Some(&["UNSUPPORTED_NAME"])).unwrap();
+    decode_job_template(v, Some(&["UNSUPPORTED_NAME"]), &CallerLimits::default()).unwrap();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -341,7 +350,7 @@ fn empty_extensions_job_template() {
     }"#,
     );
     assert!(
-        decode_job_template(v, None).is_err(),
+        decode_job_template(v, None, &CallerLimits::default()).is_err(),
         "Job template with empty extensions should be rejected"
     );
 

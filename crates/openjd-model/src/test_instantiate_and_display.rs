@@ -3,6 +3,7 @@
 
 //! Red/green TDD tests for instantiate_step error propagation and FlexFloat Display.
 
+use crate::CallerLimits;
 use crate::JobParameterInputValues;
 use crate::{create_job, decode_job_template, preprocess_job_parameters};
 
@@ -55,13 +56,13 @@ fn create_job_step_let_binding_division_by_zero_errors() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let jt = decode_job_template(v, Some(exts)).unwrap();
+    let jt = decode_job_template(v, Some(exts), &CallerLimits::default()).unwrap();
 
     // Provide Divisor=0 to trigger division by zero at create_job time
     let mut input = JobParameterInputValues::new();
     input.insert("Divisor".into(), openjd_expr::ExprValue::Int(0));
     let params = preprocess(&jt, &input);
-    let result = create_job(&jt, &params);
+    let result = create_job(&jt, &params, &CallerLimits::default());
 
     assert!(
         result.is_err(),
@@ -99,13 +100,13 @@ fn create_job_step_let_binding_type_error_at_instantiation() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let jt = decode_job_template(v, Some(exts)).unwrap();
+    let jt = decode_job_template(v, Some(exts), &CallerLimits::default()).unwrap();
 
     // Normal case: should succeed and the binding should be in the resolved symtab
     let mut input = JobParameterInputValues::new();
     input.insert("Count".into(), openjd_expr::ExprValue::Int(5));
     let params = preprocess(&jt, &input);
-    let job = create_job(&jt, &params).unwrap();
+    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
     // Verify the let binding was evaluated and is in the resolved symtab
     let step = &job.steps[0];
     let symtab_json = step
@@ -178,7 +179,7 @@ fn flexfloat_display_large_whole_number_overflow() {
     }"#
     .to_string();
     let v = yaml_val(&template_yaml);
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
 
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
     let default_str = param.default_value().unwrap();
@@ -211,7 +212,7 @@ fn flexfloat_display_negative_large_whole_number() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#;
     let v = yaml_val(template_yaml);
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
     let default_str = param.default_value().unwrap();
 

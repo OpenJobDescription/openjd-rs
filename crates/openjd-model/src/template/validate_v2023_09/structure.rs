@@ -27,6 +27,19 @@ pub fn validate_structure(
     if jt.steps.is_empty() {
         errors.add(&root, "must have at least one step.");
     }
+    // Caller-imposed step count limit
+    if let Some(max) = ctx.caller_limits.max_step_count {
+        if jt.steps.len() > max {
+            errors.add(
+                &path_field(&root, "steps"),
+                format!(
+                    "exceeds caller limit of {} steps ({} steps).",
+                    max,
+                    jt.steps.len()
+                ),
+            );
+        }
+    }
     if jt.name.raw().is_empty() {
         errors.add(&path_field(&root, "name"), "must not be empty.");
     }
@@ -109,6 +122,20 @@ pub fn validate_structure(
                     );
                 }
             }
+        }
+    }
+
+    // Caller-imposed total environment count limit
+    if let Some(max) = ctx.caller_limits.max_env_count {
+        if env_names.len() > max {
+            errors.add(
+                &root,
+                format!(
+                    "total environments ({}) exceeds caller limit of {}.",
+                    env_names.len(),
+                    max
+                ),
+            );
         }
     }
 

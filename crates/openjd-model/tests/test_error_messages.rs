@@ -10,6 +10,7 @@
 //!
 //! This ensures error messages are stable and match the Python implementation.
 
+use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -18,8 +19,12 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"]))
-        .expect_err("Expected validation error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected validation error");
     let msg = err.to_string();
     for line in expected {
         assert!(

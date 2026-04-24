@@ -6,6 +6,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -13,13 +14,13 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["TASK_CHUNKING"]))
+    decode_job_template(v, Some(&["TASK_CHUNKING"]), &CallerLimits::default())
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["TASK_CHUNKING"]))
+    let err = decode_job_template(v, Some(&["TASK_CHUNKING"]), &CallerLimits::default())
         .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
@@ -32,7 +33,8 @@ fn check_err(s: &str, expected: &[&str]) {
 
 fn check_err_no_ext(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -577,7 +579,7 @@ fn create_chunked_job(template_json: &str) -> openjd_model::job::Job {
     let v = yaml_val(template_json);
     let supported = ["TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
-    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -591,7 +593,7 @@ fn create_chunked_job(template_json: &str) -> openjd_model::job::Job {
         },
     )
     .unwrap();
-    create_job(&jt, &processed).unwrap()
+    create_job(&jt, &processed, &CallerLimits::default()).unwrap()
 }
 
 #[test]

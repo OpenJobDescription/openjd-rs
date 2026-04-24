@@ -6,6 +6,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -14,14 +15,15 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 /// Decode with FEATURE_BUNDLE_1 supported.
 fn decode_fb1(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]))
+    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default())
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 /// Decode without any extensions supported.
 fn check_err_no_ext(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&[])).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(&[]), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -34,7 +36,7 @@ fn check_err_no_ext(s: &str, expected: &[&str]) {
 /// Decode with FEATURE_BUNDLE_1 supported, expect error.
 fn check_err_fb1(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]))
+    let err = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default())
         .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
@@ -509,7 +511,7 @@ fn job_name_128_chars_without_extension_succeeds() {
     }}"#
     );
     let v = yaml_val(&s);
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 #[test]
@@ -697,7 +699,7 @@ fn extension_declared_but_not_in_supported_fails() {
         params.join(",")
     );
     let v = yaml_val(&s);
-    assert!(decode_job_template(v, Some(&["TASK_CHUNKING"])).is_err());
+    assert!(decode_job_template(v, Some(&["TASK_CHUNKING"]), &CallerLimits::default()).is_err());
 }
 
 #[test]
@@ -716,7 +718,7 @@ fn extension_not_declared_but_supported_uses_base_limits() {
         params.join(",")
     );
     let v = yaml_val(&s);
-    assert!(decode_job_template(v, Some(&["FEATURE_BUNDLE_1"])).is_err());
+    assert!(decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default()).is_err());
 }
 
 #[test]
@@ -735,7 +737,8 @@ fn extension_not_declared_50_params_succeeds() {
         params.join(",")
     );
     let v = yaml_val(&s);
-    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"])).expect("Expected success");
+    decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default())
+        .expect("Expected success");
 }
 
 // Note: Python tests for multiple interpreters conflict and resolve_syntax_sugar
@@ -754,7 +757,7 @@ fn timeout_int_string_without_extension_succeeds() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo", "timeout": "60"}}}}]
     }"#,
     );
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 #[test]
@@ -802,7 +805,7 @@ fn amount_min_decimal_string_without_extension_succeeds() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}, "hostRequirements": {"amounts": [{"name": "amount.worker.vcpu", "min": "2.5"}]}}]
     }"#,
     );
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -818,7 +821,7 @@ fn notify_period_int_string_without_extension_succeeds() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "120"}}}}}]
     }"#,
     );
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -852,7 +855,7 @@ fn step_name_64_chars_without_extension_succeeds() {
     }}"#
     );
     let v = yaml_val(&s);
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -871,7 +874,7 @@ fn env_name_64_chars_without_extension_succeeds() {
     }}"#
     );
     let v = yaml_val(&s);
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -889,7 +892,7 @@ fn identifier_64_chars_without_extension_succeeds() {
     }}"#
     );
     let v = yaml_val(&s);
-    decode_job_template(v, Some(&[])).expect("Expected success");
+    decode_job_template(v, Some(&[]), &CallerLimits::default()).expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -961,7 +964,7 @@ fn simple_action_malformed_format_string_behavior() {
             bash: "echo '{{broken'"
     "#,
     );
-    let result = decode_job_template(template, Some(exts));
+    let result = decode_job_template(template, Some(exts), &CallerLimits::default());
     // Validation catches the malformed format string before
     // resolve_syntax_sugar runs, so the silent fallback is not reached.
     assert!(

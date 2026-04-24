@@ -343,11 +343,37 @@ impl std::str::FromStr for KnownExtension {
     }
 }
 
+/// Caller-provided limits that layer on top of spec-defined limits.
+///
+/// These allow a service or application to impose additional restrictions
+/// beyond what the OpenJD specification requires. All fields are optional —
+/// `None` means "no additional restriction beyond the spec-defined limit."
+///
+/// Caller limits can only add restrictions, never relax spec-defined ones.
+#[derive(Debug, Clone, Default)]
+pub struct CallerLimits {
+    /// Maximum number of steps in a job template.
+    pub max_step_count: Option<usize>,
+    /// Maximum number of environments (job + all step environments combined)
+    /// in a job template.
+    pub max_env_count: Option<usize>,
+    /// Maximum total task count across all steps in a job template.
+    /// Checked after parameter space ranges are resolved in `create_job`.
+    pub max_task_count: Option<u64>,
+    /// Maximum JSON-encoded size of a step script, in bytes.
+    pub max_step_script_size: Option<usize>,
+    /// Maximum JSON-encoded size of an environment, in bytes.
+    pub max_environment_size: Option<usize>,
+    /// Maximum total template document size, in bytes.
+    pub max_template_size: Option<usize>,
+}
+
 /// Context for validation, carrying spec revision and enabled extensions.
 #[derive(Debug, Clone)]
 pub struct ValidationContext {
     pub revision: SpecificationRevision,
     pub extensions: Extensions,
+    pub caller_limits: CallerLimits,
 }
 
 impl ValidationContext {
@@ -355,6 +381,7 @@ impl ValidationContext {
         Self {
             revision,
             extensions: Extensions::new(),
+            caller_limits: CallerLimits::default(),
         }
     }
 
@@ -362,7 +389,13 @@ impl ValidationContext {
         Self {
             revision,
             extensions,
+            caller_limits: CallerLimits::default(),
         }
+    }
+
+    pub fn with_caller_limits(mut self, caller_limits: CallerLimits) -> Self {
+        self.caller_limits = caller_limits;
+        self
     }
 
     pub fn has_extension(&self, ext: KnownExtension) -> bool {

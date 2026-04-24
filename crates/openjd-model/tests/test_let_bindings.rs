@@ -6,6 +6,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -13,13 +14,22 @@ fn yaml_val(s: &str) -> serde_yaml::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect("Expected success");
+    decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect("Expected success");
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -341,8 +351,12 @@ fn test_let_type_propagation_across_scopes_type_error() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> script -> let[0]:\n\tInvalid expression in let binding 'y':"),
@@ -382,8 +396,12 @@ fn test_let_param_type_mismatch() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'x':"),
@@ -433,8 +451,12 @@ fn test_let_apply_path_mapping_rejected_in_step_scope() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> let[0]:\n\tInvalid expression in let binding 'mapped':"),
@@ -493,7 +515,7 @@ fn test_let_without_expr_extension_step() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err("Expected error");
+    let err = decode_job_template(v, None, &CallerLimits::default()).expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> let:\n\t'let' requires the EXPR extension."),
@@ -515,7 +537,7 @@ fn test_let_without_expr_extension_script() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err("Expected error");
+    let err = decode_job_template(v, None, &CallerLimits::default()).expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> script -> let:\n\t'let' requires the EXPR extension."),
@@ -579,8 +601,12 @@ fn test_step_and_script_let_same_name_error() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("steps[0] -> script -> let[0]:\n\t'x' shadows enclosing scope."),
@@ -665,8 +691,12 @@ fn test_typo_in_param_reference_suggests_correction() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("Did you mean: Param.Frame"),
@@ -689,8 +719,12 @@ fn test_typo_in_let_binding_suggests_correction() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("Did you mean: Param.Scene"),
@@ -812,7 +846,8 @@ fn test_let_rejected_without_extensions_field_even_if_supported() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err = decode_job_template(v, Some(&["EXPR"])).expect_err("Expected error");
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err("Expected error");
     let msg = err.to_string();
     assert!(msg.contains("EXPR"), "Expected 'EXPR' in:\n{msg}");
 }
@@ -888,8 +923,12 @@ fn test_script_let_type_error_with_session_symbol() {
         }]
     }"#;
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"])).expect_err("Expected error");
+    let err = decode_job_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected error");
     let msg = err.to_string();
     assert!(
         msg.contains("Cannot use '+' operator with path and int"),

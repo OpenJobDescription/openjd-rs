@@ -9,6 +9,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -26,12 +27,14 @@ fn job_with_param_space(ps_json: &str) -> String {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_job_template(v, None, &CallerLimits::default())
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -666,6 +669,7 @@ fn combination_single_element_association() {
             r#"{"taskParameterDefinitions": [{"name": "A", "type": "INT", "range": [1]}], "combination": "(A)"}"#,
         )),
         None,
+        &CallerLimits::default(),
     );
     // Either it fails with an error about association, or it succeeds (treating (A) as A)
     // Both are acceptable behaviors
@@ -698,7 +702,7 @@ fn combination_expr_empty_parens_rejected() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_err(),
         "Empty parentheses in combination should be rejected"
@@ -728,7 +732,7 @@ fn combination_expr_leading_star_rejected() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_err(),
         "Leading star in combination should be rejected"

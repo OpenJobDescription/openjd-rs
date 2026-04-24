@@ -10,6 +10,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -29,14 +30,14 @@ fn job_with_expr_param(param_json: &str) -> String {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR"])).expect("Expected success");
+    decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).expect("Expected success");
 }
 
 /// Gold standard check_err: asserts path + message for validation errors.
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR"])).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -49,8 +50,8 @@ fn check_err(s: &str, expected: &[&str]) {
 /// For serde-level errors (deserialization failures), assert substring.
 fn check_serde_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err =
-        decode_job_template(v, Some(&["EXPR"])).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -63,7 +64,8 @@ fn check_serde_err(s: &str, expected: &[&str]) {
 /// For errors without EXPR extension.
 fn check_err_no_ext(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -737,7 +739,7 @@ fn test_case_different_not_duplicate() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
     }"#;
     let v = yaml_val(s);
-    assert!(decode_job_template(v, None).is_ok());
+    assert!(decode_job_template(v, None, &CallerLimits::default()).is_ok());
 }
 
 // ============================================================

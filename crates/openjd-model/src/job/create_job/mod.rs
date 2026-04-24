@@ -17,7 +17,7 @@ use crate::error::ModelError;
 use crate::job;
 use crate::template::validate_v2023_09::EffectiveLimits;
 use crate::template::JobTemplate;
-use crate::types::{JobParameterValues, SpecificationRevision, ValidationContext};
+use crate::types::{CallerLimits, JobParameterValues, SpecificationRevision, ValidationContext};
 
 // Re-exports — preserve the existing public API
 pub use instantiate::{
@@ -32,9 +32,13 @@ pub use parameters::{
 ///
 /// Environment template parameters should already be merged into `job_parameter_values`
 /// via [`preprocess_job_parameters`] before calling this function.
+///
+/// When `caller_limits.max_task_count` is set, the total task count across all steps
+/// is checked after parameter spaces are resolved.
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
+    caller_limits: &CallerLimits,
 ) -> Result<job::Job, ModelError> {
     let mut symtab = build_symbol_table(job_parameter_values)?;
 
@@ -95,6 +99,28 @@ pub fn create_job(
         .map(|st| instantiate::instantiate_step(st, &symtab, has_expr, &limits))
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Caller-imposed total task count limit across all steps
+    if let Some(max_task_count) = caller_limits.max_task_count {
+        let mut total: u64 = 0;
+        for step in &steps {
+            let step_tasks = step
+                .parameter_space
+                .as_ref()
+                .map(|ps| {
+                    crate::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1))
+                        .map(|iter| iter.len() as u64)
+                })
+                .transpose()?
+                .unwrap_or(1); // Steps without a parameter space have 1 task
+            total = total.saturating_add(step_tasks);
+        }
+        if total > max_task_count {
+            return Err(ModelError::ModelValidation(format!(
+                "Total task count ({total}) exceeds caller limit of {max_task_count}."
+            )));
+        }
+    }
+
     let job_environments = job_template.job_environments.as_ref().map(|envs| {
         envs.iter()
             .map(|e| instantiate::convert_environment_with_symtab(e, Some(&symtab)))
@@ -105,6 +131,38 @@ pub fn create_job(
         .extensions
         .as_ref()
         .map(|exts| exts.iter().map(|e| e.as_str().to_string()).collect());
+
+    // Caller-imposed step script size limit (JSON-encoded bytes)
+    if let Some(max) = caller_limits.max_step_script_size {
+        for step in &steps {
+            let size = serde_json::to_string(&step.script)
+                .map(|s| s.len())
+                .unwrap_or(0);
+            if size > max {
+                return Err(ModelError::ModelValidation(format!(
+                    "Step '{}' script size ({size} bytes) exceeds caller limit of {max} bytes.",
+                    step.name
+                )));
+            }
+        }
+    }
+
+    // Caller-imposed environment size limit (JSON-encoded bytes)
+    if let Some(max) = caller_limits.max_environment_size {
+        let all_envs = steps
+            .iter()
+            .flat_map(|s| s.step_environments.iter().flatten())
+            .chain(job_environments.iter().flatten());
+        for env in all_envs {
+            let size = serde_json::to_string(env).map(|s| s.len()).unwrap_or(0);
+            if size > max {
+                return Err(ModelError::ModelValidation(format!(
+                    "Environment '{}' size ({size} bytes) exceeds caller limit of {max} bytes.",
+                    env.name
+                )));
+            }
+        }
+    }
 
     Ok(job::Job {
         name: job_name,

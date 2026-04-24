@@ -4,6 +4,7 @@
 //! Tests ported from Python test_create_job.py and test_merge_job_parameters.py
 
 use openjd_expr::path_mapping::PathFormat;
+use openjd_model::CallerLimits;
 use openjd_model::JobParameterInputValues;
 use openjd_model::{
     build_symbol_table, decode_environment_template, decode_job_template,
@@ -78,7 +79,7 @@ impl TestDirs {
 fn test_preprocess_string_param() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("hello".into()));
     let result = preprocess_job_parameters(
@@ -101,7 +102,7 @@ fn test_preprocess_string_param() {
 fn test_preprocess_int_param() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
     let result = preprocess_job_parameters(
@@ -127,7 +128,7 @@ fn test_preprocess_int_param() {
 fn test_preprocess_float_param() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
     let result = preprocess_job_parameters(
@@ -153,7 +154,7 @@ fn test_preprocess_float_param() {
 fn test_preprocess_uses_default() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "bar"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -175,7 +176,7 @@ fn test_preprocess_uses_default() {
 fn test_preprocess_missing_required_param() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     assert!(preprocess_job_parameters(
         &jt,
@@ -196,7 +197,7 @@ fn test_preprocess_missing_required_param() {
 fn test_preprocess_extra_param() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "x"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Bar".into(), openjd_expr::ExprValue::String("extra".into()));
     assert!(preprocess_job_parameters(
@@ -219,7 +220,7 @@ fn test_preprocess_int_constraint_violation() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "INT", "minValue": 10, "maxValue": 20}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("5".into()));
     assert!(preprocess_job_parameters(
@@ -242,7 +243,7 @@ fn test_preprocess_string_allowed_values_violation() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "STRING", "allowedValues": ["a", "b"]}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("c".into()));
     assert!(preprocess_job_parameters(
@@ -267,7 +268,7 @@ fn test_path_default_joined_to_template_dir() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -294,7 +295,7 @@ fn test_path_default_joined_to_template_dir() {
 fn test_path_user_value_joined_to_cwd() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "DataDir".into(),
@@ -328,7 +329,7 @@ fn test_path_user_value_joined_to_cwd() {
 fn test_path_absolute_user_value_unchanged() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     let abs_path = std::path::Path::new(td.cwd())
         .join("absolute_test")
@@ -370,7 +371,7 @@ fn test_path_absolute_default_rejected() {
         r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#,
         abs_default
     ));
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let err = preprocess_job_parameters(
         &jt,
@@ -396,7 +397,7 @@ fn test_path_default_walkup_rejected() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "../escape/path"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let err = preprocess_job_parameters(
         &jt,
@@ -422,7 +423,7 @@ fn test_path_default_walkup_rejected() {
 fn test_path_empty_default_not_joined() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": ""}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -446,7 +447,7 @@ fn test_path_empty_default_not_joined() {
 fn test_path_empty_user_value_not_joined() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "DataDir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("DataDir".into(), openjd_expr::ExprValue::String("".into()));
     let result = preprocess_job_parameters(
@@ -473,7 +474,7 @@ fn test_path_empty_user_value_not_joined() {
 fn test_build_symbol_table_int() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Frame", "type": "INT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Frame".into(), openjd_expr::ExprValue::String("42".into()));
     let params = preprocess_job_parameters(
@@ -498,7 +499,7 @@ fn test_build_symbol_table_int() {
 fn test_build_symbol_table_string() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Name", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Name".into(),
@@ -527,7 +528,7 @@ fn test_build_symbol_table_string() {
 #[test]
 fn test_merge_no_env_templates() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[]).unwrap();
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "Foo");
@@ -537,7 +538,7 @@ fn test_merge_no_env_templates() {
 fn test_merge_env_and_job_same_param() {
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "job_default"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val =
         minimal_env_template(r#"{"name": "Foo", "type": "STRING", "default": "env_default"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
@@ -550,7 +551,7 @@ fn test_merge_env_and_job_same_param() {
 #[test]
 fn test_merge_type_conflict() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     assert!(merge_job_parameter_definitions(&jt, &[et]).is_err());
@@ -565,7 +566,7 @@ fn test_merge_env_only_param() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "EnvParam", "type": "INT", "default": "5"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
@@ -596,7 +597,7 @@ fn test_uri_user_value_preserved() {
     let td = TestDirs::new();
     // URI PATH values should not be joined with current_working_dir
     let jt_val = expr_job_template_with_path_param("S3File", None);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "S3File".into(),
@@ -627,7 +628,7 @@ fn test_uri_default_preserved() {
     let td = TestDirs::new();
     // URI PATH defaults should not be joined with job_template_dir
     let jt_val = expr_job_template_with_path_param("S3File", Some("s3://my-bucket/default.obj"));
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let result = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -651,7 +652,7 @@ fn test_uri_default_preserved() {
 fn test_https_uri_user_value_preserved() {
     let td = TestDirs::new();
     let jt_val = expr_job_template_with_path_param("HttpFile", None);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "HttpFile".into(),
@@ -691,7 +692,7 @@ fn test_uri_joined_without_expr_extension() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "S3File".into(),
@@ -727,7 +728,7 @@ fn test_uri_rejected_when_not_allowed() {
     let td = TestDirs::new();
     // With EXPR + allow_uri_path_values=false, URIs are rejected
     let jt_val = expr_job_template_with_path_param("S3File", None);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "S3File".into(),
@@ -758,7 +759,7 @@ fn test_uri_default_rejected_when_not_allowed() {
     let td = TestDirs::new();
     // With EXPR + allow_uri_path_values=false, URI defaults are rejected
     let jt_val = expr_job_template_with_path_param("S3File", Some("s3://my-bucket/default.obj"));
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let err = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -783,7 +784,7 @@ fn test_uri_default_rejected_when_not_allowed() {
 fn test_posix_absolute_path_recognized_with_posix_format() {
     // /foo/bar is absolute under PathFormat::Posix — should not be joined with cwd
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -812,7 +813,7 @@ fn test_posix_absolute_path_recognized_with_posix_format() {
 fn test_posix_path_is_relative_under_windows_format() {
     // /foo/bar under PathFormat::Windows is root-relative: keeps drive from cwd
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -844,7 +845,7 @@ fn test_posix_path_is_relative_under_windows_format() {
 fn test_windows_absolute_path_recognized_with_windows_format() {
     // C:\foo is absolute under PathFormat::Windows — should not be joined
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -873,7 +874,7 @@ fn test_windows_absolute_path_recognized_with_windows_format() {
 fn test_windows_path_is_relative_under_posix_format() {
     // C:\foo is NOT absolute under PathFormat::Posix — should be joined with cwd
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -907,7 +908,7 @@ fn test_windows_path_is_relative_under_posix_format() {
 fn test_unc_path_recognized_as_absolute() {
     // \\server\share is absolute under both formats
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Dir".into(),
@@ -937,7 +938,7 @@ fn test_relative_path_still_joined_with_expr() {
     let td = TestDirs::new();
     // Regular relative paths should still be joined even with EXPR extension
     let jt_val = expr_job_template_with_path_param("LocalFile", None);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "LocalFile".into(),
@@ -974,7 +975,7 @@ fn test_uri_in_build_symbol_table() {
     // PATH params: Param.X is Unresolved(PATH) at create_job time (resolved at session time).
     // RawParam.X is the original string value.
     let jt_val = expr_job_template_with_path_param("S3File", None);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "S3File".into(),
@@ -1016,7 +1017,7 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
     let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
-    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
     let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
         .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
@@ -1034,7 +1035,7 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
         },
     )
     .unwrap();
-    create_job(&jt, &processed).unwrap()
+    create_job(&jt, &processed, &CallerLimits::default()).unwrap()
 }
 
 fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String {
@@ -1042,7 +1043,7 @@ fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String 
     let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
-    let jt = decode_job_template(v, Some(&supported_refs)).unwrap();
+    let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
     let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
         .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
@@ -1062,7 +1063,9 @@ fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String 
         Err(e) => return e.to_string(),
         Ok(p) => p,
     };
-    create_job(&jt, &processed).unwrap_err().to_string()
+    create_job(&jt, &processed, &CallerLimits::default())
+        .unwrap_err()
+        .to_string()
 }
 
 #[test]
@@ -2084,7 +2087,7 @@ fn test_uneven_parameter_space_association() {
     }"#,
     )
     .unwrap();
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -2098,7 +2101,7 @@ fn test_uneven_parameter_space_association() {
         },
     )
     .unwrap();
-    let result = create_job(&jt, &processed);
+    let result = create_job(&jt, &processed, &CallerLimits::default());
     // The error may occur at create_job or at iteration time
     match result {
         Err(e) => {
@@ -2146,7 +2149,7 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
     }}"#
     );
     let v: serde_yaml::Value = serde_yaml::from_str(&template).unwrap();
-    let err = decode_job_template(v, None).unwrap_err();
+    let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("128")
@@ -2172,7 +2175,7 @@ fn test_preprocess_reports_extra_with_environments() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = yaml_val(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -2213,7 +2216,7 @@ fn test_preprocess_reports_extra_with_environments() {
 fn test_preprocess_reports_missing_with_environments() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "ThisIsNotDefined", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = yaml_val(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -2252,7 +2255,7 @@ fn test_preprocess_collects_defaults_with_environments() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = yaml_val(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -2287,7 +2290,7 @@ fn test_preprocess_collects_defaults_with_environments() {
 fn test_preprocess_checks_constraints_with_environments() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "maxLength": 1}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = yaml_val(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -2335,7 +2338,7 @@ fn test_preprocess_collects_multiple_errors() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     input.insert("Bar".into(), openjd_expr::ExprValue::String("three".into()));
@@ -2366,7 +2369,7 @@ fn test_preprocess_ignores_defaults_when_value_provided() {
     let td = TestDirs::new();
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "defaultValue"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -2394,7 +2397,7 @@ fn test_preprocess_ignores_defaults_when_value_provided() {
 fn test_preprocess_string_constraint_violation_message() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "maxLength": 1}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     let err = preprocess_job_parameters(
@@ -2439,7 +2442,7 @@ fn test_preprocess_int_to_float_coercion() {
     let td = TestDirs::new();
     // Providing an Int value for a FLOAT param should coerce Int→Float
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Int(42));
     let result = preprocess_job_parameters(
@@ -2473,7 +2476,7 @@ fn test_preprocess_float_to_int_coercion_whole() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
@@ -2511,7 +2514,7 @@ fn test_preprocess_float_to_int_coercion_fractional_falls_through() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();
@@ -2544,7 +2547,7 @@ fn test_preprocess_bool_coercion_true() {
     let td = TestDirs::new();
     // String "true" for BOOL param → Bool(true)
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("true".into()));
     let result = preprocess_job_parameters(
@@ -2570,7 +2573,7 @@ fn test_preprocess_bool_coercion_true() {
 fn test_preprocess_bool_coercion_false() {
     let td = TestDirs::new();
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("false".into()));
     let result = preprocess_job_parameters(
@@ -2596,7 +2599,7 @@ fn test_preprocess_bool_coercion_false() {
 fn test_preprocess_bool_coercion_yes() {
     let td = TestDirs::new();
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("yes".into()));
     let result = preprocess_job_parameters(
@@ -2622,7 +2625,7 @@ fn test_preprocess_bool_coercion_yes() {
 fn test_preprocess_bool_coercion_0() {
     let td = TestDirs::new();
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("0".into()));
     let result = preprocess_job_parameters(
@@ -2649,7 +2652,7 @@ fn test_preprocess_bool_invalid_string() {
     let td = TestDirs::new();
     // check_constraints catches invalid bool before coercion
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("maybe".into()));
     let err = preprocess_job_parameters(
@@ -2673,7 +2676,7 @@ fn test_preprocess_bool_from_bool_value() {
     let td = TestDirs::new();
     // Bool(true) for BOOL param → passes through (already correct type)
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "BOOL"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Bool(true));
     let result = preprocess_job_parameters(
@@ -2700,7 +2703,7 @@ fn test_preprocess_range_expr_coercion() {
     let td = TestDirs::new();
     // String "1-10" for RANGE_EXPR param → RangeExpr
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "RANGE_EXPR"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("1-10".into()));
     let result = preprocess_job_parameters(
@@ -2727,7 +2730,7 @@ fn test_preprocess_range_expr_invalid_stays_string() {
     let td = TestDirs::new();
     // Invalid range expr string is caught by check_constraints
     let jt_val = expr_job_template_with_param(r#"{"name": "Foo", "type": "RANGE_EXPR"}"#);
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -2776,7 +2779,7 @@ fn test_preprocess_list_int_json_coercion() {
     // JSON string "[1,2,3]" for LIST[INT] param → ListInt
     // Use env-only param to bypass check_constraints on raw String
     let jt_val = expr_job_no_params();
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
@@ -2810,7 +2813,7 @@ fn test_preprocess_list_int_json_coercion() {
 fn test_preprocess_list_string_json_coercion() {
     let td = TestDirs::new();
     let jt_val = expr_job_no_params();
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[STRING]"}"#),
         Some(&["EXPR"]),
@@ -2844,7 +2847,7 @@ fn test_preprocess_list_string_json_coercion() {
 fn test_preprocess_list_bool_json_coercion() {
     let td = TestDirs::new();
     let jt_val = expr_job_no_params();
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[BOOL]"}"#),
         Some(&["EXPR"]),
@@ -2879,7 +2882,7 @@ fn test_preprocess_list_invalid_json_stays_string() {
     let td = TestDirs::new();
     // Non-JSON string for LIST[INT] → returns error
     let jt_val = expr_job_no_params();
-    let jt = decode_job_template(jt_val, Some(&["EXPR"])).unwrap();
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
@@ -2917,7 +2920,7 @@ fn test_coerce_string_to_int_errors_on_non_numeric() {
     let td = TestDirs::new();
     // "abc" for INT param → error, not silent fallback to String
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("abc".into()));
     let result = preprocess_job_parameters(
@@ -2944,7 +2947,7 @@ fn test_coerce_string_to_float_errors_on_non_numeric() {
     let td = TestDirs::new();
     // "xyz" for FLOAT param → error, not silent fallback to String
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("xyz".into()));
     let result = preprocess_job_parameters(
@@ -2971,7 +2974,7 @@ fn test_coerce_valid_int_string_succeeds() {
     let td = TestDirs::new();
     // "42" for INT param → Int(42)
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("42".into()));
     let result = preprocess_job_parameters(
@@ -2998,7 +3001,7 @@ fn test_coerce_valid_float_string_succeeds() {
     let td = TestDirs::new();
     // "3.14" for FLOAT param → Float(3.14)
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("3.14".into()));
     let result = preprocess_job_parameters(
@@ -3027,7 +3030,7 @@ fn test_relative_template_dir_with_walkup_false_errors() {
     let td = TestDirs::new();
     // Relative job_template_dir + allow_job_template_dir_walk_up=false → error
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING", "default": "bar"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let result = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -3053,7 +3056,7 @@ fn test_relative_template_dir_with_walkup_true_succeeds() {
     // Relative job_template_dir + allow_job_template_dir_walk_up=true → OK
     let jt_val =
         minimal_job_template(r#"{"name": "Foo", "type": "PATH", "default": "data/input.csv"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let result = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -3075,7 +3078,7 @@ fn test_relative_template_dir_with_walkup_true_succeeds() {
 fn test_merged_parameter_is_accessible() {
     // Verify MergedParameter is usable from the public API
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let merged: Vec<openjd_model::MergedParameterDefinition> =
         merge_job_parameter_definitions(&jt, &[]).unwrap();
     assert_eq!(merged.len(), 1);
@@ -3089,7 +3092,7 @@ fn test_preprocess_int_coerced_to_string_repr() {
     let td = TestDirs::new();
     // Int(42) for STRING param → coerce_from_str("42", String) → String("42")
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Int(42));
     let result = preprocess_job_parameters(
@@ -3113,7 +3116,7 @@ fn test_preprocess_bool_coerced_to_string_repr() {
     let td = TestDirs::new();
     // Bool(true) for STRING param → coerce_from_str("true", String) → String("true")
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::Bool(true));
     let result = preprocess_job_parameters(
@@ -3149,7 +3152,7 @@ fn test_path_absolute_default_allowed_with_walkup() {
         r#"{{"name": "DataDir", "type": "PATH", "default": "{}"}}"#,
         json_default
     ));
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -3177,7 +3180,7 @@ fn test_path_default_relative_template_dir() {
     // When template dir is relative and walk-up is disallowed, error is raised
     let jt_val =
         minimal_job_template(r#"{"name": "DataDir", "type": "PATH", "default": "data/input.csv"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -3655,9 +3658,9 @@ fn zero_dimension_parameter_space() {
                   command: echo
     "#,
     );
-    let jt = decode_job_template(template, None).unwrap();
+    let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
-    let job = create_job(&jt, &params).unwrap();
+    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
     let step = &job.steps[0];
     if let Some(ref space) = step.parameter_space {
         let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
@@ -3688,7 +3691,7 @@ fn script_let_binding_division_by_zero_is_caught() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let result = decode_job_template(v, Some(exts));
+    let result = decode_job_template(v, Some(exts), &CallerLimits::default());
     // Validation catches this — division by zero with concrete values is detected
     assert!(
         result.is_err(),
@@ -3708,7 +3711,7 @@ fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo {{Param.Foo}}"}}}}]
     }"#).unwrap();
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -3727,7 +3730,7 @@ fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed).unwrap();
+    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
     let symtab = job.steps[0]
         .resolved_symtab
         .as_ref()
@@ -3767,7 +3770,7 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let jt = decode_job_template(v, Some(exts)).unwrap();
+    let jt = decode_job_template(v, Some(exts), &CallerLimits::default()).unwrap();
 
     // Provide Divisor=0 to trigger division by zero
     let mut input = JobParameterInputValues::new();
@@ -3785,7 +3788,7 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
         },
     )
     .unwrap();
-    let result = openjd_model::create_job(&jt, &params);
+    let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
     assert!(
         result.is_err(),
         "Script-level let binding '100 / Param.Divisor' with Divisor=0 should error at create_job"
@@ -3835,11 +3838,11 @@ fn script_let_binding_syntax_error_is_caught() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let result = decode_job_template(v, Some(exts));
+    let result = decode_job_template(v, Some(exts), &CallerLimits::default());
     // This should be caught either at validation or create_job time
     if let Ok(jt) = result {
         let params = std::collections::HashMap::new();
-        let result = openjd_model::create_job(&jt, &params);
+        let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
         assert!(
             result.is_err(),
             "Script-level let binding with syntax error should produce an error"
@@ -3879,7 +3882,7 @@ fn range_expression_evaluation_error_is_caught() {
     }"#,
     );
     let exts: &[&str] = &["EXPR"];
-    let jt = decode_job_template(v, Some(exts)).unwrap();
+    let jt = decode_job_template(v, Some(exts), &CallerLimits::default()).unwrap();
 
     let mut input = JobParameterInputValues::new();
     input.insert("Count".into(), openjd_expr::ExprValue::Int(5));
@@ -3897,7 +3900,7 @@ fn range_expression_evaluation_error_is_caught() {
     )
     .unwrap();
     // "5" is a valid range expression (single value), so this succeeds
-    let result = openjd_model::create_job(&jt, &params);
+    let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "Single int as range expression should work: {:?}",
@@ -3972,7 +3975,7 @@ fn resolved_symtab_does_not_add_raw_param_for_referenced_string_param() {
 fn float_param_user_input_nan_rejected() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "F", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("F".into(), openjd_expr::ExprValue::String("NaN".into()));
     let result = preprocess_job_parameters(
@@ -3999,7 +4002,7 @@ fn float_param_user_input_nan_rejected() {
 fn float_param_user_input_inf_rejected() {
     let td = TestDirs::new();
     let jt_val = minimal_job_template(r#"{"name": "F", "type": "FLOAT"}"#);
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("F".into(), openjd_expr::ExprValue::String("inf".into()));
     let result = preprocess_job_parameters(
@@ -4035,7 +4038,7 @@ fn single_error_uses_singular_grammar() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#,
     );
-    let err = decode_job_template(v, None).unwrap_err();
+    let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("1 validation error for"),
@@ -4057,7 +4060,7 @@ fn simple_action_digit_starting_step_name() {
         "steps": [{"name": "9frames", "bash": {"script": "echo hello"}}]
     }"#,
     );
-    let result = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]));
+    let result = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default());
     assert!(
         result.is_ok(),
         "Step name starting with digit should not panic: {:?}",
@@ -4079,7 +4082,7 @@ fn test_preprocess_float_to_int_overflow_rejected() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
     }"#,
     );
-    let jt = decode_job_template(jt_val, None).unwrap();
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
     let et = decode_environment_template(et_val, None).unwrap();
     let mut input = JobParameterInputValues::new();

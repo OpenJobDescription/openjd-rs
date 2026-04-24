@@ -49,12 +49,20 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         DocumentType::Yaml
     };
-    let template_value = parse::document_string_to_object(&content, doc_type)?;
+    let template_value = parse::document_string_to_object(
+        &content,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     let exts = crate::common::parse_extensions(&args.extensions)?;
     let supported_exts: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
 
-    let job_template = parse::decode_job_template(template_value, Some(&supported_exts))?;
+    let job_template = parse::decode_job_template(
+        template_value,
+        Some(&supported_exts),
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     // Preserve template parameter definition order
     let param_order: Vec<String> = job_template
@@ -77,7 +85,11 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             DocumentType::Yaml
         };
-        let env_value = parse::document_string_to_object(&env_content, env_doc_type)?;
+        let env_value = parse::document_string_to_object(
+            &env_content,
+            env_doc_type,
+            &openjd_model::CallerLimits::default(),
+        )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
@@ -105,7 +117,11 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let the_job = openjd_model::create_job(&job_template, &param_values)?;
+    let the_job = openjd_model::create_job(
+        &job_template,
+        &param_values,
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     if let Some(step_name) = &args.step {
         output_step_summary(&the_job, step_name, &args.output)

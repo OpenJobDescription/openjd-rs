@@ -142,10 +142,18 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         DocumentType::Yaml
     };
-    let template_value = parse::document_string_to_object(&content, doc_type)?;
+    let template_value = parse::document_string_to_object(
+        &content,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )?;
     let exts = crate::common::parse_extensions(&args.extensions)?;
     let supported_exts: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
-    let job_template = parse::decode_job_template(template_value, Some(&supported_exts))?;
+    let job_template = parse::decode_job_template(
+        template_value,
+        Some(&supported_exts),
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     let mut env_templates = Vec::new();
     for env_path in &args.environments {
@@ -155,7 +163,11 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             DocumentType::Yaml
         };
-        let env_value = parse::document_string_to_object(&env_content, env_doc_type)?;
+        let env_value = parse::document_string_to_object(
+            &env_content,
+            env_doc_type,
+            &openjd_model::CallerLimits::default(),
+        )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
@@ -191,7 +203,11 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create instantiated job
-    let job = match openjd_model::create_job(&job_template, &param_values) {
+    let job = match openjd_model::create_job(
+        &job_template,
+        &param_values,
+        &openjd_model::CallerLimits::default(),
+    ) {
         Ok(j) => j,
         Err(e) => {
             let help = crate::help::format_help(&job_template, path);

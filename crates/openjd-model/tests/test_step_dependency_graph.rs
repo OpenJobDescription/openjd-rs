@@ -7,6 +7,7 @@ use openjd_expr::FormatString;
 use openjd_model::decode_job_template;
 use openjd_model::job::{Action, Job, Step, StepActions, StepDependency, StepScript};
 use openjd_model::step_dependency_graph::StepDependencyGraph;
+use openjd_model::CallerLimits;
 
 fn make_job(steps: Vec<(&str, Vec<&str>)>) -> Job {
     Job {
@@ -245,7 +246,7 @@ fn self_referencing_step_dependency_rejected() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_err(),
         "Self-referencing step dependency should be rejected"

@@ -11,7 +11,7 @@ use crate::error::ModelError;
 use crate::template::validate_v2023_09 as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
-    Extensions, KnownExtension, SpecificationRevision, TemplateSpecificationVersion,
+    CallerLimits, Extensions, KnownExtension, SpecificationRevision, TemplateSpecificationVersion,
     ValidationContext,
 };
 
@@ -23,10 +23,23 @@ pub enum DocumentType {
 }
 
 /// Parse a string into a generic YAML/JSON object.
+///
+/// When `caller_limits.max_template_size` is set, the document is rejected
+/// if its byte length exceeds the limit (checked before parsing).
 pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
+    caller_limits: &CallerLimits,
 ) -> Result<serde_yaml::Value, ModelError> {
+    if let Some(max) = caller_limits.max_template_size {
+        if document.len() > max {
+            return Err(ModelError::ModelValidation(format!(
+                "Template document size ({} bytes) exceeds caller limit of {max} bytes.",
+                document.len()
+            )));
+        }
+    }
+
     let parsed = match doc_type {
         DocumentType::Json => {
             let v: serde_json::Value = serde_json::from_str(document).map_err(|e| {
@@ -56,6 +69,7 @@ pub fn document_string_to_object(
 pub fn decode_job_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<JobTemplate, ModelError> {
     // Extract specificationVersion
     let version_str = template
@@ -131,7 +145,8 @@ pub fn decode_job_template(
         }
     }
 
-    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, extensions);
+    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, extensions)
+        .with_caller_limits(caller_limits.clone());
     validate::validate_job_template(&jt, &ctx)?;
 
     Ok(jt)
@@ -233,6 +248,7 @@ pub enum DecodedTemplate {
 pub fn decode_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<DecodedTemplate, ModelError> {
     let version_str = template
         .get("specificationVersion")
@@ -252,7 +268,7 @@ pub fn decode_template(
         })?;
 
     if version.is_job_template() {
-        decode_job_template(template, supported_extensions).map(DecodedTemplate::Job)
+        decode_job_template(template, supported_extensions, caller_limits).map(DecodedTemplate::Job)
     } else {
         decode_environment_template(template, supported_extensions)
             .map(DecodedTemplate::Environment)
@@ -271,34 +287,55 @@ mod tests {
 
     #[test]
     fn test_doc_string_to_object_json() {
-        let result = document_string_to_object(r#"{"key": "value"}"#, DocumentType::Json).unwrap();
+        let result = document_string_to_object(
+            r#"{"key": "value"}"#,
+            DocumentType::Json,
+            &CallerLimits::default(),
+        )
+        .unwrap();
         assert_eq!(result["key"].as_str().unwrap(), "value");
     }
 
     #[test]
     fn test_doc_string_to_object_yaml() {
-        let result = document_string_to_object("key: value\n", DocumentType::Yaml).unwrap();
+        let result =
+            document_string_to_object("key: value\n", DocumentType::Yaml, &CallerLimits::default())
+                .unwrap();
         assert_eq!(result["key"].as_str().unwrap(), "value");
     }
 
     #[test]
     fn test_doc_string_not_a_dict_json() {
-        assert!(document_string_to_object("[1, 2, 3]", DocumentType::Json).is_err());
+        assert!(document_string_to_object(
+            "[1, 2, 3]",
+            DocumentType::Json,
+            &CallerLimits::default()
+        )
+        .is_err());
     }
 
     #[test]
     fn test_doc_string_not_a_dict_yaml() {
-        assert!(document_string_to_object("- 1\n- 2\n", DocumentType::Yaml).is_err());
+        assert!(document_string_to_object(
+            "- 1\n- 2\n",
+            DocumentType::Yaml,
+            &CallerLimits::default()
+        )
+        .is_err());
     }
 
     #[test]
     fn test_doc_string_bad_parse_json() {
-        assert!(document_string_to_object("{", DocumentType::Json).is_err());
+        assert!(
+            document_string_to_object("{", DocumentType::Json, &CallerLimits::default()).is_err()
+        );
     }
 
     #[test]
     fn test_doc_string_bad_parse_yaml() {
-        assert!(document_string_to_object("-", DocumentType::Yaml).is_err());
+        assert!(
+            document_string_to_object("-", DocumentType::Yaml, &CallerLimits::default()).is_err()
+        );
     }
 
     // -- decode_job_template --
@@ -306,19 +343,19 @@ mod tests {
     #[test]
     fn test_decode_job_template_missing_spec_version() {
         let v = yaml_val(r#"{"notspecversion": "badvalue"}"#);
-        assert!(decode_job_template(v, None).is_err());
+        assert!(decode_job_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_job_template_unknown_version() {
         let v = yaml_val(r#"{"specificationVersion": "badvalue"}"#);
-        assert!(decode_job_template(v, None).is_err());
+        assert!(decode_job_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_job_template_not_job_version() {
         let v = yaml_val(r#"{"specificationVersion": "environment-2023-09"}"#);
-        assert!(decode_job_template(v, None).is_err());
+        assert!(decode_job_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
@@ -330,7 +367,7 @@ mod tests {
             "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}]
         }"#,
         );
-        let jt = decode_job_template(v, None).unwrap();
+        let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
         assert_eq!(jt.specification_version, "jobtemplate-2023-09");
     }
 
@@ -382,7 +419,7 @@ mod tests {
         }"#,
         );
         assert!(matches!(
-            decode_template(v, None).unwrap(),
+            decode_template(v, None, &CallerLimits::default()).unwrap(),
             DecodedTemplate::Job(_)
         ));
     }
@@ -400,7 +437,7 @@ mod tests {
         }"#,
         );
         assert!(matches!(
-            decode_template(v, None).unwrap(),
+            decode_template(v, None, &CallerLimits::default()).unwrap(),
             DecodedTemplate::Environment(_)
         ));
     }
@@ -408,14 +445,14 @@ mod tests {
     #[test]
     fn test_decode_template_missing_version() {
         let v = yaml_val(r#"{"name": "test"}"#);
-        let err = decode_template(v, None).unwrap_err();
+        let err = decode_template(v, None, &CallerLimits::default()).unwrap_err();
         assert!(err.to_string().contains("specificationVersion"));
     }
 
     #[test]
     fn test_decode_template_unknown_version() {
         let v = yaml_val(r#"{"specificationVersion": "badvalue"}"#);
-        let err = decode_template(v, None).unwrap_err();
+        let err = decode_template(v, None, &CallerLimits::default()).unwrap_err();
         assert!(err.to_string().contains("Unknown template version"));
     }
 }

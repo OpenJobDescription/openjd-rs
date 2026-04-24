@@ -6,6 +6,7 @@
 //! Tests the REDACTED_ENV_VARS extension handling for both job templates and
 //! environment templates.
 
+use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
@@ -40,14 +41,19 @@ fn redacted_env_vars_template() -> serde_yaml::Value {
 #[test]
 fn redacted_env_vars_extension_supported() {
     // When REDACTED_ENV_VARS is in the supported list, parsing succeeds
-    let result = decode_job_template(redacted_env_vars_template(), Some(&["REDACTED_ENV_VARS"]));
+    let result = decode_job_template(
+        redacted_env_vars_template(),
+        Some(&["REDACTED_ENV_VARS"]),
+        &CallerLimits::default(),
+    );
     assert!(result.is_ok(), "expected success, got: {:?}", result.err());
 }
 
 #[test]
 fn redacted_env_vars_extension_not_supported_default() {
     // By default (None), no extensions are supported → should fail
-    let err = decode_job_template(redacted_env_vars_template(), None).unwrap_err();
+    let err = decode_job_template(redacted_env_vars_template(), None, &CallerLimits::default())
+        .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
@@ -58,7 +64,12 @@ fn redacted_env_vars_extension_not_supported_default() {
 #[test]
 fn redacted_env_vars_extension_not_supported_empty_list() {
     // Empty supported list → should fail
-    let err = decode_job_template(redacted_env_vars_template(), Some(&[])).unwrap_err();
+    let err = decode_job_template(
+        redacted_env_vars_template(),
+        Some(&[]),
+        &CallerLimits::default(),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
@@ -69,7 +80,12 @@ fn redacted_env_vars_extension_not_supported_empty_list() {
 #[test]
 fn redacted_env_vars_extension_not_supported_wrong_list() {
     // Only EXPR supported, not REDACTED_ENV_VARS → should fail
-    let err = decode_job_template(redacted_env_vars_template(), Some(&["EXPR"])).unwrap_err();
+    let err = decode_job_template(
+        redacted_env_vars_template(),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
@@ -93,7 +109,11 @@ fn redacted_env_vars_with_other_extensions() {
         "steps": [{"name": "step1", "script": {"actions": {"onRun": {"command": "echo"}}}}]
     }"#,
     );
-    let result = decode_job_template(template, Some(&["REDACTED_ENV_VARS", "FEATURE_BUNDLE_1"]));
+    let result = decode_job_template(
+        template,
+        Some(&["REDACTED_ENV_VARS", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    );
     assert!(result.is_ok(), "expected success, got: {:?}", result.err());
 }
 
@@ -108,7 +128,12 @@ fn redacted_env_vars_only_one_of_two_supported() {
         "steps": [{"name": "step1", "script": {"actions": {"onRun": {"command": "echo"}}}}]
     }"#,
     );
-    let err = decode_job_template(template, Some(&["FEATURE_BUNDLE_1"])).unwrap_err();
+    let err = decode_job_template(
+        template,
+        Some(&["FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),

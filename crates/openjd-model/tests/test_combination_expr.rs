@@ -6,7 +6,7 @@
 
 use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::JobParameterInputValues;
-use openjd_model::{create_job, decode_job_template, preprocess_job_parameters};
+use openjd_model::{create_job, decode_job_template, preprocess_job_parameters, CallerLimits};
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -47,7 +47,8 @@ fn make_template(params: &[(&str, &str, &str)], combination: &str) -> String {
 fn iterate(template: &str) -> Result<Vec<openjd_model::types::TaskParameterSet>, String> {
     let v = yaml_val(template);
     let exts = all_exts();
-    let jt = decode_job_template(v, Some(&exts)).map_err(|e| e.to_string())?;
+    let jt =
+        decode_job_template(v, Some(&exts), &CallerLimits::default()).map_err(|e| e.to_string())?;
     let processed = preprocess_job_parameters(
         &jt,
         &JobParameterInputValues::new(),
@@ -61,7 +62,7 @@ fn iterate(template: &str) -> Result<Vec<openjd_model::types::TaskParameterSet>,
         },
     )
     .map_err(|e| e.to_string())?;
-    let job = create_job(&jt, &processed).map_err(|e| e.to_string())?;
+    let job = create_job(&jt, &processed, &CallerLimits::default()).map_err(|e| e.to_string())?;
     let step = &job.steps[0];
     match &step.parameter_space {
         Some(ps) => {
@@ -431,7 +432,8 @@ fn whitespace_only_combination_rejected() {
 fn error_double_comma_rejected() {
     let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(A,,B)");
     let v = yaml_val(&t);
-    let err = decode_job_template(v, None).expect_err("(A,,B) should be rejected");
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("(A,,B) should be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("empty element in combination expression."),
@@ -443,7 +445,8 @@ fn error_double_comma_rejected() {
 fn error_leading_comma_rejected() {
     let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(,A,B)");
     let v = yaml_val(&t);
-    let err = decode_job_template(v, None).expect_err("(,A,B) should be rejected");
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("(,A,B) should be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("empty element in combination expression."),
@@ -455,7 +458,8 @@ fn error_leading_comma_rejected() {
 fn error_trailing_comma_rejected() {
     let t = make_template(&[("A", "INT", "[1,2]"), ("B", "INT", "[3,4]")], "(A,B,)");
     let v = yaml_val(&t);
-    let err = decode_job_template(v, None).expect_err("(A,B,) should be rejected");
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("(A,B,) should be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("empty group in combination expression.")

@@ -33,7 +33,11 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
         DocumentType::Yaml
     };
 
-    let template_value = parse::document_string_to_object(&content, doc_type)?;
+    let template_value = parse::document_string_to_object(
+        &content,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     let version_str = template_value
         .get("specificationVersion")
@@ -46,7 +50,11 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let version = version_str.parse::<openjd_model::TemplateSpecificationVersion>();
     match version {
         Ok(v) if v.is_job_template() => {
-            parse::decode_job_template(template_value.clone(), Some(&supported))?;
+            parse::decode_job_template(
+                template_value.clone(),
+                Some(&supported),
+                &openjd_model::CallerLimits::default(),
+            )?;
         }
         Ok(v) if v.is_environment_template() => {
             parse::decode_environment_template(template_value.clone(), Some(&supported))?;

@@ -7,6 +7,7 @@
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::decode_job_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_yaml::Value {
     serde_yaml::from_str(s).unwrap()
@@ -25,12 +26,13 @@ fn job_with_param(param_json: &str) -> String {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_job_template(v, None).expect("Expected success");
+    decode_job_template(v, None, &CallerLimits::default()).expect("Expected success");
 }
 
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_job_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -1350,7 +1352,7 @@ fn float_param_large_value_roundtrip() {
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}}}]
     }"#,
     );
-    let jt = decode_job_template(template, None).unwrap();
+    let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let result = openjd_model::preprocess_job_parameters(
         &jt,
         &openjd_model::JobParameterInputValues::new(),
@@ -1394,7 +1396,7 @@ fn bug_string_param_allowed_values_byte_vs_char_length() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "3-char string with maxLength=3 should pass: {:?}",
@@ -1422,7 +1424,7 @@ fn string_param_minlength_uses_char_count() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "2-char string with minLength=2 should pass: {:?}",
@@ -1450,7 +1452,7 @@ fn path_param_maxlength_uses_char_count() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "3-char path with maxLength=3 should pass: {:?}",
@@ -1478,7 +1480,7 @@ fn path_param_minlength_uses_char_count() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "2-char path with minLength=2 should pass: {:?}",
@@ -1507,7 +1509,7 @@ fn ui_label_maxlength_uses_char_count() {
                   command: echo
     "#
     ));
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(
         result.is_ok(),
         "64-char label should pass: {:?}",
@@ -1533,7 +1535,7 @@ fn float_param_nan_rejected_by_flexfloat() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(result.is_err(), "NaN must be rejected");
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1560,7 +1562,7 @@ fn float_param_infinity_rejected_by_flexfloat() {
                   command: echo
     "#,
     );
-    let result = decode_job_template(template, None);
+    let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(result.is_err(), "Infinity must be rejected");
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1588,7 +1590,7 @@ fn string_param_maxlength_uses_chars_not_bytes() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#,
     );
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "héllo" is 5 chars but 6 bytes — should be accepted with maxLength=5
@@ -1614,7 +1616,7 @@ fn string_param_minlength_uses_chars_not_bytes() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#,
     );
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "ééé" is 3 chars but 6 bytes — should be rejected with minLength=6
@@ -1640,7 +1642,7 @@ fn path_param_maxlength_uses_chars_not_bytes() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
     }"#,
     );
-    let jt = decode_job_template(v, None).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
 
     // "/tmp/héllo" is 10 chars but 11 bytes — should be accepted with maxLength=10

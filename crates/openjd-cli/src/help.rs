@@ -66,7 +66,11 @@ fn generate_template_help(
     } else {
         DocumentType::Yaml
     };
-    let template_value = parse::document_string_to_object(&content, doc_type)?;
+    let template_value = parse::document_string_to_object(
+        &content,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )?;
 
     let default_exts = vec![
         "TASK_CHUNKING",
@@ -80,8 +84,12 @@ fn generate_template_help(
         None => default_exts,
     };
 
-    let template = parse::decode_job_template(template_value, Some(&supported_exts))
-        .map_err(|e| format!("Invalid job template: {e}"))?;
+    let template = parse::decode_job_template(
+        template_value,
+        Some(&supported_exts),
+        &openjd_model::CallerLimits::default(),
+    )
+    .map_err(|e| format!("Invalid job template: {e}"))?;
 
     Ok(format_help(&template, path))
 }
