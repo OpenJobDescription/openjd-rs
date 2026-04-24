@@ -150,26 +150,38 @@ discovered during evaluation).
 ## Diagnostic Spans
 
 `ValidationError` carries an optional `detail` field with structured diagnostic
-data for programmatic consumers. The `message` field continues to contain the full
-CLI-formatted text (including source pointers) for backwards compatibility.
+data for consumers that need to render their own error presentation (tree viewers,
+IDE extensions, LSP diagnostics). The `message` field contains the complete
+human-readable error text for consumers that don't need structured diagnostics.
 
 ### ErrorDetail
 
 ```rust
 pub struct ValidationError {
+    /// Location of the error in the template structure (e.g., which field
+    /// in the JSON/YAML tree). Used by consumers to navigate to or annotate
+    /// the affected node.
     pub path: Vec<PathElement>,
-    pub message: String,                // full formatted text (CLI-compatible)
-    pub detail: Option<ErrorDetail>,    // structured diagnostic data
+    /// Complete human-readable error text, suitable for direct display.
+    /// Includes source pointers and span context where available.
+    pub message: String,
+    /// Structured diagnostic data decomposing the error into a summary
+    /// and source spans. `None` for errors without source position info
+    /// (e.g., duplicate names, missing required fields, limit violations).
+    pub detail: Option<ErrorDetail>,
 }
 
 pub struct ErrorDetail {
-    /// Clean error summary without source pointers.
+    /// Human-readable error summary without source pointers.
     pub summary: String,
-    /// Individual diagnostic spans within the source text.
+    /// Diagnostic spans identifying specific character ranges in the
+    /// source text where the error occurs.
     pub spans: Vec<DiagnosticSpan>,
 }
 
 pub struct DiagnosticSpan {
+    /// Human-readable description of the diagnostic at this source location.
+    pub summary: String,
     /// The source text containing the error.
     pub source: String,
     /// Byte offset of the error start within source.
@@ -178,8 +190,6 @@ pub struct DiagnosticSpan {
     pub end: usize,
     /// Position of the caret (most relevant character) relative to start.
     pub caret: usize,
-    /// Label for this span.
-    pub label: String,
 }
 ```
 
@@ -203,14 +213,14 @@ ValidationError {
         summary: "Both branches fail in the if/else",
         spans: vec![
             DiagnosticSpan {
+                summary: "if-branch: Cannot use '+' operator with int and string",
                 source: "X + 'a' if cond else Y * 'b'",
                 start: 0, end: 7, caret: 2,
-                label: "if-branch: Cannot use '+' operator with int and string",
             },
             DiagnosticSpan {
+                summary: "else-branch: Cannot use '*' operator with path and string",
                 source: "X + 'a' if cond else Y * 'b'",
                 start: 21, end: 28, caret: 23,
-                label: "else-branch: Cannot use '*' operator with path and string",
             },
         ],
     }),
@@ -226,7 +236,7 @@ present in `ExpressionError` and `FormatStringValidationError`:
 ExpressionError { kind, expr, col_offset, end_col_offset, caret_offset }
   ↓ validation pipeline
 ValidationError {
-    message: e.to_string(),              // CLI pointer text
+    message: e.to_string(),              // complete human-readable text
     detail: ErrorDetail::from(&e),       // structured spans from fields
 }
 ```
