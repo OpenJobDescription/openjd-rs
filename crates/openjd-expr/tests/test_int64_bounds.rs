@@ -145,6 +145,16 @@ fn mul_overflow_negative() {
     );
 }
 
+// === TestInt64ModByOne ===
+#[test]
+fn int64_min_mod_neg1() {
+    assert_eq!(eval("-9223372036854775808 % -1").to_display_string(), "0");
+}
+#[test]
+fn int64_min_mod_1() {
+    assert_eq!(eval("-9223372036854775808 % 1").to_display_string(), "0");
+}
+
 // === TestInt64OverflowPow ===
 #[test]
 fn pow_overflow() {

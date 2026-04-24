@@ -46,7 +46,7 @@ src/
 ├── default_library.rs      Default FunctionLibrary construction
 ├── function_library.rs     FunctionLibrary, FunctionEntry, dispatch
 ├── eval/
-│   ├── mod.rs              evaluate_expression(), evaluate_expression_bounded()
+│   ├── mod.rs              Re-exports ParsedExpression, EvalBuilder, EvalResult, constants
 │   ├── parse.rs            ruff_python_parser integration, AST validation
 │   └── evaluator.rs        AST-walking Evaluator with resource bounds
 └── functions/
@@ -67,18 +67,7 @@ src/
 
 ### Entry Points
 
-```rust
-/// Simplest evaluation — host-native path format, default library, default limits.
-pub fn evaluate_expression(expr: &str, symtab: &SymbolTable) -> Result<ExprValue, ExpressionError>;
-
-/// Evaluation with explicit resource limits, returns metrics.
-pub fn evaluate_expression_bounded(
-    expr: &str, symtab: &SymbolTable,
-    memory_limit: usize, operation_limit: usize,
-) -> Result<EvalResult, ExpressionError>;
-```
-
-For more control, parse once and evaluate with a builder:
+The primary entry point is `ParsedExpression`, which separates parsing from evaluation:
 
 ```rust
 let parsed = ParsedExpression::new("Param.Frame * 2 + 1")?;
@@ -103,10 +92,16 @@ let value = parsed
     .with_operation_limit(1_000_000)
     .with_path_format(PathFormat::Posix)
     .evaluate(&[&job_params, &let_bindings])?;
+
+// Evaluation with resource-usage metrics
+let result = parsed
+    .with_memory_limit(50_000_000)
+    .evaluate_with_metrics(&[&symtab])?;
+// result.value, result.peak_memory, result.operation_count
 ```
 
 `ParsedExpression::new` parses once and exposes symbol/function metadata for validation.
-Any `with_*` call produces a `EvalBuilder` that captures configuration and
+Any `with_*` call produces an `EvalBuilder` that captures configuration and
 defers symbol-table binding until its terminal `.evaluate(&symtabs)` (or
 `.evaluate_with_metrics(&symtabs)`). This covers the use cases that the Python
 implementation handles via optional keyword arguments on `ParsedExpression.evaluate()`

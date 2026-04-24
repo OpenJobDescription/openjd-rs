@@ -79,6 +79,9 @@ pub fn mod_int(_: Ctx, a: &[ExprValue]) -> R {
             if *r == 0 {
                 return Err(ExpressionError::division_by_zero("Modulo"));
             }
+            if *r == 1 || *r == -1 {
+                return Ok(ExprValue::Int(0));
+            }
             let rem = l
                 .checked_rem(*r)
                 .ok_or_else(ExpressionError::integer_overflow)?;

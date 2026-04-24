@@ -37,10 +37,15 @@ const MAX_SUGGESTION_DISTANCE: usize = 5;
 /// Find the closest matching symbols to `name` from `available`.
 /// Returns a formatted suggestion string, or empty string if no close match.
 pub fn suggest_closest(name: &str, available: &[&str]) -> String {
+    let name_len = name.chars().count();
     let mut best_dist = MAX_SUGGESTION_DISTANCE;
     let mut best: Vec<&str> = Vec::new();
 
     for &sym in available {
+        let sym_len = sym.chars().count();
+        if name_len.abs_diff(sym_len) >= MAX_SUGGESTION_DISTANCE {
+            continue;
+        }
         let d = edit_distance(sym, name);
         if d < best_dist {
             best_dist = d;
@@ -121,5 +126,13 @@ mod tests {
     #[test]
     fn test_suggest_empty_available() {
         assert_eq!(suggest_closest("anything", &[]), "");
+    }
+
+    #[test]
+    fn test_suggest_length_difference_rejection() {
+        // "x" (len 1) vs "abcdef" (len 6): length diff is 5, which equals MAX_SUGGESTION_DISTANCE
+        // This should be skipped (distance would be >= 5 anyway)
+        let s = suggest_closest("x", &["abcdef"]);
+        assert_eq!(s, "");
     }
 }

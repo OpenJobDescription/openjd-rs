@@ -84,7 +84,7 @@ pub enum ExpressionErrorKind {
     FloatError        { message: String },
     IndexOutOfBounds  { message: String },
     MemoryLimitExceeded { used: usize, limit: usize },
-    OperationLimitExceeded,
+    OperationLimitExceeded { count: usize, limit: usize },
     UnsupportedSyntax { feature: String },
     ExplicitFail(String),
     ParseError(String),
@@ -102,7 +102,7 @@ pub enum ExpressionErrorKind {
 | `FloatError` | Float operation produces NaN or infinity |
 | `IndexOutOfBounds` | List or range index outside valid range |
 | `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit |
-| `OperationLimitExceeded` | Operation count exceeds configured limit |
+| `OperationLimitExceeded` | Operation count exceeds configured limit; reports the count and limit |
 | `UnsupportedSyntax` | Valid Python syntax not supported by the expression language |
 | `ExplicitFail` | The `fail()` function was called |
 | `ParseError` | Expression could not be parsed |

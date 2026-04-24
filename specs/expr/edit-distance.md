@@ -47,6 +47,16 @@ enough that unrelated names (`x` vs `ReallyDifferentName`) don't produce noisy
 suggestions, large enough to cover typical typos in identifiers up to ~20 characters
 (distance 5 covers a misplaced prefix plus a couple of edits).
 
+### Length-difference early rejection
+
+Before computing the full edit distance for a candidate, `suggest_closest` checks
+whether the absolute difference in character lengths between `name` and the candidate
+is ≥ `MAX_SUGGESTION_DISTANCE`. If so, the candidate is skipped. This is sound because
+Levenshtein distance is always ≥ the length difference, so such candidates can never
+be within the threshold. The check uses `>=` (not `>`) because `best_dist` starts at
+`MAX_SUGGESTION_DISTANCE` and only distances strictly less than `best_dist` are
+accepted.
+
 ## Call Sites
 
 Two places in the crate invoke `suggest_closest`:
@@ -59,11 +69,3 @@ Two places in the crate invoke `suggest_closest`:
 
 In both cases the suggestion is appended to the structured error message and rendered
 in the caret-annotated error output.
-
-## Future Work
-
-`suggest_closest` currently runs a full `edit_distance` against every candidate. A
-length-difference early rejection (skip any candidate where `|len(name) − len(cand)|
-> MAX_SUGGESTION_DISTANCE`) would cut the common case in half without changing
-behavior. Not yet implemented; see the quality evaluation report's P4
-recommendations.
