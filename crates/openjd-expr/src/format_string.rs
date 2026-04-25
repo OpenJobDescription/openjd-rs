@@ -158,7 +158,7 @@ impl FormatString {
                     input: self.raw.clone(),
                     start,
                     end,
-                    expression_error: Some(e),
+                    expression_error: Some(Box::new(e)),
                 });
             }
         }
@@ -483,7 +483,7 @@ pub struct FormatStringValidationError {
     pub end: usize,
     /// The original expression error, if available. Contains sub_errors
     /// for compound failures (e.g., if/else where both branches fail).
-    pub expression_error: Option<ExpressionError>,
+    pub expression_error: Option<Box<ExpressionError>>,
 }
 
 impl std::fmt::Display for FormatStringValidationError {

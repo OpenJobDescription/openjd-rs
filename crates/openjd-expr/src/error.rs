@@ -71,26 +71,26 @@ pub enum ExpressionErrorKind {
 /// for caret-style error formatting.
 #[derive(Debug, Clone)]
 pub struct ExpressionError {
-    kind: ExpressionErrorKind,
+    kind: Box<ExpressionErrorKind>,
     expr: Option<String>,
     col_offset: Option<usize>,
     end_col_offset: Option<usize>,
     /// Position of `^` relative to col_offset. None = 0 (start of span).
     caret_offset: Option<usize>,
     /// Sub-errors for compound failures (e.g., both branches of an if/else).
-    sub_errors: Vec<ExpressionError>,
+    sub_errors: Option<Vec<ExpressionError>>,
 }
 
 impl ExpressionError {
     /// Create an error from a structured kind.
     pub fn from_kind(kind: ExpressionErrorKind) -> Self {
         Self {
-            kind,
+            kind: Box::new(kind),
             expr: None,
             col_offset: None,
             end_col_offset: None,
             caret_offset: None,
-            sub_errors: Vec::new(),
+            sub_errors: None,
         }
     }
 
@@ -165,12 +165,17 @@ impl ExpressionError {
 
     /// Sub-errors for compound failures (e.g., both branches of an if/else).
     pub fn sub_errors(&self) -> &[ExpressionError] {
-        &self.sub_errors
+        match &self.sub_errors {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
     }
 
     /// Attach sub-errors (consumes and returns self for chaining).
     pub fn with_sub_errors(mut self, sub_errors: Vec<ExpressionError>) -> Self {
-        self.sub_errors = sub_errors;
+        if !sub_errors.is_empty() {
+            self.sub_errors = Some(sub_errors);
+        }
         self
     }
 
