@@ -158,6 +158,7 @@ impl FormatString {
                     input: self.raw.clone(),
                     start,
                     end,
+                    expression_error: Some(e),
                 });
             }
         }
@@ -480,6 +481,9 @@ pub struct FormatStringValidationError {
     pub start: usize,
     /// Byte offset of the `}}` that closes the failing interpolation.
     pub end: usize,
+    /// The original expression error, if available. Contains sub_errors
+    /// for compound failures (e.g., if/else where both branches fail).
+    pub expression_error: Option<ExpressionError>,
 }
 
 impl std::fmt::Display for FormatStringValidationError {
