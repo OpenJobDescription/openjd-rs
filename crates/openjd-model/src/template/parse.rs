@@ -7,7 +7,7 @@
 
 use std::str::FromStr;
 
-use crate::error::ModelError;
+use crate::error::{ModelError, ValidationErrors};
 use crate::template::validate_v2023_09 as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
@@ -33,9 +33,11 @@ pub fn document_string_to_object(
 ) -> Result<serde_json::Value, ModelError> {
     if let Some(max) = caller_limits.max_template_size {
         if document.len() > max {
-            return Err(ModelError::ModelValidation(format!(
-                "Template document size ({} bytes) exceeds caller limit of {max} bytes.",
-                document.len()
+            return Err(ModelError::ModelValidation(ValidationErrors::single(
+                format!(
+                    "Template document size ({} bytes) exceeds caller limit of {max} bytes.",
+                    document.len()
+                ),
             )));
         }
     }
@@ -473,7 +475,7 @@ mod tests {
             "steps": [{{"name": "{long_name}", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
         }}"#,
         ));
-        let err = decode_job_template(v, None).unwrap_err();
+        let err = decode_job_template(v, None, &Default::default()).unwrap_err();
         let errors = match &err {
             crate::error::ModelError::ModelValidation(e) => e,
             other => panic!("expected ModelValidation, got: {other}"),
@@ -513,7 +515,7 @@ mod tests {
             "steps": [{"name": "s"}]
         }"#,
         );
-        let err = decode_job_template(v, None).unwrap_err();
+        let err = decode_job_template(v, None, &Default::default()).unwrap_err();
         let errors = match &err {
             crate::error::ModelError::ModelValidation(e) => e,
             other => panic!("expected ModelValidation, got: {other}"),
@@ -541,7 +543,7 @@ mod tests {
             "steps": [{"name": "s", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
         );
-        let err = decode_job_template(v, None).unwrap_err();
+        let err = decode_job_template(v, None, &Default::default()).unwrap_err();
         let errors = match &err {
             crate::error::ModelError::ModelValidation(e) => e,
             other => panic!("expected ModelValidation, got: {other}"),

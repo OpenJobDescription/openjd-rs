@@ -115,9 +115,11 @@ pub fn create_job(
             total = total.saturating_add(step_tasks);
         }
         if total > max_task_count {
-            return Err(ModelError::ModelValidation(format!(
-                "Total task count ({total}) exceeds caller limit of {max_task_count}."
-            )));
+            return Err(ModelError::ModelValidation(
+                crate::error::ValidationErrors::single(format!(
+                    "Total task count ({total}) exceeds caller limit of {max_task_count}."
+                )),
+            ));
         }
     }
 
@@ -139,10 +141,12 @@ pub fn create_job(
                 .map(|s| s.len())
                 .unwrap_or(0);
             if size > max {
-                return Err(ModelError::ModelValidation(format!(
-                    "Step '{}' script size ({size} bytes) exceeds caller limit of {max} bytes.",
-                    step.name
-                )));
+                return Err(ModelError::ModelValidation(
+                    crate::error::ValidationErrors::single(format!(
+                        "Step '{}' script size ({size} bytes) exceeds caller limit of {max} bytes.",
+                        step.name
+                    )),
+                ));
             }
         }
     }
@@ -156,10 +160,12 @@ pub fn create_job(
         for env in all_envs {
             let size = serde_json::to_string(env).map(|s| s.len()).unwrap_or(0);
             if size > max {
-                return Err(ModelError::ModelValidation(format!(
-                    "Environment '{}' size ({size} bytes) exceeds caller limit of {max} bytes.",
-                    env.name
-                )));
+                return Err(ModelError::ModelValidation(
+                    crate::error::ValidationErrors::single(format!(
+                        "Environment '{}' size ({size} bytes) exceeds caller limit of {max} bytes.",
+                        env.name
+                    )),
+                ));
             }
         }
     }

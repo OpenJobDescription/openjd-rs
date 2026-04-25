@@ -139,6 +139,13 @@ impl std::fmt::Display for ValidationErrors {
 }
 
 impl ValidationErrors {
+    /// Create a `ValidationErrors` with a single root-level message.
+    pub fn single(msg: impl Into<String>) -> Self {
+        let mut ve = Self::default();
+        ve.add(&[], msg);
+        ve
+    }
+
     /// Add an error at the given path.
     pub fn add(&mut self, path: &[PathElement], msg: impl Into<String>) {
         self.errors.push(ValidationError {
