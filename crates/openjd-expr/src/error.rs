@@ -77,6 +77,8 @@ pub struct ExpressionError {
     end_col_offset: Option<usize>,
     /// Position of `^` relative to col_offset. None = 0 (start of span).
     caret_offset: Option<usize>,
+    /// Sub-errors for compound failures (e.g., both branches of an if/else).
+    sub_errors: Vec<ExpressionError>,
 }
 
 impl ExpressionError {
@@ -88,6 +90,7 @@ impl ExpressionError {
             col_offset: None,
             end_col_offset: None,
             caret_offset: None,
+            sub_errors: Vec::new(),
         }
     }
 
@@ -158,6 +161,17 @@ impl ExpressionError {
     /// The human-readable error message (the Display output of the kind).
     pub fn message(&self) -> String {
         self.kind.to_string()
+    }
+
+    /// Sub-errors for compound failures (e.g., both branches of an if/else).
+    pub fn sub_errors(&self) -> &[ExpressionError] {
+        &self.sub_errors
+    }
+
+    /// Attach sub-errors (consumes and returns self for chaining).
+    pub fn with_sub_errors(mut self, sub_errors: Vec<ExpressionError>) -> Self {
+        self.sub_errors = sub_errors;
+        self
     }
 
     /// The expression source text, if attached.
