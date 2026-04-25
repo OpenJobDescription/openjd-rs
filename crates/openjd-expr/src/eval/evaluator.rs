@@ -841,7 +841,7 @@ impl<'a> Evaluator<'a> {
                     append_sub_error(&mut msg, &be, false);
                     msg.push_str(&format!("  else-branch: {}\n", oe.message()));
                     append_sub_error(&mut msg, &oe, true);
-                    let mut err = ExpressionError::new(msg);
+                    let mut err = ExpressionError::new(msg).with_sub_errors(vec![be, oe]);
                     if let Some(src) = self.expr_source {
                         use ruff_text_size::Ranged;
                         let start = i.range().start().to_usize();
