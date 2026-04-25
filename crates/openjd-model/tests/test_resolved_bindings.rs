@@ -23,8 +23,8 @@ impl TestDirs {
     }
 }
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 /// A step with EXPR let bindings should serialize resolvedSymTab

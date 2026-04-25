@@ -36,7 +36,7 @@ pub fn print_cli_result(result: &dyn CliResult, format: &str) {
         ),
         "yaml" => print!(
             "{}",
-            serde_yaml::to_string(&result.to_json_value()).unwrap()
+            serde_saphyr::to_string(&result.to_json_value()).unwrap()
         ),
         _ => println!("{result}"),
     }

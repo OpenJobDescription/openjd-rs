@@ -96,7 +96,7 @@ fn create_job_with_windows_path_parameter() {
     // Verify the full create_job pipeline works with Windows path format.
     // Job name resolution is hardcoded to POSIX, so we test that the pipeline
     // succeeds and the STRING parameter value is preserved correctly.
-    let v: serde_yaml::Value = serde_yaml::from_str(
+    let v: serde_json::Value = serde_saphyr::from_str(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{{ Param.Dir }}",

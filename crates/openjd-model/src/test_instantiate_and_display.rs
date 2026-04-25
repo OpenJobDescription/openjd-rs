@@ -7,8 +7,8 @@ use crate::CallerLimits;
 use crate::JobParameterInputValues;
 use crate::{create_job, decode_job_template, preprocess_job_parameters};
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn preprocess(

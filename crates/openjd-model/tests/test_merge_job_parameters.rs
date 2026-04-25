@@ -27,11 +27,11 @@ impl TestDirs {
     }
 }
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
-fn job_template(params: &str) -> serde_yaml::Value {
+fn job_template(params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",
@@ -42,7 +42,7 @@ fn job_template(params: &str) -> serde_yaml::Value {
     ))
 }
 
-fn job_template_no_params() -> serde_yaml::Value {
+fn job_template_no_params() -> serde_json::Value {
     yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -52,7 +52,7 @@ fn job_template_no_params() -> serde_yaml::Value {
     )
 }
 
-fn env_template(name: &str, params: &str) -> serde_yaml::Value {
+fn env_template(name: &str, params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "environment-2023-09",
@@ -1196,7 +1196,7 @@ fn input_value_rejected_by_env_only_constraint_no_job_constraint() {
 // merge — LIST and BOOL parameter types (requires EXPR extension)
 // ══════════════════════════════════════════════════════════════
 
-fn expr_job_template(params: &str) -> serde_yaml::Value {
+fn expr_job_template(params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",
@@ -1208,7 +1208,7 @@ fn expr_job_template(params: &str) -> serde_yaml::Value {
     ))
 }
 
-fn expr_env_template(name: &str, params: &str) -> serde_yaml::Value {
+fn expr_env_template(name: &str, params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "environment-2023-09",

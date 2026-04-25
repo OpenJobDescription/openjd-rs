@@ -70,17 +70,17 @@ pub enum JobParameterDefinition {
     LIST_LIST_INT(super::expr_parameters::JobListListIntParameterDefinition),
 }
 
-/// Remove the `type` field from a YAML mapping before deserializing into a struct.
-fn strip_type_field(mut value: serde_yaml::Value) -> serde_yaml::Value {
-    if let Some(mapping) = value.as_mapping_mut() {
-        mapping.remove(serde_yaml::Value::String("type".to_string()));
+/// Remove the `type` field from a JSON object before deserializing into a struct.
+fn strip_type_field(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("type");
     }
     value
 }
 
 impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let value = serde_json::Value::deserialize(deserializer)?;
         let type_str = value
             .get("type")
             .and_then(|v| v.as_str())
@@ -93,40 +93,40 @@ impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
         let stripped = strip_type_field(value);
 
         match normalized.as_str() {
-            "STRING" => serde_yaml::from_value(stripped)
+            "STRING" => serde_json::from_value(stripped)
                 .map(Self::STRING)
                 .map_err(serde::de::Error::custom),
-            "INT" => serde_yaml::from_value(stripped)
+            "INT" => serde_json::from_value(stripped)
                 .map(Self::INT)
                 .map_err(serde::de::Error::custom),
-            "FLOAT" => serde_yaml::from_value(stripped)
+            "FLOAT" => serde_json::from_value(stripped)
                 .map(Self::FLOAT)
                 .map_err(serde::de::Error::custom),
-            "PATH" => serde_yaml::from_value(stripped)
+            "PATH" => serde_json::from_value(stripped)
                 .map(Self::PATH)
                 .map_err(serde::de::Error::custom),
-            "BOOL" => serde_yaml::from_value(stripped)
+            "BOOL" => serde_json::from_value(stripped)
                 .map(Self::BOOL)
                 .map_err(serde::de::Error::custom),
-            "RANGE_EXPR" => serde_yaml::from_value(stripped)
+            "RANGE_EXPR" => serde_json::from_value(stripped)
                 .map(Self::RANGE_EXPR)
                 .map_err(serde::de::Error::custom),
-            "LIST[STRING]" => serde_yaml::from_value(stripped)
+            "LIST[STRING]" => serde_json::from_value(stripped)
                 .map(Self::LIST_STRING)
                 .map_err(serde::de::Error::custom),
-            "LIST[PATH]" => serde_yaml::from_value(stripped)
+            "LIST[PATH]" => serde_json::from_value(stripped)
                 .map(Self::LIST_PATH)
                 .map_err(serde::de::Error::custom),
-            "LIST[INT]" => serde_yaml::from_value(stripped)
+            "LIST[INT]" => serde_json::from_value(stripped)
                 .map(Self::LIST_INT)
                 .map_err(serde::de::Error::custom),
-            "LIST[FLOAT]" => serde_yaml::from_value(stripped)
+            "LIST[FLOAT]" => serde_json::from_value(stripped)
                 .map(Self::LIST_FLOAT)
                 .map_err(serde::de::Error::custom),
-            "LIST[BOOL]" => serde_yaml::from_value(stripped)
+            "LIST[BOOL]" => serde_json::from_value(stripped)
                 .map(Self::LIST_BOOL)
                 .map_err(serde::de::Error::custom),
-            "LIST[LIST[INT]]" => serde_yaml::from_value(stripped)
+            "LIST[LIST[INT]]" => serde_json::from_value(stripped)
                 .map(Self::LIST_LIST_INT)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(format!(
@@ -673,9 +673,9 @@ pub struct FlexInt(pub i64);
 
 impl<'de> Deserialize<'de> for FlexInt {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => {
+            serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     Ok(FlexInt(i))
                 } else if let Some(f) = n.as_f64() {
@@ -690,15 +690,15 @@ impl<'de> Deserialize<'de> for FlexInt {
                     Err(serde::de::Error::custom("Invalid number"))
                 }
             }
-            serde_yaml::Value::String(s) => s
+            serde_json::Value::String(s) => s
                 .trim()
                 .parse::<i64>()
                 .map(FlexInt)
                 .map_err(|_| serde::de::Error::custom(format!("Cannot parse '{s}' as integer"))),
-            serde_yaml::Value::Bool(_) => {
+            serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected integer, got boolean"))
             }
-            serde_yaml::Value::Null => Err(serde::de::Error::custom("Expected integer, got null")),
+            serde_json::Value::Null => Err(serde::de::Error::custom("Expected integer, got null")),
             _ => Err(serde::de::Error::custom("Expected integer or string")),
         }
     }
@@ -729,9 +729,9 @@ pub(crate) fn reject_nan_inf(f: f64) -> Result<(), String> {
 
 impl<'de> Deserialize<'de> for FlexFloat {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => {
+            serde_json::Value::Number(n) => {
                 if let Some(f) = n.as_f64() {
                     reject_nan_inf(f).map_err(serde::de::Error::custom)?;
                     Ok(FlexFloat(f, None))
@@ -739,17 +739,17 @@ impl<'de> Deserialize<'de> for FlexFloat {
                     Err(serde::de::Error::custom("Invalid number"))
                 }
             }
-            serde_yaml::Value::String(s) => {
+            serde_json::Value::String(s) => {
                 let f = s.trim().parse::<f64>().map_err(|_| {
                     serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
                 })?;
                 reject_nan_inf(f).map_err(serde::de::Error::custom)?;
                 Ok(FlexFloat(f, Some(s.trim().to_string())))
             }
-            serde_yaml::Value::Bool(_) => {
+            serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected number, got boolean"))
             }
-            serde_yaml::Value::Null => Err(serde::de::Error::custom("Expected number, got null")),
+            serde_json::Value::Null => Err(serde::de::Error::custom("Expected number, got null")),
             _ => Err(serde::de::Error::custom("Expected number or string")),
         }
     }

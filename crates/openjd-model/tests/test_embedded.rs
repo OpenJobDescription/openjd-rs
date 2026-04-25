@@ -11,11 +11,11 @@
 use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
-fn job_with_embedded(embedded_json: &str) -> serde_yaml::Value {
+fn job_with_embedded(embedded_json: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",
@@ -31,7 +31,7 @@ fn job_with_embedded(embedded_json: &str) -> serde_yaml::Value {
     ))
 }
 
-fn env_with_embedded(embedded_json: &str) -> serde_yaml::Value {
+fn env_with_embedded(embedded_json: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "environment-2023-09",

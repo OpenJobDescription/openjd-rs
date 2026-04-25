@@ -87,7 +87,7 @@ use openjd_model::{
 
 #[test]
 fn job_name_with_path_parent() {
-    let v: serde_yaml::Value = serde_yaml::from_str(
+    let v: serde_json::Value = serde_saphyr::from_str(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "{{ path(Param.Dir).parent }}",

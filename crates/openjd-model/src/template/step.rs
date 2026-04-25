@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn resolve_syntax_sugar_returns_error_for_malformed_format_string() {
-        let step: StepTemplate = serde_yaml::from_str(
+        let step: StepTemplate = serde_saphyr::from_str(
             r#"
             name: TestStep
             bash:
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn resolve_syntax_sugar_ok_for_valid_script() {
-        let step: StepTemplate = serde_yaml::from_str(
+        let step: StepTemplate = serde_saphyr::from_str(
             r#"
             name: TestStep
             bash:

@@ -9,11 +9,11 @@
 use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
-fn redacted_env_vars_template() -> serde_yaml::Value {
+fn redacted_env_vars_template() -> serde_json::Value {
     yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -146,7 +146,7 @@ fn redacted_env_vars_only_one_of_two_supported() {
 // Ported from Python test_template_extensions_list (parametrized for env templates)
 // ══════════════════════════════════════════════════════════════
 
-fn redacted_env_vars_env_template() -> serde_yaml::Value {
+fn redacted_env_vars_env_template() -> serde_json::Value {
     yaml_val(
         r#"{
         "specificationVersion": "environment-2023-09",

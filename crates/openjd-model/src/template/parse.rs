@@ -30,7 +30,7 @@ pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
     caller_limits: &CallerLimits,
-) -> Result<serde_yaml::Value, ModelError> {
+) -> Result<serde_json::Value, ModelError> {
     if let Some(max) = caller_limits.max_template_size {
         if document.len() > max {
             return Err(ModelError::ModelValidation(format!(
@@ -40,23 +40,25 @@ pub fn document_string_to_object(
         }
     }
 
-    let parsed = match doc_type {
-        DocumentType::Json => {
-            let v: serde_json::Value = serde_json::from_str(document).map_err(|e| {
-                ModelError::DecodeValidation(format!(
-                    "The document is not a valid JSON document consisting of key-value pairs. {e}"
-                ))
-            })?;
-            serde_yaml::to_value(v).map_err(|e| ModelError::DecodeValidation(e.to_string()))?
-        }
-        DocumentType::Yaml => serde_yaml::from_str(document).map_err(|e| {
+    let parsed: serde_json::Value = match doc_type {
+        DocumentType::Json => serde_json::from_str(document).map_err(|e| {
             ModelError::DecodeValidation(format!(
-                "The document is not a valid YAML document consisting of key-value pairs. {e}"
+                "The document is not a valid JSON document consisting of key-value pairs. {e}"
             ))
         })?,
+        DocumentType::Yaml => {
+            let options = serde_saphyr::options! {
+                strict_booleans: true,
+            };
+            serde_saphyr::from_str_with_options(document, options).map_err(|e| {
+                ModelError::DecodeValidation(format!(
+                    "The document is not a valid YAML document consisting of key-value pairs. {e}"
+                ))
+            })?
+        }
     };
 
-    if !parsed.is_mapping() {
+    if !parsed.is_object() {
         return Err(ModelError::DecodeValidation(format!(
             "The document is not a valid {doc_type:?} document consisting of key-value pairs."
         )));
@@ -67,7 +69,7 @@ pub fn document_string_to_object(
 
 /// Decode and validate a job template from a YAML value.
 pub fn decode_job_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
     caller_limits: &CallerLimits,
 ) -> Result<JobTemplate, ModelError> {
@@ -99,7 +101,7 @@ pub fn decode_job_template(
         )));
     }
 
-    let jt: JobTemplate = serde_yaml::from_value(template)
+    let jt: JobTemplate = serde_json::from_value(template)
         .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
 
     // Build extension set: intersection of template-requested and supported
@@ -154,7 +156,7 @@ pub fn decode_job_template(
 
 /// Decode and validate an environment template from a YAML value.
 pub fn decode_environment_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
 ) -> Result<EnvironmentTemplate, ModelError> {
     let version_str = template
@@ -183,7 +185,7 @@ pub fn decode_environment_template(
         )));
     }
 
-    let et: EnvironmentTemplate = serde_yaml::from_value(template)
+    let et: EnvironmentTemplate = serde_json::from_value(template)
         .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
 
     // Build extension set: intersection of template-requested and supported
@@ -246,7 +248,7 @@ pub enum DecodedTemplate {
 
 /// Auto-detect whether a template is a job or environment template and decode it.
 pub fn decode_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
     caller_limits: &CallerLimits,
 ) -> Result<DecodedTemplate, ModelError> {
@@ -279,8 +281,8 @@ pub fn decode_template(
 mod tests {
     use super::*;
 
-    fn yaml_val(s: &str) -> serde_yaml::Value {
-        serde_yaml::from_str(s).unwrap()
+    fn yaml_val(s: &str) -> serde_json::Value {
+        serde_saphyr::from_str(s).unwrap()
     }
 
     // -- document_string_to_object --

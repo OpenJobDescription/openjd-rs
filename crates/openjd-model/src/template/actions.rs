@@ -30,7 +30,7 @@ pub enum CancelationMode {
 impl<'de> Deserialize<'de> for CancelationMode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use std::collections::HashMap;
-        let map = HashMap::<String, serde_yaml::Value>::deserialize(deserializer)?;
+        let map = HashMap::<String, serde_json::Value>::deserialize(deserializer)?;
         let mode = map
             .get("mode")
             .and_then(|v| v.as_str())

@@ -7,8 +7,8 @@ use openjd_model::{
     create_job, decode_job_template, preprocess_job_parameters, CallerLimits, PathParameterOptions,
 };
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn test_tmp_dir() -> &'static str {

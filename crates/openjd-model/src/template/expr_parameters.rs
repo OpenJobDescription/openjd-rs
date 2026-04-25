@@ -95,10 +95,10 @@ pub struct BoolValue(pub bool);
 
 impl<'de> Deserialize<'de> for BoolValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Bool(b) => Ok(BoolValue(*b)),
-            serde_yaml::Value::Number(n) => {
+            serde_json::Value::Bool(b) => Ok(BoolValue(*b)),
+            serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     match i {
                         0 => Ok(BoolValue(false)),
@@ -117,7 +117,7 @@ impl<'de> Deserialize<'de> for BoolValue {
                     Err(serde::de::Error::custom("Invalid bool value"))
                 }
             }
-            serde_yaml::Value::String(s) => match s.to_lowercase().as_str() {
+            serde_json::Value::String(s) => match s.to_lowercase().as_str() {
                 "true" | "yes" | "on" | "1" => Ok(BoolValue(true)),
                 "false" | "no" | "off" | "0" => Ok(BoolValue(false)),
                 _ => Err(serde::de::Error::custom(format!(

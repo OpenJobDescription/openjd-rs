@@ -11,8 +11,8 @@
 use openjd_model::decode_job_template;
 use openjd_model::CallerLimits;
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn job_with_param_space(ps_json: &str) -> String {

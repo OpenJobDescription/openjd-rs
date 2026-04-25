@@ -9,8 +9,8 @@ use openjd_model::parse::{document_string_to_object, DocumentType};
 use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn check_parse_err(doc: &str, doc_type: DocumentType, expected: &[&str]) {

@@ -8,8 +8,8 @@
 
 use openjd_model::decode_environment_template;
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn decode_ok(s: &str) {
@@ -230,7 +230,7 @@ fn test_environment_is_none() {
         "specificationVersion": "environment-2023-09",
         "environment": null
     }"#,
-        &["missing field `name`"],
+        &["invalid type: null, expected struct Environment"],
     );
 }
 

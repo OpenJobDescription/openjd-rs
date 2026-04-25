@@ -31,8 +31,8 @@ pub fn parse_cli_parameters(
                 if path.extension().and_then(|e| e.to_str()) == Some("json") {
                     serde_json::from_str(&content)?
                 } else {
-                    let v: serde_yaml::Value = serde_yaml::from_str(&content)?;
-                    serde_json::to_value(v)?
+                    let v: serde_json::Value = serde_saphyr::from_str(&content)?;
+                    v
                 };
             if let Some(obj) = value.as_object() {
                 for (k, v) in obj {
@@ -124,8 +124,8 @@ pub fn parse_tasks_arg(
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
             serde_json::from_str(&content)?
         } else {
-            let v: serde_yaml::Value = serde_yaml::from_str(&content)?;
-            serde_json::to_value(v)?
+            let v: serde_json::Value = serde_saphyr::from_str(&content)?;
+            v
         }
     } else {
         serde_json::from_str(arg)

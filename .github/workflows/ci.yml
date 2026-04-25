@@ -28,8 +28,11 @@ jobs:
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
-  clippy:
-    name: Clippy (${{ matrix.os }})
+  # Build, test, and conformance share a single release-profile target/ cache.
+  # This avoids maintaining separate debug and release caches for the same
+  # workspace and keeps the total cache footprint well under 10 GB.
+  build-test:
+    name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,39 +51,19 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: rust-clippy-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            rust-clippy-${{ matrix.os }}-
+            rust-release-${{ matrix.os }}-
       - name: Run cargo clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+        run: cargo clippy --release --all-features --all-targets --workspace -- -D warnings
       - name: Run helper clippy
-        run: cargo clippy --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
-
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: rust-build-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            rust-build-${{ matrix.os }}-
+        run: cargo clippy --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
       - name: Build release binary
         run: cargo build --release
+      - name: Run tests
+        run: cargo test --release --workspace
+      - name: Run helper integration tests
+        run: cargo test --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
@@ -90,37 +73,9 @@ jobs:
             target/release/openjd-rs.exe
           if-no-files-found: error
 
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup override set stable
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: rust-test-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            rust-test-${{ matrix.os }}-
-      - name: Run tests
-        run: cargo test --workspace
-      - name: Run helper integration tests
-        run: cargo test --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
-
   conformance:
     name: Conformance (${{ matrix.os }})
-    needs: build
+    needs: build-test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -260,8 +215,8 @@ jobs:
         env:
           OPENJD_TEST_WIN_USER_NAME: openjdtestuser
         run: |
-          cargo test -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
-          cargo test -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
+          cargo test --release -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
+          cargo test --release -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
       - name: Remove test user
         if: always()
         run: net user openjdtestuser /delete

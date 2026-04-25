@@ -27,9 +27,9 @@ struct Scenario {
     run_on: String,
     job_template_file: String,
     #[serde(default)]
-    job_parameters: serde_yaml::Value,
+    job_parameters: serde_json::Value,
     #[serde(default)]
-    path_mapping_rules: Vec<serde_yaml::Value>,
+    path_mapping_rules: Vec<serde_json::Value>,
     #[serde(default)]
     step: Option<String>,
     #[serde(default)]
@@ -63,22 +63,21 @@ fn should_run(run_on: &str) -> bool {
     }
 }
 
-fn yaml_to_input_values(val: &serde_yaml::Value) -> JobParameterInputValues {
+fn yaml_to_input_values(val: &serde_json::Value) -> JobParameterInputValues {
     let mut result = HashMap::new();
-    if let Some(map) = val.as_mapping() {
+    if let Some(map) = val.as_object() {
         for (k, v) in map {
-            let name = k.as_str().unwrap().to_string();
             let expr_val = yaml_to_expr_value(v);
-            result.insert(name, expr_val);
+            result.insert(k.clone(), expr_val);
         }
     }
     result
 }
 
-fn yaml_to_expr_value(v: &serde_yaml::Value) -> openjd_expr::ExprValue {
+fn yaml_to_expr_value(v: &serde_json::Value) -> openjd_expr::ExprValue {
     match v {
-        serde_yaml::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
-        serde_yaml::Value::Number(n) => {
+        serde_json::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
+        serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 openjd_expr::ExprValue::Int(i)
             } else if let Some(f) = n.as_f64() {
@@ -87,8 +86,8 @@ fn yaml_to_expr_value(v: &serde_yaml::Value) -> openjd_expr::ExprValue {
                 openjd_expr::ExprValue::String(n.to_string())
             }
         }
-        serde_yaml::Value::Bool(b) => openjd_expr::ExprValue::Bool(*b),
-        serde_yaml::Value::Sequence(seq) => {
+        serde_json::Value::Bool(b) => openjd_expr::ExprValue::Bool(*b),
+        serde_json::Value::Array(seq) => {
             let items: Vec<openjd_expr::ExprValue> = seq.iter().map(yaml_to_expr_value).collect();
             if items.is_empty() {
                 return openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::STRING)
@@ -111,11 +110,11 @@ fn yaml_to_expr_value(v: &serde_yaml::Value) -> openjd_expr::ExprValue {
     }
 }
 
-fn parse_path_mapping_rules(rules: &[serde_yaml::Value]) -> Vec<PathMappingRule> {
+fn parse_path_mapping_rules(rules: &[serde_json::Value]) -> Vec<PathMappingRule> {
     rules
         .iter()
         .filter_map(|r| {
-            let map = r.as_mapping()?;
+            let map = r.as_object()?;
             let fmt = map.get("source_path_format")?.as_str()?;
             let src = map.get("source_path")?.as_str()?;
             let dst = map.get("destination_path")?.as_str()?;
@@ -135,7 +134,7 @@ fn parse_path_mapping_rules(rules: &[serde_yaml::Value]) -> Vec<PathMappingRule>
 
 async fn run_scenario(scenario_path: &Path) {
     let scenario_text = std::fs::read_to_string(scenario_path).unwrap();
-    let scenario: Scenario = serde_yaml::from_str(&scenario_text).unwrap();
+    let scenario: Scenario = serde_saphyr::from_str(&scenario_text).unwrap();
 
     if !should_run(&scenario.run_on) {
         eprintln!(
@@ -151,12 +150,12 @@ async fn run_scenario(scenario_path: &Path) {
         .unwrap()
         .join(&scenario.job_template_file);
     let template_text = std::fs::read_to_string(&template_path).unwrap();
-    let template_yaml: serde_yaml::Value = serde_yaml::from_str(&template_text).unwrap();
+    let template_yaml: serde_json::Value = serde_saphyr::from_str(&template_text).unwrap();
 
     // Get extensions
     let extensions: Vec<String> = template_yaml
         .get("extensions")
-        .and_then(|v| v.as_sequence())
+        .and_then(|v| v.as_array())
         .map(|seq| {
             seq.iter()
                 .filter_map(|v| v.as_str().map(String::from))

@@ -9,8 +9,8 @@ use openjd_expr::path_mapping::PathFormat;
 use openjd_model::decode_job_template;
 use openjd_model::CallerLimits;
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
 fn job_with_param(param_json: &str) -> String {
@@ -1538,8 +1538,11 @@ fn float_param_nan_rejected_by_flexfloat() {
     let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(result.is_err(), "NaN must be rejected");
     let msg = result.unwrap_err().to_string();
+    // serde-saphyr converts YAML .nan to a string since JSON has no NaN,
+    // so FlexFloat rejects it as an unparseable float string.
     assert!(
-        msg.contains("NaN is not a valid float value"),
+        msg.contains("NaN is not a valid float value")
+            || msg.contains("Cannot parse '.nan' as float"),
         "Expected NaN rejection message, got: {msg}"
     );
 }
@@ -1565,8 +1568,11 @@ fn float_param_infinity_rejected_by_flexfloat() {
     let result = decode_job_template(template, None, &CallerLimits::default());
     assert!(result.is_err(), "Infinity must be rejected");
     let msg = result.unwrap_err().to_string();
+    // serde-saphyr converts YAML .inf to a string since JSON has no Infinity,
+    // so FlexFloat rejects it as an unparseable float string.
     assert!(
-        msg.contains("Infinity is not a valid float value"),
+        msg.contains("Infinity is not a valid float value")
+            || msg.contains("Cannot parse '.inf' as float"),
         "Expected Infinity rejection message, got: {msg}"
     );
 }

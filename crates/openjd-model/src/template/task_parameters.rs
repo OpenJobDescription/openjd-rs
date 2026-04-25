@@ -53,16 +53,16 @@ pub enum IntRange {
 
 impl<'de> Deserialize<'de> for IntRange {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match val {
-            serde_yaml::Value::Sequence(seq) => {
+            serde_json::Value::Array(seq) => {
                 let items: Result<Vec<FlexInt>, _> = seq
                     .into_iter()
-                    .map(|v| serde_yaml::from_value(v).map_err(serde::de::Error::custom))
+                    .map(|v| serde_json::from_value(v).map_err(serde::de::Error::custom))
                     .collect();
                 Ok(IntRange::List(items?))
             }
-            serde_yaml::Value::String(s) => FormatString::new(&s)
+            serde_json::Value::String(s) => FormatString::new(&s)
                 .map(IntRange::Expression)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(
@@ -83,14 +83,14 @@ pub enum StringRange {
 
 impl<'de> Deserialize<'de> for StringRange {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Sequence(_) => {
+            serde_json::Value::Array(_) => {
                 let items: Vec<FormatString> =
-                    serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
+                    serde_json::from_value(val).map_err(serde::de::Error::custom)?;
                 Ok(StringRange::List(items))
             }
-            serde_yaml::Value::String(s) => FormatString::new(s)
+            serde_json::Value::String(s) => FormatString::new(s)
                 .map(StringRange::Expression)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(
@@ -109,16 +109,16 @@ pub enum FloatRangeItem {
 
 impl<'de> Deserialize<'de> for FloatRangeItem {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => {
+            serde_json::Value::Number(n) => {
                 let f = n
                     .as_f64()
                     .ok_or_else(|| serde::de::Error::custom("Invalid number in float range"))?;
                 super::parameters::reject_nan_inf(f).map_err(serde::de::Error::custom)?;
                 Ok(FloatRangeItem::Float(f))
             }
-            serde_yaml::Value::String(s) => FormatString::new(s)
+            serde_json::Value::String(s) => FormatString::new(s)
                 .map(FloatRangeItem::FormatString)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(
@@ -136,14 +136,14 @@ pub enum FloatRange {
 
 impl<'de> Deserialize<'de> for FloatRange {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Sequence(_) => {
+            serde_json::Value::Array(_) => {
                 let items: Vec<FloatRangeItem> =
-                    serde_yaml::from_value(val).map_err(serde::de::Error::custom)?;
+                    serde_json::from_value(val).map_err(serde::de::Error::custom)?;
                 Ok(FloatRange::List(items))
             }
-            serde_yaml::Value::String(s) => FormatString::new(s)
+            serde_json::Value::String(s) => FormatString::new(s)
                 .map(FloatRange::Expression)
                 .map_err(serde::de::Error::custom),
             _ => Err(serde::de::Error::custom(
@@ -219,9 +219,9 @@ impl IntOrFormatString {
 
 impl<'de> Deserialize<'de> for IntOrFormatString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let val = serde_yaml::Value::deserialize(deserializer)?;
+        let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_yaml::Value::Number(n) => {
+            serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     Ok(Self::Int(i))
                 } else if let Some(f) = n.as_f64() {
@@ -236,7 +236,7 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
                     Err(serde::de::Error::custom("Invalid number"))
                 }
             }
-            serde_yaml::Value::String(s) => {
+            serde_json::Value::String(s) => {
                 // If it contains format string interpolation, treat as FormatString
                 if s.contains("{{") {
                     FormatString::new(s)
@@ -249,10 +249,10 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
                     })
                 }
             }
-            serde_yaml::Value::Bool(_) => {
+            serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected integer, got boolean"))
             }
-            serde_yaml::Value::Null => Err(serde::de::Error::custom("Expected integer, got null")),
+            serde_json::Value::Null => Err(serde::de::Error::custom("Expected integer, got null")),
             _ => Err(serde::de::Error::custom("Expected integer or string")),
         }
     }

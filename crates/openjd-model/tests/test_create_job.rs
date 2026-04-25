@@ -11,11 +11,11 @@ use openjd_model::{
     merge_job_parameter_definitions, preprocess_job_parameters,
 };
 
-fn yaml_val(s: &str) -> serde_yaml::Value {
-    serde_yaml::from_str(s).unwrap()
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
 }
 
-fn minimal_job_template(params: &str) -> serde_yaml::Value {
+fn minimal_job_template(params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",
@@ -26,7 +26,7 @@ fn minimal_job_template(params: &str) -> serde_yaml::Value {
     ))
 }
 
-fn minimal_env_template(params: &str) -> serde_yaml::Value {
+fn minimal_env_template(params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "environment-2023-09",
@@ -576,7 +576,7 @@ fn test_merge_env_only_param() {
 
 // === URI path handling ===
 
-fn expr_job_template_with_path_param(param_name: &str, default: Option<&str>) -> serde_yaml::Value {
+fn expr_job_template_with_path_param(param_name: &str, default: Option<&str>) -> serde_json::Value {
     let default_str = match default {
         Some(d) => format!(r#", "default": "{d}""#),
         None => String::new(),
@@ -1014,7 +1014,7 @@ use openjd_model::job;
 
 fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
     let td = TestDirs::new();
-    let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
+    let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
     let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
@@ -1040,7 +1040,7 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
 
 fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String {
     let td = TestDirs::new();
-    let v: serde_yaml::Value = serde_yaml::from_str(template_json).unwrap();
+    let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
     let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
@@ -2069,7 +2069,7 @@ fn test_create_job_rejects_mismatched_association_lengths() {
 fn test_uneven_parameter_space_association() {
     let td = TestDirs::new();
     // Association with mismatched lengths should fail during create_job or iteration
-    let v: serde_yaml::Value = serde_yaml::from_str(
+    let v: serde_json::Value = serde_saphyr::from_str(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Job",
@@ -2148,7 +2148,7 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
         "steps": [{{"name": "Step", "script": {{"actions": {{"onRun": {{"command": "do something"}}}}}}}}]
     }}"#
     );
-    let v: serde_yaml::Value = serde_yaml::from_str(&template).unwrap();
+    let v: serde_json::Value = serde_saphyr::from_str(&template).unwrap();
     let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -2425,7 +2425,7 @@ fn test_preprocess_string_constraint_violation_message() {
 // Category B: Type coercion in preprocess_job_parameters
 // ══════════════════════════════════════════════════════════════
 
-fn expr_job_template_with_param(param_json: &str) -> serde_yaml::Value {
+fn expr_job_template_with_param(param_json: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",
@@ -2752,7 +2752,7 @@ fn test_preprocess_range_expr_invalid_stays_string() {
     assert!(err.to_string().contains("not a valid range"), "got: {err}");
 }
 
-fn expr_env_template(params: &str) -> serde_yaml::Value {
+fn expr_env_template(params: &str) -> serde_json::Value {
     yaml_val(&format!(
         r#"{{
         "specificationVersion": "environment-2023-09",
@@ -2762,7 +2762,7 @@ fn expr_env_template(params: &str) -> serde_yaml::Value {
     ))
 }
 
-fn expr_job_no_params() -> serde_yaml::Value {
+fn expr_job_no_params() -> serde_json::Value {
     yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -3705,7 +3705,7 @@ fn script_let_binding_division_by_zero_is_caught() {
 
 #[test]
 fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
-    let v: serde_yaml::Value = serde_yaml::from_str(r#"{
+    let v: serde_json::Value = serde_saphyr::from_str(r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "parameterDefinitions": [{"name": "Foo", "type": "PATH"}],
