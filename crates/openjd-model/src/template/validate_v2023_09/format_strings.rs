@@ -258,16 +258,41 @@ fn validate_fs(
         return;
     }
     if let Err(e) = fs.validate_expressions(symtab, lib) {
-        let detail = crate::error::ErrorDetail {
-            summary: e.message.clone(),
-            spans: vec![crate::error::DiagnosticSpan {
+        let mut spans = Vec::new();
+        if let Some(ref expr_err) = e.expression_error {
+            if !expr_err.sub_errors().is_empty() {
+                // Compound error (e.g., if/else both branches fail) — one span per sub-error
+                for sub in expr_err.sub_errors() {
+                    if let (Some(expr), Some(col), Some(end_col)) =
+                        (sub.expr(), sub.col_offset(), sub.end_col_offset())
+                    {
+                        spans.push(crate::error::DiagnosticSpan {
+                            summary: sub.message(),
+                            source: expr.to_string(),
+                            start: col,
+                            end: end_col,
+                            caret: sub.caret_offset().unwrap_or(0),
+                        });
+                    }
+                }
+            }
+        }
+        // Fallback: single span covering the whole interpolation
+        if spans.is_empty() {
+            spans.push(crate::error::DiagnosticSpan {
                 summary: e.message.clone(),
                 source: e.input.clone(),
                 start: e.start,
                 end: e.end,
                 caret: 0,
-            }],
+            });
+        }
+        let summary = if let Some(ref expr_err) = e.expression_error {
+            expr_err.message()
+        } else {
+            e.message.clone()
         };
+        let detail = crate::error::ErrorDetail { summary, spans };
         errors.add_with_detail(
             path,
             format!(
