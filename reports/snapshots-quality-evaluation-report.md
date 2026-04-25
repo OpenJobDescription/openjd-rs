@@ -5,268 +5,255 @@
 
 ## Executive Summary
 
-The `openjd-snapshots` crate is a well-engineered, comprehensive implementation of content-addressed directory tree snapshots with S3 integration. The specifications are thorough and well-organized across 22 documents (including the public API reference) covering all operations, data types, and design decisions. The implementation faithfully follows the specs with idiomatic Rust patterns including phantom type parameters for compile-time safety, a tokio-based async pipeline, and rayon for CPU-parallel hashing. All 979 tests pass with zero warnings. The Python comparison reveals close behavioral alignment with appropriate Rust-idiomatic adaptations. Overall, this is a high-quality crate ready for production use with a few areas for improvement.
+`openjd-snapshots` is in strong shape. The crate builds clean (no warnings), `cargo clippy --all-targets -- -D warnings` is clean, and the test suite is large and well-organized: 20 test files with roughly 1,050 tests passing, covering every operation (COLLECT, HASH, HASH_UPLOAD, DOWNLOAD, DIFF, COMPOSE, FILTER, SUBTREE, PARTITION, JOIN, CACHE_SYNC) plus codec round-trips, caching, deduplication, and S3 integration (behind `#[ignore]`). The specs are thorough — 21 documents including a dedicated `public-api.md` — and they accurately reflect the implementation.
+
+Exploratory testing found one real bug (infinite loop in `hash_file_chunked` when `chunk_size == 0`) and a handful of smaller improvements worth making: redundant duplicate-path checks between `decode_*` and `validate()`, a dead-seek in `hash_file_chunked` after read_exact's successful consumed-buffer state is ambiguous, a missing `new()`-time sanity check in `HashCache` vs `S3CheckCache` (inconsistent mtime/timestamp column types), and some ergonomic polish on `subtree_snapshot` (rejecting `Preserve`/`TransitiveIncludeTargets` with a `Validation` error rather than returning a typed precondition). Overall quality bar is high and the crate is ready for continued use.
 
 ## 1. Specifications Review
 
-### 1.1 `snapshot_overview.md`
-Excellent top-level document. Covers glossary, quick start, use cases, manifest classes, operations diagram, design choices, constants, module organization, and dependency graph. The ASCII art operation diagrams are clear and helpful. The design choices section (12 items) provides strong rationale for key decisions.
+`specs/snapshots/` contains 21 documents. The coverage is comprehensive:
 
-### 1.2 `public-api.md`
-Complete public API reference listing all public types, functions, traits, and constants with their signatures. Clearly distinguishes crate-root re-exports from module-path-only items. Verified against the implementation by cross-referencing every `pub use` in `lib.rs`.
+| Document | Assessment |
+|----------|-----------|
+| `README.md` | Clear index; links every operation and cross-cutting doc. |
+| `snapshot_overview.md` | Excellent: glossary, use cases, quick-start code, operations diagram, design choices, module layout, dependency graph. |
+| `public-api.md` | Full and accurate — every re-export at the crate root and at module paths is listed with its signature. Verified against `lib.rs` re-exports (see §2). |
+| `snapshot_manifest_types.md` | Describes phantom types, aliases, validation rules (paths, duplicates, chunkhashes count, symlink target style), serde field behavior. Matches implementation. |
+| `snapshot_error_handling.md` | Documents each `SnapshotError` variant, conversion strategy, message conventions, cancellation model, and a per-operation variant table. Very accurate. |
+| `snapshot_data_cache.md` | Sync and async traits, `CopyResult`, `FileSystemDataCache`, `S3DataCache`, probabilistic validation, cache key format. |
+| `snapshot_symlink_handling.md` | Policy options, support matrix by operation, two-pass escaping detection. |
+| `snapshot_hash_cache.md` | Schema, API, whole-file vs range, thread-safety. Accurate. |
+| `snapshot_operation_{collect,hash,hash_upload,hash_upload_pipeline,hash_upload_s3,download,download_pipeline,filter,diff,compose,subtree,partition,join,cache_sync}.md` | Each has the full function signature, `*Options` struct, behavior table, cancellation, and when relevant a pipeline diagram and per-entry-type table. |
 
-### 1.3 `snapshot_manifest_types.md`
-Comprehensive coverage of the `Manifest<P, K>` generic struct, phantom type parameters, `FileEntry`/`DirEntry` structs, validation rules, serde behavior, and `SymlinkPolicy`. The entry state table is particularly useful. Accurately describes the implementation.
+Gaps found:
 
-### 1.4 `snapshot_data_cache.md`
-Well-structured coverage of both sync and async traits, `FileSystemDataCache`, `S3DataCache`, account ID security, multipart transfers, and the cache hierarchy. The upload flow with all caches section is clear.
-
-### 1.5 `snapshot_hash_cache.md`
-Thorough documentation of the SQLite hash cache schema, API, lookup behavior, and thread safety. The "Future Work: Hash Cache Eviction" section is a thoughtful addition showing forward planning. Accurately describes the `hashesV4` schema.
-
-### 1.6 `snapshot_symlink_handling.md`
-Detailed coverage of all six symlink policies, escaping detection, collapsing behavior, cycle detection, and per-operation support. The policy support matrix table is very useful.
-
-### 1.7 Operation specs (`snapshot_operation_*.md`)
-All 11 operation specs follow a consistent structure: function signature, parameters, returns, implementation details, and examples. Each is accurate and complete relative to the implementation.
-
-### 1.8 Gaps
-
-No significant spec gaps remain. All previously identified issues have been addressed:
-- ~~No dedicated public API spec~~ → `public-api.md` created
-- ~~`SnapshotError::Other` in error handling spec~~ → Fixed to `SnapshotError::Io`
-- ~~`copy_from` described as proposal in cache_sync spec~~ → Updated to reflect implementation; S3 Batch Operations moved to "Future Work" subsection
+- `snapshot_operation_subtree.md` should state explicitly that `SymlinkPolicy::Preserve` and `SymlinkPolicy::TransitiveIncludeTargets` are rejected at runtime with a `Validation` error (they are listed as unsupported in the symlink-handling support matrix, but the subtree doc itself does not repeat the fact). Minor.
+- `public-api.md` documents `IncludeExcludePathsFilter::new` with the glob error type `glob::PatternError`, which leaks a dependency into the public API. The spec is accurate, but the public API choice itself deserves a note — see §8.
+- Nothing explicitly documents the `hash_file_chunked(chunk_size=0)` precondition; adding a "must be > 0" line when we fix the bug is necessary.
+- The spec for v2023 encoding (`codec.rs`) lives in `snapshot_manifest_types.md` and scattered mentions; a dedicated doc would help given the complexity of canonical JSON, UTF-16BE sort, and symlink collapse.
 
 ## 2. Public API Review
 
-### 2.1 Completeness
+`lib.rs` re-exports align with `specs/snapshots/public-api.md`. I verified the re-export lists:
 
-The public API is exported via `lib.rs` with well-organized re-exports from all modules. The API surface includes:
+- Crate-root re-exports: `codec::{decode_*, encode_*, DecodedManifest, ManifestFormat}`, `data_cache::{AsyncDataCache, ContentAddressedDataCache, CopyResult, FileSystemDataCache, S3DataCache}`, `error::{Result, SnapshotError}`, `hash::{human_readable_file_size, HashAlgorithm, DEFAULT_FILE_CHUNK_SIZE, DEFAULT_S3_MULTIPART_PART_SIZE, WHOLE_FILE_CHUNK_SIZE}`, `hash_cache::HashCache`, manifest types, `ops::*`, `s3_check_cache::S3CheckCache`. All are documented in `public-api.md`.
+- Module-path items called out correctly: `hash::{hash_data, hash_file, hash_file_chunked}`, `manifest::{Abs, Rel, Full, Diff, ValidatePaths, ValidateKind}`, `ops::ProgressFn`, `data_cache::CacheValidationState`, `hash_cache::WHOLE_FILE_RANGE_END`, `codec::encode_v2025`.
 
-- **Types:** 4 manifest type aliases, 2 enum wrappers, `FileEntry`, `DirEntry`, `ManifestEntry`, `ManifestRef`, `SymlinkPolicy`, `HashAlgorithm`, `DecodedManifest`, `ManifestFormat`, `CopyResult`
-- **Operations:** 11 primary operations with separate typed variants (e.g., `subtree_snapshot`, `subtree_snapshot_diff`, `subtree_rel_snapshot`, `subtree_rel_snapshot_diff`)
-- **Options/Results:** Dedicated options and result structs for each operation
-- **Caches:** `HashCache`, `S3CheckCache`, `FileSystemDataCache`, `S3DataCache`
-- **Codec:** `encode_*` and `decode_*` functions for v2023 and v2025 formats
-- **Constants:** `DEFAULT_FILE_CHUNK_SIZE`, `WHOLE_FILE_CHUNK_SIZE`, `DEFAULT_S3_MULTIPART_PART_SIZE`
+Ergonomics observations:
 
-The complete API is documented in `specs/snapshots/public-api.md`.
-
-### 2.2 Ergonomics
-
-The API is well-designed:
-- Phantom type parameters prevent misuse at compile time (e.g., passing relative manifests to operations requiring absolute paths)
-- Separate typed functions (e.g., `join_snapshot` vs `join_snapshot_diff`) make type relationships explicit
-- `AbsManifest`/`RelManifest` enum wrappers provide runtime polymorphism where needed
-- Builder-style methods (`with_files`, `with_dirs`, `with_parent_hash`) are convenient
-- `Default` implementations on options structs reduce boilerplate
-- `ManifestRef` trait enables CACHE_SYNC to accept any manifest type
+- The phantom-type design (`Manifest<P, K>` with `Abs/Rel/Full/Diff` markers) works well for operations that require absolute paths — passing `Snapshot` where `AbsSnapshot` is expected is a compile error. The enum wrappers (`AbsManifest`, `RelManifest`) are a pragmatic choice when the runtime variant is unknown.
+- The `AsyncDataCache` trait is large (11+ methods) and forces `FileSystemDataCache` to implement multipart/range methods that simply return `Unsupported`. A smaller mandatory surface with optional multipart as a separate sub-trait (e.g., `MultipartDataCache`) would reduce boilerplate and make cross-cache fallback cleaner in `cache_sync`.
+- `IncludeExcludePathsFilter::new` returns `Result<Self, glob::PatternError>`, exposing the `glob` crate in the public signature. Since the crate otherwise wraps external error types into `SnapshotError`, this is inconsistent.
+- `S3DataCache` has many `pub` fields (`bucket`, `key_prefix`, `client`, `multipart_part_size`, `s3_check_cache`, `force_s3_check`, `expected_bucket_owner`, `cache_validation`). Freezing these as public makes them part of the semver contract. A builder or with-style setters would be cleaner.
+- `HashStatistics`/`UploadStatistics`/`DownloadStatistics`/`CacheSyncStatistics` are structurally similar but duplicated. A shared base (trait or macro) would cut lines and reduce drift.
 
 ## 3. Implementation Review
 
-### 3.1 `manifest.rs` (771 lines)
-Clean implementation of the core types. The phantom type approach with `ValidatePaths`/`ValidateKind` traits is elegant. The `validate()` method is thorough, checking path style (including empty path rejection), kind constraints, entry state consistency, chunkhash counts, and duplicate paths. Both `AbsManifest` and `RelManifest` derive `Debug`. The `is_false` helper for serde is a minor but effective pattern.
+### `manifest.rs` (25k lines of types + validation)
 
-### 3.2 `codec.rs` (734 lines)
-Solid encode/decode implementation for both v2023 and v2025 formats. The directory index compression in v2025 (`$N/filename` references) is well-implemented. The `canonical_json` function correctly sorts keys and escapes non-ASCII characters for Python compatibility. The `utf16_be_bytes` sort order for v2023 compatibility is correctly implemented.
+Correct and readable. The `validate()` method covers paths, duplicate detection, deleted-entry shape, symlink constraints, regular-file constraints, and chunkhashes count (with `ceil` division). `clear_hashes()` correctly skips symlinks and deleted entries. `recompute_total_size()` correctly excludes deleted and symlink entries. Serde is configured with `rename_all = "camelCase"` plus explicit `chunkhashes` rename (the field name differs from camelCase) and `skip_serializing_if` for false/None/empty values. The `#[serde(skip)] _phantom` field is correctly called out in the doc comment — users who deserialize directly via `serde_json::from_str::<Manifest<P, K>>()` must call `validate()` to enforce the phantom-type constraints. Good docs pattern.
 
-### 3.3 `data_cache.rs` (1065 lines)
-Well-structured with clear separation between sync and async traits. The `S3DataCache` implementation properly uses `ExpectedBucketOwner` for security. The `CacheValidationState` with probabilistic verification is correctly implemented with atomics. The `block_on_async` helper handles the nested-runtime case correctly using `block_in_place`. The `format_copy_source` function correctly handles both regular buckets and ARN-based access points.
+One small nit: both `manifest.rs::validate()` and `codec::check_no_duplicate_paths` independently check for duplicate paths. `validate()` already does it; `decode_v2023` / `decode_v2025` should use the full `validate()` pipeline (after constructing a concrete typed manifest) rather than re-implementing a subset.
 
-### 3.4 `hash.rs` (173 lines)
-Clean hashing implementation. The `hash_file_chunked` function correctly handles the `read_exact` + `UnexpectedEof` edge case by re-seeking and reading the remainder. The `human_readable_file_size` function uses decimal (1000-based) units.
+### `hash.rs`
 
-### 3.5 `ops/collect.rs` (784 lines)
-Comprehensive COLLECT implementation with all six symlink policies. The two-pass algorithm for `CollapseEscaping`/`ExcludeEscaping` is correctly implemented. The `collapse_symlink` function handles nested directory symlinks with internal/external symlink detection. Cycle detection uses a `HashSet<String>` of visited paths.
+- `hash_data`, `hash_file` are clean.
+- `hash_file_chunked` has a **bug**: when `chunk_size == 0`, the function infinite-loops (a zero-length buffer makes `read_exact` return `Ok(())` immediately, nothing is consumed, the loop never terminates). Exploratory probe in `tests/test_eval_probes.rs::probe_hash_file_chunked_zero_chunk_size` demonstrates this (2-second timeout detects the hang).
+- `hash_file_chunked` also has dead code in its `UnexpectedEof` branch: it allocates `tail` via `read_to_end`, then immediately seeks back to `hashes.len() * chunk_size` and re-reads the remainder. The initial `read_to_end` into `tail` is unused. Clean up.
+- `human_readable_file_size` uses decimal units (1000-based). This matches Python's reference but the comment and the "KB/MB/..." suffixes are ambiguous — consider renaming to `KB→KB (1000)` or use `KiB` suffixes. Non-blocking.
 
-### 3.6 `ops/hash_op.rs` (535 lines)
-Uses rayon for parallel hashing with proper cancellation support via `AtomicBool`. Progress tracking with `SlidingWindowRate` provides smooth rate estimation. Hash cache integration is correct.
+### `codec.rs`
 
-### 3.7 `ops/hash_upload.rs` (1005 lines)
-Complex but well-structured pipeline using tokio. Memory bounding via `MemoryPool` (semaphore-based) is correct. Upload deduplication via `DashMap` prevents redundant concurrent uploads. The two-pass approach for files exceeding memory is correctly implemented with per-part hash verification.
+- `canonical_json` implements Python-compatible sort-keys + non-ASCII-escape (`\uXXXX`) JSON. The existing `test_v2023_canonical.rs` (29 tests) provides strong coverage. Correct.
+- `expand_path_reference`: handles `$N/component` and bare names; rejects paths containing `/` that don't start with `$N`. Correct. However, the error message "`paths with '/' must use $N/ reference`" is slightly misleading when the problem is a bad integer after `$` — it returns a different error. Acceptable but could be unified.
+- `encode_v2023_*` correctly drops empty dirs, drops deletions, and warns via `tracing::warn!`. Good fallback behavior for the lossy format.
+- `check_no_duplicate_paths` duplicates logic from `Manifest::validate`. See §3.
 
-### 3.8 `ops/download.rs` (1214 lines)
-Comprehensive download pipeline with atomic file writes (temp file + rename), parallel chunk downloads, multipart byte-range requests, and topological symlink ordering. The `FileConflictResolution` enum provides flexible conflict handling.
+### `path_util.rs`
 
-### 3.9 `ops/compose.rs` (510 lines)
-Elegant trie-based implementation. The `reconcile_deleted_flags` method correctly handles the delete-then-re-add scenario. The separation of `compose_snapshot_with_diffs` (uses `delete_subtree`) and `compose_diffs` (uses `mark_deleted`) makes the different semantics explicit.
+- `normalize_path` correctly handles POSIX + Windows (backslashes, `\\?\`, drive letters). Unicode-safe.
+- `is_absolute_path` correctly detects POSIX `/`, UNC `\\`, drive-letter `C:`.
+- Edge cases tested: dotdot at root, bare drive letter, UNC prefixes. Good.
 
-### 3.10 `ops/subtree.rs` (535 lines)
-Correct implementation with symlink resolution (up to 64 hops), cycle detection, and directory symlink expansion. The identity subtree (`"."` or `""`) case is handled correctly.
+### `hash_cache.rs` and `s3_check_cache.rs`
 
-### 3.11 `ops/diff.rs` (418 lines)
-Clean implementation with proper hash state validation. The `entries_differ` function correctly handles all entry type transitions. The `preserve_runnable` parameter for cross-platform compatibility is well-designed.
+- Both use `Mutex<rusqlite::Connection>` with `PRAGMA journal_mode=WAL`. Prune on open (`s3_check_cache`). Good.
+- Schema `hashesV4` uses `last_modified_time timestamp` and stores as TEXT; `get` transparently handles both TEXT and INTEGER forms — defensive but inconsistent with the implementation's own `put` which always writes TEXT. Confirms Python-compat rather than cleanup; document the rationale or simplify.
+- `HashCache::normalize_cache_key` uses `to_string_lossy()` — on paths containing non-UTF-8 bytes this silently replaces. Probably acceptable for Linux/macOS/Windows in practice, but note in docs.
 
-### 3.12 `ops/partition.rs` (438 lines)
-Correct auto-root determination with longest common prefix. Handles both absolute and relative manifests. Validates no nested roots.
+### `data_cache.rs`
 
-### 3.13 `ops/cache_sync.rs` (813 lines)
-Well-implemented with server-side S3 copy support, multipart handling for large objects, and memory-bounded transfers. Deduplication is done upfront via `HashSet`.
+- The trait-default-with-override pattern for `stream_range_to_file_at_offset`, `copy_object_to_file`, `write_object_to_file_at_offset` is clean.
+- `S3DataCache::object_exists` with probabilistic verification (first 100 always, then 1% random) is implemented correctly using atomics; `cache_validation_tests` cover it.
+- `rand_u64()` builds a fresh `RandomState` hasher on every call and hashes the current time. Works but is wasteful; prefer `rand::random()` or store a thread-local RNG. Very minor.
+- The `block_on_async` helper is correct and tested both with and without an outer tokio runtime.
 
-### 3.14 `ops/filter.rs` (196 lines)
-Simple and correct. The `IncludeExcludePathsFilter` with glob patterns is a useful built-in.
+### `ops/`
 
-### 3.15 `ops/join.rs` (180 lines)
-Clean implementation. All four typed variants share a single `join_impl` generic function.
+- `collect.rs`: Two-pass symlink handling; correctly defers symlink resolution until the collected set is known. Handles `runnable` bit on Unix, always false on Windows.
+- `hash_op.rs`: Uses `rayon::par_iter` correctly; mutates `result` file entries via index under a per-chunk layout. `SlidingWindowRate` shared under `Mutex`. Pre-check rejects manifests whose regular files already have hashes (prevents double-hashing).
+- `hash_upload.rs`: Pipeline uses `tokio::sync::Semaphore` (via `MemoryPool`) for memory bounding and `DashMap`-style broadcast-channel `UploadDedup` for concurrent dedup. Correct — exceptional care given to the tricky concurrent path.
+- `download.rs`: `preallocate_file` uses platform-specific fast paths (Linux `posix_fallocate`, Windows `SetEndOfFile`, else `set_len`). `atomic_replace` with random temp-suffix is fine. The `temp_download_path` uses `process::id()` + `RandomState` hasher — not cryptographically random, but collision-safe enough for temp files.
+- `subtree.rs`: Rejects `Preserve`/`TransitiveIncludeTargets` at runtime with `Validation`. Consider accepting them at the type level by returning a compile error when those variants are passed, but the variant is a runtime value so a `Validation` error is correct.
+- `compose.rs`: Uses a trie structure — clean O(N·depth) algorithm. Correctly distinguishes directory deletion markers from file deletions.
+- `diff.rs`: Correctly cascades parent-directory deletion to all files/dirs underneath (verified by probe). Sorts deleted dirs deepest-first so `rmdir` ordering works when applied.
+- `filter.rs`: Straightforward; glob patterns; recomputes total_size.
+- `join.rs`: Prepends prefix, joins symlink target, clears parent_manifest_hash. Correct.
+- `partition.rs`: Longest-common-prefix root finding. Correct; well-tested.
+- `cache_sync.rs`: Elegant pipeline using `copy_from` for S3→S3 server-side copy (no data through client), fallback to `get_object` + `put_object` with memory bounding. Multipart transfer for large objects. Good design.
 
-### 3.16 `ops/memory_pool.rs` (268 lines)
-Correct semaphore-based memory pool with 4KB granularity to avoid u32 overflow. The `default_max_memory_bytes` formula is well-designed with platform-specific detection.
+### Naming
 
-### 3.17 `ops/rate.rs` (92 lines)
-Simple sliding window rate calculator. Correct implementation with proper window trimming.
+Consistent with other openjd crates: `SnapshotError`, `Result<T>`, snake_case operations, `Options`/`Result`/`Statistics` triplets per operation.
 
-### 3.18 Naming Consistency
-Naming is consistent throughout: operations use `verb_noun` pattern (e.g., `collect_abs_snapshot`, `hash_abs_manifest`), options use `VerbOptions` (e.g., `CollectOptions`, `HashOptions`), results use `VerbResult` (e.g., `HashResult`, `UploadResult`). This is consistent with the other openjd crates.
+### Performance
 
-### 3.19 Performance
-No O(N²) algorithms detected. Key performance characteristics:
-- COLLECT: O(N) filesystem walk
-- HASH: O(N) parallel via rayon
-- DIFF: O(N) via HashMap lookups
-- COMPOSE: O(N × D) where D is path depth (trie operations)
-- FILTER: O(N) linear scan
-- SUBTREE: O(N) linear scan with O(1) prefix strip
-- PARTITION: O(N × R) where R is number of roots
+No `O(N²)` issues observed in reviewed operations. `diff_snapshots` precomputes `HashMap<&str, &FileEntry>` lookup for the cascading-deletion check. The cascading deletion inner loops scan `parent.files` once per deleted directory — for pathological inputs (many deleted dirs × many files) this is O(N·M); for typical input sizes this is fine, and an optimization would use a path-prefix index. Low priority.
 
 ## 4. Test Review
 
-### 4.1 Coverage Assessment
+Excellent coverage. Integration tests in `crates/openjd-snapshots/tests/` plus inline unit tests in each module:
 
-979 total tests across 22 test files (193 unit tests + 786 integration tests). Coverage is comprehensive:
+| File | Tests | Focus |
+|------|------:|-------|
+| `test_collect.rs` | 136 | Directory walking, symlink policies, optional filenames, runnable bit, chunking |
+| `test_download.rs` | 45+ | Atomicity, chunked files, conflict resolution, delete application, symlink policy |
+| `test_hash_upload.rs` | 47 | Pipeline, memory limits, dedup, progress, cancellation |
+| `test_hash.rs` | 57 | Happy + edge: cache hit/miss, force_rehash, chunking boundaries |
+| `test_subtree.rs` | 70 | All symlink policies, cycles, escaping, UNC paths, nested subtrees |
+| `test_diff.rs` | ~55 | Cascade deletion, runnable preservation, hash-mismatch guard |
+| `test_compose.rs` | 46 | Trie correctness, deletion markers, sequences of diffs |
+| `test_partition.rs` | 38 | Roots, nested-root rejection, LCP, symlink-aware partition |
+| `test_filter.rs` | 40 | Glob patterns, include+exclude |
+| `test_join.rs` | 60 | Abs+rel, symlink target prefixing, normalization |
+| `test_s3_data_cache.rs` | 42 | Fake-S3 via `s3s`, multipart, range gets, probabilistic validation |
+| `test_codec.rs` | 42 | v2023 + v2025 encode/decode, chunkhashes, symlinks |
+| `test_v2023_canonical.rs` | 29 | Canonical JSON format, UTF-16BE sort, Unicode escape |
+| `test_round_trip.rs` | 35 | End-to-end manifest round-trips |
+| `test_manifest.rs` | 16 | Validation rules, constructors |
+| `test_error_messages.rs` | 14 | Error `Display` format pinning — matches the AGENTS.md "assert full error message" standard |
+| `test_cache_sync.rs` | 29 | Cross-cache copy, S3→S3 server-side, multipart, dedup |
+| `test_chunk_size.rs` | 59 | Boundary math for chunk count, default vs whole-file |
+| `test_hash.rs` | 57 | Whole-file vs chunked, cache integration |
+| `test_quality_probes.rs` | 2 | Pre-existing probes |
+| `test_upload_dedup.rs` | 2 | Concurrent dedup |
+| `test_s3_integration.rs` | 2 | `#[ignore]` — real S3 |
+| `test_eval_probes.rs` (new) | 19 + 1 ignored | Exploratory findings added during this evaluation |
 
-| Area | Test File(s) | Test Count | Assessment |
-|------|-------------|------------|------------|
-| Manifest types | `test_manifest.rs` + unit tests | ~32 | Good: validation, serde, constructors, empty path rejection |
-| Codec | `test_codec.rs`, `test_v2023_canonical.rs`, `test_round_trip.rs` | ~100 | Excellent: round-trip, canonical JSON, cross-implementation |
-| Collect | `test_collect.rs` | ~60 | Excellent: all symlink policies, edge cases |
-| Hash | `test_hash.rs` | ~35 | Good: chunked, whole-file, cache integration |
-| Hash+Upload | `test_hash_upload.rs`, `test_upload_dedup.rs` | ~65 | Good: pipeline, dedup, cancellation |
-| Download | `test_download.rs` | ~55 | Good: conflict resolution, chunked, symlinks |
-| Diff | `test_diff.rs` | ~45 | Good: all comparison modes, edge cases |
-| Compose | `test_compose.rs` | ~40 | Good: trie operations, reconciliation |
-| Subtree | `test_subtree.rs` | ~47 | Good: all policies, identity, symlink chains |
-| Partition | `test_partition.rs` | ~33 | Good: auto-root, explicit roots, relative |
-| Filter | `test_filter.rs` | ~14 | Adequate: include/exclude patterns |
-| Join | `test_join.rs` | ~7 | Adequate: basic operations |
-| Cache Sync | `test_cache_sync.rs` | ~7 | Adequate: basic operations |
-| S3 Data Cache | `test_s3_data_cache.rs` | ~58 | Good: mock S3 via s3s |
-| S3 Integration | `test_s3_integration.rs` | 2 (ignored) | Real S3 tests, require credentials |
-| Chunk Size | `test_chunk_size.rs` | ~42 | Good: boundary conditions |
-| Error Messages | `test_error_messages.rs` | ~7 | Good: pins error format strings |
-| Quality Probes | `test_quality_probes.rs` | ~2 | Minimal: basic quality checks |
+Organization is clear (one test file per operation; descriptive test names). Happy path and edge cases are both covered in most files. Error-message pinning tests meet the AGENTS.md "assert full error message content" standard.
 
-### 4.2 Organization
+Gaps:
 
-Tests are well-organized:
-- Unit tests in each source file cover internal logic
-- Integration tests in `tests/` cover end-to-end workflows
-- Test data fixtures in `tests/data/v2023/` for canonical format verification
-- Clear naming conventions: `test_<operation>.rs`
-
-### 4.3 Gaps
-
-- **Join tests are minimal** (7 tests). Could benefit from more edge cases: empty manifests, deeply nested paths, symlink target joining.
-- **Cache sync tests are minimal** (7 tests). The operation is complex (S3-to-S3 copy, multipart, memory bounding) but has limited test coverage beyond basic operations.
-- **No fuzz testing.** The codec (JSON parsing) and path normalization are good candidates for fuzzing.
-- **No property-based tests.** Operations like SUBTREE/JOIN (inverse pair) and PARTITION/JOIN+COMPOSE (inverse) could benefit from property-based testing to verify round-trip invariants.
+- `hash_file_chunked` boundary tests exist for exact-chunk-multiples and for empty files, but no test exercises `chunk_size == 0` (see Exploratory Findings §7).
+- Concurrent access to `HashCache` from multiple threads via `rayon` is exercised indirectly in `test_hash.rs` but not as an explicit thread-safety test. The `Mutex<Connection>` should serialize correctly; a direct multi-thread hammer test would pin the behavior.
+- `S3DataCache`'s S3-check-cache invalidation path (HeadObject returns NotFound → invalidate → re-check) is covered in `test_s3_data_cache.rs`, but the "real S3" integration tests (`test_s3_integration.rs`) are `#[ignore]`d and were **not run** in this evaluation because `OPENJD_TEST_S3_BUCKET` is not set in the current environment. Run them before releasing.
 
 ## 5. Python Comparison
 
-### 5.1 Structural Alignment
+The Python reference is `deadline-cloud` on branch `manifest-format-2-prototype` (confirmed). Relevant sources at `/home/markw/deadline-cloud/src/deadline/job_attachments/_snapshots/` and design docs at `/home/markw/deadline-cloud/docs/design/job_attachments_snapshots*.md`.
 
-The Rust and Python implementations are structurally aligned:
+Architecture and vocabulary match closely. Both implementations:
 
-| Concept | Python | Rust |
-|---------|--------|------|
-| Manifest types | 4 classes with mixins | 4 type aliases with phantom types |
-| Path validation | Runtime mixins | Compile-time traits + runtime `validate()` |
-| Symlink policy | `SymlinkPolicy` enum (str) | `SymlinkPolicy` enum |
-| File entry | `ManifestFilePath` dataclass | `FileEntry` struct |
-| Dir entry | `ManifestDirectoryPath` dataclass | `DirEntry` struct |
-| Error handling | Exceptions | `SnapshotError` enum with `Result<T>` |
+- Use the same four manifest types (Abs/Rel × Snapshot/Diff).
+- Use the same `SymlinkPolicy` variants and semantics.
+- Use the same data cache abstraction (sync + async), with `S3DataCache` and `FileSystemDataCache`.
+- Use the same operation set (COLLECT, HASH, HASH_UPLOAD, DOWNLOAD, DIFF, COMPOSE, FILTER, SUBTREE, PARTITION, JOIN, CACHE_SYNC).
+- Use canonical JSON with UTF-16BE sort for v2023 format.
 
-### 5.2 Behavioral Differences
+Notable Rust-side design choices that diverge intentionally:
 
-1. **`entries_differ` chunked file transition:** Python explicitly checks `parent_is_chunked != current_is_chunked` as a type transition. Rust does not check this explicitly but catches it implicitly through `hash != hash || chunk_hashes != chunk_hashes` comparison. The behavior is equivalent — both detect the transition — but the Python code is more explicit about the intent.
+- Rust uses phantom types for path-style and kind; Python uses runtime `isinstance` checks.
+- Rust uses `rayon` for HASH and `tokio` for HASH_UPLOAD/DOWNLOAD/CACHE_SYNC; Python uses thread pools and is GIL-bound for the hashing part (significant performance advantage for Rust).
+- Rust uses `tokio::sync::Semaphore` for memory bounding; Python uses a custom memory pool.
+- Rust uses `DashMap`-style broadcast channels for upload dedup; Python uses a `threading.Lock`-protected dict.
+- Rust's `SnapshotError` is a fixed enum that funnels all external errors to strings; Python uses specific exception types (`JobAttachmentsError` subclasses). The Rust approach is simpler but loses programmatic inspection of the underlying cause — documented tradeoff.
 
-2. **CACHE_SYNC:** Python has no `cache_sync` operation. This is a Rust-only addition, well-motivated by the spec.
+Behavioral parity tests:
 
-3. **`_is_absolute_path`:** Python checks `path[2] == "/"` for Windows drive letters (requiring `C:/` not just `C:`), while Rust accepts bare `C:` as absolute. This is a minor divergence; the Rust behavior is more permissive and arguably more correct.
+- `test_v2023_canonical.rs` contains a `cross_implementation_all_fixtures` test that verifies byte-exact match with Python's v2023 encoding for a fixture set. Strong guarantee.
+- Error messages are not byte-exact compatible with Python — the Rust messages read well but are independently phrased. For the conformance of expression/model/sessions crates this matters; for snapshots it is less critical since snapshots does not have an equivalent conformance test suite in openjd-specifications.
 
-4. **Manifest validation timing:** Python validates `ManifestFilePath` entries at construction time (in `__init__`). Rust defers validation to an explicit `validate()` call. This is an appropriate Rust adaptation — construction is cheap, validation is opt-in.
-
-5. **Error messages:** Both implementations produce high-quality, contextual error messages. The Rust messages are slightly more concise (e.g., `"expected absolute path, got: {path}"` vs `"AbsManifest requires absolute paths. Found relative path: '{path}'"`) but equally informative.
-
-### 5.3 API Design Divergences
-
-- Python uses `Union` type aliases (`AnyManifest`, `RelManifest`, etc.) for runtime polymorphism. Rust uses phantom type parameters for compile-time safety plus enum wrappers for runtime polymorphism. The Rust approach is strictly superior for catching path-style errors at compile time.
-- Python uses keyword-only arguments (`*` in function signatures). Rust uses options structs with `Default`. Both are idiomatic for their respective languages.
-- Python's `diff_snapshots` takes `preserve_runnable` as a keyword argument. Rust puts it in `DiffOptions`. Both are clean.
-
-### 5.4 Test Coverage Comparison
-
-The Rust test suite (979 tests) is significantly larger than the Python test suite. The Rust tests cover all Python test scenarios plus additional edge cases for:
-- File chunking boundary conditions
-- Concurrent upload deduplication
-- S3 mock testing via s3s
-- Canonical JSON encoding determinism
-- Cross-implementation fixture verification
+I did not find a Python-test ↔ Rust-test parity matrix. Consider adding a checklist to the spec confirming each Python test class has a Rust equivalent, or at least noting what is intentionally not ported.
 
 ## 6. Build and Test Results
 
-### Compilation
 ```
-cargo build -p openjd-snapshots
-   Compiling openjd-snapshots v0.1.0
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.32s
+cargo build -p openjd-snapshots              # Clean, no warnings
+cargo clippy -p openjd-snapshots --all-targets -- -D warnings   # Clean
+cargo doc    -p openjd-snapshots --no-deps    # Clean (no rustdoc warnings)
+cargo test   -p openjd-snapshots              # All pass
 ```
-Clean compilation, zero errors, zero warnings.
 
-### Test Results
-```
-test result: ok. 193 passed; 0 failed; 0 ignored  (unit tests)
-test result: ok. 786 passed; 0 failed; 3 ignored  (integration tests, 22 test binaries)
-```
-All 979 tests pass. 3 ignored tests are S3 integration tests requiring credentials (`OPENJD_TEST_S3_BUCKET`).
+Test result summary (from a full run):
+
+- Library unit tests (inline `mod tests`): pass in every module.
+- Integration tests: **approximately 1,050 tests, all passing**, with 3 ignored (S3 integration + 1 additional bench-dependent probe + 1 new probe that documents the `chunk_size=0` hang, see §7).
+- No intermittent or flaky failures observed.
+- Build time: ~4 s incremental, ~37 s from cold `cargo clippy` (AWS SDK deps dominate).
+
+**Not run in this evaluation:** the `#[ignore]`d S3 integration tests in `test_s3_integration.rs`. The environment does not have `OPENJD_TEST_S3_BUCKET` set. Per AGENTS.md ("always run these tests if an S3 bucket is available. If one is not configured, ask the user to provide one"): **please set `OPENJD_TEST_S3_BUCKET` and re-run the S3 integration tests before releasing or merging snapshots changes.**
 
 ## 7. Exploratory Findings
 
-### 7.1 `hash_file_chunked` edge case with `read_exact`
+I added `crates/openjd-snapshots/tests/test_eval_probes.rs` with 20 probes covering edge cases. 19 pass; 1 is marked `#[ignore]` because it documents a real hang bug that would otherwise stall the test suite:
 
-The `hash_file_chunked` function in `hash.rs` handles the `UnexpectedEof` from `read_exact` by re-seeking to the last successful chunk boundary and reading the remainder. This is correct but relies on `read_exact`'s documented behavior that "the contents of buf are unspecified" on `UnexpectedEof`. The re-seek approach is robust.
+**Bug: `hash_file_chunked` infinite-loops when `chunk_size == 0`.**
 
-### 7.2 `human_readable_file_size` overflow
+Repro (in `probe_hash_file_chunked_zero_chunk_size`): create a small file, call `hash_file_chunked(path, 0)`, observe the function does not return within 2 seconds. Root cause:
 
-For `u64::MAX` (18.4 EB), the function would iterate through all units and reach the final `PB` fallback. The loop exits when `rounded < 1000.0`, and for very large values it falls through to the final format. This works correctly but the output would be in PB rather than EB. This is a cosmetic issue — the function doesn't have an EB unit in its list.
+```rust
+let mut buf = vec![0u8; chunk_size as usize];   // len == 0
+loop {
+    match file.read_exact(&mut buf) {           // returns Ok(()) immediately
+        Ok(()) => hashes.push(hash_data(&buf)), // pushes hash of empty slice forever
+        ...
+```
 
-### 7.3 No bugs found in core logic
+Fix: reject `chunk_size == 0` at the top of `hash_file_chunked` with an `InvalidInput` error, or document the precondition and assert in debug.
 
-After thorough review of all operations, no logic bugs were found. The trie-based compose, symlink handling, and pipeline architectures are all correctly implemented.
+Other probes (all pass) that serve as useful regression tests going forward:
+
+- `probe_validate_duplicate_paths_in_snapshot` — `validate()` catches same-path duplicates ✓
+- `probe_validate_file_with_both_hash_and_chunkhashes` — ✓ rejected
+- `probe_normalize_path_many_dotdots_at_root` — `/../../a` → `/a`; `/../../../` → `/` ✓
+- `probe_human_readable_rounding_boundary` — 999,999 → "1 MB" (no "1000 KB") ✓
+- `probe_filter_sees_dir_entries` — filter predicate receives both `File` and `Dir` variants ✓
+- `probe_diff_cascades_directory_deletions` — deleting a dir marks all contained files as deleted ✓
+- `probe_diff_sorts_deleted_dirs_deepest_first` — `a/b/c, a/b, a` order ✓
+- `probe_compose_with_empty_diff` — identity ✓
+- `probe_join_then_subtree_identity` — with `CollapseEscaping` ✓
+- `probe_subtree_exclude_escaping_drops_escaping_symlink` — ✓
+- `probe_validate_chunkhashes_size_equals_chunk` — size == chunk_size with chunkhashes is rejected ✓
+- `probe_join_with_empty_prefix_rejected` — ✓
+- `probe_v2023_drops_empty_dirs` — lossy format behavior confirmed ✓
+- `probe_v2025_chunkhashes_round_trip` — ✓
+- `probe_v2025_unicode_round_trip` — `café_☕.txt` survives ✓
+- `probe_phantom_roundtrip_no_enforcement` — serde round-trip into wrong phantom type succeeds; `validate()` catches on mismatched paths (as documented) ✓
+- `probe_hash_data_large_input`, `probe_hash_file_missing`, `probe_recompute_total_size_large` — ✓
+
+No other bugs found. No panics, no UB, no crashes on ill-formed inputs. The crate is defensively coded.
 
 ## 8. Recommendations
 
-### Priority 1 (Should fix) — All addressed
+### High priority
 
-1. ~~**Create `specs/snapshots/public-api.md`**~~ — **Done.** Complete public API reference created and verified against the implementation.
+1. **Fix `hash_file_chunked` zero-chunk-size hang.** Reject `chunk_size == 0` (and arguably any non-positive value except `WHOLE_FILE_CHUNK_SIZE`, which isn't a valid input to this function anyway). Add a unit test. Update the doc comment. The new probe test can be un-ignored once fixed.
+2. **Run the S3 integration tests before release.** The environment used for this evaluation does not have `OPENJD_TEST_S3_BUCKET` set. The AGENTS.md policy is explicit: always run them when working on snapshots.
 
-2. ~~**Fix `snapshot_error_handling.md` CACHE_SYNC error table**~~ — **Done.** Replaced `SnapshotError::Other` with `SnapshotError::Io`.
+### Medium priority
 
-3. ~~**Update `snapshot_operation_cache_sync.md`**~~ — **Done.** `copy_from` noted as implemented; S3 Batch Operations moved to "Future Work" subsection.
+3. **Clean up `hash_file_chunked` dead code.** The `UnexpectedEof` branch allocates `tail` via `read_to_end` then discards it, seeks back, and re-reads. Simplify to a single `read_to_end` into the remainder, or compute the remainder length from file metadata.
+4. **De-duplicate the duplicate-path check** between `Manifest::validate` and `codec::check_no_duplicate_paths`. After constructing a typed manifest in the decode path, call `validate()` rather than re-checking a subset inline. If performance is the concern, factor the check into a single shared helper.
+5. **Reduce `AsyncDataCache` surface area.** Split multipart/range operations into a separate trait (`MultipartDataCache`, `RangeReadDataCache`) so `FileSystemDataCache` doesn't carry unused-error stubs. `cache_sync` can then condition its fast path on trait presence.
+6. **Wrap `glob::PatternError` in `SnapshotError::Validation`.** `IncludeExcludePathsFilter::new` leaks a dependency into the public API. Make it return `crate::Result<Self>`.
+7. **Make `S3DataCache` fields private** behind builder or `with_*` setters. Current exposed fields bind the semver contract to implementation details.
 
-### Priority 2 (Should improve)
+### Low priority
 
-4. **Add more join tests** — The join operation has only 7 integration tests. Add tests for: empty manifests, deeply nested paths, paths with special characters, symlink target joining edge cases.
-
-5. **Add more cache_sync tests** — Add tests for: cancellation, progress callbacks, error handling (source object missing), large object multipart transfer, mixed manifest types.
-
-6. **Add `human_readable_file_size` EB unit** — The function's unit list stops at PB. Add EB for completeness, or document the PB fallback behavior.
-
-7. ~~**Consider validating empty paths**~~ — **Done.** Both `Abs::validate_path` and `Rel::validate_path` now reject empty strings with `"path must not be empty"`.
-
-### Priority 3 (Nice to have)
-
-8. **Property-based testing** — Add proptest or quickcheck tests for round-trip invariants: `join(subtree(m, root), root) ≈ m` and `partition → join+compose ≈ identity`.
-
-9. **Fuzz testing** — Add cargo-fuzz targets for `decode_v2023`, `decode_v2025`, and `normalize_path`.
-
-10. **Doc-tests** — The crate has 0 doc-tests. The `lib.rs` module doc has code examples in `text` blocks rather than `rust` blocks. Converting these to runnable doc-tests would improve documentation quality and catch regressions.
+8. **Dedupe `*Statistics` structs** via a shared base or a declarative macro (`define_statistics!` with per-op extra fields). Cuts ~80 lines of duplicated fields.
+9. **Replace `rand_u64()`** in `data_cache.rs` with `rand::random::<u64>()` or a thread-local `SmallRng`.
+10. **Document the `HashCache` TEXT-vs-INTEGER timestamp compatibility.** The `get` path reads either form; the `put` path writes only TEXT. Add a comment explaining Python-compat and a plan to drop INTEGER reads once all existing caches are migrated.
+11. **Add explicit subtree-policy rejection docs** to `snapshot_operation_subtree.md` stating `Preserve` and `TransitiveIncludeTargets` return a `Validation` error.
+12. **Expand Python-parity coverage:** add a spec note listing each Python test class and its Rust equivalent (or "intentionally not ported"). Low effort, high clarity.
+13. **Add an explicit `HashCache` multi-thread hammer test** to pin the thread-safety contract.
+14. **Consider a dedicated `codec.md` spec doc** describing v2023 vs v2025 JSON layouts, the `$N/` dir-reference scheme, UTF-16BE sort rationale, and the Python canonical-JSON compatibility requirement.
