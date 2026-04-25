@@ -1217,3 +1217,67 @@ fn listcomp_no_filter_happy_path() {
         .unwrap();
     assert_eq!(r.to_display_string(), "[1, 2, 3]");
 }
+
+#[test]
+fn ifelse_both_branches_fail_has_sub_errors() {
+    let mut st = SymbolTable::new();
+    st.set("cond", ExprValue::unresolved(ExprType::BOOL))
+        .unwrap();
+    st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
+    st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
+    let err = ParsedExpression::new("X + 'a' if cond else Y * 'b'")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err();
+    assert_eq!(err.sub_errors().len(), 2);
+    // if-branch error
+    let if_err = &err.sub_errors()[0];
+    assert_eq!(
+        if_err.message(),
+        "Cannot use '+' operator with int and string"
+    );
+    assert!(if_err.col_offset().is_some());
+    assert!(if_err.end_col_offset().is_some());
+    // else-branch error
+    let else_err = &err.sub_errors()[1];
+    assert_eq!(
+        else_err.message(),
+        "Cannot use '*' operator with path and string"
+    );
+    assert!(else_err.col_offset().is_some());
+    assert!(else_err.end_col_offset().is_some());
+}
+
+#[test]
+fn format_string_validation_carries_expression_error_with_sub_errors() {
+    let mut st = SymbolTable::new();
+    st.set("cond", ExprValue::unresolved(ExprType::BOOL))
+        .unwrap();
+    st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
+    st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
+    let fs = FormatString::new("{{X + 'a' if cond else Y * 'b'}}").unwrap();
+    let lib = FunctionLibrary::default();
+    let err = fs.validate_expressions(&st, &lib).unwrap_err();
+    assert_eq!(err.start, 0);
+    assert_eq!(err.end, 32);
+    let expr_err = err
+        .expression_error
+        .as_ref()
+        .expect("expression_error should be Some");
+    assert_eq!(expr_err.sub_errors().len(), 2);
+    // Sub-error messages may differ from direct evaluation due to
+    // unresolved type handling in format string validation
+    assert!(!expr_err.sub_errors()[0].message().is_empty());
+    assert!(!expr_err.sub_errors()[1].message().is_empty());
+    // Each sub-error has span info
+    assert!(expr_err.sub_errors()[0].col_offset().is_some());
+    assert!(expr_err.sub_errors()[1].col_offset().is_some());
+}
+
+#[test]
+fn simple_error_has_no_sub_errors() {
+    let st = SymbolTable::new();
+    let err = ParsedExpression::new("Param.Undefined")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err();
+    assert!(err.sub_errors().is_empty());
+}
