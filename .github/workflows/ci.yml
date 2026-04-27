@@ -64,16 +64,22 @@ jobs:
           key: rust-release-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             rust-release-${{ matrix.os }}-
+      # Single unified compile pass: builds lib/bin/test targets with one
+      # feature-unified dep graph. Clippy then reuses these artifacts instead
+      # of triggering a full recompile from check-mode rmetas, and the
+      # subsequent `cargo test` and `cargo build` steps are near no-ops.
+      - name: Build workspace (lib, bin, tests)
+        run: cargo test --release --workspace --all-targets --no-run
       - name: Run cargo clippy
         run: cargo clippy --release --all-features --all-targets --workspace -- -D warnings
       - name: Run helper clippy
         run: cargo clippy --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
-      - name: Build release binary
-        run: cargo build --release
       - name: Run tests
         run: cargo test --release --workspace
       - name: Run helper integration tests
         run: cargo test --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
+      - name: Build release binary
+        run: cargo build --release --bin openjd-rs
       - name: Upload CLI binary
         uses: actions/upload-artifact@v4
         with:
