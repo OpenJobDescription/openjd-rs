@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 // Integration tests for the helper subprocess on both POSIX and Windows.
 //
 // The helper binary is a standalone child process that the session uses to

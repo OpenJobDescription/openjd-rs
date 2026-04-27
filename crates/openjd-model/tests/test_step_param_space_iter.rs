@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Integration tests: template → create_job → StepParameterSpaceIterator.
 //! Ported from Python test_step_param_space_iter.py.

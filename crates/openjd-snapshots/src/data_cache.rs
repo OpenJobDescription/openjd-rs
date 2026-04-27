@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use crate::hash::DEFAULT_S3_MULTIPART_PART_SIZE;
 use crate::s3_check_cache::S3CheckCache;
 use std::any::Any;

@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Tests ported from Python test/openjd/model/v2023_09/test_environment_template.py,
 //! test_environments.py, and test_embedded.py.

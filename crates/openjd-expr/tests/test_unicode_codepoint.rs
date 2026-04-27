@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Tests that all string functions operate on Unicode codepoints (matching Python behavior),
 //! NOT on UTF-8 byte offsets. Each test case has been verified against CPython 3.x.

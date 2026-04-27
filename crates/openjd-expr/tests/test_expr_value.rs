@@ -1,6 +1,7 @@
 #![allow(clippy::approx_constant)]
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Tests for ExprValue: coercion, repr_python, and construction.
 

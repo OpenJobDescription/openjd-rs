@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Tests ported from Python test_environments.py, test_definitions.py, test_embedded.py,
 //! test_redacted_env_vars.py, test_template_variables.py

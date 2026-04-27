@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Coverage tests for builtin functions in functions/misc.rs:
 //! fail_fn, zfill_fn, any_fn, all_fn, abs_int, abs_float,

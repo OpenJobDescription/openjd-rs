@@ -1,5 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Tests ported from Python test_job_parameters_bool.py, test_job_parameters_range_expr.py,
 //! test_job_parameters_list_string.py, test_job_parameters_list_int.py,

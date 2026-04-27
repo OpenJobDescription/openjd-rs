@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use crate::hash::HashAlgorithm;
 use crate::manifest::{AbsSnapshot, DirEntry, FileEntry, Manifest, SymlinkPolicy};
 use crate::path_util::normalize_path;

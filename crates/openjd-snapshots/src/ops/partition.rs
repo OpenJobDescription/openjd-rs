@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use crate::manifest::{AbsSnapshot, Manifest, Snapshot, SymlinkPolicy};
 use crate::ops::subtree::{subtree_rel_snapshot, subtree_snapshot};
 use crate::path_util::{is_absolute_path, normalize_path};

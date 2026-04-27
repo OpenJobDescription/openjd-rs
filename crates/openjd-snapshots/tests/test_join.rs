@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use openjd_snapshots::path_util::{is_absolute_path, normalize_path};
 /// Rust port of all tests from
 /// deadline-cloud/test/unit/deadline_job_attachments/snapshots/operations/test_join_manifest.py

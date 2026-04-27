@@ -117,4 +117,6 @@ If you discover a potential security issue in this project we ask that you notif
 
 ## Licensing
 
-See the [LICENSE](LICENSE) file for our project's licensing. We will ask you to confirm the licensing of your contribution.
+See the [LICENSE-Apache-2.0](LICENSE-Apache-2.0) and [LICENSE-MIT](LICENSE-MIT) files for our project's licensing. We will ask you to confirm the licensing of your contribution.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

@@ -1,4 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 // Ported from deadline-cloud test_file_chunk_size_bytes.py
 //
 // Tests that file_chunk_size_bytes is correctly preserved through operations:

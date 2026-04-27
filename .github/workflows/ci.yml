@@ -28,6 +28,16 @@ jobs:
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Check licenses
+        run: cargo deny check licenses
+
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same
   # workspace and keeps the total cache footprint well under 10 GB.

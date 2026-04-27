@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 //! Content-addressed directory tree snapshots with S3 integration.
 //!
 //! This crate captures directory tree snapshots, computes diffs, and transfers data

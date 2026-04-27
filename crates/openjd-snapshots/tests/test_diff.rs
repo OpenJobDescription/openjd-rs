@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 /// Rust port of the first ~30 tests from
 /// deadline-cloud/test/unit/deadline_job_attachments/snapshots/operations/test_diff_snapshots.py
 use openjd_snapshots::{

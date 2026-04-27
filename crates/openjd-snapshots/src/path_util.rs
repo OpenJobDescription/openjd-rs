@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 /// Normalizes a path string, collapses `.` and `..` components, and strips
 /// trailing slashes (except root `/`).
 /// On Windows, backslashes are converted to forward slashes and `\\?\` prefix is stripped.

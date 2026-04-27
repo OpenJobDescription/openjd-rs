@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 /// S3 integration tests for S3DataCache.
 ///
 /// These tests require a real S3 bucket and AWS credentials.

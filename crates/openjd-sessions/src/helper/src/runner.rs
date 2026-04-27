@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use super::protocol::{send, Command as HelperCommand, Response, RunCommand};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::signal::{killpg, Signal};

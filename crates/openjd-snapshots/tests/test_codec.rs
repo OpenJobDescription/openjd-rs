@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use openjd_snapshots::{
     codec::{
         decode_manifest, decode_v2023, decode_v2025, encode_abs_snapshot_diff_v2025,

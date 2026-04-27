@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use super::rate::SlidingWindowRate;
 use crate::hash::{hash_file, hash_file_chunked};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};

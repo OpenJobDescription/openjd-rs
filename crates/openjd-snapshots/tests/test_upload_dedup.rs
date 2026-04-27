@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 //! Tests for concurrent upload deduplication in hash_upload.
 //!
 //! Uses a mock AsyncDataCache with artificial latency on put_object to

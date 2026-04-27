@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 //! Encode/decode manifests to/from on-disk v2023 and v2025 JSON formats.
 
 use crate::hash::HashAlgorithm;

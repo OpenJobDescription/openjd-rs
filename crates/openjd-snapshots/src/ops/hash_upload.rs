@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;

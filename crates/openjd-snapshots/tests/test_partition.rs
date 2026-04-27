@@ -1,4 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 // Ported from deadline-cloud test_partition_manifest.py (~35 tests)
 
 use std::collections::HashSet;

@@ -1,3 +1,7 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 use openjd_snapshots::hash::hash_file_chunked;
 /// Quality probe tests written during the snapshots crate evaluation.
 /// These tests demonstrate potential issues found during code review.
