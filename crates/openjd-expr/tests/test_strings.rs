@@ -1328,7 +1328,44 @@ fn pwsh_list_of_bools() {
 // === Additional repr_cmd comprehensive ===
 #[test]
 fn cmd_string_newline() {
-    assert!(eval("repr_cmd('a\\nb')").to_display_string().contains("\""));
+    // Newlines are stripped (security: prevents command injection via embedded newline).
+    assert_eq!(eval("repr_cmd('a\\nb')").to_display_string(), "ab");
+}
+#[test]
+fn cmd_string_newline_with_caret() {
+    // \n stripped, ^ escaped inside quotes.
+    assert_eq!(eval("repr_cmd('a\\n^b')").to_display_string(), "\"a^^b\"");
+}
+#[test]
+fn cmd_string_newline_with_quote() {
+    // \n stripped, " escaped as ^".
+    assert_eq!(
+        eval(r#"repr_cmd('a\n"b')"#).to_display_string(),
+        "\"a^\"b\""
+    );
+}
+#[test]
+fn cmd_string_newline_with_percent() {
+    // \n stripped, % doubled.
+    assert_eq!(eval("repr_cmd('a\\n%b')").to_display_string(), "\"a%%b\"");
+}
+#[test]
+fn cmd_string_newline_with_bang() {
+    // \n stripped, ! escaped as ^^!.
+    assert_eq!(eval("repr_cmd('a\\n!b')").to_display_string(), "\"a^^!b\"");
+}
+#[test]
+fn cmd_string_cr_with_special() {
+    // \r stripped, & triggers quoting but is literal inside quotes.
+    assert_eq!(eval("repr_cmd('a\\r&b')").to_display_string(), "\"a&b\"");
+}
+#[test]
+fn cmd_string_crlf_with_special() {
+    // \r\n stripped, ^ escaped.
+    assert_eq!(
+        eval("repr_cmd('a\\r\\n^b')").to_display_string(),
+        "\"a^^b\""
+    );
 }
 #[test]
 fn cmd_string_less_than() {
@@ -1787,7 +1824,8 @@ fn cmd_string_with_spaces() {
 }
 #[test]
 fn cmd_string_carriage_return() {
-    assert!(eval("repr_cmd('a\\rb')").to_display_string().contains("\""));
+    // Carriage returns are stripped alongside newlines.
+    assert_eq!(eval("repr_cmd('a\\rb')").to_display_string(), "ab");
 }
 #[test]
 fn cmd_string_all_special() {
@@ -2350,11 +2388,26 @@ fn cmd_set_variable_with_spaces_exact() {
 // --- repr_cmd newline/carriage_return exact ---
 #[test]
 fn cmd_string_newline_exact() {
-    assert_eq!(eval(r"repr_cmd('a\nb')").to_display_string(), "\"a\nb\"");
+    // \n is stripped before quoting; "ab" has no special chars → unquoted.
+    assert_eq!(eval(r"repr_cmd('a\nb')").to_display_string(), "ab");
 }
 #[test]
 fn cmd_string_carriage_return_exact() {
-    assert_eq!(eval(r"repr_cmd('a\rb')").to_display_string(), "\"a\rb\"");
+    assert_eq!(eval(r"repr_cmd('a\rb')").to_display_string(), "ab");
+}
+#[test]
+fn cmd_string_crlf_stripped() {
+    assert_eq!(eval(r"repr_cmd('a\r\nb')").to_display_string(), "ab");
+}
+#[test]
+fn cmd_string_newline_with_special_retains_quoting() {
+    // After stripping "\n", "a&b" still contains special chars → quoted.
+    assert_eq!(eval(r"repr_cmd('a\n&\nb')").to_display_string(), "\"a&b\"");
+}
+#[test]
+fn cmd_string_only_newlines_becomes_empty_quoted() {
+    // An all-newline string becomes empty after stripping; empty strings are quoted.
+    assert_eq!(eval(r"repr_cmd('\n\r\n')").to_display_string(), "\"\"");
 }
 
 // --- pwsh: missing exact values ---
@@ -2425,16 +2478,32 @@ fn regex_in_list_comprehension_uses_shared_cache() {
     assert_eq!(result.list_len(), Some(2));
 }
 
-// --- repr_cmd delayed expansion: ! is intentionally NOT escaped ---
-// repr_cmd targets default cmd.exe rules without EnableDelayedExpansion (see spec §2.2.6).
+// --- repr_cmd delayed expansion: ! is escaped as ^^! ---
+// repr_cmd escapes ! as ^^! as a best-effort defense against EnableDelayedExpansion
+// contexts in cmd.exe (see spec §2.2.6).
 #[test]
-fn cmd_string_exclamation_not_escaped() {
-    assert_eq!(eval("repr_cmd('hello!')").to_display_string(), "\"hello!\"");
+fn cmd_string_exclamation_escaped() {
+    assert_eq!(
+        eval("repr_cmd('hello!')").to_display_string(),
+        "\"hello^^!\""
+    );
 }
 #[test]
-fn cmd_string_exclamation_variable_not_escaped() {
+fn cmd_string_exclamation_variable_escaped() {
     assert_eq!(
-        eval("repr_cmd('value is !PATH!')").to_display_string(),
-        "\"value is !PATH!\""
+        eval("repr_cmd('!PATH!')").to_display_string(),
+        "\"^^!PATH^^!\""
     );
+}
+#[test]
+fn cmd_string_exclamation_with_caret_escaped() {
+    // Both ^ and ! require escaping: ^ → ^^, ! → ^^!.
+    assert_eq!(
+        eval("repr_cmd('a ^ b!')").to_display_string(),
+        "\"a ^^ b^^!\""
+    );
+}
+#[test]
+fn cmd_string_only_exclamation_is_quoted_and_escaped() {
+    assert_eq!(eval("repr_cmd('!')").to_display_string(), "\"^^!\"");
 }

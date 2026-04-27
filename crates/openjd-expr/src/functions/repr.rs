@@ -225,23 +225,27 @@ fn repr_pwsh(val: &ExprValue) -> String {
 }
 
 fn cmd_quote(s: &str) -> String {
-    // Note: targets default cmd.exe parsing rules WITHOUT EnableDelayedExpansion.
-    // The ! character is intentionally not escaped. See the EXPR specification §2.2.6.
-    const NEEDS_QUOTING: &str = " \t\n\r&|<>^\"()%!";
-    if !s.is_empty() && !s.chars().any(|c| NEEDS_QUOTING.contains(c)) {
-        return s.to_string();
+    // Strip newlines: cmd.exe has no escape for a literal newline inside a quoted argument,
+    // and an embedded newline would cause cmd.exe to treat the remainder as a new command
+    // (a command injection vector). See EXPR specification §2.2.6.
+    let stripped: String = s.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+    const NEEDS_QUOTING: &str = " \t&|<>^\"()%!";
+    if !stripped.is_empty() && !stripped.chars().any(|c| NEEDS_QUOTING.contains(c)) {
+        return stripped;
     }
-    let escaped: String = s
-        .chars()
-        .map(|c| {
-            if c == '^' || c == '"' {
-                format!("^{c}")
-            } else if c == '%' {
-                "%%".to_string()
-            } else {
-                c.to_string()
+    let mut escaped = String::with_capacity(stripped.len());
+    for c in stripped.chars() {
+        match c {
+            '^' | '"' => {
+                escaped.push('^');
+                escaped.push(c);
             }
-        })
-        .collect();
+            '%' => escaped.push_str("%%"),
+            // Escape ! as ^^! for EnableDelayedExpansion contexts: cmd.exe processes ^ escapes
+            // before delayed expansion, so a single ^ is consumed and leaves a bare !.
+            '!' => escaped.push_str("^^!"),
+            c => escaped.push(c),
+        }
+    }
     format!("\"{escaped}\"")
 }
