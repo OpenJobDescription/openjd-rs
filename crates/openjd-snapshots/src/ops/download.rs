@@ -548,6 +548,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
 
                 let part_size = dc.multipart_part_size();
                 let multipart_threshold = 2 * part_size as u64;
+                let supports_range = dc.as_range_read().is_some();
 
                 // For multipart files, write directly to file at offsets
                 let already_written;
@@ -569,7 +570,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                         let remaining = file_size - file_offset;
                         let this_chunk_size = remaining.min(cs);
 
-                        if this_chunk_size >= multipart_threshold {
+                        if this_chunk_size >= multipart_threshold && supports_range {
                             // Split large chunk into parallel byte-range parts
                             let num_parts = (this_chunk_size as usize).div_ceil(part_size);
                             for part_idx in 0..num_parts {
@@ -584,15 +585,17 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                                 let h = h.clone();
                                 let tp = tmp_path.clone();
                                 chunk_handles.push(tokio::spawn(async move {
-                                    dc.stream_range_to_file_at_offset(
-                                        &h,
-                                        &alg,
-                                        part_start,
-                                        part_end,
-                                        &tp,
-                                        write_offset,
-                                    )
-                                    .await
+                                    dc.as_range_read()
+                                        .expect("RangeReadDataCache support verified above")
+                                        .stream_range_to_file_at_offset(
+                                            &h,
+                                            &alg,
+                                            part_start,
+                                            part_end,
+                                            &tp,
+                                            write_offset,
+                                        )
+                                        .await
                                 }));
                             }
                         } else {
@@ -644,7 +647,7 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
                     already_written = true;
                     Vec::new()
                 } else if let Some(ref hash) = file_hash {
-                    if file_size >= multipart_threshold {
+                    if file_size >= multipart_threshold && supports_range {
                         download_multipart_to_file(
                             &dc,
                             hash,
@@ -866,7 +869,9 @@ async fn download_multipart_to_file(
         let tp = tmp_path.clone();
 
         handles.push(tokio::spawn(async move {
-            dc.stream_range_to_file_at_offset(&h, &a, start, end, &tp, start)
+            dc.as_range_read()
+                .expect("download_multipart_to_file requires RangeReadDataCache support")
+                .stream_range_to_file_at_offset(&h, &a, start, end, &tp, start)
                 .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok::<_, crate::SnapshotError>(())

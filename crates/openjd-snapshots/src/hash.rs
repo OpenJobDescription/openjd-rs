@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::Read;
 use std::path::Path;
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Default};
 
@@ -54,37 +54,54 @@ pub fn hash_file(path: &Path) -> std::io::Result<String> {
 
 /// Hashes file in chunks, returns vec of hex hash strings.
 ///
+/// `chunk_size` must be strictly positive. Pass a positive value in bytes.
+/// `WHOLE_FILE_CHUNK_SIZE` is not a valid argument — callers should use
+/// [`hash_file`] for whole-file hashing.
+///
+/// `expected_size` is the file size the caller expects on disk (typically
+/// from the manifest entry). If the actual file size differs, this function
+/// returns an `InvalidData` error — content-addressed hashing requires the
+/// file on disk to match what the manifest claims.
+///
 /// Uses `read_exact` to ensure chunk boundaries are determined by `chunk_size`,
 /// not by how many bytes a single `read()` call returns.
-pub fn hash_file_chunked(path: &Path, chunk_size: u64) -> std::io::Result<Vec<String>> {
-    let mut file = File::open(path)?;
-    let mut hashes = Vec::new();
+pub fn hash_file_chunked(
+    path: &Path,
+    chunk_size: u64,
+    expected_size: u64,
+) -> std::io::Result<Vec<String>> {
+    if chunk_size == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "hash_file_chunked requires chunk_size > 0",
+        ));
+    }
+    let file = File::open(path)?;
+    let actual_size = file.metadata()?.len();
+    if actual_size != expected_size {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "file size mismatch for {}: expected {expected_size}, found {actual_size}",
+                path.display()
+            ),
+        ));
+    }
+
+    let mut file = file;
+    let full_chunks = actual_size / chunk_size;
+    let remainder_len = (actual_size % chunk_size) as usize;
+    let mut hashes = Vec::with_capacity(full_chunks as usize + 1);
     let mut buf = vec![0u8; chunk_size as usize];
-    loop {
-        match file.read_exact(&mut buf) {
-            Ok(()) => {
-                hashes.push(hash_data(&buf));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                // Final partial chunk: read whatever remains
-                let mut tail = Vec::new();
-                file.read_to_end(&mut tail)?;
-                // read_exact consumed some bytes into buf before failing;
-                // we need to account for them. Re-read from where the last
-                // successful chunk ended.
-                // Actually, read_exact's behavior on UnexpectedEof is that buf
-                // contents are unspecified. Re-seek and read the remainder.
-                let consumed = hashes.len() as u64 * chunk_size;
-                file.seek(std::io::SeekFrom::Start(consumed))?;
-                let mut remainder = Vec::new();
-                file.read_to_end(&mut remainder)?;
-                if !remainder.is_empty() {
-                    hashes.push(hash_data(&remainder));
-                }
-                break;
-            }
-            Err(e) => return Err(e),
-        }
+
+    for _ in 0..full_chunks {
+        file.read_exact(&mut buf)?;
+        hashes.push(hash_data(&buf));
+    }
+    if remainder_len > 0 {
+        buf.truncate(remainder_len);
+        file.read_exact(&mut buf)?;
+        hashes.push(hash_data(&buf));
     }
     if hashes.is_empty() {
         hashes.push(hash_data(&[]));
@@ -146,7 +163,7 @@ mod tests {
         // Write 10 bytes, chunk size 4 => 3 chunks (4+4+2)
         f.write_all(&[0u8; 10]).unwrap();
         drop(f);
-        let hashes = hash_file_chunked(&p, 4).unwrap();
+        let hashes = hash_file_chunked(&p, 4, 10).unwrap();
         assert_eq!(hashes.len(), 3);
         assert_eq!(hashes[0], hash_data(&[0u8; 4]));
         assert_eq!(hashes[2], hash_data(&[0u8; 2]));
@@ -157,9 +174,41 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("empty.bin");
         File::create(&p).unwrap();
-        let hashes = hash_file_chunked(&p, 4).unwrap();
+        let hashes = hash_file_chunked(&p, 4, 0).unwrap();
         assert_eq!(hashes.len(), 1);
         assert_eq!(hashes[0], hash_data(b""));
+    }
+
+    #[test]
+    fn hash_chunked_rejects_zero_chunk_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f.bin");
+        std::fs::write(&p, b"data").unwrap();
+        let err = hash_file_chunked(&p, 0, 4).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("chunk_size > 0"));
+    }
+
+    #[test]
+    fn hash_chunked_size_mismatch_longer_on_disk() {
+        // Manifest says 5 bytes but file is 10 bytes. Must error.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f.bin");
+        std::fs::write(&p, [0u8; 10]).unwrap();
+        let err = hash_file_chunked(&p, 4, 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("size"), "{err}");
+    }
+
+    #[test]
+    fn hash_chunked_size_mismatch_shorter_on_disk() {
+        // Manifest says 10 bytes but file is 5 bytes. Must error.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f.bin");
+        std::fs::write(&p, [0u8; 5]).unwrap();
+        let err = hash_file_chunked(&p, 4, 10).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("size"), "{err}");
     }
 
     #[test]
