@@ -126,7 +126,7 @@ jobs:
           repository: OpenJobDescription/openjd-specifications
           path: openjd-specifications
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
       - name: Run conformance tests (Unix)
         if: runner.os != 'Windows'
         working-directory: openjd-specifications/conformance-tests
