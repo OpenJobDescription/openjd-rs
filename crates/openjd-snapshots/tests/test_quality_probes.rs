@@ -61,3 +61,84 @@ fn manifest_deserialization_ignores_phantom_types() {
         "validate() correctly rejects absolute paths in Rel manifest"
     );
 }
+
+// ============================================================================
+// Probes added during April 2026 re-evaluation
+// ============================================================================
+
+/// BUG: `Manifest::validate()` does not explicitly reject negative
+/// `file_chunk_size_bytes` values other than `-1` (`WHOLE_FILE_CHUNK_SIZE`).
+/// Casting a negative i64 to u64 wraps to a huge value and the error message
+/// becomes nonsensical. The fix is to check `< 0 && != WHOLE_FILE_CHUNK_SIZE`
+/// up front in `validate()`. Ignored until fixed.
+#[test]
+#[ignore]
+fn validate_rejects_bad_negative_chunk_size_with_sensible_message() {
+    let mut f = FileEntry::file("a.bin", 1024, 1);
+    f.chunk_hashes = Some(vec!["a".into(), "b".into()]);
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, -2).with_files(vec![f]);
+    let err = m.validate().unwrap_err().to_string();
+    // The ideal error would say something about an invalid chunk size.
+    // Today it says "size > 18446744073709551614 (chunk size), got 1024".
+    assert!(
+        !err.contains("18446744073709551614"),
+        "validate() leaks the u64-wrapped value into the error message: {err}"
+    );
+}
+
+/// BUG: `Manifest::validate()` with `file_chunk_size_bytes = 0` and a file
+/// carrying `chunk_hashes` divides by zero when computing expected chunk count
+/// and produces a nonsensical error ("should have 18446744073709551615 chunks").
+/// The fix is to reject `chunk_size == 0` up front. Ignored until fixed.
+#[test]
+#[ignore]
+fn validate_rejects_zero_chunk_size_with_sensible_message() {
+    let mut f = FileEntry::file("a.bin", 3, 1);
+    f.chunk_hashes = Some(vec!["a".into()]);
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, 0).with_files(vec![f]);
+    let err = m.validate().unwrap_err().to_string();
+    assert!(
+        !err.contains("18446744073709551615"),
+        "validate() leaks divide-by-zero into the error message: {err}"
+    );
+}
+
+/// Probe: `compose_snapshot_with_diffs` with an empty diff list is a no-op
+/// clone (not an error). Document the current behaviour.
+#[test]
+fn compose_with_empty_diffs_is_no_op() {
+    let base: Snapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+        .with_files(vec![FileEntry::file("a.txt", 10, 1)]);
+    let out = compose_snapshot_with_diffs::<openjd_snapshots::manifest::Rel>(&base, &[])
+        .expect("empty diff list should succeed");
+    assert_eq!(out.files.len(), 1);
+}
+
+/// Probe: v2025 codec correctly rejects duplicate paths at decode time.
+#[test]
+fn decode_v2025_rejects_duplicate_file_paths() {
+    let dup = r#"{
+        "specificationVersion":"absolute-manifest-snapshot-beta-2025-12",
+        "hashAlg":"xxh128","totalSize":10,"fileChunkSizeBytes":-1,
+        "dirs":[],
+        "files":[
+            {"name":"/a.txt","hash":"abc","size":10,"mtime":1},
+            {"name":"/a.txt","hash":"def","size":20,"mtime":2}
+        ]
+    }"#;
+    let err = decode_v2025(dup).unwrap_err().to_string();
+    assert!(err.contains("duplicate path"), "got: {err}");
+}
+
+// SPEC/IMPL MISMATCH: `specs/snapshots/public-api.md` documents
+// `normalize_path` and `is_absolute_path` at the crate root, but they are
+// only accessible via the `path_util` module path. Either:
+//   (a) re-export them with `pub use path_util::{normalize_path, is_absolute_path};`
+//   (b) update `public-api.md` to note they are at `openjd_snapshots::path_util::*`.
+//
+// This test would fail to compile today, showing the gap. It is commented out
+// so the suite stays green, but the mismatch is real.
+// #[test]
+// fn normalize_path_is_at_crate_root() {
+//     let _ = openjd_snapshots::normalize_path("/a/./b");
+// }
