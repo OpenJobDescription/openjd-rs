@@ -54,7 +54,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup override set stable
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -81,7 +81,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release --bin openjd-rs
       - name: Upload CLI binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openjd-cli-${{ matrix.os }}
           path: |
@@ -106,7 +106,7 @@ jobs:
             binary: openjd-rs
     steps:
       - name: Download CLI binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: openjd-cli-${{ matrix.os }}
           path: bin
@@ -126,7 +126,7 @@ jobs:
           repository: OpenJobDescription/openjd-specifications
           path: openjd-specifications
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8.1.0
       - name: Run conformance tests (Unix)
         if: runner.os != 'Windows'
         working-directory: openjd-specifications/conformance-tests
@@ -147,7 +147,7 @@ jobs:
         run: |
           rustup toolchain install 1.92 --profile minimal
           rustup override set 1.92
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -169,7 +169,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -210,7 +210,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
