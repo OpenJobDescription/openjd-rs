@@ -12,7 +12,22 @@ fn main() {
     let helper_dir = manifest_dir.join("src/helper");
     let helper_out = out_dir.join("openjd_helper");
 
-    println!("cargo:rerun-if-changed=src/helper/");
+    // Rerun only when helper sources change. Watching the whole `src/helper/`
+    // directory would include `src/helper/target/` which this script writes
+    // into, causing spurious re-runs on every cargo invocation (and
+    // recompilation of openjd-sessions + openjd-cli every time).
+    println!(
+        "cargo:rerun-if-changed={}",
+        helper_dir.join("Cargo.toml").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        helper_dir.join("Cargo.lock").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        helper_dir.join("src").display()
+    );
 
     let is_unix = target.contains("linux") || target.contains("unix") || cfg!(unix);
     let is_windows = target.contains("windows") || cfg!(windows);
@@ -45,14 +60,23 @@ fn main() {
             .join(binary_name);
         std::fs::copy(&built, &helper_out).expect("Failed to copy helper binary");
 
-        // Also place the binary where integration tests expect it
-        // (tests can't access OUT_DIR, so they look in the helper's own target dir)
-        let test_dir = helper_dir.join("target/release");
-        std::fs::create_dir_all(&test_dir).expect("Failed to create helper test dir");
-        std::fs::copy(&built, test_dir.join(binary_name))
-            .expect("Failed to copy helper binary for tests");
+        // Expose the built helper binary path to integration tests via
+        // env!("OPENJD_HELPER_BINARY_PATH"). This keeps the helper binary
+        // inside OUT_DIR where it belongs, instead of copying it back into
+        // the source tree (which would dirty the cargo fingerprint on every
+        // run).
+        println!(
+            "cargo:rustc-env=OPENJD_HELPER_BINARY_PATH={}",
+            built.display()
+        );
     } else {
         // Unsupported platform: write empty placeholder so include_bytes! doesn't fail
         std::fs::write(&helper_out, b"").expect("Failed to write placeholder");
+        // Still set the env var so env!() compiles; tests that need the helper
+        // will skip on unsupported platforms.
+        println!(
+            "cargo:rustc-env=OPENJD_HELPER_BINARY_PATH={}",
+            helper_out.display()
+        );
     }
 }

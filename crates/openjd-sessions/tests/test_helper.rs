@@ -18,17 +18,11 @@ use std::process::{Command, Stdio};
 // ────────────────────────────────────────────────────────────────────
 
 fn helper_path() -> PathBuf {
-    let binary = if cfg!(windows) {
-        "openjd_helper.exe"
-    } else {
-        "openjd_helper"
-    };
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/helper/target/release")
-        .join(binary);
+    let p = PathBuf::from(env!("OPENJD_HELPER_BINARY_PATH"));
     if !p.exists() {
         panic!(
-            "Helper binary not found at {}. Build it first: cd crates/openjd-sessions/src/helper && cargo build --release",
+            "Helper binary not found at {}. Build openjd-sessions first (its build.rs \
+             compiles the helper).",
             p.display()
         );
     }

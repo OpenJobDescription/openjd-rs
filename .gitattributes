@@ -1,0 +1,6 @@
+# Ensure Cargo.lock has consistent LF line endings on all platforms.
+# Without this, a Windows checkout converts Cargo.lock to CRLF and the
+# `hashFiles('**/Cargo.lock')` expression in CI produces a different hash
+# than Linux/macOS, which can lead to cache keys that are needlessly
+# fragmented or that never match a previously-saved entry.
+Cargo.lock text eol=lf

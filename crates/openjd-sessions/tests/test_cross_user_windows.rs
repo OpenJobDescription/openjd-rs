@@ -68,13 +68,10 @@ fn make_session(user: Arc<WindowsSessionUser>) -> Session {
 // driving it the same way the Linux tests drive CrossUserHelper via sudo.
 
 fn helper_path() -> PathBuf {
-    let binary = "openjd_helper.exe";
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/helper/target/release")
-        .join(binary);
+    let p = PathBuf::from(env!("OPENJD_HELPER_BINARY_PATH"));
     if !p.exists() {
         panic!(
-            "Helper binary not found at {}. Build it first.",
+            "Helper binary not found at {}. Build openjd-sessions first.",
             p.display()
         );
     }
