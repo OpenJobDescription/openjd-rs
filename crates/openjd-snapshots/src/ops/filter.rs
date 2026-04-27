@@ -39,16 +39,20 @@ pub struct IncludeExcludePathsFilter {
 }
 
 impl IncludeExcludePathsFilter {
-    pub fn new(include: &[&str], exclude: &[&str]) -> Result<Self, glob::PatternError> {
+    pub fn new(include: &[&str], exclude: &[&str]) -> crate::Result<Self> {
+        fn compile(patterns: &[&str]) -> crate::Result<Vec<glob::Pattern>> {
+            patterns
+                .iter()
+                .map(|p| {
+                    glob::Pattern::new(p).map_err(|e| {
+                        crate::SnapshotError::Validation(format!("invalid glob pattern '{p}': {e}"))
+                    })
+                })
+                .collect()
+        }
         Ok(Self {
-            include: include
-                .iter()
-                .map(|p| glob::Pattern::new(p))
-                .collect::<Result<_, _>>()?,
-            exclude: exclude
-                .iter()
-                .map(|p| glob::Pattern::new(p))
-                .collect::<Result<_, _>>()?,
+            include: compile(include)?,
+            exclude: compile(exclude)?,
         })
     }
 

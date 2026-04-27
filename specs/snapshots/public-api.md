@@ -317,26 +317,42 @@ pub trait AsyncDataCache: Send + Sync {
 
     fn multipart_part_size(&self) -> usize;  // Default: 32MB
 
-    // Multipart upload
+    // Capability discovery — default: None
+    fn as_multipart(&self) -> Option<&dyn MultipartDataCache>;
+    fn as_range_read(&self) -> Option<&dyn RangeReadDataCache>;
+
+    // Streaming helpers (with default implementations)
+    async fn copy_object_to_file(&self, hash: &str, algorithm: &str,
+        dest: &Path) -> std::io::Result<u64>;
+    async fn write_object_to_file_at_offset(&self, hash: &str, algorithm: &str,
+        dest: &Path, offset: u64) -> std::io::Result<u64>;
+}
+```
+
+### Multipart Extension Trait
+
+```rust
+#[async_trait]
+pub trait MultipartDataCache: AsyncDataCache {
     async fn create_multipart_upload(&self, hash: &str, algorithm: &str) -> std::io::Result<String>;
     async fn upload_part(&self, hash: &str, algorithm: &str, upload_id: &str,
                          part_number: i32, data: Vec<u8>) -> std::io::Result<String>;
     async fn complete_multipart_upload(&self, hash: &str, algorithm: &str, upload_id: &str,
                                        parts: Vec<(i32, String)>) -> std::io::Result<()>;
     async fn abort_multipart_upload(&self, hash: &str, algorithm: &str,
-                                     upload_id: &str) -> std::io::Result<()>;
+                                    upload_id: &str) -> std::io::Result<()>;
+}
+```
 
-    // Byte-range download
+### Range-Read Extension Trait
+
+```rust
+#[async_trait]
+pub trait RangeReadDataCache: AsyncDataCache {
     async fn get_object_range(&self, hash: &str, algorithm: &str,
                               start: u64, end: u64) -> std::io::Result<Vec<u8>>;
-
-    // Streaming helpers (with default implementations)
     async fn stream_range_to_file_at_offset(&self, hash: &str, algorithm: &str,
         range_start: u64, range_end: u64, dest: &Path, file_offset: u64) -> std::io::Result<u64>;
-    async fn copy_object_to_file(&self, hash: &str, algorithm: &str,
-        dest: &Path) -> std::io::Result<u64>;
-    async fn write_object_to_file_at_offset(&self, hash: &str, algorithm: &str,
-        dest: &Path, offset: u64) -> std::io::Result<u64>;
 }
 ```
 
@@ -362,21 +378,14 @@ impl FileSystemDataCache {
 }
 ```
 
-Implements `ContentAddressedDataCache` and `AsyncDataCache`.
+Implements `ContentAddressedDataCache` and `AsyncDataCache`. Does not implement
+`MultipartDataCache` or `RangeReadDataCache`, so `as_multipart()` and
+`as_range_read()` return `None`.
 
 ### S3DataCache
 
 ```rust
-pub struct S3DataCache {
-    pub bucket: String,
-    pub key_prefix: String,
-    pub client: aws_sdk_s3::Client,
-    pub multipart_part_size: usize,
-    pub s3_check_cache: Option<Arc<S3CheckCache>>,
-    pub force_s3_check: bool,
-    pub expected_bucket_owner: Option<String>,
-    pub cache_validation: CacheValidationState,
-}
+pub struct S3DataCache { /* private fields */ }
 
 impl S3DataCache {
     pub fn new(bucket: String, key_prefix: String, client: aws_sdk_s3::Client) -> Self;
@@ -384,13 +393,25 @@ impl S3DataCache {
         bucket: String, key_prefix: String,
         s3_client: aws_sdk_s3::Client, sts_client: aws_sdk_sts::Client,
     ) -> Result<Self>;
+
+    // Consuming builder-style setters
+    pub fn with_multipart_part_size(self, size: usize) -> Self;
+    pub fn with_s3_check_cache(self, cache: Option<Arc<S3CheckCache>>) -> Self;
+    pub fn with_force_s3_check(self, force: bool) -> Self;
+    pub fn with_expected_bucket_owner(self, owner: Option<String>) -> Self;
+
+    // Accessors
+    pub fn client(&self) -> &aws_sdk_s3::Client;
+    pub fn expected_bucket_owner(&self) -> Option<&str>;
     pub fn cache_key(&self, hash: &str, algorithm: &str) -> String;
     pub fn check_cache_exists(&self, hash: &str, algorithm: &str) -> bool;
     pub fn record_in_check_cache(&self, hash: &str, algorithm: &str);
+    pub fn is_cache_validation_invalidated(&self) -> bool;
 }
 ```
 
-Implements `ContentAddressedDataCache` and `AsyncDataCache` (with `copy_from` for S3-to-S3 server-side copy).
+Implements `ContentAddressedDataCache`, `AsyncDataCache` (with `copy_from` for
+S3-to-S3 server-side copy), `MultipartDataCache`, and `RangeReadDataCache`.
 
 ### CacheValidationState
 

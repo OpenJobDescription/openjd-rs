@@ -33,6 +33,13 @@ pub enum CopyResult {
 }
 
 /// Async content-addressed data cache for use in tokio pipelines.
+///
+/// This is the core trait implemented by every async cache backend. Backends that
+/// additionally support S3-style multipart upload or byte-range reads implement the
+/// companion traits [`MultipartDataCache`] and [`RangeReadDataCache`] and override
+/// [`as_multipart`](AsyncDataCache::as_multipart) /
+/// [`as_range_read`](AsyncDataCache::as_range_read) so callers can discover the
+/// extra capability through a trait object.
 #[async_trait]
 pub trait AsyncDataCache: Send + Sync {
     fn object_key(&self, hash: &str, algorithm: &str) -> String;
@@ -57,69 +64,24 @@ pub trait AsyncDataCache: Send + Sync {
     }
 
     /// Returns the part size for multipart transfers. Default: 32MB.
+    ///
+    /// Callers use this value as a threshold hint (e.g. whether a file is large
+    /// enough to warrant multipart upload) before checking whether the backend
+    /// actually supports multipart via [`as_multipart`](AsyncDataCache::as_multipart).
     fn multipart_part_size(&self) -> usize {
         crate::hash::DEFAULT_S3_MULTIPART_PART_SIZE
     }
 
-    // Multipart upload
-    async fn create_multipart_upload(&self, hash: &str, algorithm: &str)
-        -> std::io::Result<String>;
-    async fn upload_part(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        upload_id: &str,
-        part_number: i32,
-        data: Vec<u8>,
-    ) -> std::io::Result<String>;
-    async fn complete_multipart_upload(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        upload_id: &str,
-        parts: Vec<(i32, String)>,
-    ) -> std::io::Result<()>;
-    async fn abort_multipart_upload(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        upload_id: &str,
-    ) -> std::io::Result<()>;
+    /// Returns `Some(self)` as a [`MultipartDataCache`] if the backend supports
+    /// S3-style multipart upload. Default: `None`.
+    fn as_multipart(&self) -> Option<&dyn MultipartDataCache> {
+        None
+    }
 
-    // Byte-range download
-    async fn get_object_range(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        start: u64,
-        end: u64,
-    ) -> std::io::Result<Vec<u8>>;
-
-    /// Stream a byte-range of a cached object directly to a file at a given offset.
-    /// Default uses get_object_range + write. S3 overrides to stream without buffering.
-    async fn stream_range_to_file_at_offset(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        range_start: u64,
-        range_end: u64,
-        dest: &std::path::Path,
-        file_offset: u64,
-    ) -> std::io::Result<u64> {
-        let data = self
-            .get_object_range(hash, algorithm, range_start, range_end)
-            .await?;
-        let len = data.len() as u64;
-        let dest = dest.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            use std::io::{Seek, SeekFrom, Write};
-            let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
-            f.seek(SeekFrom::Start(file_offset))?;
-            f.write_all(&data)?;
-            Ok::<_, std::io::Error>(len)
-        })
-        .await
-        .map_err(std::io::Error::other)?
+    /// Returns `Some(self)` as a [`RangeReadDataCache`] if the backend supports
+    /// byte-range reads. Default: `None`.
+    fn as_range_read(&self) -> Option<&dyn RangeReadDataCache> {
+        None
     }
 
     /// Copy a cached object directly to a file. The default reads into memory then writes.
@@ -152,6 +114,73 @@ pub trait AsyncDataCache: Send + Sync {
             use std::io::{Seek, SeekFrom, Write};
             let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
             f.seek(SeekFrom::Start(offset))?;
+            f.write_all(&data)?;
+            Ok::<_, std::io::Error>(len)
+        })
+        .await
+        .map_err(std::io::Error::other)?
+    }
+}
+
+/// Extension trait for caches that support S3-style multipart upload.
+#[async_trait]
+pub trait MultipartDataCache: AsyncDataCache {
+    async fn create_multipart_upload(&self, hash: &str, algorithm: &str)
+        -> std::io::Result<String>;
+    async fn upload_part(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        part_number: i32,
+        data: Vec<u8>,
+    ) -> std::io::Result<String>;
+    async fn complete_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+        parts: Vec<(i32, String)>,
+    ) -> std::io::Result<()>;
+    async fn abort_multipart_upload(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        upload_id: &str,
+    ) -> std::io::Result<()>;
+}
+
+/// Extension trait for caches that support byte-range reads.
+#[async_trait]
+pub trait RangeReadDataCache: AsyncDataCache {
+    async fn get_object_range(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        start: u64,
+        end: u64,
+    ) -> std::io::Result<Vec<u8>>;
+
+    /// Stream a byte-range of a cached object directly to a file at a given offset.
+    /// Default uses get_object_range + write. S3 overrides to stream without buffering.
+    async fn stream_range_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        range_start: u64,
+        range_end: u64,
+        dest: &std::path::Path,
+        file_offset: u64,
+    ) -> std::io::Result<u64> {
+        let data = self
+            .get_object_range(hash, algorithm, range_start, range_end)
+            .await?;
+        let len = data.len() as u64;
+        let dest = dest.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
+            f.seek(SeekFrom::Start(file_offset))?;
             f.write_all(&data)?;
             Ok::<_, std::io::Error>(len)
         })
@@ -233,65 +262,6 @@ impl AsyncDataCache for FileSystemDataCache {
 
     async fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
         tokio::fs::read(self.object_path(hash, algorithm)).await
-    }
-
-    async fn create_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-    ) -> std::io::Result<String> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "multipart not supported for filesystem",
-        ))
-    }
-    async fn upload_part(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-        _part_number: i32,
-        _data: Vec<u8>,
-    ) -> std::io::Result<String> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "multipart not supported for filesystem",
-        ))
-    }
-    async fn complete_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-        _parts: Vec<(i32, String)>,
-    ) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "multipart not supported for filesystem",
-        ))
-    }
-    async fn abort_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-    ) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "multipart not supported for filesystem",
-        ))
-    }
-    async fn get_object_range(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _start: u64,
-        _end: u64,
-    ) -> std::io::Result<Vec<u8>> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "range get not supported for filesystem",
-        ))
     }
 
     async fn copy_object_to_file(
@@ -474,14 +444,14 @@ impl CacheValidationState {
 
 /// Content-addressed storage backed by Amazon S3.
 pub struct S3DataCache {
-    pub bucket: String,
-    pub key_prefix: String,
-    pub client: aws_sdk_s3::Client,
-    pub multipart_part_size: usize,
-    pub s3_check_cache: Option<Arc<S3CheckCache>>,
-    pub force_s3_check: bool,
-    pub expected_bucket_owner: Option<String>,
-    pub cache_validation: CacheValidationState,
+    bucket: String,
+    key_prefix: String,
+    client: aws_sdk_s3::Client,
+    multipart_part_size: usize,
+    s3_check_cache: Option<Arc<S3CheckCache>>,
+    force_s3_check: bool,
+    expected_bucket_owner: Option<String>,
+    cache_validation: CacheValidationState,
 }
 
 impl S3DataCache {
@@ -498,9 +468,49 @@ impl S3DataCache {
         }
     }
 
+    /// Set the multipart part size for S3 transfers.
+    pub fn with_multipart_part_size(mut self, size: usize) -> Self {
+        self.multipart_part_size = size;
+        self
+    }
+
+    /// Attach an S3 check cache used to skip HeadObject calls.
+    pub fn with_s3_check_cache(mut self, cache: Option<Arc<S3CheckCache>>) -> Self {
+        self.s3_check_cache = cache;
+        self
+    }
+
+    /// If true, always call HeadObject even when the check cache has an entry.
+    pub fn with_force_s3_check(mut self, force: bool) -> Self {
+        self.force_s3_check = force;
+        self
+    }
+
+    /// Set the expected bucket owner account ID for S3 requests.
+    pub fn with_expected_bucket_owner(mut self, owner: Option<String>) -> Self {
+        self.expected_bucket_owner = owner;
+        self
+    }
+
+    /// Returns a reference to the underlying AWS S3 client.
+    pub fn client(&self) -> &aws_sdk_s3::Client {
+        &self.client
+    }
+
+    /// Returns the expected bucket owner account ID, if configured.
+    pub fn expected_bucket_owner(&self) -> Option<&str> {
+        self.expected_bucket_owner.as_deref()
+    }
+
     /// Returns the cache key for a given hash: "{bucket}/{prefix}/{hash}.{algorithm}"
     pub fn cache_key(&self, hash: &str, algorithm: &str) -> String {
         format!("{}/{}", self.bucket, self.object_key(hash, algorithm))
+    }
+
+    /// Returns `true` if the probabilistic S3-check-cache validation has detected
+    /// a stale entry and invalidated the local cache. Primarily useful for tests.
+    pub fn is_cache_validation_invalidated(&self) -> bool {
+        self.cache_validation.is_invalidated()
     }
 
     /// Create with auto-detected account ID from AWS credentials.
@@ -518,9 +528,7 @@ impl S3DataCache {
             .account()
             .ok_or_else(|| crate::SnapshotError::S3("STS response missing Account".into()))?
             .to_string();
-        let mut cache = Self::new(bucket, key_prefix, s3_client);
-        cache.expected_bucket_owner = Some(account);
-        Ok(cache)
+        Ok(Self::new(bucket, key_prefix, s3_client).with_expected_bucket_owner(Some(account)))
     }
 
     /// Check the S3 check cache for an entry (without HeadObject).
@@ -611,6 +619,14 @@ impl AsyncDataCache for S3DataCache {
 
     fn multipart_part_size(&self) -> usize {
         self.multipart_part_size
+    }
+
+    fn as_multipart(&self) -> Option<&dyn MultipartDataCache> {
+        Some(self)
+    }
+
+    fn as_range_read(&self) -> Option<&dyn RangeReadDataCache> {
+        Some(self)
     }
 
     async fn copy_from(
@@ -732,6 +748,71 @@ impl AsyncDataCache for S3DataCache {
         Ok(bytes.to_vec())
     }
 
+    async fn copy_object_to_file(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+    ) -> std::io::Result<u64> {
+        let key = AsyncDataCache::object_key(self, hash, algorithm);
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .set_expected_bucket_owner(self.expected_bucket_owner.clone())
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
+        })?;
+        let data = bytes.to_vec();
+        let len = data.len() as u64;
+        let dest = dest.to_path_buf();
+        tokio::task::spawn_blocking(move || std::fs::write(&dest, &data))
+            .await
+            .map_err(std::io::Error::other)??;
+        Ok(len)
+    }
+
+    async fn write_object_to_file_at_offset(
+        &self,
+        hash: &str,
+        algorithm: &str,
+        dest: &std::path::Path,
+        offset: u64,
+    ) -> std::io::Result<u64> {
+        let key = AsyncDataCache::object_key(self, hash, algorithm);
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .set_expected_bucket_owner(self.expected_bucket_owner.clone())
+            .send()
+            .await
+            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
+        let bytes = resp.body.collect().await.map_err(|e| {
+            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
+        })?;
+        let data = bytes.to_vec();
+        let len = data.len() as u64;
+        let dest = dest.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
+            f.seek(SeekFrom::Start(offset))?;
+            f.write_all(&data)?;
+            Ok::<_, std::io::Error>(len)
+        })
+        .await
+        .map_err(std::io::Error::other)?
+    }
+}
+
+#[async_trait]
+impl MultipartDataCache for S3DataCache {
     async fn create_multipart_upload(
         &self,
         hash: &str,
@@ -841,7 +922,10 @@ impl AsyncDataCache for S3DataCache {
             })?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl RangeReadDataCache for S3DataCache {
     async fn get_object_range(
         &self,
         hash: &str,
@@ -869,68 +953,6 @@ impl AsyncDataCache for S3DataCache {
             ))
         })?;
         Ok(bytes.to_vec())
-    }
-
-    async fn copy_object_to_file(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        dest: &std::path::Path,
-    ) -> std::io::Result<u64> {
-        let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(&key)
-            .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send()
-            .await
-            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
-        let bytes = resp.body.collect().await.map_err(|e| {
-            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
-        })?;
-        let data = bytes.to_vec();
-        let len = data.len() as u64;
-        let dest = dest.to_path_buf();
-        tokio::task::spawn_blocking(move || std::fs::write(&dest, &data))
-            .await
-            .map_err(std::io::Error::other)??;
-        Ok(len)
-    }
-
-    async fn write_object_to_file_at_offset(
-        &self,
-        hash: &str,
-        algorithm: &str,
-        dest: &std::path::Path,
-        offset: u64,
-    ) -> std::io::Result<u64> {
-        let key = AsyncDataCache::object_key(self, hash, algorithm);
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(&key)
-            .set_expected_bucket_owner(self.expected_bucket_owner.clone())
-            .send()
-            .await
-            .map_err(|e| std::io::Error::other(format!("S3 GetObject failed for {key}: {e}")))?;
-        let bytes = resp.body.collect().await.map_err(|e| {
-            std::io::Error::other(format!("S3 GetObject body read failed for {key}: {e}"))
-        })?;
-        let data = bytes.to_vec();
-        let len = data.len() as u64;
-        let dest = dest.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            use std::io::{Seek, SeekFrom, Write};
-            let mut f = std::fs::OpenOptions::new().write(true).open(&dest)?;
-            f.seek(SeekFrom::Start(offset))?;
-            f.write_all(&data)?;
-            Ok::<_, std::io::Error>(len)
-        })
-        .await
-        .map_err(std::io::Error::other)?
     }
 
     async fn stream_range_to_file_at_offset(

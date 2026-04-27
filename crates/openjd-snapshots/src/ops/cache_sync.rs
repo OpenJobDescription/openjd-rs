@@ -4,7 +4,7 @@
 
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
-use crate::data_cache::{AsyncDataCache, CopyResult};
+use crate::data_cache::{AsyncDataCache, CopyResult, MultipartDataCache, RangeReadDataCache};
 use crate::manifest::ManifestRef;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,7 +37,8 @@ pub struct CacheSyncStatistics {
 }
 
 /// Transfer a single object from source to destination cache.
-/// Uses multipart upload for objects >= 2 * part_size, single get+put otherwise.
+/// Uses multipart upload for objects >= 2 * part_size when both sides support it;
+/// otherwise falls back to single get+put.
 async fn transfer_object(
     src: &dyn AsyncDataCache,
     dst: &dyn AsyncDataCache,
@@ -50,24 +51,34 @@ async fn transfer_object(
     let multipart_threshold = 2 * part_size as u64;
 
     if size_est >= multipart_threshold {
-        transfer_object_multipart(src, dst, hash, alg, size_est, part_size, memory_pool).await
-    } else {
-        let _mem_permit = memory_pool.acquire(size_est as usize).await;
-        let data = src
-            .get_object(hash, alg)
-            .await
-            .map_err(crate::SnapshotError::Io)?;
-        let actual_size = data.len() as u64;
-        dst.put_object(hash, alg, data)
-            .await
-            .map_err(crate::SnapshotError::Io)?;
-        Ok(actual_size)
+        if let (Some(dst_mp), Some(src_rr)) = (dst.as_multipart(), src.as_range_read()) {
+            return transfer_object_multipart(
+                src_rr,
+                dst_mp,
+                hash,
+                alg,
+                size_est,
+                part_size,
+                memory_pool,
+            )
+            .await;
+        }
     }
+    let _mem_permit = memory_pool.acquire(size_est as usize).await;
+    let data = src
+        .get_object(hash, alg)
+        .await
+        .map_err(crate::SnapshotError::Io)?;
+    let actual_size = data.len() as u64;
+    dst.put_object(hash, alg, data)
+        .await
+        .map_err(crate::SnapshotError::Io)?;
+    Ok(actual_size)
 }
 
 async fn transfer_object_multipart(
-    src: &dyn AsyncDataCache,
-    dst: &dyn AsyncDataCache,
+    src: &dyn RangeReadDataCache,
+    dst: &dyn MultipartDataCache,
     hash: &str,
     alg: &str,
     size_est: u64,
@@ -576,6 +587,12 @@ mod tests {
             fn multipart_part_size(&self) -> usize {
                 5
             }
+            fn as_multipart(&self) -> Option<&dyn MultipartDataCache> {
+                Some(self)
+            }
+            fn as_range_read(&self) -> Option<&dyn RangeReadDataCache> {
+                Some(self)
+            }
             async fn object_exists(&self, h: &str, a: &str) -> std::io::Result<bool> {
                 self.inner.object_exists(h, a).await
             }
@@ -585,6 +602,10 @@ mod tests {
             async fn get_object(&self, h: &str, a: &str) -> std::io::Result<Vec<u8>> {
                 self.inner.get_object(h, a).await
             }
+        }
+
+        #[async_trait::async_trait]
+        impl MultipartDataCache for SmallPartCache {
             async fn create_multipart_upload(&self, _h: &str, _a: &str) -> std::io::Result<String> {
                 Ok("test-upload-id".into())
             }
@@ -633,6 +654,10 @@ mod tests {
             ) -> std::io::Result<()> {
                 Ok(())
             }
+        }
+
+        #[async_trait::async_trait]
+        impl RangeReadDataCache for SmallPartCache {
             async fn get_object_range(
                 &self,
                 h: &str,
@@ -733,45 +758,6 @@ mod tests {
                 let data = _source.get_object(hash, algorithm).await?;
                 self.inner.put_object(hash, algorithm, data).await?;
                 Ok(CopyResult::ServerSideCopy)
-            }
-            async fn create_multipart_upload(&self, h: &str, a: &str) -> std::io::Result<String> {
-                self.inner.create_multipart_upload(h, a).await
-            }
-            async fn upload_part(
-                &self,
-                h: &str,
-                a: &str,
-                u: &str,
-                p: i32,
-                d: Vec<u8>,
-            ) -> std::io::Result<String> {
-                self.inner.upload_part(h, a, u, p, d).await
-            }
-            async fn complete_multipart_upload(
-                &self,
-                h: &str,
-                a: &str,
-                u: &str,
-                p: Vec<(i32, String)>,
-            ) -> std::io::Result<()> {
-                self.inner.complete_multipart_upload(h, a, u, p).await
-            }
-            async fn abort_multipart_upload(
-                &self,
-                h: &str,
-                a: &str,
-                u: &str,
-            ) -> std::io::Result<()> {
-                self.inner.abort_multipart_upload(h, a, u).await
-            }
-            async fn get_object_range(
-                &self,
-                h: &str,
-                a: &str,
-                s: u64,
-                e: u64,
-            ) -> std::io::Result<Vec<u8>> {
-                self.inner.get_object_range(h, a, s, e).await
             }
         }
 

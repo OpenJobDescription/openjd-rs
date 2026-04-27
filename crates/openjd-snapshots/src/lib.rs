@@ -70,7 +70,8 @@ pub use codec::{
     encode_snapshot_v2023, encode_snapshot_v2025, DecodedManifest, ManifestFormat,
 };
 pub use data_cache::{
-    AsyncDataCache, ContentAddressedDataCache, CopyResult, FileSystemDataCache, S3DataCache,
+    AsyncDataCache, ContentAddressedDataCache, CopyResult, FileSystemDataCache, MultipartDataCache,
+    RangeReadDataCache, S3DataCache,
 };
 pub use error::{Result, SnapshotError};
 pub use hash::{

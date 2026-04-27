@@ -220,7 +220,7 @@ fn hash_manifest<P: Clone, K: Clone>(
 
                 let path = Path::new(&item.path);
                 let cr = if item.use_chunks {
-                    let hashes = hash_file_chunked(path, chunk_size as u64)?;
+                    let hashes = hash_file_chunked(path, chunk_size as u64, item.file_size)?;
                     debug!(path = %item.path, chunks = hashes.len(), "hashed (chunked)");
                     CacheResult::Chunked(hashes)
                 } else {

@@ -6,14 +6,23 @@
 
 ## Overview
 
-A content-addressed data cache stores data using the content's hash as the key, enabling deduplication, efficient retrieval, and integrity verification. The crate provides two trait abstractions and two concrete implementations:
+A content-addressed data cache stores data using the content's hash as the key, enabling deduplication, efficient retrieval, and integrity verification. The crate provides four trait abstractions and two concrete implementations:
 
 ```
 ContentAddressedDataCache (sync trait)
-AsyncDataCache            (async trait, used by HASH_UPLOAD and DOWNLOAD)
-├── S3DataCache           - Amazon S3 storage with multipart transfer support
-└── FileSystemDataCache   - Local or network filesystem storage
+AsyncDataCache            (core async trait, used by HASH_UPLOAD, DOWNLOAD, CACHE_SYNC)
+├── MultipartDataCache    (extension trait: S3-style multipart upload)
+└── RangeReadDataCache    (extension trait: byte-range reads)
+
+S3DataCache           - implements all three async traits (multipart + range reads)
+FileSystemDataCache   - implements only AsyncDataCache (no multipart, no range reads)
 ```
+
+Callers who need multipart or range capabilities discover them at runtime via
+`AsyncDataCache::as_multipart()` / `AsyncDataCache::as_range_read()`, which return
+`Some(&dyn MultipartDataCache)` / `Some(&dyn RangeReadDataCache)` when the backing
+cache supports the capability. The default implementation returns `None`, so
+backends opt in by overriding these accessors.
 
 ## Storage Key Format
 
@@ -58,38 +67,71 @@ pub trait ContentAddressedDataCache: Send + Sync {
 
 ## Async Trait: `AsyncDataCache`
 
-Used by HASH_UPLOAD and DOWNLOAD pipelines. Extends the sync interface with multipart and streaming operations:
+Core async trait used by HASH_UPLOAD, DOWNLOAD, and CACHE_SYNC pipelines. Every async
+cache backend implements this trait. Backends that additionally support S3-style
+multipart upload or byte-range reads implement the extension traits
+[`MultipartDataCache`](#multipart-extension-trait-multipartdatacache) and
+[`RangeReadDataCache`](#range-read-extension-trait-rangereaddatacache), and override
+`as_multipart` / `as_range_read` so callers can discover the capability through a
+trait object.
 
 ```rust
 #[async_trait]
 pub trait AsyncDataCache: Send + Sync {
     fn object_key(&self, hash: &str, algorithm: &str) -> String;
+    fn as_any(&self) -> &dyn Any;
     async fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool>;
     async fn put_object(&self, hash: &str, algorithm: &str, data: Vec<u8>) -> std::io::Result<String>;
     async fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>>;
+
+    // Server-side copy (default: NotSupported)
+    async fn copy_from(&self, source: &dyn AsyncDataCache, hash: &str, algorithm: &str)
+        -> std::io::Result<CopyResult>;
+
     fn multipart_part_size(&self) -> usize;  // Default: 32MB
 
-    // Multipart upload
+    // Capability discovery — default: None
+    fn as_multipart(&self) -> Option<&dyn MultipartDataCache>;
+    fn as_range_read(&self) -> Option<&dyn RangeReadDataCache>;
+
+    // Streaming helpers (with default implementations using get_object)
+    async fn copy_object_to_file(/* ... */) -> std::io::Result<u64>;
+    async fn write_object_to_file_at_offset(/* ... */) -> std::io::Result<u64>;
+}
+```
+
+### Multipart extension trait: `MultipartDataCache`
+
+```rust
+#[async_trait]
+pub trait MultipartDataCache: AsyncDataCache {
     async fn create_multipart_upload(&self, hash: &str, algorithm: &str) -> std::io::Result<String>;
     async fn upload_part(&self, hash: &str, algorithm: &str, upload_id: &str,
                          part_number: i32, data: Vec<u8>) -> std::io::Result<String>;
     async fn complete_multipart_upload(&self, hash: &str, algorithm: &str, upload_id: &str,
                                        parts: Vec<(i32, String)>) -> std::io::Result<()>;
     async fn abort_multipart_upload(&self, hash: &str, algorithm: &str,
-                                     upload_id: &str) -> std::io::Result<()>;
-
-    // Byte-range download
-    async fn get_object_range(&self, hash: &str, algorithm: &str,
-                              start: u64, end: u64) -> std::io::Result<Vec<u8>>;
-
-    // Streaming helpers (with default implementations)
-    async fn stream_range_to_file_at_offset(/* ... */) -> std::io::Result<u64>;
-    async fn copy_object_to_file(/* ... */) -> std::io::Result<u64>;
-    async fn write_object_to_file_at_offset(/* ... */) -> std::io::Result<u64>;
+                                    upload_id: &str) -> std::io::Result<()>;
 }
 ```
 
-The streaming helpers have default implementations that read into memory then write. `S3DataCache` and `FileSystemDataCache` can override for efficiency.
+### Range-read extension trait: `RangeReadDataCache`
+
+```rust
+#[async_trait]
+pub trait RangeReadDataCache: AsyncDataCache {
+    async fn get_object_range(&self, hash: &str, algorithm: &str,
+                              start: u64, end: u64) -> std::io::Result<Vec<u8>>;
+
+    // Stream a byte range directly to a file (default uses get_object_range + write)
+    async fn stream_range_to_file_at_offset(/* ... */) -> std::io::Result<u64>;
+}
+```
+
+The streaming helpers on `AsyncDataCache` (`copy_object_to_file`,
+`write_object_to_file_at_offset`) have default implementations that read into memory
+then write, so they work for any backend. `S3DataCache` and `FileSystemDataCache`
+override them for efficiency.
 
 ## FileSystemDataCache
 
@@ -114,7 +156,9 @@ let cache = FileSystemDataCache::new("/tmp/debug_snapshot/Data")?;
 - `object_exists()` → filesystem `exists()` check
 - `put_object()` → write file to `{root_path}/{hash}.{algorithm}`
 - `get_object()` → read file from cache
-- Multipart operations are no-ops (single-file writes)
+- Does not implement `MultipartDataCache` or `RangeReadDataCache`; `as_multipart()`
+  and `as_range_read()` both return `None`. Callers that need these capabilities
+  must fall back to `get_object` + `put_object`.
 
 ### Use Cases
 
@@ -127,21 +171,24 @@ let cache = FileSystemDataCache::new("/tmp/debug_snapshot/Data")?;
 Content-addressed storage backed by Amazon S3.
 
 ```rust
-pub struct S3DataCache {
-    pub bucket: String,
-    pub key_prefix: String,
-    pub client: aws_sdk_s3::Client,
-    pub s3_check_cache: Option<Arc<S3CheckCache>>,
-    pub multipart_part_size: usize,  // Default: 32MB
-    pub account_id: AccountId,
-}
+pub struct S3DataCache { /* private fields */ }
 
-pub enum AccountId {
-    Auto(String),       // Resolved at construction via STS
-    Explicit(String),
-    NoCheck,
+impl S3DataCache {
+    pub fn new(bucket: String, key_prefix: String, client: aws_sdk_s3::Client) -> Self;
+    pub async fn new_with_auto_account_id(
+        bucket: String, key_prefix: String,
+        s3_client: aws_sdk_s3::Client, sts_client: aws_sdk_sts::Client,
+    ) -> Result<Self>;
+
+    // Consuming builder-style setters for optional configuration
+    pub fn with_multipart_part_size(self, size: usize) -> Self; // Default: 32MB
+    pub fn with_s3_check_cache(self, cache: Option<Arc<S3CheckCache>>) -> Self;
+    pub fn with_force_s3_check(self, force: bool) -> Self;
+    pub fn with_expected_bucket_owner(self, owner: Option<String>) -> Self;
 }
 ```
+
+All configuration fields are private; construct with `new` or `new_with_auto_account_id`, then chain `with_*` setters for optional state.
 
 ### Account ID and Security
 

@@ -363,7 +363,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
 
                 let fr = if item.use_chunks {
                     process_chunked_async(item.path, cs as u64, alg, dc, dedup).await?
-                } else if item.file_size >= multipart_threshold {
+                } else if item.file_size >= multipart_threshold && dc.as_multipart().is_some() {
                     process_whole_multipart(item.path, item.file_size, alg, dc, part_size, dedup)
                         .await?
                 } else {
@@ -621,7 +621,10 @@ async fn process_whole_multipart(
     }
 
     // Stage 3: Multipart upload (we own this hash)
-    let upload_id = data_cache
+    let mp = data_cache
+        .as_multipart()
+        .expect("process_whole_multipart requires MultipartDataCache support");
+    let upload_id = mp
         .create_multipart_upload(&hash, &alg_str)
         .await
         .map_err(crate::SnapshotError::Io)?;
@@ -653,6 +656,8 @@ async fn process_whole_multipart(
                 .map_err(crate::SnapshotError::Io)?;
 
                 let etag = dc
+                    .as_multipart()
+                    .expect("MultipartDataCache support verified above")
                     .upload_part(&h, &a, &uid, part_num, part_data)
                     .await
                     .map_err(crate::SnapshotError::Io)?;
@@ -669,8 +674,7 @@ async fn process_whole_multipart(
         }
         parts.sort_by_key(|(num, _)| *num);
 
-        data_cache
-            .complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
+        mp.complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
             .await
             .map_err(crate::SnapshotError::Io)?;
 
@@ -680,9 +684,7 @@ async fn process_whole_multipart(
 
     // Abort the multipart upload on failure before notifying waiters
     if let Err(ref _e) = upload_result {
-        let _ = data_cache
-            .abort_multipart_upload(&hash, &alg_str, &upload_id)
-            .await;
+        let _ = mp.abort_multipart_upload(&hash, &alg_str, &upload_id).await;
     }
 
     // Notify waiters and clean up dedup map regardless of success/failure

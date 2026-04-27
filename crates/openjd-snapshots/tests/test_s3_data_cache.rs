@@ -11,7 +11,7 @@ use openjd_snapshots::{
     collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
     subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, CopyResult, DirEntry,
     DownloadOptions, FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
-    S3DataCache, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    MultipartDataCache, RangeReadDataCache, S3DataCache, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
 };
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
@@ -606,7 +606,7 @@ fn s3_multipart_upload_round_trip() {
         .unwrap();
 
     rt.block_on(async {
-        use openjd_snapshots::AsyncDataCache;
+        use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
 
         let hash = "multipart_test_hash";
         let alg = "xxh128";
@@ -656,7 +656,7 @@ fn s3_get_object_range() {
         .unwrap();
 
     rt.block_on(async {
-        use openjd_snapshots::AsyncDataCache;
+        use openjd_snapshots::{AsyncDataCache, RangeReadDataCache};
 
         // Upload a file
         let content = b"hello world, this is range test data";
@@ -682,7 +682,7 @@ fn s3_abort_multipart_upload() {
         .unwrap();
 
     rt.block_on(async {
-        use openjd_snapshots::AsyncDataCache;
+        use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
 
         let hash = "abort_test_hash";
         let alg = "xxh128";
@@ -719,12 +719,12 @@ fn s3_check_cache_hit_skips_head_object() {
     check_cache.put_entry(&cache_key).unwrap();
 
     // Attach the check cache to the data cache
-    let mut data_cache_with_check = S3DataCache::new(
+    let data_cache_with_check = S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
-        data_cache.client.clone(),
-    );
-    data_cache_with_check.s3_check_cache = Some(check_cache);
+        data_cache.client().clone(),
+    )
+    .with_s3_check_cache(Some(check_cache));
 
     // check_cache_exists should return true without any S3 call
     assert!(data_cache_with_check.check_cache_exists("abc123", "xxh128"));
@@ -736,12 +736,12 @@ fn s3_check_cache_miss_calls_head_object() {
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
-    let mut data_cache_with_check = S3DataCache::new(
+    let data_cache_with_check = S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
-        data_cache.client.clone(),
-    );
-    data_cache_with_check.s3_check_cache = Some(check_cache);
+        data_cache.client().clone(),
+    )
+    .with_s3_check_cache(Some(check_cache));
 
     // No entry in check cache — check_cache_exists returns false
     assert!(!data_cache_with_check.check_cache_exists("missing", "xxh128"));
@@ -769,8 +769,8 @@ fn make_s3_fixture_small_parts() -> (TempDir, Arc<S3DataCache>) {
     rt.block_on(async {
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
-    let mut data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client);
-    data_cache.multipart_part_size = SMALL_PART_SIZE;
+    let data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
+        .with_multipart_part_size(SMALL_PART_SIZE);
     (tmp, Arc::new(data_cache))
 }
 
@@ -931,8 +931,8 @@ fn make_s3_fixture_with_expected_bucket_owner(owner: &str) -> (TempDir, Arc<S3Da
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
 
-    let mut cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client);
-    cache.expected_bucket_owner = Some(owner.to_string());
+    let cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
+        .with_expected_bucket_owner(Some(owner.to_string()));
     (tmp, Arc::new(cache))
 }
 
@@ -940,7 +940,7 @@ fn make_s3_fixture_with_expected_bucket_owner(owner: &str) -> (TempDir, Arc<S3Da
 fn s3_data_cache_expected_bucket_owner_none() {
     // S3DataCache created without expected_bucket_owner — all operations succeed
     let (_tmp, cache) = make_s3_fixture();
-    assert!(cache.expected_bucket_owner.is_none());
+    assert!(cache.expected_bucket_owner().is_none());
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
@@ -955,7 +955,7 @@ fn s3_data_cache_expected_bucket_owner_set() {
     // S3DataCache with expected_bucket_owner — s3s doesn't validate the field,
     // so operations succeed. This confirms the field is passed through without error.
     let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012");
-    assert_eq!(cache.expected_bucket_owner.as_deref(), Some("123456789012"));
+    assert_eq!(cache.expected_bucket_owner(), Some("123456789012"));
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
@@ -1033,7 +1033,7 @@ fn s3_download_with_expected_bucket_owner() {
 fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
     // When expected_bucket_owner is None, uploads succeed without the header.
     let (_s3_tmp, cache) = make_s3_fixture();
-    assert!(cache.expected_bucket_owner.is_none());
+    assert!(cache.expected_bucket_owner().is_none());
 
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"no owner header");
@@ -1058,7 +1058,7 @@ fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
 fn s3_download_excludes_expected_bucket_owner_when_disabled() {
     // When expected_bucket_owner is None, downloads succeed without the header.
     let (_s3_tmp, cache) = make_s3_fixture();
-    assert!(cache.expected_bucket_owner.is_none());
+    assert!(cache.expected_bucket_owner().is_none());
 
     let tmp = TempDir::new().unwrap();
     let hash = upload_to_s3(&*cache, b"no owner download");
@@ -1161,32 +1161,13 @@ async fn fs_async_write_object_to_file_at_offset() {
 }
 
 #[tokio::test]
-async fn fs_async_multipart_returns_unsupported() {
+async fn fs_async_has_no_multipart_or_range_capability() {
     let (_tmp, cache) = make_fs_async_cache();
 
-    let err = cache.create_multipart_upload("h", "a").await.unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
-
-    let err = cache
-        .upload_part("h", "a", "uid", 1, vec![])
-        .await
-        .unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
-
-    let err = cache
-        .complete_multipart_upload("h", "a", "uid", vec![])
-        .await
-        .unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
-
-    let err = cache
-        .abort_multipart_upload("h", "a", "uid")
-        .await
-        .unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
-
-    let err = cache.get_object_range("h", "a", 0, 10).await.unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+    // FileSystemDataCache implements only AsyncDataCache; callers can discover
+    // that it does not support multipart/range via these accessors.
+    assert!(cache.as_multipart().is_none());
+    assert!(cache.as_range_read().is_none());
 }
 
 // ===== S3 Streaming Download Methods =====
@@ -1203,8 +1184,8 @@ fn make_s3_fixture_tiny_parts() -> (TempDir, Arc<S3DataCache>) {
     rt.block_on(async {
         client.create_bucket().bucket(BUCKET).send().await.unwrap();
     });
-    let mut data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client);
-    data_cache.multipart_part_size = TINY_PART_SIZE;
+    let data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
+        .with_multipart_part_size(TINY_PART_SIZE);
     (tmp, Arc::new(data_cache))
 }
 
@@ -1490,13 +1471,13 @@ fn s3_force_s3_check_bypasses_cache() {
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
-    let mut dc = S3DataCache::new(
+    let dc = S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
-        base_cache.client.clone(),
-    );
-    dc.s3_check_cache = Some(check_cache.clone());
-    dc.force_s3_check = true;
+        base_cache.client().clone(),
+    )
+    .with_s3_check_cache(Some(check_cache.clone()))
+    .with_force_s3_check(true);
 
     // Put entry in check cache
     let cache_key = dc.cache_key("test_hash", "xxh128");
@@ -1524,12 +1505,12 @@ fn s3_cache_validation_stale_entry_invalidates() {
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
-    let mut dc = S3DataCache::new(
+    let dc = S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
-        base_cache.client.clone(),
-    );
-    dc.s3_check_cache = Some(check_cache.clone());
+        base_cache.client().clone(),
+    )
+    .with_s3_check_cache(Some(check_cache.clone()));
 
     // Put a stale entry — object doesn't actually exist in S3
     let cache_key = dc.cache_key("stale_hash", "xxh128");
@@ -1555,7 +1536,7 @@ fn s3_cache_validation_stale_entry_invalidates() {
 
     // Invalidation is NOT triggered because s3s doesn't return is_not_found()
     // (it returns NoSuchKey instead of NotFound). This is a known s3s limitation.
-    assert!(!dc.cache_validation.is_invalidated());
+    assert!(!dc.is_cache_validation_invalidated());
 }
 
 #[test]
@@ -1567,12 +1548,12 @@ fn s3_cache_validation_valid_entry_confirmed() {
     // Upload a real object
     SyncCache::put_object(&*data_cache, "real_hash", "xxh128", b"real data").unwrap();
 
-    let mut dc = S3DataCache::new(
+    let dc = S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
-        data_cache.client.clone(),
-    );
-    dc.s3_check_cache = Some(check_cache.clone());
+        data_cache.client().clone(),
+    )
+    .with_s3_check_cache(Some(check_cache.clone()));
 
     // Populate check cache
     let cache_key = dc.cache_key("real_hash", "xxh128");
@@ -1587,5 +1568,5 @@ fn s3_cache_validation_valid_entry_confirmed() {
         .block_on(async { AsyncDataCache::object_exists(&dc, "real_hash", "xxh128").await })
         .unwrap();
     assert!(exists);
-    assert!(!dc.cache_validation.is_invalidated());
+    assert!(!dc.is_cache_validation_invalidated());
 }

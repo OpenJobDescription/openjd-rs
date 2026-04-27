@@ -17,8 +17,8 @@ fn hash_file_chunked_consistent_chunk_count() {
     let data: Vec<u8> = (0..3 * chunk_size).map(|i| (i % 256) as u8).collect();
     std::fs::write(&path, &data).unwrap();
 
-    let h1 = hash_file_chunked(&path, chunk_size).unwrap();
-    let h2 = hash_file_chunked(&path, chunk_size).unwrap();
+    let h1 = hash_file_chunked(&path, chunk_size, data.len() as u64).unwrap();
+    let h2 = hash_file_chunked(&path, chunk_size, data.len() as u64).unwrap();
     assert_eq!(h1.len(), 3, "Should produce exactly 3 chunks");
     assert_eq!(h1, h2, "Repeated hashing should be deterministic");
 
@@ -26,7 +26,7 @@ fn hash_file_chunked_consistent_chunk_count() {
         .map(|i| (i % 256) as u8)
         .collect();
     std::fs::write(&path, &data2).unwrap();
-    let h3 = hash_file_chunked(&path, chunk_size).unwrap();
+    let h3 = hash_file_chunked(&path, chunk_size, data2.len() as u64).unwrap();
     assert_eq!(h3.len(), 4, "Should produce 4 chunks for 3*chunk_size+500");
 }
 

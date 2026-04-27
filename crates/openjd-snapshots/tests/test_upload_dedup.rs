@@ -97,54 +97,6 @@ impl AsyncDataCache for SlowPutDataCache {
     fn multipart_part_size(&self) -> usize {
         32 * 1024 * 1024
     }
-
-    async fn create_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-    ) -> std::io::Result<String> {
-        Ok("mock-upload-id".into())
-    }
-
-    async fn upload_part(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-        part_number: i32,
-        _data: Vec<u8>,
-    ) -> std::io::Result<String> {
-        Ok(format!("etag-{part_number}"))
-    }
-
-    async fn complete_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-        _parts: Vec<(i32, String)>,
-    ) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    async fn abort_multipart_upload(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _upload_id: &str,
-    ) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    async fn get_object_range(
-        &self,
-        _hash: &str,
-        _algorithm: &str,
-        _start: u64,
-        _end: u64,
-    ) -> std::io::Result<Vec<u8>> {
-        Ok(vec![])
-    }
 }
 
 fn make_test_file(dir: &Path, name: &str, content: &[u8]) -> (String, u64, u64) {

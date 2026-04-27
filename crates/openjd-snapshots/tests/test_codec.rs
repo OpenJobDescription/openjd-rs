@@ -355,7 +355,8 @@ fn v2025_symlinks_preserved() {
 fn v2025_chunkhashes_preserved() {
     let mut f = FileEntry::file("big.bin", 10000, 500);
     f.chunk_hashes = Some(vec!["ch1".into(), "ch2".into(), "ch3".into()]);
-    let snap = make_snapshot(vec![f]);
+    // 10000 / 4096 = 2.44 -> ceil = 3 chunks, matches the 3 chunk_hashes above.
+    let snap: Snapshot = Manifest::new(HashAlgorithm::Xxh128, 4096).with_files(vec![f]);
 
     let json = encode_snapshot_v2025(&snap).unwrap();
     let decoded = decode_v2025(&json).unwrap();
