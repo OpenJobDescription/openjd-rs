@@ -1,5 +1,10 @@
 # Embedded Cross-User Helper Binary
 
+> **Related**: The [cross-user execution](cross-user.md) document describes the overall
+> cross-user design including the `SessionUser` trait, file ownership, and Windows
+> support. This document focuses on the persistent helper binary that optimizes
+> POSIX cross-user subprocess execution.
+
 ## Overview
 
 Eliminate per-action `sudo -i` overhead by embedding a small helper binary in

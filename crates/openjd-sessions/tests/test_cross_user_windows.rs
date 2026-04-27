@@ -58,7 +58,7 @@ fn make_session(user: Arc<WindowsSessionUser>) -> Session {
         user: Some(user),
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     Session::with_config(config).unwrap()
 }

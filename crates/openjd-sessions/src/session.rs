@@ -84,10 +84,11 @@ pub struct SessionConfig {
     /// future actions will be cancelled via the spec's cancellation sequence.
     pub cancel_token: Option<CancellationToken>,
     /// Whether to accumulate subprocess stdout into result strings.
+    /// Intended for debugging only — production callers should leave this
+    /// `false` and observe output through the real-time callback instead.
     /// Default is `false` — output is still streamed through the callback in
     /// real time, but `ActionResult.stdout` and similar fields stay empty.
-    /// Set to `true` for CLI usage where captured output is needed.
-    pub collect_stdout: bool,
+    pub debug_collect_stdout: bool,
 }
 
 fn format_exit_code(code: Option<i32>) -> String {
@@ -239,7 +240,7 @@ pub struct Session {
     // Redaction
     redacted_values: HashSet<String>,
     revision_extensions: Option<openjd_model::types::ValidationContext>,
-    collect_stdout: bool,
+    debug_collect_stdout: bool,
 }
 
 impl Session {
@@ -277,7 +278,7 @@ impl Session {
             callback: None,
             redacted_values: HashSet::new(),
             revision_extensions: None,
-            collect_stdout: true, // test constructor — tests need captured stdout
+            debug_collect_stdout: true, // test constructor — tests need captured stdout
         }
     }
 
@@ -421,7 +422,7 @@ impl Session {
             callback: config.callback,
             redacted_values: HashSet::new(),
             revision_extensions: config.revision_extensions,
-            collect_stdout: config.collect_stdout,
+            debug_collect_stdout: config.debug_collect_stdout,
         })
     }
 
@@ -780,7 +781,7 @@ impl Session {
                 self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
-            .with_collect_stdout(self.collect_stdout)
+            .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -934,7 +935,7 @@ impl Session {
                 self.cross_user.user.clone(),
             )
             .with_redactions(self.redactions_enabled())
-            .with_collect_stdout(self.collect_stdout)
+            .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1044,7 +1045,7 @@ impl Session {
             self.cross_user.user.clone(),
         )
         .with_redactions(self.redactions_enabled())
-        .with_collect_stdout(self.collect_stdout)
+        .with_debug_collect_stdout(self.debug_collect_stdout)
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
@@ -1162,7 +1163,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            collect_stdout: self.collect_stdout,
+            debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
         let subprocess_identifier = format!(
@@ -1205,7 +1206,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: self.collect_stdout,
+            debug_collect_stdout: self.debug_collect_stdout,
         };
 
         let helper = self

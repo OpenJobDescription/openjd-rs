@@ -445,7 +445,7 @@ async fn test_env_with_resolved_variables() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut session = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();

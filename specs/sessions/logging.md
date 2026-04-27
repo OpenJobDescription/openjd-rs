@@ -66,17 +66,32 @@ pub fn log_subsection_banner(session_id: &str, title: &str);
 
 Emit formatted banner lines matching the Python library's output:
 
-```
-==============================
-= Section Title
-==============================
-```
+### Section banner format
 
 ```
-------------------------------
-- Subsection Title
-------------------------------
+<blank line>
+==============================================
+--------- {title}
+==============================================
 ```
+
+The separator line is exactly 46 `=` characters. The title line is prefixed with
+`--------- ` (9 dashes + space). Each line is emitted as a separate `session_log!`
+call with `LogContent::BANNER`.
+
+### Subsection banner format
+
+```
+----------------------------------------------
+{title}
+----------------------------------------------
+```
+
+The separator line is exactly 46 `-` characters. The title line has no prefix.
+
+**Stability note**: The banner format (separator length, prefix characters) is not
+part of the public API contract. Consumers should not parse banner lines to extract
+structured information — use the `openjd_log_content` key-value metadata instead.
 
 These are used at session lifecycle boundaries (enter environment, run task, cleanup)
 to provide visual structure in log output.

@@ -48,8 +48,8 @@ impl EnvironmentScriptRunner {
         self
     }
 
-    pub fn with_collect_stdout(mut self, collect: bool) -> Self {
-        self.base.collect_stdout = collect;
+    pub fn with_debug_collect_stdout(mut self, collect: bool) -> Self {
+        self.base.debug_collect_stdout = collect;
         self
     }
 

@@ -46,18 +46,8 @@ drove the API design:
 ## Relationship to the Python Library
 
 The Rust crate mirrors the Python library's public API surface but diverges significantly
-in implementation:
-
-| Aspect | Python | Rust |
-|--------|--------|------|
-| Concurrency | `ThreadPoolExecutor` + daemon threads + `Queue` + `Lock` | tokio async/await + `mpsc` channels + `CancellationToken` |
-| Subprocess I/O | Daemon thread enqueues lines, main loop dequeues with 1ms timeout | `tokio::io::BufReader::lines()` with async streaming |
-| Cancelation | `threading.Event` + lock coordination | `CancellationToken::cancel()` — no locks |
-| Timeout | `Timer` thread | `tokio::time::sleep` future in `select!` |
-| Action filter | `logging.Filter` on the LOG logger | Standalone `ActionFilter` struct, messages sent via mpsc channel |
-| Non-blocking API | Returns immediately, caller polls `action_status` | Async methods that `.await` to completion |
-| Cross-user (POSIX) | `sudo -u` + procfs/pgrep + libcap ctypes | `sudo -u` + procfs/pgrep + `caps` crate |
-| Cross-user (Windows) | `CreateProcessWithLogonW`/`AsUserW` via ctypes | Partially implemented (`WindowsSessionUser`, `win32.rs`, `win32_permissions.rs`); integration testing pending |
+in implementation. See [architecture.md § Python-vs-Rust Design Comparison](architecture.md#python-vs-rust-design-comparison)
+for the full comparison table.
 
 ## Normative References
 

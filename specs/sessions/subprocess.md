@@ -22,6 +22,9 @@ pub struct SubprocessConfig {
     pub user: Option<Arc<dyn SessionUser>>, // Cross-user execution target
     pub cancel_method: CancelMethod,    // Terminate vs NotifyThenTerminate
     pub cancel_request_rx: Option<tokio::sync::watch::Receiver<Option<Duration>>>,
+    /// Whether to accumulate stdout into `SubprocessResult.stdout`.
+    /// Intended for debugging only.
+    pub debug_collect_stdout: bool,
 }
 ```
 
@@ -111,12 +114,13 @@ loop {
                     let line = String::from_utf8_lossy(&line_buf);
                     let line = truncate_line(&line).to_string();
                     line_buf.clear();
-                    let (messages, pass_through, modified) = filter.filter_message(&line);
-                    for msg in messages {
+                    let (callbacks, pass_through, modified) = filter.filter_message(&line, session_id);
+                    for cb in callbacks {
+                        let msg = map_callback_to_message(cb);
                         let _ = message_tx.send(msg);
                     }
                     if pass_through {
-                        session_log!(INFO, session_id, LogContent::COMMAND_OUTPUT, "{}", modified);
+                        session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", modified);
                     }
                 }
                 Err(_) => break,
@@ -159,6 +163,15 @@ match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
 
 This prevents the session from hanging indefinitely on processes that ignore signals
 or are stuck in uninterruptible I/O.
+
+### Why 5 seconds
+
+The 5-second grace period balances two concerns: (1) giving the process enough time to
+flush buffers and exit cleanly after stdout closes, and (2) not blocking the session
+for an unreasonable time if the process is stuck. Most well-behaved processes exit
+within milliseconds of stdout closing. The 5-second limit catches processes that are
+stuck in uninterruptible I/O or have leaked file descriptors keeping stdout open.
+The Python library uses the same timeout.
 
 ## Signal Delivery
 
@@ -237,12 +250,7 @@ pub struct SubprocessResult {
 }
 ```
 
-The `stdout` field captures all output for backward compatibility with the synchronous
-API path. In the async path, stdout is streamed via the channel and this field is
-typically empty.
-
-
-When `SubprocessConfig.collect_stdout` is `false` (the default), the `stdout` field is
+When `SubprocessConfig.debug_collect_stdout` is `false` (the default), the `stdout` field is
 always empty — lines are still streamed through the filter and channel in real time.
 
 ## Internal Helper Functions

@@ -59,10 +59,11 @@ pub struct SubprocessConfig {
     pub cancel_method: CancelMethod,
     pub cancel_request_rx: Option<tokio::sync::watch::Receiver<Option<Duration>>>,
     /// Whether to accumulate all stdout into `SubprocessResult.stdout`.
+    /// Intended for debugging only — production callers should leave this
+    /// `false` and observe output through the real-time callback.
     /// Default is `false` — lines are still streamed through the filter and
     /// callback in real time, but the collected string stays empty.
-    /// Set to `true` only when the caller needs the full output (e.g. CLI `run`).
-    pub collect_stdout: bool,
+    pub debug_collect_stdout: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -797,7 +798,7 @@ pub async fn run_subprocess(
                             if pass_through && filter.min_log_level() <= 20 {
                                 session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
                             }
-                            if config.collect_stdout {
+                            if config.debug_collect_stdout {
                                 stdout_collected.push_str(&display);
                                 stdout_collected.push('\n');
                             }
@@ -1073,7 +1074,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(60),
             },
             cancel_request_rx: Some(cancel_rx),
-            collect_stdout: false,
+            debug_collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1133,7 +1134,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(1),
             },
             cancel_request_rx: Some(cancel_rx),
-            collect_stdout: false,
+            debug_collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1187,7 +1188,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            collect_stdout: false,
+            debug_collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1234,7 +1235,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            collect_stdout: false,
+            debug_collect_stdout: false,
         };
 
         let t = token.clone();
@@ -1486,7 +1487,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: true,
+            debug_collect_stdout: true,
         })
     }
 
@@ -1547,7 +1548,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                collect_stdout: false,
+                debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
         });
@@ -1575,7 +1576,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                collect_stdout: false,
+                debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
         });
@@ -1605,7 +1606,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                collect_stdout: false,
+                debug_collect_stdout: false,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
                 .await
@@ -1642,7 +1643,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                collect_stdout: true,
+                debug_collect_stdout: true,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
                 .await
@@ -1674,7 +1675,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: true,
+            debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("test_value_42"), "stdout: {}", r.stdout);
@@ -1699,7 +1700,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: true,
+            debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         assert!(r.stdout.contains("VAL=UNSET"), "stdout: {}", r.stdout);
@@ -1717,7 +1718,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: true,
+            debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
         // Resolve symlinks for comparison (macOS /tmp -> /private/tmp)
@@ -1826,12 +1827,12 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_run_subprocess_collect_stdout_false_by_default() {
+    fn test_run_subprocess_debug_collect_stdout_false_by_default() {
         let (r, _) = run_simple(vec!["echo".into(), "hello".into()]);
-        // run_simple sets collect_stdout: true, so stdout is captured
+        // run_simple sets debug_collect_stdout: true, so stdout is captured
         assert!(r.stdout.contains("hello"));
 
-        // With collect_stdout: false (default), stdout should be empty
+        // With debug_collect_stdout: false (default), stdout should be empty
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1848,7 +1849,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                collect_stdout: false,
+                debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token)
                 .await
@@ -1857,7 +1858,7 @@ mod tests {
         assert_eq!(r.state, ActionState::Success);
         assert!(
             r.stdout.is_empty(),
-            "stdout should be empty when collect_stdout is false: {:?}",
+            "stdout should be empty when debug_collect_stdout is false: {:?}",
             r.stdout
         );
     }
@@ -1942,7 +1943,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            collect_stdout: false,
+            debug_collect_stdout: false,
         };
 
         // Cancel from OS thread — simulates the pyo3 binding's cancel path

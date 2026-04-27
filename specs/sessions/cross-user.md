@@ -1,5 +1,10 @@
 # Cross-User Execution
 
+> **Related**: The [embedded cross-user helper](embedded-cross-user-helper.md) document
+> describes the persistent helper binary that eliminates per-action `sudo -i` overhead.
+> This document covers the overall cross-user design; the helper document covers the
+> binary's protocol, implementation, and build system.
+
 ## Overview
 
 Cross-user execution allows the session runtime (running as a service user) to execute

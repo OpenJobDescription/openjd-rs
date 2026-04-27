@@ -47,13 +47,24 @@ src/
 └── error.rs                # SessionError enum
 ```
 
+```
+build.rs                    # Compiles embedded cross-user helper binary
+helper/                     # Standalone helper binary crate
+├── Cargo.toml              # Independent workspace ([workspace] = {})
+└── src/
+    ├── main.rs             # Shared stdin reader, command dispatch loop
+    ├── protocol.rs         # Command/Response JSON serde types
+    ├── runner.rs           # poll(2) loop, child management, cancel handling
+    └── runner_win.rs       # Windows runner (placeholder)
+```
+
 ## Public API Surface
 
 Re-exported from `lib.rs`:
 
 ```rust
 // Core session
-pub use session::{Session, SessionState, SessionConfig};
+pub use session::{Session, SessionState, SessionConfig, EnvironmentIdentifier};
 pub use action::{ActionState, ActionResult, ActionMessage};
 pub use action_status::ActionStatus;
 pub use error::SessionError;
@@ -63,7 +74,6 @@ pub use subprocess::SubprocessResult;
 pub use runner::{CancelMethod, ScriptRunnerState};
 
 // Environment and path mapping
-pub use session::EnvironmentIdentifier;
 pub use openjd_expr::{PathFormat, PathMappingRule};  // re-export
 
 // Logging
@@ -173,3 +183,20 @@ Windows has partial support:
   `win32_locate.rs` (executable resolution, not yet integrated)
 - Temp directory and embedded file permissions: Windows ACL paths implemented
 - Integration testing on Windows: pending
+
+## Python-vs-Rust Design Comparison
+
+This section consolidates the key design differences between the Python
+`openjd-sessions-for-python` library and this Rust crate. Other spec documents
+reference this section rather than repeating the comparison.
+
+| Aspect | Python | Rust |
+|--------|--------|------|
+| Concurrency | `ThreadPoolExecutor` + daemon threads + `Queue` + `Lock` | `tokio::select!` + `mpsc::unbounded_channel` + `CancellationToken` |
+| Subprocess I/O | `logging.Filter` on module logger intercepts stdout | `ActionFilter` struct parses lines, sends `ActionMessage` via channel |
+| State mutation | `logging.Filter` callback mutates session state (GIL-safe) | `Session::drive_action` processes messages with `&mut self` (no locks) |
+| Cancelation | `threading.Event` + lock coordination | `CancellationToken` (child tokens cascade from parent) |
+| Cross-user launch | `sudo -u <user> -i` per action (~1s overhead each) | Embedded helper binary, `sudo -i` once per session (~1ms subsequent) |
+| Error types | Exceptions (`RuntimeError`, `OSError`) | `SessionError` enum with `thiserror` (`#[non_exhaustive]`) |
+| Callback | `Callable[[str, ActionStatus], None]` | `Box<dyn Fn(&str, &ActionStatus) + Send + Sync>` |
+| Temp directory cleanup | Explicit `cleanup()`, no `__del__` | Explicit `cleanup()` + `Drop` safety net |

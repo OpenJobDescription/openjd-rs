@@ -251,7 +251,7 @@ async fn run_scenario(scenario_path: &Path) {
         user: None,
         revision_extensions,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut session = Session::with_config(config).unwrap();
 

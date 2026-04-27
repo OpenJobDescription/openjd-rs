@@ -37,6 +37,21 @@ pub enum SessionError {
 
     #[error("{0}")]
     Runtime(String),
+
+    #[error("Environment {id} has already been entered in this Session.")]
+    DuplicateEnvironment { id: String },
+
+    #[error("Unknown environment identifier: {identifier}")]
+    UnknownEnvironment { identifier: String },
+
+    #[error("Failed to set permissions on '{path}': {reason}")]
+    PathPermissions { path: String, reason: String },
+
+    #[error("Cross-user helper error: {0}")]
+    HelperCommunication(String),
+
+    #[error("Must exit the most recently entered environment first. Expected {expected}, got {got}")]
+    LifoViolation { expected: String, got: String },
 }
 ```
 
@@ -95,9 +110,36 @@ the resolved command string, helping diagnose "command not found" errors.
 ### Runtime
 
 Catch-all for errors that don't fit other variants. Used sparingly — most errors should
-have a specific variant. Currently used for:
-- LIFO environment exit order violations
+have a specific variant. Several former `Runtime` uses have been promoted to structured
+variants (`DuplicateEnvironment`, `UnknownEnvironment`, `LifoViolation`,
+`PathPermissions`, `HelperCommunication`). Remaining uses cover:
 - Unexpected internal state
+- Validation errors not yet promoted to structured variants
+
+### DuplicateEnvironment
+
+Returned when `enter_environment` is called with an identifier that is already in the
+session's entered-environments stack. Prevents corrupting the LIFO stack.
+
+### UnknownEnvironment
+
+Returned when an operation references an environment identifier that doesn't exist in
+the session.
+
+### PathPermissions
+
+Wraps `chown`/`chmod` failures during cross-user file ownership setup. The `path` field
+is the filesystem path; `reason` describes the OS error.
+
+### HelperCommunication
+
+Wraps IPC failures between the session and the embedded cross-user helper binary.
+Covers protocol errors, unexpected helper exit, and stdin/stdout pipe failures.
+
+### LifoViolation
+
+Returned when `exit_environment` is called out of LIFO order. The `expected` field is
+the identifier that should be exited next; `got` is the identifier that was requested.
 
 ## Error Propagation Patterns
 

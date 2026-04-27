@@ -25,6 +25,21 @@ Default grace periods match the Python library:
 - `onRun` actions: 120 seconds
 - Environment actions (`onEnter`/`onExit`): 30 seconds
 
+### Default grace period rationale
+
+The default grace periods differ by action type:
+
+| Action type | Default grace | Rationale |
+|-------------|--------------|----------|
+| `onRun` (task) | 120 seconds | Tasks may need significant time to save state, flush render output, or checkpoint progress. A 2-minute window accommodates most graceful shutdown patterns. |
+| `onEnter`/`onExit` (env) | 30 seconds | Environment scripts are typically short-lived (install packages, start/stop services). A 30-second window is generous for these operations. |
+| `exit()` overall timeout | 300 seconds | Environment exit may involve tearing down containers, unmounting filesystems, or deregistering services. The 5-minute overall timeout accommodates complex teardown. |
+
+These defaults match the Python library. The `onRun` and env script defaults come from
+the `notifyPeriodInSeconds` field in the OpenJD spec's
+[`<CancelationMethodNotifyThenTerminate>`](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas#532-cancelationmethodnotifythenterminate).
+The 300-second exit timeout is a session-level safety net, not a spec-defined value.
+
 ## ScriptRunnerState
 
 ```rust
@@ -219,7 +234,7 @@ and expose identical builder methods:
 | Method | Effect |
 |--------|--------|
 | `with_redactions(bool)` | Enable/disable redaction processing in the `ActionFilter` |
-| `with_collect_stdout(bool)` | Enable/disable stdout accumulation in `SubprocessResult` |
+| `with_debug_collect_stdout(bool)` | Enable/disable stdout accumulation in `SubprocessResult` |
 | `with_initial_redacted_values(Vec<String>)` | Pre-populate the redaction set (from session's accumulated values) |
 | `with_cancel_token(CancellationToken)` | Set the cancellation token for the action |
 | `with_cancel_request_rx(Receiver<Option<Duration>>)` | Set the cancel request channel for time-limited cancellation |

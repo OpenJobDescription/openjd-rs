@@ -61,6 +61,9 @@ pub struct SessionConfig {
     pub user: Option<Arc<dyn SessionUser>>,
     pub revision_extensions: Option<ValidationContext>,
     pub cancel_token: Option<CancellationToken>,
+    /// Whether to accumulate subprocess stdout into result strings.
+    /// Intended for debugging only. Default is `false`.
+    pub debug_collect_stdout: bool,
 }
 ```
 
@@ -113,8 +116,10 @@ the agent would need to track and cancel each action individually.
 5. Logs host info (version, platform, architecture)
 6. Stores job parameter values, path mapping rules, and other config for later use
 
-A `Session::new(working_directory)` constructor exists behind the `test-utils` feature
-flag for tests that need to control the directory directly.
+A `Session::new_for_test(working_directory)` constructor is available when the
+`test-utils` feature is enabled or in `#[cfg(test)]` builds. It creates a minimal
+session with an empty session ID, no callback, no path mapping, and `debug_collect_stdout`
+set to `true`. Production code should always use `Session::with_config`.
 
 ## Environment Management
 
@@ -311,19 +316,49 @@ subprocess doesn't exit within the limit, it's forcefully killed.
 
 ## Cleanup
 
-`cleanup()`:
+See [Session Lifecycle Contract](#session-lifecycle-contract) for the full cleanup
+and teardown guarantees.
 
-1. For cross-user sessions: runs `sudo rm -rf` as the session user to clean files
-   owned by that user, then removes the directory as the process user
-2. For same-user sessions: `remove_dir_all` on the working directory
-3. Sets state to `Ended`
-4. Skips directory removal if `retain_working_dir` is true
+`cleanup()` must be called after all environments have been exited. Calling `cleanup()`
+while environments are still entered will remove the working directory but leave the
+session in an inconsistent state — the environments' `onExit` scripts will not have run.
 
-The `Drop` impl logs a warning if `cleanup()` wasn't called, and performs a best-effort
-`remove_dir_all` on the working directory (unless `retain_working_dir` is true). This
-safety net prevents leaked temp directories when callers forget to call `cleanup()`, but
-callers should still call `cleanup()` explicitly for proper cross-user file removal and
-logging.
+## Session Lifecycle Contract
+
+A session manages a stack of environments. After construction, the caller can
+enter environments, run tasks, and exit environments in any order — as long as
+exits follow LIFO order (most recently entered first). A typical worker agent
+pattern is: enter job envs → enter step envs → run tasks → exit step envs →
+enter different step envs → run more tasks → exit all → cleanup. This section
+collects the cleanup and teardown guarantees in one place.
+
+### Explicit cleanup via `cleanup()`
+
+`cleanup()` is the primary teardown API. It:
+1. Shuts down the cross-user helper (if active) via the `"shutdown"` protocol message
+2. For cross-user sessions: runs `sudo rm -rf` as the session user to remove files
+   owned by that user, then `remove_dir_all` as the process user for any remainder
+3. For same-user sessions: `remove_dir_all` on the working directory
+4. Sets state to `Ended`
+5. Skips directory removal if `retain_working_dir` is `true`
+
+### Drop safety net
+
+If `cleanup()` is never called, `Session`'s `Drop` impl:
+1. Logs a warning ("Session::cleanup() was not called")
+2. Performs a best-effort `remove_dir_all` on the working directory
+3. Does **not** perform cross-user cleanup (no async, no sudo)
+4. Does **not** shut down the cross-user helper
+5. Skips removal if `retain_working_dir` is `true`
+
+Callers should always call `cleanup()` explicitly. The `Drop` safety net exists only
+to prevent leaked temp directories during development and debugging.
+
+### retain_working_dir
+
+When `SessionConfig.retain_working_dir` is `true`, both `cleanup()` and `Drop` skip
+directory removal. The session still transitions to `Ended` state. This is used for
+debugging — the operator can inspect the working directory contents after the session.
 
 ## drive_action
 
@@ -409,6 +444,22 @@ Returns the sorted list of enabled extension names for this session. Returns an 
 vec if no `revision_extensions` were set. Used by the worker agent to report which
 extensions are active.
 
+## Public Accessors
+
+Read-only accessors on `Session`:
+
+| Accessor | Return type | Description |
+|----------|-------------|-------------|
+| `session_id()` | `&str` | The session's unique identifier |
+| `state()` | `SessionState` | Current lifecycle state |
+| `working_directory()` | `&Path` | Path to the session's working directory |
+| `files_directory()` | `&Path` | Path to the embedded files subdirectory |
+| `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
+| `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules (sorted by source path length, longest first) |
+| `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
+| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cancel-info file writer for the cross-user helper. Used by PyO3 bindings to send cancel commands from a background thread. |
+| `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |
+
 ## enter_environment_with_output
 
 ```rust
@@ -429,7 +480,7 @@ Used by the CLI's `run` command to display a unified output stream showing what 
 environment and task printed. The worker agent uses the regular `enter_environment`
 since it observes output through the real-time callback.
 
-Note: stdout is only captured when `SessionConfig.collect_stdout` is `true`.
+Note: stdout is only captured when `SessionConfig.debug_collect_stdout` is `true`.
 
 ## Redaction
 
@@ -460,12 +511,12 @@ On Windows, environment variable names are case-insensitive. The internal
 mixed-case duplicates from causing undefined behavior in the Win32 API. On POSIX,
 keys are passed through unchanged.
 
-## collect_stdout
+## debug_collect_stdout
 
-`SessionConfig.collect_stdout: bool` (default `false`) controls whether subprocess
+`SessionConfig.debug_collect_stdout: bool` (default `false`) controls whether subprocess
 output is accumulated into `SubprocessResult.stdout` / `ActionResult.stdout`. When
 `false`, output is still streamed through the `ActionFilter` and callback in real time,
 but the collected `String` stays empty — preventing unbounded memory growth.
 
-Set to `true` for CLI usage where captured output is needed (e.g., `openjd run`).
-The worker agent leaves this `false` since it observes output through the callback.
+Intended for debugging only. Production callers should leave this `false` and observe
+output through the real-time callback.

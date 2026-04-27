@@ -98,7 +98,7 @@ async fn test_root_dir_permissions_posix() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let session = Session::with_config(config).unwrap();
     // The working dir is created by TempDir::new with mode 0o700 when no user is given.
@@ -361,7 +361,7 @@ async fn test_enter_environment_with_resolved_variables() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();
@@ -891,7 +891,7 @@ async fn test_run_subprocess_basic() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -924,7 +924,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -963,7 +963,7 @@ async fn test_run_subprocess_with_os_env_vars() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let mut extra = HashMap::new();
@@ -999,7 +999,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -1030,7 +1030,7 @@ async fn test_run_subprocess_empty_command_fails() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -1053,7 +1053,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -1181,7 +1181,7 @@ fn realtime_test_config(
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     }
 }
 
@@ -1413,7 +1413,7 @@ async fn test_cancel_action_mark_failed() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -1725,7 +1725,7 @@ fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionCon
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: true,
+        debug_collect_stdout: true,
     }
 }
 
@@ -2118,7 +2118,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
         user: None,
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2171,7 +2171,7 @@ async fn test_cancel_action_with_mark_failed() {
         user: None,
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
-        collect_stdout: true,
+        debug_collect_stdout: true,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2503,7 +2503,7 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
         user: None,
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
-        collect_stdout: false,
+        debug_collect_stdout: false,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2553,7 +2553,7 @@ async fn test_callback_reports_intermediate_progress() {
         user: None,
         revision_extensions: None,
         cancel_token: None,
-        collect_stdout: false,
+        debug_collect_stdout: false,
     };
     let mut s = Session::with_config(config).unwrap();
 

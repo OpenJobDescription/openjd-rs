@@ -480,7 +480,7 @@ pub(crate) async fn run_via_helper(
                     if pass_through && filter.min_log_level() <= 20 {
                         session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
                     }
-                    if config.collect_stdout {
+                    if config.debug_collect_stdout {
                         stdout_collected.push_str(&display);
                         stdout_collected.push('\n');
                     }

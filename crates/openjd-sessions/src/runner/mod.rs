@@ -99,7 +99,7 @@ pub(crate) struct ScriptRunnerBase {
     pub user: Option<Arc<dyn SessionUser>>,
     pub redactions_enabled: bool,
     pub initial_redacted_values: Vec<String>,
-    pub collect_stdout: bool,
+    pub debug_collect_stdout: bool,
     #[cfg(unix)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
@@ -124,7 +124,7 @@ impl ScriptRunnerBase {
             user,
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
-            collect_stdout: false,
+            debug_collect_stdout: false,
             helper: None,
             cancel_writer: None,
         }
@@ -155,7 +155,7 @@ impl ScriptRunnerBase {
             user: self.user.clone(),
             cancel_method,
             cancel_request_rx: self.cancel_request_rx.clone(),
-            collect_stdout: self.collect_stdout,
+            debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);
         filter.add_redacted_values(&self.initial_redacted_values);

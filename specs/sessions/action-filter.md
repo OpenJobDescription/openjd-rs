@@ -180,15 +180,16 @@ or special characters that can't be represented in the simple `NAME=VALUE` forma
 
 ## Integration with Subprocess
 
-The subprocess stdout loop calls `filter.filter_message(line)` for each line:
+The subprocess stdout loop calls `filter.filter_message(line, session_id)` for each line:
 
 ```rust
-let (messages, pass_through, modified_line) = filter.filter_message(&line);
-for msg in messages {
+let (callbacks, pass_through, modified_line) = filter.filter_message(&line, session_id);
+for cb in callbacks {
+    let msg = map_callback_to_message(cb);  // FilterCallback → ActionMessage
     let _ = message_tx.send(msg);
 }
 if pass_through {
-    session_log!(INFO, session_id, LogContent::COMMAND_OUTPUT, "{}", modified_line);
+    session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", modified_line);
 }
 ```
 
