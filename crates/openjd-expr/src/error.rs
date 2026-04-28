@@ -79,15 +79,21 @@ pub enum ExpressionErrorKind {
 ///
 /// Wraps an [`ExpressionErrorKind`] with optional source location context
 /// for caret-style error formatting.
+///
+/// Internally boxed (8 bytes on stack) to keep `Result<ExprValue, ExpressionError>`
+/// compact. Same pattern as `serde_json::Error`.
 #[derive(Debug, Clone)]
 pub struct ExpressionError {
-    kind: Box<ExpressionErrorKind>,
+    inner: Box<ExpressionErrorInner>,
+}
+
+#[derive(Debug, Clone)]
+struct ExpressionErrorInner {
+    kind: ExpressionErrorKind,
     expr: Option<String>,
     col_offset: Option<usize>,
     end_col_offset: Option<usize>,
-    /// Position of `^` relative to col_offset. None = 0 (start of span).
     caret_offset: Option<usize>,
-    /// Sub-errors for compound failures (e.g., both branches of an if/else).
     sub_errors: Option<Vec<ExpressionError>>,
 }
 
@@ -95,12 +101,14 @@ impl ExpressionError {
     /// Create an error from a structured kind.
     pub fn from_kind(kind: ExpressionErrorKind) -> Self {
         Self {
-            kind: Box::new(kind),
-            expr: None,
-            col_offset: None,
-            end_col_offset: None,
-            caret_offset: None,
-            sub_errors: None,
+            inner: Box::new(ExpressionErrorInner {
+                kind,
+                expr: None,
+                col_offset: None,
+                end_col_offset: None,
+                caret_offset: None,
+                sub_errors: None,
+            }),
         }
     }
 
@@ -170,17 +178,17 @@ impl ExpressionError {
 
     /// The structured error kind.
     pub fn kind(&self) -> &ExpressionErrorKind {
-        &self.kind
+        &self.inner.kind
     }
 
     /// The human-readable error message (the Display output of the kind).
     pub fn message(&self) -> String {
-        self.kind.to_string()
+        self.inner.kind.to_string()
     }
 
     /// Sub-errors for compound failures (e.g., both branches of an if/else).
     pub fn sub_errors(&self) -> &[ExpressionError] {
-        match &self.sub_errors {
+        match &self.inner.sub_errors {
             Some(v) => v.as_slice(),
             None => &[],
         }
@@ -189,55 +197,55 @@ impl ExpressionError {
     /// Attach sub-errors (consumes and returns self for chaining).
     pub fn with_sub_errors(mut self, sub_errors: Vec<ExpressionError>) -> Self {
         if !sub_errors.is_empty() {
-            self.sub_errors = Some(sub_errors);
+            self.inner.sub_errors = Some(sub_errors);
         }
         self
     }
 
     /// The expression source text, if attached.
     pub fn expr(&self) -> Option<&str> {
-        self.expr.as_deref()
+        self.inner.expr.as_deref()
     }
 
     /// The start column offset within the expression, if attached.
     pub fn col_offset(&self) -> Option<usize> {
-        self.col_offset
+        self.inner.col_offset
     }
 
     /// The end column offset within the expression, if attached.
     pub fn end_col_offset(&self) -> Option<usize> {
-        self.end_col_offset
+        self.inner.end_col_offset
     }
 
     /// The caret offset relative to col_offset, if attached.
     pub fn caret_offset(&self) -> Option<usize> {
-        self.caret_offset
+        self.inner.caret_offset
     }
 
     /// Attach expression source and AST node span for caret formatting.
     #[must_use]
     pub fn with_node(mut self, expr_source: &str, node: &ruff_python_ast::Expr) -> Self {
         use ruff_text_size::Ranged;
-        if self.expr.is_some() {
+        if self.inner.expr.is_some() {
             return self;
         }
-        self.expr = Some(expr_source.to_string());
+        self.inner.expr = Some(expr_source.to_string());
         let range = node.range();
-        self.col_offset = Some(range.start().to_usize());
-        self.end_col_offset = Some(range.end().to_usize());
-        self.caret_offset = Some(compute_caret_offset(expr_source, node));
+        self.inner.col_offset = Some(range.start().to_usize());
+        self.inner.end_col_offset = Some(range.end().to_usize());
+        self.inner.caret_offset = Some(compute_caret_offset(expr_source, node));
         self
     }
 
     /// Attach expression source with explicit span (no AST node).
     #[must_use]
     pub fn with_span(mut self, expr_source: &str, col: usize, end_col: usize) -> Self {
-        if self.expr.is_some() {
+        if self.inner.expr.is_some() {
             return self;
         }
-        self.expr = Some(expr_source.to_string());
-        self.col_offset = Some(col);
-        self.end_col_offset = Some(end_col);
+        self.inner.expr = Some(expr_source.to_string());
+        self.inner.col_offset = Some(col);
+        self.inner.end_col_offset = Some(end_col);
         self
     }
 
@@ -250,10 +258,10 @@ impl ExpressionError {
         end_col: usize,
         caret_offset: usize,
     ) {
-        self.expr = Some(expr_source.to_string());
-        self.col_offset = Some(col);
-        self.end_col_offset = Some(end_col);
-        self.caret_offset = Some(caret_offset);
+        self.inner.expr = Some(expr_source.to_string());
+        self.inner.col_offset = Some(col);
+        self.inner.end_col_offset = Some(end_col);
+        self.inner.caret_offset = Some(caret_offset);
     }
 
     /// Format the error with a prefix prepended to the expression line.
@@ -267,9 +275,11 @@ impl ExpressionError {
     /// Falls back to the normal `Display` output for multi-line or
     /// context-free errors.
     pub fn message_with_expr_prefix(&self, prefix: &str) -> String {
-        let (Some(expr), Some(col), Some(end_col)) =
-            (&self.expr, self.col_offset, self.end_col_offset)
-        else {
+        let (Some(expr), Some(col), Some(end_col)) = (
+            &self.inner.expr,
+            self.inner.col_offset,
+            self.inner.end_col_offset,
+        ) else {
             return self.to_string();
         };
         if expr.contains('\n') {
@@ -285,7 +295,7 @@ impl ExpressionError {
             &mut out,
             col + prefix.len(),
             end_col + prefix.len(),
-            self.caret_offset.unwrap_or(0),
+            self.inner.caret_offset.unwrap_or(0),
         );
         out
     }
@@ -293,10 +303,12 @@ impl ExpressionError {
 
 impl fmt::Display for ExpressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)?;
-        if let (Some(expr), Some(col), Some(end_col)) =
-            (&self.expr, self.col_offset, self.end_col_offset)
-        {
+        write!(f, "{}", self.inner.kind)?;
+        if let (Some(expr), Some(col), Some(end_col)) = (
+            &self.inner.expr,
+            self.inner.col_offset,
+            self.inner.end_col_offset,
+        ) {
             let is_multiline = expr.contains('\n');
             // For multi-line, the parser wraps in parens shifting offsets by 1
             let (col, end_col) = if is_multiline {
@@ -330,7 +342,12 @@ impl fmt::Display for ExpressionError {
             };
 
             write!(f, "\n  {expr_line}\n  ")?;
-            write_caret_line(f, line_col, line_end_col, self.caret_offset.unwrap_or(0))?;
+            write_caret_line(
+                f,
+                line_col,
+                line_end_col,
+                self.inner.caret_offset.unwrap_or(0),
+            )?;
         }
         Ok(())
     }
@@ -338,7 +355,7 @@ impl fmt::Display for ExpressionError {
 
 impl std::error::Error for ExpressionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.kind)
+        Some(&self.inner.kind)
     }
 }
 
