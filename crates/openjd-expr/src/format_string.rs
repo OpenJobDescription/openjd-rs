@@ -30,9 +30,42 @@ pub struct FormatString {
     segments: Vec<Segment>,
 }
 
+/// Maximum permitted input length (in bytes) for [`FormatString::new`].
+///
+/// Caps the raw source text a format string may carry. Templates this large
+/// are almost certainly pathological inputs rather than real user content —
+/// 1 MB is several orders of magnitude above the size of the largest known
+/// legitimate template fields.
+///
+/// See `specs/expr/format-string.md` (Defensive caps) for rationale.
+pub const MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
+
+/// Maximum number of `{{...}}` interpolation segments in a single format string.
+///
+/// Each segment triggers a full ruff parse and an allocation of a
+/// `ParsedExpression`. Thousands of segments in one template field indicate
+/// abuse; 1,000 is two orders of magnitude above any realistic usage.
+///
+/// See `specs/expr/format-string.md` (Defensive caps) for rationale.
+pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
+
 impl FormatString {
     pub fn new(input: &str) -> Result<Self, ExpressionError> {
+        if input.len() > MAX_FORMAT_STRING_LEN {
+            return Err(ExpressionError::new(format!(
+                "Format string length ({} bytes) exceeds maximum allowed size ({} bytes)",
+                input.len(),
+                MAX_FORMAT_STRING_LEN
+            )));
+        }
         let segments = parse_segments(input)?;
+        if segments.len() > MAX_FORMAT_STRING_SEGMENTS {
+            return Err(ExpressionError::new(format!(
+                "Format string contains too many interpolation segments ({}); maximum is {}",
+                segments.len(),
+                MAX_FORMAT_STRING_SEGMENTS
+            )));
+        }
         Ok(Self {
             raw: input.to_string(),
             segments,

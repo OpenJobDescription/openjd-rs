@@ -88,6 +88,11 @@ pub struct Evaluator<'a> {
     current_memory: usize,
     peak_memory: usize,
     operation_count: usize,
+    /// Current recursion depth of the evaluate/evaluate_inner call chain.
+    /// Bounded by [`MAX_EXPRESSION_DEPTH`](super::parse::MAX_EXPRESSION_DEPTH)
+    /// to prevent stack exhaustion on deeply-nested ASTs that slipped past
+    /// the parse-phase depth check (e.g., left-associative binop chains).
+    recursion_depth: usize,
     keyword_renames: &'a std::collections::HashMap<String, String>,
     library: &'a crate::function_library::FunctionLibrary,
     target_type: Option<crate::types::ExprType>,
@@ -113,6 +118,7 @@ impl<'a> Evaluator<'a> {
             current_memory: 0,
             peak_memory: 0,
             operation_count: 0,
+            recursion_depth: 0,
             keyword_renames: &EMPTY_KEYWORD_RENAMES,
             library: crate::default_library::get_default_library(),
             target_type: None,
@@ -210,7 +216,28 @@ impl<'a> Evaluator<'a> {
 
     /// Evaluate an AST expression node.
     pub fn evaluate(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
+        // Bound recursion depth so deep ASTs (e.g., left-associative
+        // binop chains produced from short sources like "1+1+1+...+1")
+        // cannot exhaust the stack. This is the single chokepoint: every
+        // sub-node evaluation goes through `evaluate` (or `evaluate_inner`
+        // via the top-level `evaluate`), so incrementing here covers all
+        // recursive descent paths.
+        //
+        // See `specs/expr/evaluator.md` (Depth limit) for the rationale.
+        self.recursion_depth += 1;
+        if self.recursion_depth > super::parse::MAX_EXPRESSION_DEPTH {
+            self.recursion_depth -= 1;
+            let err = ExpressionError::expression_too_deep(
+                self.recursion_depth + 1,
+                super::parse::MAX_EXPRESSION_DEPTH,
+            );
+            return Err(match self.expr_source {
+                Some(src) => err.with_node(src, node),
+                None => err,
+            });
+        }
         let result = self.evaluate_inner(node);
+        self.recursion_depth -= 1;
         // Attach caret context to any error that doesn't already have it
         match result {
             Err(e) if e.expr().is_none() => {
@@ -994,7 +1021,7 @@ impl<'a> Evaluator<'a> {
 
         let mut elements = Vec::new();
         for elt in &l.elts {
-            let val = self.evaluate_inner(elt)?;
+            let val = self.evaluate(elt)?;
             if matches!(&val, ExprValue::Null) {
                 self.target_type = saved_target;
                 return Err(ExpressionError::new("null is not allowed in list literals"));
@@ -1238,6 +1265,7 @@ impl<'a> Evaluator<'a> {
             current_memory: self.current_memory,
             peak_memory: self.peak_memory,
             operation_count: self.operation_count,
+            recursion_depth: self.recursion_depth,
             keyword_renames: self.keyword_renames,
             library: self.library,
             target_type: None,

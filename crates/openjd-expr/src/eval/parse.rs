@@ -95,96 +95,53 @@ impl ParsedExpression {
             return Err(ExpressionError::new("Empty expression"));
         }
 
-        let mut source = expr_str.to_string();
-        let mut keyword_renames: HashMap<String, String> = HashMap::new();
+        // Hard cap on parser input length. A recursive-descent parser can
+        // recurse at most once per input character; the 8 MB worker-thread
+        // stack comfortably handles inputs up to
+        // [`MAX_PARSE_INPUT_LEN`], but beyond that we would risk overflow
+        // even in the dedicated thread. Inputs exceeding this size are
+        // rejected without invoking the parser at all.
+        if expr_str.len() > MAX_PARSE_INPUT_LEN {
+            return Err(ExpressionError::new(format!(
+                "Expression source length ({} bytes) exceeds maximum allowed ({} bytes)",
+                expr_str.len(),
+                MAX_PARSE_INPUT_LEN
+            )));
+        }
 
-        // Wrap multi-line expressions in parentheses for implicit line continuation
-        let is_multiline = source.contains('\n');
+        // Short-input fast path: a recursive-descent parser cannot recurse
+        // more times than there are input characters to consume, and the
+        // ruff parser's empirical overflow threshold on Rust's default
+        // 2 MB thread stack is well above `FAST_PATH_INPUT_LEN`. Any
+        // source at or below that length is safe to parse on the current
+        // thread regardless of shape. The structural depth walker still
+        // catches excessive AST depth that might arise from the parser's
+        // own node-building patterns.
+        if expr_str.len() <= FAST_PATH_INPUT_LEN {
+            return parse_inner(expr, expr_str);
+        }
 
-        loop {
-            let to_parse = if is_multiline {
-                format!("({})", source)
-            } else {
-                source.clone()
-            };
-
-            match ruff_python_parser::parse_expression(&to_parse) {
-                Ok(parsed) => {
-                    let expr_node = parsed.into_expr();
-                    // Structural validation (matches Python implementation)
-                    validate_structure(&expr_node, expr_str)?;
-                    let mut accessed_symbols = HashSet::new();
-                    let mut called_functions = HashSet::new();
-                    let mut local_bindings = HashSet::new();
-                    collect_symbols(
-                        &expr_node,
-                        &keyword_renames,
-                        &mut accessed_symbols,
-                        &mut called_functions,
-                        &mut local_bindings,
-                    );
-                    // Check for nested comprehension variable shadowing
-                    check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
-                    return Ok(ParsedExpression {
-                        ast: expr_node,
-                        source: expr.to_string(),
-                        expr: expr_str.to_string(),
-                        keyword_renames,
-                        accessed_symbols,
-                        called_functions,
-                        local_bindings,
-                    });
-                }
-                Err(e) => {
-                    // Try to find a keyword after '.' that caused the error
-                    // Look for patterns like ".if", ".def", ".in" etc. in the source
-                    let mut found = false;
-                    for kw in PYTHON_KEYWORDS {
-                        let pattern = format!(".{kw}");
-                        if let Some(pos) = source.find(&pattern) {
-                            // Check that the keyword is followed by a non-identifier char
-                            let after_pos = pos + 1 + kw.len();
-                            let after_char = source.chars().nth(after_pos);
-                            if after_char.is_none_or(|c| !c.is_alphanumeric() && c != '_') {
-                                let replacement = keyword_renames
-                                    .iter()
-                                    .find(|(_, v)| v.as_str() == *kw)
-                                    .map(|(k, _)| k.clone())
-                                    .unwrap_or_else(|| {
-                                        let r = make_replacement(kw, &source);
-                                        keyword_renames.insert(r.clone(), kw.to_string());
-                                        r
-                                    });
-                                // Replace in source — same length, preserves positions
-                                source = format!(
-                                    "{}.{}{}",
-                                    &source[..pos],
-                                    replacement,
-                                    &source[after_pos..]
-                                );
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !found {
-                        let msg = format!("Syntax error: {}", e.error);
-                        let start = e.location.start().to_usize();
-                        let end = e.location.end().to_usize();
-                        // For zero-width ranges (like EOF), point at the last char
-                        let (col, end_col) = if start == end && !source.is_empty() {
-                            (0, source.len())
-                        } else {
-                            (start.min(source.len()), end.min(source.len()))
-                        };
-                        let mut err = ExpressionError::new(msg);
-                        if !source.is_empty() {
-                            err = err.with_span(&source, col, end_col.max(col + 1));
-                        }
-                        return Err(err);
-                    }
-                }
-            }
+        // Longer inputs could drive the parser's recursive descent past
+        // the thread's default stack (Rust cannot recover from stack
+        // overflow — it aborts the process). Run the parse + structural
+        // validation + symbol collection on a dedicated thread with an
+        // enlarged stack. The depth walker still rejects inputs whose AST
+        // exceeds `MAX_EXPRESSION_DEPTH`, so this thread allocation is
+        // purely about surviving long enough to apply that check.
+        let expr_owned = expr.to_string();
+        let handle = std::thread::Builder::new()
+            .name("openjd-expr-parse".into())
+            .stack_size(PARSER_THREAD_STACK_SIZE)
+            .spawn(move || {
+                let expr_str = expr_owned.trim();
+                parse_inner(&expr_owned, expr_str)
+            })
+            .map_err(|e| ExpressionError::new(format!("Failed to spawn parser thread: {e}")))?;
+        match handle.join() {
+            Ok(result) => result,
+            Err(_) => Err(ExpressionError::new(
+                "Parser thread panicked while parsing expression",
+            )),
         }
     }
 
@@ -425,8 +382,174 @@ fn build_symbol_name(expr: &ast::Expr, renames: &HashMap<String, String>) -> Opt
     }
 }
 
+/// Maximum permitted AST nesting depth.
+///
+/// Applied during structural validation (parse phase) and during evaluation
+/// to prevent stack exhaustion on pathological inputs such as
+/// `((((...1...))))` or long left-associative binop chains like
+/// `1+1+...+1` that produce a deep AST even when the source is short.
+///
+/// A limit of 64 is well above any legitimate template expression: the
+/// spec already caps list nesting at 2 and list comprehensions at a
+/// single generator, and real-world expressions rarely exceed ~10
+/// levels of nesting. Exceeding this limit raises
+/// [`ExpressionErrorKind::ExpressionTooDeep`](crate::ExpressionErrorKind::ExpressionTooDeep).
+///
+/// See `specs/expr/parser.md` (Depth limit) and `specs/expr/evaluator.md`
+/// (Depth limit) for the rationale.
+pub const MAX_EXPRESSION_DEPTH: usize = 64;
+
+/// Input-length threshold below which [`ParsedExpression::new`] parses on
+/// the current thread instead of spawning a worker thread.
+///
+/// A recursive-descent parser cannot recurse more times than there are
+/// input characters to consume, and the ruff parser's empirical overflow
+/// threshold on the default 2 MB Rust thread stack is well above this
+/// value in release builds (≥ 500 frames observed). 200 characters
+/// leaves a comfortable safety margin in both release and debug profiles
+/// while keeping the vast majority of real template expressions — which
+/// are typically well under 100 characters — on the fast path.
+///
+/// This is deliberately separate from [`MAX_EXPRESSION_DEPTH`]: the depth
+/// limit is a semantic abuse ceiling on AST nesting, while this threshold
+/// is a pragmatic tuning knob for parser stack-safety on the caller's
+/// thread.
+const FAST_PATH_INPUT_LEN: usize = 200;
+
+/// Maximum permitted source length (in bytes) for a single
+/// [`ParsedExpression`]. An absolute cap independent of any AST-shape
+/// analysis: the parser's recursive descent can recurse at most once per
+/// input byte, so bounding input length bounds worst-case stack use. Set
+/// to a value that leaves generous headroom in a debug-profile build on
+/// the parser worker thread (32 MB stack).
+///
+/// Realistic template expressions are well under 1 KB; 64 KB is two
+/// orders of magnitude above that.
+pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
+
+/// Stack size for the parser thread used when the source string is longer
+/// than [`FAST_PATH_INPUT_LEN`]. 32 MB is large enough to handle any input
+/// up to [`MAX_PARSE_INPUT_LEN`] even in debug builds, where each parser
+/// frame can be several KB. In release builds this leaves orders of
+/// magnitude of headroom; the allocation is a one-time reservation per
+/// parse and is reclaimed when the thread ends.
+const PARSER_THREAD_STACK_SIZE: usize = 32 * 1024 * 1024;
+
+/// The actual parse loop: runs the ruff parser, handles the
+/// keyword-rename retry cycle, and wires up the resulting AST into a
+/// `ParsedExpression`. Factored out of [`ParsedExpression::new`] so it can
+/// be invoked either on the current thread (short inputs) or on a
+/// stack-enlarged worker thread (long inputs), without duplicating the
+/// loop body.
+fn parse_inner(raw: &str, expr_str: &str) -> Result<ParsedExpression, ExpressionError> {
+    let mut source = expr_str.to_string();
+    let mut keyword_renames: HashMap<String, String> = HashMap::new();
+
+    // Wrap multi-line expressions in parentheses for implicit line continuation
+    let is_multiline = source.contains('\n');
+
+    loop {
+        let to_parse = if is_multiline {
+            format!("({})", source)
+        } else {
+            source.clone()
+        };
+
+        match ruff_python_parser::parse_expression(&to_parse) {
+            Ok(parsed) => {
+                let expr_node = parsed.into_expr();
+                // Structural validation (matches Python implementation)
+                validate_structure(&expr_node, expr_str)?;
+                let mut accessed_symbols = HashSet::new();
+                let mut called_functions = HashSet::new();
+                let mut local_bindings = HashSet::new();
+                collect_symbols(
+                    &expr_node,
+                    &keyword_renames,
+                    &mut accessed_symbols,
+                    &mut called_functions,
+                    &mut local_bindings,
+                );
+                // Check for nested comprehension variable shadowing
+                check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
+                return Ok(ParsedExpression {
+                    ast: expr_node,
+                    source: raw.to_string(),
+                    expr: expr_str.to_string(),
+                    keyword_renames,
+                    accessed_symbols,
+                    called_functions,
+                    local_bindings,
+                });
+            }
+            Err(e) => {
+                // Try to find a keyword after '.' that caused the error
+                let mut found = false;
+                for kw in PYTHON_KEYWORDS {
+                    let pattern = format!(".{kw}");
+                    if let Some(pos) = source.find(&pattern) {
+                        // Check that the keyword is followed by a non-identifier char
+                        let after_pos = pos + 1 + kw.len();
+                        let after_char = source.chars().nth(after_pos);
+                        if after_char.is_none_or(|c| !c.is_alphanumeric() && c != '_') {
+                            let replacement = keyword_renames
+                                .iter()
+                                .find(|(_, v)| v.as_str() == *kw)
+                                .map(|(k, _)| k.clone())
+                                .unwrap_or_else(|| {
+                                    let r = make_replacement(kw, &source);
+                                    keyword_renames.insert(r.clone(), kw.to_string());
+                                    r
+                                });
+                            // Replace in source — same length, preserves positions
+                            source = format!(
+                                "{}.{}{}",
+                                &source[..pos],
+                                replacement,
+                                &source[after_pos..]
+                            );
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    let msg = format!("Syntax error: {}", e.error);
+                    let start = e.location.start().to_usize();
+                    let end = e.location.end().to_usize();
+                    // For zero-width ranges (like EOF), point at the last char
+                    let (col, end_col) = if start == end && !source.is_empty() {
+                        (0, source.len())
+                    } else {
+                        (start.min(source.len()), end.min(source.len()))
+                    };
+                    let mut err = ExpressionError::new(msg);
+                    if !source.is_empty() {
+                        err = err.with_span(&source, col, end_col.max(col + 1));
+                    }
+                    return Err(err);
+                }
+            }
+        }
+    }
+}
+
 /// Validate structural constraints on the AST that can't be caught by the parser.
 fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionError> {
+    validate_structure_inner(node, source, 0)
+}
+
+fn validate_structure_inner(
+    node: &ast::Expr,
+    source: &str,
+    depth: usize,
+) -> Result<(), ExpressionError> {
+    if depth > MAX_EXPRESSION_DEPTH {
+        return Err(
+            ExpressionError::expression_too_deep(depth, MAX_EXPRESSION_DEPTH)
+                .with_node(source, node),
+        );
+    }
     fn err(msg: &str, source: &str, node: &ast::Expr) -> Result<(), ExpressionError> {
         Err(ExpressionError::new(msg).with_node(source, node))
     }
@@ -461,11 +584,11 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
                     }
                 }
             }
-            validate_structure(&lc.elt, source)?;
+            validate_structure_inner(&lc.elt, source, depth + 1)?;
             for gen in &lc.generators {
-                validate_structure(&gen.iter, source)?;
+                validate_structure_inner(&gen.iter, source, depth + 1)?;
                 for if_clause in &gen.ifs {
-                    validate_structure(if_clause, source)?;
+                    validate_structure_inner(if_clause, source, depth + 1)?;
                 }
             }
         }
@@ -491,18 +614,18 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
                 }
                 _ => {}
             }
-            validate_structure(&b.left, source)?;
-            validate_structure(&b.right, source)?;
+            validate_structure_inner(&b.left, source, depth + 1)?;
+            validate_structure_inner(&b.right, source, depth + 1)?;
         }
         ast::Expr::UnaryOp(u) => {
             if matches!(u.op, ast::UnaryOp::Invert) {
                 return err("Bitwise NOT (~) is not supported", source, node);
             }
-            validate_structure(&u.operand, source)?;
+            validate_structure_inner(&u.operand, source, depth + 1)?;
         }
         ast::Expr::BoolOp(b) => {
             for v in &b.values {
-                validate_structure(v, source)?;
+                validate_structure_inner(v, source, depth + 1)?;
             }
         }
         ast::Expr::Compare(c) => {
@@ -517,20 +640,31 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
                     _ => {}
                 }
             }
-            validate_structure(&c.left, source)?;
+            validate_structure_inner(&c.left, source, depth + 1)?;
+            // Chained comparisons (1<2<3<...) also grow without bound via the
+            // comparators vector; treat each comparator as +1 depth to catch
+            // `1<2<3<...<N` patterns that would otherwise be O(N) wide but
+            // shallow in terms of recursion.
+            if c.comparators.len() > MAX_EXPRESSION_DEPTH {
+                return Err(ExpressionError::expression_too_deep(
+                    c.comparators.len(),
+                    MAX_EXPRESSION_DEPTH,
+                )
+                .with_node(source, node));
+            }
             for comp in &c.comparators {
-                validate_structure(comp, source)?;
+                validate_structure_inner(comp, source, depth + 1)?;
             }
         }
         ast::Expr::If(i) => {
-            validate_structure(&i.test, source)?;
-            validate_structure(&i.body, source)?;
-            validate_structure(&i.orelse, source)?;
+            validate_structure_inner(&i.test, source, depth + 1)?;
+            validate_structure_inner(&i.body, source, depth + 1)?;
+            validate_structure_inner(&i.orelse, source, depth + 1)?;
         }
         ast::Expr::Call(c) => {
-            validate_structure(&c.func, source)?;
+            validate_structure_inner(&c.func, source, depth + 1)?;
             for arg in &c.arguments.args {
-                validate_structure(arg, source)?;
+                validate_structure_inner(arg, source, depth + 1)?;
             }
             if !c.arguments.keywords.is_empty() {
                 return err("Keyword arguments are not supported", source, node);
@@ -538,12 +672,15 @@ fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionEr
         }
         ast::Expr::List(l) => {
             for elt in &l.elts {
-                validate_structure(elt, source)?;
+                validate_structure_inner(elt, source, depth + 1)?;
             }
         }
         ast::Expr::Subscript(s) => {
-            validate_structure(&s.value, source)?;
-            validate_structure(&s.slice, source)?;
+            validate_structure_inner(&s.value, source, depth + 1)?;
+            validate_structure_inner(&s.slice, source, depth + 1)?;
+        }
+        ast::Expr::Attribute(a) => {
+            validate_structure_inner(&a.value, source, depth + 1)?;
         }
         ast::Expr::StringLiteral(s) => {
             for part in &s.value {

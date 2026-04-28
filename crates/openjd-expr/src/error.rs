@@ -49,6 +49,15 @@ pub enum ExpressionErrorKind {
     #[error("Expression operation count ({count}) exceeded limit ({limit})")]
     OperationLimitExceeded { count: usize, limit: usize },
 
+    /// Expression AST nesting depth exceeded the configured limit.
+    ///
+    /// Raised by the parser's structural validator and by the evaluator to
+    /// prevent stack exhaustion on pathological inputs such as
+    /// `((((...1...))))` or a ~1000-term left-associative binop chain.
+    /// The limit is [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH).
+    #[error("Expression nesting depth ({depth}) exceeded limit ({limit})")]
+    ExpressionTooDeep { depth: usize, limit: usize },
+
     /// A Python syntax feature that is not supported in the expression language.
     #[error("{feature}")]
     UnsupportedSyntax { feature: String },
@@ -152,6 +161,11 @@ impl ExpressionError {
     /// A parse-stage error (underlying parser, range expression parser, etc.).
     pub fn parse_error(message: impl Into<String>) -> Self {
         Self::from_kind(ExpressionErrorKind::ParseError(message.into()))
+    }
+
+    /// AST nesting depth exceeded the configured limit.
+    pub fn expression_too_deep(depth: usize, limit: usize) -> Self {
+        Self::from_kind(ExpressionErrorKind::ExpressionTooDeep { depth, limit })
     }
 
     /// The structured error kind.
