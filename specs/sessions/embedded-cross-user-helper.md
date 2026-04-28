@@ -17,11 +17,15 @@ lifetime. All subprocess execution routes through it over a stdin/stdout protoco
 ```
 Session::with_config(user=job-user)
   │
-  ├─ Write helper binary to session working directory
-  │    /sessions/<session-id>/openjd_helper
+  ├─ Create helpers directory in session working directory
+  │    /sessions/<session-id>/.helpers-<uuid>/
+  │    mkdir 700, chown :job-user-group, chmod 750
+  │
+  ├─ Write helper binary with randomized name
+  │    /sessions/<session-id>/.helpers-<uuid>/h-<uuid>
   │    chmod 750, chown :job-user-group
   │
-  ├─ Spawn: sudo -u job-user -i /sessions/<session-id>/openjd_helper
+  ├─ Spawn: sudo -u job-user -i /sessions/<session-id>/.helpers-<uuid>/h-<uuid>
   │    (1 second login cost, paid once)
   │
   └─ Dup helper stdin fd → cancel_writer (for cancel_action from any thread)
@@ -48,8 +52,14 @@ and embedded in the `openjd-sessions` crate using `include_bytes!`:
 const HELPER_BINARY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/openjd_helper"));
 ```
 
-At session start, written to the session working directory, cleaned up
-automatically when the working directory is deleted.
+At session start, a restricted helpers directory (`.helpers-<uuid>`,
+mode 0o750 after group setup) is created inside the session working directory.
+The directory starts at 0o700, then group ownership is set to the job user's
+group, then permissions are widened to 0o750 (owner rwx, group r-x). The helper
+binary is written there with a randomized name (`h-<uuid>`), preventing the job
+user from predicting or tampering with the binary path. The directory's
+permissions ensure the job user can traverse and execute but cannot modify
+its contents.
 
 ## Wire Protocol
 
@@ -371,7 +381,7 @@ openjd-sessions/
   build.rs              ← compiles helper, copies to OUT_DIR
   src/
     lib.rs              ← #[cfg(unix)] pub(crate) mod helper_binary;
-    helper_binary.rs    ← include_bytes! + write_helper()
+    helper_binary.rs    ← include_bytes! + create_helpers_dir() + write_helper()
     session.rs          ← CrossUserHelper, run_via_helper, cancel_writer
     helper/
       Cargo.toml        ← standalone crate with [workspace] = {}

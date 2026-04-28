@@ -97,6 +97,11 @@ impl StepScriptRunner {
         self
     }
 
+    pub(crate) fn with_helpers_directory(mut self, dir: PathBuf) -> Self {
+        self.base.helpers_directory = Some(dir);
+        self
+    }
+
     /// Run the step script's onRun action.
     pub async fn run(
         &mut self,

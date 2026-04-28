@@ -58,6 +58,11 @@ pub struct SubprocessConfig {
     pub user: Option<Arc<dyn SessionUser>>,
     pub cancel_method: CancelMethod,
     pub cancel_request_rx: Option<tokio::sync::watch::Receiver<Option<Duration>>>,
+    /// Directory for cross-user wrapper scripts. When set, wrapper scripts are
+    /// written here instead of in `working_dir`. Permissions are 0o750 (owner
+    /// rwx, group r-x) so the job user can execute but not modify scripts.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub helpers_dir: Option<PathBuf>,
     /// Whether to accumulate all stdout into `SubprocessResult.stdout`.
     /// Intended for debugging only — production callers should leave this
     /// `false` and observe output through the real-time callback.
@@ -487,10 +492,11 @@ pub async fn run_subprocess(
                 config.working_dir.as_deref(),
             )?;
             let script_dir = config
-                .working_dir
+                .helpers_dir
                 .as_deref()
+                .or(config.working_dir.as_deref())
                 .unwrap_or_else(|| std::path::Path::new("/tmp"));
-            let script_path = script_dir.join(format!("_openjd_run_{}.sh", std::process::id()));
+            let script_path = script_dir.join(format!("_run_{}.sh", uuid::Uuid::new_v4().simple()));
             std::fs::write(&script_path, &script_content).map_err(|e| {
                 SessionError::SubprocessStart {
                     command: args[0].clone(),
@@ -1074,6 +1080,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(60),
             },
             cancel_request_rx: Some(cancel_rx),
+            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1134,6 +1141,7 @@ mod tests {
                 terminate_delay: Duration::from_secs(1),
             },
             cancel_request_rx: Some(cancel_rx),
+            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1188,6 +1196,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1235,6 +1244,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1487,6 +1497,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: None,
             debug_collect_stdout: true,
         })
     }
@@ -1548,6 +1559,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
@@ -1576,6 +1588,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
@@ -1606,6 +1619,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1643,6 +1657,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                helpers_dir: None,
                 debug_collect_stdout: true,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1675,6 +1690,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1700,6 +1716,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1718,6 +1735,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1849,6 +1867,7 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
+                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1943,6 +1962,7 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: None,
             debug_collect_stdout: false,
         };
 

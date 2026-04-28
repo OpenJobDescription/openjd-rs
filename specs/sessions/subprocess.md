@@ -221,13 +221,16 @@ When `SubprocessConfig.user` is set and the user differs from the process user:
 
 1. Generate a shell script wrapper:
    ```bash
-   #!/bin/bash
+   #!/bin/sh
    export VAR1='value1'
    export VAR2='value2'
    cd '/path/to/working/dir'
    exec /path/to/command arg1 arg2
    ```
-2. Write the script to a temp file in the session working directory
+2. Write the script to a randomized path in the helpers directory
+   (`<helpers_dir>/_run_<uuid>.sh`). The helpers directory is 0o750
+   (owner rwx, group r-x), preventing the job user from modifying
+   scripts between write and execution.
 3. Set permissions to allow the target user to execute it
 4. Launch via `sudo -u <user> -i setsid -w <script_path>`
 

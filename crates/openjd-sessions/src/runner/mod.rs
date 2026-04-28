@@ -96,6 +96,7 @@ pub(crate) struct ScriptRunnerBase {
     pub session_id: String,
     pub working_directory: PathBuf,
     pub files_directory: PathBuf,
+    pub helpers_directory: Option<PathBuf>,
     pub user: Option<Arc<dyn SessionUser>>,
     pub redactions_enabled: bool,
     pub initial_redacted_values: Vec<String>,
@@ -121,6 +122,7 @@ impl ScriptRunnerBase {
             session_id: session_id.to_string(),
             working_directory,
             files_directory,
+            helpers_directory: None,
             user,
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
@@ -155,6 +157,7 @@ impl ScriptRunnerBase {
             user: self.user.clone(),
             cancel_method,
             cancel_request_rx: self.cancel_request_rx.clone(),
+            helpers_dir: self.helpers_directory.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);

@@ -101,6 +101,11 @@ impl EnvironmentScriptRunner {
         self
     }
 
+    pub(crate) fn with_helpers_directory(mut self, dir: PathBuf) -> Self {
+        self.base.helpers_directory = Some(dir);
+        self
+    }
+
     /// Run the environment's onEnter action.
     pub async fn enter(
         &mut self,

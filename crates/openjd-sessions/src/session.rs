@@ -180,6 +180,8 @@ impl CancelFields {
 /// Cross-user execution state.
 struct CrossUserFields {
     user: Option<Arc<dyn SessionUser>>,
+    /// Process-user-only directory for helper binary and wrapper scripts.
+    helpers_dir: Option<PathBuf>,
     #[cfg(unix)]
     helper: Option<CrossUserHelper>,
     #[cfg(windows)]
@@ -272,6 +274,7 @@ impl Session {
             cancel: CancelFields::new(None),
             cross_user: CrossUserFields {
                 user: None,
+                helpers_dir: None,
                 helper: None,
                 cancel_writer: None,
             },
@@ -326,13 +329,21 @@ impl Session {
         let library = derive_library(None, &path_mapping_rules);
         let process_env = config.os_env_vars.unwrap_or_default();
 
-        // Spawn cross-user helper if needed
+        // Create helpers directory and spawn cross-user helper if needed.
+        // The helpers directory is 0o750 (owner rwx, group r-x) so the job user
+        // can traverse and execute but cannot create or modify files.
+        let mut helpers_dir = None;
+
         #[cfg(unix)]
         let (helper, cancel_writer) = if let Some(ref user) = config.user {
             if !user.is_process_user() {
-                let helper_path =
-                    crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
+                let hdir = crate::helper_binary::create_helpers_dir(
+                    &working_directory,
+                    Some(user.as_ref()),
+                )?;
+                let helper_path = crate::helper_binary::write_helper(&hdir, user.as_ref())?;
                 let (h, cw) = CrossUserHelper::spawn(&helper_path, user.as_ref())?;
+                helpers_dir = Some(hdir);
                 (Some(h), Some(cw))
             } else {
                 (None, None)
@@ -344,9 +355,13 @@ impl Session {
         #[cfg(windows)]
         let (helper, cancel_writer) = if let Some(ref user) = config.user {
             if !user.is_process_user() {
-                let helper_path =
-                    crate::helper_binary::write_helper(&working_directory, user.as_ref())?;
+                let hdir = crate::helper_binary::create_helpers_dir(
+                    &working_directory,
+                    Some(user.as_ref()),
+                )?;
+                let helper_path = crate::helper_binary::write_helper(&hdir, user.as_ref())?;
                 let (h, cw) = CrossUserHelperWin::spawn(&helper_path, user.as_ref())?;
+                helpers_dir = Some(hdir);
                 (Some(h), Some(cw))
             } else {
                 (None, None)
@@ -416,6 +431,7 @@ impl Session {
             cancel: CancelFields::new(config.cancel_token),
             cross_user: CrossUserFields {
                 user: config.user,
+                helpers_dir,
                 helper,
                 cancel_writer,
             },
@@ -785,6 +801,9 @@ impl Session {
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
+            if let Some(ref hdir) = self.cross_user.helpers_dir {
+                runner = runner.with_helpers_directory(hdir.clone());
+            }
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
                     let r = runner.with_helper(h);
@@ -939,6 +958,9 @@ impl Session {
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
+            if let Some(ref hdir) = self.cross_user.helpers_dir {
+                runner = runner.with_helpers_directory(hdir.clone());
+            }
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
                     let r = runner.with_helper(h);
@@ -1049,6 +1071,9 @@ impl Session {
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
+        if let Some(ref hdir) = self.cross_user.helpers_dir {
+            runner = runner.with_helpers_directory(hdir.clone());
+        }
         let mut runner = match self.cross_user.helper.take() {
             Some(h) => {
                 let r = runner.with_helper(h);
@@ -1163,6 +1188,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
+            helpers_dir: self.cross_user.helpers_dir.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
@@ -1206,6 +1232,7 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: None,
+            helpers_dir: self.cross_user.helpers_dir.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
 
