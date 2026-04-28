@@ -102,9 +102,23 @@ pub struct WindowsSessionUser {
     logon_token: Option<windows::Win32::Foundation::HANDLE>,
 }
 
-// HANDLE is Send+Sync (it's just a pointer-sized integer)
+// SAFETY: `WindowsSessionUser` is Send because all of its fields can be
+// sent across threads:
+// - `user: String` and `password: Option<String>` are Send by virtue of
+//   being owned `String`s.
+// - `logon_token: Option<HANDLE>` is a Windows kernel object handle,
+//   represented as a pointer-sized integer. Kernel handles are process-
+//   wide and safe to use from any thread. The `HANDLE` type is marked
+//   `!Send` in `windows-rs` out of caution because many Win32 APIs expect
+//   the handle to remain associated with the original thread, but that is
+//   not the case for the logon token here — it is only read and passed to
+//   APIs that accept any thread's handle.
 #[cfg(windows)]
 unsafe impl Send for WindowsSessionUser {}
+// SAFETY: `WindowsSessionUser` is Sync because all fields are immutable
+// after construction (no interior mutability), so `&WindowsSessionUser`
+// can be shared across threads without data races. The `HANDLE` is only
+// read through `&self` accessors.
 #[cfg(windows)]
 unsafe impl Sync for WindowsSessionUser {}
 

@@ -150,8 +150,16 @@ pub(crate) struct CrossUserHelperWin {
     pub(crate) async_reader: WindowsAsyncHelperReader,
 }
 
-// SAFETY: Windows HANDLE is a kernel object handle that is safe to send across
-// threads. The other fields (BufWriter<File>, BufReader<File>) are already Send.
+// SAFETY: `CrossUserHelperWin` is Send because all of its fields can be
+// sent across threads:
+// - `process_handle: HANDLE` is a Windows kernel object handle (pointer-
+//   sized integer). Kernel handles are process-wide and safe to use from
+//   any thread. `HANDLE` is `!Send` in `windows-rs` out of caution, but the
+//   process handle here is only used for wait/terminate operations that
+//   accept any thread's handle.
+// - `stdin: BufWriter<File>` is already Send.
+// - `async_reader: WindowsAsyncHelperReader` owns an `UnboundedReceiver`
+//   and a `JoinHandle`, both of which are Send.
 #[cfg(windows)]
 unsafe impl Send for CrossUserHelperWin {}
 
