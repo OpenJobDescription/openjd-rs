@@ -97,6 +97,29 @@ Every function call increments the operation counter:
 The proportional costs prevent DoS via large strings or lists — a million-element list
 comprehension costs 1M operations even if each iteration is trivial.
 
+### Depth Limit
+
+In addition to memory and operation counters, the evaluator carries a
+`recursion_depth: usize` field that is incremented on every call to
+`Evaluator::evaluate` and decremented on return. If the counter exceeds
+[`MAX_EXPRESSION_DEPTH`](../../crates/openjd-expr/src/eval/parse.rs) (currently
+**64**), evaluation fails with `ExpressionErrorKind::ExpressionTooDeep`.
+
+The evaluator's depth guard catches deep ASTs that slipped past the parse-phase
+check — notably long left-associative binop chains like `1+1+1+...+1`, which
+the parser-side source prefix scan does **not** flag (the source has no
+consecutive `(`/`-` tokens) but which produce a left-leaning BinOp tree of
+O(N) height. Without this guard, such inputs recurse through the `eval_binop`
+→ `evaluate(&b.left)` chain until the thread's stack overflows and the process
+aborts (`std::panic::catch_unwind` cannot recover from a stack overflow).
+
+Child evaluators created for list comprehensions inherit the parent's
+`recursion_depth`, so nested comprehensions share the same budget rather than
+each having a fresh 64-level allowance.
+
+See also [parser.md § Depth Limit](parser.md#depth-limit) for the source-level
+and AST-walker checks that complement this evaluator-side guard.
+
 ## AST Node Evaluation
 
 The evaluator dispatches on AST node type:

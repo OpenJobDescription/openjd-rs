@@ -34,6 +34,34 @@ Parsing validates:
 
 Errors include the position within the format string for precise error reporting.
 
+## Defensive Caps
+
+`FormatString::new` enforces two size limits intended as defense-in-depth
+against pathological inputs whose total cost is bounded linearly by input size
+but unbounded in absolute terms:
+
+| Constant | Value | Check |
+|---|---|---|
+| [`MAX_FORMAT_STRING_LEN`](../../crates/openjd-expr/src/format_string.rs) | 1 MB | Input byte length |
+| [`MAX_FORMAT_STRING_SEGMENTS`](../../crates/openjd-expr/src/format_string.rs) | 1,000 | Count of `{{…}}` segments |
+
+The length cap is checked before `parse_segments` runs, so an oversized input
+is rejected without allocating a segment vector or touching the parser. The
+segment cap is checked after parsing because the segment count is only known
+once the scan completes; by that point the `Vec<Segment>` allocation is
+already proportional to the input size, so rejecting here is purely a policy
+guard and not a further memory-protection measure.
+
+These limits are well above the size of any real template field. The spec's
+own examples fit in hundreds of bytes, with a handful of `{{…}}` interpolations
+per field at most. Hitting either cap means either a malicious input or a
+programming bug in an upstream codegen path — both warrant failing loudly.
+
+Exceeding either cap produces an `ExpressionError` whose message names the
+violated limit. No dedicated `ExpressionErrorKind` variant is allocated for
+this case because callers already treat any `ExpressionError` from
+`FormatString::new` as "invalid format string."
+
 ## Resolution
 
 Two resolution methods serve different purposes; both take a

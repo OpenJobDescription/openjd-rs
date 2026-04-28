@@ -9,6 +9,7 @@ description = "Open Job Description expression language — types, evaluation, a
 shlex = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
+regex-syntax = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

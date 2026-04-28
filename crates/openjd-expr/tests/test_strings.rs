@@ -819,7 +819,7 @@ fn re_split_no_match() {
 fn re_split_invalid_pattern() {
     assert_err(
         "re_split('hello', '[')",
-        &["Invalid regex: regex parse error"],
+        &["Invalid regex pattern: regex parse error"],
     );
 }
 #[test]

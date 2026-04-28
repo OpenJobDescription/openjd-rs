@@ -354,7 +354,14 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
 
 - **Integer arithmetic** uses Python-style floored division and modulo (§2.1.1)
 - **`round()`** uses banker's rounding / round-half-even (§2.2.2)
-- **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5)
+- **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
+  Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
+  inspect the result, rather than a substring scan. This correctly ignores
+  lookaround-shaped syntax that appears inside character classes, escaped
+  sequences, or regex comments (e.g., `[(?=]`, `\?=`, `(?#...)`). The parser
+  rejects forbidden constructs at parse time; the translated error names the
+  specific feature (e.g., "Unsupported regex feature: lookahead") so callers
+  can produce stable diagnostics.
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6)
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
 - **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /

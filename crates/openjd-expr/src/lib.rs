@@ -30,6 +30,7 @@ pub mod value;
 pub use error::{ExpressionError, ExpressionErrorKind};
 pub use eval::{
     EvalBuilder, EvalResult, ParsedExpression, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT,
+    MAX_EXPRESSION_DEPTH, MAX_PARSE_INPUT_LEN,
 };
 pub use format_string::escape_format_string;
 pub use format_string::FormatString;

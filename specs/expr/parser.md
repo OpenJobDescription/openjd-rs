@@ -93,6 +93,64 @@ language:
 - Subscript, Slice, Call, Attribute, Name, Constant
 - List, ListComp, comprehension
 
+## Depth Limit
+
+The parser and evaluator both enforce a maximum AST nesting depth of
+[`MAX_EXPRESSION_DEPTH`](../../crates/openjd-expr/src/eval/parse.rs) (currently
+**64**). This exists solely to prevent stack exhaustion on pathological inputs —
+not to constrain legitimate expressions, which rarely nest more than ~10 levels.
+
+Three independent mechanisms work together:
+
+1. **Absolute input-size cap.** `ParsedExpression::new` rejects any source
+   longer than [`MAX_PARSE_INPUT_LEN`](../../crates/openjd-expr/src/eval/parse.rs)
+   (currently **64 KB**) before invoking the parser. This bounds the parser's
+   worst-case recursion depth at source length: a recursive-descent parser
+   cannot recurse more times than there are input characters to consume.
+
+2. **Short-input fast path + long-input worker thread.** Inputs of at most
+   **200** characters (`FAST_PATH_INPUT_LEN`) parse directly on the current
+   thread. Two things together make this safe: a recursive-descent parser
+   cannot recurse more times than there are input characters to consume,
+   and the ruff parser's empirical overflow threshold on Rust's default
+   2 MB thread stack is well above 200 frames (≥ 500 observed in release
+   builds). Longer inputs run on a dedicated thread with a 32 MB stack via
+   `std::thread::Builder::stack_size`, which comfortably accommodates any
+   input up to `MAX_PARSE_INPUT_LEN` even in debug builds. The
+   worker-thread approach lets us parse *any* AST shape safely without
+   enumerating which token patterns drive parser recursion — whatever
+   shape the grammar produces, the parser has enough stack to complete.
+
+   The fast-path threshold is deliberately decoupled from
+   `MAX_EXPRESSION_DEPTH`: the depth cap is a semantic abuse ceiling on
+   AST nesting, while the fast-path threshold is a pragmatic tuning knob
+   for parser stack-safety on the caller's thread. Real-world template
+   expressions are nearly always under 100 characters, so 200 keeps the
+   vast majority of inputs on the cheap path.
+
+3. **Structural AST walker.** After parsing succeeds, `validate_structure`
+   carries a `depth` counter and bumps it on every recursive descent into
+   a child node. If the counter exceeds `MAX_EXPRESSION_DEPTH`, validation
+   fails with `ExpressionErrorKind::ExpressionTooDeep`. Chained comparisons
+   (`a < b < c < ...`) are also checked against the limit via their
+   comparators vector length.
+
+The evaluator applies a parallel check: `Evaluator::evaluate` — the single
+entry point through which every sub-node evaluation flows — carries a
+`recursion_depth` field and checks it on entry. ASTs that slip past the
+parser-phase check (e.g., a long left-associative binop chain `1+1+...+1`
+which produces a deep-but-syntactically-shallow source) are caught here
+before they can exhaust the evaluator's stack.
+
+Rust threads default to 2 MB of stack, and Rust cannot recover from stack
+overflow via `std::panic::catch_unwind` — it aborts the process. The input
+cap + worker thread + depth walker + evaluator guard together ensure that
+no input to `ParsedExpression::new` or `Evaluator::evaluate` can cause a
+process abort.
+
+Exceeding the limit returns `ExpressionErrorKind::ExpressionTooDeep { depth,
+limit: 64 }` with normal caret formatting.
+
 **Rejected with descriptive errors:**
 | Node | Error message |
 |------|---------------|

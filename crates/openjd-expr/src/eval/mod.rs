@@ -13,4 +13,4 @@ mod parse;
 
 pub(crate) use evaluator::Evaluator;
 pub use evaluator::{EvalResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
-pub use parse::{EvalBuilder, ParsedExpression};
+pub use parse::{EvalBuilder, ParsedExpression, MAX_EXPRESSION_DEPTH, MAX_PARSE_INPUT_LEN};
