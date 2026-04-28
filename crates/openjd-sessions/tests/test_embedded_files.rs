@@ -252,3 +252,129 @@ fn test_materialize_resolved_data() {
     assert_eq!(fs::read_to_string(&foo_path).unwrap(), resolved);
     assert_eq!(fs::read_to_string(&bar_path).unwrap(), resolved);
 }
+
+// === Path traversal defense-in-depth (CWE-22) ===
+//
+// Per spec (§6.1.1), embedded file `filename` must be a plain basename and
+// the `openjd-model` crate rejects path separators at template validation
+// time. These tests exercise the sessions-layer check that re-validates
+// the filename before it is joined to the target directory. This check
+// catches traversal strings that could reach the session layer via any
+// bypass of model validation, including implementation-level format-string
+// substitution (the current model stores `filename` as a `FormatString`).
+
+mod path_traversal {
+    use super::*;
+    use openjd_expr::format_string::FormatString;
+    use openjd_expr::ExprValue;
+    use openjd_model::job::EmbeddedFile;
+    use openjd_model::symbol_table::SymbolTable;
+    use openjd_model::types::FileType;
+    use openjd_sessions::SessionError;
+
+    /// Build an `EmbeddedFile` with a `filename` template that references
+    /// `Param.Evil` — the tainted value is supplied via the symbol table so
+    /// the traversal string bypasses any raw-template validation.
+    fn file_with_tainted_filename(name: &str) -> EmbeddedFile {
+        EmbeddedFile {
+            name: name.to_string(),
+            file_type: FileType::Text,
+            filename: Some(FormatString::new("{{Param.Evil}}").unwrap()),
+            data: Some(FormatString::new("echo hello").unwrap()),
+            runnable: None,
+            end_of_line: None,
+        }
+    }
+
+    fn symtab_with_evil(value: &str) -> SymbolTable {
+        let mut st = SymbolTable::new();
+        st.set("Param.Evil", ExprValue::String(value.to_string()))
+            .unwrap();
+        st
+    }
+
+    fn allocate_with_tainted(value: &str) -> Result<(), SessionError> {
+        let tmp = TempDir::new().unwrap();
+        let mut ef = EmbeddedFiles::new(
+            EmbeddedFilesScope::Step,
+            tmp.path().to_path_buf(),
+            "test-session",
+        );
+        let mut st = symtab_with_evil(value);
+        let file = file_with_tainted_filename("evil");
+        ef.allocate_file_paths(&[file], &mut st)
+    }
+
+    fn assert_rejects(tainted_value: &str, expected_reason_fragment: &str) {
+        let err = allocate_with_tainted(tainted_value).expect_err(&format!(
+            "expected rejection for tainted filename {tainted_value:?}"
+        ));
+        let msg = err.to_string();
+        let expected_full = format!(
+            "Embedded file 'evil' has unsafe filename '{tainted_value}': {expected_reason_fragment}"
+        );
+        assert_eq!(
+            msg, expected_full,
+            "error message mismatch for tainted value {tainted_value:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_parent_dir_traversal() {
+        assert_rejects("../evil.sh", "must not contain path separators");
+    }
+
+    #[test]
+    fn rejects_absolute_posix_path() {
+        assert_rejects("/etc/passwd", "must not contain path separators");
+    }
+
+    #[test]
+    fn rejects_backslash_separator() {
+        // Backslashes are rejected on all platforms — embedded file names
+        // are single path components by spec.
+        assert_rejects("..\\evil.sh", "must not contain path separators");
+    }
+
+    #[test]
+    fn rejects_windows_absolute_path() {
+        assert_rejects("C:\\Windows\\evil.exe", "must not contain path separators");
+    }
+
+    #[test]
+    fn rejects_nested_subdirectory() {
+        assert_rejects("sub/evil.sh", "must not contain path separators");
+    }
+
+    #[test]
+    fn rejects_empty_filename() {
+        assert_rejects("", "must not be empty");
+    }
+
+    #[test]
+    fn rejects_dot() {
+        assert_rejects(".", "must not be '.'");
+    }
+
+    #[test]
+    fn rejects_double_dot() {
+        assert_rejects("..", "must not be '..'");
+    }
+
+    #[test]
+    fn rejects_null_byte() {
+        assert_rejects("evil\0.sh", "must not contain null bytes");
+    }
+
+    #[test]
+    fn accepts_safe_single_component_filename() {
+        // Sanity check: a safe resolved filename continues to work.
+        allocate_with_tainted("safe.sh").expect("safe filename should be accepted");
+    }
+
+    #[test]
+    fn accepts_filename_with_dots_in_middle() {
+        // Dots in the middle of a filename are not path components.
+        allocate_with_tainted("my.file.sh").expect("dotted filename should be accepted");
+    }
+}

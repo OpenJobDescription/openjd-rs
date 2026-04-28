@@ -46,6 +46,20 @@ pub enum SessionError {
         source: std::io::Error,
     },
 
+    /// An embedded file's filename is not a safe single path component.
+    ///
+    /// Raised when a `filename` field's value contains path separators,
+    /// parent-directory components, null bytes, or is otherwise unsafe.
+    /// This is a defense-in-depth check; `openjd-model` also rejects
+    /// path separators in filenames at template validation time per the
+    /// 2023-09 spec (§6.1.1 `<Filename>`).
+    #[error("Embedded file '{name}' has unsafe filename '{filename}': {reason}")]
+    EmbeddedFilePath {
+        name: String,
+        filename: String,
+        reason: String,
+    },
+
     /// Failed to create or access the working directory.
     #[error("Failed to create working directory {path}: {source}")]
     WorkingDirectory {

@@ -66,7 +66,9 @@ use `Env.File.*`, step-scoped files use `Task.File.*`.
 For each embedded file:
 
 1. Determine the file path:
-   - If `filename` is specified: `files_directory / filename`
+   - If `filename` is specified: resolve its format string, validate it as a
+     safe single path component (see [Filename path-traversal defense-in-depth](#filename-path-traversal-defense-in-depth)),
+     then join with `files_directory`.
    - Otherwise: `files_directory / {random_hex}` (hash-based name for uniqueness)
 2. Create an empty file with 0o600 permissions (POSIX) to reserve the path
 3. Register the path in the symbol table as `ExprValue::Path`:
@@ -79,6 +81,37 @@ Creating the file during allocation (rather than waiting for phase 2) ensures:
 - The path is valid and writable before let bindings reference it
 - No race condition if multiple embedded files target the same directory
 - File permissions are set early for cross-user scenarios
+
+### Filename path-traversal defense-in-depth
+
+Per the 2023-09 spec (§6.1.1 `<Filename>`), an embedded file's `filename` must
+be a plain basename with no directory pathing. The `openjd-model` crate
+enforces this at template validation time by rejecting forward-slash (`/`)
+and backslash (`\`) in the filename.
+
+As a defense-in-depth check, the sessions layer re-validates the
+filename in phase 1 before joining it to the target directory. The value
+must be a single safe path component:
+
+| Rejected filename | Reason |
+|-------------------|--------|
+| `""` | empty |
+| contains `/` or `\` | path separators |
+| contains `\0` | null byte |
+| exactly `.` or `..` | current/parent dir component |
+
+Rejection surfaces as `SessionError::EmbeddedFilePath { name, filename, reason }`.
+Backslash is rejected on all platforms — embedded file filenames are single
+path components by spec, so `\` has no legitimate use even on POSIX.
+
+This check is not required for correctness when the model layer is
+functioning. It provides protection against:
+- Future regressions or gaps in model-layer validation.
+- Templates that reach the session layer via code paths that skip full model
+  validation.
+- Any implementation-level format-string substitution in the filename field
+  (the current model stores `filename` as a `FormatString`, so a resolved
+  value could differ from the raw template).
 
 ## Phase 2: write_file_contents
 

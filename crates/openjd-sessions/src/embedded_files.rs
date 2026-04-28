@@ -169,6 +169,48 @@ fn random_hex_filename() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+/// Validate a resolved embedded file filename for path traversal safety.
+///
+/// Per the 2023-09 spec (§6.1.1 `<Filename>`), an embedded file's `filename`
+/// must be a plain basename — directory pathing is disallowed. The
+/// `openjd-model` crate enforces this at template validation time by
+/// rejecting `/` and `\` in the filename.
+///
+/// This function is a defense-in-depth check at the point where the
+/// resolved filename is joined to the target directory. It protects against:
+/// - Bugs or gaps in model-layer validation.
+/// - Call paths that reach the session layer without going through full
+///   model validation.
+/// - Any implementation-level format-string substitution in the filename
+///   (the current model stores `filename` as a `FormatString`) that could
+///   introduce separators or traversal components from symbol values at
+///   session time.
+///
+/// Rejects filenames that:
+/// - Are empty.
+/// - Contain any forward slash (`/`) or backslash (`\`). Backslashes are
+///   rejected on all platforms because embedded file filenames are single
+///   path components by spec.
+/// - Contain a null byte.
+/// - Equal `.` or `..`.
+///
+/// Returns `Ok(())` if the filename is a safe single path component.
+fn validate_resolved_filename(resolved: &str) -> Result<(), String> {
+    if resolved.is_empty() {
+        return Err("must not be empty".into());
+    }
+    if resolved.contains('\0') {
+        return Err("must not contain null bytes".into());
+    }
+    if resolved.contains('/') || resolved.contains('\\') {
+        return Err("must not contain path separators".into());
+    }
+    if resolved == "." || resolved == ".." {
+        return Err(format!("must not be '{resolved}'"));
+    }
+    Ok(())
+}
+
 struct FileRecord {
     _symbol: String,
     filename: PathBuf,
@@ -232,6 +274,19 @@ impl EmbeddedFiles {
                         context: format!("embedded file '{}' filename", file.name),
                         reason: e.to_string(),
                     })?;
+                // Defense-in-depth: the spec requires `filename` to be a
+                // plain basename and the model layer rejects path separators
+                // in the raw template. Re-check the value here before it is
+                // joined to the target directory, in case model validation
+                // was bypassed or the resolved value differs from the raw
+                // template.
+                validate_resolved_filename(&resolved).map_err(|reason| {
+                    SessionError::EmbeddedFilePath {
+                        name: file.name.clone(),
+                        filename: resolved.clone(),
+                        reason,
+                    }
+                })?;
                 self.target_directory.join(resolved)
             } else {
                 let name = random_hex_filename();
