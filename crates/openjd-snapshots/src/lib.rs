@@ -61,7 +61,7 @@ pub mod hash;
 pub mod hash_cache;
 pub mod manifest;
 pub mod ops;
-pub mod path_util;
+mod path_util;
 pub mod s3_check_cache;
 
 pub use codec::{

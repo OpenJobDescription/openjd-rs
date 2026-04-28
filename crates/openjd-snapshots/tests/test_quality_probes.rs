@@ -130,15 +130,8 @@ fn decode_v2025_rejects_duplicate_file_paths() {
     assert!(err.contains("duplicate path"), "got: {err}");
 }
 
-// SPEC/IMPL MISMATCH: `specs/snapshots/public-api.md` documents
-// `normalize_path` and `is_absolute_path` at the crate root, but they are
-// only accessible via the `path_util` module path. Either:
-//   (a) re-export them with `pub use path_util::{normalize_path, is_absolute_path};`
-//   (b) update `public-api.md` to note they are at `openjd_snapshots::path_util::*`.
-//
-// This test would fail to compile today, showing the gap. It is commented out
-// so the suite stays green, but the mismatch is real.
-// #[test]
-// fn normalize_path_is_at_crate_root() {
-//     let _ = openjd_snapshots::normalize_path("/a/./b");
-// }
+// HISTORICAL NOTE: `specs/snapshots/public-api.md` previously documented
+// `normalize_path` and `is_absolute_path` at the crate root, but they were
+// only accessible via the `path_util` module. The resolution (April 2026) was
+// to make `path_util` crate-private — path handling for external callers is
+// provided by `openjd-expr`'s `PathFormat`-aware APIs.

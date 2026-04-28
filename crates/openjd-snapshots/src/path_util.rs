@@ -201,4 +201,63 @@ mod tests {
         // On POSIX, backslash is a valid filename character
         assert_eq!(normalize_path("dir/file\\name.txt"), "dir/file\\name.txt");
     }
+
+    // ----- Additional cases moved from integration tests -----
+
+    #[test]
+    fn is_absolute_windows_unc() {
+        assert!(is_absolute_path("//server/share/file.txt"));
+    }
+
+    #[test]
+    fn is_absolute_rejects_relative_with_dotdot() {
+        assert!(!is_absolute_path("../file.txt"));
+        assert!(!is_absolute_path("./file.txt"));
+        assert!(!is_absolute_path("assets/file.txt"));
+        assert!(!is_absolute_path("file.txt"));
+    }
+
+    #[test]
+    fn normalize_collapses_double_slash() {
+        assert_eq!(normalize_path("assets//textures"), "assets/textures");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_windows_converts_nested_backslashes() {
+        assert_eq!(
+            normalize_path("assets\\textures\\wood"),
+            "assets/textures/wood"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_posix_preserves_nested_backslashes() {
+        // On POSIX, backslashes are valid filename characters
+        assert_eq!(
+            normalize_path("assets\\textures\\wood"),
+            "assets\\textures\\wood"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_posix_preserves_backslashes_after_drive_prefix() {
+        // "C:\projects\scene" has drive prefix "C:", so byte[2] ('\') is skipped
+        // as separator, and "projects\scene" becomes a single component (no '/' to
+        // split on) with backslashes preserved as valid filename chars.
+        assert_eq!(normalize_path("C:\\projects\\scene"), "C:/projects\\scene");
+    }
+
+    #[test]
+    fn normalize_preserves_forward_slashes() {
+        assert_eq!(normalize_path("dir/name"), "dir/name");
+    }
+
+    #[test]
+    fn is_absolute_unc_variants() {
+        assert!(is_absolute_path("//server/share"));
+        assert!(is_absolute_path("\\\\server\\share"));
+    }
 }

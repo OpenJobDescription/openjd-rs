@@ -10,7 +10,7 @@
 #[cfg(unix)]
 use openjd_snapshots::SymlinkPolicy;
 use openjd_snapshots::{
-    collect_abs_snapshot, CollectOptions, HashAlgorithm, DEFAULT_FILE_CHUNK_SIZE,
+    collect_abs_snapshot, CollectOptions, DirEntry, HashAlgorithm, DEFAULT_FILE_CHUNK_SIZE,
     WHOLE_FILE_CHUNK_SIZE,
 };
 use std::path::PathBuf;
@@ -2720,9 +2720,9 @@ fn root_directory_included_in_dirs() {
     )
     .unwrap();
 
-    // On Windows, normalize_path converts backslashes to forward slashes,
-    // so compare using the same normalization the manifest applies.
-    let root_str = openjd_snapshots::path_util::normalize_path(&root.to_string_lossy());
+    // On Windows, the library normalizes backslashes to forward slashes;
+    // compare using the library's own normalization (via DirEntry::new).
+    let root_str = DirEntry::new(root.to_string_lossy().as_ref()).path;
     assert!(
         m.dirs.iter().any(|d| d.path == root_str),
         "root directory should appear in dirs, got: {:?}",

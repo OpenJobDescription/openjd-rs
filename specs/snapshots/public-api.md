@@ -458,13 +458,6 @@ impl S3CheckCache {
 }
 ```
 
-## Path Utilities
-
-```rust
-pub fn normalize_path(path: &str) -> String;
-pub fn is_absolute_path(path: &str) -> bool;
-```
-
 ## Operations
 
 ### Progress Callback Type

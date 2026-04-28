@@ -2,7 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-use openjd_snapshots::path_util::{is_absolute_path, normalize_path};
 /// Rust port of all tests from
 /// deadline-cloud/test/unit/deadline_job_attachments/snapshots/operations/test_join_manifest.py
 use openjd_snapshots::{
@@ -28,65 +27,8 @@ fn hfile(path: &str, hash: &str, size: u64, mtime: u64) -> FileEntry {
     e
 }
 
-// ===== TestHelperFunctions =====
-
-#[test]
-fn normalize_path_removes_trailing_slash() {
-    assert_eq!(normalize_path("assets/textures/"), "assets/textures");
-    assert_eq!(normalize_path("/projects/scene/"), "/projects/scene");
-}
-
-#[test]
-fn normalize_path_preserves_leading_slash() {
-    assert_eq!(normalize_path("/projects/scene"), "/projects/scene");
-}
-
-#[test]
-fn join_path_relative() {
-    assert_eq!(
-        normalize_path("assets/textures/wood.png"),
-        "assets/textures/wood.png"
-    );
-    assert_eq!(normalize_path("a/b/c/d.txt"), "a/b/c/d.txt");
-}
-
-#[test]
-fn join_path_absolute_posix() {
-    assert_eq!(
-        normalize_path("/projects/scene/wood.png"),
-        "/projects/scene/wood.png"
-    );
-    assert_eq!(normalize_path("/a/b/c/d.txt"), "/a/b/c/d.txt");
-}
-
-#[test]
-fn join_path_absolute_windows() {
-    assert_eq!(
-        normalize_path("C:/projects/scene/wood.png"),
-        "C:/projects/scene/wood.png"
-    );
-    assert_eq!(normalize_path("C:/a/b/c/d.txt"), "C:/a/b/c/d.txt");
-}
-
-#[test]
-fn is_absolute_path_posix() {
-    assert!(is_absolute_path("/home/user/file.txt"));
-    assert!(is_absolute_path("/"));
-}
-
-#[test]
-fn is_absolute_path_windows_drive() {
-    assert!(is_absolute_path("C:/Users/file.txt"));
-    assert!(is_absolute_path("D:/Projects/file.txt"));
-}
-
-#[test]
-fn is_absolute_path_relative() {
-    assert!(!is_absolute_path("assets/file.txt"));
-    assert!(!is_absolute_path("file.txt"));
-    assert!(!is_absolute_path("./file.txt"));
-    assert!(!is_absolute_path("../file.txt"));
-}
+// Helper-function tests for normalize_path / is_absolute_path live in the
+// crate-internal unit tests (src/path_util.rs).
 
 // ===== TestJoinManifestRelSnapshot =====
 
@@ -303,28 +245,6 @@ fn windows_backslash_prefix_normalized() {
     assert_eq!(result.files[0].path, "C:/projects/scene/wood.png");
 }
 
-// ===== TestPathSeparatorHandling =====
-
-#[cfg(windows)]
-#[test]
-fn normalize_path_converts_backslashes() {
-    assert_eq!(normalize_path("C:\\projects\\scene"), "C:/projects/scene");
-}
-
-#[cfg(not(windows))]
-#[test]
-fn normalize_path_preserves_backslashes_on_posix() {
-    // On POSIX, backslashes are preserved as filename characters.
-    // "C:\projects\scene" has drive prefix "C:", so byte[2] ('\') is skipped as separator,
-    // and "projects\scene" becomes a single component (no '/' to split on).
-    assert_eq!(normalize_path("C:\\projects\\scene"), "C:/projects\\scene");
-}
-
-#[test]
-fn normalize_path_preserves_forward_slashes() {
-    assert_eq!(normalize_path("dir/name"), "dir/name");
-}
-
 // ===== TestGetOutputManifestType (type-level in Rust) =====
 // In Python, _get_output_manifest_type determines the output type at runtime.
 // In Rust, the type is determined at compile time by which function you call.
@@ -356,12 +276,6 @@ fn rel_diff_abs_prefix_returns_abs_snapshot_diff() {
     let m = snap_diff(vec![hfile("a.txt", "h1", 10, 1000)], vec![]);
     let result = join_snapshot_diff(&m, "/prefix").unwrap();
     assert!(result.files[0].path.starts_with('/'));
-}
-
-#[test]
-fn is_absolute_path_windows_unc() {
-    assert!(is_absolute_path("//server/share"));
-    assert!(is_absolute_path("\\\\server\\share"));
 }
 
 // ===== Additional edge-case tests =====
