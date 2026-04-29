@@ -743,3 +743,75 @@ fn symbol_table_error_converts_to_expression_error() {
     let expr_msg = expr_err.to_string();
     assert_eq!(expr_msg, sym_msg);
 }
+
+// ══════════════════════════════════════════════════════════════
+// SEC-2026-6: Entry-count cap on transport deserialization
+// ══════════════════════════════════════════════════════════════
+
+use openjd_expr::{SerializedSymbolTable, MAX_SYMBOL_TABLE_ENTRIES};
+
+/// Build a JSON transport blob with `n` entries, each with a unique name
+/// so `SymbolTable::set` does not conflict.
+fn build_transport_json(n: usize) -> String {
+    let mut s = String::from("[");
+    for i in 0..n {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!(r#"{{"name":"k{i}","type":"int","value":"{i}"}}"#));
+    }
+    s.push(']');
+    s
+}
+
+#[test]
+fn serialized_symtab_rejects_oversize_array() {
+    let json = build_transport_json(MAX_SYMBOL_TABLE_ENTRIES + 1);
+    let serialized = SerializedSymbolTable::from_json_str(&json).unwrap();
+    let err = serialized.to_symtab(PathFormat::Posix).unwrap_err();
+    assert!(
+        err.contains("too many entries"),
+        "expected entry-cap error, got: {err}"
+    );
+}
+
+#[test]
+fn serialized_symtab_accepts_exactly_max_entries() {
+    let json = build_transport_json(MAX_SYMBOL_TABLE_ENTRIES);
+    let serialized = SerializedSymbolTable::from_json_str(&json).unwrap();
+    let st = serialized
+        .to_symtab(PathFormat::Posix)
+        .expect("exactly MAX_SYMBOL_TABLE_ENTRIES must succeed");
+    assert_eq!(st.all_paths("").len(), MAX_SYMBOL_TABLE_ENTRIES);
+}
+
+#[test]
+fn symbol_table_deserialize_rejects_oversize_array() {
+    let json = build_transport_json(MAX_SYMBOL_TABLE_ENTRIES + 1);
+    let err = serde_json::from_str::<SymbolTable>(&json)
+        .expect_err("oversized array must be rejected by Deserialize");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("too many entries"),
+        "expected entry-cap error, got: {msg}"
+    );
+}
+
+#[test]
+fn symbol_table_deserialize_accepts_exactly_max_entries() {
+    let json = build_transport_json(MAX_SYMBOL_TABLE_ENTRIES);
+    let st: SymbolTable =
+        serde_json::from_str(&json).expect("exactly MAX_SYMBOL_TABLE_ENTRIES must deserialize");
+    assert_eq!(st.all_paths("").len(), MAX_SYMBOL_TABLE_ENTRIES);
+}
+
+#[test]
+fn in_process_set_not_capped() {
+    // The cap applies only to transport deserialization. Direct
+    // SymbolTable::set calls are trusted and must not be capped.
+    let mut st = SymbolTable::new();
+    for i in 0..(MAX_SYMBOL_TABLE_ENTRIES + 100) {
+        st.set(&format!("k{i}"), ExprValue::Int(i as i64)).unwrap();
+    }
+    assert_eq!(st.all_paths("").len(), MAX_SYMBOL_TABLE_ENTRIES + 100);
+}

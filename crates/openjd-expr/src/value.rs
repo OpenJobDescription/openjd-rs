@@ -267,11 +267,61 @@ impl ExprValue {
         Self::ListList(v, elem_type, heap)
     }
 
+    /// Estimate the heap allocation required to build a list from `elements`.
+    ///
+    /// Upper bound on the `heap_size()` of the resulting list — ignores the
+    /// type-promotion shortcuts in [`make_list`](Self::make_list) that can
+    /// shrink the final footprint (e.g. collapsing `ListInt` elements into
+    /// a single `ListFloat`). Treats the worst case of storing every
+    /// element through a `ListList`, which is what a heterogeneous input
+    /// ultimately materializes to.
+    ///
+    /// Used by [`make_list_checked`](Self::make_list_checked) to fail a
+    /// memory-bounded evaluator cleanly before the list allocation
+    /// happens, rather than after.
+    fn estimate_list_heap_size(elements: &[ExprValue]) -> usize {
+        let per_slot = std::mem::size_of::<ExprValue>();
+        elements
+            .iter()
+            .fold(elements.len().saturating_mul(per_slot), |acc, e| {
+                acc.saturating_add(e.heap_size())
+            })
+    }
+
+    /// Memory-checked variant of [`make_list`](Self::make_list).
+    ///
+    /// Pre-checks the evaluator's memory budget against an upper-bound
+    /// estimate of the list's heap footprint before any allocation occurs.
+    /// This is the defense-in-depth path: call sites that have an
+    /// [`EvalContext`](crate::function_library::EvalContext) available
+    /// should prefer this over [`make_list`](Self::make_list) so that a
+    /// memory-bounded evaluator fails cleanly on oversized intermediate
+    /// lists — even from code paths that did not charge ops proportionally
+    /// to the list size.
+    ///
+    /// Type promotion and nesting validation are otherwise identical to
+    /// [`make_list`](Self::make_list); this function forwards to it after
+    /// the memory check passes.
+    pub fn make_list_checked(
+        ctx: &mut dyn crate::function_library::EvalContext,
+        elements: Vec<ExprValue>,
+        hint_type: ExprType,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        ctx.check_memory(Self::estimate_list_heap_size(&elements))?;
+        Self::make_list(elements, hint_type)
+    }
+
     /// Construct a typed list from heterogeneous elements.
     ///
     /// Applies type promotion rules: int+float→float, path+string→string.
     /// Uses `hint_type` for empty lists to determine the element type.
     /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
+    ///
+    /// When called from an evaluator or function implementation that has
+    /// an [`EvalContext`](crate::function_library::EvalContext), prefer
+    /// [`make_list_checked`](Self::make_list_checked) so that an oversized
+    /// intermediate list fails the evaluator's memory limit before the
+    /// allocation happens.
     pub fn make_list(
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,

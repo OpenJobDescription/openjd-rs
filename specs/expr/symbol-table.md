@@ -167,6 +167,31 @@ template scope stores paths in Posix format, while session scope may need host-n
 format. This is the key architectural role: it bridges the serialization boundary
 between processes that may run on different operating systems.
 
+### Defensive Caps
+
+Both transport-deserialization paths —
+[`SerializedSymbolTable::to_symtab`](../../crates/openjd-expr/src/symbol_table.rs)
+and the `serde::Deserialize` impl on `SymbolTable` — enforce a hard cap on
+the number of entries in the incoming JSON array:
+
+| Constant | Value | Check |
+|---|---|---|
+| [`MAX_SYMBOL_TABLE_ENTRIES`](../../crates/openjd-expr/src/symbol_table.rs) | 100,000 | Entry count in transport JSON array |
+
+Real symbol tables carry a handful of job parameters plus a handful of
+session variables — well under 1,000 entries in aggregate. A 100,000-entry
+cap is two orders of magnitude above any realistic use and rejects
+transport blobs whose sole purpose is to inflate worker memory before
+evaluation begins.
+
+The cap applies only to transport deserialization. Direct in-process
+`SymbolTable::set` and `set_table` calls are trusted (host code), so
+callers that legitimately need larger in-memory tables (e.g., a test
+builder) are not affected.
+
+Exceeding the cap produces a `Deserialize` error for `SymbolTable` or a
+`String` error from `to_symtab`; both name the violated limit.
+
 ### JSON Transport for Values
 
 Individual `ExprValue` instances also support JSON transport via `to_json_transport()`

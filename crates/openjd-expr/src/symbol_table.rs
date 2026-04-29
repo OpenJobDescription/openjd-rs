@@ -35,6 +35,26 @@ use crate::types::ExprType;
 use crate::value::ExprValue;
 use std::collections::HashMap;
 
+/// Maximum number of entries permitted in a `SymbolTable` deserialized from
+/// the JSON transport format (`SerializedSymbolTable` or the serde
+/// `Deserialize` impl on `SymbolTable` itself).
+///
+/// The deserializer walks an untrusted JSON array and invokes
+/// `SymbolTable::set` for each entry. Real-world symbol tables carry a
+/// handful of job parameters, a handful of session variables, and a
+/// handful of path-mapping-derived bindings — well under a thousand
+/// entries in the aggregate. This cap rejects transport blobs that would
+/// produce a multi-million-entry table purely to inflate the worker's
+/// memory footprint before evaluation begins.
+///
+/// The cap applies **only** to the transport-deserialization paths. Direct
+/// in-process calls to `SymbolTable::set` or `set_table` are trusted
+/// (host code), and callers that legitimately need larger tables (e.g.
+/// a test builder) can construct them by hand without tripping the cap.
+///
+/// See `specs/expr/symbol-table.md` (Defensive caps) for rationale.
+pub const MAX_SYMBOL_TABLE_ENTRIES: usize = 100_000;
+
 /// Error returned when a [`SymbolTable::set`] call conflicts with an existing entry.
 ///
 /// For example, setting `"A.B.C"` when `"A.B"` is already a scalar value.
@@ -300,6 +320,13 @@ impl serde::Serialize for SymbolTable {
 impl<'de> serde::Deserialize<'de> for SymbolTable {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let arr: Vec<serde_json::Value> = serde::Deserialize::deserialize(d)?;
+        if arr.len() > MAX_SYMBOL_TABLE_ENTRIES {
+            return Err(serde::de::Error::custom(format!(
+                "SymbolTable: too many entries ({}); maximum is {}",
+                arr.len(),
+                MAX_SYMBOL_TABLE_ENTRIES,
+            )));
+        }
         let mut st = SymbolTable::new();
         for entry in &arr {
             let name = entry
@@ -380,6 +407,9 @@ impl SerializedSymbolTable {
     /// Path values in the transport format are plain strings; this method
     /// reconstructs them as `ExprValue::Path` with separators normalized
     /// to the specified format.
+    ///
+    /// Returns an error if the transport array holds more than
+    /// [`MAX_SYMBOL_TABLE_ENTRIES`] entries.
     pub fn to_symtab(
         &self,
         path_format: crate::path_mapping::PathFormat,
@@ -388,6 +418,13 @@ impl SerializedSymbolTable {
             .0
             .as_array()
             .ok_or("SerializedSymbolTable: expected JSON array")?;
+        if arr.len() > MAX_SYMBOL_TABLE_ENTRIES {
+            return Err(format!(
+                "SerializedSymbolTable: too many entries ({}); maximum is {}",
+                arr.len(),
+                MAX_SYMBOL_TABLE_ENTRIES,
+            ));
+        }
         let mut st = SymbolTable::new();
         for entry in arr {
             let name = entry

@@ -101,9 +101,38 @@ ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Float(..)], ExprType::NU
 ExprValue::make_list(vec![ExprValue::Path{..}, ExprValue::String(..)], ExprType::NULLTYPE)  // → ListString (path→string)
 ExprValue::make_list(vec![], ExprType::INT)  // → ListInt (empty, hint selects variant)
 
+// Memory-checked list construction — prefer this from evaluator/function contexts
+ExprValue::make_list_checked(ctx, elements, hint_type)  // pre-checks ctx.check_memory(...)
+
 // Unresolved — type-only placeholder for static checking
 ExprValue::unresolved(ExprType::INT)
 ```
+
+### List Construction: `make_list` vs `make_list_checked`
+
+The crate offers two list constructors with identical promotion semantics
+but different memory-safety guarantees:
+
+| Function | Caller has `EvalContext`? | Memory pre-check? | Use from |
+|---|---|---|---|
+| `make_list(elements, hint)` | No | No | Transport deserialization, tests, coercion paths, and any static construction |
+| `make_list_checked(ctx, elements, hint)` | Yes | `ctx.check_memory(estimate)` before allocation | Evaluator dispatch and function implementations |
+
+`make_list_checked` is the defense-in-depth path. It computes an upper-bound
+estimate of the list's heap footprint, calls `ctx.check_memory(estimate)` to
+fail cleanly against the evaluator's memory budget, then forwards to
+`make_list`. Call sites with an `EvalContext` available **must** prefer
+`make_list_checked`: the existing per-element operation charges catch most
+oversized inputs, but `make_list_checked` closes the remaining gap for
+future code paths that construct a list without proportional op charges.
+
+The estimator is intentionally conservative — it sums `len * size_of::<ExprValue>()`
+plus each element's `heap_size()`, which is an upper bound on the resulting
+list's own heap size regardless of which typed-list variant `make_list`
+ultimately produces. A false early rejection (estimator over-counts) is
+preferable to a late rejection (allocation already happened).
+
+See `crates/openjd-expr/src/value.rs`.
 
 ### Path Encapsulation
 

@@ -196,7 +196,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             .split_whitespace()
             .map(|p| ExprValue::String(p.to_string()))
             .collect();
-        return ExprValue::make_list(parts, ExprType::STRING);
+        return ExprValue::make_list_checked(ctx, parts, ExprType::STRING);
     }
     let sep = get_str(&a[1])?;
     if sep.is_empty() {
@@ -217,7 +217,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
     };
-    ExprValue::make_list(parts, ExprType::STRING)
+    ExprValue::make_list_checked(ctx, parts, ExprType::STRING)
 }
 
 pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -228,7 +228,7 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             .split_whitespace()
             .map(|p| ExprValue::String(p.to_string()))
             .collect();
-        return ExprValue::make_list(parts, ExprType::STRING);
+        return ExprValue::make_list_checked(ctx, parts, ExprType::STRING);
     }
     let sep = get_str(&a[1])?;
     if sep.is_empty() {
@@ -253,7 +253,7 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
     };
-    ExprValue::make_list(parts, ExprType::STRING)
+    ExprValue::make_list_checked(ctx, parts, ExprType::STRING)
 }
 
 pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R {

@@ -419,13 +419,13 @@ pub fn prop_suffixes(ctx: Ctx, a: &[ExprValue]) -> R {
             .into_iter()
             .map(ExprValue::String)
             .collect();
-        return ExprValue::make_list(suffixes, crate::types::ExprType::STRING);
+        return ExprValue::make_list_checked(ctx, suffixes, crate::types::ExprType::STRING);
     }
     let suffixes: Vec<ExprValue> = pp::suffixes(&path_str, fmt)
         .into_iter()
         .map(ExprValue::String)
         .collect();
-    ExprValue::make_list(suffixes, crate::types::ExprType::STRING)
+    ExprValue::make_list_checked(ctx, suffixes, crate::types::ExprType::STRING)
 }
 
 pub fn prop_parent(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -445,11 +445,11 @@ pub fn prop_parts(ctx: Ctx, a: &[ExprValue]) -> R {
             .into_iter()
             .map(ExprValue::String)
             .collect();
-        return ExprValue::make_list(parts, crate::types::ExprType::STRING);
+        return ExprValue::make_list_checked(ctx, parts, crate::types::ExprType::STRING);
     }
     let parts: Vec<ExprValue> = pp::parts(&path_str, fmt)
         .into_iter()
         .map(ExprValue::String)
         .collect();
-    ExprValue::make_list(parts, crate::types::ExprType::STRING)
+    ExprValue::make_list_checked(ctx, parts, crate::types::ExprType::STRING)
 }

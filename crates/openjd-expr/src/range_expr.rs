@@ -10,6 +10,27 @@
 use crate::error::ExpressionError;
 use std::fmt;
 
+/// Maximum number of comma-separated sub-ranges in a single range expression.
+///
+/// Each sub-range becomes one `IntRange` entry in the parsed `RangeExpr`.
+/// Real-world range expressions (frame ranges, task chunks) contain at most
+/// a few dozen sub-ranges; 10,000 is two orders of magnitude above any
+/// plausible legitimate use. Rejecting larger inputs at parse time prevents
+/// an attacker from forcing a multi-megabyte `Vec<IntRange>` allocation
+/// through a parameter value before any downstream resource-bounding
+/// (e.g. the evaluator's memory limit) applies.
+///
+/// This cap targets the source-text and heap dimensions of a `RangeExpr`.
+/// It does **not** cap the logical element count of a single chunk —
+/// `RangeExpr` stores chunks symbolically (`start`, `end`, `step`), so a
+/// single-chunk range `"1-100000000000"` allocates only one `IntRange`
+/// regardless of its logical length. Downstream materialization (e.g.
+/// `list(range_expr)`) is already bounded by the evaluator's per-element
+/// operation charge and memory limit.
+///
+/// See `specs/expr/range-expr.md` (Defensive caps) for rationale.
+pub const MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
+
 /// Error raised when parsing a range expression fails.
 #[derive(Debug, Clone)]
 pub struct RangeExprError {
@@ -277,11 +298,21 @@ impl RangeExpr {
     }
 
     /// Create from pre-built `IntRange`s. Sorts, merges adjacent ranges, and validates no overlaps.
+    ///
+    /// Returns an error if the number of input ranges exceeds
+    /// [`MAX_RANGE_EXPR_CHUNKS`].
     pub fn from_ranges(mut ranges: Vec<IntRange>) -> Result<Self, ExpressionError> {
         if ranges.is_empty() {
             return Err(ExpressionError::parse_error(
                 "Range expression cannot be empty",
             ));
+        }
+        if ranges.len() > MAX_RANGE_EXPR_CHUNKS {
+            return Err(ExpressionError::parse_error(format!(
+                "Range expression has too many sub-ranges ({}); maximum is {}",
+                ranges.len(),
+                MAX_RANGE_EXPR_CHUNKS,
+            )));
         }
         // Sort by start
         ranges.sort_by_key(|r| (r.start, r.end));
@@ -312,7 +343,16 @@ impl RangeExpr {
                 )));
             }
         }
-        let length = merged.iter().map(|r| r.len()).sum();
+        // Use saturating arithmetic when summing per-chunk lengths so that a
+        // multi-chunk range whose combined logical length exceeds `usize`
+        // capacity saturates at `usize::MAX` rather than wrapping to a small
+        // value that would corrupt `len()`/`is_empty()`. `RangeExpr` stores
+        // chunks symbolically, so an enormous logical length is not itself a
+        // DoS vector — only the chunk count is capped via
+        // [`MAX_RANGE_EXPR_CHUNKS`].
+        let length: usize = merged
+            .iter()
+            .fold(0usize, |acc, r| acc.saturating_add(r.len()));
         let cumulative_lengths = build_cumulative(&merged);
         Ok(Self {
             ranges: merged,
@@ -530,6 +570,15 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
     let bytes = expr.as_bytes();
 
     loop {
+        // Bail out early if the input is producing more sub-ranges than
+        // we are willing to handle. `from_ranges` would reject the same
+        // input, but the early check lets us stop consuming source
+        // characters as soon as the limit is hit.
+        if ranges.len() > MAX_RANGE_EXPR_CHUNKS {
+            return Err(ExpressionError::parse_error(format!(
+                "Range expression has too many sub-ranges (> {MAX_RANGE_EXPR_CHUNKS}): '{expr}'",
+            )));
+        }
         // Skip whitespace
         while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
             pos += 1;
@@ -864,5 +913,89 @@ mod tests {
     fn slice_single_element() {
         let r = "1-10".parse::<RangeExpr>().unwrap();
         assert_eq!(r.slice(3, 4, 1).unwrap().to_vec(), vec![4]);
+    }
+
+    // ── Defensive caps (SEC-2026-4) ──
+
+    #[test]
+    fn reject_too_many_chunks_from_str() {
+        // MAX_RANGE_EXPR_CHUNKS + 1 single values: 0,1,2,...
+        let expr = (0..=MAX_RANGE_EXPR_CHUNKS as i64)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let err = expr.parse::<RangeExpr>().unwrap_err().to_string();
+        assert!(err.contains("too many sub-ranges"), "got: {err}");
+    }
+
+    #[test]
+    fn accept_max_chunks_from_str() {
+        // Exactly MAX_RANGE_EXPR_CHUNKS non-contiguous single values:
+        // 0,2,4,...,(2*N-2). Stride of 2 prevents adjacent-range merging,
+        // so we end up with exactly N sub-ranges after from_ranges.
+        let expr = (0..MAX_RANGE_EXPR_CHUNKS as i64)
+            .map(|i| (i * 2).to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let r = expr.parse::<RangeExpr>().unwrap();
+        assert_eq!(r.ranges().len(), MAX_RANGE_EXPR_CHUNKS);
+    }
+
+    #[test]
+    fn reject_too_many_chunks_from_ranges() {
+        let ranges: Vec<IntRange> = (0..=MAX_RANGE_EXPR_CHUNKS as i64)
+            .map(|i| IntRange::new(i * 2, i * 2, 1).unwrap())
+            .collect();
+        let err = RangeExpr::from_ranges(ranges).unwrap_err().to_string();
+        assert!(err.contains("too many sub-ranges"), "got: {err}");
+    }
+
+    #[test]
+    fn accept_single_huge_chunk() {
+        // A single chunk with a very large logical length is allowed —
+        // `RangeExpr` stores chunks symbolically, so the heap cost is O(1)
+        // regardless of `end - start`. Only chunk count is capped.
+        let expr = "1-100000000000";
+        let r = expr.parse::<RangeExpr>().unwrap();
+        assert_eq!(r.ranges().len(), 1);
+        assert_eq!(r.len(), 100_000_000_000);
+    }
+
+    #[test]
+    fn length_uses_saturating_sum() {
+        // `from_ranges` uses `saturating_add` when summing per-chunk lengths,
+        // so a multi-chunk range whose combined logical length would exceed
+        // `usize::MAX` cannot wrap to a small value that would corrupt
+        // `len()` / `is_empty()`. This test confirms the happy-path summation
+        // matches the expected total; the saturating behavior is exercised
+        // only in the arithmetic failure mode and is a defensive guard.
+        let ranges = vec![
+            IntRange::new(0, 1_000_000, 1).unwrap(),
+            IntRange::new(2_000_000, 3_000_000, 1).unwrap(),
+        ];
+        let r = RangeExpr::from_ranges(ranges).unwrap();
+        assert_eq!(r.ranges().len(), 2);
+        assert_eq!(r.len(), 1_000_001 + 1_000_001);
+    }
+
+    #[test]
+    fn chunk_cap_parse_does_not_hang() {
+        // A pathological input with 100,000 comma-separated values. The parser
+        // should reject it in well under a second without building the full
+        // vector. This guards against regressions that would remove the
+        // in-loop cap check.
+        let start = std::time::Instant::now();
+        let expr = (0..100_000i64)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let err = expr.parse::<RangeExpr>().unwrap_err().to_string();
+        assert!(err.contains("too many sub-ranges"), "got: {err}");
+        // Generous budget (2 seconds) to avoid flakes on loaded CI machines.
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "parser took too long on 100k-chunk input: {:?}",
+            start.elapsed(),
+        );
     }
 }

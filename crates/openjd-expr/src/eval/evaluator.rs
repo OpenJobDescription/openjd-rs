@@ -1106,7 +1106,8 @@ impl<'a> Evaluator<'a> {
                         .map_err(ExpressionError::new)
                 })
                 .collect();
-            return self.track(ExprValue::make_list(coerced?, elem_t.clone())?);
+            let list = ExprValue::make_list_checked(self, coerced?, elem_t.clone())?;
+            return self.track(list);
         }
         // Check type consistency
         if !elements.is_empty() {
@@ -1158,7 +1159,8 @@ impl<'a> Evaluator<'a> {
         } else {
             elements[0].expr_type()
         };
-        self.track(ExprValue::make_list(elements, elem_type)?)
+        let list = ExprValue::make_list_checked(self, elements, elem_type)?;
+        self.track(list)
     }
 
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {
@@ -1417,7 +1419,8 @@ impl<'a> Evaluator<'a> {
         } else {
             result[0].expr_type()
         };
-        self.track(ExprValue::make_list(result, elem_type)?)
+        let list = ExprValue::make_list_checked(self, result, elem_type)?;
+        self.track(list)
     }
 
     fn eval_slice(&mut self, s: &ast::ExprSlice) -> Result<ExprValue, ExpressionError> {

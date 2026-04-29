@@ -38,7 +38,9 @@ pub use format_string::FormatStringOptions;
 pub use format_string::FormatStringValidationError;
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
-pub use range_expr::{RangeExpr, RangeExprError};
-pub use symbol_table::{SerializedSymbolTable, SymbolTable, SymbolTableError};
+pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS};
+pub use symbol_table::{
+    SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
+};
 pub use types::{ExprType, TypeCode};
 pub use value::ExprValue;

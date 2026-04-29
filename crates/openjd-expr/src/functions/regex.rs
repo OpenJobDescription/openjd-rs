@@ -212,7 +212,7 @@ pub fn re_match_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                     )
                 })
                 .collect();
-            Ok(ExprValue::make_list(groups, ExprType::STRING)?)
+            Ok(ExprValue::make_list_checked(ctx, groups, ExprType::STRING)?)
         }
     }
 }
@@ -234,7 +234,7 @@ pub fn re_search_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                     )
                 })
                 .collect();
-            Ok(ExprValue::make_list(groups, ExprType::STRING)?)
+            Ok(ExprValue::make_list_checked(ctx, groups, ExprType::STRING)?)
         }
     }
 }
@@ -250,7 +250,11 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             .find_iter(&s)
             .map(|m| ExprValue::String(m.as_str().to_string()))
             .collect();
-        Ok(ExprValue::make_list(matches, ExprType::STRING)?)
+        Ok(ExprValue::make_list_checked(
+            ctx,
+            matches,
+            ExprType::STRING,
+        )?)
     } else if num_groups == 1 {
         let matches: Vec<ExprValue> = re
             .captures_iter(&s)
@@ -258,8 +262,16 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 ExprValue::String(c.get(1).map(|m| m.as_str().to_string()).unwrap_or_default())
             })
             .collect();
-        Ok(ExprValue::make_list(matches, ExprType::STRING)?)
+        Ok(ExprValue::make_list_checked(
+            ctx,
+            matches,
+            ExprType::STRING,
+        )?)
     } else {
+        // Build inner lists without per-element ctx-checking: each captures
+        // row has a bounded number of groups (num_groups, fixed by the
+        // pattern), so the inner allocations are small. The outer list is
+        // the one that scales with the input; check memory on it.
         let matches: Result<Vec<ExprValue>, _> = re
             .captures_iter(&s)
             .map(|c| {
@@ -273,7 +285,8 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 ExprValue::make_list(groups, ExprType::STRING)
             })
             .collect();
-        Ok(ExprValue::make_list(
+        Ok(ExprValue::make_list_checked(
+            ctx,
             matches?,
             ExprType::list(ExprType::STRING),
         )?)

@@ -64,6 +64,49 @@ sorted set of integers, and (b) it eliminates a whole class of edge cases
 - Validates no overlapping ranges
 - Validates steps are positive and non-zero
 
+## Defensive Caps
+
+`RangeExpr::from_str` and `RangeExpr::from_ranges` enforce a cap on the
+number of comma-separated sub-ranges, intended as defense-in-depth against
+pathological inputs. A parameter value flowing through `from_str_coerce` is
+not protected by the evaluator's memory limit, so an unbounded input here
+would allocate proportional memory before evaluation begins.
+
+| Constant | Value | Check |
+|---|---|---|
+| [`MAX_RANGE_EXPR_CHUNKS`](../../crates/openjd-expr/src/range_expr.rs) | 10,000 | Count of comma-separated sub-ranges |
+
+The chunk cap is checked twice: inside `parse_range_expr` as each sub-range
+is appended (so an attacker cannot force the parser to consume gigabytes of
+comma-separated source text), and again inside `from_ranges` after parsing
+completes (so direct callers of `from_ranges` cannot bypass the cap).
+
+The cap targets the **source-text and heap dimensions** of a `RangeExpr`.
+It does not bound the logical element count of any single chunk: `RangeExpr`
+stores chunks symbolically as `(start, end, step)`, so a one-chunk range
+`"1-100000000000"` allocates a single `IntRange` regardless of its 10¹¹
+logical length. The model layer relies on this laziness to support very
+large parameter spaces (millions of frames, billions of iterations) without
+materialization. Downstream conversion (`list(range_expr)`, comprehensions
+over the range) is already bounded by the evaluator's per-element operation
+charge and memory limit.
+
+`from_ranges` uses `saturating_add` when summing per-chunk lengths, so a
+multi-chunk range whose combined logical length exceeds `usize::MAX`
+produces a `RangeExpr` with `len() == usize::MAX` rather than a wrapped
+smaller value.
+
+This cap is orders of magnitude above any realistic render-farm frame
+range: real multi-chunk inputs select frames from a handful of shots, well
+under 10,000 chunks. Hitting the cap means either a malicious input or a
+codegen bug upstream — both warrant failing loudly.
+
+Exceeding the cap produces an `ExpressionError` whose message names the
+violated limit. The crate does not allocate a dedicated
+`ExpressionErrorKind` variant for this case because `RangeExpr::from_str`
+errors are routed through `ExpressionError::parse_error` to match the
+existing diagnostic style.
+
 ## Indexing
 
 `RangeExpr` supports O(log n) random access via binary search on `cumulative_lengths`:

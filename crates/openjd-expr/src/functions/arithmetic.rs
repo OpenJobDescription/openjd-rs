@@ -312,7 +312,7 @@ pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
         (ExprValue::RangeExpr(l), ExprValue::RangeExpr(r)) => {
             ctx.count_ops(l.len() + r.len())?;
             let elements: Vec<ExprValue> = l.iter().chain(r.iter()).map(ExprValue::Int).collect();
-            Ok(ExprValue::make_list(elements, ExprType::INT)?)
+            Ok(ExprValue::make_list_checked(ctx, elements, ExprType::INT)?)
         }
         _ => Err(ExpressionError::type_error("type error")),
     }
@@ -328,7 +328,7 @@ pub fn mul_list(ctx: Ctx, a: &[ExprValue]) -> R {
         _ => return Err(ExpressionError::type_error("type error")),
     };
     if n <= 0 {
-        return ExprValue::make_list(Vec::new(), elem_type);
+        return ExprValue::make_list_checked(ctx, Vec::new(), elem_type);
     }
     let result_len = elements.len() * n as usize;
     for _ in 0..result_len {
@@ -338,7 +338,7 @@ pub fn mul_list(ctx: Ctx, a: &[ExprValue]) -> R {
     for _ in 0..n {
         result.extend(elements.iter().cloned());
     }
-    ExprValue::make_list(result, elem_type)
+    ExprValue::make_list_checked(ctx, result, elem_type)
 }
 
 pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -366,7 +366,7 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let mut combined = l;
     combined.extend(r);
     let result_type = if lt == ExprType::NULLTYPE { rt } else { lt };
-    ExprValue::make_list(combined, result_type)
+    ExprValue::make_list_checked(ctx, combined, result_type)
 }
 
 pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -380,7 +380,7 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     };
     ctx.count_ops(l.len() + r.len())?;
     l.extend(r.iter().map(ExprValue::Int));
-    ExprValue::make_list(l, et)
+    ExprValue::make_list_checked(ctx, l, et)
 }
 
 pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -395,7 +395,7 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_ops(r.len() + l.len())?;
     let mut combined: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
     combined.extend(l);
-    ExprValue::make_list(combined, et)
+    ExprValue::make_list_checked(ctx, combined, et)
 }
 
 // ── Comparison operators ──

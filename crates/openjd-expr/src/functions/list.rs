@@ -20,7 +20,7 @@ pub fn sorted_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_ops(elements.len())?;
     let mut sorted = elements;
     sorted.sort_by(|a, b| a.compare(b).unwrap_or(std::cmp::Ordering::Equal));
-    ExprValue::make_list(sorted, elem_type)
+    ExprValue::make_list_checked(ctx, sorted, elem_type)
 }
 
 pub fn reversed_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -30,7 +30,7 @@ pub fn reversed_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         .ok_or_else(|| ExpressionError::new("reversed() argument must be a list"))?;
     ctx.count_ops(elements.len())?;
     elements.reverse();
-    ExprValue::make_list(elements, elem_type)
+    ExprValue::make_list_checked(ctx, elements, elem_type)
 }
 
 pub fn unique_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -46,7 +46,7 @@ pub fn unique_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             result.push(e);
         }
     }
-    ExprValue::make_list(result, elem_type)
+    ExprValue::make_list_checked(ctx, result, elem_type)
 }
 
 pub fn flatten_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -69,7 +69,7 @@ pub fn flatten_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     } else {
         result[0].expr_type()
     };
-    ExprValue::make_list(result, et)
+    ExprValue::make_list_checked(ctx, result, et)
 }
 
 pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -127,7 +127,7 @@ pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             ctx.count_op()?;
         }
     }
-    ExprValue::make_list(elements, ExprType::INT)
+    ExprValue::make_list_checked(ctx, elements, ExprType::INT)
 }
 
 pub fn join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -151,7 +151,7 @@ pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
         ExprValue::RangeExpr(r) => {
             ctx.count_ops(r.len())?;
             let elements: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
-            Ok(ExprValue::make_list(elements, ExprType::INT)?)
+            Ok(ExprValue::make_list_checked(ctx, elements, ExprType::INT)?)
         }
         _ => Err(ExpressionError::new("list() argument must be range_expr")),
     }

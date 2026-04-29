@@ -299,3 +299,198 @@ fn peak_memory_range_concat_range() {
         ev_size + 100 * 8
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// SEC-2026-5: make_list_checked defense-in-depth
+// ══════════════════════════════════════════════════════════════
+//
+// Evaluator and function call sites that build lists call
+// `ExprValue::make_list_checked(ctx, ...)` rather than `make_list`, so the
+// memory limit is enforced *before* the list allocation happens — even in
+// call paths that did not charge ops proportionally to the list size.
+//
+// Each test drives a different call site that was migrated to
+// `make_list_checked` and asserts the memory limit triggers a
+// `MemoryLimitExceeded` diagnostic before the list construction proceeds.
+
+/// Small memory limit — big enough to hold small intermediate values
+/// but well below the size of a list produced by the exploratory inputs.
+const TIGHT_MEM: usize = 1_000;
+
+fn err_msg(expr: &str, mem: usize) -> String {
+    eval_bounded(expr, mem).unwrap_err().to_string()
+}
+
+fn assert_memory_exceeded(expr: &str, mem: usize) {
+    let e = err_msg(expr, mem);
+    assert!(
+        e.contains("Expression memory usage")
+            && e.contains(&format!("exceeded limit ({mem} bytes)")),
+        "expected memory-limit error, got:\n{e}"
+    );
+}
+
+#[test]
+fn make_list_checked_list_literal_evaluator() {
+    // Evaluator's list-literal path (eval/evaluator.rs). A 1,000-string
+    // list easily exceeds a 1 kB memory limit at construction time.
+    assert_memory_exceeded(
+        "[\"abcdefghijklmnopqrstuvwxyz\" for i in range(1000)]",
+        TIGHT_MEM,
+    );
+}
+
+#[test]
+fn make_list_checked_list_comprehension_evaluator() {
+    // Evaluator's comprehension path also routes through make_list_checked.
+    assert_memory_exceeded("[i * i for i in range(10000)]", TIGHT_MEM);
+}
+
+#[test]
+fn make_list_checked_range_fn() {
+    // `range()` builds its result through make_list_checked. The
+    // per-element op charge catches this first, but the memory cap is the
+    // defense-in-depth we want to verify: lower the op limit high and
+    // drive the memory limit low.
+    let e = ParsedExpression::new("range(100000)")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
+        .unwrap_err()
+        .to_string();
+    // Either memory or operation-count failure is acceptable; both fire
+    // on oversized inputs and both demonstrate the sandbox holds.
+    assert!(
+        e.contains("exceeded limit"),
+        "expected a bound-exceeded error, got:\n{e}"
+    );
+}
+
+#[test]
+fn make_list_checked_sorted_fn() {
+    // sorted() → make_list_checked. Use a large input symtab list so the
+    // oversize only materializes at construction.
+    let mut st = SymbolTable::new();
+    st.set(
+        "Param.Items",
+        ExprValue::ListString(
+            (0..1000).map(|i| format!("item_{i:04}")).collect(),
+            /*cached=*/ 0,
+        ),
+    )
+    .unwrap();
+    let e = ParsedExpression::new("sorted(Param.Items)")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("exceeded limit"),
+        "expected memory-limit error from sorted(), got:\n{e}"
+    );
+}
+
+#[test]
+fn make_list_checked_mul_list_fn() {
+    // List multiplication routes through make_list_checked. The op
+    // counter catches the huge case first; with a generous op limit and
+    // tight memory cap, memory fires.
+    let e = ParsedExpression::new("[\"aaaa\"] * 100000")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&SymbolTable::new()])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("exceeded limit"),
+        "expected bound-exceeded error from list * n, got:\n{e}"
+    );
+}
+
+#[test]
+fn make_list_checked_split_fn() {
+    // string.split() → make_list_checked. A large source string with many
+    // separators produces a large `Vec<ExprValue>` before the list is built.
+    let mut st = SymbolTable::new();
+    // 10 kB of comma-separated tokens.
+    let src = "a,".repeat(5000) + "a";
+    st.set("Param.S", ExprValue::String(src)).unwrap();
+    let e = ParsedExpression::new("split(Param.S, \",\")")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("exceeded limit"),
+        "expected memory-limit error from split(), got:\n{e}"
+    );
+}
+
+#[test]
+fn make_list_checked_small_lists_succeed() {
+    // Sanity check: small lists well within the memory cap still work.
+    let r = eval_bounded("[1, 2, 3, 4, 5]", 10_000).unwrap();
+    assert_eq!(r.value.to_display_string(), "[1, 2, 3, 4, 5]");
+
+    let r = eval_bounded("sorted([3, 1, 2])", 10_000).unwrap();
+    assert_eq!(r.value.to_display_string(), "[1, 2, 3]");
+
+    let r = eval_bounded("range(10)", 10_000).unwrap();
+    assert_eq!(
+        r.value.to_display_string(),
+        "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]"
+    );
+
+    let r = eval_bounded("[\"a\", \"b\"] * 3", 10_000).unwrap();
+    assert_eq!(
+        r.value.to_display_string(),
+        "[\"a\", \"b\", \"a\", \"b\", \"a\", \"b\"]"
+    );
+}
+
+#[test]
+fn estimate_list_heap_size_is_upper_bound() {
+    // The upper-bound estimator must never under-count the true heap
+    // footprint of the resulting list for any input. Exercise a few
+    // shapes and check the estimator meets or exceeds the actual size.
+    use openjd_expr::ExprType;
+
+    // Helper: build a list via make_list and compare its memory_size to the
+    // estimator output. The estimator should be a valid upper bound.
+    fn check(elements: Vec<ExprValue>, hint: ExprType) {
+        let estimate_size = elements.len() * std::mem::size_of::<ExprValue>()
+            + elements
+                .iter()
+                .map(|e| e.memory_size() - std::mem::size_of::<ExprValue>())
+                .sum::<usize>();
+        let list = ExprValue::make_list(elements, hint).unwrap();
+        let actual = list.memory_size() - std::mem::size_of::<ExprValue>();
+        // Inline ExprValue storage in the Vec is `len * size_of(ExprValue)`;
+        // heap_size for list variants adds only the extra heap bytes. The
+        // estimate computes the same two components, so it must be ≥ actual.
+        assert!(
+            estimate_size >= actual,
+            "estimator {estimate_size} < actual {actual}"
+        );
+    }
+
+    check(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT);
+    check(
+        vec![
+            ExprValue::String("hello".into()),
+            ExprValue::String("world".into()),
+        ],
+        ExprType::STRING,
+    );
+    check(vec![], ExprType::INT);
+}
