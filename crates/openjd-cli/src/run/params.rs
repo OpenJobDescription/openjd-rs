@@ -28,21 +28,19 @@ pub fn parse_cli_parameters(
             }
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Cannot read parameter file '{}': {e}", path.display()))?;
-            let value: serde_json::Value =
-                if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                    serde_json::from_str(&content)?
-                } else {
-                    let v: serde_json::Value = serde_saphyr::from_str(&content)?;
-                    v
-                };
-            if let Some(obj) = value.as_object() {
-                for (k, v) in obj {
-                    params.insert(k.clone(), json_val_to_expr(v));
-                }
+            let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                openjd_model::parse::DocumentType::Json
             } else {
-                return Err(
-                    format!("Job parameter file '{}' should contain a dictionary.", arg).into(),
-                );
+                openjd_model::parse::DocumentType::Yaml
+            };
+            let value = openjd_model::parse::document_string_to_object(
+                &content,
+                doc_type,
+                &openjd_model::CallerLimits::default(),
+            )
+            .map_err(|_| format!("Job parameter file '{}' should contain a dictionary.", arg))?;
+            for (k, v) in value.as_object().unwrap() {
+                params.insert(k.clone(), json_val_to_expr(v));
             }
         } else if arg.starts_with('{') && arg.ends_with('}') {
             let value: serde_json::Value = serde_json::from_str(arg)
