@@ -24,6 +24,29 @@ multiple-versions = "warn"
 
 [advisories]
 version = 2
+ignore = [
+    # RUSTSEC-2026-0098: rustls-webpki 0.101.x — Name constraints for URI
+    # names were incorrectly accepted.
+    #
+    # Reachability: Not reachable in our usage.
+    # - We do not depend on `rustls-webpki` directly.
+    # - The vulnerable 0.101.7 is pulled in only through the AWS SDK's
+    #   `legacy-rustls-ring` feature of `aws-smithy-http-client`, which
+    #   exists for hyper 0.14 back-compat and is not the HTTPS client
+    #   used at runtime. The active TLS path is `rustls 0.23` via the
+    #   `rustls-aws-lc` / `default-https-client` features.
+    # - The RustSec advisory itself states: "this library does not
+    #   provide an API for asserting URI names" and "URI name constraints
+    #   are otherwise not implemented." Exploitation requires a trusted
+    #   CA to misissue a certificate with URI-name constraints, which
+    #   the AWS public PKI we talk to (Amazon Trust Services) does not.
+    #
+    # Removal plan: Drop this ignore once the AWS SDK stops pulling in
+    # rustls 0.21 via the `legacy-rustls-ring` feature, or once
+    # rustls-webpki 0.101.x receives a backport (unlikely — the fix is
+    # in 0.103.12+).
+    "RUSTSEC-2026-0098",
+]
 
 [sources]
 unknown-registry = "deny"
