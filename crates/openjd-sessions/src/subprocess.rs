@@ -58,11 +58,6 @@ pub struct SubprocessConfig {
     pub user: Option<Arc<dyn SessionUser>>,
     pub cancel_method: CancelMethod,
     pub cancel_request_rx: Option<tokio::sync::watch::Receiver<Option<Duration>>>,
-    /// Directory for cross-user wrapper scripts. When set, wrapper scripts are
-    /// written here instead of in `working_dir`. Permissions are 0o750 (owner
-    /// rwx, group r-x) so the job user can execute but not modify scripts.
-    #[cfg_attr(not(unix), allow(dead_code))]
-    pub helpers_dir: Option<PathBuf>,
     /// Whether to accumulate all stdout into `SubprocessResult.stdout`.
     /// Intended for debugging only — production callers should leave this
     /// `false` and observe output through the real-time callback.
@@ -365,42 +360,6 @@ mod platform {
 
 use platform::*;
 
-/// Generate a shell script that sets up env vars, cd, and exec's the command.
-/// Mirrors Python's `_generate_command_shell_script`.
-#[cfg(unix)]
-fn generate_command_shell_script(
-    args: &[String],
-    env_vars: &HashMap<String, Option<String>>,
-    working_dir: Option<&Path>,
-) -> Result<String, SessionError> {
-    let quote = |s: &str| -> Result<String, SessionError> {
-        shlex::try_quote(s).map(|c| c.into_owned()).map_err(|_| {
-            SessionError::Runtime(format!(
-                "Cannot shell-quote string containing null byte: {s:?}"
-            ))
-        })
-    };
-    let mut script = String::from("#!/bin/sh\n");
-    for (name, value) in env_vars {
-        match value {
-            Some(val) => {
-                script.push_str(&format!("export {}={}\n", name, quote(val)?));
-            }
-            None => {
-                script.push_str(&format!("unset {name}\n"));
-            }
-        }
-    }
-    if let Some(dir) = working_dir {
-        script.push_str(&format!("cd {}\n", quote(&dir.to_string_lossy())?));
-    }
-    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let joined = shlex::try_join(args_str.iter().copied())
-        .map_err(|_| SessionError::Runtime("Command args contain null byte".into()))?;
-    script.push_str(&format!("exec {joined}\n"));
-    Ok(script)
-}
-
 /// Write cancel_info.json to the working directory as required by the OpenJD spec
 /// for NotifyThenTerminate cancelation.
 fn write_cancel_info(working_dir: &Path, terminate_delay: Duration) {
@@ -467,7 +426,14 @@ pub async fn run_subprocess(
         return Err(SessionError::Runtime("No command specified".into()));
     }
 
-    let cross_user = config.user.as_deref().filter(|u| !u.is_process_user());
+    // Cross-user execution must go through the helper binary.
+    if config.user.as_deref().is_some_and(|u| !u.is_process_user()) {
+        return Err(SessionError::Runtime(
+            "Cross-user subprocess execution requires the helper binary. \
+             Use run_via_helper instead of run_subprocess for cross-user actions."
+                .into(),
+        ));
+    }
 
     // Build merged environment
     let mut merged: HashMap<String, String> = std::env::vars().collect();
@@ -482,89 +448,19 @@ pub async fn run_subprocess(
         }
     }
 
-    let (final_args, use_setsid, _script_path) = if let Some(_user) = cross_user {
-        #[cfg(unix)]
-        {
-            // Cross-user: generate shell script wrapper
-            let script_content = generate_command_shell_script(
-                args,
-                &config.env_vars,
-                config.working_dir.as_deref(),
-            )?;
-            let script_dir = config
-                .helpers_dir
-                .as_deref()
-                .or(config.working_dir.as_deref())
-                .unwrap_or_else(|| std::path::Path::new("/tmp"));
-            let script_path = script_dir.join(format!("_run_{}.sh", uuid::Uuid::new_v4().simple()));
-            std::fs::write(&script_path, &script_content).map_err(|e| {
-                SessionError::SubprocessStart {
-                    command: args[0].clone(),
-                    source: e,
-                }
-            })?;
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Ok(Some(grp)) = nix::unistd::Group::from_name(_user.group()) {
-                    nix::unistd::chown(&script_path, None, Some(grp.gid)).map_err(|e| {
-                        SessionError::PathPermissions {
-                            path: script_path.display().to_string(),
-                            reason: e.to_string(),
-                        }
-                    })?;
-                }
-                std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o770))
-                    .map_err(|e| SessionError::SubprocessStart {
-                        command: args[0].clone(),
-                        source: e,
-                    })?;
-            }
-            let sudo_args = vec![
-                "sudo".to_string(),
-                "-u".to_string(),
-                _user.user().to_string(),
-                "-i".to_string(),
-                "setsid".to_string(),
-                "-w".to_string(),
-                script_path.to_string_lossy().to_string(),
-            ];
-            (sudo_args, false, Some(script_path))
-        }
-        #[cfg(windows)]
-        {
-            // Cross-user on Windows: stub — full CreateProcessAsUserW in Phase 3
-            // For now, just run the command directly (same-user fallback)
-            (args.clone(), false, None::<PathBuf>)
-        }
-    } else {
-        (args.clone(), true, None)
-    };
-
     // Log the command line (redacting any openjd_redacted_env tokens)
-    if final_args != *args {
-        // Cross-user: log the actual command, not the sudo wrapper
-        session_log!(
-            info,
-            session_id,
-            LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
-            "Running command {}",
-            format_command_for_log(args)
-        );
-        log::debug!(target: "openjd.sessions", "Wrapper: {}", format_command_for_log(&final_args));
-    } else {
-        session_log!(
-            info,
-            session_id,
-            LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
-            "Running command {}",
-            format_command_for_log(&final_args)
-        );
-    }
+    session_log!(
+        info,
+        session_id,
+        LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+        "Running command {}",
+        format_command_for_log(args)
+    );
 
-    // Spawn the process. On Windows cross-user, we use Win32 APIs directly;
-    // otherwise we use tokio::process::Command.
+    // Spawn the process via tokio::process::Command (same-user only;
+    // cross-user was rejected above).
     #[cfg(windows)]
-    let mut win32_process_handle: Option<windows::Win32::Foundation::HANDLE> = None;
+    let win32_process_handle: Option<windows::Win32::Foundation::HANDLE> = None;
 
     #[allow(unused_mut)]
     let (mut child, pid, stdout_for_reading): (
@@ -572,130 +468,40 @@ pub async fn run_subprocess(
         i32,
         Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>,
     ) = {
-        #[cfg(windows)]
-        if let Some(_cross) = cross_user {
-            use crate::session_user::WindowsSessionUser;
-            let win_user = config.user.as_ref().unwrap();
-            if let Some(wu) = win_user.as_any().downcast_ref::<WindowsSessionUser>() {
-                match crate::win32::spawn_as_user(
-                    args,
-                    &config.env_vars,
-                    config.working_dir.as_deref(),
-                    wu.password(),
-                    wu.user(),
-                    wu.logon_token(),
-                ) {
-                    Ok(spawned) => {
-                        let p = spawned.pid as i32;
-                        win32_process_handle = Some(spawned.process_handle);
-                        let std_file: std::fs::File = spawned.stdout_read.into();
-                        let tokio_file = tokio::fs::File::from_std(std_file);
-                        (
-                            None,
-                            p,
-                            Some(Box::new(tokio_file)
-                                as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-                        )
-                    }
-                    Err(e) => {
-                        session_log!(
-                            info,
-                            session_id,
-                            LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
-                            "Process failed to start: '{}': {}",
-                            args[0],
-                            e
-                        );
-                        return Err(SessionError::SubprocessStart {
-                            command: args[0].clone(),
-                            source: std::io::Error::other(e),
-                        });
-                    }
-                }
-            } else {
-                return Err(SessionError::Runtime(
-                    "Cross-user on Windows requires WindowsSessionUser".into(),
-                ));
-            }
-        } else {
-            let mut cmd = Command::new(&final_args[0]);
-            cmd.args(&final_args[1..]);
-            cmd.env_clear();
-            for (k, v) in &merged {
-                cmd.env(k, v);
-            }
-            if let Some(dir) = &config.working_dir {
-                cmd.current_dir(dir);
-            }
-            let merged_reader = unsafe { configure_command(&mut cmd, use_setsid) };
-            if merged_reader.is_none() {
-                // POSIX: configure_command sets up dup2 in pre_exec, we pipe stdout normally
-                cmd.stdout(std::process::Stdio::piped());
-            }
-            let mut c = cmd.spawn().map_err(|e| {
-                session_log!(
-                    info,
-                    session_id,
-                    LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
-                    "Process failed to start: '{}': {}",
-                    final_args[0],
-                    e
-                );
-                SessionError::SubprocessStart {
-                    command: final_args[0].clone(),
-                    source: e,
-                }
-            })?;
-            let p = c.id().unwrap_or(0) as i32;
-            let stdout = merged_reader.or_else(|| {
-                c.stdout
-                    .take()
-                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
-            });
-            (Some(c), p, stdout)
+        let mut cmd = Command::new(&args[0]);
+        cmd.args(&args[1..]);
+        cmd.env_clear();
+        for (k, v) in &merged {
+            cmd.env(k, v);
         }
-
-        #[cfg(not(windows))]
-        {
-            let mut cmd = Command::new(&final_args[0]);
-            cmd.args(&final_args[1..]);
-            if cross_user.is_none() {
-                cmd.env_clear();
-                for (k, v) in &merged {
-                    cmd.env(k, v);
-                }
-            }
-            if cross_user.is_none() {
-                if let Some(dir) = &config.working_dir {
-                    cmd.current_dir(dir);
-                }
-            }
-            let merged_reader = unsafe { configure_command(&mut cmd, use_setsid) };
-            if merged_reader.is_none() {
-                cmd.stdout(std::process::Stdio::piped());
-            }
-            let mut c = cmd.spawn().map_err(|e| {
-                session_log!(
-                    info,
-                    session_id,
-                    LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
-                    "Process failed to start: '{}': {}",
-                    final_args[0],
-                    e
-                );
-                SessionError::SubprocessStart {
-                    command: final_args[0].clone(),
-                    source: e,
-                }
-            })?;
-            let p = c.id().unwrap_or(0) as i32;
-            let stdout = merged_reader.or_else(|| {
-                c.stdout
-                    .take()
-                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
-            });
-            (Some(c), p, stdout)
+        if let Some(dir) = &config.working_dir {
+            cmd.current_dir(dir);
         }
+        let merged_reader = unsafe { configure_command(&mut cmd, true) };
+        if merged_reader.is_none() {
+            cmd.stdout(std::process::Stdio::piped());
+        }
+        let mut c = cmd.spawn().map_err(|e| {
+            session_log!(
+                info,
+                session_id,
+                LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
+                "Process failed to start: '{}': {}",
+                args[0],
+                e
+            );
+            SessionError::SubprocessStart {
+                command: args[0].clone(),
+                source: e,
+            }
+        })?;
+        let p = c.id().unwrap_or(0) as i32;
+        let stdout = merged_reader.or_else(|| {
+            c.stdout
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
+        });
+        (Some(c), p, stdout)
     };
 
     session_log!(
@@ -851,11 +657,6 @@ pub async fn run_subprocess(
         }
     };
 
-    // Clean up script file
-    if let Some(ref sp) = _script_path {
-        let _ = std::fs::remove_file(sp);
-    }
-
     let exit_code = exit_status.and_then(|s| s.code());
     session_log!(
         info,
@@ -959,109 +760,6 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    #[test]
-    fn test_empty_string_arg() {
-        let script =
-            generate_command_shell_script(&["echo".into(), "".into()], &HashMap::new(), None)
-                .unwrap();
-        let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
-        assert!(exec_line.contains("echo"), "script was: {script}");
-        assert!(
-            exec_line.len() > "exec echo".len(),
-            "empty arg missing, script was: {script}"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_args_with_spaces() {
-        let script = generate_command_shell_script(
-            &["echo".into(), "hello world".into()],
-            &HashMap::new(),
-            None,
-        )
-        .unwrap();
-        let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
-        assert!(exec_line.contains("hello world"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_args_with_single_quotes() {
-        let script =
-            generate_command_shell_script(&["echo".into(), "it's".into()], &HashMap::new(), None)
-                .unwrap();
-        let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
-        assert!(exec_line.contains("echo"), "script was: {script}");
-        assert!(exec_line.contains("it"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_args_with_double_quotes() {
-        let script = generate_command_shell_script(
-            &["echo".into(), r#"say "hello""#.into()],
-            &HashMap::new(),
-            None,
-        )
-        .unwrap();
-        let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
-        assert!(exec_line.contains("hello"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_args_with_special_characters() {
-        let input = "a$b`c\\d;e|f&g";
-        let script =
-            generate_command_shell_script(&["echo".into(), input.into()], &HashMap::new(), None)
-                .unwrap();
-        let exec_line = script.lines().find(|l| l.starts_with("exec")).unwrap();
-        // Verify round-trip: shlex::split of the exec args should recover the original
-        let parsed = shlex::split(&exec_line["exec ".len()..]).unwrap();
-        assert_eq!(parsed, vec!["echo", input]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_env_var_quoting() {
-        let mut env = HashMap::new();
-        env.insert("FOO".into(), Some("bar baz".into()));
-        env.insert("REMOVE".into(), None);
-        let script = generate_command_shell_script(&["cmd".into()], &env, None).unwrap();
-        assert!(script.contains("export FOO="), "script was: {script}");
-        assert!(script.contains("bar baz"), "script was: {script}");
-        assert!(script.contains("unset REMOVE"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_working_dir() {
-        let script = generate_command_shell_script(
-            &["cmd".into()],
-            &HashMap::new(),
-            Some(Path::new("/tmp/my dir")),
-        )
-        .unwrap();
-        assert!(script.contains("cd "), "script was: {script}");
-        assert!(script.contains("/tmp/my dir"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_script_structure() {
-        let mut env = HashMap::new();
-        env.insert("K".into(), Some("V".into()));
-        let script =
-            generate_command_shell_script(&["a".into(), "b".into()], &env, Some(Path::new("/w")))
-                .unwrap();
-        assert!(script.starts_with("#!/bin/sh\n"), "script was: {script}");
-        assert!(script.ends_with('\n'), "script was: {script}");
-        let last_line = script.trim_end().lines().last().unwrap();
-        assert!(last_line.starts_with("exec"), "script was: {script}");
-    }
-
-    #[cfg(unix)]
     #[tokio::test]
     async fn test_cancel_ntt_with_zero_time_limit_is_immediate() {
         use tokio_util::sync::CancellationToken;
@@ -1080,7 +778,6 @@ mod tests {
                 terminate_delay: Duration::from_secs(60),
             },
             cancel_request_rx: Some(cancel_rx),
-            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1141,7 +838,6 @@ mod tests {
                 terminate_delay: Duration::from_secs(1),
             },
             cancel_request_rx: Some(cancel_rx),
-            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1196,7 +892,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1244,7 +939,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            helpers_dir: None,
             debug_collect_stdout: false,
         };
 
@@ -1497,7 +1191,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: None,
             debug_collect_stdout: true,
         })
     }
@@ -1559,7 +1252,6 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
@@ -1588,7 +1280,6 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token).await
@@ -1619,7 +1310,6 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1657,7 +1347,6 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                helpers_dir: None,
                 debug_collect_stdout: true,
             };
             let r = run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1690,7 +1379,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1716,7 +1404,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1735,7 +1422,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: None,
             debug_collect_stdout: true,
         });
         assert_eq!(r.state, ActionState::Success);
@@ -1867,7 +1553,6 @@ mod tests {
                 user: None,
                 cancel_method: CancelMethod::Terminate,
                 cancel_request_rx: None,
-                helpers_dir: None,
                 debug_collect_stdout: false,
             };
             run_subprocess(config, &mut filter, "test", msg_tx, token)
@@ -1962,7 +1647,6 @@ mod tests {
             user: None,
             cancel_method: CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: None,
             debug_collect_stdout: false,
         };
 

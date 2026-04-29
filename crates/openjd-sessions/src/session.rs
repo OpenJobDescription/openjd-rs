@@ -1188,7 +1188,6 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: Some(cancel_rx),
-            helpers_dir: self.cross_user.helpers_dir.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
@@ -1232,7 +1231,6 @@ impl Session {
             user: self.cross_user.user.clone(),
             cancel_method: crate::runner::CancelMethod::Terminate,
             cancel_request_rx: None,
-            helpers_dir: self.cross_user.helpers_dir.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
 

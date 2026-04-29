@@ -157,7 +157,6 @@ impl ScriptRunnerBase {
             user: self.user.clone(),
             cancel_method,
             cancel_request_rx: self.cancel_request_rx.clone(),
-            helpers_dir: self.helpers_directory.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
         let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);
