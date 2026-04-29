@@ -2,6 +2,8 @@
 /bin/
 /coverage/
 package*.json
+!js/package.json
+!js/package-lock.json
 crates/openjd-sessions/src/helper/target/
 
 # Build artifacts

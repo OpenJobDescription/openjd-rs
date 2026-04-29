@@ -5,6 +5,7 @@ members = [
     "crates/openjd-sessions",
     "crates/openjd-cli",
     "crates/openjd-snapshots",
+    "crates/openjd-for-js",
 ]
 resolver = "2"
 

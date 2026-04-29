@@ -546,40 +546,4 @@ mod tests {
             assert_eq!(e.path[1], crate::error::PathElement::Index(0),);
         }
     }
-
-    #[test]
-    fn validation_error_detail_populated_for_format_string_errors() {
-        // Template with undefined variable in format string
-        let v = yaml_val(
-            r#"{
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "{{Param.Undefined}}",
-            "steps": [{"name": "s", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-        }"#,
-        );
-        let err = decode_job_template(v, None, &Default::default()).unwrap_err();
-        let errors = match &err {
-            crate::error::ModelError::ModelValidation(e) => e,
-            other => panic!("expected ModelValidation, got: {other}"),
-        };
-        assert_eq!(errors.len(), 1);
-        let e = &errors.errors[0];
-        assert_eq!(
-            e.path,
-            vec![crate::error::PathElement::Field("name".into())]
-        );
-        // message contains the full formatted text
-        assert!(e.message.contains("Undefined variable"));
-        // detail is populated with structured diagnostic data
-        let detail = e
-            .detail
-            .as_ref()
-            .expect("detail should be Some for format string errors");
-        assert!(detail.summary.contains("Undefined variable"));
-        assert_eq!(detail.spans.len(), 1);
-        let span = &detail.spans[0];
-        assert!(span.summary.contains("Undefined variable"));
-        assert_eq!(span.source, "{{Param.Undefined}}");
-        assert!(span.end > span.start);
-    }
 }

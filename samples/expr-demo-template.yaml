@@ -1,0 +1,156 @@
+specificationVersion: jobtemplate-2023-09
+name: "{{Param.ProjectName}}-render-{{Param.Shot}}"
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: ProjectName
+    type: STRING
+    default: "nebula"
+  - name: Shot
+    type: STRING
+    default: "sh010"
+  - name: Frames
+    type: STRING
+    default: "1-100"
+  - name: OutputDir
+    type: PATH
+    default: "/renders/output"
+  - name: Quality
+    type: INT
+    default: 8
+    minValue: 1
+    maxValue: 10
+  - name: MotionBlur
+    type: FLOAT
+    default: 0.5
+  - name: UseDenoiser
+    type: BOOL
+    default: true
+  - name: TileSize
+    type: INT
+    default: 256
+  - name: Priority
+    type: INT
+    default: 50
+
+jobEnvironments:
+  - name: RenderSetup
+    variables:
+      RENDER_ENGINE: blender
+      PROJECT: "{{Param.ProjectName}}"
+      QUALITY_LABEL: "{{('high' if Param.Quality >= 8 else ('medium' if Param.Quality >= 5 else 'low'))}}"
+      OUTPUT_BASE: "{{Param.OutputDir}}/{{Param.ProjectName}}/{{Param.Shot}}"
+      TILE_AREA: "{{str(Param.TileSize * Param.TileSize)}}"
+    script:
+      actions:
+        onEnter:
+          command: "{{Param.OutputDir}}/setup.sh"
+          args:
+            - "--project"
+            - "{{Param.ProjectName}}"
+            - "--quality"
+            - "{{str(Param.Quality)}}"
+        onExit:
+          command: /usr/bin/cleanup
+          args:
+            - "{{Param.OutputDir}}/{{Param.ProjectName}}/{{Param.Shot}}"
+
+steps:
+  - name: Validate
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+            - "-c"
+            - "print('Validating {{Param.Shot}} frames={{Param.Frames}} quality={{str(Param.Quality)}} denoiser={{str(Param.UseDenoiser)}}')"
+
+  - name: Render
+    dependencies:
+      - dependsOn: Validate
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: Frame
+          type: INT
+          range: "{{Param.Frames}}"
+    script:
+      embeddedFiles:
+        - name: RenderScript
+          type: TEXT
+          filename: render_frame.py
+          runnable: true
+          data: |
+            import bpy
+            import os
+
+            frame = {{Task.Param.Frame}}
+            output_dir = "{{Param.OutputDir}}/{{Param.ProjectName}}/{{Param.Shot}}"
+            quality = {{Param.Quality}}
+            tile_size = {{Param.TileSize}}
+            motion_blur = {{Param.MotionBlur}}
+            use_denoiser = {{Param.UseDenoiser}}
+
+            bpy.context.scene.frame_set(frame)
+            bpy.context.scene.render.resolution_percentage = quality * 10
+            bpy.context.scene.render.tile_x = tile_size
+            bpy.context.scene.render.tile_y = tile_size
+
+            if use_denoiser:
+                bpy.context.scene.view_layers[0].cycles.use_denoising = True
+
+            padded = str(frame).zfill(5)
+            bpy.context.scene.render.filepath = os.path.join(output_dir, f"frame_{padded}.exr")
+            bpy.ops.render.render(write_still=True)
+            print(f"Rendered frame {frame} to {output_dir}")
+      actions:
+        onRun:
+          command: blender
+          args:
+            - "--background"
+            - "{{Param.OutputDir}}/{{Param.ProjectName}}/scene.blend"
+            - "--python"
+            - "{{Task.File.RenderScript}}"
+          timeout: "{{str(max(300, Param.Quality * 120))}}"
+
+  - name: Composite
+    dependencies:
+      - dependsOn: Render
+    script:
+      embeddedFiles:
+        - name: CompositeScript
+          type: TEXT
+          filename: composite.py
+          runnable: true
+          data: |
+            import os
+            import glob
+
+            output_dir = "{{Param.OutputDir}}/{{Param.ProjectName}}/{{Param.Shot}}"
+            frames = sorted(glob.glob(os.path.join(output_dir, "frame_*.exr")))
+            print(f"Compositing {len(frames)} frames from {output_dir}")
+
+            quality_label = "{{('high' if Param.Quality >= 8 else 'standard')}}"
+            output_file = os.path.join(output_dir, f"{{Param.Shot}}_{quality_label}.mp4")
+
+            cmd = f"ffmpeg -framerate 24 -i {output_dir}/frame_%05d.exr -c:v libx264 -pix_fmt yuv420p {output_file}"
+            os.system(cmd)
+            print(f"Output: {output_file}")
+      actions:
+        onRun:
+          command: python
+          args:
+            - "{{Task.File.CompositeScript}}"
+
+  - name: Notify
+    dependencies:
+      - dependsOn: Composite
+    script:
+      actions:
+        onRun:
+          command: curl
+          args:
+            - "-X"
+            - "POST"
+            - "https://hooks.slack.com/render-complete"
+            - "-d"
+            - "{\"text\": \"{{Param.ProjectName}}/{{Param.Shot}} render complete. Quality: {{str(Param.Quality)}}/10, Denoiser: {{str(Param.UseDenoiser)}}\"}"
