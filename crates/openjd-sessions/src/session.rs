@@ -823,7 +823,10 @@ impl Session {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             let lib = self.library.clone();
-            let runner_fut = runner.enter(env, &action_symtab, Some(&lib), &env_vars, tx);
+            // Box::pin keeps the inner subprocess/select! state machine off the
+            // outer future's stack. Without this, the combined future exceeds
+            // Windows' default 1 MB thread stack in release builds.
+            let runner_fut = Box::pin(runner.enter(env, &action_symtab, Some(&lib), &env_vars, tx));
             let result = self.drive_action(runner_fut, &mut rx, &identifier).await;
             self.cross_user.helper = runner.take_helper();
             let result = result?;
@@ -980,7 +983,9 @@ impl Session {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             let lib = self.library.clone();
-            let runner_fut = runner.exit(&env, &action_symtab, Some(&lib), &env_vars, tx);
+            // See the note in the onEnter path about Box::pin and the Windows
+            // 1 MB thread-stack limit on release builds.
+            let runner_fut = Box::pin(runner.exit(&env, &action_symtab, Some(&lib), &env_vars, tx));
             let result = self.drive_action(runner_fut, &mut rx, identifier).await;
             self.cross_user.helper = runner.take_helper();
             let result = result?;
@@ -1094,7 +1099,9 @@ impl Session {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let lib = self.library.clone();
-        let runner_fut = runner.run(script, &action_symtab, Some(&lib), &env_vars, tx);
+        // See the note in the onEnter path about Box::pin and the Windows
+        // 1 MB thread-stack limit on release builds.
+        let runner_fut = Box::pin(runner.run(script, &action_symtab, Some(&lib), &env_vars, tx));
         let result = self
             .drive_action(runner_fut, &mut rx, &step_identifier)
             .await;
@@ -1198,8 +1205,15 @@ impl Session {
         );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let sid = self.session_id.clone();
-        let runner_fut =
-            crate::subprocess::run_subprocess(config, &mut filter, &sid, tx, cancel_token);
+        // See the note in the onEnter path about Box::pin and the Windows
+        // 1 MB thread-stack limit on release builds.
+        let runner_fut = Box::pin(crate::subprocess::run_subprocess(
+            config,
+            &mut filter,
+            &sid,
+            tx,
+            cancel_token,
+        ));
         self.drive_action(runner_fut, &mut rx, &subprocess_identifier)
             .await
     }
