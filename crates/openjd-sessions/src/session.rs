@@ -789,6 +789,9 @@ impl Session {
             let env_vars = self.evaluate_env_vars(os_env_vars);
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
+            // Box large locals — see run_task for rationale.
+            let action_symtab = Box::new(action_symtab);
+            let env_vars = Box::new(env_vars);
             #[allow(unused_mut)]
             let mut runner = EnvironmentScriptRunner::new(
                 &self.session_id,
@@ -913,7 +916,8 @@ impl Session {
         let symtab = self.build_symbol_table(None, resolved_symtab)?;
 
         // Evaluate env vars BEFORE removing from tracking (matching Python)
-        let env_vars = self.evaluate_env_vars(os_env_vars);
+        // Box to keep off the async state machine — see run_task for rationale.
+        let env_vars = Box::new(self.evaluate_env_vars(os_env_vars));
 
         // Unless overridden by the caller, once we've started exiting environments
         // we can only exit environments.
@@ -949,6 +953,8 @@ impl Session {
 
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
+            // Box large locals — see run_task for rationale.
+            let action_symtab = Box::new(action_symtab);
             #[allow(unused_mut)]
             let mut runner = EnvironmentScriptRunner::new(
                 &self.session_id,
@@ -1064,6 +1070,12 @@ impl Session {
         let env_vars = self.evaluate_env_vars(os_env_vars);
         let mut action_symtab = symtab.clone();
         self.materialize_path_mapping(&mut action_symtab)?;
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combined future
+        // (run_task → drive_action → select!) exceeds Windows' default
+        // 1 MB thread stack in release builds.
+        let action_symtab = Box::new(action_symtab);
+        let env_vars = Box::new(env_vars);
         #[allow(unused_mut)]
         let mut runner = StepScriptRunner::new(
             &self.session_id,

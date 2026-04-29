@@ -23,6 +23,16 @@ pub enum DocumentType {
     Yaml,
 }
 
+/// Maximum structural nesting depth for template documents.
+///
+/// A valid OpenJD template reaches at most ~8 levels of nesting
+/// (e.g. `steps[0].script.embeddedFiles[0].data`). 128 is generous
+/// while preventing stack exhaustion from pathological inputs.
+///
+/// Matches `serde_json`'s hardcoded recursion limit so both formats
+/// behave identically on deeply nested input.
+pub const MAX_DOCUMENT_DEPTH: usize = 128;
+
 /// Parse a string into a generic YAML/JSON object.
 ///
 /// When `caller_limits.max_template_size` is set, the document is rejected
@@ -52,6 +62,9 @@ pub fn document_string_to_object(
         DocumentType::Yaml => {
             let options = serde_saphyr::options! {
                 strict_booleans: true,
+                budget: serde_saphyr::budget! {
+                    max_depth: MAX_DOCUMENT_DEPTH,
+                },
             };
             serde_saphyr::from_str_with_options(document, options).map_err(|e| {
                 ModelError::DecodeValidation(format!(
