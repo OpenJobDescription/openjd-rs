@@ -28,7 +28,10 @@ pub use download::{
     FileConflictResolution,
 };
 pub use filter::{filter_manifest, IncludeExcludePathsFilter};
-pub use hash_op::{hash_abs_manifest, HashOptions, HashResult, HashStatistics};
+pub use hash_op::{
+    hash_abs_manifest, hash_abs_snapshot, hash_abs_snapshot_diff, HashOptions, HashResult,
+    HashStatistics,
+};
 pub use hash_upload::{
     hash_upload_abs_manifest, HashUploadOptions, UploadResult, UploadStatistics,
 };

@@ -492,10 +492,22 @@ Implements `Default`.
 ### HASH
 
 ```rust
+// Concrete-typed entry points (preserve the input manifest type in the result)
+pub fn hash_abs_snapshot(
+    manifest: &AbsSnapshot,
+    options: HashOptions,
+) -> Result<HashResult<AbsSnapshot>>;
+
+pub fn hash_abs_snapshot_diff(
+    manifest: &AbsSnapshotDiff,
+    options: HashOptions,
+) -> Result<HashResult<AbsSnapshotDiff>>;
+
+// Enum-dispatching entry point (use when the caller holds an `AbsManifest`)
 pub fn hash_abs_manifest(
     manifest: &AbsManifest,
     options: HashOptions,
-) -> Result<HashResult>
+) -> Result<HashResult<AbsManifest>>;
 ```
 
 ```rust
@@ -507,8 +519,10 @@ pub struct HashOptions {
     pub max_workers: Option<usize>,
 }
 
-pub struct HashResult {
-    pub manifest: AbsManifest,
+/// `M` defaults to `AbsManifest`, so bare `HashResult` refers to the
+/// enum-dispatching shape returned by `hash_abs_manifest`.
+pub struct HashResult<M = AbsManifest> {
+    pub manifest: M,
     pub statistics: HashStatistics,
 }
 
@@ -633,7 +647,7 @@ pub fn entries_differ(
     parent: &FileEntry,
     current: &FileEntry,
     ignore_hashes: bool,
-    preserve_runnable: bool,
+    ignore_runnable: bool,
 ) -> bool
 ```
 
@@ -641,6 +655,11 @@ pub fn entries_differ(
 pub struct DiffOptions {
     pub parent_manifest_hash: Option<String>,
     pub ignore_hashes: bool,
+    /// Dual-purpose flag: ignores `runnable` when comparing, *and* copies the
+    /// parent's `runnable` into the diff entry for modified files. The
+    /// ignore-on-compare half is delegated to `entries_differ` via its
+    /// `ignore_runnable` parameter; the copy-on-emit half is handled inside
+    /// `diff_snapshots`.
     pub preserve_runnable: bool,
 }
 ```

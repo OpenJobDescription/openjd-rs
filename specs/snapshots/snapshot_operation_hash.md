@@ -6,12 +6,28 @@
 
 Fills in hashes for a manifest created by `collect_abs_snapshot()` or `diff_snapshots()`. The input manifest must have absolute paths.
 
+The operation exposes three entry points. The concrete-typed variants preserve the input type in the result so callers can chain further operations without matching on an enum; the enum-dispatching variant is useful when the caller holds an [`AbsManifest`] without statically knowing whether it is a snapshot or a diff.
+
 ```rust
+// Concrete-typed entry points (preferred when the caller knows the concrete type)
+pub fn hash_abs_snapshot(
+    manifest: &AbsSnapshot,
+    options: HashOptions,
+) -> Result<HashResult<AbsSnapshot>>;
+
+pub fn hash_abs_snapshot_diff(
+    manifest: &AbsSnapshotDiff,
+    options: HashOptions,
+) -> Result<HashResult<AbsSnapshotDiff>>;
+
+// Enum-dispatching entry point
 pub fn hash_abs_manifest(
     manifest: &AbsManifest,
     options: HashOptions,
-) -> Result<HashResult>
+) -> Result<HashResult<AbsManifest>>;
 ```
+
+All three share identical parameters, algorithm, and statistics; they differ only in the static type of the manifest carried in and out. This mirrors the three-entry-point pattern used by `subtree_*` (`subtree_snapshot` / `subtree_snapshot_diff` / `subtree_manifest`) and `join_*`.
 
 ## Parameters
 
@@ -36,8 +52,10 @@ pub struct HashOptions {
 ## Returns
 
 ```rust
-pub struct HashResult {
-    pub manifest: AbsManifest,
+/// Generic over the manifest type `M`; `M` defaults to `AbsManifest` so bare
+/// `HashResult` still names the enum-dispatch shape.
+pub struct HashResult<M = AbsManifest> {
+    pub manifest: M,
     pub statistics: HashStatistics,
 }
 
@@ -54,6 +72,8 @@ pub struct HashStatistics {
     pub progress_message: String,
 }
 ```
+
+The returned `M` matches the input: `hash_abs_snapshot` returns `HashResult<AbsSnapshot>`, `hash_abs_snapshot_diff` returns `HashResult<AbsSnapshotDiff>`, and `hash_abs_manifest` returns `HashResult<AbsManifest>`.
 
 ## Implementation
 
@@ -102,18 +122,20 @@ The progress callback can return `false` to cancel. An `AtomicBool` is checked b
 
 ## Example
 
+Using the concrete entry point (preserves `AbsSnapshot` through the result):
+
 ```rust
 use openjd_snapshots::{
-    collect_abs_snapshot, hash_abs_manifest,
-    AbsManifest, CollectOptions, HashOptions, HashCache,
+    collect_abs_snapshot, hash_abs_snapshot,
+    CollectOptions, HashOptions, HashCache,
 };
 use std::sync::Arc;
 
 let manifest = collect_abs_snapshot(&["/projects/my_scene"], &[] as &[&str], CollectOptions::default())?;
 let cache = Arc::new(HashCache::open_default()?);
 
-let result = hash_abs_manifest(
-    &AbsManifest::Snapshot(manifest),
+let result = hash_abs_snapshot(
+    &manifest,
     HashOptions {
         hash_cache: Some(cache),
         on_progress: Some(Box::new(|stats| {
@@ -125,6 +147,20 @@ let result = hash_abs_manifest(
     },
 )?;
 
+// result.manifest is AbsSnapshot; no enum unwrap needed.
 println!("Hashed {} bytes, skipped {} bytes",
     result.statistics.hashed_bytes, result.statistics.skipped_bytes);
+let snapshot: AbsSnapshot = result.manifest;
+```
+
+Using the enum entry point (when the caller holds an `AbsManifest`):
+
+```rust
+use openjd_snapshots::{hash_abs_manifest, AbsManifest, HashOptions};
+
+let result = hash_abs_manifest(&abs_manifest, HashOptions::default())?;
+match result.manifest {
+    AbsManifest::Snapshot(s) => { /* use s */ }
+    AbsManifest::Diff(d)     => { /* use d */ }
+}
 ```

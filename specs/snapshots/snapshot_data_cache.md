@@ -192,13 +192,25 @@ All configuration fields are private; construct with `new` or `new_with_auto_acc
 
 ### Account ID and Security
 
-The `account_id` controls `ExpectedBucketOwner` on S3 API calls, preventing confused deputy attacks:
+The `expected_bucket_owner` field (type `Option<String>`) controls the
+`x-amz-expected-bucket-owner` header that the AWS SDK sends on every S3 API call,
+preventing confused-deputy attacks against buckets the caller does not own.
 
-| Value | Behavior |
-|-------|----------|
-| `AccountId::Auto(id)` | Auto-detected from STS at construction |
-| `AccountId::Explicit(id)` | Use provided account ID |
-| `AccountId::NoCheck` | Disable ExpectedBucketOwner checks |
+| API usage | Behavior |
+|-----------|----------|
+| `S3DataCache::new_with_auto_account_id(...).await?` | Auto-detect the caller's AWS account ID via `STS:GetCallerIdentity` at construction and set it as the expected bucket owner. Construction fails if STS cannot be reached. |
+| `S3DataCache::new(...).with_expected_bucket_owner(Some("123456789012".into()))` | Use an explicit caller-provided account ID. |
+| `S3DataCache::new(...)` (or `.with_expected_bucket_owner(None)`) | Disable the expected-bucket-owner check entirely. No `x-amz-expected-bucket-owner` header is sent and S3 does not enforce ownership. |
+
+The current value can be read back with `S3DataCache::expected_bucket_owner() -> Option<&str>`.
+
+Rationale for using `Option<String>` rather than a dedicated enum: the AWS SDK's
+`.set_expected_bucket_owner(Option<String>)` S3 request builder method takes the
+same shape, so threading an `Option<String>` through is a direct fit. The Python
+reference uses a three-way value (default = auto-detect, string = explicit,
+`NO_ACCOUNT_ID_CHECK` sentinel = disable); in Rust the auto-detect case is
+expressed instead by calling the dedicated async constructor, which keeps the
+fallible STS call out of the synchronous `new`.
 
 ### Multipart Transfers
 

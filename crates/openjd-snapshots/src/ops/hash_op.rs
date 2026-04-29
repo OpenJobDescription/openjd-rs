@@ -5,7 +5,7 @@
 use super::rate::SlidingWindowRate;
 use crate::hash::{hash_file, hash_file_chunked};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
-use crate::manifest::{AbsManifest, Manifest};
+use crate::manifest::{AbsManifest, AbsSnapshot, AbsSnapshotDiff, Manifest};
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,10 +39,49 @@ pub struct HashStatistics {
     pub progress_message: String,
 }
 
+/// The return type of the HASH operation.
+///
+/// Generic over the manifest type `M` so the concrete-typed entry points
+/// ([`hash_abs_snapshot`], [`hash_abs_snapshot_diff`]) can preserve the
+/// input type, while the enum-dispatching entry point ([`hash_abs_manifest`])
+/// returns an [`AbsManifest`]. The default `M = AbsManifest` keeps the bare
+/// `HashResult` name usable as a shorthand for the enum-dispatch case.
 #[derive(Debug)]
-pub struct HashResult {
-    pub manifest: AbsManifest,
+pub struct HashResult<M = AbsManifest> {
+    pub manifest: M,
     pub statistics: HashStatistics,
+}
+
+/// Computes content hashes for all unhashed files in an [`AbsSnapshot`].
+///
+/// Concrete-typed entry point that preserves the input type in the result.
+/// Prefer this over [`hash_abs_manifest`] when you hold an [`AbsSnapshot`]
+/// directly, to avoid an enum unwrap on the result.
+pub fn hash_abs_snapshot(
+    manifest: &AbsSnapshot,
+    options: HashOptions,
+) -> crate::Result<HashResult<AbsSnapshot>> {
+    let (m, statistics) = hash_manifest(manifest, &options)?;
+    Ok(HashResult {
+        manifest: m,
+        statistics,
+    })
+}
+
+/// Computes content hashes for all unhashed files in an [`AbsSnapshotDiff`].
+///
+/// Concrete-typed entry point that preserves the input type in the result.
+/// Prefer this over [`hash_abs_manifest`] when you hold an [`AbsSnapshotDiff`]
+/// directly, to avoid an enum unwrap on the result.
+pub fn hash_abs_snapshot_diff(
+    manifest: &AbsSnapshotDiff,
+    options: HashOptions,
+) -> crate::Result<HashResult<AbsSnapshotDiff>> {
+    let (m, statistics) = hash_manifest(manifest, &options)?;
+    Ok(HashResult {
+        manifest: m,
+        statistics,
+    })
 }
 
 /// Computes content hashes for all unhashed files in an absolute-path manifest.
@@ -50,23 +89,35 @@ pub struct HashResult {
 /// Files are hashed in parallel using rayon. A hash cache can be provided
 /// to skip re-hashing unchanged files. Returns the manifest with hashes
 /// filled in and statistics about the operation.
+///
+/// This enum-dispatching entry point is useful for callers that hold an
+/// [`AbsManifest`] without knowing whether it is a snapshot or a diff.
+/// Callers that hold a concrete [`AbsSnapshot`] or [`AbsSnapshotDiff`] should
+/// prefer [`hash_abs_snapshot`] or [`hash_abs_snapshot_diff`] to avoid an
+/// enum match on the returned manifest.
 pub fn hash_abs_manifest(
     manifest: &AbsManifest,
     options: HashOptions,
-) -> crate::Result<HashResult> {
+) -> crate::Result<HashResult<AbsManifest>> {
     match manifest {
         AbsManifest::Snapshot(s) => {
-            let (m, stats) = hash_manifest(s, &options)?;
+            let HashResult {
+                manifest,
+                statistics,
+            } = hash_abs_snapshot(s, options)?;
             Ok(HashResult {
-                manifest: AbsManifest::Snapshot(m),
-                statistics: stats,
+                manifest: AbsManifest::Snapshot(manifest),
+                statistics,
             })
         }
         AbsManifest::Diff(d) => {
-            let (m, stats) = hash_manifest(d, &options)?;
+            let HashResult {
+                manifest,
+                statistics,
+            } = hash_abs_snapshot_diff(d, options)?;
             Ok(HashResult {
-                manifest: AbsManifest::Diff(m),
-                statistics: stats,
+                manifest: AbsManifest::Diff(manifest),
+                statistics,
             })
         }
     }
@@ -535,5 +586,74 @@ mod tests {
         assert!(f.hash.is_none()); // no whole-file hash
         let chunks = f.chunk_hashes.as_ref().unwrap();
         assert_eq!(chunks.len(), 4); // 1024 / 256 = 4 chunks
+    }
+
+    #[test]
+    fn hash_abs_snapshot_preserves_concrete_type() {
+        let tmp = TempDir::new().unwrap();
+        let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
+
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+            .with_files(vec![FileEntry::file(&path, 5, mtime)]);
+
+        // Concrete entry point: result.manifest is AbsSnapshot directly — no enum unwrap.
+        let result: HashResult<AbsSnapshot> =
+            hash_abs_snapshot(&manifest, HashOptions::default()).unwrap();
+
+        // Direct field access works with no enum matching.
+        assert_eq!(result.manifest.files.len(), 1);
+        assert!(result.manifest.files[0].hash.is_some());
+        // Can chain further operations that require AbsSnapshot (e.g. validate).
+        result.manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn hash_abs_snapshot_diff_preserves_concrete_type() {
+        let tmp = TempDir::new().unwrap();
+        let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
+
+        let manifest: AbsSnapshotDiff =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![
+                FileEntry::file(&path, 5, mtime),
+                FileEntry::deleted("/tmp/gone"),
+            ]);
+
+        let result: HashResult<AbsSnapshotDiff> =
+            hash_abs_snapshot_diff(&manifest, HashOptions::default()).unwrap();
+
+        assert_eq!(result.manifest.files.len(), 2);
+        assert!(result.manifest.files[0].hash.is_some());
+        assert!(result.manifest.files[1].deleted);
+        result.manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn hash_abs_snapshot_and_enum_produce_identical_hashes() {
+        // The concrete and enum entry points must be semantically equivalent:
+        // same files hashed, same hash values, same statistics.
+        let tmp = TempDir::new().unwrap();
+        let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello world");
+
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+            .with_files(vec![FileEntry::file(&path, 11, mtime)]);
+
+        let concrete = hash_abs_snapshot(&manifest, HashOptions::default()).unwrap();
+        let via_enum =
+            hash_abs_manifest(&AbsManifest::Snapshot(manifest), HashOptions::default()).unwrap();
+
+        let enum_files = via_enum.manifest.files();
+        assert_eq!(concrete.manifest.files[0].hash, enum_files[0].hash);
+        assert_eq!(
+            concrete.statistics.total_files,
+            via_enum.statistics.total_files
+        );
+        assert_eq!(
+            concrete.statistics.total_bytes,
+            via_enum.statistics.total_bytes
+        );
+        assert_eq!(
+            concrete.statistics.hashed_files,
+            via_enum.statistics.hashed_files
+        );
     }
 }

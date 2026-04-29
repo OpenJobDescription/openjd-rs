@@ -86,12 +86,13 @@ pub use manifest::{
 pub use ops::{
     cache_sync_manifest, collect_abs_snapshot, compose_diffs, compose_snapshot_with_diffs,
     diff_snapshots, download_abs_manifest, entries_differ, filter_manifest, hash_abs_manifest,
-    hash_upload_abs_manifest, join_manifest, join_manifest_rel, join_snapshot, join_snapshot_diff,
-    join_snapshot_diff_rel, join_snapshot_rel, partition_manifest, partition_rel_manifest,
-    subtree_manifest, subtree_rel_manifest, subtree_rel_snapshot, subtree_rel_snapshot_diff,
-    subtree_snapshot, subtree_snapshot_diff, CacheSyncOptions, CacheSyncResult,
-    CacheSyncStatistics, CollectOptions, DiffOptions, DownloadOptions, DownloadResult,
-    DownloadStatistics, FileConflictResolution, HashOptions, HashResult, HashStatistics,
-    HashUploadOptions, IncludeExcludePathsFilter, PartitionOptions, UploadResult, UploadStatistics,
+    hash_abs_snapshot, hash_abs_snapshot_diff, hash_upload_abs_manifest, join_manifest,
+    join_manifest_rel, join_snapshot, join_snapshot_diff, join_snapshot_diff_rel,
+    join_snapshot_rel, partition_manifest, partition_rel_manifest, subtree_manifest,
+    subtree_rel_manifest, subtree_rel_snapshot, subtree_rel_snapshot_diff, subtree_snapshot,
+    subtree_snapshot_diff, CacheSyncOptions, CacheSyncResult, CacheSyncStatistics, CollectOptions,
+    DiffOptions, DownloadOptions, DownloadResult, DownloadStatistics, FileConflictResolution,
+    HashOptions, HashResult, HashStatistics, HashUploadOptions, IncludeExcludePathsFilter,
+    PartitionOptions, UploadResult, UploadStatistics,
 };
 pub use s3_check_cache::S3CheckCache;

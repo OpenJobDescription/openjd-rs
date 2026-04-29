@@ -5,22 +5,59 @@
 use crate::manifest::{Diff, DirEntry, FileEntry, Full, Manifest};
 use std::collections::HashMap;
 
+/// Options controlling the DIFF operation ([`diff_snapshots`]).
 #[derive(Default)]
 pub struct DiffOptions {
+    /// Hash of the parent manifest to record in the diff's
+    /// `parent_manifest_hash` field. The caller computes this from the
+    /// parent's serialized form.
     pub parent_manifest_hash: Option<String>,
+
+    /// If `true`, ignore `hash`/`chunk_hashes` when comparing entries and
+    /// skip the hash-state compatibility check. Useful for fast diffs where
+    /// only metadata (size, mtime, runnable) is compared.
     pub ignore_hashes: bool,
+
+    /// If `true`, the `runnable` field is treated specially when a file appears
+    /// in both snapshots:
+    ///
+    /// 1. **Comparison**: `runnable` is ignored when deciding whether the file
+    ///    changed (so a Windows collector that lost the POSIX execute bit does
+    ///    not cause a spurious "modified" entry).
+    /// 2. **Preservation**: if the file is otherwise modified (size, mtime, or
+    ///    hash differs), the parent entry's `runnable` value is copied into
+    ///    the diff entry instead of the current entry's value.
+    ///
+    /// The comparison half is delegated to [`entries_differ`] via its
+    /// `ignore_runnable` parameter; the preservation half is applied by
+    /// [`diff_snapshots`] itself when it emits the diff entry.
     pub preserve_runnable: bool,
 }
 
 /// Compares two file entries to determine if they differ.
 ///
-/// Checks entry type transitions, content hashes (unless `ignore_hashes`),
-/// and metadata (size, mtime, runnable).
+/// Checks entry type transitions (regular vs symlink), content hashes (unless
+/// `ignore_hashes`), and metadata (size, mtime, runnable).
+///
+/// # Parameters
+///
+/// - `parent`: The parent-side entry (older snapshot).
+/// - `current`: The current-side entry (newer snapshot).
+/// - `ignore_hashes`: When `true`, skip the `hash`/`chunk_hashes` comparison.
+///   Used for fast diff mode where only metadata is compared.
+/// - `ignore_runnable`: When `true`, skip the `runnable` comparison. Callers
+///   that want the top-level [`DiffOptions::preserve_runnable`] behaviour pass
+///   the value of that field here — this function only controls whether
+///   `runnable` participates in the comparison, not how the diff entry is
+///   constructed. The "preserve" half of `preserve_runnable` (copying the
+///   parent's `runnable` into the diff entry) is handled by [`diff_snapshots`]
+///   itself. This matches the Python reference's `_entries_differ(...,
+///   ignore_runnable=...)`.
 pub fn entries_differ(
     parent: &FileEntry,
     current: &FileEntry,
     ignore_hashes: bool,
-    preserve_runnable: bool,
+    ignore_runnable: bool,
 ) -> bool {
     let parent_is_symlink = parent.symlink_target.is_some();
     let current_is_symlink = current.symlink_target.is_some();
@@ -44,7 +81,7 @@ pub fn entries_differ(
     {
         return true;
     }
-    if !preserve_runnable && parent.runnable != current.runnable {
+    if !ignore_runnable && parent.runnable != current.runnable {
         return true;
     }
     false
@@ -110,7 +147,17 @@ pub fn diff_snapshots<P: Clone>(
         match parent_files.get(cf.path.as_str()) {
             None => files.push(cf.clone()),
             Some(pf) => {
-                if entries_differ(pf, cf, options.ignore_hashes, options.preserve_runnable) {
+                // `preserve_runnable` at the options layer means two things:
+                //   1. Ignore the `runnable` field when deciding if files differ
+                //      (this is the `ignore_runnable` arg to `entries_differ`).
+                //   2. If the file is otherwise modified, copy the parent's
+                //      `runnable` into the diff entry (handled below).
+                if entries_differ(
+                    pf,
+                    cf,
+                    options.ignore_hashes,
+                    /* ignore_runnable = */ options.preserve_runnable,
+                ) {
                     let mut entry = cf.clone();
                     if options.preserve_runnable && cf.symlink_target.is_none() {
                         entry.runnable = pf.runnable;

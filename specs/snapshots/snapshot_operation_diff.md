@@ -65,27 +65,36 @@ pub fn entries_differ(
     parent: &FileEntry,
     current: &FileEntry,
     ignore_hashes: bool,
-    preserve_runnable: bool,
+    ignore_runnable: bool,
 ) -> bool
 ```
 
 - Type transitions (file ↔ symlink) are always different
 - Symlinks compared by `symlink_target` only
-- Regular files compared by hash/chunk_hashes (unless `ignore_hashes`), size, mtime, runnable
+- Regular files compared by hash/chunk_hashes (unless `ignore_hashes`), size, mtime, and runnable (unless `ignore_runnable`)
 
-## The `preserve_runnable` Parameter
+The final parameter is called `ignore_runnable` rather than `preserve_runnable` because at this layer it only controls the comparison — it cannot "preserve" anything, since `entries_differ` returns a `bool` and never constructs a diff entry. Callers who want the full [`preserve_runnable` behaviour](#the-preserve_runnable-option) pass `DiffOptions::preserve_runnable` through as `ignore_runnable`; the "copy parent's runnable into the diff" half happens in `diff_snapshots` itself. This matches the Python reference (`_entries_differ(..., ignore_runnable=...)`).
+
+## The `preserve_runnable` Option
+
+The `DiffOptions::preserve_runnable` flag controls two behaviours of `diff_snapshots` at once:
+
+1. **Comparison**: `runnable` is ignored when deciding whether a file changed. This is delegated to `entries_differ` via its `ignore_runnable` parameter.
+2. **Preservation**: when a file *is* reported as modified (size, mtime, or hash differs), the parent entry's `runnable` value is copied into the diff entry.
+
+### Motivation
 
 The `runnable` field captures the POSIX execute bit. On Windows, all files report `runnable=false`. This creates a cross-platform problem:
 
 1. Manifest created on POSIX with `script.sh` having `runnable=true`
 2. User modifies `script.sh` on Windows
 3. New manifest has `runnable=false`
-4. Diff shows modification, but applying back to POSIX incorrectly removes execute bit
+4. Diff shows modification, but applying back to POSIX incorrectly removes the execute bit
 
-`preserve_runnable=true` solves this by:
-- Ignoring `runnable` differences when determining if entries differ
-- Copying `runnable` from parent for modified files with other changes
-- New files always use current manifest's `runnable` value
+With `preserve_runnable=true`:
+- `runnable` differences alone do not mark a file as modified.
+- When a file is modified for other reasons, the diff carries the parent's `runnable`.
+- New files (not present in the parent) always use the current manifest's `runnable`.
 
 ## Implementation
 
