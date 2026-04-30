@@ -9,7 +9,32 @@ mod runner;
 mod runner_win;
 
 use protocol::{send, Command, Response};
-use std::io::BufRead;
+use std::io::{BufRead, Read};
+
+/// Maximum bytes the helper will read for a single JSON line from stdin.
+/// Matches the 128 KB limit used for subprocess log lines (2× `LOG_LINE_MAX_LENGTH`).
+/// Lines exceeding this are rejected with an error response.
+const MAX_LINE_LENGTH: usize = 128 * 1024;
+
+/// Read a single line from `reader`, enforcing [`MAX_LINE_LENGTH`].
+/// Returns `Ok(0)` on EOF, `Ok(n)` on success, or `Err` if the line is too long.
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    buf: &mut String,
+) -> std::io::Result<usize> {
+    buf.clear();
+    let n = Read::take(&mut *reader, MAX_LINE_LENGTH as u64).read_line(buf)?;
+    if n == MAX_LINE_LENGTH && !buf.ends_with('\n') {
+        // Line exceeded the limit — drain the rest so the stream stays aligned
+        let mut discard = Vec::new();
+        let _ = reader.read_until(b'\n', &mut discard);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("line exceeds {MAX_LINE_LENGTH} byte limit"),
+        ));
+    }
+    Ok(n)
+}
 
 fn main() {
     #[cfg(unix)]
@@ -28,10 +53,15 @@ fn run_unix() {
 
     loop {
         line.clear();
-        match reader.read_line(&mut line) {
+        match read_bounded_line(&mut reader, &mut line) {
             Ok(0) => break,
             Ok(_) => {}
-            Err(_) => break,
+            Err(e) => {
+                send(&Response::Error {
+                    error: format!("stdin read error: {e}"),
+                });
+                continue;
+            }
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -80,10 +110,15 @@ fn run_windows() {
 
         loop {
             line.clear();
-            match reader.read_line(&mut line) {
+            match read_bounded_line(&mut reader, &mut line) {
                 Ok(0) => break,
                 Ok(_) => {}
-                Err(_) => break,
+                Err(e) => {
+                    send(&Response::Error {
+                        error: format!("stdin read error: {e}"),
+                    });
+                    continue;
+                }
             }
             let trimmed = line.trim();
             if trimmed.is_empty() {
