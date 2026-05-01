@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Open Job Description for ECMAScript — model, expression, and validation via WebAssembly"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

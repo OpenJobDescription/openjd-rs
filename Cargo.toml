@@ -9,12 +9,22 @@ members = [
 ]
 resolver = "2"
 
+# Workspace-wide metadata inherited by crates via `*.workspace = true`. Each
+# publishable crate sets its own `version` (independent versioning) but inherits
+# everything else from here. Non-publishable crates (openjd-snapshots,
+# openjd-for-js) inherit the workspace version below as a convenience — they
+# have `publish = false` so the version number is not meaningful on crates.io.
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "(Apache-2.0 OR MIT)"
 repository = "https://github.com/OpenJobDescription/openjd-rs"
+homepage = "https://github.com/OpenJobDescription/openjd-rs"
+readme = "README.md"
 rust-version = "1.92"
+authors = ["Amazon Web Services"]
+keywords = ["openjd", "openjobdescription", "render-farm", "job-template", "rendering"]
+categories = ["command-line-utilities", "parser-implementations"]
 
 [workspace.dependencies]
 shlex = "1"

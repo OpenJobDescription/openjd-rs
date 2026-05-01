@@ -1,0 +1,122 @@
+# Release-plz: automated versioning, changelog, and crates.io publishing.
+#
+# ⚠️ DRY-RUN MODE: this workflow is currently configured to dry-run only.
+#   The `release-pr` job still opens/updates the Release PR so we can see what
+#   it proposes, but the `release` job runs `cargo publish --dry-run` and does
+#   NOT create git tags, GitHub Releases, or publish to crates.io.
+#
+#   To go live, remove `dry_run: true` from the `release-plz-release` job.
+#   See RELEASING.md for the one-time setup that must be completed first.
+#
+# Overview (once dry-run is removed):
+#   On every push to `mainline`, release-plz does two things:
+#     1. `release-pr` — opens (or updates) a single PR titled "chore: release"
+#        that bumps versions, updates Cargo.lock, and regenerates CHANGELOG.md
+#        for every crate with unreleased conventional-commit changes.
+#     2. `release` — for any commit on `mainline` that matches a published
+#        version (i.e. the Release PR was just merged), creates git tags,
+#        GitHub Releases, and publishes the crates to crates.io in dependency
+#        order.
+#
+# Authentication:
+#   Publishing uses crates.io Trusted Publishing via OIDC. No long-lived API
+#   token is stored as a secret. For this to work, each publishable crate must
+#   be registered for trusted publishing in its crates.io settings (pointing
+#   at this repo and this workflow filename). See RELEASING.md.
+#
+# Release policy:
+#   - Publishable: openjd-expr, openjd-model, openjd-sessions, openjd-cli
+#   - Excluded:    openjd-snapshots, openjd-for-js  (publish = false + explicit
+#                  `release = false` entries in release-plz.toml)
+#   - Independent versions per crate, driven by conventional commits.
+#
+# See release-plz.toml for the tool configuration.
+
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - mainline
+
+# Only one release workflow runs at a time. We do NOT cancel in-progress runs
+# because that could abandon an in-flight publish partway through the dependency
+# chain.
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Publish unreleased crates. This job only produces side effects on the
+  # commit that results from merging a Release PR, because `cargo publish`
+  # refuses to re-publish versions that are already on crates.io.
+  release-plz-release:
+    name: Release-plz release
+    # Guard against release-plz running in forks.
+    if: ${{ github.repository == 'OpenJobDescription/openjd-rs' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      # Push git tags and create GitHub Releases.
+      contents: write
+      # Read the Release PR metadata to associate it with the release.
+      pull-requests: read
+      # Exchange an OIDC token with crates.io for trusted publishing.
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+          # ⚠️ Remove this line to actually publish. See the header comment.
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Open or update the Release PR. This runs on every push to mainline.
+  # The `release-pr` command is not affected by `dry_run`, so the PR will
+  # appear normally; it just won't be acted upon by the release job above
+  # until `dry_run: true` is removed.
+  release-plz-pr:
+    name: Release-plz PR
+    if: ${{ github.repository == 'OpenJobDescription/openjd-rs' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Create/update branch with version bumps, changelog, Cargo.lock.
+      contents: write
+      # Open and maintain the Release PR.
+      pull-requests: write
+    # Cancel an earlier in-progress PR update if a newer commit landed. This is
+    # safe for the PR-update job (but NOT for the release job above) because
+    # the next run will simply recompute the PR state from the latest commit.
+    concurrency:
+      group: release-plz-pr-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

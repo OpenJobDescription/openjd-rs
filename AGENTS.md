@@ -231,6 +231,15 @@ cargo clippy --all-features --all-targets --workspace -- -D warnings
 cargo test --workspace
 ```
 
+## Releasing
+
+Releases are automated via [release-plz](https://release-plz.dev/). Every push to `mainline` runs `.github/workflows/release-plz.yml`, which maintains a single "chore: release" PR. Merging that PR publishes the changed crates to crates.io via OIDC Trusted Publishing.
+
+- Published crates: `openjd-expr`, `openjd-model`, `openjd-sessions`, `openjd-cli` — independent versions, conventional-commit-driven bumps.
+- Non-published crates: `openjd-snapshots`, `openjd-for-js` — marked `publish = false`.
+
+See [RELEASING.md](RELEASING.md) for the full process, one-time setup steps, and how to add new crates.
+
 ## Running the Conformance Suite
 
 The [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications) conformance test suite validates CLI behavior against the spec.

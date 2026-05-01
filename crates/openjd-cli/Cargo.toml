@@ -1,18 +1,25 @@
 [package]
 name = "openjd-cli"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 description = "Open Job Description CLI — validate, summarize, and run job templates"
+keywords = ["openjd", "openjobdescription", "cli", "job-template", "render-farm"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "openjd-rs"
 path = "src/main.rs"
 
 [dependencies]
-openjd-expr = { path = "../openjd-expr" }
-openjd-model = { path = "../openjd-model" }
-openjd-sessions = { path = "../openjd-sessions" }
+openjd-expr = { path = "../openjd-expr", version = "0.1.0" }
+openjd-model = { path = "../openjd-model", version = "0.1.0" }
+openjd-sessions = { path = "../openjd-sessions", version = "0.1.0" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

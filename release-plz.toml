@@ -1,0 +1,118 @@
+# release-plz configuration for openjd-rs
+#
+# See https://release-plz.dev/docs/config for the full reference.
+#
+# Release model:
+#   - Independent versions per crate. release-plz tracks each crate's commit
+#     history and only bumps the ones that changed, cascading version bumps
+#     through dependent crates as needed.
+#   - Conventional commits drive the semver bump (feat = minor, fix = patch,
+#     `!` suffix or `BREAKING CHANGE` footer = major).
+#   - Release PR model: every push to mainline updates (or creates) a single
+#     Release PR with version bumps, Cargo.lock updates, and CHANGELOG entries.
+#     Merging the PR triggers the actual release (git tag, GitHub Release,
+#     `cargo publish`).
+#   - Authentication: crates.io trusted publishing via OIDC. No
+#     CARGO_REGISTRY_TOKEN secret is used. Each crate must be registered with
+#     trusted publishing in its crates.io settings. See RELEASING.md.
+#
+# The two non-publishable crates (openjd-snapshots, openjd-for-js) are excluded
+# below (belt-and-suspenders; their Cargo.toml also has `publish = false`).
+
+[workspace]
+# Always create a GitHub Release when a version is published.
+git_release_enable = true
+git_release_type = "auto"
+
+# Pre-release 0.x bumps: under semver 0.x, feat = patch (not minor), because
+# 0.x is considered pre-stable. Once any crate reaches 1.0, remove or tune
+# this per-crate.
+semver_check = true
+
+# Changelog settings — inherits git-cliff defaults unless overridden below.
+changelog_update = true
+
+# Group changelog entries by conventional-commit type.
+[changelog]
+# Default git-cliff-style config is fine; just pin the sections we care about.
+header = """# Changelog
+
+All notable changes to this crate are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+body = """
+{%- macro remote_url() -%}
+  https://github.com/OpenJobDescription/openjd-rs
+{%- endmacro -%}
+
+{% if version -%}
+    ## [{{ version | trim_start_matches(pat="v") }}]\
+    {%- if previous.version -%}
+      ({{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }})\
+    {%- else -%}
+      ({{ self::remote_url() }}/releases/tag/{{ version }})\
+    {%- endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+    ## [Unreleased]
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.breaking %}[**breaking**] {% endif %}\
+          {{ commit.message | upper_first }}\
+          {% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}]\
+            ({{ self::remote_url() }}/pull/{{ commit.remote.pr_number }}))\
+          {%- endif %}
+    {% endfor %}
+{% endfor %}
+"""
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^test", group = "Testing" },
+    { message = "^ci", group = "CI" },
+    { message = "^chore\\(release\\): prepare for", skip = true },
+    { message = "^chore\\(deps\\)", skip = true },
+    { message = "^chore", group = "Miscellaneous" },
+]
+
+# ── Publishable crates ──────────────────────────────────────────────────────
+# Per-crate overrides are optional; the workspace settings above apply to all
+# publishable crates. List them explicitly for clarity and so any crate-level
+# tweaks are easy to add later.
+
+[[package]]
+name = "openjd-expr"
+
+[[package]]
+name = "openjd-model"
+
+[[package]]
+name = "openjd-sessions"
+
+[[package]]
+name = "openjd-cli"
+
+# ── Non-publishable crates ──────────────────────────────────────────────────
+# release-plz reads `publish = false` from Cargo.toml and will automatically
+# skip publishing for these crates. The explicit entries below also disable
+# version bumps and changelog generation, keeping them out of the Release PR
+# entirely.
+
+[[package]]
+name = "openjd-snapshots"
+publish = false
+release = false
+changelog_update = false
+
+[[package]]
+name = "openjd-for-js"
+publish = false
+release = false
+changelog_update = false
