@@ -7,7 +7,7 @@
 Fills in hashes for a manifest AND uploads file content to a data cache in a single pipelined pass, avoiding reading files twice.
 
 ```rust
-pub fn hash_upload_abs_manifest(
+pub async fn hash_upload_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: HashUploadOptions,

@@ -1,6 +1,7 @@
 /target/
 /bin/
 /coverage/
+/bench-results/
 package*.json
 !js/package.json
 !js/package-lock.json

@@ -44,8 +44,8 @@ fn hashed_entry(path: &str, content: &[u8], dc: &dyn ContentAddressedDataCache) 
 
 // ===== Basic downloading =====
 
-#[test]
-fn download_empty_manifest() {
+#[tokio::test]
+async fn download_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
@@ -54,13 +54,14 @@ fn download_empty_manifest() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert_eq!(result.statistics.downloaded_files, 0);
     assert_eq!(result.statistics.total_bytes, 0);
 }
 
-#[test]
-fn download_single_file() {
+#[tokio::test]
+async fn download_single_file() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -73,6 +74,7 @@ fn download_single_file() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
@@ -80,8 +82,8 @@ fn download_single_file() {
     assert_eq!(result.statistics.downloaded_bytes, 11);
 }
 
-#[test]
-fn download_creates_parent_dirs() {
+#[tokio::test]
+async fn download_creates_parent_dirs() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -94,13 +96,14 @@ fn download_creates_parent_dirs() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "nested");
 }
 
-#[test]
-fn download_multiple_files_with_subdirs() {
+#[tokio::test]
+async fn download_multiple_files_with_subdirs() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -119,6 +122,7 @@ fn download_multiple_files_with_subdirs() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), "Content 1");
@@ -127,8 +131,8 @@ fn download_multiple_files_with_subdirs() {
     assert_eq!(result.statistics.downloaded_files, 3);
 }
 
-#[test]
-fn download_updates_mtime_in_manifest() {
+#[tokio::test]
+async fn download_updates_mtime_in_manifest() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -141,6 +145,7 @@ fn download_updates_mtime_in_manifest() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     // mtime should be restored to the manifest value (or close, depending on fs precision).
@@ -153,8 +158,8 @@ fn download_updates_mtime_in_manifest() {
     );
 }
 
-#[test]
-fn download_creates_manifest_dirs() {
+#[tokio::test]
+async fn download_creates_manifest_dirs() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -167,6 +172,7 @@ fn download_creates_manifest_dirs() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert!(dir_path.is_dir());
@@ -174,8 +180,8 @@ fn download_creates_manifest_dirs() {
 
 // ===== Conflict resolution =====
 
-#[test]
-fn conflict_skip() {
+#[tokio::test]
+async fn conflict_skip() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -192,14 +198,15 @@ fn conflict_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
     assert_eq!(result.statistics.skipped_files, 1);
 }
 
-#[test]
-fn conflict_overwrite() {
+#[tokio::test]
+async fn conflict_overwrite() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -213,13 +220,14 @@ fn conflict_overwrite() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
 }
 
-#[test]
-fn conflict_create_copy() {
+#[tokio::test]
+async fn conflict_create_copy() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -236,6 +244,7 @@ fn conflict_create_copy() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
@@ -245,8 +254,8 @@ fn conflict_create_copy() {
 
 // ===== Diff manifest deletions =====
 
-#[test]
-fn diff_deletes_files() {
+#[tokio::test]
+async fn diff_deletes_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -267,14 +276,15 @@ fn diff_deletes_files() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(!file_to_delete.exists());
     assert!(file_to_keep.exists());
 }
 
-#[test]
-fn diff_apply_deletes_false_skips_deletions() {
+#[tokio::test]
+async fn diff_apply_deletes_false_skips_deletions() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -293,13 +303,14 @@ fn diff_apply_deletes_false_skips_deletions() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(file_to_delete.exists());
 }
 
-#[test]
-fn diff_deletes_empty_directory() {
+#[tokio::test]
+async fn diff_deletes_empty_directory() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -320,13 +331,14 @@ fn diff_deletes_empty_directory() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(!dir_to_delete.exists());
 }
 
-#[test]
-fn non_empty_directory_not_deleted() {
+#[tokio::test]
+async fn non_empty_directory_not_deleted() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -348,14 +360,15 @@ fn non_empty_directory_not_deleted() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(dir.exists());
     assert!(dir.join("file.txt").exists());
 }
 
-#[test]
-fn deletion_order_children_before_parents() {
+#[tokio::test]
+async fn deletion_order_children_before_parents() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -388,6 +401,7 @@ fn deletion_order_children_before_parents() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(!file_in_child.exists());
@@ -397,8 +411,8 @@ fn deletion_order_children_before_parents() {
 
 // ===== Validation =====
 
-#[test]
-fn rejects_file_with_no_hash() {
+#[tokio::test]
+async fn rejects_file_with_no_hash() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -411,7 +425,8 @@ fn rejects_file_with_no_hash() {
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
     match result {
         Err(e) => assert!(e.to_string().contains("no hash"), "unexpected error: {e}"),
         Ok(_) => panic!("expected error for file with no hash"),
@@ -420,8 +435,8 @@ fn rejects_file_with_no_hash() {
 
 // ===== Chunked download =====
 
-#[test]
-fn download_chunked_file() {
+#[tokio::test]
+async fn download_chunked_file() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -446,6 +461,7 @@ fn download_chunked_file() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), b"aaabbbcccddd");
@@ -454,8 +470,8 @@ fn download_chunked_file() {
 // ===== Symlink download =====
 
 #[cfg(unix)]
-#[test]
-fn download_creates_symlink() {
+#[tokio::test]
+async fn download_creates_symlink() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -473,6 +489,7 @@ fn download_creates_symlink() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
@@ -481,8 +498,8 @@ fn download_creates_symlink() {
 
 // ===== Round trip =====
 
-#[test]
-fn round_trip_upload_then_download() {
+#[tokio::test]
+async fn round_trip_upload_then_download() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dst_dir = TempDir::new().unwrap();
@@ -506,6 +523,7 @@ fn round_trip_upload_then_download() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     // Remap paths to destination
@@ -528,6 +546,7 @@ fn round_trip_upload_then_download() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(
@@ -542,8 +561,8 @@ fn round_trip_upload_then_download() {
 
 // ===== Hash cache skip =====
 
-#[test]
-fn hash_cache_skip_on_second_download() {
+#[tokio::test]
+async fn hash_cache_skip_on_second_download() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -563,6 +582,7 @@ fn hash_cache_skip_on_second_download() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
     assert_eq!(r1.statistics.skipped_files, 0);
@@ -576,13 +596,14 @@ fn hash_cache_skip_on_second_download() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
 }
 
-#[test]
-fn hash_cache_stale_mtime_redownloads() {
+#[tokio::test]
+async fn hash_cache_stale_mtime_redownloads() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -602,6 +623,7 @@ fn hash_cache_stale_mtime_redownloads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "original");
 
@@ -618,14 +640,15 @@ fn hash_cache_stale_mtime_redownloads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 1);
     assert_eq!(r2.statistics.skipped_files, 0);
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "original");
 }
 
-#[test]
-fn hash_cache_deleted_file_redownloads() {
+#[tokio::test]
+async fn hash_cache_deleted_file_redownloads() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -644,6 +667,7 @@ fn hash_cache_deleted_file_redownloads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     std::fs::remove_file(&dest).unwrap();
@@ -656,13 +680,14 @@ fn hash_cache_deleted_file_redownloads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 1);
     assert!(dest.exists());
 }
 
-#[test]
-fn without_hash_cache_always_downloads() {
+#[tokio::test]
+async fn without_hash_cache_always_downloads() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -676,6 +701,7 @@ fn without_hash_cache_always_downloads() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
 
@@ -684,14 +710,15 @@ fn without_hash_cache_always_downloads() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.downloaded_files, 1);
 }
 
 // ===== Atomic writes =====
 
-#[test]
-fn no_temp_files_after_success() {
+#[tokio::test]
+async fn no_temp_files_after_success() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -710,6 +737,7 @@ fn no_temp_files_after_success() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let tmp_files: Vec<_> = std::fs::read_dir(&dl_dir)
@@ -720,8 +748,8 @@ fn no_temp_files_after_success() {
     assert!(tmp_files.is_empty(), "temp files left: {:?}", tmp_files);
 }
 
-#[test]
-fn atomic_write_produces_correct_content() {
+#[tokio::test]
+async fn atomic_write_produces_correct_content() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -735,6 +763,7 @@ fn atomic_write_produces_correct_content() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "atomic content");
@@ -742,8 +771,8 @@ fn atomic_write_produces_correct_content() {
 
 // ===== Chunked file hash cache =====
 
-#[test]
-fn chunked_download_round_trip_with_hash_cache() {
+#[tokio::test]
+async fn chunked_download_round_trip_with_hash_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -775,6 +804,7 @@ fn chunked_download_round_trip_with_hash_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
     assert_eq!(std::fs::read(&dest).unwrap(), b"AAAABBBBCC");
@@ -789,6 +819,7 @@ fn chunked_download_round_trip_with_hash_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.downloaded_files, 0);
@@ -798,8 +829,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // ===== Progress callback and parallelism tests =====
 
-#[test]
-fn download_progress_callback_invoked() {
+#[tokio::test]
+async fn download_progress_callback_invoked() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -825,13 +856,14 @@ fn download_progress_callback_invoked() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(call_count.load(Ordering::Relaxed) >= 1);
 }
 
-#[test]
-fn download_progress_callback_cancel() {
+#[tokio::test]
+async fn download_progress_callback_cancel() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -851,14 +883,15 @@ fn download_progress_callback_cancel() {
             max_workers: Some(1),
             ..Default::default()
         },
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("cancelled"));
 }
 
-#[test]
-fn parallel_download_produces_same_results() {
+#[tokio::test]
+async fn parallel_download_produces_same_results() {
     let tmp1 = TempDir::new().unwrap();
     let tmp2 = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
@@ -890,6 +923,7 @@ fn parallel_download_produces_same_results() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     download_abs_manifest(
@@ -900,6 +934,7 @@ fn parallel_download_produces_same_results() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     for i in 0..10 {
@@ -915,8 +950,8 @@ fn parallel_download_produces_same_results() {
 // Progress metadata tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn download_progress_fields_populated() {
+#[tokio::test]
+async fn download_progress_fields_populated() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -927,14 +962,15 @@ fn download_progress_fields_populated() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(result.statistics.total_time > 0.0);
     assert!(result.statistics.rate >= 0.0);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
 
-#[test]
-fn download_progress_zero_for_empty_manifest() {
+#[tokio::test]
+async fn download_progress_zero_for_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
@@ -943,13 +979,14 @@ fn download_progress_zero_for_empty_manifest() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(result.statistics.total_files, 0);
     assert_eq!(result.statistics.progress, 0.0);
 }
 
-#[test]
-fn download_progress_callback_receives_timing() {
+#[tokio::test]
+async fn download_progress_callback_receives_timing() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -976,6 +1013,7 @@ fn download_progress_callback_receives_timing() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
@@ -984,8 +1022,8 @@ fn download_progress_callback_receives_timing() {
     }
 }
 
-#[test]
-fn download_progress_rate_positive() {
+#[tokio::test]
+async fn download_progress_rate_positive() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1000,14 +1038,15 @@ fn download_progress_rate_positive() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(result.statistics.rate > 0.0);
 }
 
 // ===== Progress message tests =====
 
-#[test]
-fn download_progress_message_contains_rate() {
+#[tokio::test]
+async fn download_progress_message_contains_rate() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1022,6 +1061,7 @@ fn download_progress_message_contains_rate() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(
         result.statistics.progress_message.contains("/s)"),
@@ -1030,8 +1070,8 @@ fn download_progress_message_contains_rate() {
     );
 }
 
-#[test]
-fn download_progress_message_contains_elapsed_time() {
+#[tokio::test]
+async fn download_progress_message_contains_elapsed_time() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1046,6 +1086,7 @@ fn download_progress_message_contains_elapsed_time() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     // Message should contain "in X.XXs"
     assert!(
@@ -1060,8 +1101,8 @@ fn download_progress_message_contains_elapsed_time() {
     );
 }
 
-#[test]
-fn download_final_statistics_transfer_rate_calculation() {
+#[tokio::test]
+async fn download_final_statistics_transfer_rate_calculation() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1073,6 +1114,7 @@ fn download_final_statistics_transfer_rate_calculation() {
         dc.clone(),
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     // rate should be approximately total_bytes / total_time
     let expected = result.statistics.total_bytes as f64 / result.statistics.total_time;
@@ -1087,8 +1129,8 @@ fn download_final_statistics_transfer_rate_calculation() {
 // ===== Symlink policy and delete edge cases =====
 
 #[cfg(unix)]
-#[test]
-fn download_excludes_symlinks_with_exclude_policy() {
+#[tokio::test]
+async fn download_excludes_symlinks_with_exclude_policy() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1111,6 +1153,7 @@ fn download_excludes_symlinks_with_exclude_policy() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(file_path.exists());
@@ -1118,8 +1161,8 @@ fn download_excludes_symlinks_with_exclude_policy() {
 }
 
 #[cfg(unix)]
-#[test]
-fn diff_deletes_symlink() {
+#[tokio::test]
+async fn diff_deletes_symlink() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1138,14 +1181,15 @@ fn diff_deletes_symlink() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(!link.exists());
     assert!(target.exists());
 }
 
-#[test]
-fn snapshot_manifest_ignores_apply_deletes() {
+#[tokio::test]
+async fn snapshot_manifest_ignores_apply_deletes() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1162,6 +1206,7 @@ fn snapshot_manifest_ignores_apply_deletes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(existing.exists());
@@ -1192,8 +1237,8 @@ fn chunked_entry(
     (entry, manifest)
 }
 
-#[test]
-fn download_mixed_regular_and_chunked_files() {
+#[tokio::test]
+async fn download_mixed_regular_and_chunked_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1221,6 +1266,7 @@ fn download_mixed_regular_and_chunked_files() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(
@@ -1231,8 +1277,8 @@ fn download_mixed_regular_and_chunked_files() {
     assert_eq!(result.statistics.downloaded_files, 2);
 }
 
-#[test]
-fn download_chunked_file_conflict_skip() {
+#[tokio::test]
+async fn download_chunked_file_conflict_skip() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1250,14 +1296,15 @@ fn download_chunked_file_conflict_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old data");
     assert_eq!(result.statistics.skipped_files, 1);
 }
 
-#[test]
-fn download_chunked_file_conflict_overwrite() {
+#[tokio::test]
+async fn download_chunked_file_conflict_overwrite() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1272,13 +1319,14 @@ fn download_chunked_file_conflict_overwrite() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), b"newdat");
 }
 
-#[test]
-fn download_chunked_file_preserves_mtime() {
+#[tokio::test]
+async fn download_chunked_file_preserves_mtime() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1291,6 +1339,7 @@ fn download_chunked_file_preserves_mtime() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let actual_mtime = result.manifest.files()[0].mtime.unwrap();
@@ -1303,8 +1352,8 @@ fn download_chunked_file_preserves_mtime() {
 
 // ===== Chunked hash cache tests =====
 
-#[test]
-fn chunked_file_downloaded_when_hash_mismatch() {
+#[tokio::test]
+async fn chunked_file_downloaded_when_hash_mismatch() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1323,6 +1372,7 @@ fn chunked_file_downloaded_when_hash_mismatch() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(std::fs::read(&dest).unwrap(), b"olddat");
 
@@ -1337,14 +1387,15 @@ fn chunked_file_downloaded_when_hash_mismatch() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(r.statistics.downloaded_files, 1);
     assert_eq!(std::fs::read(&dest).unwrap(), b"NEWDAT");
 }
 
-#[test]
-fn hash_cache_updated_after_chunked_download() {
+#[tokio::test]
+async fn hash_cache_updated_after_chunked_download() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1363,6 +1414,7 @@ fn hash_cache_updated_after_chunked_download() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
 
@@ -1375,13 +1427,14 @@ fn hash_cache_updated_after_chunked_download() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.downloaded_files, 0);
 }
 
-#[test]
-fn second_download_skips_chunked_file() {
+#[tokio::test]
+async fn second_download_skips_chunked_file() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1399,6 +1452,7 @@ fn second_download_skips_chunked_file() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let content_after_first = std::fs::read(&dest).unwrap();
@@ -1412,6 +1466,7 @@ fn second_download_skips_chunked_file() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(r2.statistics.downloaded_files, 0);
@@ -1439,8 +1494,8 @@ fn download_relative_path_raises_error() {
 
 // ===== Progress tests =====
 
-#[test]
-fn download_progress_with_hash_cache_hits() {
+#[tokio::test]
+async fn download_progress_with_hash_cache_hits() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1460,6 +1515,7 @@ fn download_progress_with_hash_cache_hits() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Second download — should be a cache hit (skipped)
@@ -1471,6 +1527,7 @@ fn download_progress_with_hash_cache_hits() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(r2.statistics.skipped_files, 1);
@@ -1478,8 +1535,8 @@ fn download_progress_with_hash_cache_hits() {
     assert_eq!(r2.statistics.skipped_bytes, 14);
 }
 
-#[test]
-fn download_progress_total_time_increases_monotonically() {
+#[tokio::test]
+async fn download_progress_total_time_increases_monotonically() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1510,6 +1567,7 @@ fn download_progress_total_time_increases_monotonically() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let t = times.lock().unwrap();
@@ -1526,8 +1584,8 @@ fn download_progress_total_time_increases_monotonically() {
 
 // ===== Corrupted data tests =====
 
-#[test]
-fn download_with_corrupted_cache_object() {
+#[tokio::test]
+async fn download_with_corrupted_cache_object() {
     // Store wrong content under a valid hash — verification catches it
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
@@ -1545,7 +1603,8 @@ fn download_with_corrupted_cache_object() {
         &AbsManifest::Snapshot(make_snapshot(vec![entry])),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -1555,8 +1614,8 @@ fn download_with_corrupted_cache_object() {
     );
 }
 
-#[test]
-fn download_with_truncated_cache_object() {
+#[tokio::test]
+async fn download_with_truncated_cache_object() {
     // Store truncated content — verification catches the mismatch
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
@@ -1573,7 +1632,8 @@ fn download_with_truncated_cache_object() {
         &AbsManifest::Snapshot(make_snapshot(vec![entry])),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -1583,8 +1643,8 @@ fn download_with_truncated_cache_object() {
     );
 }
 
-#[test]
-fn download_missing_object_returns_error() {
+#[tokio::test]
+async fn download_missing_object_returns_error() {
     // Manifest references a hash not present in the data cache
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
@@ -1598,14 +1658,15 @@ fn download_missing_object_returns_error() {
         &AbsManifest::Snapshot(make_snapshot(vec![entry])),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("IO error"));
 }
 
-#[test]
-fn stale_hash_cache_triggers_redownload() {
+#[tokio::test]
+async fn stale_hash_cache_triggers_redownload() {
     // Hash cache has an old hash for the file, but manifest has a new hash.
     // Download should not skip — it should re-download.
     let tmp = TempDir::new().unwrap();
@@ -1629,6 +1690,7 @@ fn stale_hash_cache_triggers_redownload() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
 
@@ -1653,6 +1715,7 @@ fn stale_hash_cache_triggers_redownload() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Hash cache had old_hash for this mtime, but manifest wants new_hash → re-download
@@ -1661,8 +1724,8 @@ fn stale_hash_cache_triggers_redownload() {
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
 }
 
-#[test]
-fn corrupted_chunked_cache_object() {
+#[tokio::test]
+async fn corrupted_chunked_cache_object() {
     // One chunk has wrong content — verification catches the mismatch
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
@@ -1687,7 +1750,8 @@ fn corrupted_chunked_cache_object() {
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -1699,8 +1763,8 @@ fn corrupted_chunked_cache_object() {
 
 // ===== mtime restoration tests =====
 
-#[test]
-fn download_restores_mtime_from_manifest() {
+#[tokio::test]
+async fn download_restores_mtime_from_manifest() {
     // The downloaded file's mtime should be set to the manifest value,
     // not left as the time of download.
     let tmp = TempDir::new().unwrap();
@@ -1720,6 +1784,7 @@ fn download_restores_mtime_from_manifest() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     // The file on disk should have mtime close to the manifest value
@@ -1744,8 +1809,8 @@ fn download_restores_mtime_from_manifest() {
     assert_eq!(returned_mtime, on_disk_mtime);
 }
 
-#[test]
-fn download_restores_mtime_chunked() {
+#[tokio::test]
+async fn download_restores_mtime_chunked() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1766,6 +1831,7 @@ fn download_restores_mtime_chunked() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let on_disk_mtime = dest

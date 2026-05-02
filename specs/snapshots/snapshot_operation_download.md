@@ -7,7 +7,7 @@
 Downloads files from a data cache to the local filesystem. For snapshots, recreates the directory structure. For diffs, applies changes (download new/modified, delete removed).
 
 ```rust
-pub fn download_abs_manifest(
+pub async fn download_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: DownloadOptions,

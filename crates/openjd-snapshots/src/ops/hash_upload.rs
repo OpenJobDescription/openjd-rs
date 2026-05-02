@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
+use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
 use crate::hash::{hash_data, WHOLE_FILE_CHUNK_SIZE};
@@ -110,21 +110,21 @@ pub struct UploadStatistics {
 }
 
 /// Hashes files and uploads their content to a data cache in a single pass.
-pub fn hash_upload_abs_manifest(
+pub async fn hash_upload_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: HashUploadOptions,
 ) -> crate::Result<UploadResult> {
     match manifest {
         AbsManifest::Snapshot(s) => {
-            let (result, stats) = hash_upload_manifest(s, data_cache, options)?;
+            let (result, stats) = hash_upload_manifest(s, data_cache, options).await?;
             Ok(UploadResult {
                 manifest: AbsManifest::Snapshot(result),
                 statistics: stats,
             })
         }
         AbsManifest::Diff(d) => {
-            let (result, stats) = hash_upload_manifest(d, data_cache, options)?;
+            let (result, stats) = hash_upload_manifest(d, data_cache, options).await?;
             Ok(UploadResult {
                 manifest: AbsManifest::Diff(result),
                 statistics: stats,
@@ -152,7 +152,7 @@ enum FileResult {
     },
 }
 
-fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
+async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     manifest: &Manifest<P, K>,
     data_cache: Arc<dyn AsyncDataCache>,
     options: HashUploadOptions,
@@ -186,12 +186,6 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let max_memory = options
         .max_memory_bytes
         .unwrap_or_else(default_max_memory_bytes);
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(num_cpus().max(4))
-        .enable_all()
-        .build()
-        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
     struct WorkItem {
         index: usize,
@@ -251,7 +245,7 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let hash_cache_arc: Option<Arc<HashCache>> = options.hash_cache.clone();
     let force_rehash = options.force_rehash;
 
-    let file_results: Vec<crate::Result<(usize, FileResult)>> = rt.block_on(async {
+    let file_results: Vec<crate::Result<(usize, FileResult)>> = async {
         let mut handles = Vec::new();
 
         for item in work_items {
@@ -392,7 +386,8 @@ fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             }
         }
         results
-    });
+    }
+    .await;
 
     // Apply results and write cache entries sequentially
     for r in file_results {
@@ -802,8 +797,8 @@ mod tests {
         (p.to_string_lossy().into_owned(), mtime)
     }
 
-    #[test]
-    fn hash_upload_produces_hashes_and_stores_data() {
+    #[tokio::test]
+    async fn hash_upload_produces_hashes_and_stores_data() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -818,24 +813,19 @@ mod tests {
             data_cache.clone(),
             HashUploadOptions::default(),
         )
+        .await
         .unwrap();
 
         let hash = result.manifest.files()[0].hash.as_ref().unwrap();
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        assert!(rt
-            .block_on(data_cache.object_exists(hash, "xxh128"))
-            .unwrap());
-        let stored = rt.block_on(data_cache.get_object(hash, "xxh128")).unwrap();
+        assert!(data_cache.object_exists(hash, "xxh128").await.unwrap());
+        let stored = data_cache.get_object(hash, "xxh128").await.unwrap();
         assert_eq!(stored, b"hello");
         assert_eq!(result.statistics.uploaded_files, 1);
         assert_eq!(result.statistics.uploaded_bytes, 5);
     }
 
-    #[test]
-    fn second_upload_skips() {
+    #[tokio::test]
+    async fn second_upload_skips() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -851,6 +841,7 @@ mod tests {
             data_cache.clone(),
             HashUploadOptions::default(),
         )
+        .await
         .unwrap();
 
         let result = hash_upload_abs_manifest(
@@ -858,13 +849,14 @@ mod tests {
             data_cache.clone(),
             HashUploadOptions::default(),
         )
+        .await
         .unwrap();
         assert_eq!(result.statistics.uploaded_files, 0);
         assert_eq!(result.statistics.skipped_files, 1);
     }
 
-    #[test]
-    fn hash_cache_enables_full_skip() {
+    #[tokio::test]
+    async fn hash_cache_enables_full_skip() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let hc_dir = TempDir::new().unwrap();
@@ -885,6 +877,7 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
 
         let result = hash_upload_abs_manifest(
@@ -895,14 +888,15 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
         assert_eq!(result.statistics.skipped_files, 1);
         assert_eq!(result.statistics.hashed_files, 0);
         assert_eq!(result.statistics.uploaded_files, 0);
     }
 
-    #[test]
-    fn symlinks_and_deleted_pass_through() {
+    #[tokio::test]
+    async fn symlinks_and_deleted_pass_through() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let (path, mtime) = make_test_file(tmp.path(), "real.txt", b"data");
@@ -921,6 +915,7 @@ mod tests {
             data_cache.clone(),
             HashUploadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert!(result.manifest.files()[0].hash.is_some());
@@ -929,8 +924,8 @@ mod tests {
         assert_eq!(result.statistics.total_files, 1);
     }
 
-    #[test]
-    fn rejects_already_hashed_files() {
+    #[tokio::test]
+    async fn rejects_already_hashed_files() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let (path, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -946,7 +941,8 @@ mod tests {
             &AbsManifest::Snapshot(manifest),
             data_cache.clone(),
             HashUploadOptions::default(),
-        );
+        )
+        .await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -954,8 +950,8 @@ mod tests {
             .contains("already has hashes set"));
     }
 
-    #[test]
-    fn chunked_upload() {
+    #[tokio::test]
+    async fn chunked_upload() {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("chunked_upload.bin");
         let data = vec![42u8; 1024];
@@ -987,6 +983,7 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
 
         let f = &result.manifest.files()[0];
@@ -994,18 +991,9 @@ mod tests {
         let chunks = f.chunk_hashes.as_ref().unwrap();
         assert_eq!(chunks.len(), 4);
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         for h in chunks {
-            assert!(rt.block_on(data_cache.object_exists(h, "xxh128")).unwrap());
-            assert_eq!(
-                rt.block_on(data_cache.get_object(h, "xxh128"))
-                    .unwrap()
-                    .len(),
-                256
-            );
+            assert!(data_cache.object_exists(h, "xxh128").await.unwrap());
+            assert_eq!(data_cache.get_object(h, "xxh128").await.unwrap().len(), 256);
         }
     }
 }

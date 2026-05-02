@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-use super::memory_pool::{default_max_memory_bytes, num_cpus, MemoryPool};
+use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
 use crate::hash::hash_data;
@@ -147,21 +147,21 @@ pub struct DownloadStatistics {
 }
 
 /// Downloads files from a data cache to the local filesystem.
-pub fn download_abs_manifest(
+pub async fn download_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: DownloadOptions,
 ) -> crate::Result<DownloadResult> {
     match manifest {
         AbsManifest::Snapshot(s) => {
-            let (result, stats) = download_manifest(s, data_cache, options)?;
+            let (result, stats) = download_manifest(s, data_cache, options).await?;
             Ok(DownloadResult {
                 manifest: AbsManifest::Snapshot(result),
                 statistics: stats,
             })
         }
         AbsManifest::Diff(d) => {
-            let (result, stats) = download_manifest(d, data_cache, options)?;
+            let (result, stats) = download_manifest(d, data_cache, options).await?;
             Ok(DownloadResult {
                 manifest: AbsManifest::Diff(result),
                 statistics: stats,
@@ -253,7 +253,7 @@ fn collect_work_item(
     work_items.push((index, false, 0));
 }
 
-fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 'static>(
+async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 'static>(
     manifest: &Manifest<P, K>,
     data_cache: Arc<dyn AsyncDataCache>,
     options: DownloadOptions,
@@ -496,15 +496,9 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
     let progress_stats = Arc::new(Mutex::new(stats.clone()));
     let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(num_cpus().max(4))
-        .enable_all()
-        .build()
-        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
-
     let start = start_time;
 
-    let download_results: Vec<crate::Result<(usize, std::path::PathBuf)>> = rt.block_on(async {
+    let download_results: Vec<crate::Result<(usize, std::path::PathBuf)>> = async {
         let mut handles = Vec::new();
 
         for item in download_items {
@@ -739,7 +733,8 @@ fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + Sync + 
             }
         }
         results
-    });
+    }
+    .await;
 
     // Apply mtime restoration and cache writes sequentially
     for r in download_results {
@@ -973,8 +968,8 @@ mod tests {
         hash
     }
 
-    #[test]
-    fn download_single_file() {
+    #[tokio::test]
+    async fn download_single_file() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -993,6 +988,7 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
@@ -1000,8 +996,8 @@ mod tests {
         assert_eq!(result.statistics.downloaded_bytes, 11);
     }
 
-    #[test]
-    fn download_creates_parent_dirs() {
+    #[tokio::test]
+    async fn download_creates_parent_dirs() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1020,13 +1016,14 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "nested");
     }
 
-    #[test]
-    fn download_skip_conflict() {
+    #[tokio::test]
+    async fn download_skip_conflict() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1049,14 +1046,15 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
         assert_eq!(result.statistics.skipped_files, 1);
     }
 
-    #[test]
-    fn download_overwrite_conflict() {
+    #[tokio::test]
+    async fn download_overwrite_conflict() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1076,13 +1074,14 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
     }
 
-    #[test]
-    fn download_create_copy_conflict() {
+    #[tokio::test]
+    async fn download_create_copy_conflict() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1105,6 +1104,7 @@ mod tests {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
@@ -1112,8 +1112,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "new");
     }
 
-    #[test]
-    fn download_applies_deletes() {
+    #[tokio::test]
+    async fn download_applies_deletes() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1131,13 +1131,14 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert!(!file_to_delete.exists());
     }
 
-    #[test]
-    fn download_chunked_file() {
+    #[tokio::test]
+    async fn download_chunked_file() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1164,13 +1165,14 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert_eq!(std::fs::read(&dest).unwrap(), b"aaabbbcccddd");
     }
 
-    #[test]
-    fn download_updates_mtime_in_manifest() {
+    #[tokio::test]
+    async fn download_updates_mtime_in_manifest() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1190,6 +1192,7 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         // mtime should be restored to the manifest value (or close, depending on fs precision)
@@ -1201,8 +1204,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn download_creates_manifest_dirs() {
+    #[tokio::test]
+    async fn download_creates_manifest_dirs() {
         let tmp = TempDir::new().unwrap();
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
@@ -1216,6 +1219,7 @@ mod tests {
             Arc::new(data_cache),
             DownloadOptions::default(),
         )
+        .await
         .unwrap();
 
         assert!(dir_path.is_dir());

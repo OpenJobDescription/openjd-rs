@@ -58,15 +58,6 @@ impl MemoryPool {
     }
 }
 
-/// Calculate the default memory limit for the pipeline.
-///
-/// Returns the number of available CPU cores, defaulting to 4 if detection fails.
-pub(crate) fn num_cpus() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-}
-
 /// Formula: `min(16GB, max(256MB, total_ram/4, available_ram - 1GB))`
 /// Falls back to 256MB if system memory cannot be detected.
 pub(crate) fn default_max_memory_bytes() -> usize {

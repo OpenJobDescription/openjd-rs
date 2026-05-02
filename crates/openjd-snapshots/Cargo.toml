@@ -58,5 +58,9 @@ optional = true
 version = "3"
 optional = true
 
+[dependencies.aws-config]
+version = "1"
+optional = true
+
 [features]
-bench = ["clap", "rand", "tempfile"]
+bench = ["clap", "rand", "tempfile", "aws-config"]

@@ -44,22 +44,6 @@ fn s3_test_config() -> Option<S3TestConfig> {
     })
 }
 
-/// Create an S3 client using the default credential chain. Must be called
-/// outside of an existing tokio runtime (the sync tests use this).
-fn make_s3_client(region: &str) -> aws_sdk_s3::Client {
-    use aws_sdk_s3::config::Region;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let config = rt.block_on(
-        aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(Region::new(region.to_string()))
-            .load(),
-    );
-    aws_sdk_s3::Client::new(&config)
-}
-
 /// Create an S3 client from within an async context.
 async fn make_s3_client_async(region: &str) -> aws_sdk_s3::Client {
     use aws_sdk_s3::config::Region;
@@ -99,23 +83,14 @@ async fn cleanup_prefix(client: &aws_sdk_s3::Client, bucket: &str, prefix: &str)
     }
 }
 
-/// Sync wrapper for cleanup_prefix (for use in non-async tests).
-fn cleanup_prefix_sync(client: &aws_sdk_s3::Client, bucket: &str, prefix: &str) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(cleanup_prefix(client, bucket, prefix));
-}
-
-#[test]
+#[tokio::test]
 #[ignore] // Requires AWS credentials and S3 bucket access
-fn s3_round_trip_collect_upload_download() {
+async fn s3_round_trip_collect_upload_download() {
     let Some(config) = s3_test_config() else {
         eprintln!("Skipping: OPENJD_TEST_S3_BUCKET not set");
         return;
     };
-    let s3_client = make_s3_client(&config.region);
+    let s3_client = make_s3_client_async(&config.region).await;
     let prefix = test_prefix(&config.prefix);
 
     let src_dir = TempDir::new().unwrap();
@@ -146,6 +121,7 @@ fn s3_round_trip_collect_upload_download() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(upload_result.statistics.uploaded_files, 2);
@@ -185,6 +161,7 @@ fn s3_round_trip_collect_upload_download() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(dl_result.statistics.downloaded_files, 2);
@@ -200,7 +177,7 @@ fn s3_round_trip_collect_upload_download() {
     );
 
     // Cleanup
-    cleanup_prefix_sync(&s3_client, &config.bucket, &prefix);
+    cleanup_prefix(&s3_client, &config.bucket, &prefix).await;
 }
 
 #[tokio::test]

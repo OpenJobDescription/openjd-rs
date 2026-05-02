@@ -123,8 +123,8 @@ fn make_test_file(dir: &Path, name: &str, content: &[u8]) -> (String, u64, u64) 
 /// uploaded exactly once. The slow put_object simulates a real S3 upload
 /// where the object isn't visible until the upload completes, creating a
 /// window where concurrent workers all see object_exists=false.
-#[test]
-fn concurrent_identical_files_upload_exactly_once() {
+#[tokio::test]
+async fn concurrent_identical_files_upload_exactly_once() {
     let tmp = TempDir::new().unwrap();
     let content = b"identical content for concurrent dedup test";
 
@@ -150,6 +150,7 @@ fn concurrent_identical_files_upload_exactly_once() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // All files should have the same hash
@@ -173,8 +174,8 @@ fn concurrent_identical_files_upload_exactly_once() {
 
 /// With a mix of duplicate and unique files, put_object should be called
 /// exactly once per unique hash.
-#[test]
-fn concurrent_mixed_content_uploads_once_per_unique_hash() {
+#[tokio::test]
+async fn concurrent_mixed_content_uploads_once_per_unique_hash() {
     let tmp = TempDir::new().unwrap();
 
     // 4 files with content_a, 1 with content_b, 3 with content_c = 3 unique
@@ -206,6 +207,7 @@ fn concurrent_mixed_content_uploads_once_per_unique_hash() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Verify hashes are correct

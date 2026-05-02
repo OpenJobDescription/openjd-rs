@@ -51,8 +51,8 @@ fn new_data_cache(tmp: &TempDir) -> Arc<dyn AsyncDataCache> {
 
 // ===== Basic functionality =====
 
-#[test]
-fn empty_manifest() {
+#[tokio::test]
+async fn empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
@@ -61,13 +61,14 @@ fn empty_manifest() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert_eq!(result.manifest.files().len(), 0);
     assert_eq!(result.statistics.total_files, 0);
 }
 
-#[test]
-fn single_file_hashed_and_stored() {
+#[tokio::test]
+async fn single_file_hashed_and_stored() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"Hello, World!");
@@ -79,27 +80,24 @@ fn single_file_hashed_and_stored() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
     let hash = f.hash.as_ref().unwrap();
     assert!(!hash.is_empty());
     assert_eq!(hash.len(), 32); // xxh128 hex
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    assert!(rt.block_on(dc.object_exists(hash, "xxh128")).unwrap());
+    assert!(dc.object_exists(hash, "xxh128").await.unwrap());
     assert_eq!(
-        rt.block_on(dc.get_object(hash, "xxh128")).unwrap(),
+        dc.get_object(hash, "xxh128").await.unwrap(),
         b"Hello, World!"
     );
     assert_eq!(result.statistics.uploaded_files, 1);
     assert_eq!(result.statistics.uploaded_bytes, size);
 }
 
-#[test]
-fn multiple_files() {
+#[tokio::test]
+async fn multiple_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p1, s1, m1) = make_test_file(tmp.path(), "file1.txt", b"Content of file 1");
@@ -117,6 +115,7 @@ fn multiple_files() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     for f in result.manifest.files() {
@@ -126,8 +125,8 @@ fn multiple_files() {
     assert_eq!(result.statistics.uploaded_files, 3);
 }
 
-#[test]
-fn hash_matches_direct_hash() {
+#[tokio::test]
+async fn hash_matches_direct_hash() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(
@@ -143,14 +142,15 @@ fn hash_matches_direct_hash() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let expected = openjd_snapshots::hash::hash_file(Path::new(&path)).unwrap();
     assert_eq!(result.manifest.files()[0].hash.as_ref().unwrap(), &expected);
 }
 
-#[test]
-fn preserves_metadata() {
+#[tokio::test]
+async fn preserves_metadata() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"Content");
@@ -162,6 +162,7 @@ fn preserves_metadata() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
@@ -171,8 +172,8 @@ fn preserves_metadata() {
     assert_eq!(f.path, FileEntry::new(&path).path);
 }
 
-#[test]
-fn preserves_runnable_flag_true() {
+#[tokio::test]
+async fn preserves_runnable_flag_true() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "script.sh", b"#!/bin/bash\necho hello");
@@ -185,14 +186,15 @@ fn preserves_runnable_flag_true() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert!(result.manifest.files()[0].runnable);
     assert!(result.manifest.files()[0].hash.is_some());
 }
 
-#[test]
-fn preserves_runnable_flag_false() {
+#[tokio::test]
+async fn preserves_runnable_flag_false() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "script.sh", b"#!/bin/bash\necho hello");
@@ -204,6 +206,7 @@ fn preserves_runnable_flag_false() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert!(!result.manifest.files()[0].runnable);
@@ -212,8 +215,8 @@ fn preserves_runnable_flag_false() {
 
 // ===== Manifest type preservation =====
 
-#[test]
-fn returns_snapshot_for_snapshot_input() {
+#[tokio::test]
+async fn returns_snapshot_for_snapshot_input() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"content");
@@ -225,12 +228,13 @@ fn returns_snapshot_for_snapshot_input() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert!(matches!(result.manifest, AbsManifest::Snapshot(_)));
 }
 
-#[test]
-fn returns_diff_for_diff_input() {
+#[tokio::test]
+async fn returns_diff_for_diff_input() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"content");
@@ -240,6 +244,7 @@ fn returns_diff_for_diff_input() {
         .with_parent_hash(Some("abc123".into()));
     let result =
         hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default())
+            .await
             .unwrap();
     assert!(matches!(result.manifest, AbsManifest::Diff(_)));
     assert_eq!(result.manifest.parent_manifest_hash(), Some("abc123"));
@@ -247,8 +252,8 @@ fn returns_diff_for_diff_input() {
 
 // ===== Special entries =====
 
-#[test]
-fn symlinks_pass_through_unchanged() {
+#[tokio::test]
+async fn symlinks_pass_through_unchanged() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "target.txt", b"Target content");
@@ -263,6 +268,7 @@ fn symlinks_pass_through_unchanged() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let files = result.manifest.files();
@@ -282,14 +288,15 @@ fn symlinks_pass_through_unchanged() {
     assert_eq!(result.statistics.total_files, 1); // only regular files counted
 }
 
-#[test]
-fn deleted_entries_pass_through() {
+#[tokio::test]
+async fn deleted_entries_pass_through() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
 
     let manifest = make_diff(vec![FileEntry::deleted("/some/deleted/file.txt")]);
     let result =
         hash_upload_abs_manifest(&AbsManifest::Diff(manifest), dc.clone(), Default::default())
+            .await
             .unwrap();
 
     assert_eq!(result.manifest.files().len(), 1);
@@ -298,8 +305,8 @@ fn deleted_entries_pass_through() {
     assert_eq!(result.statistics.total_files, 0);
 }
 
-#[test]
-fn directories_pass_through() {
+#[tokio::test]
+async fn directories_pass_through() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "file.txt", b"Content");
@@ -312,6 +319,7 @@ fn directories_pass_through() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.manifest.dirs().len(), 1);
@@ -320,8 +328,8 @@ fn directories_pass_through() {
 
 // ===== Validation =====
 
-#[test]
-fn rejects_already_hashed_files() {
+#[tokio::test]
+async fn rejects_already_hashed_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -335,12 +343,13 @@ fn rejects_already_hashed_files() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap_err();
     assert!(err.to_string().contains("already has hashes set"));
 }
 
-#[test]
-fn rejects_already_chunk_hashed_files() {
+#[tokio::test]
+async fn rejects_already_chunk_hashed_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -354,14 +363,15 @@ fn rejects_already_chunk_hashed_files() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap_err();
     assert!(err.to_string().contains("already has hashes set"));
 }
 
 // ===== Content-addressable deduplication =====
 
-#[test]
-fn duplicate_content_stored_once() {
+#[tokio::test]
+async fn duplicate_content_stored_once() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p1, s1, m1) = make_test_file(tmp.path(), "file1.txt", b"Same content");
@@ -380,6 +390,7 @@ fn duplicate_content_stored_once() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let files = result.manifest.files();
@@ -389,8 +400,8 @@ fn duplicate_content_stored_once() {
     assert_eq!(result.statistics.skipped_files, 1);
 }
 
-#[test]
-fn second_upload_skips_existing() {
+#[tokio::test]
+async fn second_upload_skips_existing() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"Test content");
@@ -402,6 +413,7 @@ fn second_upload_skips_existing() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     let r2 = hash_upload_abs_manifest(
@@ -409,6 +421,7 @@ fn second_upload_skips_existing() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.uploaded_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
@@ -417,8 +430,8 @@ fn second_upload_skips_existing() {
 
 // ===== Hash cache integration =====
 
-#[test]
-fn hash_cache_populates_on_first_run() {
+#[tokio::test]
+async fn hash_cache_populates_on_first_run() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -435,6 +448,7 @@ fn hash_cache_populates_on_first_run() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Hash cache should have an entry
@@ -448,8 +462,8 @@ fn hash_cache_populates_on_first_run() {
     assert_eq!(cached.as_ref(), result.manifest.files()[0].hash.as_ref());
 }
 
-#[test]
-fn hash_cache_enables_full_skip() {
+#[tokio::test]
+async fn hash_cache_enables_full_skip() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -468,6 +482,7 @@ fn hash_cache_enables_full_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Second upload: hash cache hit + data cache hit => full skip
@@ -479,14 +494,15 @@ fn hash_cache_enables_full_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.uploaded_files, 0);
 }
 
-#[test]
-fn hash_cache_miss_on_mtime_change() {
+#[tokio::test]
+async fn hash_cache_miss_on_mtime_change() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -503,6 +519,7 @@ fn hash_cache_miss_on_mtime_change() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Modify file
@@ -526,14 +543,15 @@ fn hash_cache_miss_on_mtime_change() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_ne!(r1.manifest.files()[0].hash, r2.manifest.files()[0].hash);
     assert_eq!(r2.statistics.hashed_files, 1);
 }
 
-#[test]
-fn force_rehash_bypasses_hash_cache() {
+#[tokio::test]
+async fn force_rehash_bypasses_hash_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -547,6 +565,7 @@ fn force_rehash_bypasses_hash_cache() {
         ..Default::default()
     };
     let _ = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest.clone()), dc.clone(), opts)
+        .await
         .unwrap();
 
     // With force_rehash, should re-hash even though cache has entry
@@ -555,14 +574,16 @@ fn force_rehash_bypasses_hash_cache() {
         force_rehash: true,
         ..Default::default()
     };
-    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), opts2).unwrap();
+    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest), dc.clone(), opts2)
+        .await
+        .unwrap();
     assert_eq!(r2.statistics.hashed_files, 1);
 }
 
 // ===== Chunked upload =====
 
-#[test]
-fn chunked_upload_produces_chunk_hashes() {
+#[tokio::test]
+async fn chunked_upload_produces_chunk_hashes() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let data = vec![42u8; 64];
@@ -581,26 +602,23 @@ fn chunked_upload_produces_chunk_hashes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
     assert!(f.hash.is_none());
     let chunks = f.chunk_hashes.as_ref().unwrap();
     assert_eq!(chunks.len(), 4);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
     for h in chunks {
-        assert!(rt.block_on(dc.object_exists(h, "xxh128")).unwrap());
-        assert_eq!(rt.block_on(dc.get_object(h, "xxh128")).unwrap().len(), 16);
+        assert!(dc.object_exists(h, "xxh128").await.unwrap());
+        assert_eq!(dc.get_object(h, "xxh128").await.unwrap().len(), 16);
     }
 }
 
 // ===== Statistics =====
 
-#[test]
-fn statistics_are_accurate() {
+#[tokio::test]
+async fn statistics_are_accurate() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p1, s1, m1) = make_test_file(tmp.path(), "a.txt", b"aaaa");
@@ -616,6 +634,7 @@ fn statistics_are_accurate() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.total_files, 2);
@@ -631,8 +650,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // ===== Progress callback and parallelism tests =====
 
-#[test]
-fn upload_progress_callback_invoked() {
+#[tokio::test]
+async fn upload_progress_callback_invoked() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p1, s1, m1) = make_test_file(tmp.path(), "a.txt", b"aaa");
@@ -657,13 +676,14 @@ fn upload_progress_callback_invoked() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(call_count.load(Ordering::Relaxed) >= 1);
 }
 
-#[test]
-fn upload_progress_callback_cancel() {
+#[tokio::test]
+async fn upload_progress_callback_cancel() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -683,14 +703,15 @@ fn upload_progress_callback_cancel() {
             max_workers: Some(1),
             ..Default::default()
         },
-    );
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("cancelled"));
 }
 
-#[test]
-fn parallel_upload_produces_same_results() {
+#[tokio::test]
+async fn parallel_upload_produces_same_results() {
     let tmp = TempDir::new().unwrap();
     let cache_dir1 = TempDir::new().unwrap();
     let cache_dir2 = TempDir::new().unwrap();
@@ -714,6 +735,7 @@ fn parallel_upload_produces_same_results() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let r_par = hash_upload_abs_manifest(
@@ -724,6 +746,7 @@ fn parallel_upload_produces_same_results() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     for (a, b) in r_seq
@@ -736,8 +759,8 @@ fn parallel_upload_produces_same_results() {
     }
 }
 
-#[test]
-fn statistics_include_hash_counts() {
+#[tokio::test]
+async fn statistics_include_hash_counts() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p1, s1, m1) = make_test_file(tmp.path(), "a.txt", b"aaaa");
@@ -753,6 +776,7 @@ fn statistics_include_hash_counts() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.hashed_files, 2);
@@ -761,8 +785,8 @@ fn statistics_include_hash_counts() {
 
 // ===== Error handling tests =====
 
-#[test]
-fn upload_file_not_found_error() {
+#[tokio::test]
+async fn upload_file_not_found_error() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![FileEntry::file(
@@ -774,12 +798,13 @@ fn upload_file_not_found_error() {
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         HashUploadOptions::default(),
-    );
+    )
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn upload_permission_denied_error() {
+#[tokio::test]
+async fn upload_permission_denied_error() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p, s, m) = make_test_file(tmp.path(), "readonly.txt", b"data");
@@ -800,7 +825,8 @@ fn upload_permission_denied_error() {
             max_workers: Some(1),
             ..Default::default()
         },
-    );
+    )
+    .await;
 
     // Restore permissions for cleanup
     #[cfg(unix)]
@@ -815,8 +841,8 @@ fn upload_permission_denied_error() {
 
 // ===== Concurrent deduplication tests =====
 
-#[test]
-fn concurrent_dedup_identical_files() {
+#[tokio::test]
+async fn concurrent_dedup_identical_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -837,6 +863,7 @@ fn concurrent_dedup_identical_files() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // All files should have the same hash
@@ -857,8 +884,8 @@ fn concurrent_dedup_identical_files() {
     assert_eq!(cache_files.len(), 1);
 }
 
-#[test]
-fn concurrent_dedup_mixed_content() {
+#[tokio::test]
+async fn concurrent_dedup_mixed_content() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -882,6 +909,7 @@ fn concurrent_dedup_mixed_content() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // a, b, d should have same hash; c different
@@ -899,8 +927,8 @@ fn concurrent_dedup_mixed_content() {
     assert_eq!(cache_files.len(), 2);
 }
 
-#[test]
-fn concurrent_dedup_chunked_identical_chunks() {
+#[tokio::test]
+async fn concurrent_dedup_chunked_identical_chunks() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -920,6 +948,7 @@ fn concurrent_dedup_chunked_identical_chunks() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
@@ -939,8 +968,8 @@ fn concurrent_dedup_chunked_identical_chunks() {
     assert_eq!(cache_files.len(), 1);
 }
 
-#[test]
-fn concurrent_dedup_chunked_mixed_chunks() {
+#[tokio::test]
+async fn concurrent_dedup_chunked_mixed_chunks() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -965,6 +994,7 @@ fn concurrent_dedup_chunked_mixed_chunks() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
@@ -986,8 +1016,8 @@ fn concurrent_dedup_chunked_mixed_chunks() {
 // Progress metadata tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn upload_progress_fields_populated() {
+#[tokio::test]
+async fn upload_progress_fields_populated() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p, s, m) = make_test_file(tmp.path(), "a.txt", b"hello world");
@@ -998,14 +1028,15 @@ fn upload_progress_fields_populated() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(result.statistics.total_time > 0.0);
     assert!(result.statistics.rate >= 0.0);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
 
-#[test]
-fn upload_progress_zero_for_empty_manifest() {
+#[tokio::test]
+async fn upload_progress_zero_for_empty_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![]);
@@ -1014,13 +1045,14 @@ fn upload_progress_zero_for_empty_manifest() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(result.statistics.total_files, 0);
     assert_eq!(result.statistics.progress, 0.0);
 }
 
-#[test]
-fn upload_progress_callback_receives_timing() {
+#[tokio::test]
+async fn upload_progress_callback_receives_timing() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1047,6 +1079,7 @@ fn upload_progress_callback_receives_timing() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let t = times.lock().unwrap();
     assert!(!t.is_empty());
@@ -1060,8 +1093,8 @@ fn upload_progress_callback_receives_timing() {
     }
 }
 
-#[test]
-fn upload_progress_rate_positive() {
+#[tokio::test]
+async fn upload_progress_rate_positive() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p, s, m) = make_test_file(tmp.path(), "big.txt", &vec![0u8; 10000]);
@@ -1072,12 +1105,13 @@ fn upload_progress_rate_positive() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(result.statistics.rate > 0.0);
 }
 
-#[test]
-fn upload_progress_with_cache_skip() {
+#[tokio::test]
+async fn upload_progress_with_cache_skip() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1094,6 +1128,7 @@ fn upload_progress_with_cache_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     // Second upload - full skip
     let result = hash_upload_abs_manifest(
@@ -1104,13 +1139,14 @@ fn upload_progress_with_cache_skip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(result.statistics.skipped_files, 1);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
 
-#[test]
-fn upload_progress_upload_skip_on_data_cache_hit() {
+#[tokio::test]
+async fn upload_progress_upload_skip_on_data_cache_hit() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (p, s, m) = make_test_file(tmp.path(), "a.txt", b"dedup test");
@@ -1122,6 +1158,7 @@ fn upload_progress_upload_skip_on_data_cache_hit() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     // Second upload - data already in cache, upload skipped but still hashed
     let result = hash_upload_abs_manifest(
@@ -1129,6 +1166,7 @@ fn upload_progress_upload_skip_on_data_cache_hit() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(result.statistics.uploaded_files, 0);
     assert_eq!(result.statistics.skipped_files, 1);
@@ -1136,8 +1174,8 @@ fn upload_progress_upload_skip_on_data_cache_hit() {
 
 // ===== Validation: path tests =====
 
-#[test]
-fn rejects_relative_file_path() {
+#[tokio::test]
+async fn rejects_relative_file_path() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let manifest = make_snapshot(vec![FileEntry::file("relative/path.txt", 10, 1000)]);
@@ -1145,12 +1183,13 @@ fn rejects_relative_file_path() {
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn rejects_relative_directory_path() {
+#[tokio::test]
+async fn rejects_relative_directory_path() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "file.txt", b"data");
@@ -1162,13 +1201,14 @@ fn rejects_relative_directory_path() {
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
         Default::default(),
-    );
+    )
+    .await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().manifest.dirs()[0].path, "relative/dir");
 }
 
-#[test]
-fn accepts_absolute_path() {
+#[tokio::test]
+async fn accepts_absolute_path() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "abs.txt", b"absolute");
@@ -1186,6 +1226,7 @@ fn accepts_absolute_path() {
         dc.clone(),
         Default::default(),
     )
+    .await
     .unwrap();
     assert!(result.manifest.files()[0].hash.is_some());
     assert_eq!(result.statistics.uploaded_files, 1);
@@ -1193,8 +1234,8 @@ fn accepts_absolute_path() {
 
 // ===== Cache: force_rehash and statistics =====
 
-#[test]
-fn force_rehash_false_uses_cache() {
+#[tokio::test]
+async fn force_rehash_false_uses_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1211,6 +1252,7 @@ fn force_rehash_false_uses_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // force_rehash defaults to false; second run should skip hashing via cache
@@ -1223,13 +1265,14 @@ fn force_rehash_false_uses_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
 }
 
-#[test]
-fn statistics_count_skipped_bytes() {
+#[tokio::test]
+async fn statistics_count_skipped_bytes() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1246,6 +1289,7 @@ fn statistics_count_skipped_bytes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let r2 = hash_upload_abs_manifest(
@@ -1256,13 +1300,14 @@ fn statistics_count_skipped_bytes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_bytes, size);
     assert_eq!(r2.statistics.hashed_bytes, 0);
 }
 
-#[test]
-fn chunked_file_with_some_duplicate_chunks() {
+#[tokio::test]
+async fn chunked_file_with_some_duplicate_chunks() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1284,6 +1329,7 @@ fn chunked_file_with_some_duplicate_chunks() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
@@ -1302,8 +1348,8 @@ fn chunked_file_with_some_duplicate_chunks() {
 
 // ===== Progress: cache hits and monotonic time =====
 
-#[test]
-fn upload_progress_with_hash_cache_hits() {
+#[tokio::test]
+async fn upload_progress_with_hash_cache_hits() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1322,6 +1368,7 @@ fn upload_progress_with_hash_cache_hits() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Second run: progress callback should fire and report skipped file
@@ -1341,14 +1388,15 @@ fn upload_progress_with_hash_cache_hits() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     // The final progress callback should have reported the skip
     assert!(saw_skip.load(Ordering::Relaxed) >= 1);
 }
 
-#[test]
-fn upload_progress_total_time_increases_monotonically() {
+#[tokio::test]
+async fn upload_progress_total_time_increases_monotonically() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1378,6 +1426,7 @@ fn upload_progress_total_time_increases_monotonically() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let t = times.lock().unwrap();
@@ -1394,8 +1443,8 @@ fn upload_progress_total_time_increases_monotonically() {
 
 // ===== Progress message tests =====
 
-#[test]
-fn upload_progress_message_uses_files_for_whole_file_mode() {
+#[tokio::test]
+async fn upload_progress_message_uses_files_for_whole_file_mode() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1415,6 +1464,7 @@ fn upload_progress_message_uses_files_for_whole_file_mode() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(
         result.statistics.progress_message.contains("files"),
@@ -1433,8 +1483,8 @@ fn upload_progress_message_uses_files_for_whole_file_mode() {
     );
 }
 
-#[test]
-fn upload_progress_message_uses_chunks_for_chunked_mode() {
+#[tokio::test]
+async fn upload_progress_message_uses_chunks_for_chunked_mode() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1450,6 +1500,7 @@ fn upload_progress_message_uses_chunks_for_chunked_mode() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     // The message should say "chunks" not "files" since chunk_size > 0
     assert!(
@@ -1464,8 +1515,8 @@ fn upload_progress_message_uses_chunks_for_chunked_mode() {
     );
 }
 
-#[test]
-fn upload_progress_message_contains_rate() {
+#[tokio::test]
+async fn upload_progress_message_contains_rate() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1476,6 +1527,7 @@ fn upload_progress_message_contains_rate() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert!(
         result.statistics.progress_message.contains("/s)"),
@@ -1486,8 +1538,8 @@ fn upload_progress_message_contains_rate() {
 
 // ===== Memory and chunking boundary tests =====
 
-#[test]
-fn hash_upload_with_custom_max_memory() {
+#[tokio::test]
+async fn hash_upload_with_custom_max_memory() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1509,6 +1561,7 @@ fn hash_upload_with_custom_max_memory() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.total_files, 5);
@@ -1518,8 +1571,8 @@ fn hash_upload_with_custom_max_memory() {
     }
 }
 
-#[test]
-fn hash_upload_chunked_boundary_sizes() {
+#[tokio::test]
+async fn hash_upload_chunked_boundary_sizes() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1543,6 +1596,7 @@ fn hash_upload_chunked_boundary_sizes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     // 32 bytes == chunk_size, so NOT chunked (use_chunks = file_size > chunk_size)
     assert!(r1.manifest.files()[0].hash.is_some());
@@ -1559,6 +1613,7 @@ fn hash_upload_chunked_boundary_sizes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(
         r2.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(),
@@ -1576,6 +1631,7 @@ fn hash_upload_chunked_boundary_sizes() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(
         r3.manifest.files()[0].chunk_hashes.as_ref().unwrap().len(),
@@ -1583,8 +1639,8 @@ fn hash_upload_chunked_boundary_sizes() {
     );
 }
 
-#[test]
-fn hash_upload_mixed_small_and_large_files() {
+#[tokio::test]
+async fn hash_upload_mixed_small_and_large_files() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
@@ -1607,6 +1663,7 @@ fn hash_upload_mixed_small_and_large_files() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let files = result.manifest.files();
@@ -1621,8 +1678,8 @@ fn hash_upload_mixed_small_and_large_files() {
 
 // ===== Additional hash cache and streaming tests =====
 
-#[test]
-fn some_files_cached_others_not() {
+#[tokio::test]
+async fn some_files_cached_others_not() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1641,6 +1698,7 @@ fn some_files_cached_others_not() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let hash1_first = r1.manifest.files()[0].hash.clone().unwrap();
 
@@ -1657,6 +1715,7 @@ fn some_files_cached_others_not() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let files = r2.manifest.files();
@@ -1665,8 +1724,8 @@ fn some_files_cached_others_not() {
     assert_eq!(files[0].hash.as_ref().unwrap(), &hash1_first);
 }
 
-#[test]
-fn some_chunks_cached_others_not() {
+#[tokio::test]
+async fn some_chunks_cached_others_not() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1689,6 +1748,7 @@ fn some_chunks_cached_others_not() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let chunks1 = r1.manifest.files()[0].chunk_hashes.clone().unwrap();
 
@@ -1704,14 +1764,15 @@ fn some_chunks_cached_others_not() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let chunks2 = r2.manifest.files()[0].chunk_hashes.clone().unwrap();
 
     assert_eq!(chunks1, chunks2);
 }
 
-#[test]
-fn hash_cache_stores_chunk_ranges() {
+#[tokio::test]
+async fn hash_cache_stores_chunk_ranges() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1732,6 +1793,7 @@ fn hash_cache_stores_chunk_ranges() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let chunks = result.manifest.files()[0].chunk_hashes.as_ref().unwrap();
@@ -1746,8 +1808,8 @@ fn hash_cache_stores_chunk_ranges() {
     }
 }
 
-#[test]
-fn hash_cache_hit_for_chunked_file() {
+#[tokio::test]
+async fn hash_cache_hit_for_chunked_file() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1770,6 +1832,7 @@ fn hash_cache_hit_for_chunked_file() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let chunks1 = r1.manifest.files()[0].chunk_hashes.clone().unwrap();
 
@@ -1785,6 +1848,7 @@ fn hash_cache_hit_for_chunked_file() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let chunks2 = r2.manifest.files()[0].chunk_hashes.clone().unwrap();
 
@@ -1793,8 +1857,8 @@ fn hash_cache_hit_for_chunked_file() {
     assert_eq!(r2.statistics.hashed_files, 0);
 }
 
-#[test]
-fn three_passes_with_same_unhashed_manifest() {
+#[tokio::test]
+async fn three_passes_with_same_unhashed_manifest() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1813,6 +1877,7 @@ fn three_passes_with_same_unhashed_manifest() {
                 ..Default::default()
             },
         )
+        .await
         .unwrap();
         hashes.push(result.manifest.files()[0].hash.clone().unwrap());
     }
@@ -1821,8 +1886,8 @@ fn three_passes_with_same_unhashed_manifest() {
     assert_eq!(hashes[1], hashes[2]);
 }
 
-#[test]
-fn data_cache_miss_after_hash_cache_hit_reuploads() {
+#[tokio::test]
+async fn data_cache_miss_after_hash_cache_hit_reuploads() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1840,6 +1905,7 @@ fn data_cache_miss_after_hash_cache_hit_reuploads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
@@ -1860,6 +1926,7 @@ fn data_cache_miss_after_hash_cache_hit_reuploads() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
@@ -1867,8 +1934,8 @@ fn data_cache_miss_after_hash_cache_hit_reuploads() {
     assert!(data_path.exists());
 }
 
-#[test]
-fn streaming_file_with_hash_cache() {
+#[tokio::test]
+async fn streaming_file_with_hash_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1885,21 +1952,23 @@ fn streaming_file_with_hash_cache() {
 
     // First run
     let manifest1 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r1 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
+    let r1 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts())
+        .await
+        .unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Second run: hash cache hit
     let manifest2 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
+    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts())
+        .await
+        .unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
     assert_eq!(hash1, hash2);
 }
 
-#[test]
-fn streaming_file_skipped_when_exists_in_data_cache() {
+#[tokio::test]
+async fn streaming_file_skipped_when_exists_in_data_cache() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -1916,14 +1985,16 @@ fn streaming_file_skipped_when_exists_in_data_cache() {
 
     // First run uploads
     let manifest1 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r1 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts()).unwrap();
+    let r1 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest1), dc.clone(), opts())
+        .await
+        .unwrap();
     let hash1 = r1.manifest.files()[0].hash.clone().unwrap();
 
     // Second run: hash cache + data cache hit => full skip
     let manifest2 = make_snapshot(vec![FileEntry::file(&path, size, mtime)]);
-    let r2 =
-        hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts()).unwrap();
+    let r2 = hash_upload_abs_manifest(&AbsManifest::Snapshot(manifest2), dc.clone(), opts())
+        .await
+        .unwrap();
     let hash2 = r2.manifest.files()[0].hash.clone().unwrap();
 
     assert_eq!(hash1, hash2);

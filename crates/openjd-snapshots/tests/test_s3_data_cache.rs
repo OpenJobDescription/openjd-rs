@@ -50,19 +50,10 @@ fn make_s3_client(tmp: &Path) -> aws_sdk_s3::Client {
     aws_sdk_s3::Client::from_conf(config)
 }
 
-fn make_s3_fixture() -> (TempDir, Arc<S3DataCache>) {
+async fn make_s3_fixture() -> (TempDir, Arc<S3DataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-
-    // Create bucket
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        client.create_bucket().bucket(BUCKET).send().await.unwrap();
-    });
-
+    client.create_bucket().bucket(BUCKET).send().await.unwrap();
     let data_cache = Arc::new(S3DataCache::new(
         BUCKET.to_string(),
         PREFIX.to_string(),
@@ -105,9 +96,9 @@ type AbsSnapshotDiff = Manifest<openjd_snapshots::manifest::Abs, openjd_snapshot
 
 // ===== Category 1: S3DataCache Basic Operations =====
 
-#[test]
-fn s3_put_and_get_object() {
-    let (_tmp, cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_put_and_get_object() {
+    let (_tmp, cache) = make_s3_fixture().await;
     openjd_snapshots::ContentAddressedDataCache::put_object(
         &*cache,
         "abc123",
@@ -120,9 +111,9 @@ fn s3_put_and_get_object() {
     assert_eq!(data, b"hello world");
 }
 
-#[test]
-fn s3_object_exists_after_put() {
-    let (_tmp, cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_object_exists_after_put() {
+    let (_tmp, cache) = make_s3_fixture().await;
     // Note: s3s-fs returns NoSuchKey for missing objects on HeadObject,
     // but the AWS SDK expects NotFound. So object_exists returns Err
     // for missing objects instead of Ok(false). We test the positive case.
@@ -130,51 +121,44 @@ fn s3_object_exists_after_put() {
     assert!(SyncCache::object_exists(&*cache, "abc123", "xxh128").unwrap());
 }
 
-#[test]
-fn s3_object_key_format() {
-    let (_tmp, cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_object_key_format() {
+    let (_tmp, cache) = make_s3_fixture().await;
     let key = SyncCache::object_key(&*cache, "abc123", "xxh128");
     assert_eq!(key, "Data/abc123.xxh128");
 }
 
-#[test]
-fn s3_get_nonexistent_returns_error() {
-    let (_tmp, cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_get_nonexistent_returns_error() {
+    let (_tmp, cache) = make_s3_fixture().await;
     assert!(SyncCache::get_object(&*cache, "missing", "xxh128").is_err());
 }
 
-#[test]
-fn s3_object_exists_nonexistent_returns_error() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_object_exists_nonexistent_returns_error() {
     // s3s-fs returns NoSuchKey (not NotFound) for HeadObject on missing keys,
     // which the SDK doesn't map to is_not_found(). This causes object_exists
     // to return Err instead of Ok(false) when used with s3s.
-    let (_tmp, cache) = make_s3_fixture();
+    let (_tmp, cache) = make_s3_fixture().await;
     assert!(SyncCache::object_exists(&*cache, "nonexistent", "xxh128").is_err());
 }
 
-#[test]
-fn s3_copy_from_between_buckets() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_copy_from_between_buckets() {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    client
+        .create_bucket()
+        .bucket("src-bucket")
+        .send()
+        .await
         .unwrap();
-    rt.block_on(async {
-        client
-            .create_bucket()
-            .bucket("src-bucket")
-            .send()
-            .await
-            .unwrap();
-        client
-            .create_bucket()
-            .bucket("dst-bucket")
-            .send()
-            .await
-            .unwrap();
-    });
+    client
+        .create_bucket()
+        .bucket("dst-bucket")
+        .send()
+        .await
+        .unwrap();
 
     let src = Arc::new(S3DataCache::new(
         "src-bucket".to_string(),
@@ -191,13 +175,11 @@ fn s3_copy_from_between_buckets() {
     SyncCache::put_object(&*src, "abc123", "xxh128", b"copy me").unwrap();
 
     // Server-side copy
-    rt.block_on(async {
-        let result = dst
-            .copy_from(src.as_ref() as &dyn AsyncDataCache, "abc123", "xxh128")
-            .await
-            .unwrap();
-        assert_eq!(result, CopyResult::ServerSideCopy);
-    });
+    let result = dst
+        .copy_from(src.as_ref() as &dyn AsyncDataCache, "abc123", "xxh128")
+        .await
+        .unwrap();
+    assert_eq!(result, CopyResult::ServerSideCopy);
 
     // Verify data arrived
     let data = SyncCache::get_object(&*dst, "abc123", "xxh128").unwrap();
@@ -206,9 +188,9 @@ fn s3_copy_from_between_buckets() {
 
 // ===== Category 2: Hash+Upload with S3 =====
 
-#[test]
-fn s3_hash_upload_single_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_hash_upload_single_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"hello world");
 
@@ -220,6 +202,7 @@ fn s3_hash_upload_single_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let hash = result.manifest.files()[0].hash.as_ref().unwrap();
@@ -231,9 +214,9 @@ fn s3_hash_upload_single_file() {
     assert_eq!(result.statistics.uploaded_bytes, 11);
 }
 
-#[test]
-fn s3_hash_upload_duplicate_content_stored_once() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_hash_upload_duplicate_content_stored_once() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let (path1, size1, mtime1) = make_test_file(tmp.path(), "file1.txt", b"same content");
     let (path2, size2, mtime2) = make_test_file(tmp.path(), "file2.txt", b"same content");
@@ -249,6 +232,7 @@ fn s3_hash_upload_duplicate_content_stored_once() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let files = result.manifest.files();
@@ -259,9 +243,9 @@ fn s3_hash_upload_duplicate_content_stored_once() {
     );
 }
 
-#[test]
-fn s3_hash_upload_second_upload_skips() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_hash_upload_second_upload_skips() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"content");
 
@@ -273,6 +257,7 @@ fn s3_hash_upload_second_upload_skips() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.uploaded_files, 1);
 
@@ -285,14 +270,15 @@ fn s3_hash_upload_second_upload_skips() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.uploaded_files, 0);
     assert_eq!(r2.statistics.skipped_files, 1);
 }
 
-#[test]
-fn s3_hash_upload_symlinks_and_deleted_pass_through() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_hash_upload_symlinks_and_deleted_pass_through() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "real.txt", b"data");
 
@@ -308,6 +294,7 @@ fn s3_hash_upload_symlinks_and_deleted_pass_through() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let files = result.manifest.files();
@@ -317,9 +304,9 @@ fn s3_hash_upload_symlinks_and_deleted_pass_through() {
     assert_eq!(result.statistics.total_files, 1);
 }
 
-#[test]
-fn s3_hash_upload_empty_manifest() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_hash_upload_empty_manifest() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
 
     let manifest: AbsSnapshot =
         Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![]);
@@ -329,6 +316,7 @@ fn s3_hash_upload_empty_manifest() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.total_files, 0);
@@ -336,9 +324,9 @@ fn s3_hash_upload_empty_manifest() {
 
 // ===== Category 3: Download with S3 =====
 
-#[test]
-fn s3_download_single_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_single_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*data_cache, b"hello world");
@@ -355,15 +343,16 @@ fn s3_download_single_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
     assert_eq!(result.statistics.downloaded_files, 1);
 }
 
-#[test]
-fn s3_download_creates_parent_dirs() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_creates_parent_dirs() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*data_cache, b"nested");
@@ -380,14 +369,15 @@ fn s3_download_creates_parent_dirs() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "nested");
 }
 
-#[test]
-fn s3_download_chunked_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_chunked_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<&[u8]> = vec![b"aaa", b"bbb", b"ccc", b"ddd"];
@@ -407,14 +397,15 @@ fn s3_download_chunked_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), b"aaabbbcccddd");
 }
 
-#[test]
-fn s3_download_skip_conflict() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_skip_conflict() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*data_cache, b"new content");
@@ -435,15 +426,16 @@ fn s3_download_skip_conflict() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
     assert_eq!(result.statistics.skipped_files, 1);
 }
 
-#[test]
-fn s3_download_overwrite_conflict() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_overwrite_conflict() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*data_cache, b"new content");
@@ -461,14 +453,15 @@ fn s3_download_overwrite_conflict() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
 }
 
-#[test]
-fn s3_download_create_copy_conflict() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_create_copy_conflict() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*data_cache, b"new");
@@ -489,6 +482,7 @@ fn s3_download_create_copy_conflict() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
@@ -496,9 +490,9 @@ fn s3_download_create_copy_conflict() {
     assert_eq!(std::fs::read_to_string(&copy).unwrap(), "new");
 }
 
-#[test]
-fn s3_download_applies_deletes() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_applies_deletes() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let file_to_delete = tmp.path().join("gone.txt");
@@ -514,14 +508,15 @@ fn s3_download_applies_deletes() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert!(!file_to_delete.exists());
 }
 
-#[test]
-fn s3_download_creates_manifest_dirs() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_creates_manifest_dirs() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
     let dir_path = tmp.path().join("new_dir");
@@ -533,14 +528,15 @@ fn s3_download_creates_manifest_dirs() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert!(dir_path.is_dir());
 }
 
-#[test]
-fn s3_round_trip_collect_upload_download() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_round_trip_collect_upload_download() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let src = TempDir::new().unwrap();
     let dst = TempDir::new().unwrap();
 
@@ -560,6 +556,7 @@ fn s3_round_trip_collect_upload_download() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(upload_result.statistics.uploaded_files, 2);
 
@@ -581,6 +578,7 @@ fn s3_round_trip_collect_upload_download() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(dl_result.statistics.downloaded_files, 2);
 
@@ -596,121 +594,103 @@ fn s3_round_trip_collect_upload_download() {
 
 // ===== Category 4: AsyncDataCache Operations =====
 
-#[test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore] // s3s-fs does not fully support CompleteMultipartUpload; works against real S3
-fn s3_multipart_upload_round_trip() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+async fn s3_multipart_upload_round_trip() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
+
+    use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
+
+    let hash = "multipart_test_hash";
+    let alg = "xxh128";
+
+    // Create multipart upload
+    let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
+
+    // Upload 3 parts
+    let part1 = data_cache
+        .upload_part(hash, alg, &upload_id, 1, b"part1data".to_vec())
+        .await
+        .unwrap();
+    let part2 = data_cache
+        .upload_part(hash, alg, &upload_id, 2, b"part2data".to_vec())
+        .await
+        .unwrap();
+    let part3 = data_cache
+        .upload_part(hash, alg, &upload_id, 3, b"part3data".to_vec())
+        .await
         .unwrap();
 
-    rt.block_on(async {
-        use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
+    // Complete
+    data_cache
+        .complete_multipart_upload(
+            hash,
+            alg,
+            &upload_id,
+            vec![(1, part1), (2, part2), (3, part3)],
+        )
+        .await
+        .unwrap();
 
-        let hash = "multipart_test_hash";
-        let alg = "xxh128";
-
-        // Create multipart upload
-        let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
-
-        // Upload 3 parts
-        let part1 = data_cache
-            .upload_part(hash, alg, &upload_id, 1, b"part1data".to_vec())
-            .await
-            .unwrap();
-        let part2 = data_cache
-            .upload_part(hash, alg, &upload_id, 2, b"part2data".to_vec())
-            .await
-            .unwrap();
-        let part3 = data_cache
-            .upload_part(hash, alg, &upload_id, 3, b"part3data".to_vec())
-            .await
-            .unwrap();
-
-        // Complete
-        data_cache
-            .complete_multipart_upload(
-                hash,
-                alg,
-                &upload_id,
-                vec![(1, part1), (2, part2), (3, part3)],
-            )
-            .await
-            .unwrap();
-
-        // Verify content
-        let data = AsyncDataCache::get_object(&*data_cache, hash, alg)
-            .await
-            .unwrap();
-        assert_eq!(data, b"part1datapart2datapart3data");
-    });
+    // Verify content
+    let data = AsyncDataCache::get_object(&*data_cache, hash, alg)
+        .await
+        .unwrap();
+    assert_eq!(data, b"part1datapart2datapart3data");
 }
 
-#[test]
-fn s3_get_object_range() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_get_object_range() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
+
+    use openjd_snapshots::{AsyncDataCache, RangeReadDataCache};
+
+    // Upload a file
+    let content = b"hello world, this is range test data";
+    AsyncDataCache::put_object(&*data_cache, "range_hash", "xxh128", content.to_vec())
+        .await
         .unwrap();
 
-    rt.block_on(async {
-        use openjd_snapshots::{AsyncDataCache, RangeReadDataCache};
-
-        // Upload a file
-        let content = b"hello world, this is range test data";
-        AsyncDataCache::put_object(&*data_cache, "range_hash", "xxh128", content.to_vec())
-            .await
-            .unwrap();
-
-        // Get a range (bytes 6-10 inclusive = "world")
-        let range_data = data_cache
-            .get_object_range("range_hash", "xxh128", 6, 10)
-            .await
-            .unwrap();
-        assert_eq!(range_data, b"world");
-    });
+    // Get a range (bytes 6-10 inclusive = "world")
+    let range_data = data_cache
+        .get_object_range("range_hash", "xxh128", 6, 10)
+        .await
+        .unwrap();
+    assert_eq!(range_data, b"world");
 }
 
-#[test]
-fn s3_abort_multipart_upload() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_abort_multipart_upload() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
+
+    use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
+
+    let hash = "abort_test_hash";
+    let alg = "xxh128";
+
+    let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
+    data_cache
+        .upload_part(hash, alg, &upload_id, 1, b"data".to_vec())
+        .await
         .unwrap();
 
-    rt.block_on(async {
-        use openjd_snapshots::{AsyncDataCache, MultipartDataCache};
+    // Abort instead of complete
+    data_cache
+        .abort_multipart_upload(hash, alg, &upload_id)
+        .await
+        .unwrap();
 
-        let hash = "abort_test_hash";
-        let alg = "xxh128";
-
-        let upload_id = data_cache.create_multipart_upload(hash, alg).await.unwrap();
-        data_cache
-            .upload_part(hash, alg, &upload_id, 1, b"data".to_vec())
-            .await
-            .unwrap();
-
-        // Abort instead of complete
-        data_cache
-            .abort_multipart_upload(hash, alg, &upload_id)
-            .await
-            .unwrap();
-
-        // Object should not exist
-        assert!(!AsyncDataCache::object_exists(&*data_cache, hash, alg)
-            .await
-            .unwrap_or(false));
-    });
+    // Object should not exist
+    assert!(!AsyncDataCache::object_exists(&*data_cache, hash, alg)
+        .await
+        .unwrap_or(false));
 }
 
 // ===== Category 5: S3CheckCache Integration =====
 
-#[test]
-fn s3_check_cache_hit_skips_head_object() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_check_cache_hit_skips_head_object() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
@@ -730,9 +710,9 @@ fn s3_check_cache_hit_skips_head_object() {
     assert!(data_cache_with_check.check_cache_exists("abc123", "xxh128"));
 }
 
-#[test]
-fn s3_check_cache_miss_calls_head_object() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_check_cache_miss_calls_head_object() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
@@ -759,24 +739,18 @@ fn s3_check_cache_miss_calls_head_object() {
 /// Small part size so multipart kicks in for small test files.
 const SMALL_PART_SIZE: usize = 32;
 
-fn make_s3_fixture_small_parts() -> (TempDir, Arc<S3DataCache>) {
+async fn make_s3_fixture_small_parts() -> (TempDir, Arc<S3DataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        client.create_bucket().bucket(BUCKET).send().await.unwrap();
-    });
+    client.create_bucket().bucket(BUCKET).send().await.unwrap();
     let data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
         .with_multipart_part_size(SMALL_PART_SIZE);
     (tmp, Arc::new(data_cache))
 }
 
-#[test]
-fn s3_multipart_download_large_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_multipart_download_large_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts().await;
     let tmp = TempDir::new().unwrap();
 
     // File size >= 2 * SMALL_PART_SIZE (64 bytes) triggers multipart
@@ -799,15 +773,16 @@ fn s3_multipart_download_large_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), content);
     assert_eq!(result.statistics.downloaded_files, 1);
 }
 
-#[test]
-fn s3_multipart_download_small_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_multipart_download_small_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts().await;
     let tmp = TempDir::new().unwrap();
 
     // File size < 2 * SMALL_PART_SIZE (64 bytes) — single request path
@@ -830,15 +805,16 @@ fn s3_multipart_download_small_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), content);
     assert_eq!(result.statistics.downloaded_files, 1);
 }
 
-#[test]
-fn s3_multipart_download_chunked_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_multipart_download_chunked_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts().await;
     let tmp = TempDir::new().unwrap();
 
     // Each chunk is large enough to trigger multipart on its own if it were a file,
@@ -864,6 +840,7 @@ fn s3_multipart_download_chunked_file() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     let expected: Vec<u8> = chunks.into_iter().flatten().collect();
@@ -871,9 +848,9 @@ fn s3_multipart_download_chunked_file() {
     assert_eq!(result.statistics.downloaded_files, 1);
 }
 
-#[test]
-fn s3_multipart_download_mixed_sizes() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_multipart_download_mixed_sizes() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_small_parts().await;
     let tmp = TempDir::new().unwrap();
 
     // Large file (>= 2 * 32 = 64 bytes) — multipart path
@@ -909,6 +886,7 @@ fn s3_multipart_download_mixed_sizes() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(&large_dest).unwrap(), large_content);
@@ -919,27 +897,20 @@ fn s3_multipart_download_mixed_sizes() {
 // ===== Category 6: ExpectedBucketOwner (Account ID) =====
 
 /// Helper: create S3DataCache with expected_bucket_owner set.
-fn make_s3_fixture_with_expected_bucket_owner(owner: &str) -> (TempDir, Arc<S3DataCache>) {
+async fn make_s3_fixture_with_expected_bucket_owner(owner: &str) -> (TempDir, Arc<S3DataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        client.create_bucket().bucket(BUCKET).send().await.unwrap();
-    });
+    client.create_bucket().bucket(BUCKET).send().await.unwrap();
 
     let cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
         .with_expected_bucket_owner(Some(owner.to_string()));
     (tmp, Arc::new(cache))
 }
 
-#[test]
-fn s3_data_cache_expected_bucket_owner_none() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_data_cache_expected_bucket_owner_none() {
     // S3DataCache created without expected_bucket_owner — all operations succeed
-    let (_tmp, cache) = make_s3_fixture();
+    let (_tmp, cache) = make_s3_fixture().await;
     assert!(cache.expected_bucket_owner().is_none());
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
@@ -950,11 +921,11 @@ fn s3_data_cache_expected_bucket_owner_none() {
     );
 }
 
-#[test]
-fn s3_data_cache_expected_bucket_owner_set() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_data_cache_expected_bucket_owner_set() {
     // S3DataCache with expected_bucket_owner — s3s doesn't validate the field,
     // so operations succeed. This confirms the field is passed through without error.
-    let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012");
+    let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012").await;
     assert_eq!(cache.expected_bucket_owner(), Some("123456789012"));
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
@@ -965,11 +936,11 @@ fn s3_data_cache_expected_bucket_owner_set() {
     );
 }
 
-#[test]
-fn s3_data_cache_expected_bucket_owner_mismatch() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_data_cache_expected_bucket_owner_mismatch() {
     // s3s does not enforce ExpectedBucketOwner, so a mismatched value still succeeds.
     // This test documents that behavior and confirms the field is wired through.
-    let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("999999999999");
+    let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("999999999999").await;
 
     SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
     assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
@@ -979,10 +950,10 @@ fn s3_data_cache_expected_bucket_owner_mismatch() {
     );
 }
 
-#[test]
-fn s3_upload_with_expected_bucket_owner() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_upload_with_expected_bucket_owner() {
     // Full hash_upload pipeline with expected_bucket_owner set
-    let (_s3_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012");
+    let (_s3_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012").await;
     let tmp = TempDir::new().unwrap();
     let (path, size, mtime) = make_test_file(tmp.path(), "test.txt", b"hello owner");
 
@@ -994,6 +965,7 @@ fn s3_upload_with_expected_bucket_owner() {
         cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let hash = result.manifest.files()[0].hash.as_ref().unwrap();
@@ -1003,10 +975,10 @@ fn s3_upload_with_expected_bucket_owner() {
     assert_eq!(stored, b"hello owner");
 }
 
-#[test]
-fn s3_download_with_expected_bucket_owner() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_with_expected_bucket_owner() {
     // Full download pipeline with expected_bucket_owner set
-    let (_s3_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012");
+    let (_s3_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012").await;
     let tmp = TempDir::new().unwrap();
 
     let hash = upload_to_s3(&*cache, b"owner download");
@@ -1023,16 +995,17 @@ fn s3_download_with_expected_bucket_owner() {
         cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "owner download");
     assert_eq!(result.statistics.downloaded_files, 1);
 }
 
-#[test]
-fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
     // When expected_bucket_owner is None, uploads succeed without the header.
-    let (_s3_tmp, cache) = make_s3_fixture();
+    let (_s3_tmp, cache) = make_s3_fixture().await;
     assert!(cache.expected_bucket_owner().is_none());
 
     let tmp = TempDir::new().unwrap();
@@ -1046,6 +1019,7 @@ fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
         cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.uploaded_files, 1);
@@ -1054,10 +1028,10 @@ fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
     assert_eq!(stored, b"no owner header");
 }
 
-#[test]
-fn s3_download_excludes_expected_bucket_owner_when_disabled() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_excludes_expected_bucket_owner_when_disabled() {
     // When expected_bucket_owner is None, downloads succeed without the header.
-    let (_s3_tmp, cache) = make_s3_fixture();
+    let (_s3_tmp, cache) = make_s3_fixture().await;
     assert!(cache.expected_bucket_owner().is_none());
 
     let tmp = TempDir::new().unwrap();
@@ -1075,6 +1049,7 @@ fn s3_download_excludes_expected_bucket_owner_when_disabled() {
         cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "no owner download");
@@ -1092,7 +1067,7 @@ fn make_fs_async_cache() -> (TempDir, Arc<dyn AsyncDataCache>) {
     (tmp, cache)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_put_and_get_object() {
     let (_tmp, cache) = make_fs_async_cache();
     cache
@@ -1103,7 +1078,7 @@ async fn fs_async_put_and_get_object() {
     assert_eq!(data, b"hello world");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_object_exists() {
     let (_tmp, cache) = make_fs_async_cache();
     assert!(!cache.object_exists("abc123", "xxh128").await.unwrap());
@@ -1114,14 +1089,14 @@ async fn fs_async_object_exists() {
     assert!(cache.object_exists("abc123", "xxh128").await.unwrap());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_object_key_format() {
     let (_tmp, cache) = make_fs_async_cache();
     let key = cache.object_key("abc123", "xxh128");
     assert!(key.ends_with("abc123.xxh128"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_copy_object_to_file() {
     let (_tmp, cache) = make_fs_async_cache();
     cache
@@ -1137,7 +1112,7 @@ async fn fs_async_copy_object_to_file() {
     assert_eq!(std::fs::read(&dest).unwrap(), b"copy me");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_write_object_to_file_at_offset() {
     let (_tmp, cache) = make_fs_async_cache();
     cache
@@ -1160,7 +1135,7 @@ async fn fs_async_write_object_to_file_at_offset() {
     assert_eq!(&contents[0..10], &[0u8; 10]);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fs_async_has_no_multipart_or_range_capability() {
     let (_tmp, cache) = make_fs_async_cache();
 
@@ -1174,102 +1149,75 @@ async fn fs_async_has_no_multipart_or_range_capability() {
 
 const TINY_PART_SIZE: usize = 8;
 
-fn make_s3_fixture_tiny_parts() -> (TempDir, Arc<S3DataCache>) {
+async fn make_s3_fixture_tiny_parts() -> (TempDir, Arc<S3DataCache>) {
     let tmp = TempDir::new().unwrap();
     let client = make_s3_client(tmp.path());
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        client.create_bucket().bucket(BUCKET).send().await.unwrap();
-    });
+    client.create_bucket().bucket(BUCKET).send().await.unwrap();
     let data_cache = S3DataCache::new(BUCKET.to_string(), PREFIX.to_string(), client)
         .with_multipart_part_size(TINY_PART_SIZE);
     (tmp, Arc::new(data_cache))
 }
 
-#[test]
-fn s3_stream_range_to_file_at_offset() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_stream_range_to_file_at_offset() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..50u8).collect();
     let hash = upload_to_s3(&*data_cache, &content);
     let dest = tmp.path().join("stream_range.bin");
     std::fs::write(&dest, vec![0u8; 50]).unwrap();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    data_cache
+        .stream_range_to_file_at_offset(&hash, "xxh128", 0, 24, &dest, 0)
+        .await
         .unwrap();
-    rt.block_on(async {
-        data_cache
-            .stream_range_to_file_at_offset(&hash, "xxh128", 0, 24, &dest, 0)
-            .await
-            .unwrap();
-        data_cache
-            .stream_range_to_file_at_offset(&hash, "xxh128", 25, 49, &dest, 25)
-            .await
-            .unwrap();
-    });
+    data_cache
+        .stream_range_to_file_at_offset(&hash, "xxh128", 25, 49, &dest, 25)
+        .await
+        .unwrap();
 
     assert_eq!(std::fs::read(&dest).unwrap(), content);
 }
 
-#[test]
-fn s3_stream_write_object_to_file_at_offset() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_stream_write_object_to_file_at_offset() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..20u8).collect();
     let hash = upload_to_s3(&*data_cache, &content);
     let dest = tmp.path().join("write_offset.bin");
     std::fs::write(&dest, vec![0u8; 40]).unwrap();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    data_cache
+        .write_object_to_file_at_offset(&hash, "xxh128", &dest, 10)
+        .await
         .unwrap();
-    rt.block_on(async {
-        data_cache
-            .write_object_to_file_at_offset(&hash, "xxh128", &dest, 10)
-            .await
-            .unwrap();
-    });
 
     let result = std::fs::read(&dest).unwrap();
     assert_eq!(&result[10..30], &content[..]);
 }
 
-#[test]
-fn s3_stream_copy_object_to_file() {
-    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_stream_copy_object_to_file() {
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..30u8).collect();
     let hash = upload_to_s3(&*data_cache, &content);
     let dest = tmp.path().join("copy_obj.bin");
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
+    data_cache
+        .copy_object_to_file(&hash, "xxh128", &dest)
+        .await
         .unwrap();
-    rt.block_on(async {
-        data_cache
-            .copy_object_to_file(&hash, "xxh128", &dest)
-            .await
-            .unwrap();
-    });
 
     assert_eq!(std::fs::read(&dest).unwrap(), content);
 }
 
-#[test]
-fn s3_download_chunked_with_stream_range() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_chunked_with_stream_range() {
     // chunk_size=16, part_size=8 → multipart_threshold = 2*8 = 16
     // Each 16-byte chunk >= threshold → stream_range_to_file_at_offset
-    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts();
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<Vec<u8>> = (0..3u8).map(|i| vec![i; 16]).collect();
@@ -1289,19 +1237,20 @@ fn s3_download_chunked_with_stream_range() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     let expected: Vec<u8> = chunks.into_iter().flatten().collect();
     assert_eq!(std::fs::read(&dest).unwrap(), expected);
 }
 
-#[test]
-fn s3_download_chunked_mixed_stream_and_write() {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_download_chunked_mixed_stream_and_write() {
     // chunk_size=16, part_size=8 → multipart_threshold = 16
     // chunk0 (16 bytes) >= 16 → stream_range_to_file_at_offset
     // chunk1 (16 bytes) >= 16 → stream_range_to_file_at_offset
     // chunk2 (8 bytes)  <  16 → write_object_to_file_at_offset
-    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts();
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
     let tmp = TempDir::new().unwrap();
 
     let chunk0: Vec<u8> = vec![0xAA; 16];
@@ -1324,6 +1273,7 @@ fn s3_download_chunked_mixed_stream_and_write() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     let mut expected = Vec::new();
@@ -1335,122 +1285,96 @@ fn s3_download_chunked_mixed_stream_and_write() {
 
 // ===== S3 Error Paths =====
 
-#[test]
-fn s3_get_object_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
-        AsyncDataCache::get_object(&*data_cache, "nonexistent_hash", "xxh128").await
-    });
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_get_object_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
+    let result =
+        async { AsyncDataCache::get_object(&*data_cache, "nonexistent_hash", "xxh128").await }
+            .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_get_object_range_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_get_object_range_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
+    let result = async {
         data_cache
             .get_object_range("nonexistent_hash", "xxh128", 0, 10)
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_copy_object_to_file_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_copy_object_to_file_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
     let dest = _tmp.path().join("dest.bin");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+    let result = async {
         data_cache
             .copy_object_to_file("nonexistent_hash", "xxh128", &dest)
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_write_object_to_file_at_offset_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_write_object_to_file_at_offset_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
     let dest = _tmp.path().join("preallocated.bin");
     std::fs::write(&dest, [0u8; 64]).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+    let result = async {
         data_cache
             .write_object_to_file_at_offset("nonexistent_hash", "xxh128", &dest, 0)
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_stream_range_to_file_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_stream_range_to_file_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
     let dest = _tmp.path().join("preallocated.bin");
     std::fs::write(&dest, [0u8; 64]).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+    let result = async {
         data_cache
             .stream_range_to_file_at_offset("nonexistent_hash", "xxh128", 0, 10, &dest, 0)
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_abort_nonexistent_multipart_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_abort_nonexistent_multipart_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
+    let result = async {
         data_cache
             .abort_multipart_upload("somehash", "xxh128", "fake_upload_id")
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_upload_part_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_upload_part_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
+    let result = async {
         data_cache
             .upload_part("somehash", "xxh128", "fake_upload_id", 1, b"data".to_vec())
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn s3_complete_multipart_nonexistent_returns_error() {
-    let (_tmp, data_cache) = make_s3_fixture();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result = rt.block_on(async {
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_complete_multipart_nonexistent_returns_error() {
+    let (_tmp, data_cache) = make_s3_fixture().await;
+    let result = async {
         data_cache
             .complete_multipart_upload(
                 "somehash",
@@ -1459,15 +1383,16 @@ fn s3_complete_multipart_nonexistent_returns_error() {
                 vec![(1, "fake_etag".to_string())],
             )
             .await
-    });
+    }
+    .await;
     assert!(result.is_err());
 }
 
 // ===== S3 Cache Validation Branches =====
 
-#[test]
-fn s3_force_s3_check_bypasses_cache() {
-    let (_s3_tmp, base_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_force_s3_check_bypasses_cache() {
+    let (_s3_tmp, base_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
@@ -1489,19 +1414,15 @@ fn s3_force_s3_check_bypasses_cache() {
     // Upload the object so HeadObject succeeds, then verify object_exists
     // goes through the HeadObject path (not the cache short-circuit)
     SyncCache::put_object(&*base_cache, "test_hash", "xxh128", b"data").unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let exists = rt
-        .block_on(async { AsyncDataCache::object_exists(&dc, "test_hash", "xxh128").await })
+    let exists = AsyncDataCache::object_exists(&dc, "test_hash", "xxh128")
+        .await
         .unwrap();
     assert!(exists);
 }
 
-#[test]
-fn s3_cache_validation_stale_entry_invalidates() {
-    let (_s3_tmp, base_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_cache_validation_stale_entry_invalidates() {
+    let (_s3_tmp, base_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
@@ -1523,12 +1444,7 @@ fn s3_cache_validation_stale_entry_invalidates() {
     // returns true for the first 100 calls). HeadObject fails because the object
     // doesn't exist. s3s returns a generic service error (not is_not_found()),
     // so the code returns Err rather than triggering invalidation.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let result =
-        rt.block_on(async { AsyncDataCache::object_exists(&dc, "stale_hash", "xxh128").await });
+    let result = AsyncDataCache::object_exists(&dc, "stale_hash", "xxh128").await;
     assert!(
         result.is_err(),
         "s3s HeadObject on missing key returns Err (not Ok(false))"
@@ -1539,9 +1455,9 @@ fn s3_cache_validation_stale_entry_invalidates() {
     assert!(!dc.is_cache_validation_invalidated());
 }
 
-#[test]
-fn s3_cache_validation_valid_entry_confirmed() {
-    let (_s3_tmp, data_cache) = make_s3_fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_cache_validation_valid_entry_confirmed() {
+    let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
@@ -1560,12 +1476,8 @@ fn s3_cache_validation_valid_entry_confirmed() {
     check_cache.put_entry(&cache_key).unwrap();
 
     // Probabilistic verification does HeadObject, object exists → returns true
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let exists = rt
-        .block_on(async { AsyncDataCache::object_exists(&dc, "real_hash", "xxh128").await })
+    let exists = AsyncDataCache::object_exists(&dc, "real_hash", "xxh128")
+        .await
         .unwrap();
     assert!(exists);
     assert!(!dc.is_cache_validation_invalidated());

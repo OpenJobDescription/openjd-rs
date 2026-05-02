@@ -55,6 +55,22 @@ struct Cli {
     preset: Option<String>,
     #[arg(long, default_value_t = false)]
     no_hash_cache: bool,
+    /// S3 bucket for data cache. If unset, benchmarks against FileSystemDataCache.
+    #[arg(long)]
+    s3_bucket: Option<String>,
+    /// S3 key prefix (default: "openjd-snapshots-bench/<timestamp>")
+    #[arg(long)]
+    s3_prefix: Option<String>,
+    /// AWS region (default: from environment / AWS config)
+    #[arg(long)]
+    aws_region: Option<String>,
+    /// Tokio runtime flavor: "current_thread" or "multi_thread".
+    #[arg(long, default_value = "multi_thread")]
+    runtime_flavor: String,
+    /// When runtime_flavor is multi_thread, number of worker threads
+    /// (default: tokio's default, which is num_cpus).
+    #[arg(long)]
+    runtime_worker_threads: Option<usize>,
 }
 
 #[allow(dead_code)]
@@ -275,8 +291,37 @@ fn format_duration(secs: f64) -> String {
 }
 
 fn main() {
-    let mut cli = Cli::parse();
+    let cli = Cli::parse();
 
+    // Build the tokio runtime based on CLI flags so we can benchmark different
+    // runtime flavors with the same binary.
+    let rt = match cli.runtime_flavor.as_str() {
+        "current_thread" => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build current_thread runtime"),
+        "multi_thread" => {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            builder.enable_all();
+            if let Some(n) = cli.runtime_worker_threads {
+                builder.worker_threads(n);
+            }
+            builder
+                .build()
+                .expect("failed to build multi_thread runtime")
+        }
+        other => {
+            eprintln!(
+                "invalid --runtime-flavor: {other:?} (expected 'current_thread' or 'multi_thread')"
+            );
+            std::process::exit(2);
+        }
+    };
+
+    rt.block_on(async_main(cli));
+}
+
+async fn async_main(mut cli: Cli) {
     // Apply presets
     match cli.preset.as_deref() {
         Some("tiny") => {
@@ -375,7 +420,8 @@ fn main() {
                 p,
                 Some(t),
                 start_all,
-            );
+            )
+            .await;
         };
         (tmp, None)
     };
@@ -389,11 +435,12 @@ fn main() {
         source_root,
         None::<tempfile::TempDir>,
         start_all,
-    );
+    )
+    .await;
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_with_tmpdir(
+async fn run_with_tmpdir(
     cli: Cli,
     worker_counts: Vec<usize>,
     is_scaling: bool,
@@ -442,6 +489,34 @@ fn run_with_tmpdir(
 
     let abs_manifest = AbsManifest::Snapshot(manifest.clone());
 
+    // Pre-load S3 client once if we're benchmarking against S3. Per-worker-count
+    // S3DataCache instances share the client but use distinct key prefixes so
+    // that each scaling iteration measures cold-cache performance.
+    let s3_client: Option<aws_sdk_s3::Client> = if cli.s3_bucket.is_some() {
+        use aws_sdk_s3::config::Region;
+        let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+        if let Some(ref region) = cli.aws_region {
+            loader = loader.region(Region::new(region.to_string()));
+        }
+        let config = loader.load().await;
+        Some(aws_sdk_s3::Client::new(&config))
+    } else {
+        None
+    };
+    let base_s3_prefix: String = cli.s3_prefix.clone().unwrap_or_else(|| {
+        format!(
+            "openjd-snapshots-bench/{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        )
+    });
+
+    if let Some(ref bucket) = cli.s3_bucket {
+        println!("\n  S3 data cache: s3://{}/{}", bucket, base_s3_prefix);
+    }
+
     // Run for each worker count
     let mut all_scaling: Vec<(usize, Vec<TimingResult>)> = Vec::new();
 
@@ -462,7 +537,18 @@ fn run_with_tmpdir(
         std::fs::create_dir_all(&data_cache_root).unwrap();
         std::fs::create_dir_all(&hash_cache_dir).unwrap();
 
-        let data_cache = Arc::new(FileSystemDataCache::new(&data_cache_root).unwrap());
+        let data_cache: Arc<dyn AsyncDataCache> = if let Some(ref bucket) = cli.s3_bucket {
+            // Separate S3 prefix per worker-count iteration, so each scaling run
+            // sees a cold cache.
+            let prefix = format!("{}/w{}", base_s3_prefix, workers);
+            Arc::new(S3DataCache::new(
+                bucket.clone(),
+                prefix,
+                s3_client.clone().unwrap(),
+            ))
+        } else {
+            Arc::new(FileSystemDataCache::new(&data_cache_root).unwrap())
+        };
 
         // HASH_UPLOAD cold
         {
@@ -492,6 +578,7 @@ fn run_with_tmpdir(
                     ..Default::default()
                 },
             )
+            .await
             .unwrap();
             let dur = t.elapsed().as_secs_f64();
             let stats = &upload_result.statistics;
@@ -535,6 +622,7 @@ fn run_with_tmpdir(
                     ..Default::default()
                 },
             )
+            .await
             .unwrap();
             let dur = t.elapsed().as_secs_f64();
             let tp = (tb as f64 / (1024.0 * 1024.0)) / dur;
@@ -596,6 +684,7 @@ fn run_with_tmpdir(
                             ..Default::default()
                         },
                     )
+                    .await
                     .unwrap();
                     let dur = t.elapsed().as_secs_f64();
                     let ds = &dl_result.statistics;
@@ -632,6 +721,7 @@ fn run_with_tmpdir(
                             ..Default::default()
                         },
                     )
+                    .await
                     .unwrap();
                     let dur = t.elapsed().as_secs_f64();
                     let ds2 = &dl_result2.statistics;

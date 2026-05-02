@@ -564,7 +564,7 @@ pub struct HashStatistics {
 ### HASH_UPLOAD
 
 ```rust
-pub fn hash_upload_abs_manifest(
+pub async fn hash_upload_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: HashUploadOptions,
@@ -607,7 +607,7 @@ pub struct UploadStatistics {
 ### DOWNLOAD
 
 ```rust
-pub fn download_abs_manifest(
+pub async fn download_abs_manifest(
     manifest: &AbsManifest,
     data_cache: Arc<dyn AsyncDataCache>,
     options: DownloadOptions,

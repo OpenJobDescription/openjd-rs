@@ -57,7 +57,7 @@ let result = hash_upload_abs_manifest(
     &AbsManifest::Snapshot(manifest),
     data_cache,
     HashUploadOptions::default(),
-)?;
+).await?;
 
 // 3. Extract as relative-path manifest for storage/transport
 let rel = match &result.manifest {
@@ -84,7 +84,7 @@ download_abs_manifest(
     &AbsManifest::Snapshot(abs),
     data_cache,
     DownloadOptions::default(),
-)?;
+).await?;
 ```
 
 ## Use Cases

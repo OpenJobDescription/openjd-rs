@@ -509,8 +509,8 @@ fn hash_file_smaller_than_chunk_size_produces_single_hash() {
 
 // ===== Hash Upload chunk size =====
 
-#[test]
-fn hash_upload_preserves_input_chunk_size_when_none() {
+#[tokio::test]
+async fn hash_upload_preserves_input_chunk_size_when_none() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (_path, _mtime) = make_test_file(tmp.path(), "a.txt", b"hello world12345");
@@ -534,13 +534,14 @@ fn hash_upload_preserves_input_chunk_size_when_none() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(result.manifest.file_chunk_size_bytes(), 16);
 }
 
-#[test]
-fn hash_upload_overrides_chunk_size_when_specified() {
+#[tokio::test]
+async fn hash_upload_overrides_chunk_size_when_specified() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (_path, _mtime) = make_test_file(tmp.path(), "a.txt", b"hello world12345");
@@ -563,6 +564,7 @@ fn hash_upload_overrides_chunk_size_when_specified() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Manifest metadata preserved from input (clone semantics).
@@ -571,8 +573,8 @@ fn hash_upload_overrides_chunk_size_when_specified() {
     assert!(result.manifest.files()[0].hash.is_some());
 }
 
-#[test]
-fn hash_upload_whole_file_disables_chunking() {
+#[tokio::test]
+async fn hash_upload_whole_file_disables_chunking() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let data = vec![0xABu8; 64];
@@ -596,6 +598,7 @@ fn hash_upload_whole_file_disables_chunking() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
@@ -636,8 +639,8 @@ fn collect_then_hash_preserves_chunk_size() {
     assert_eq!(result.manifest.file_chunk_size_bytes(), 32);
 }
 
-#[test]
-fn collect_then_hash_upload_preserves_chunk_size() {
+#[tokio::test]
+async fn collect_then_hash_upload_preserves_chunk_size() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (_path, _mtime) = make_test_file(tmp.path(), "a.txt", b"hello");
@@ -661,6 +664,7 @@ fn collect_then_hash_upload_preserves_chunk_size() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert_eq!(result.manifest.file_chunk_size_bytes(), 32);
@@ -668,8 +672,8 @@ fn collect_then_hash_upload_preserves_chunk_size() {
 
 // ===== Hash Upload with filesystem data cache =====
 
-#[test]
-fn hash_upload_small_file_with_small_chunks_filesystem() {
+#[tokio::test]
+async fn hash_upload_small_file_with_small_chunks_filesystem() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let data = vec![0x42u8; 1024];
@@ -694,6 +698,7 @@ fn hash_upload_small_file_with_small_chunks_filesystem() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
@@ -701,17 +706,13 @@ fn hash_upload_small_file_with_small_chunks_filesystem() {
     assert_eq!(chunks.len(), 16, "1024 / 64 = 16 chunks");
 
     // Verify chunks are retrievable from the data cache
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
     for h in chunks {
-        assert!(rt.block_on(dc.object_exists(h, "xxh128")).unwrap());
+        assert!(dc.object_exists(h, "xxh128").await.unwrap());
     }
 }
 
-#[test]
-fn hash_upload_idempotent_filesystem() {
+#[tokio::test]
+async fn hash_upload_idempotent_filesystem() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let (_path, _mtime) = make_test_file(tmp.path(), "a.txt", b"idempotent content");
@@ -731,6 +732,7 @@ fn hash_upload_idempotent_filesystem() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.uploaded_files, 1);
 
@@ -740,6 +742,7 @@ fn hash_upload_idempotent_filesystem() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(
         r2.statistics.uploaded_files, 0,
@@ -751,8 +754,8 @@ fn hash_upload_idempotent_filesystem() {
     );
 }
 
-#[test]
-fn hash_upload_deduplication_filesystem() {
+#[tokio::test]
+async fn hash_upload_deduplication_filesystem() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let content = b"identical content for dedup test";
@@ -773,6 +776,7 @@ fn hash_upload_deduplication_filesystem() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     // Both files should have the same hash (identical content)
@@ -781,11 +785,7 @@ fn hash_upload_deduplication_filesystem() {
     assert_eq!(h0, h1, "identical files should produce the same hash");
 
     // Content-addressed cache stores only one object for the shared hash
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let stored = rt.block_on(dc.get_object(h0, "xxh128")).unwrap();
+    let stored = dc.get_object(h0, "xxh128").await.unwrap();
     assert_eq!(stored, content);
 }
 
@@ -829,8 +829,8 @@ fn hash_computed_correctly_with_custom_chunk_size() {
     );
 }
 
-#[test]
-fn hash_and_upload_with_custom_chunk_size() {
+#[tokio::test]
+async fn hash_and_upload_with_custom_chunk_size() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let data = b"test content for hashing and uploading";
@@ -849,18 +849,16 @@ fn hash_and_upload_with_custom_chunk_size() {
         dc.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
     assert!(f.hash.is_some(), "hash should be computed");
 
     // Verify file is in the data cache
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    assert!(rt
-        .block_on(dc.object_exists(f.hash.as_ref().unwrap(), "xxh128"))
+    assert!(dc
+        .object_exists(f.hash.as_ref().unwrap(), "xxh128")
+        .await
         .unwrap());
 }
 
@@ -932,8 +930,8 @@ fn override_chunk_size_affects_chunking_decision_hash() {
     assert_eq!(chunks.len(), 4, "64 bytes / 16 byte chunks = 4");
 }
 
-#[test]
-fn override_chunk_size_affects_chunking_decision_hash_upload() {
+#[tokio::test]
+async fn override_chunk_size_affects_chunking_decision_hash_upload() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let data: Vec<u8> = (0..64u8).collect();
@@ -960,6 +958,7 @@ fn override_chunk_size_affects_chunking_decision_hash_upload() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let f = &result.manifest.files()[0];
@@ -1064,8 +1063,8 @@ fn hash_different_files_different_hash() {
     );
 }
 
-#[test]
-fn hash_upload_multiple_files_with_chunks_filesystem() {
+#[tokio::test]
+async fn hash_upload_multiple_files_with_chunks_filesystem() {
     let tmp = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let sizes: &[(&str, usize)] = &[("small.bin", 64), ("medium.bin", 128), ("large.bin", 256)];
@@ -1093,12 +1092,9 @@ fn hash_upload_multiple_files_with_chunks_filesystem() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
     for f in result.manifest.files() {
         assert!(f.hash.is_none(), "file {} should use chunk hashes", f.path);
         let chunks = f.chunk_hashes.as_ref().expect("should have chunk hashes");
@@ -1111,7 +1107,7 @@ fn hash_upload_multiple_files_with_chunks_filesystem() {
         );
         for h in chunks {
             assert!(
-                rt.block_on(dc.object_exists(h, "xxh128")).unwrap(),
+                dc.object_exists(h, "xxh128").await.unwrap(),
                 "chunk should be in cache"
             );
         }

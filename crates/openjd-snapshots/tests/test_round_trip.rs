@@ -40,7 +40,7 @@ fn create_test_tree(dir: &Path) {
     std::fs::write(dir.join("empty.txt"), b"").unwrap();
 }
 
-fn upload_and_remap(
+async fn upload_and_remap(
     src_dir: &Path,
     dst_dir: &Path,
     data_cache: &Arc<FileSystemDataCache>,
@@ -57,6 +57,7 @@ fn upload_and_remap(
         data_cache.clone(),
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     let abs_snap = match upload_result.manifest {
@@ -73,8 +74,8 @@ fn upload_and_remap(
     join_snapshot(&rel, &dst_dir.to_string_lossy()).unwrap()
 }
 
-#[test]
-fn round_trip_collect_upload_download() {
+#[tokio::test]
+async fn round_trip_collect_upload_download() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dst_dir = TempDir::new().unwrap();
@@ -82,13 +83,14 @@ fn round_trip_collect_upload_download() {
     create_test_tree(src_dir.path());
 
     let data_cache = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
-    let abs_dl = upload_and_remap(src_dir.path(), dst_dir.path(), &data_cache);
+    let abs_dl = upload_and_remap(src_dir.path(), dst_dir.path(), &data_cache).await;
 
     let download_result = download_abs_manifest(
         &AbsManifest::Snapshot(abs_dl),
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(
@@ -106,8 +108,8 @@ fn round_trip_collect_upload_download() {
     assert_eq!(download_result.statistics.downloaded_files, 3);
 }
 
-#[test]
-fn upload_skip_on_second_run() {
+#[tokio::test]
+async fn upload_skip_on_second_run() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
 
@@ -128,6 +130,7 @@ fn upload_skip_on_second_run() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.uploaded_files, 2);
 
@@ -136,13 +139,14 @@ fn upload_skip_on_second_run() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.uploaded_files, 0);
     assert_eq!(r2.statistics.skipped_files, 2);
 }
 
-#[test]
-fn download_skip_with_hash_cache() {
+#[tokio::test]
+async fn download_skip_with_hash_cache() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let hc_dir = TempDir::new().unwrap();
@@ -152,7 +156,7 @@ fn download_skip_with_hash_cache() {
 
     let data_cache = Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
     let hash_cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
-    let abs_dl = upload_and_remap(src_dir.path(), dst_dir.path(), &data_cache);
+    let abs_dl = upload_and_remap(src_dir.path(), dst_dir.path(), &data_cache).await;
 
     // First download
     let r1 = download_abs_manifest(
@@ -163,6 +167,7 @@ fn download_skip_with_hash_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r1.statistics.downloaded_files, 1);
 
@@ -175,13 +180,14 @@ fn download_skip_with_hash_cache() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
     assert_eq!(r2.statistics.skipped_files, 1);
     assert_eq!(r2.statistics.downloaded_files, 0);
 }
 
-#[test]
-fn chunked_round_trip() {
+#[tokio::test]
+async fn chunked_round_trip() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
     let dst_dir = TempDir::new().unwrap();
@@ -209,6 +215,7 @@ fn chunked_round_trip() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     let abs_snap = match upload_result.manifest {
@@ -231,13 +238,14 @@ fn chunked_round_trip() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         DownloadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(std::fs::read(dst_dir.path().join("big.bin")).unwrap(), data);
 }
 
-#[test]
-fn delete_via_diff_manifest() {
+#[tokio::test]
+async fn delete_via_diff_manifest() {
     let cache_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
 
@@ -288,6 +296,7 @@ fn delete_via_diff_manifest() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     assert!(keep_path.exists());
@@ -295,8 +304,8 @@ fn delete_via_diff_manifest() {
     assert!(!work_dir.path().join("empty_dir").exists());
 }
 
-#[test]
-fn statistics_are_accurate() {
+#[tokio::test]
+async fn statistics_are_accurate() {
     let src_dir = TempDir::new().unwrap();
     let cache_dir = TempDir::new().unwrap();
 
@@ -316,6 +325,7 @@ fn statistics_are_accurate() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
 
     assert_eq!(result.statistics.total_files, 2);
@@ -327,8 +337,8 @@ fn statistics_are_accurate() {
     assert_eq!(result.statistics.skipped_files, 0);
 }
 
-#[test]
-fn round_trip_with_symlinks() {
+#[tokio::test]
+async fn round_trip_with_symlinks() {
     if !symlinks_supported() {
         eprintln!("skipping: symlinks not supported on this OS/configuration");
         return;
@@ -385,6 +395,7 @@ fn round_trip_with_symlinks() {
         data_cache.clone() as Arc<dyn AsyncDataCache>,
         HashUploadOptions::default(),
     )
+    .await
     .unwrap();
     assert_eq!(upload_result.statistics.uploaded_files, 1);
 
@@ -418,6 +429,7 @@ fn round_trip_with_symlinks() {
             ..Default::default()
         },
     )
+    .await
     .unwrap();
 
     // Verify: real file has correct content
