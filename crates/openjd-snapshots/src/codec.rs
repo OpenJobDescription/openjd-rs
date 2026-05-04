@@ -6,8 +6,8 @@
 
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
-    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Snapshot, SnapshotDiff,
-    SymlinkPolicy,
+    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Full, Manifest, Rel, Snapshot, SnapshotDiff,
+    SymlinkPolicy, ValidateKind,
 };
 use crate::ops::subtree_rel_snapshot;
 use crate::{Result, SnapshotError, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE};
@@ -339,8 +339,35 @@ pub fn decode_manifest(json: &str) -> Result<DecodedManifest> {
     }
 }
 
-/// Decode v2023 JSON to Snapshot.
+/// Decode v2023 JSON as a relative-path full [`Snapshot`].
+///
+/// The v2023 manifest format has no structural concept of deletions, so every
+/// successfully decoded v2023 manifest is, structurally, also a valid full
+/// snapshot. Use [`decode_v2023_as_diff`] instead if you need a
+/// [`SnapshotDiff`] (e.g. to pass to
+/// [`compose_snapshot_with_diffs`](crate::compose_snapshot_with_diffs) without
+/// reconstructing the manifest).
 pub fn decode_v2023(json: &str) -> Result<Snapshot> {
+    decode_v2023_with_kind::<Full>(json)
+}
+
+/// Decode v2023 JSON as a relative-path [`SnapshotDiff`].
+///
+/// The v2023 format has no structural distinction between a full snapshot and
+/// a diff — the phantom-type distinction is Rust-side only. Because v2023
+/// manifests never contain deleted entries, the resulting diff always has an
+/// empty deleted-entries set. This is purely a convenience for callers that
+/// want to layer a v2023-formatted manifest into a diff pipeline (such as
+/// [`compose_snapshot_with_diffs`](crate::compose_snapshot_with_diffs))
+/// without manually converting from [`Snapshot`].
+pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff> {
+    decode_v2023_with_kind::<crate::manifest::Diff>(json)
+}
+
+/// Shared implementation for v2023 decoding. `K` selects the phantom-type
+/// kind (`Full` or `Diff`); v2023 never produces deleted entries so either
+/// choice is equally valid at runtime.
+fn decode_v2023_with_kind<K: ValidateKind>(json: &str) -> Result<Manifest<Rel, K>> {
     let data: Value = serde_json::from_str(json)
         .map_err(|e| SnapshotError::Validation(format!("Invalid JSON: {e}")))?;
 
@@ -382,7 +409,7 @@ pub fn decode_v2023(json: &str) -> Result<Snapshot> {
         files.push(entry);
     }
 
-    let mut m: Snapshot = Manifest::new(hash_alg, WHOLE_FILE_CHUNK_SIZE);
+    let mut m: Manifest<Rel, K> = Manifest::new(hash_alg, WHOLE_FILE_CHUNK_SIZE);
     m.files = files;
     m.total_size = total_size;
     m.validate()?;

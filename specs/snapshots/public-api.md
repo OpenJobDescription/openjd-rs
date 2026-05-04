@@ -113,7 +113,18 @@ pub fn with_dirs(self, dirs: Vec<DirEntry>) -> Self;
 pub fn with_parent_hash(self, hash: Option<String>) -> Self;
 pub fn clear_hashes(&mut self);
 pub fn recompute_total_size(&mut self);
+pub fn common_root(&self) -> Option<String>;
 ```
+
+`common_root` returns the longest directory prefix that is an ancestor (or
+equal to) every meaningful non-deleted path in the manifest. Files contribute
+their parent directory; empty dirs contribute themselves; non-empty dirs
+(those with a strict descendant declared elsewhere in the manifest) are
+ignored so that a dir entry like `/` does not collapse the result toward
+root when it merely contains other declared entries. Returns `None` if the
+manifest is empty (or all entries are deleted). Composes with
+[`subtree_snapshot`] to extract a relative-path subtree from an absolute
+manifest without the caller needing to know a root path.
 
 #### Methods (where `P: ValidatePaths, K: ValidateKind`)
 
@@ -284,8 +295,16 @@ pub fn encode_v2025<P: Clone + Debug, K: Clone + Debug>(
 ```rust
 pub fn decode_manifest(json: &str) -> Result<DecodedManifest>;
 pub fn decode_v2023(json: &str) -> Result<Snapshot>;
+pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff>;
 pub fn decode_v2025(json: &str) -> Result<DecodedManifest>;
 ```
+
+The v2023 format has no structural distinction between a full snapshot and
+a diff. `decode_v2023` and `decode_v2023_as_diff` return the same data
+structurally; they differ only in the phantom `Kind` parameter of the
+returned manifest. `decode_v2023_as_diff` is a convenience for callers that
+want to feed a v2023-formatted manifest into a diff-consuming pipeline like
+[`compose_snapshot_with_diffs`] without reconstructing the manifest.
 
 ## Data Cache
 

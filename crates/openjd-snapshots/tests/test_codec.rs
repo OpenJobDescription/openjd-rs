@@ -4,9 +4,9 @@
 
 use openjd_snapshots::{
     codec::{
-        decode_manifest, decode_v2023, decode_v2025, encode_abs_snapshot_diff_v2025,
-        encode_abs_snapshot_v2025, encode_snapshot_diff_v2023, encode_snapshot_diff_v2025,
-        encode_snapshot_v2023, encode_snapshot_v2025, DecodedManifest,
+        decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2025,
+        encode_abs_snapshot_diff_v2025, encode_abs_snapshot_v2025, encode_snapshot_diff_v2023,
+        encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, DecodedManifest,
     },
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, HashAlgorithm, Manifest, Snapshot,
     SnapshotDiff, WHOLE_FILE_CHUNK_SIZE,
@@ -221,6 +221,102 @@ fn v2023_paths_sorted_by_utf16_be() {
     let a_pos = json.find("\"a.txt\"").unwrap();
     let b_pos = json.find("\"b.txt\"").unwrap();
     assert!(a_pos < b_pos, "paths should be sorted");
+}
+
+// ===== v2023 decode as SnapshotDiff =====
+
+#[test]
+fn v2023_decode_as_diff_roundtrip() {
+    // A v2023 manifest can be loaded as SnapshotDiff without re-serialization.
+    let snap = make_snapshot(vec![
+        file("a.txt", "hash_a", 10, 1000),
+        file("dir/b.txt", "hash_b", 20, 2000),
+    ]);
+    let json = encode_snapshot_v2023(&snap).unwrap();
+
+    let diff: SnapshotDiff = decode_v2023_as_diff(&json).unwrap();
+    assert_eq!(diff.files.len(), 2);
+    assert_eq!(diff.hash_alg, HashAlgorithm::Xxh128);
+    assert_eq!(diff.total_size, 30);
+    // v2023 never carries deletions — decoded diff has none either.
+    assert!(diff.files.iter().all(|f| !f.deleted));
+}
+
+#[test]
+fn v2023_decode_as_diff_validates_same_as_snapshot() {
+    // Malformed JSON should fail equally in both decoders.
+    let bad = r#"{"manifestVersion":"2023-03-03","hashAlg":"xxh128","totalSize":0,"paths":"not-an-array"}"#;
+    assert!(decode_v2023(bad).is_err());
+    assert!(decode_v2023_as_diff(bad).is_err());
+}
+
+#[test]
+fn v2023_decode_as_diff_empty_manifest() {
+    let snap = make_snapshot(vec![]);
+    let json = encode_snapshot_v2023(&snap).unwrap();
+    let diff = decode_v2023_as_diff(&json).unwrap();
+    assert_eq!(diff.files.len(), 0);
+    assert_eq!(diff.total_size, 0);
+}
+
+#[test]
+fn v2023_decode_as_snapshot_and_as_diff_produce_equivalent_file_lists() {
+    // The v2023 format has no structural distinction between full and diff,
+    // so both decoders should yield the same file contents (modulo the
+    // phantom type on the returned manifest).
+    let snap = make_snapshot(vec![
+        file("a.txt", "hash_a", 10, 1000),
+        file("b.txt", "hash_b", 20, 2000),
+        file("subdir/c.txt", "hash_c", 30, 3000),
+    ]);
+    let json = encode_snapshot_v2023(&snap).unwrap();
+
+    let as_snapshot = decode_v2023(&json).unwrap();
+    let as_diff = decode_v2023_as_diff(&json).unwrap();
+
+    assert_eq!(as_snapshot.files, as_diff.files);
+    assert_eq!(as_snapshot.dirs, as_diff.dirs);
+    assert_eq!(as_snapshot.hash_alg, as_diff.hash_alg);
+    assert_eq!(as_snapshot.total_size, as_diff.total_size);
+    assert_eq!(
+        as_snapshot.file_chunk_size_bytes,
+        as_diff.file_chunk_size_bytes
+    );
+}
+
+#[test]
+fn v2023_decode_as_diff_can_feed_compose_snapshot_with_diffs() {
+    // End-to-end demonstration of the motivating use case: load a v2023
+    // manifest as a diff and layer it onto a base snapshot via
+    // compose_snapshot_with_diffs.
+    use openjd_snapshots::compose_snapshot_with_diffs;
+
+    let base = make_snapshot(vec![
+        file("keep.txt", "hash_keep", 10, 1000),
+        file("update.txt", "old_hash", 20, 2000),
+    ]);
+
+    // The overlay is stored on disk in v2023 format.
+    let overlay_snap = make_snapshot(vec![
+        file("update.txt", "new_hash", 25, 3000),
+        file("added.txt", "hash_added", 30, 4000),
+    ]);
+    let overlay_json = encode_snapshot_v2023(&overlay_snap).unwrap();
+
+    // Load the overlay directly as a SnapshotDiff — no manual coercion.
+    let overlay_diff = decode_v2023_as_diff(&overlay_json).unwrap();
+
+    let composed = compose_snapshot_with_diffs(&base, &[&overlay_diff]).unwrap();
+
+    // Verify the composition worked end-to-end.
+    let by_path: std::collections::HashMap<&str, &FileEntry> = composed
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f))
+        .collect();
+    assert_eq!(by_path["keep.txt"].hash.as_deref(), Some("hash_keep"));
+    assert_eq!(by_path["update.txt"].hash.as_deref(), Some("new_hash"));
+    assert_eq!(by_path["added.txt"].hash.as_deref(), Some("hash_added"));
 }
 
 // ===== v2025 encode/decode =====
