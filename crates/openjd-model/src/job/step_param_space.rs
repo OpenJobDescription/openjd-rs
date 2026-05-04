@@ -362,7 +362,8 @@ fn count_contiguous_chunks_from_sub_ranges(r: &RangeExpr, default_task_count: us
             // then each subsequent value is its own interval.
             let count = sr.len();
             for idx in 0..count {
-                let val = sr.get(idx).unwrap();
+                // SAFETY: idx is bounded by sr.len(), so get() always returns Some.
+                let val = sr.get(idx).expect("index within sub-range bounds");
                 match interval {
                     Some((is, ie)) if val == ie + 1 => {
                         interval = Some((is, val));
@@ -485,7 +486,10 @@ impl ContiguousChunkIterState {
     fn get_value(&self, i: usize) -> i64 {
         match &self.range {
             job::TaskParamRange::List(v) => v[i],
-            job::TaskParamRange::RangeExpr(r) => r.get(i as i64).unwrap(),
+            // i is always bounded by the range length via cursor/total_len checks in callers.
+            job::TaskParamRange::RangeExpr(r) => {
+                r.get(i as i64).expect("index within range bounds")
+            }
         }
     }
 
@@ -1282,7 +1286,12 @@ impl StepParameterSpaceIterator {
                 children.push(child);
             }
             if children.len() == 1 {
-                children.pop().unwrap()
+                // SAFETY: We just checked len() == 1, so into_iter().next() always
+                // returns Some. Using into_iter avoids an unwrap on pop().
+                children
+                    .into_iter()
+                    .next()
+                    .expect("non-empty vec with len 1")
             } else {
                 let length = checked_product_len(&children)?;
                 Box::new(ProductNode { children, length })
@@ -1493,7 +1502,12 @@ fn parse_node_product(
         )?);
     }
     if children.len() == 1 {
-        Ok(children.pop().unwrap())
+        // SAFETY: We just checked len() == 1, so into_iter().next() always
+        // returns Some. Using into_iter avoids an unwrap on pop().
+        Ok(children
+            .into_iter()
+            .next()
+            .expect("non-empty vec with len 1"))
     } else {
         let length = checked_product_len(&children)?;
         Ok(Box::new(ProductNode { children, length }))
@@ -2046,5 +2060,31 @@ mod tests {
         let err = iter.validate_containment(&params).unwrap_err();
         assert!(err.contains("C"), "got: {err}");
         assert!(err.contains("not"), "got: {err}");
+    }
+
+    // ── F2: get_value with range_expr returns values without panic ──
+
+    #[test]
+    fn test_contiguous_chunk_stepped_range_iterates_without_panic() {
+        // Stepped range (step=2) exercises the sr.get(idx) path in
+        // count_contiguous_chunks_for_range and ContiguousChunkIterState::get_value
+        let space = make_space(vec![("C", static_chunk_param("1-10:2", 2))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let results: Vec<_> = iter.collect();
+        assert!(!results.is_empty(), "should produce at least one chunk");
+        for r in &results {
+            assert!(r.contains_key("C"));
+        }
+    }
+
+    #[test]
+    fn test_range_expr_random_access_does_not_panic() {
+        // Exercises RangeExprNode::get which calls r.get(i as i64)
+        let space = make_space(vec![("X", range_expr_param("1-5"))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        for i in 0..5 {
+            let set = iter.get(i).unwrap();
+            assert_eq!(set["X"].value, ExprValue::Int(i as i64 + 1));
+        }
     }
 }

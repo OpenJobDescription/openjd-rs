@@ -356,7 +356,8 @@ pub(super) fn coerce_to_type(
     match (value, param_type) {
         (ExprValue::Int(i), JobParameterType::Float) => {
             return Ok(ExprValue::Float(
-                openjd_expr::value::Float64::new(*i as f64).unwrap(),
+                openjd_expr::value::Float64::new(*i as f64)
+                    .map_err(|_| format!("Cannot represent integer {i} as a finite float"))?,
             ));
         }
         (ExprValue::Float(f), JobParameterType::Int) => {
@@ -680,6 +681,17 @@ fn join_for_format(
 
 /// Normalize a path string by resolving `.` and `..` components.
 /// Uses string-based logic so it works correctly regardless of host OS.
+///
+/// # Limitations
+///
+/// This is a **string-level** normalization only. It does **not** resolve
+/// symlinks, so a path like `./symlink_to_parent/../secret` may normalize
+/// to a location that appears to be within the base directory but actually
+/// escapes it via the symlink target. Callers that use the result for
+/// access-control checks (e.g. the `starts_with(normalized_dir)` guard in
+/// `preprocess_job_parameters`) should be aware that filesystem-level
+/// canonicalization (e.g. `std::fs::canonicalize`) is needed downstream
+/// before performing actual file I/O to prevent symlink-based traversal.
 fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat) -> String {
     use openjd_expr::path_mapping::PathFormat;
     let sep = match format {
@@ -819,5 +831,24 @@ mod tests {
         // More .. than components should clamp at server\share
         let result = normalize_path_str(r"\\server\share\..\..\..\..", PathFormat::Windows);
         assert_eq!(result, r"\\server\share", "got {result}");
+    }
+
+    #[test]
+    fn coerce_int_to_float_returns_ok() {
+        let val = openjd_expr::ExprValue::Int(42);
+        let result = coerce_to_type(&val, JobParameterType::Float);
+        assert!(result.is_ok(), "int-to-float coercion should succeed");
+        match result.unwrap() {
+            openjd_expr::ExprValue::Float(f) => assert_eq!(f.value(), 42.0),
+            other => panic!("expected Float, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn coerce_large_int_to_float_returns_ok() {
+        // Large i64 that loses precision as f64 but is still finite
+        let val = openjd_expr::ExprValue::Int(i64::MAX);
+        let result = coerce_to_type(&val, JobParameterType::Float);
+        assert!(result.is_ok(), "large int-to-float coercion should succeed");
     }
 }
