@@ -40,81 +40,111 @@ fn arithmetic() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     let mut lib = FunctionLibrary::new();
     // int arithmetic
-    lib.register_sig("__add__", "(int, int) -> int", add_int);
-    lib.register_sig("__sub__", "(int, int) -> int", sub_int);
-    lib.register_sig("__mul__", "(int, int) -> int", mul_int);
-    lib.register_sig("__truediv__", "(int, int) -> float", truediv_int);
-    lib.register_sig("__floordiv__", "(int, int) -> int", floordiv_int);
-    lib.register_sig("__mod__", "(int, int) -> int", mod_int);
-    lib.register_sig("__pow__", "(int, int) -> float | int", pow_int);
-    lib.register_sig("__neg__", "(int) -> int", neg_int);
-    lib.register_sig("__pos__", "(int) -> int", pos_int);
+    lib.register_sig("__add__", "(int, int) -> int", add_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__sub__", "(int, int) -> int", sub_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__mul__", "(int, int) -> int", mul_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__truediv__", "(int, int) -> float", truediv_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__floordiv__", "(int, int) -> int", floordiv_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__mod__", "(int, int) -> int", mod_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__pow__", "(int, int) -> float | int", pow_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__neg__", "(int) -> int", neg_int)
+        .expect("bad builtin signature");
+    lib.register_sig("__pos__", "(int) -> int", pos_int)
+        .expect("bad builtin signature");
     // float arithmetic
-    lib.register_sig("__add__", "(float, float) -> float", add_float);
-    lib.register_sig("__sub__", "(float, float) -> float", sub_float);
-    lib.register_sig("__mul__", "(float, float) -> float", mul_float);
-    lib.register_sig("__truediv__", "(float, float) -> float", truediv_float);
-    lib.register_sig("__floordiv__", "(float, float) -> int", floordiv_float);
-    lib.register_sig("__mod__", "(float, float) -> float", mod_float);
-    lib.register_sig("__pow__", "(float, float) -> float", pow_float);
-    lib.register_sig("__neg__", "(float) -> float", neg_float);
-    lib.register_sig("__pos__", "(float) -> float", pos_float);
+    lib.register_sig("__add__", "(float, float) -> float", add_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__sub__", "(float, float) -> float", sub_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__mul__", "(float, float) -> float", mul_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__truediv__", "(float, float) -> float", truediv_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__floordiv__", "(float, float) -> int", floordiv_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__mod__", "(float, float) -> float", mod_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__pow__", "(float, float) -> float", pow_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__neg__", "(float) -> float", neg_float)
+        .expect("bad builtin signature");
+    lib.register_sig("__pos__", "(float) -> float", pos_float)
+        .expect("bad builtin signature");
     lib
 }
 
 fn string_ops() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("__add__", "(string, string) -> string", add_string);
+    lib.register_sig("__add__", "(string, string) -> string", add_string)
+        .expect("bad builtin signature");
     lib.register_sig(
         "__add__",
         "(string, range_expr) -> string",
         add_string_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__add__",
         "(range_expr, string) -> string",
         add_range_string,
-    );
-    lib.register_sig("__mul__", "(string, int) -> string", mul_string);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("__mul__", "(string, int) -> string", mul_string)
+        .expect("bad builtin signature");
     lib
 }
 
 fn list_ops() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("__add__", "(list[T1], list[T2]) -> list[T3]", add_list_list);
+    lib.register_sig("__add__", "(list[T1], list[T2]) -> list[T3]", add_list_list)
+        .expect("bad builtin signature");
     lib.register_sig(
         "__add__",
         "(range_expr, list[T1]) -> list[T2]",
         add_range_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__add__",
         "(list[T1], range_expr) -> list[T2]",
         add_list_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__add__",
         "(range_expr, range_expr) -> list[int]",
         add_range_range,
-    );
-    lib.register_sig("__mul__", "(list[T1], int) -> list[T1]", mul_list);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("__mul__", "(list[T1], int) -> list[T1]", mul_list)
+        .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(list[T1], int) -> T1",
         crate::functions::misc::getitem_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(string, int) -> string",
         crate::functions::misc::getitem_string,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(range_expr, int) -> int",
         crate::functions::misc::getitem_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib
 }
 
@@ -122,197 +152,313 @@ fn comparison() -> FunctionLibrary {
     use crate::functions::arithmetic::not_bool;
     use crate::functions::comparison::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("__not__", "(bool) -> bool", not_bool);
+    lib.register_sig("__not__", "(bool) -> bool", not_bool)
+        .expect("bad builtin signature");
     // Equality / ordering — generic (T1, T2) -> bool
-    lib.register_sig("__eq__", "(T1, T2) -> bool", eq_generic);
-    lib.register_sig("__ne__", "(T1, T2) -> bool", ne_generic);
-    lib.register_sig("__lt__", "(T1, T2) -> bool", lt_generic);
-    lib.register_sig("__le__", "(T1, T2) -> bool", le_generic);
-    lib.register_sig("__gt__", "(T1, T2) -> bool", gt_generic);
-    lib.register_sig("__ge__", "(T1, T2) -> bool", ge_generic);
+    lib.register_sig("__eq__", "(T1, T2) -> bool", eq_generic)
+        .expect("bad builtin signature");
+    lib.register_sig("__ne__", "(T1, T2) -> bool", ne_generic)
+        .expect("bad builtin signature");
+    lib.register_sig("__lt__", "(T1, T2) -> bool", lt_generic)
+        .expect("bad builtin signature");
+    lib.register_sig("__le__", "(T1, T2) -> bool", le_generic)
+        .expect("bad builtin signature");
+    lib.register_sig("__gt__", "(T1, T2) -> bool", gt_generic)
+        .expect("bad builtin signature");
+    lib.register_sig("__ge__", "(T1, T2) -> bool", ge_generic)
+        .expect("bad builtin signature");
     // Containment — container first, item second
-    lib.register_sig("__contains__", "(list[T1], T1) -> bool", contains_list);
-    lib.register_sig("__contains__", "(range_expr, int) -> bool", contains_range);
-    lib.register_sig("__contains__", "(string, string) -> bool", contains_string);
+    lib.register_sig("__contains__", "(list[T1], T1) -> bool", contains_list)
+        .expect("bad builtin signature");
+    lib.register_sig("__contains__", "(range_expr, int) -> bool", contains_range)
+        .expect("bad builtin signature");
+    lib.register_sig("__contains__", "(string, string) -> bool", contains_string)
+        .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
         "(list[T1], T1) -> bool",
         not_contains_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
         "(range_expr, int) -> bool",
         not_contains_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
         "(string, string) -> bool",
         not_contains_string,
-    );
+    )
+    .expect("bad builtin signature");
     // Slice — 4-arg __getitem__ overloads
     lib.register_sig(
         "__getitem__",
         "(list[T1], int | nulltype, int | nulltype, int | nulltype) -> list[T1]",
         slice_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(range_expr, int | nulltype, int | nulltype, int | nulltype) -> range_expr | list[int]",
         slice_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(string, int | nulltype, int | nulltype, int | nulltype) -> string",
         slice_string,
-    );
+    )
+    .expect("bad builtin signature");
     lib
 }
 
 fn math_ops() -> FunctionLibrary {
     use crate::functions::math::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("min", "(int, int) -> int", min_fn);
-    lib.register_sig("min", "(float, float) -> float", min_fn);
-    lib.register_sig("min", "(int, int, int) -> int", min_fn);
-    lib.register_sig("min", "(float, float, float) -> float", min_fn);
-    lib.register_sig("min", "(list[int]) -> int", min_fn);
-    lib.register_sig("min", "(list[float]) -> float", min_fn);
-    lib.register_sig("min", "(range_expr) -> int", min_fn);
-    lib.register_sig("min", "(list[nulltype]) -> noreturn", min_fn);
-    lib.register_sig("max", "(int, int) -> int", max_fn);
-    lib.register_sig("max", "(float, float) -> float", max_fn);
-    lib.register_sig("max", "(int, int, int) -> int", max_fn);
-    lib.register_sig("max", "(float, float, float) -> float", max_fn);
-    lib.register_sig("max", "(list[int]) -> int", max_fn);
-    lib.register_sig("max", "(list[float]) -> float", max_fn);
-    lib.register_sig("max", "(range_expr) -> int", max_fn);
-    lib.register_sig("max", "(list[nulltype]) -> noreturn", max_fn);
-    lib.register_sig("floor", "(int) -> int", floor_int);
-    lib.register_sig("floor", "(float) -> int", floor_float);
-    lib.register_sig("ceil", "(int) -> int", ceil_int);
-    lib.register_sig("ceil", "(float) -> int", ceil_float);
-    lib.register_sig("round", "(float) -> int", round_fn);
-    lib.register_sig("round", "(float, int) -> float | int", round_fn);
-    lib.register_sig("round", "(int, int) -> int", round_fn);
-    lib.register_sig("sum", "(list[int]) -> int", sum_list);
-    lib.register_sig("sum", "(list[float]) -> float", sum_list);
-    lib.register_sig("sum", "(list[nulltype]) -> int", sum_list);
-    lib.register_sig("sum", "(range_expr) -> int", sum_list);
+    lib.register_sig("min", "(int, int) -> int", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(float, float) -> float", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(int, int, int) -> int", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(float, float, float) -> float", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(list[int]) -> int", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(list[float]) -> float", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(range_expr) -> int", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("min", "(list[nulltype]) -> noreturn", min_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(int, int) -> int", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(float, float) -> float", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(int, int, int) -> int", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(float, float, float) -> float", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(list[int]) -> int", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(list[float]) -> float", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(range_expr) -> int", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("max", "(list[nulltype]) -> noreturn", max_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("floor", "(int) -> int", floor_int)
+        .expect("bad builtin signature");
+    lib.register_sig("floor", "(float) -> int", floor_float)
+        .expect("bad builtin signature");
+    lib.register_sig("ceil", "(int) -> int", ceil_int)
+        .expect("bad builtin signature");
+    lib.register_sig("ceil", "(float) -> int", ceil_float)
+        .expect("bad builtin signature");
+    lib.register_sig("round", "(float) -> int", round_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("round", "(float, int) -> float | int", round_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("round", "(int, int) -> int", round_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("sum", "(list[int]) -> int", sum_list)
+        .expect("bad builtin signature");
+    lib.register_sig("sum", "(list[float]) -> float", sum_list)
+        .expect("bad builtin signature");
+    lib.register_sig("sum", "(list[nulltype]) -> int", sum_list)
+        .expect("bad builtin signature");
+    lib.register_sig("sum", "(range_expr) -> int", sum_list)
+        .expect("bad builtin signature");
     lib
 }
 
 fn string_functions() -> FunctionLibrary {
     use crate::functions::string::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("upper", "(string) -> string", upper_fn);
-    lib.register_sig("lower", "(string) -> string", lower_fn);
-    lib.register_sig("strip", "(string) -> string", strip_fn);
-    lib.register_sig("strip", "(string, string) -> string", strip_fn);
-    lib.register_sig("lstrip", "(string) -> string", lstrip_fn);
-    lib.register_sig("lstrip", "(string, string) -> string", lstrip_fn);
-    lib.register_sig("rstrip", "(string) -> string", rstrip_fn);
-    lib.register_sig("rstrip", "(string, string) -> string", rstrip_fn);
-    lib.register_sig("startswith", "(string, string) -> bool", startswith_fn);
-    lib.register_sig("endswith", "(string, string) -> bool", endswith_fn);
-    lib.register_sig("replace", "(string, string, string) -> string", replace_fn);
-    lib.register_sig("split", "(string) -> list[string]", split_fn);
-    lib.register_sig("split", "(string, string) -> list[string]", split_fn);
-    lib.register_sig("split", "(string, string, int) -> list[string]", split_fn);
-    lib.register_sig("rsplit", "(string) -> list[string]", rsplit_fn);
-    lib.register_sig("rsplit", "(string, string) -> list[string]", rsplit_fn);
-    lib.register_sig("rsplit", "(string, string, int) -> list[string]", rsplit_fn);
-    lib.register_sig("find", "(string, string) -> int", find_fn);
-    lib.register_sig("rfind", "(string, string) -> int", rfind_fn);
-    lib.register_sig("index", "(string, string) -> int", index_fn);
-    lib.register_sig("rindex", "(string, string) -> int", rindex_fn);
-    lib.register_sig("count", "(string, string) -> int", count_fn);
+    lib.register_sig("upper", "(string) -> string", upper_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("lower", "(string) -> string", lower_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("strip", "(string) -> string", strip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("strip", "(string, string) -> string", strip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("lstrip", "(string) -> string", lstrip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("lstrip", "(string, string) -> string", lstrip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rstrip", "(string) -> string", rstrip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rstrip", "(string, string) -> string", rstrip_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("startswith", "(string, string) -> bool", startswith_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("endswith", "(string, string) -> bool", endswith_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("replace", "(string, string, string) -> string", replace_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("split", "(string) -> list[string]", split_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("split", "(string, string) -> list[string]", split_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("split", "(string, string, int) -> list[string]", split_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rsplit", "(string) -> list[string]", rsplit_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rsplit", "(string, string) -> list[string]", rsplit_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rsplit", "(string, string, int) -> list[string]", rsplit_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("find", "(string, string) -> int", find_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rfind", "(string, string) -> int", rfind_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("index", "(string, string) -> int", index_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rindex", "(string, string) -> int", rindex_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("count", "(string, string) -> int", count_fn)
+        .expect("bad builtin signature");
     lib.register_sig(
         "removeprefix",
         "(string, string) -> string",
         removeprefix_fn,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "removesuffix",
         "(string, string) -> string",
         removesuffix_fn,
-    );
-    lib.register_sig("isdigit", "(string) -> bool", isdigit_fn);
-    lib.register_sig("isalpha", "(string) -> bool", isalpha_fn);
-    lib.register_sig("isalnum", "(string) -> bool", isalnum_fn);
-    lib.register_sig("isspace", "(string) -> bool", isspace_fn);
-    lib.register_sig("isupper", "(string) -> bool", isupper_fn);
-    lib.register_sig("islower", "(string) -> bool", islower_fn);
-    lib.register_sig("isascii", "(string) -> bool", isascii_fn);
-    lib.register_sig("title", "(string) -> string", title_fn);
-    lib.register_sig("capitalize", "(string) -> string", capitalize_fn);
-    lib.register_sig("center", "(string, int) -> string", center_fn);
-    lib.register_sig("ljust", "(string, int) -> string", ljust_fn);
-    lib.register_sig("rjust", "(string, int) -> string", rjust_fn);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("isdigit", "(string) -> bool", isdigit_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("isalpha", "(string) -> bool", isalpha_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("isalnum", "(string) -> bool", isalnum_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("isspace", "(string) -> bool", isspace_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("isupper", "(string) -> bool", isupper_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("islower", "(string) -> bool", islower_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("isascii", "(string) -> bool", isascii_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("title", "(string) -> string", title_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("capitalize", "(string) -> string", capitalize_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("center", "(string, int) -> string", center_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("ljust", "(string, int) -> string", ljust_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("rjust", "(string, int) -> string", rjust_fn)
+        .expect("bad builtin signature");
     lib
 }
 
 fn list_functions() -> FunctionLibrary {
     use crate::functions::list::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("sorted", "(list[T1]) -> list[T1]", sorted_fn);
-    lib.register_sig("reversed", "(list[T1]) -> list[T1]", reversed_fn);
-    lib.register_sig("unique", "(list[T1]) -> list[T1]", unique_fn);
-    lib.register_sig("flatten", "(list[list[T1]]) -> list[T1]", flatten_fn);
-    lib.register_sig("flatten", "(list[T1]) -> list[T1]", flatten_fn);
-    lib.register_sig("flatten", "(list[nulltype]) -> list[nulltype]", flatten_fn);
-    lib.register_sig("join", "(list[string], string) -> string", join_fn);
-    lib.register_sig("join", "(list[path], string) -> string", join_fn);
-    lib.register_sig("join", "(list[nulltype], string) -> string", join_fn);
-    lib.register_sig("range", "(int) -> list[int]", range_fn);
-    lib.register_sig("range", "(int, int) -> list[int]", range_fn);
-    lib.register_sig("range", "(int, int, int) -> list[int]", range_fn);
+    lib.register_sig("sorted", "(list[T1]) -> list[T1]", sorted_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("reversed", "(list[T1]) -> list[T1]", reversed_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("unique", "(list[T1]) -> list[T1]", unique_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("flatten", "(list[list[T1]]) -> list[T1]", flatten_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("flatten", "(list[T1]) -> list[T1]", flatten_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("flatten", "(list[nulltype]) -> list[nulltype]", flatten_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("join", "(list[string], string) -> string", join_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("join", "(list[path], string) -> string", join_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("join", "(list[nulltype], string) -> string", join_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("range", "(int) -> list[int]", range_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("range", "(int, int) -> list[int]", range_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("range", "(int, int, int) -> list[int]", range_fn)
+        .expect("bad builtin signature");
     lib
 }
 
 fn conversion() -> FunctionLibrary {
     use crate::functions::conversion::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("int", "(int) -> int", int_from_int);
-    lib.register_sig("int", "(float) -> int", int_from_float);
-    lib.register_sig("int", "(string) -> int", int_from_string);
-    lib.register_sig("float", "(float) -> float", float_from_float);
-    lib.register_sig("float", "(int) -> float", float_from_int);
-    lib.register_sig("float", "(string) -> float", float_from_string);
-    lib.register_sig("string", "(int) -> string", string_fn);
-    lib.register_sig("string", "(float) -> string", string_fn);
-    lib.register_sig("string", "(bool) -> string", string_fn);
-    lib.register_sig("string", "(string) -> string", string_fn);
-    lib.register_sig("string", "(path) -> string", string_fn);
-    lib.register_sig("string", "(nulltype) -> string", string_fn);
-    lib.register_sig("string", "(list[T1]) -> string", string_fn);
-    lib.register_sig("string", "(range_expr) -> string", string_fn);
-    lib.register_sig("bool", "(bool) -> bool", bool_from_bool);
-    lib.register_sig("bool", "(int) -> bool", bool_from_int);
-    lib.register_sig("bool", "(float) -> bool", bool_from_float);
-    lib.register_sig("bool", "(string) -> bool", bool_from_string);
-    lib.register_sig("bool", "(nulltype) -> bool", bool_from_null);
-    lib.register_sig("bool", "(path) -> noreturn", bool_from_path);
-    lib.register_sig("bool", "(list[T]) -> noreturn", bool_from_list);
+    lib.register_sig("int", "(int) -> int", int_from_int)
+        .expect("bad builtin signature");
+    lib.register_sig("int", "(float) -> int", int_from_float)
+        .expect("bad builtin signature");
+    lib.register_sig("int", "(string) -> int", int_from_string)
+        .expect("bad builtin signature");
+    lib.register_sig("float", "(float) -> float", float_from_float)
+        .expect("bad builtin signature");
+    lib.register_sig("float", "(int) -> float", float_from_int)
+        .expect("bad builtin signature");
+    lib.register_sig("float", "(string) -> float", float_from_string)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(int) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(float) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(bool) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(string) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(path) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(nulltype) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(list[T1]) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("string", "(range_expr) -> string", string_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(bool) -> bool", bool_from_bool)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(int) -> bool", bool_from_int)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(float) -> bool", bool_from_float)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(string) -> bool", bool_from_string)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(nulltype) -> bool", bool_from_null)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(path) -> noreturn", bool_from_path)
+        .expect("bad builtin signature");
+    lib.register_sig("bool", "(list[T]) -> noreturn", bool_from_list)
+        .expect("bad builtin signature");
     lib.register_sig(
         "list",
         "(range_expr) -> list[int]",
         crate::functions::list::list_from_range,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "range_expr",
         "(string) -> range_expr",
         crate::functions::list::range_expr_from_string,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "range_expr",
         "(list[int]) -> range_expr",
         crate::functions::list::range_expr_from_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "range_expr",
         "(list[nulltype]) -> noreturn",
         crate::functions::list::range_expr_from_empty_list,
-    );
+    )
+    .expect("bad builtin signature");
     lib
 }
 
@@ -320,42 +466,64 @@ fn path_ops() -> FunctionLibrary {
     use crate::functions::arithmetic::*;
     use crate::functions::path::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("path", "(string) -> path", crate::functions::misc::path_fn);
+    lib.register_sig("path", "(string) -> path", crate::functions::misc::path_fn)
+        .expect("bad builtin signature");
     lib.register_sig(
         "path",
         "(list[string]) -> path",
         crate::functions::misc::path_fn,
-    );
-    lib.register_sig("__truediv__", "(path, string) -> path", path_div);
-    lib.register_sig("__truediv__", "(path, path) -> path", path_div);
-    lib.register_sig("__add__", "(path, string) -> path", add_path_string);
-    lib.register_sig("as_posix", "(path) -> string", as_posix_fn);
-    lib.register_sig("with_name", "(path, string) -> path", with_name_fn);
-    lib.register_sig("with_stem", "(path, string) -> path", with_stem_fn);
-    lib.register_sig("with_suffix", "(path, string) -> path", with_suffix_fn);
-    lib.register_sig("with_number", "(path, int) -> path", with_number_fn);
-    lib.register_sig("with_number", "(string, int) -> string", with_number_fn);
-    lib.register_sig("is_absolute", "(path) -> bool", is_absolute_fn);
-    lib.register_sig("is_relative_to", "(path, path) -> bool", is_relative_to_fn);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("__truediv__", "(path, string) -> path", path_div)
+        .expect("bad builtin signature");
+    lib.register_sig("__truediv__", "(path, path) -> path", path_div)
+        .expect("bad builtin signature");
+    lib.register_sig("__add__", "(path, string) -> path", add_path_string)
+        .expect("bad builtin signature");
+    lib.register_sig("as_posix", "(path) -> string", as_posix_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("with_name", "(path, string) -> path", with_name_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("with_stem", "(path, string) -> path", with_stem_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("with_suffix", "(path, string) -> path", with_suffix_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("with_number", "(path, int) -> path", with_number_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("with_number", "(string, int) -> string", with_number_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("is_absolute", "(path) -> bool", is_absolute_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("is_relative_to", "(path, path) -> bool", is_relative_to_fn)
+        .expect("bad builtin signature");
     lib.register_sig(
         "is_relative_to",
         "(path, string) -> bool",
         is_relative_to_fn,
-    );
-    lib.register_sig("relative_to", "(path, path) -> path", relative_to_fn);
-    lib.register_sig("relative_to", "(path, string) -> path", relative_to_fn);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("relative_to", "(path, path) -> path", relative_to_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("relative_to", "(path, string) -> path", relative_to_fn)
+        .expect("bad builtin signature");
     // apply_path_mapping is host-context only — registered via with_host_context()
     // Properties (handled by eval_attribute, registered for type checking)
-    lib.register_sig("__property_name__", "(path) -> string", prop_name);
-    lib.register_sig("__property_stem__", "(path) -> string", prop_stem);
-    lib.register_sig("__property_suffix__", "(path) -> string", prop_suffix);
+    lib.register_sig("__property_name__", "(path) -> string", prop_name)
+        .expect("bad builtin signature");
+    lib.register_sig("__property_stem__", "(path) -> string", prop_stem)
+        .expect("bad builtin signature");
+    lib.register_sig("__property_suffix__", "(path) -> string", prop_suffix)
+        .expect("bad builtin signature");
     lib.register_sig(
         "__property_suffixes__",
         "(path) -> list[string]",
         prop_suffixes,
-    );
-    lib.register_sig("__property_parent__", "(path) -> path", prop_parent);
-    lib.register_sig("__property_parts__", "(path) -> list[string]", prop_parts);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("__property_parent__", "(path) -> path", prop_parent)
+        .expect("bad builtin signature");
+    lib.register_sig("__property_parts__", "(path) -> list[string]", prop_parts)
+        .expect("bad builtin signature");
     lib
 }
 
@@ -377,14 +545,22 @@ fn repr_ops() -> FunctionLibrary {
         ("repr_cmd", repr_cmd_fn),
         ("repr_pwsh", repr_pwsh_fn),
     ] {
-        lib.register_sig(f.0, "(int) -> string", f.1);
-        lib.register_sig(f.0, "(float) -> string", f.1);
-        lib.register_sig(f.0, "(string) -> string", f.1);
-        lib.register_sig(f.0, "(bool) -> string", f.1);
-        lib.register_sig(f.0, "(path) -> string", f.1);
-        lib.register_sig(f.0, "(nulltype) -> string", f.1);
-        lib.register_sig(f.0, "(list[T1]) -> string", f.1);
-        lib.register_sig(f.0, "(range_expr) -> string", f.1);
+        lib.register_sig(f.0, "(int) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(float) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(string) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(bool) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(path) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(nulltype) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(list[T1]) -> string", f.1)
+            .expect("bad builtin signature");
+        lib.register_sig(f.0, "(range_expr) -> string", f.1)
+            .expect("bad builtin signature");
     }
     lib
 }
@@ -392,34 +568,42 @@ fn repr_ops() -> FunctionLibrary {
 fn regex_ops() -> FunctionLibrary {
     use crate::functions::regex::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("re_match", "(string, string) -> list[string]?", re_match_fn);
+    lib.register_sig("re_match", "(string, string) -> list[string]?", re_match_fn)
+        .expect("bad builtin signature");
     lib.register_sig(
         "re_search",
         "(string, string) -> list[string]?",
         re_search_fn,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "re_findall",
         "(string, string) -> list[string]",
         re_findall_fn,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "re_findall",
         "(string, string) -> list[list[string]]",
         re_findall_fn,
-    );
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "re_sub",
         "(string, string, string) -> string",
         re_replace_fn,
-    );
-    lib.register_sig("re_split", "(string, string) -> list[string]", re_split_fn);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("re_split", "(string, string) -> list[string]", re_split_fn)
+        .expect("bad builtin signature");
     lib.register_sig(
         "re_split",
         "(string, string, int) -> list[string]",
         re_split_fn,
-    );
-    lib.register_sig("re_escape", "(string) -> string", re_escape_fn);
+    )
+    .expect("bad builtin signature");
+    lib.register_sig("re_escape", "(string) -> string", re_escape_fn)
+        .expect("bad builtin signature");
     lib
 }
 
@@ -435,7 +619,8 @@ pub fn register_host_context_functions(
         "apply_path_mapping",
         "(string) -> path",
         crate::functions::path::make_apply_path_mapping_fn(rules),
-    );
+    )
+    .expect("bad builtin signature");
 }
 
 pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
@@ -449,26 +634,41 @@ pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
         "apply_path_mapping",
         "(string) -> path",
         unresolved_apply_path_mapping,
-    );
+    )
+    .expect("bad builtin signature");
 }
 
 fn misc() -> FunctionLibrary {
     use crate::functions::misc::*;
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("fail", "(string) -> noreturn", fail_fn);
-    lib.register_sig("zfill", "(string, int) -> string", zfill_fn);
-    lib.register_sig("zfill", "(int, int) -> string", zfill_fn);
-    lib.register_sig("zfill", "(float, int) -> string", zfill_fn);
-    lib.register_sig("any", "(list[bool]) -> bool", any_fn);
-    lib.register_sig("any", "(list[nulltype]) -> bool", any_fn);
-    lib.register_sig("all", "(list[bool]) -> bool", all_fn);
-    lib.register_sig("all", "(list[nulltype]) -> bool", all_fn);
-    lib.register_sig("abs", "(int) -> int", abs_int);
-    lib.register_sig("abs", "(float) -> float", abs_float);
-    lib.register_sig("len", "(string) -> int", len_string);
-    lib.register_sig("len", "(path) -> int", len_path);
-    lib.register_sig("len", "(list[T1]) -> int", len_list);
-    lib.register_sig("len", "(range_expr) -> int", len_range);
+    lib.register_sig("fail", "(string) -> noreturn", fail_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("zfill", "(string, int) -> string", zfill_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("zfill", "(int, int) -> string", zfill_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("zfill", "(float, int) -> string", zfill_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("any", "(list[bool]) -> bool", any_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("any", "(list[nulltype]) -> bool", any_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("all", "(list[bool]) -> bool", all_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("all", "(list[nulltype]) -> bool", all_fn)
+        .expect("bad builtin signature");
+    lib.register_sig("abs", "(int) -> int", abs_int)
+        .expect("bad builtin signature");
+    lib.register_sig("abs", "(float) -> float", abs_float)
+        .expect("bad builtin signature");
+    lib.register_sig("len", "(string) -> int", len_string)
+        .expect("bad builtin signature");
+    lib.register_sig("len", "(path) -> int", len_path)
+        .expect("bad builtin signature");
+    lib.register_sig("len", "(list[T1]) -> int", len_list)
+        .expect("bad builtin signature");
+    lib.register_sig("len", "(range_expr) -> int", len_range)
+        .expect("bad builtin signature");
     lib
 }
 

@@ -79,7 +79,8 @@ fn add_float(_ctx: &mut dyn EvalContext, args: &[ExprValue]) -> Result<ExprValue
 #[test]
 fn library_function_called_from_evaluator() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("custom_add", "(int, int) -> int", custom_add);
+    lib.register_sig("custom_add", "(int, int) -> int", custom_add)
+        .unwrap();
 
     let parsed = ParsedExpression::new("custom_add(3, 7)").unwrap();
     let st = SymbolTable::new();
@@ -90,7 +91,8 @@ fn library_function_called_from_evaluator() {
 #[test]
 fn library_function_with_unresolved() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("custom_add", "(int, int) -> int", custom_add);
+    lib.register_sig("custom_add", "(int, int) -> int", custom_add)
+        .unwrap();
 
     let mut st = SymbolTable::new();
     st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
@@ -106,8 +108,10 @@ fn library_function_with_unresolved() {
 fn phase1_exact_match_preferred_over_coercion() {
     // When both exact and coerced matches exist, exact wins
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int, int) -> int", custom_add); // exact: returns a*100+b
-    lib.register_sig("f", "(float, float) -> float", add_float); // coerced would go here
+    lib.register_sig("f", "(int, int) -> int", custom_add)
+        .unwrap(); // exact: returns a*100+b
+    lib.register_sig("f", "(float, float) -> float", add_float)
+        .unwrap(); // coerced would go here
     let mut ctx = MockCtx;
     let r = lib
         .call("f", &[ExprValue::Int(2), ExprValue::Int(3)], &mut ctx)
@@ -118,7 +122,8 @@ fn phase1_exact_match_preferred_over_coercion() {
 #[test]
 fn phase2_coercion_int_to_float() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(float, float) -> float", add_float);
+    lib.register_sig("f", "(float, float) -> float", add_float)
+        .unwrap();
     let mut ctx = MockCtx;
     // No exact (int,int) match → coerce both ints to float
     let r = lib
@@ -130,7 +135,8 @@ fn phase2_coercion_int_to_float() {
 #[test]
 fn phase2_coercion_path_to_string() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(string) -> string", identity);
+    lib.register_sig("f", "(string) -> string", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     let path = ExprValue::new_path("/tmp/test", PathFormat::Posix);
     let r = lib.call("f", &[path], &mut ctx).unwrap();
@@ -145,7 +151,8 @@ fn phase3_generic_match() {
             .ok_or_else(|| ExpressionError::new("empty"))
     }
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("first", "(list[T1]) -> T1", first);
+    lib.register_sig("first", "(list[T1]) -> T1", first)
+        .unwrap();
     let mut ctx = MockCtx;
     let list = ExprValue::make_list(vec![ExprValue::Int(42)], ExprType::INT).unwrap();
     let r = lib.call("first", &[list], &mut ctx).unwrap();
@@ -163,7 +170,8 @@ fn phase3_generic_with_coercion() {
     }
     let mut lib = FunctionLibrary::new();
     // Only accepts (float) → list[float], but we'll pass int
-    lib.register_sig("list_of", "(float) -> list[float]", list_of);
+    lib.register_sig("list_of", "(float) -> list[float]", list_of)
+        .unwrap();
     let mut ctx = MockCtx;
     let r = lib.call("list_of", &[ExprValue::Int(5)], &mut ctx).unwrap();
     assert!(r.is_list());
@@ -175,7 +183,8 @@ fn phase3_generic_with_coercion() {
 fn call_method_skips_receiver_coercion() {
     // Method call should NOT coerce the receiver (first arg)
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("upper", "(string) -> string", identity);
+    lib.register_sig("upper", "(string) -> string", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     // path.upper() as method → should fail because path receiver can't be coerced
     let path = ExprValue::new_path("/tmp", PathFormat::Posix);
@@ -202,7 +211,8 @@ fn call_method_coerces_non_receiver_args() {
         }
     }
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("concat", "(string, string) -> string", concat);
+    lib.register_sig("concat", "(string, string) -> string", concat)
+        .unwrap();
     let mut ctx = MockCtx;
     // "hello".concat(path) → path coerced to string for second arg
     let path = ExprValue::new_path("/tmp", PathFormat::Posix);
@@ -220,7 +230,8 @@ fn call_method_coerces_non_receiver_args() {
 fn call_as_function_coerces_all_args() {
     // Function call (not method) SHOULD coerce all args including first
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("upper", "(string) -> string", identity);
+    lib.register_sig("upper", "(string) -> string", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     let path = ExprValue::new_path("/tmp", PathFormat::Posix);
     let r = lib.call("upper", &[path], &mut ctx).unwrap();
@@ -232,7 +243,8 @@ fn call_as_function_coerces_all_args() {
 #[test]
 fn error_wrong_arg_count() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int, int) -> int", custom_add);
+    lib.register_sig("f", "(int, int) -> int", custom_add)
+        .unwrap();
     let mut ctx = MockCtx;
     let e = lib
         .call("f", &[ExprValue::Int(1)], &mut ctx)
@@ -247,8 +259,9 @@ fn error_wrong_arg_count() {
 #[test]
 fn error_wrong_arg_count_multiple_arities() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int) -> int", identity);
-    lib.register_sig("f", "(int, int, int) -> int", identity);
+    lib.register_sig("f", "(int) -> int", identity).unwrap();
+    lib.register_sig("f", "(int, int, int) -> int", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     let e = lib
         .call("f", &[ExprValue::Int(1), ExprValue::Int(2)], &mut ctx)
@@ -271,7 +284,8 @@ fn error_unknown_function() {
 #[test]
 fn error_operator_type_mismatch() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("__add__", "(int, int) -> int", custom_add);
+    lib.register_sig("__add__", "(int, int) -> int", custom_add)
+        .unwrap();
     let mut ctx = MockCtx;
     let e = lib
         .call(
@@ -290,7 +304,8 @@ fn error_operator_type_mismatch() {
 #[test]
 fn error_method_wrong_receiver_type() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("upper", "(string) -> string", identity);
+    lib.register_sig("upper", "(string) -> string", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     let e = lib
         .call_method("upper", &[ExprValue::Int(42)], &mut ctx)
@@ -305,7 +320,7 @@ fn error_method_wrong_receiver_type() {
 #[test]
 fn error_no_matching_signature() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int) -> int", identity);
+    lib.register_sig("f", "(int) -> int", identity).unwrap();
     let mut ctx = MockCtx;
     let e = lib
         .call("f", &[ExprValue::String("x".into())], &mut ctx)
@@ -322,7 +337,8 @@ fn error_no_matching_signature() {
 #[test]
 fn unresolved_exact_match_returns_unresolved() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int, int) -> string", identity);
+    lib.register_sig("f", "(int, int) -> string", identity)
+        .unwrap();
     let mut ctx = MockCtx;
     let r = lib
         .call(
@@ -338,7 +354,8 @@ fn unresolved_exact_match_returns_unresolved() {
 #[test]
 fn unresolved_coerced_match_returns_unresolved() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(float, float) -> float", add_float);
+    lib.register_sig("f", "(float, float) -> float", add_float)
+        .unwrap();
     let mut ctx = MockCtx;
     // unresolved(int) + float → coerce → unresolved(float)
     let r = lib
@@ -361,7 +378,8 @@ fn unresolved_generic_returns_substituted_type() {
         Ok(args[0].clone())
     }
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("first", "(list[T1]) -> T1", first);
+    lib.register_sig("first", "(list[T1]) -> T1", first)
+        .unwrap();
     let mut ctx = MockCtx;
     let r = lib
         .call(
@@ -379,7 +397,7 @@ fn unresolved_generic_returns_substituted_type() {
 #[test]
 fn derive_return_type_no_match_returns_none() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int) -> int", identity);
+    lib.register_sig("f", "(int) -> int", identity).unwrap();
     assert_eq!(lib.derive_return_type("f", &[ExprType::STRING]), None);
 }
 
@@ -395,7 +413,7 @@ fn derive_return_type_unknown_function_returns_none() {
 #[test]
 fn derive_return_type_with_coercion() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(float) -> float", identity);
+    lib.register_sig("f", "(float) -> float", identity).unwrap();
     // int → coerce to float
     assert_eq!(
         lib.derive_return_type("f", &[ExprType::INT]),
@@ -406,7 +424,8 @@ fn derive_return_type_with_coercion() {
 #[test]
 fn derive_return_type_generic_substitution() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("first", "(list[T1]) -> T1", identity);
+    lib.register_sig("first", "(list[T1]) -> T1", identity)
+        .unwrap();
     assert_eq!(
         lib.derive_return_type("first", &[ExprType::list(ExprType::PATH)]),
         Some(ExprType::PATH)
@@ -416,8 +435,8 @@ fn derive_return_type_generic_substitution() {
 #[test]
 fn derive_return_type_union_expansion() {
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("f", "(int) -> string", identity);
-    lib.register_sig("f", "(float) -> path", identity);
+    lib.register_sig("f", "(int) -> string", identity).unwrap();
+    lib.register_sig("f", "(float) -> path", identity).unwrap();
     let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]);
     let result = lib.derive_return_type("f", &[union_arg]).unwrap();
     assert_eq!(
@@ -455,9 +474,9 @@ fn with_unresolved_host_context_has_signatures() {
 #[test]
 fn merge_combines_overloads() {
     let mut a = FunctionLibrary::new();
-    a.register_sig("f", "(int) -> int", identity);
+    a.register_sig("f", "(int) -> int", identity).unwrap();
     let mut b = FunctionLibrary::new();
-    b.register_sig("f", "(string) -> string", identity);
+    b.register_sig("f", "(string) -> string", identity).unwrap();
     let merged = a.merge(b);
     assert_eq!(merged.get_signatures("f").len(), 2);
 }
@@ -465,9 +484,9 @@ fn merge_combines_overloads() {
 #[test]
 fn merge_preserves_distinct_functions() {
     let mut a = FunctionLibrary::new();
-    a.register_sig("foo", "(int) -> int", identity);
+    a.register_sig("foo", "(int) -> int", identity).unwrap();
     let mut b = FunctionLibrary::new();
-    b.register_sig("bar", "(int) -> int", identity);
+    b.register_sig("bar", "(int) -> int", identity).unwrap();
     let merged = a.merge(b);
     assert_eq!(merged.get_signatures("foo").len(), 1);
     assert_eq!(merged.get_signatures("bar").len(), 1);
@@ -537,7 +556,8 @@ fn register_accepts_bare_fn() {
     }
 
     let mut lib = FunctionLibrary::new();
-    lib.register_sig("double", "(int) -> int", double_int);
+    lib.register_sig("double", "(int) -> int", double_int)
+        .unwrap();
 
     let mut ctx = MockCtx;
     let r = lib.call("double", &[ExprValue::Int(21)], &mut ctx).unwrap();
@@ -560,7 +580,8 @@ fn register_accepts_closure_with_captured_state() {
             ExprValue::Int(n) => Ok(ExprValue::Int(n + *offset_cloned)),
             _ => Err(ExpressionError::type_error("expected int")),
         },
-    );
+    )
+    .unwrap();
 
     let mut ctx = MockCtx;
     let r = lib
@@ -579,7 +600,8 @@ fn function_library_stays_clone_after_closure_registration() {
         "id",
         "(int) -> int",
         |_: &mut dyn EvalContext, a: &[ExprValue]| Ok(a[0].clone()),
-    );
+    )
+    .unwrap();
     let cloned = lib.clone();
 
     let mut ctx = MockCtx;
@@ -599,7 +621,8 @@ fn function_library_is_send_sync_with_closure_impl() {
         "k",
         "(int) -> int",
         |_: &mut dyn EvalContext, _: &[ExprValue]| Ok(ExprValue::Int(0)),
-    );
+    )
+    .unwrap();
     assert_send_sync(&lib);
 }
 
@@ -622,7 +645,7 @@ fn external_custom_fn_evaluates_via_with_library() {
     }
     // Start from the default library so `+`, literals, etc. still work.
     let mut lib = default_library::get_default_library().clone();
-    lib.register_sig("triple", "(int) -> int", triple);
+    lib.register_sig("triple", "(int) -> int", triple).unwrap();
 
     let parsed = ParsedExpression::new("triple(7) + 1").unwrap();
     let r = parsed
@@ -648,7 +671,8 @@ fn external_closure_fn_with_captured_state_evaluates() {
             ExprValue::Int(n) => Ok(ExprValue::Int(n * *scale_cloned)),
             _ => Err(ExpressionError::type_error("scaled expects int")),
         },
-    );
+    )
+    .unwrap();
 
     let parsed = ParsedExpression::new("scaled(5) + scaled(2)").unwrap();
     let r = parsed
@@ -675,7 +699,8 @@ fn external_custom_fn_reads_path_format_from_evalcontext() {
             *seen_cloned.lock().unwrap() = Some(ctx.path_format());
             Ok(a[0].clone())
         },
-    );
+    )
+    .unwrap();
 
     let parsed = ParsedExpression::new("probe(1)").unwrap();
     let _ = parsed
@@ -695,7 +720,8 @@ fn external_custom_fn_error_propagates_through_evaluator() {
         Err(ExpressionError::new("boom"))
     }
     let mut lib = default_library::get_default_library().clone();
-    lib.register_sig("always_fail", "(int) -> int", always_fail);
+    lib.register_sig("always_fail", "(int) -> int", always_fail)
+        .unwrap();
 
     let parsed = ParsedExpression::new("always_fail(1)").unwrap();
     let err = parsed
@@ -721,7 +747,8 @@ fn external_custom_fn_respects_operation_limit_via_count_op() {
         Ok(ExprValue::Int(0))
     }
     let mut lib = default_library::get_default_library().clone();
-    lib.register_sig("busy_loop", "(int) -> int", busy_loop);
+    lib.register_sig("busy_loop", "(int) -> int", busy_loop)
+        .unwrap();
 
     let parsed = ParsedExpression::new("busy_loop(0)").unwrap();
     let err = parsed
@@ -733,4 +760,34 @@ fn external_custom_fn_respects_operation_limit_via_count_op() {
         err.kind(),
         openjd_expr::ExpressionErrorKind::OperationLimitExceeded { .. }
     ));
+}
+
+// === F2: register_sig must return Result, not panic on bad signatures ===
+
+#[test]
+fn register_sig_valid_signature_succeeds() {
+    let mut lib = FunctionLibrary::new();
+    let result = lib.register_sig("len", "(string) -> int", |_, args| {
+        Ok(args.first().cloned().unwrap_or(ExprValue::Null))
+    });
+    assert!(result.is_ok());
+    assert_eq!(lib.get_signatures("len").len(), 1);
+}
+
+#[test]
+fn register_sig_invalid_signature_returns_error() {
+    let mut lib = FunctionLibrary::new();
+    let result = lib.register_sig("bad", "not a valid signature!!!", |_, _| {
+        Ok(ExprValue::Null)
+    });
+    assert!(result.is_err(), "malformed signature should return Err");
+    // The function should NOT be registered
+    assert_eq!(lib.get_signatures("bad").len(), 0);
+}
+
+#[test]
+fn register_sig_empty_signature_returns_error() {
+    let mut lib = FunctionLibrary::new();
+    let result = lib.register_sig("bad", "", |_, _| Ok(ExprValue::Null));
+    assert!(result.is_err());
 }

@@ -159,16 +159,24 @@ impl FunctionLibrary {
     }
 
     /// Register from spec notation: `lib.register_sig("len", "(list[T1]) -> int", len_list)`
-    pub fn register_sig<F>(&mut self, name: &str, sig_str: &str, implementation: F)
+    ///
+    /// Returns `Err` if `sig_str` cannot be parsed as a valid type
+    /// signature. The function is **not** registered on failure.
+    pub fn register_sig<F>(
+        &mut self,
+        name: &str,
+        sig_str: &str,
+        implementation: F,
+    ) -> Result<(), String>
     where
         F: Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
             + Send
             + Sync
             + 'static,
     {
-        let signature =
-            ExprType::parse(sig_str).unwrap_or_else(|e| panic!("Bad signature '{sig_str}': {e}"));
+        let signature = ExprType::parse(sig_str)?;
         self.register(name, signature, implementation);
+        Ok(())
     }
 
     /// Get all entries for a function name.
@@ -629,8 +637,10 @@ mod tests {
     #[test]
     fn register_and_get() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("len", "(string) -> int", dummy_impl);
-        lib.register_sig("len", "(list[T1]) -> int", dummy_impl);
+        lib.register_sig("len", "(string) -> int", dummy_impl)
+            .unwrap();
+        lib.register_sig("len", "(list[T1]) -> int", dummy_impl)
+            .unwrap();
         assert_eq!(lib.get_signatures("len").len(), 2);
         assert_eq!(lib.get_signatures("missing").len(), 0);
     }
@@ -638,10 +648,12 @@ mod tests {
     #[test]
     fn merge_libraries() {
         let mut a = FunctionLibrary::new();
-        a.register_sig("foo", "(int) -> int", dummy_impl);
+        a.register_sig("foo", "(int) -> int", dummy_impl).unwrap();
         let mut b = FunctionLibrary::new();
-        b.register_sig("bar", "(string) -> string", dummy_impl);
-        b.register_sig("foo", "(float) -> float", dummy_impl);
+        b.register_sig("bar", "(string) -> string", dummy_impl)
+            .unwrap();
+        b.register_sig("foo", "(float) -> float", dummy_impl)
+            .unwrap();
         let merged = a.merge(b);
         assert_eq!(merged.get_signatures("foo").len(), 2);
         assert_eq!(merged.get_signatures("bar").len(), 1);
@@ -650,7 +662,8 @@ mod tests {
     #[test]
     fn register_sig_parses() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__getitem__", "(list[T1], int) -> T1", dummy_impl);
+        lib.register_sig("__getitem__", "(list[T1], int) -> T1", dummy_impl)
+            .unwrap();
         let sigs = lib.get_signatures("__getitem__");
         assert_eq!(sigs.len(), 1);
         assert!(sigs[0].signature.is_symbolic());
@@ -659,8 +672,10 @@ mod tests {
     #[test]
     fn function_names() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("alpha", "(int) -> int", dummy_impl);
-        lib.register_sig("beta", "(int) -> int", dummy_impl);
+        lib.register_sig("alpha", "(int) -> int", dummy_impl)
+            .unwrap();
+        lib.register_sig("beta", "(int) -> int", dummy_impl)
+            .unwrap();
         let names: Vec<&str> = lib.function_names().collect();
         assert!(names.contains(&"alpha"));
         assert!(names.contains(&"beta"));
@@ -719,8 +734,10 @@ mod tests {
     #[test]
     fn dispatch_exact_match() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(int, int) -> int", add_int);
-        lib.register_sig("__add__", "(float, float) -> float", add_float);
+        lib.register_sig("__add__", "(int, int) -> int", add_int)
+            .unwrap();
+        lib.register_sig("__add__", "(float, float) -> float", add_float)
+            .unwrap();
         let mut ctx = MockCtx;
         let r = lib
             .call("__add__", &[ExprValue::Int(2), ExprValue::Int(3)], &mut ctx)
@@ -731,7 +748,8 @@ mod tests {
     #[test]
     fn dispatch_coerced_match() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(float, float) -> float", add_float);
+        lib.register_sig("__add__", "(float, float) -> float", add_float)
+            .unwrap();
         let mut ctx = MockCtx;
         // int + float → coerce int to float
         let r = lib
@@ -750,7 +768,8 @@ mod tests {
     #[test]
     fn dispatch_generic_match() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("len", "(list[T1]) -> int", list_len);
+        lib.register_sig("len", "(list[T1]) -> int", list_len)
+            .unwrap();
         let mut ctx = MockCtx;
         let list = ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT)
             .unwrap();
@@ -761,7 +780,8 @@ mod tests {
     #[test]
     fn dispatch_unresolved_returns_unresolved() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(int, int) -> int", add_int);
+        lib.register_sig("__add__", "(int, int) -> int", add_int)
+            .unwrap();
         let mut ctx = MockCtx;
         let r = lib
             .call(
@@ -777,7 +797,8 @@ mod tests {
     #[test]
     fn dispatch_no_match_errors() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(int, int) -> int", add_int);
+        lib.register_sig("__add__", "(int, int) -> int", add_int)
+            .unwrap();
         let mut ctx = MockCtx;
         let r = lib.call(
             "__add__",
@@ -798,7 +819,8 @@ mod tests {
     #[test]
     fn derive_return_type_exact() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(int, int) -> int", add_int);
+        lib.register_sig("__add__", "(int, int) -> int", add_int)
+            .unwrap();
         assert_eq!(
             lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
             Some(ExprType::INT)
@@ -808,7 +830,8 @@ mod tests {
     #[test]
     fn derive_return_type_generic() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__getitem__", "(list[T1], int) -> T1", dummy_impl);
+        lib.register_sig("__getitem__", "(list[T1], int) -> T1", dummy_impl)
+            .unwrap();
         assert_eq!(
             lib.derive_return_type(
                 "__getitem__",
@@ -821,7 +844,8 @@ mod tests {
     #[test]
     fn derive_return_type_coerced() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(float, float) -> float", add_float);
+        lib.register_sig("__add__", "(float, float) -> float", add_float)
+            .unwrap();
         // int + float → coerce → float
         assert_eq!(
             lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
@@ -832,8 +856,10 @@ mod tests {
     #[test]
     fn derive_return_type_union_args() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__add__", "(int, int) -> int", add_int);
-        lib.register_sig("__add__", "(float, float) -> float", add_float);
+        lib.register_sig("__add__", "(int, int) -> int", add_int)
+            .unwrap();
+        lib.register_sig("__add__", "(float, float) -> float", add_float)
+            .unwrap();
         // (int | float) + int → int (from int+int) | float (from float coerced)
         let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]);
         let result = lib
@@ -848,8 +874,10 @@ mod tests {
     #[test]
     fn derive_return_type_union_collapses_to_single() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("len", "(string) -> int", dummy_impl);
-        lib.register_sig("len", "(list[T1]) -> int", dummy_impl);
+        lib.register_sig("len", "(string) -> int", dummy_impl)
+            .unwrap();
+        lib.register_sig("len", "(list[T1]) -> int", dummy_impl)
+            .unwrap();
         // len(string | list[int]) → int (both return int)
         let union_arg = ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::INT)]);
         assert_eq!(
@@ -861,8 +889,10 @@ mod tests {
     #[test]
     fn get_property_type_path() {
         let mut lib = FunctionLibrary::new();
-        lib.register_sig("__property_name__", "(path) -> string", dummy_impl);
-        lib.register_sig("__property_parent__", "(path) -> path", dummy_impl);
+        lib.register_sig("__property_name__", "(path) -> string", dummy_impl)
+            .unwrap();
+        lib.register_sig("__property_parent__", "(path) -> path", dummy_impl)
+            .unwrap();
         assert_eq!(
             lib.get_property_type(&ExprType::PATH, "name"),
             Some(ExprType::STRING)

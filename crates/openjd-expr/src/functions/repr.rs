@@ -34,7 +34,7 @@ pub fn repr_sh_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         ctx.count_ops(a[0].list_len().unwrap_or(0))?;
     }
     ctx.count_string_ops(repr_string_len(&a[0]))?;
-    Ok(ExprValue::String(repr_sh(&a[0])))
+    repr_sh(&a[0]).map(ExprValue::String)
 }
 
 pub fn repr_cmd_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -130,24 +130,18 @@ fn repr_json(val: &ExprValue) -> String {
     }
 }
 
-fn repr_sh(val: &ExprValue) -> String {
+fn repr_sh(val: &ExprValue) -> Result<String, ExpressionError> {
     match val {
-        ExprValue::String(s) => shlex::try_quote(s)
-            .map(|c| c.into_owned())
-            .unwrap_or_default(),
-        ExprValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-        ExprValue::Null => "''".to_string(),
-        ExprValue::Int(i) => i.to_string(),
-        ExprValue::Float(f) => {
-            if f.value().fract() == 0.0 {
-                format!("{:.1}", f)
-            } else {
-                f.to_string()
-            }
-        }
-        ExprValue::Path { value, .. } => shlex::try_quote(value)
-            .map(|c| c.into_owned())
-            .unwrap_or_default(),
+        ExprValue::String(s) => shlex_quote(s),
+        ExprValue::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
+        ExprValue::Null => Ok("''".to_string()),
+        ExprValue::Int(i) => Ok(i.to_string()),
+        ExprValue::Float(f) => Ok(if f.value().fract() == 0.0 {
+            format!("{:.1}", f)
+        } else {
+            f.to_string()
+        }),
+        ExprValue::Path { value, .. } => shlex_quote(value),
         val if val.is_list() => {
             let strs: Vec<String> = val
                 .list_iter()
@@ -157,10 +151,18 @@ fn repr_sh(val: &ExprValue) -> String {
                     other => other.to_display_string(),
                 })
                 .collect();
-            shlex::try_join(strs.iter().map(|s| s.as_str())).unwrap_or_default()
+            shlex::try_join(strs.iter().map(|s| s.as_str()))
+                .map_err(|e| ExpressionError::new(format!("Cannot shell-quote list: {e}")))
         }
-        _ => val.to_display_string(),
+        _ => Ok(val.to_display_string()),
     }
+}
+
+/// Shell-quote a single string, returning an error on null bytes.
+fn shlex_quote(s: &str) -> Result<String, ExpressionError> {
+    shlex::try_quote(s)
+        .map(|c| c.into_owned())
+        .map_err(|e| ExpressionError::new(format!("Cannot shell-quote string: {e}")))
 }
 
 fn repr_cmd(val: &ExprValue) -> String {

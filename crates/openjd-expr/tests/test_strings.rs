@@ -2508,3 +2508,49 @@ fn cmd_string_exclamation_with_caret_escaped() {
 fn cmd_string_only_exclamation_is_quoted_and_escaped() {
     assert_eq!(eval("repr_cmd('!')").to_display_string(), "\"^^!\"");
 }
+
+// === F1: repr_sh must propagate errors from shlex on null bytes ===
+
+#[test]
+fn repr_sh_string_with_null_byte_returns_error() {
+    // A string containing a null byte cannot be shell-quoted.
+    // repr_sh should return an error, not silently produce an empty string.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("hello\0world".into()))
+        .unwrap();
+    let parsed = ParsedExpression::new("repr_sh(Param.S)").unwrap();
+    let result = parsed.evaluate(&st);
+    assert!(result.is_err(), "repr_sh on null-byte string should error");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("shell-quote"),
+        "error should mention shell-quoting, got: {msg}"
+    );
+}
+
+#[test]
+fn repr_sh_path_with_null_byte_returns_error() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Param.P",
+        ExprValue::new_path("/tmp/bad\0path", PathFormat::Posix),
+    )
+    .unwrap();
+    let parsed = ParsedExpression::new("repr_sh(Param.P)").unwrap();
+    let result = parsed.evaluate(&st);
+    assert!(result.is_err(), "repr_sh on null-byte path should error");
+}
+
+#[test]
+fn repr_sh_list_with_null_byte_returns_error() {
+    // A list containing a string with a null byte should also error.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("has\0null".into()))
+        .unwrap();
+    let parsed = ParsedExpression::new("repr_sh([Param.S])").unwrap();
+    let result = parsed.evaluate(&st);
+    assert!(
+        result.is_err(),
+        "repr_sh on list with null-byte string should error"
+    );
+}

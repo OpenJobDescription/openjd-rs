@@ -1137,7 +1137,9 @@ mod tests {
         let fs = FormatString::new("{{ upper('hi') }}").unwrap();
         let st = SymbolTable::new();
         let mut minimal = crate::function_library::FunctionLibrary::new();
-        minimal.register_sig("len", "(string) -> int", crate::functions::misc::len_string);
+        minimal
+            .register_sig("len", "(string) -> int", crate::functions::misc::len_string)
+            .unwrap();
         let opts = FormatStringOptions::new().with_library(&minimal);
         assert!(
             fs.resolve_with(&st, &opts).is_err(),
