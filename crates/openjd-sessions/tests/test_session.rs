@@ -99,6 +99,7 @@ async fn test_root_dir_permissions_posix() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let session = Session::with_config(config).unwrap();
     // The working dir is created by TempDir::new with mode 0o700 when no user is given.
@@ -111,6 +112,151 @@ async fn test_root_dir_permissions_posix() {
         0o700,
         "working dir is 0o700 (no user)"
     );
+}
+
+// === StickyBitPolicy tests ===
+
+/// Strict mode rejects a session root under a world-writable dir without sticky bit.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sticky_bit_policy_strict_rejects_unsafe_dir() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let unsafe_dir = tmp.path().join("world_writable");
+    std::fs::create_dir(&unsafe_dir).unwrap();
+    std::fs::set_permissions(&unsafe_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let root = unsafe_dir.join("root");
+    std::fs::create_dir(&root).unwrap();
+
+    let config = SessionConfig {
+        session_id: "test-strict".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(root),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
+    };
+    let result = Session::with_config(config);
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(err.contains("world-writable"), "error was: {err}");
+}
+
+/// Strict mode allows a session root when sticky bit is set.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sticky_bit_policy_strict_allows_safe_dir() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let safe_dir = tmp.path().join("sticky");
+    std::fs::create_dir(&safe_dir).unwrap();
+    std::fs::set_permissions(&safe_dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    let root = safe_dir.join("root");
+    std::fs::create_dir(&root).unwrap();
+
+    let config = SessionConfig {
+        session_id: "test-strict-ok".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(root),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
+    };
+    let session = Session::with_config(config).unwrap();
+    assert_eq!(session.state(), SessionState::Ready);
+}
+
+/// Warn mode logs but does not reject an unsafe directory.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sticky_bit_policy_warn_allows_unsafe_dir() {
+    use std::os::unix::fs::PermissionsExt;
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    let unsafe_dir = tmp.path().join("world_writable");
+    std::fs::create_dir(&unsafe_dir).unwrap();
+    std::fs::set_permissions(&unsafe_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let root = unsafe_dir.join("root");
+    std::fs::create_dir(&root).unwrap();
+
+    let config = SessionConfig {
+        session_id: "test-warn".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(root),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Warn,
+    };
+    let session = Session::with_config(config).unwrap();
+    assert_eq!(session.state(), SessionState::Ready);
+
+    testing_logger::validate(|captured_logs| {
+        assert!(
+            captured_logs
+                .iter()
+                .any(|log| log.level == log::Level::Warn
+                    && log.body.contains("Sticky bit is not set")),
+            "Expected a warning about missing sticky bit"
+        );
+    });
+}
+
+/// Disabled mode skips the check entirely — no error, no warning.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sticky_bit_policy_disabled_skips_check() {
+    use std::os::unix::fs::PermissionsExt;
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    let unsafe_dir = tmp.path().join("world_writable");
+    std::fs::create_dir(&unsafe_dir).unwrap();
+    std::fs::set_permissions(&unsafe_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let root = unsafe_dir.join("root");
+    std::fs::create_dir(&root).unwrap();
+
+    let config = SessionConfig {
+        session_id: "test-disabled".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(root),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        revision_extensions: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    let session = Session::with_config(config).unwrap();
+    assert_eq!(session.state(), SessionState::Ready);
+
+    testing_logger::validate(|captured_logs| {
+        assert!(
+            !captured_logs
+                .iter()
+                .any(|log| log.body.contains("Sticky bit")),
+            "Should not log anything about sticky bit when disabled"
+        );
+    });
 }
 
 /// Mirrors Python: Session dropped without cleanup() should log a warning.
@@ -362,6 +508,7 @@ async fn test_enter_environment_with_resolved_variables() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();
@@ -892,6 +1039,7 @@ async fn test_run_subprocess_basic() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -925,6 +1073,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -964,6 +1113,7 @@ async fn test_run_subprocess_with_os_env_vars() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
     let mut extra = HashMap::new();
@@ -1000,6 +1150,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
     let r = s
@@ -1031,6 +1182,7 @@ async fn test_run_subprocess_empty_command_fails() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -1054,6 +1206,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
     assert!(s
@@ -1182,6 +1335,7 @@ fn realtime_test_config(
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     }
 }
 
@@ -1414,6 +1568,7 @@ async fn test_cancel_action_mark_failed() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -1726,6 +1881,7 @@ fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionCon
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     }
 }
 
@@ -2119,6 +2275,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2172,6 +2329,7 @@ async fn test_cancel_action_with_mark_failed() {
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2504,6 +2662,7 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
         revision_extensions: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: false,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 
@@ -2554,6 +2713,7 @@ async fn test_callback_reports_intermediate_progress() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: false,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
 

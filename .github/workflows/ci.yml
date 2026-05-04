@@ -35,8 +35,10 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
-      - name: Run cargo deny check
+      - name: Run cargo deny check (workspace)
         run: cargo deny check
+      - name: Run cargo deny check (helper sub-crate)
+        run: cargo deny --manifest-path crates/openjd-sessions/src/helper/Cargo.toml check
 
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same

@@ -45,4 +45,5 @@ pub use session_user::SessionUser;
 #[cfg(windows)]
 pub use session_user::WindowsSessionUser;
 pub use subprocess::SubprocessResult;
+pub use tempdir::StickyBitPolicy;
 pub use tempdir::TempDir;

@@ -83,6 +83,10 @@ pub struct SessionConfig {
     /// Optional external cancellation token. When cancelled, all running and
     /// future actions will be cancelled via the spec's cancellation sequence.
     pub cancel_token: Option<CancellationToken>,
+    /// Controls behavior when a parent directory of the session root is
+    /// world-writable without the sticky bit set (POSIX only).
+    /// Defaults to `Strict` (fail-closed). Has no effect on Windows.
+    pub sticky_bit_policy: crate::tempdir::StickyBitPolicy,
     /// Whether to accumulate subprocess stdout into result strings.
     /// Intended for debugging only — production callers should leave this
     /// `false` and observe output through the real-time callback instead.
@@ -307,7 +311,37 @@ impl Session {
         };
 
         #[cfg(unix)]
-        crate::tempdir::validate_sticky_bit(&root_dir);
+        {
+            use crate::tempdir::StickyBitPolicy;
+            match config.sticky_bit_policy {
+                StickyBitPolicy::Strict => {
+                    if let Some(path) = crate::tempdir::find_missing_sticky_bit(&root_dir) {
+                        return Err(SessionError::PathPermissions {
+                            path: path.display().to_string(),
+                            reason: format!(
+                                "Directory is world-writable without the sticky bit set. \
+                                 This allows other users to modify or delete session files. \
+                                 Set the sticky bit (chmod +t {}) or use \
+                                 StickyBitPolicy::Warn to override.",
+                                path.display()
+                            ),
+                        });
+                    }
+                }
+                StickyBitPolicy::Warn => {
+                    if let Some(path) = crate::tempdir::find_missing_sticky_bit(&root_dir) {
+                        log::warn!(
+                            target: "openjd.sessions",
+                            "Sticky bit is not set on {}. This may pose a risk when running \
+                             work on this host as users may modify or delete files in this \
+                             directory which do not belong to them.",
+                            path.display()
+                        );
+                    }
+                }
+                StickyBitPolicy::Disabled => {}
+            }
+        }
 
         let working_dir = crate::tempdir::TempDir::new(
             Some(&root_dir),

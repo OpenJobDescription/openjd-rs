@@ -1,0 +1,26 @@
+# cargo-deny configuration for the cross-user helper binary.
+# Stricter than the workspace config — no advisory ignores since the helper
+# has a minimal dependency tree (serde, serde_json, nix/windows).
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+]
+
+[bans]
+multiple-versions = "deny"
+
+[advisories]
+version = 2
+# No ignores — the helper's small dep tree should have zero advisories.
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

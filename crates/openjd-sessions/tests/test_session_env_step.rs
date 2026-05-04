@@ -446,6 +446,7 @@ async fn test_env_with_resolved_variables() {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut session = Session::with_config(session_config).unwrap();
     let mut vars = HashMap::new();

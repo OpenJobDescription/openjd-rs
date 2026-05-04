@@ -9,6 +9,23 @@ use std::path::{Path, PathBuf};
 use crate::error::SessionError;
 use crate::session_user::SessionUser;
 
+/// Controls behavior when a parent directory is world-writable without the sticky bit.
+///
+/// On POSIX systems, a world-writable directory without the sticky bit allows any
+/// user to rename or delete files belonging to other users. This is a security risk
+/// for session working directories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StickyBitPolicy {
+    /// Refuse to create the session if a parent directory is unsafe.
+    /// This is the default — fail-closed is the secure choice.
+    #[default]
+    Strict,
+    /// Log a warning but allow the session to proceed.
+    Warn,
+    /// Skip the check entirely.
+    Disabled,
+}
+
 /// Returns the platform-specific OpenJD temp directory, creating it if needed.
 pub fn openjd_temp_dir() -> Result<PathBuf, SessionError> {
     #[cfg(unix)]
@@ -36,8 +53,10 @@ pub fn openjd_temp_dir() -> Result<PathBuf, SessionError> {
 }
 
 /// Check parent directories for world-writable dirs missing the sticky bit (POSIX only).
+///
+/// Returns the first offending path, or `None` if all parents are safe.
 #[cfg(unix)]
-pub fn validate_sticky_bit(root_dir: &Path) {
+pub fn find_missing_sticky_bit(root_dir: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
     const S_IWOTH: u32 = 0o002;
@@ -47,16 +66,11 @@ pub fn validate_sticky_bit(root_dir: &Path) {
         if let Ok(meta) = std::fs::metadata(parent) {
             let mode = meta.mode();
             if (mode & S_IWOTH) != 0 && (mode & S_ISVTX) == 0 {
-                log::warn!(
-                    target: "openjd.sessions",
-                    "Sticky bit is not set on {}. This may pose a risk when running work \
-                     on this host as users may modify or delete files in this directory \
-                     which do not belong to them.",
-                    parent.display()
-                );
+                return Some(parent.to_path_buf());
             }
         }
     }
+    None
 }
 
 /// A securely-created temporary directory.
@@ -223,12 +237,11 @@ mod tests {
     }
 
     /// Mirrors Python TestSession::test_posix_permissions_warning.
-    /// Creates a world-writable dir without the sticky bit and verifies the warning.
+    /// Creates a world-writable dir without the sticky bit and verifies detection.
     #[cfg(unix)]
     #[test]
-    fn validate_sticky_bit_warns_on_world_writable_without_sticky() {
+    fn find_missing_sticky_bit_detects_world_writable_without_sticky() {
         use std::os::unix::fs::PermissionsExt;
-        testing_logger::setup();
 
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("world_writable");
@@ -238,25 +251,16 @@ mod tests {
         let child = dir.join("child");
         std::fs::create_dir(&child).unwrap();
 
-        validate_sticky_bit(&child);
-
-        testing_logger::validate(|captured_logs| {
-            assert!(
-                captured_logs.iter().any(|log| {
-                    log.level == log::Level::Warn && log.body.contains("Sticky bit is not set")
-                }),
-                "Expected a warning about missing sticky bit"
-            );
-        });
+        let result = find_missing_sticky_bit(&child);
+        assert_eq!(result, Some(dir));
     }
 
     /// Mirrors Python TestSession::test_posix_permissions_no_warning.
-    /// A dir with the sticky bit set should not trigger a warning.
+    /// A dir with the sticky bit set should not be flagged.
     #[cfg(unix)]
     #[test]
-    fn validate_sticky_bit_no_warn_when_sticky_set() {
+    fn find_missing_sticky_bit_none_when_sticky_set() {
         use std::os::unix::fs::PermissionsExt;
-        testing_logger::setup();
 
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("sticky_dir");
@@ -266,16 +270,8 @@ mod tests {
         let child = dir.join("child");
         std::fs::create_dir(&child).unwrap();
 
-        validate_sticky_bit(&child);
-
-        testing_logger::validate(|captured_logs| {
-            assert!(
-                !captured_logs
-                    .iter()
-                    .any(|log| { log.body.contains("Sticky bit is not set") }),
-                "Should not warn when sticky bit is set"
-            );
-        });
+        let result = find_missing_sticky_bit(&child);
+        assert_eq!(result, None);
     }
 
     /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — warns when PROGRAMDATA unset.

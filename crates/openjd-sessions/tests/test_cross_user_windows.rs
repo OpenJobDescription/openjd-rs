@@ -199,6 +199,7 @@ fn make_session(user: Arc<WindowsSessionUser>) -> Session {
         revision_extensions: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     Session::with_config(config).unwrap()
 }

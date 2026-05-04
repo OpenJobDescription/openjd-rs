@@ -252,6 +252,7 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         user: None,
         revision_extensions: Some(revision_ctx),
         cancel_token: Some(cancel_token.clone()),
+        sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,
     };
     let mut session = Session::with_config(session_config)

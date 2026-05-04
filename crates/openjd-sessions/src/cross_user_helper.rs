@@ -11,11 +11,16 @@
 //! avoiding per-action login costs and enabling reliable cancellation from the
 //! target user's context.
 
+use std::io::Read;
 use std::path::Path;
 
 use crate::action::{ActionMessage, ActionState};
 use crate::error::SessionError;
 use crate::logging::LogContent;
+
+/// Maximum bytes for a single JSON response line from the helper's stdout.
+/// Matches the helper binary's own `MAX_LINE_LENGTH` (128 KB).
+const MAX_RESPONSE_LINE_LENGTH: usize = 128 * 1024;
 use crate::session_log;
 use crate::session_user::SessionUser;
 
@@ -57,9 +62,22 @@ impl UnixAsyncHelperReader {
             let mut line = String::new();
             loop {
                 line.clear();
-                match reader.read_line(&mut line) {
+                match Read::take(&mut reader, MAX_RESPONSE_LINE_LENGTH as u64).read_line(&mut line)
+                {
                     Ok(0) => break,
-                    Ok(_) => {
+                    Ok(n) => {
+                        if n == MAX_RESPONSE_LINE_LENGTH && !line.ends_with('\n') {
+                            // Line exceeded limit — discard remainder and report error
+                            let mut discard = Vec::new();
+                            let _ = reader.read_until(b'\n', &mut discard);
+                            let result = Err(SessionError::HelperCommunication(format!(
+                                "response line exceeds {MAX_RESPONSE_LINE_LENGTH} byte limit"
+                            )));
+                            if tx.send(result).is_err() {
+                                break;
+                            }
+                            continue;
+                        }
                         let result = serde_json::from_str(line.trim_end()).map_err(|e| {
                             SessionError::HelperCommunication(format!("parse error: {e}"))
                         });
@@ -102,9 +120,22 @@ impl WindowsAsyncHelperReader {
             let mut line = String::new();
             loop {
                 line.clear();
-                match reader.read_line(&mut line) {
+                match Read::take(&mut reader, MAX_RESPONSE_LINE_LENGTH as u64).read_line(&mut line)
+                {
                     Ok(0) => break,
-                    Ok(_) => {
+                    Ok(n) => {
+                        if n == MAX_RESPONSE_LINE_LENGTH && !line.ends_with('\n') {
+                            // Line exceeded limit — discard remainder and report error
+                            let mut discard = Vec::new();
+                            let _ = reader.read_until(b'\n', &mut discard);
+                            let result = Err(SessionError::HelperCommunication(format!(
+                                "response line exceeds {MAX_RESPONSE_LINE_LENGTH} byte limit"
+                            )));
+                            if tx.send(result).is_err() {
+                                break;
+                            }
+                            continue;
+                        }
                         let result = serde_json::from_str(line.trim_end()).map_err(|e| {
                             SessionError::HelperCommunication(format!("parse error: {e}"))
                         });
