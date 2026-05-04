@@ -52,14 +52,44 @@ and embedded in the `openjd-sessions` crate using `include_bytes!`:
 const HELPER_BINARY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/openjd_helper"));
 ```
 
-At session start, a restricted helpers directory (`.helpers-<uuid>`,
-mode 0o750 after group setup) is created inside the session working directory.
-The directory starts at 0o700, then group ownership is set to the job user's
-group, then permissions are widened to 0o750 (owner rwx, group r-x). The helper
-binary is written there with a randomized name (`h-<uuid>`), preventing the job
-user from predicting or tampering with the binary path. The directory's
-permissions ensure the job user can traverse and execute but cannot modify
-its contents.
+At session start, a restricted helpers directory (`.helpers-<uuid>`) is
+created inside the session working directory. The helper binary is written
+there with a randomized name (`h-<uuid>`), preventing the job user from
+predicting or tampering with the binary path.
+
+### POSIX permissions
+
+The directory starts at 0o700, then group ownership is set to the job
+user's group, then permissions are widened to 0o750 (owner rwx, group
+r-x). The helper binary inside is chmod'd 0o750 with the same group. The
+job user can traverse and execute but cannot write or delete.
+
+### Windows permissions
+
+On Windows, the session working directory's DACL grants the session user
+Modify access so that job actions can write files into it. Without
+additional protection, the helpers directory and the helper binary would
+inherit that Modify ACE and the job user could overwrite the helper —
+a session-user → process-user escalation path.
+
+To prevent this, both the helpers directory and the helper binary are
+given a **protected DACL** (the `PROTECTED_DACL_SECURITY_INFORMATION`
+flag, via `SetNamedSecurityInfoW`) that severs inheritance from the
+parent. The DACL contains only:
+
+- Process user → Full Control (inheritable to children)
+- Session user → Read & Execute (`FILE_GENERIC_READ | FILE_GENERIC_EXECUTE`
+  = `0x1200A9`; no `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `DELETE`, or
+  `FILE_DELETE_CHILD`, inheritable to children)
+
+The binary's own DACL is set separately (not just inherited from the
+directory) as defense-in-depth — if the directory's DACL is later
+weakened by any means, the binary's own protected DACL still refuses
+session-user writes.
+
+This is implemented in `win32_permissions::set_permissions_protected`,
+a Rust-only variant of the Python-compatible `set_permissions` that
+mirrors the Python API's non-protected behavior.
 
 ## Wire Protocol
 

@@ -5,8 +5,16 @@
 //! Embedded cross-user helper binary — written to disk at session start.
 //!
 //! The helper is placed in a randomized subdirectory with restrictive
-//! permissions (0o750 on POSIX, group r-x only) so that the job user
-//! can execute the binary via `sudo` but cannot modify or replace it.
+//! permissions so that the job user can execute the binary but cannot
+//! modify or replace it.
+//!
+//! - POSIX: directory and binary are 0o750 (owner rwx, group r-x),
+//!   owned by the process user with group set to the session user's group.
+//! - Windows: directory and binary have an explicit DACL granting the
+//!   process user Full Control and the session user Read & Execute.
+//!   The session user's ACE intentionally omits `FILE_WRITE_DATA`,
+//!   `FILE_APPEND_DATA`, `DELETE`, and `FILE_DELETE_CHILD` so the job
+//!   user cannot overwrite, replace, or delete the helper binary.
 
 use std::path::{Path, PathBuf};
 
@@ -17,10 +25,17 @@ const HELPER_BINARY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/openjd_he
 
 /// Create a restricted helpers directory inside `working_dir`.
 ///
-/// Returns the path to the new directory. On POSIX, the directory is owned
-/// by the process user with group set to the session user's group and mode
-/// 0o750 — the job user can traverse and read (needed for `sudo -u <user> -i`
-/// to execute the helper binary) but cannot write or modify files.
+/// Returns the path to the new directory.
+///
+/// - On POSIX: the directory is owned by the process user with group set
+///   to the session user's group and mode 0o750 — the job user can
+///   traverse and read (needed for `sudo -u <user> -i` to execute the
+///   helper binary) but cannot write or modify files.
+/// - On Windows: the directory's DACL grants the process user Full
+///   Control and the session user Read & Execute (inheritable). This
+///   prevents the job user from modifying or deleting the helper binary
+///   that will be written inside, even though the parent session working
+///   directory's inherited DACL grants the session user Modify.
 pub(crate) fn create_helpers_dir(
     working_dir: &Path,
     user: Option<&dyn SessionUser>,
@@ -59,13 +74,37 @@ pub(crate) fn create_helpers_dir(
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = user;
         std::fs::create_dir(&dir).map_err(|source| SessionError::WorkingDirectory {
             path: dir.clone(),
             source,
         })?;
+
+        // Lock down the DACL for cross-user sessions. Without this the
+        // directory inherits the session working dir's DACL, which grants
+        // the session user Modify — enough to replace or delete the helper
+        // binary written inside. We explicitly set, with inheritance from
+        // the parent severed:
+        //   process user → Full Control (inheritable to children)
+        //   session user → Read & Execute only (inheritable to children)
+        if let Some(u) = user.filter(|u| !u.is_process_user()) {
+            let process_user =
+                crate::win32::get_process_user().map_err(|e| SessionError::PathPermissions {
+                    path: dir.display().to_string(),
+                    reason: format!("Could not determine process user: {e}"),
+                })?;
+            crate::win32_permissions::set_permissions_protected(
+                &dir.to_string_lossy(),
+                &[process_user.as_str()],
+                &[],
+                &[u.user()],
+            )
+            .map_err(|reason| SessionError::PathPermissions {
+                path: dir.display().to_string(),
+                reason,
+            })?;
+        }
     }
 
     Ok(dir)
@@ -74,9 +113,15 @@ pub(crate) fn create_helpers_dir(
 /// Write the embedded helper binary to `helpers_dir/<random>[.exe]`, set
 /// appropriate permissions, and return the path.
 ///
-/// The binary name is randomized to prevent prediction. The helpers directory
-/// is 0o750 (owner rwx, group r-x) so the job user can traverse and execute
-/// but cannot modify or replace the binary.
+/// The binary name is randomized to prevent prediction. Permissions are
+/// tightened so the job user can execute the binary but cannot modify or
+/// replace it:
+///
+/// - POSIX: 0o750 (owner rwx, group r-x), group = session user's group.
+/// - Windows: explicit DACL with process user Full Control and session
+///   user Read & Execute. This is defense-in-depth over the helpers
+///   directory's DACL — if the directory's DACL is ever weakened, the
+///   binary itself still refuses session-user writes.
 pub(crate) fn write_helper(
     helpers_dir: &Path,
     user: &dyn SessionUser,
@@ -108,8 +153,29 @@ pub(crate) fn write_helper(
         )?;
     }
 
-    #[cfg(not(unix))]
-    let _ = user; // suppress unused warning on Windows
+    #[cfg(windows)]
+    {
+        if !user.is_process_user() {
+            let process_user =
+                crate::win32::get_process_user().map_err(|e| SessionError::PathPermissions {
+                    path: path.display().to_string(),
+                    reason: format!("Could not determine process user: {e}"),
+                })?;
+            // Protected DACL: no inheritance from the helpers directory,
+            // so even if something weakens that dir's DACL the binary is
+            // still enforced as read-only for the session user.
+            crate::win32_permissions::set_permissions_protected(
+                &path.to_string_lossy(),
+                &[process_user.as_str()],
+                &[],
+                &[user.user()],
+            )
+            .map_err(|reason| SessionError::PathPermissions {
+                path: path.display().to_string(),
+                reason,
+            })?;
+        }
+    }
 
     Ok(path)
 }

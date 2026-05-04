@@ -149,9 +149,21 @@ Win32 environment block. Stdout and stderr are merged via a shared anonymous pip
 
 ### Permissions (`win32_permissions.rs`)
 
-`set_permissions()` sets DACLs on files and directories: full control for the process
-user, modify access for the session user. Used by `TempDir` and `EmbeddedFiles` for
-cross-user file access.
+Two entry points:
+
+- **`set_permissions()`** — sets DACLs while leaving inheritance from the
+  parent intact. Bucket parameters: principals for Full Control, Modify,
+  and Read & Execute. Used by `TempDir` and `EmbeddedFiles` for cross-user
+  file access and mirrors the Python `WindowsPermissionHelper.set_permissions`
+  behavior (Python has no Read & Execute bucket; that is a Rust-only
+  extension used by the embedded helper binary).
+- **`set_permissions_protected()`** — same DACL construction, but also
+  marks the DACL as protected (`PROTECTED_DACL_SECURITY_INFORMATION`
+  via `SetNamedSecurityInfoW`) so the object no longer inherits ACEs
+  from its parent. Used by the embedded helper binary and its
+  containing `.helpers-<uuid>` directory to prevent the session user's
+  Modify ACE on the session working directory from granting write or
+  delete access to the helper binary.
 
 ### Not yet implemented
 

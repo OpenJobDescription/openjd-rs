@@ -285,3 +285,124 @@ fn test_embedded_file_windows_user_permissions() {
         "Windows user should have Modify access on embedded file"
     );
 }
+
+// === Single-user (no cross-user) Windows DACL tests ===
+//
+// These mirror the POSIX `test_tempdir_posix_permissions` /
+// `test_tempdir_posix_default_ownership` and
+// `test_writes_file_posix_ownership` / `test_writes_file_posix_no_group_or_other_permissions`
+// tests. On Windows, when no `SessionUser` is supplied, the sessions crate
+// intentionally leaves DACL setup to the parent directory (the newly created
+// directory inherits ACEs from its parent, and file creation inherits those
+// same inheritable ACEs). These tests confirm that behavior — no *additional*
+// explicit session-user ACE is injected.
+//
+// They do NOT require OPENJD_TEST_WIN_USER_NAME / _PASSWORD, so they run in
+// the default Windows `build-test` CI job without `--include-ignored`.
+
+/// Mirrors Python `TestTempDirPosix::test_defaults` — a TempDir created with
+/// no user should only contain ACEs inherited from its parent; the crate
+/// must not inject any explicit additional ACEs.
+#[test]
+fn test_tempdir_windows_no_user_has_only_inherited_aces() {
+    // Create in a parent we control so inheritance is deterministic.
+    let parent = tempfile::TempDir::new().unwrap();
+    let td = TempDir::new(Some(parent.path()), None, None).unwrap();
+
+    let parent_aces = get_aces_for_object(&parent.path().to_string_lossy());
+    let child_aces = get_aces_for_object(&td.path().to_string_lossy());
+
+    // Every ACE on the child must appear on the parent (purely inherited).
+    // This confirms the crate did not add any principal-specific ACEs.
+    for (child_name, child_allowed, child_denied) in &child_aces {
+        let matching = parent_aces
+            .iter()
+            .find(|(n, _, _)| n.eq_ignore_ascii_case(child_name));
+        match matching {
+            Some((_, parent_allowed, parent_denied)) => {
+                for mask in child_allowed {
+                    assert!(
+                        parent_allowed.contains(mask),
+                        "child has allowed mask 0x{mask:X} for {child_name:?} not present on parent"
+                    );
+                }
+                for mask in child_denied {
+                    assert!(
+                        parent_denied.contains(mask),
+                        "child has denied mask 0x{mask:X} for {child_name:?} not present on parent"
+                    );
+                }
+            }
+            None => panic!(
+                "child tempdir has an ACE for {child_name:?} that is not present on the parent — \
+                 single-user TempDir must only rely on inheritance, got child aces: {child_aces:?}"
+            ),
+        }
+    }
+}
+
+/// Mirrors Python `TestMaterializeFilePosix::test_writes_file` (owner-only
+/// ACE assertions) — an embedded file written with no user should only have
+/// ACEs inherited from its parent directory.
+#[test]
+fn test_embedded_file_windows_no_user_has_only_inherited_aces() {
+    let parent = tempfile::TempDir::new().unwrap();
+    let path = parent.path().join("testfile.txt");
+    write_embedded_file_with_options(&path, "data", false, None).unwrap();
+
+    let parent_aces = get_aces_for_object(&parent.path().to_string_lossy());
+    let file_aces = get_aces_for_object(&path.to_string_lossy());
+
+    for (name, allowed, denied) in &file_aces {
+        let matching = parent_aces
+            .iter()
+            .find(|(n, _, _)| n.eq_ignore_ascii_case(name));
+        assert!(
+            matching.is_some(),
+            "embedded file has an ACE for {name:?} not present on parent — \
+             no-user path must rely purely on inheritance, got file aces: {file_aces:?}"
+        );
+        let (_, parent_allowed, parent_denied) = matching.unwrap();
+        for mask in allowed {
+            assert!(
+                parent_allowed.contains(mask),
+                "embedded file has allowed mask 0x{mask:X} for {name:?} not present on parent"
+            );
+        }
+        for mask in denied {
+            assert!(
+                parent_denied.contains(mask),
+                "embedded file has denied mask 0x{mask:X} for {name:?} not present on parent"
+            );
+        }
+    }
+}
+
+/// Runnable embedded file with no user — identical DACL story to the
+/// non-runnable case on Windows. Mirrors POSIX
+/// `test_writes_file_runnable_posix_ownership_and_permissions`.
+#[test]
+fn test_embedded_file_windows_runnable_no_user_has_only_inherited_aces() {
+    let parent = tempfile::TempDir::new().unwrap();
+    let path = parent.path().join("testfile.bat");
+    write_embedded_file_with_options(&path, "@echo test", true, None).unwrap();
+
+    let parent_aces = get_aces_for_object(&parent.path().to_string_lossy());
+    let file_aces = get_aces_for_object(&path.to_string_lossy());
+
+    for (name, allowed, _denied) in &file_aces {
+        let matching = parent_aces
+            .iter()
+            .find(|(n, _, _)| n.eq_ignore_ascii_case(name));
+        assert!(
+            matching.is_some(),
+            "runnable embedded file has an ACE for {name:?} not present on parent, got file aces: {file_aces:?}"
+        );
+        for mask in allowed {
+            assert!(
+                matching.unwrap().1.contains(mask),
+                "runnable embedded file has allowed mask 0x{mask:X} for {name:?} not present on parent"
+            );
+        }
+    }
+}

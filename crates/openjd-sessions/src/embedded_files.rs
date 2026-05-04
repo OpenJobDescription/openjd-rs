@@ -152,6 +152,7 @@ pub fn chown_for_user(
         &path.to_string_lossy(),
         &[process_user.as_str()],
         &[user.user()],
+        &[],
     )
     .map_err(|e| SessionError::PathPermissions {
         path: path.display().to_string(),

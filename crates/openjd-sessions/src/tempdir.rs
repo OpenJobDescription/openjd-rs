@@ -157,6 +157,7 @@ impl TempDir {
                         &path.to_string_lossy(),
                         &[process_user.as_str()],
                         &[u.user()],
+                        &[],
                     ) {
                         return Err(SessionError::PathPermissions {
                             path: path.display().to_string(),
@@ -303,5 +304,63 @@ mod tests {
                 "Expected a warning about PROGRAMDATA not being set"
             );
         });
+    }
+
+    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — positive
+    /// path: when PROGRAMDATA is set to a custom value, the OpenJD root is
+    /// `<PROGRAMDATA>\Amazon\OpenJD` and the `<PROGRAMDATA>\Amazon` parent
+    /// directory is created as a side effect.
+    ///
+    /// The Python test is in a class-scoped fixture so PROGRAMDATA can be
+    /// swapped per-test; here we mutate the process env var, capture the
+    /// result, and always restore — using an RAII guard to avoid leaking the
+    /// override to other tests even on panic.
+    #[cfg(windows)]
+    #[test]
+    fn openjd_temp_dir_honors_programdata_override() {
+        struct EnvGuard {
+            key: &'static str,
+            original: Option<String>,
+        }
+        impl EnvGuard {
+            fn set(key: &'static str, new_value: &str) -> Self {
+                let original = std::env::var(key).ok();
+                unsafe {
+                    std::env::set_var(key, new_value);
+                }
+                Self { key, original }
+            }
+        }
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    match &self.original {
+                        Some(v) => std::env::set_var(self.key, v),
+                        None => std::env::remove_var(self.key),
+                    }
+                }
+            }
+        }
+
+        let custom_root = std::env::temp_dir().join("OpenJDProgramDataTest");
+        // Ensure a clean slate so create_dir_all does real work.
+        let _ = std::fs::remove_dir_all(&custom_root);
+
+        let _guard = EnvGuard::set("PROGRAMDATA", &custom_root.to_string_lossy());
+
+        let dir = openjd_temp_dir().expect("openjd_temp_dir should succeed with override");
+        let expected = custom_root.join("Amazon").join("OpenJD");
+        assert_eq!(
+            dir, expected,
+            "openjd_temp_dir should respect PROGRAMDATA override"
+        );
+        assert!(dir.exists(), "openjd_temp_dir should create the directory");
+        assert!(
+            custom_root.join("Amazon").exists(),
+            "the <PROGRAMDATA>\\Amazon parent must exist"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&custom_root);
     }
 }

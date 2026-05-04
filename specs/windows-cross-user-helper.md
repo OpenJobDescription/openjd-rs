@@ -208,9 +208,43 @@ fallback for same-user processes (where it works fine). The session's
 (`NOTIFY_THEN_TERMINATE` or `TERMINATE`) through the helper's stdin pipe.
 The helper maps these to the appropriate OS primitives internally.
 
+### Step 6: Protect the Windows helper binary from the session user ✅
+
+The session working directory's DACL on Windows grants the session user
+Modify so that action scripts can write files into it. Without additional
+protection, the `.helpers-<uuid>` subdirectory and the helper binary
+inside would inherit that Modify ACE — and the session user could
+overwrite the helper binary to escalate into the process user context
+the next time the session starts a new action.
+
+`helper_binary::create_helpers_dir` and `helper_binary::write_helper`
+both call `win32_permissions::set_permissions_protected` on Windows
+(cross-user only). This:
+
+- Replaces the explicit DACL with
+  `[process user → Full Control, session user → Read & Execute]`.
+- Sets `PROTECTED_DACL_SECURITY_INFORMATION` on the object, severing
+  inheritance from the parent session working directory.
+
+The session user can still traverse the directory and execute the
+helper binary (the spawn is done by the process user, so the binary
+only needs to be loadable by the session user's logon token), but
+cannot write, delete, or replace it.
+
+The binary's own DACL is set separately from the directory's DACL as
+defense-in-depth — if the directory's DACL is ever weakened, the
+binary's protected DACL still enforces read-only for the session user.
+
 ## Testing
 
 - Unit test: `test_cancel_terminate_on_windows` (already exists, same-user)
 - Integration test: helper protocol round-trip (spawn helper, send command,
   read output, send cancel, verify exit)
 - E2E: the existing worker agent cancellation tests that currently fail
+- DACL tests in `tests/test_cross_user_windows.rs`:
+  - `test_cross_user_helpers_dir_dacl_protects_from_session_user`
+  - `test_cross_user_helper_binary_dacl_protects_from_session_user`
+  - `test_cross_user_session_user_cannot_overwrite_helper_binary`
+    (functional: the session user's attempt to write to the helper
+    binary must fail, and the binary on disk must match the embedded
+    size)
