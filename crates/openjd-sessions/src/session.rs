@@ -191,6 +191,11 @@ struct CrossUserFields {
     #[cfg(windows)]
     helper: Option<CrossUserHelperWin>,
     cancel_writer: Option<std::fs::File>,
+    /// Shared auth token for the helper process. `Some` whenever `helper` is
+    /// `Some`; `None` for same-user sessions. Kept separate from the helper
+    /// struct because the cancel path needs to access it even when the
+    /// helper has been moved into a runner.
+    helper_auth_token: Option<String>,
 }
 
 /// Build the derived function library: `base` (or default) merged with a
@@ -281,6 +286,7 @@ impl Session {
                 helpers_dir: None,
                 helper: None,
                 cancel_writer: None,
+                helper_auth_token: None,
             },
             callback: None,
             redacted_values: HashSet::new(),
@@ -294,6 +300,14 @@ impl Session {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File) {
         self.cross_user.cancel_writer = Some(writer);
+    }
+
+    /// Test-only: inject a `helper_auth_token` so `cancel_action` writes a
+    /// tokenized cancel JSON object. Pairs with `set_cancel_writer_for_test`
+    /// to exercise the token-in-cancel-JSON path without a real helper.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_helper_auth_token_for_test(&mut self, token: String) {
+        self.cross_user.helper_auth_token = Some(token);
     }
 
     /// Test-only: force the session state (typically to `Running`) so `cancel_action`
@@ -369,7 +383,7 @@ impl Session {
         let mut helpers_dir = None;
 
         #[cfg(unix)]
-        let (helper, cancel_writer) = if let Some(ref user) = config.user {
+        let (helper, cancel_writer, helper_auth_token) = if let Some(ref user) = config.user {
             if !user.is_process_user() {
                 let hdir = crate::helper_binary::create_helpers_dir(
                     &working_directory,
@@ -377,17 +391,18 @@ impl Session {
                 )?;
                 let helper_path = crate::helper_binary::write_helper(&hdir, user.as_ref())?;
                 let (h, cw) = CrossUserHelper::spawn(&helper_path, user.as_ref())?;
+                let token = h.auth_token().to_string();
                 helpers_dir = Some(hdir);
-                (Some(h), Some(cw))
+                (Some(h), Some(cw), Some(token))
             } else {
-                (None, None)
+                (None, None, None)
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         #[cfg(windows)]
-        let (helper, cancel_writer) = if let Some(ref user) = config.user {
+        let (helper, cancel_writer, helper_auth_token) = if let Some(ref user) = config.user {
             if !user.is_process_user() {
                 let hdir = crate::helper_binary::create_helpers_dir(
                     &working_directory,
@@ -395,13 +410,14 @@ impl Session {
                 )?;
                 let helper_path = crate::helper_binary::write_helper(&hdir, user.as_ref())?;
                 let (h, cw) = CrossUserHelperWin::spawn(&helper_path, user.as_ref())?;
+                let token = h.auth_token().to_string();
                 helpers_dir = Some(hdir);
-                (Some(h), Some(cw))
+                (Some(h), Some(cw), Some(token))
             } else {
-                (None, None)
+                (None, None, None)
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         // Log host info (mirrors Python Session.__init__)
@@ -468,6 +484,7 @@ impl Session {
                 helpers_dir,
                 helper,
                 cancel_writer,
+                helper_auth_token,
             },
             callback: config.callback,
             redacted_values: HashSet::new(),
@@ -640,17 +657,28 @@ impl Session {
         }
 
         // Send cancel to the helper process via the dup'd stdin fd.
+        //
+        // Same-user sessions have no helper, so cancel_writer is None — in
+        // those sessions there's nothing to write. When a cancel_writer is
+        // present but no helper token is stored (e.g. an in-test injection
+        // via `set_cancel_writer_for_test`), the test is responsible for
+        // asserting whatever framing it expects; we still write a valid
+        // tokenized command if we have a token.
         if let Some(ref mut writer) = self.cross_user.cancel_writer {
             use std::io::Write;
             let is_terminate = matches!(time_limit, Some(d) if d.is_zero());
+            let token_field = match &self.cross_user.helper_auth_token {
+                Some(t) => format!(r#""token":"{t}","#),
+                None => String::new(),
+            };
             let cmd = if is_terminate {
-                r#"{"cancel":"TERMINATE"}"#.to_string()
+                format!(r#"{{{token_field}"cancel":"TERMINATE"}}"#)
             } else {
                 let notify_period = time_limit
                     .unwrap_or(Duration::from_secs(DEFAULT_CANCEL_NOTIFY_PERIOD_SECS))
                     .as_secs();
                 format!(
-                    r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+                    r#"{{{token_field}"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
                 )
             };
             let _ = writer.write_all(cmd.as_bytes());

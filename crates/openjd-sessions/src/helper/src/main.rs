@@ -8,7 +8,7 @@ mod runner;
 #[cfg(windows)]
 mod runner_win;
 
-use protocol::{send, Command, Response};
+use protocol::{constant_time_eq, send, Command, Response, AUTH_TOKEN_LEN};
 use std::io::{BufRead, Read};
 
 /// Maximum bytes the helper will read for a single JSON line from stdin.
@@ -36,17 +36,71 @@ fn read_bounded_line(
     Ok(n)
 }
 
+/// Parse the `--auth-token <TOKEN>` argument from the helper's argv.
+///
+/// Exits the process with status 2 and a one-line stderr diagnostic if the
+/// option is missing or the value is not exactly [`AUTH_TOKEN_LEN`] bytes long.
+/// No JSON is emitted in either case.
+fn parse_auth_token_or_exit() -> String {
+    let args: Vec<String> = std::env::args().collect();
+    // Expect: <helper_path> --auth-token <VALUE>
+    // Allow future arguments after the token without failing hard here —
+    // additional options would fail at the point they'd be parsed.
+    let mut token: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--auth-token" {
+            if i + 1 >= args.len() {
+                eprintln!("openjd_helper: --auth-token requires a value");
+                std::process::exit(2);
+            }
+            token = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            eprintln!("openjd_helper: unknown argument: {}", args[i]);
+            std::process::exit(2);
+        }
+    }
+    let Some(t) = token else {
+        eprintln!("openjd_helper: missing required --auth-token <TOKEN> argument");
+        std::process::exit(2);
+    };
+    if t.len() != AUTH_TOKEN_LEN {
+        eprintln!(
+            "openjd_helper: --auth-token must be exactly {AUTH_TOKEN_LEN} characters (got {})",
+            t.len()
+        );
+        std::process::exit(2);
+    }
+    t
+}
+
 fn main() {
+    let expected_token = parse_auth_token_or_exit();
+
     #[cfg(unix)]
-    run_unix();
+    run_unix(&expected_token);
     #[cfg(windows)]
-    run_windows();
+    run_windows(&expected_token);
+}
+
+/// Verify that `cmd`'s embedded token matches `expected`. On mismatch, sends
+/// `{"error":"invalid token"}` and returns `false`.
+fn verify_token(cmd: &Command, expected: &str) -> bool {
+    if constant_time_eq(cmd.token().as_bytes(), expected.as_bytes()) {
+        true
+    } else {
+        send(&Response::Error {
+            error: "invalid token".into(),
+        });
+        false
+    }
 }
 
 /// POSIX: single-threaded stdin reading. The runner uses poll() to multiplex
 /// stdin (cancel) and child stdout internally.
 #[cfg(unix)]
-fn run_unix() {
+fn run_unix(expected_token: &str) {
     let stdin = std::io::stdin();
     let mut reader = std::io::BufReader::new(stdin.lock());
     let mut line = String::new();
@@ -76,13 +130,18 @@ fn run_unix() {
                 continue;
             }
         };
+        if !verify_token(&cmd, expected_token) {
+            continue;
+        }
         match cmd {
-            Command::Run(run) => match runner::run_command(&run, &mut reader) {
-                Ok(code) => send(&Response::Exited { exited: code }),
-                Err(e) => send(&Response::Error { error: e }),
-            },
-            Command::Shutdown => break,
-            Command::Cancel(_) => {}
+            Command::Run { run, .. } => {
+                match runner::run_command(&run, &mut reader, expected_token) {
+                    Ok(code) => send(&Response::Exited { exited: code }),
+                    Err(e) => send(&Response::Error { error: e }),
+                }
+            }
+            Command::Shutdown { .. } => break,
+            Command::Cancel { .. } => {}
         }
     }
 }
@@ -91,7 +150,7 @@ fn run_unix() {
 /// pipes. Commands are dispatched via channels — Run/Shutdown to the main
 /// loop, Cancel to the runner.
 #[cfg(windows)]
-fn run_windows() {
+fn run_windows(expected_token: &str) {
     use std::sync::mpsc;
 
     enum MainCmd {
@@ -101,6 +160,10 @@ fn run_windows() {
 
     let (main_tx, main_rx) = mpsc::channel::<MainCmd>();
     let (cancel_tx, cancel_rx) = mpsc::channel::<protocol::CancelMethod>();
+
+    // The reader thread owns its own copy of the expected token so the
+    // stdin parsing path stays fully self-contained.
+    let token_owned = expected_token.to_string();
 
     // Stdin reader thread
     std::thread::spawn(move || {
@@ -133,18 +196,21 @@ fn run_windows() {
                     continue;
                 }
             };
+            if !verify_token(&cmd, &token_owned) {
+                continue;
+            }
             match cmd {
-                Command::Run(run) => {
+                Command::Run { run, .. } => {
                     if main_tx.send(MainCmd::Run(run)).is_err() {
                         break;
                     }
                 }
-                Command::Shutdown => {
+                Command::Shutdown { .. } => {
                     let _ = main_tx.send(MainCmd::Shutdown);
                     break;
                 }
-                Command::Cancel(req) => {
-                    let _ = cancel_tx.send(req);
+                Command::Cancel { method, .. } => {
+                    let _ = cancel_tx.send(method);
                 }
             }
         }

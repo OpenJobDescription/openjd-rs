@@ -2175,6 +2175,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "futures-util",
+ "getrandom 0.4.2",
  "log",
  "nix",
  "openjd-expr",

@@ -29,19 +29,26 @@ correctly from within the right user/session context.
 ```
 Session (agent user)          Helper (job user, via sudo)
     |                              |
-    |-- {"command":..., "args":..., "env":..., "cwd":...} -->
+    |-- {"token":..., "command":..., "args":..., "env":..., "cwd":...} -->
     |                              |-- spawns child process
     |                              |   (process group 0)
     |<-- {"pid": 1234} -----------|
     |<-- {"out": "line..."} ------|   (stdout lines)
     |                              |
-    |-- {"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5} -->|-- killpg(child, SIGTERM)
+    |-- {"token":..., "cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5} -->|-- killpg(child, SIGTERM)
     |                              |   (grace period, then SIGKILL if still alive)
     |                              |
     |<-- {"exited": 0} ----------|
     |                              |
-    |-- "shutdown" -------------->|-- exits
+    |-- {"token":..., "shutdown":true} -->|-- exits
 ```
+
+The `token` value is a random 22-character ASCII string (128 bits of
+entropy, drawn from a 64-char URL-safe alphabet via the OS CSPRNG) passed
+to the helper once on the command line as `--auth-token <TOKEN>` and
+required on every subsequent request. See
+[Authentication Token](sessions/embedded-cross-user-helper.md#authentication-token)
+for the full rationale.
 
 ### Key files
 

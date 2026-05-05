@@ -9,13 +9,18 @@
 
 Eliminate per-action `sudo -i` overhead by embedding a small helper binary in
 the `openjd-sessions` crate. The helper is written to disk once at session start,
-launched via `sudo -u job-user -i /path/to/helper`, and persists for the session
-lifetime. All subprocess execution routes through it over a stdin/stdout protocol.
+launched via `sudo -u job-user -i /path/to/helper --auth-token <TOKEN>`, and
+persists for the session lifetime. All subprocess execution routes through it
+over a stdin/stdout protocol, and every request carries a shared random
+authentication token that the helper verifies before acting.
 
 ## Architecture
 
 ```
 Session::with_config(user=job-user)
+  │
+  ├─ Generate auth_token = 22 chars from the 64-char URL-safe alphabet
+  │    (128 bits of entropy, 6 bits per char via byte & 0x3F)
   │
   ├─ Create helpers directory in session working directory
   │    /sessions/<session-id>/.helpers-<uuid>/
@@ -25,22 +30,25 @@ Session::with_config(user=job-user)
   │    /sessions/<session-id>/.helpers-<uuid>/h-<uuid>
   │    chmod 750, chown :job-user-group
   │
-  ├─ Spawn: sudo -u job-user -i /sessions/<session-id>/.helpers-<uuid>/h-<uuid>
-  │    (1 second login cost, paid once)
+  ├─ Spawn: sudo -u job-user -i /sessions/<session-id>/.helpers-<uuid>/h-<uuid> \
+  │           --auth-token <TOKEN>
+  │    (1 second login cost, paid once; token passed as CLI arg)
   │
   └─ Dup helper stdin fd → cancel_writer (for cancel_action from any thread)
        │
        └─ Helper process (running as job-user)
+            ├─ Parses --auth-token from argv at startup
             ├─ Single BufReader on stdin shared between main loop and runner
-            ├─ Main loop reads commands, dispatches to runner
-            ├─ Runner uses poll(2) to multiplex stdin (cancel) + child stdout
+            ├─ Main loop reads commands, verifies token, dispatches to runner
+            ├─ Runner uses poll(2) to multiplex stdin (cancel) + child stdout;
+            │  each cancel command must also carry the token
             ├─ Sends exit code when child exits
             └─ Returns to main loop for next command
 
-session.enter_environment(...)   ─── stdin JSON ──→ helper ──→ fork/exec onEnter
-session.run_task(...)            ─── stdin JSON ──→ helper ──→ fork/exec command
-session.cancel_action(...)       ─── cancel_writer ──→ helper stdin ──→ killpg child
-session.cleanup()                ─── "shutdown" ──→ helper exits
+session.enter_environment(...)   ─── stdin JSON (+token) ──→ helper ──→ fork/exec onEnter
+session.run_task(...)            ─── stdin JSON (+token) ──→ helper ──→ fork/exec command
+session.cancel_action(...)       ─── cancel_writer (+token) ──→ helper stdin ──→ killpg child
+session.cleanup()                ─── {"shutdown":true, "token":...} ──→ helper exits
 ```
 
 ## Embedded Binary
@@ -91,21 +99,117 @@ This is implemented in `win32_permissions::set_permissions_protected`,
 a Rust-only variant of the Python-compatible `set_permissions` that
 mirrors the Python API's non-protected behavior.
 
+## Authentication Token
+
+Every helper invocation is scoped to a random per-session token that the
+session generates, passes to the helper once on the CLI, and includes in
+every subsequent request JSON. The helper verifies the token on every
+command and refuses anything it does not recognise.
+
+### Why
+
+The pipe-based IPC alone provides no authentication: any process that can
+write to the helper's stdin can execute arbitrary commands as the job user.
+Pipe inheritance, the randomized binary path, and the token provide
+defense-in-depth against file descriptor leaks, accidental pipe
+sharing, and future refactors that might expose the helper's stdin more
+broadly.
+
+### Token properties
+
+- **Generated on the session side**, fresh for each helper process, with
+  no meaning after that helper exits.
+- **128 bits of entropy**, rendered as a 22-character ASCII string drawn
+  from a fixed 64-character URL-safe alphabet:
+
+  ```
+  ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_
+  ```
+
+  Each character is produced by drawing a byte from the OS CSPRNG
+  (`getrandom::fill`) and indexing via `byte & 0x3F`. A 64-element
+  alphabet makes this uniform without rejection sampling, and each
+  character contributes exactly 6 bits of entropy (22 × 6 = 132 bits of
+  capacity, ≥ 128 used).
+- **Alphabet chosen to be drop-in safe** anywhere the token might appear
+  — argv, JSON, log lines, filenames — with no `+` / `/` / `=` /
+  whitespace / quoting concerns. It matches URL-safe Base64 without
+  padding, but it is used as a character set, not as an encoding; there
+  is no decode step.
+- **Never logged.** Log lines that would otherwise include the token
+  substitute the literal string `<redacted>`.
+
+### Transport to the helper
+
+The token is passed to the helper once as the `--auth-token <TOKEN>` CLI
+option:
+
+- POSIX: `sudo -u <user> -i <helper_path> --auth-token <TOKEN>`. `sudo -i`
+  forwards the trailing arguments to the helper's argv.
+- Windows: `[helper_path, "--auth-token", <TOKEN>]` is passed to
+  `win32::spawn_as_user_with_stdin` as the argv.
+
+The helper runs as the job user, and on both platforms process argv is
+visible only to that same user — so the token is not disclosed beyond
+the existing trust boundary.
+
+If `--auth-token` is missing or malformed, the helper exits immediately
+with a nonzero status and a one-line error on stderr, without producing
+any JSON.
+
+### Presence in every request
+
+Every JSON object the helper accepts must include a `"token"` field whose
+value is the exact 22-character string the helper received on the CLI.
+This applies to run commands, cancel commands, and shutdown.
+
+### Verification
+
+The helper compares the incoming token against its own copy in constant
+time to avoid timing side-channels. The comparison is hand-rolled (length
+check first, then XOR across equal-length bytes, OR into an accumulator,
+check zero at the end) rather than pulling in a new dependency; the
+helper binary size budget is tight, and the primitive is ~6 lines. The
+token's fixed length also means the length check reliably rejects
+malformed input before the byte comparison even runs.
+
+On mismatch or missing token, the helper sends
+`{"error":"invalid token"}` on stdout and ignores the rest of the request.
+The current run (if any) is not cancelled: a cancel command with a bad
+token cannot be used as an unauthenticated cancel primitive.
+
+Mismatch handling is "log and ignore," not "exit," for two reasons:
+
+1. The session may have sent a malformed request while a legitimate run is
+   in flight; exiting would turn a request-level bug into a session-fatal
+   one.
+2. Forcing the helper to exit on bad input would let any party with write
+   access to the pipe crash the helper — a cheap denial of service.
+
 ## Wire Protocol
 
-Newline-delimited JSON over stdin (commands) and stdout (responses).
+Newline-delimited JSON over stdin (commands) and stdout (responses). Every
+command object MUST include `"token"` set to the value the helper received
+from `--auth-token`; the helper refuses objects that lack it or carry the
+wrong value. Responses do not carry the token — they travel on a pipe the
+helper itself owns, and the session doesn't need to authenticate the
+helper (it spawned it).
 
 ### Commands (stdin → helper)
 
 ```json
-{"command": "bash", "args": ["-c", "echo hello"], "env": {"PATH": "/usr/bin"}, "cwd": "/sessions/abc"}
+{"token": "<TOKEN>", "command": "bash", "args": ["-c", "echo hello"], "env": {"PATH": "/usr/bin"}, "cwd": "/sessions/abc"}
 
-{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}
+{"token": "<TOKEN>", "cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}
 
-{"cancel": "TERMINATE"}
+{"token": "<TOKEN>", "cancel": "TERMINATE"}
 
-"shutdown"
+{"token": "<TOKEN>", "shutdown": true}
 ```
+
+`<TOKEN>` is the literal 22-character ASCII string described in the
+[Authentication Token](#authentication-token) section; it is not a
+placeholder for some other encoding.
 
 ### Responses (helper → stdout)
 
@@ -117,6 +221,8 @@ Newline-delimited JSON over stdin (commands) and stdout (responses).
 {"exited": 0}
 
 {"error": "No such file or directory"}
+
+{"error": "invalid token"}
 ```
 
 Only one command runs at a time. The protocol is implicitly sequential:
@@ -144,6 +250,10 @@ to handle data already buffered by the main loop's `read_line`.
 ```rust
 // src/helper/main.rs
 fn main() {
+    // Parse --auth-token from argv. Exit immediately on missing/malformed.
+    // Token is a 22-char ASCII string from the URL-safe alphabet.
+    let expected_token: [u8; 22] = parse_auth_token_arg_or_exit();
+
     let stdin = std::io::stdin();
     let mut reader = BufReader::new(stdin.lock());
 
@@ -153,10 +263,17 @@ fn main() {
         if reader.read_line(&mut line).unwrap_or(0) == 0 { break; }
         let cmd: Command = serde_json::from_str(line.trim())?;
 
+        // Every command must carry the shared token. Bad token → log and skip.
+        if !constant_time_eq(cmd.token_bytes(), &expected_token) {
+            send(&Response::Error { error: "invalid token".into() });
+            continue;
+        }
+
         match cmd {
             Command::Run(run) => {
-                // Pass the SAME reader to run_command for cancel reads
-                match runner::run_command(&run, &mut reader) {
+                // Pass the SAME reader AND the expected token to run_command;
+                // cancel commands read during the run are verified the same way.
+                match runner::run_command(&run, &mut reader, &expected_token) {
                     Ok(code) => send(&Response::Exited { exited: code }),
                     Err(e) => send(&Response::Error { error: e }),
                 }
@@ -172,7 +289,11 @@ fn main() {
 
 ```rust
 // src/helper/runner.rs
-fn run_command(cmd: &RunCommand, stdin_buf: &mut BufReader<StdinLock>) -> Result<i32, String> {
+fn run_command(
+    cmd: &RunCommand,
+    stdin_buf: &mut BufReader<StdinLock>,
+    expected_token: &[u8; 22],
+) -> Result<i32, String> {
     let mut child = Command::new(&cmd.command)
         .args(&cmd.args)
         .envs(&cmd.env)
@@ -196,8 +317,11 @@ fn run_command(cmd: &RunCommand, stdin_buf: &mut BufReader<StdinLock>) -> Result
 
         if !stdin_has_buffered { poll([stdin_fd, child_fd], timeout); }
 
-        // Cancel on stdin → parse as Command::Cancel(signal), killpg(child_pgid, signal)
-        if stdin ready { read line, parse Command::Cancel(sig), killpg, child_killed = true }
+        // Cancel on stdin → parse, verify token, then killpg(child_pgid, signal).
+        // A cancel with a bad token is dropped (send {"error":"invalid token"})
+        // so an attacker with write access to the pipe cannot unauthenticatedly
+        // cancel a running action.
+        if stdin ready { read line, parse Command::Cancel(sig), verify token, killpg, child_killed = true }
 
         // Child output → send {"out": line}
         if child ready { read line, send }
@@ -217,6 +341,11 @@ Key details:
 - Checks `POLLHUP | POLLERR` for child stdout close
 - Drains remaining buffered output before returning exit code
 - Kills the child's process group on exit to clean up descendants
+- Every cancel line read inside the runner is passed through the same
+  constant-time token check the main loop uses. The Windows runner
+  (`runner_win.rs`) receives already-validated `CancelMethod` values
+  over its `mpsc::Receiver`, so token validation for it stays in
+  `main.rs` where stdin is actually read.
 
 ## Session Integration
 
@@ -227,10 +356,22 @@ struct CrossUserHelper {
     child: std::process::Child,
     stdin: BufWriter<std::process::ChildStdin>,
     async_reader: UnixAsyncHelperReader,  // async channel-based reader
+    /// 22-char auth token shared with the helper. Included in every
+    /// command sent over `stdin` and over the dup'd `cancel_writer`.
+    auth_token: String,
 }
 ```
 
-Methods: `spawn`, `send_command`, `shutdown`.
+Methods: `spawn`, `send_command`, `shutdown`, `auth_token`.
+
+`spawn` generates the token (22 draws of `alphabet[byte & 0x3F]` over a
+fresh 22-byte `getrandom` buffer), formats the helper argv as
+`[helper_path, "--auth-token", <TOKEN>]`, and stores the string on the
+struct. `send_command` takes the caller's serde_json body and merges
+`"token"` into it before writing; callers cannot forget to include it.
+`auth_token` exposes the string so `run_via_helper` can include it when
+writing cancel commands through the dup'd `cancel_writer` (which doesn't
+go through `send_command`).
 
 Reading is done via the `AsyncHelperReader` trait (see below).
 
@@ -247,12 +388,22 @@ let raw_fd = child_stdin.as_raw_fd();
 let dup_fd = nix::unistd::dup(raw_fd)?;
 let cancel_writer = File::from_raw_fd(dup_fd);
 
-// In Session::cancel_action:
+// In Session::cancel_action (token is the helper's 22-char auth_token):
 if let Some(ref mut writer) = self.cancel_writer {
-    writeln!(writer, "{{\"cancel\":\"NOTIFY_THEN_TERMINATE\",\"notifyPeriodInSeconds\":5}}")?;
+    writeln!(
+        writer,
+        r#"{{"token":"{token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5}}"#,
+        token = self.helper_auth_token,
+    )?;
     writer.flush()?;
 }
 ```
+
+The session stores the token string alongside the `cancel_writer` so the
+cancel path doesn't depend on the helper struct (which may be moved into
+a runner). The token is copied once at helper spawn and never mutated.
+Because the alphabet excludes `"` and `\`, the token can be embedded
+verbatim in the JSON literal — no escaping required.
 
 ### Timeout
 
@@ -392,6 +543,26 @@ Tests cover: basic execution, stdout streaming, notify-then-terminate cancel,
 immediate terminate cancel, process tree kill, uid/gid verification,
 env vars, env isolation, cleanup, permissions, and disjoint user rejection.
 
+Additional token-focused tests added in `helper/tests/test_helper_protocol.rs`:
+
+- **`test_helper_rejects_missing_auth_token_cli`** — spawn the helper with
+  no `--auth-token` argument; expect a nonzero exit and a diagnostic on
+  stderr, with no JSON on stdout.
+- **`test_helper_rejects_missing_token_field`** — send a run command
+  without a `"token"` field; expect `{"error":"invalid token"}` and no
+  child spawn.
+- **`test_helper_rejects_wrong_token`** — send a run command with the
+  wrong token; expect `{"error":"invalid token"}` and that a legitimate
+  request with the correct token afterwards still works (the helper stays
+  alive, stream stays aligned).
+- **`test_helper_cancel_rejects_wrong_token`** — start a long-running
+  command with the correct token, send a cancel with the wrong token,
+  verify the command is still running, then send a cancel with the
+  correct token and verify the command exits.
+- **`test_helper_happy_path_includes_token`** — the pre-existing echo /
+  terminate / nonexistent-command tests updated to include the token on
+  every request.
+
 ## Resolved Decisions
 
 - **stderr**: Merged into stdout via `dup2(1, 2)` in `pre_exec`
@@ -400,6 +571,15 @@ env vars, env isolation, cleanup, permissions, and disjoint user rejection.
 - **Environment**: Job-user login env from `sudo -i` + per-action overrides
 - **Stdin sharing**: Single `BufReader` shared between main loop and runner (critical for cancel)
 - **Cancel mechanism**: Dup'd stdin fd on Session, writable from any thread
+- **Authentication**: Random 128-bit per-helper token rendered as 22 ASCII
+  characters from a 64-char URL-safe alphabet (direct `byte & 0x3F` draw,
+  no rejection sampling, no encoder dependency); passed once via
+  `--auth-token` CLI option, echoed on every request; verified in
+  constant time; missing/bad token rejected without affecting the
+  current run
+- **Token transport**: CLI argv
+- **Shutdown wire form**: `{"token":"...","shutdown":true}` object, so
+  shutdown carries a token like every other command
 
 ## Build System
 
@@ -416,9 +596,11 @@ openjd-sessions/
     helper/
       Cargo.toml        ← standalone crate with [workspace] = {}
       src/
-        main.rs         ← shared stdin reader, command dispatch
-        protocol.rs     ← Command/Response serde types
-        runner.rs       ← poll(2) loop, child management, cancel
+        main.rs         ← argv parse (--auth-token), shared stdin reader,
+                          command dispatch with token verification
+        protocol.rs     ← Command/Response serde types, token field
+        runner.rs       ← poll(2) loop, child management, cancel with
+                          per-command token check
 ```
 
 ### build.rs
@@ -430,7 +612,17 @@ On non-unix targets, writes an empty placeholder so `include_bytes!` doesn't fai
 ### Binary size
 
 425KB with `opt-level = "s"`, LTO, strip, `panic = "abort"`.
-Dependencies: serde, serde_json, nix.
+Dependencies: serde, serde_json, nix. The token comparison is hand-rolled
+(no `subtle` or similar crate) to keep the dependency set unchanged.
+
+### Session-side dependencies
+
+The session generates the token with the OS CSPRNG. `openjd-sessions`
+already depends on `uuid` with the `v4` feature, which pulls in
+`getrandom` transitively. The token generation uses `getrandom::fill`
+directly on a `[u8; 22]` stack buffer, then indexes each byte
+(`byte & 0x3F`) into the 64-char URL-safe alphabet to produce the final
+22-char `String`. No `base64`, `rand`, or `subtle` crate is added.
 
 ### PyO3 integration
 

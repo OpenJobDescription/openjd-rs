@@ -24,6 +24,60 @@ const MAX_RESPONSE_LINE_LENGTH: usize = 128 * 1024;
 use crate::session_log;
 use crate::session_user::SessionUser;
 
+/// Length of the shared auth token in characters.
+///
+/// Matches the helper's `AUTH_TOKEN_LEN` constant. The helper rejects
+/// `--auth-token` values of any other length.
+pub(crate) const AUTH_TOKEN_LEN: usize = 22;
+
+/// 64-character URL-safe alphabet used to render the auth token.
+///
+/// Chosen so that `byte & 0x3F` is a uniform index with no rejection
+/// sampling. The character set avoids `+` / `/` / `=` / whitespace so the
+/// token is safe in argv, JSON, filenames, and log lines without quoting.
+const AUTH_TOKEN_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/// Generate a fresh per-helper auth token: [`AUTH_TOKEN_LEN`] ASCII characters
+/// drawn from [`AUTH_TOKEN_ALPHABET`]. Uses the OS CSPRNG via `getrandom::fill`.
+///
+/// Each character contributes 6 bits of entropy (64-char alphabet), so
+/// 22 characters ≥ 128 bits of entropy.
+pub(crate) fn generate_auth_token() -> Result<String, SessionError> {
+    let mut raw = [0u8; AUTH_TOKEN_LEN];
+    getrandom::fill(&mut raw).map_err(|e| {
+        SessionError::HelperCommunication(format!("Failed to generate auth token: {e}"))
+    })?;
+    let mut out = String::with_capacity(AUTH_TOKEN_LEN);
+    for b in raw {
+        out.push(AUTH_TOKEN_ALPHABET[(b & 0x3F) as usize] as char);
+    }
+    Ok(out)
+}
+
+/// Return `cmd` extended with `"token": <auth_token>`.
+///
+/// `cmd` must be a JSON object, since every helper command is an object.
+/// If the caller's map already contains a `"token"` entry, it is overwritten
+/// — `augment_with_token` is the sole owner of that field in outgoing
+/// commands.
+fn augment_with_token(
+    cmd: &serde_json::Value,
+    auth_token: &str,
+) -> Result<serde_json::Value, SessionError> {
+    let serde_json::Value::Object(map) = cmd else {
+        return Err(SessionError::HelperCommunication(format!(
+            "helper command must be a JSON object, got: {cmd}"
+        )));
+    };
+    let mut with_token = map.clone();
+    with_token.insert(
+        "token".to_string(),
+        serde_json::Value::String(auth_token.to_string()),
+    );
+    Ok(serde_json::Value::Object(with_token))
+}
+
 // ── Async helper reader ──
 
 /// Future type returned by `AsyncHelperReader::next_response`.
@@ -163,13 +217,17 @@ impl AsyncHelperReader for WindowsAsyncHelperReader {
 
 /// Manages a long-lived helper process for cross-user command execution (POSIX).
 ///
-/// On POSIX: launched via `sudo -u <user> -i <helper_path>`.
-/// Communicates over newline-delimited JSON on stdin/stdout.
+/// On POSIX: launched via `sudo -u <user> -i <helper_path> --auth-token <TOKEN>`.
+/// Communicates over newline-delimited JSON on stdin/stdout. Every request
+/// carries the shared `auth_token` string; the helper rejects anything else.
 #[cfg(unix)]
 pub(crate) struct CrossUserHelper {
     child: std::process::Child,
     stdin: std::io::BufWriter<std::process::ChildStdin>,
     pub(crate) async_reader: UnixAsyncHelperReader,
+    /// 22-char auth token shared with the helper. Included in every command
+    /// sent over `stdin` and over the dup'd `cancel_writer`.
+    auth_token: String,
 }
 
 /// Windows variant: the child is a raw process handle from `CreateProcessAsUserW`,
@@ -179,6 +237,9 @@ pub(crate) struct CrossUserHelperWin {
     process_handle: windows::Win32::Foundation::HANDLE,
     stdin: std::io::BufWriter<std::fs::File>,
     pub(crate) async_reader: WindowsAsyncHelperReader,
+    /// 22-char auth token shared with the helper. Included in every command
+    /// sent over `stdin` and over the dup'd `cancel_writer`.
+    auth_token: String,
 }
 
 // SAFETY: `CrossUserHelperWin` is Send because all of its fields can be
@@ -198,6 +259,10 @@ unsafe impl Send for CrossUserHelperWin {}
 impl CrossUserHelper {
     /// Spawn the helper binary as the given user via sudo (POSIX).
     ///
+    /// Generates a fresh per-helper auth token, passes it to the helper as
+    /// `--auth-token <TOKEN>`, and stores it on the returned struct so every
+    /// subsequent command can echo it back.
+    ///
     /// Returns `(helper, cancel_writer)` where `cancel_writer` is a dup'd copy
     /// of the helper's stdin fd. This allows sending cancel commands even while
     /// the helper struct is moved to a runner during action execution.
@@ -206,14 +271,27 @@ impl CrossUserHelper {
         helper_path: &Path,
         user: &dyn SessionUser,
     ) -> Result<(Self, std::fs::File), SessionError> {
+        let auth_token = generate_auth_token()?;
         let mut child = std::process::Command::new("sudo")
-            .args(["-u", user.user(), "-i", &helper_path.to_string_lossy()])
+            .args([
+                "-u",
+                user.user(),
+                "-i",
+                &helper_path.to_string_lossy(),
+                "--auth-token",
+                &auth_token,
+            ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|source| SessionError::SubprocessStart {
-                command: format!("sudo -u {} -i {}", user.user(), helper_path.display()),
+                // Don't include the token in error messages.
+                command: format!(
+                    "sudo -u {} -i {} --auth-token <redacted>",
+                    user.user(),
+                    helper_path.display()
+                ),
                 source,
             })?;
 
@@ -236,15 +314,27 @@ impl CrossUserHelper {
                 child,
                 stdin,
                 async_reader,
+                auth_token,
             },
             cancel_writer,
         ))
     }
 
-    /// Send a JSON command to the helper (writes JSON + newline, then flushes).
+    /// The shared auth token. Callers that write directly to the helper's
+    /// stdin (like the cancel_writer path) must include this in every request.
+    pub fn auth_token(&self) -> &str {
+        &self.auth_token
+    }
+
+    /// Send a JSON command to the helper, injecting the shared auth token.
+    ///
+    /// `cmd` must be a JSON object; the helper's protocol requires every
+    /// command to be an object. The token is inserted as `"token"` before
+    /// the line is written.
     pub fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         use std::io::Write;
-        serde_json::to_writer(&mut self.stdin, cmd).map_err(|e| {
+        let payload = augment_with_token(cmd, &self.auth_token)?;
+        serde_json::to_writer(&mut self.stdin, &payload).map_err(|e| {
             SessionError::HelperCommunication(format!("Failed to write to helper stdin: {e}"))
         })?;
         self.stdin.write_all(b"\n").map_err(|e| {
@@ -256,9 +346,9 @@ impl CrossUserHelper {
         Ok(())
     }
 
-    /// Send "shutdown" and wait for the child to exit.
+    /// Send a tokenized shutdown command and wait for the child to exit.
     pub fn shutdown(&mut self) {
-        let _ = self.send_command(&serde_json::Value::String("shutdown".into()));
+        let _ = self.send_command(&serde_json::json!({"shutdown": true}));
         let _ = self.child.wait();
     }
 }
@@ -278,6 +368,10 @@ impl Drop for CrossUserHelper {
 #[cfg(windows)]
 impl CrossUserHelperWin {
     /// Spawn the helper binary as the given user via `CreateProcessAsUserW` (Windows).
+    ///
+    /// Generates a fresh per-helper auth token, passes it to the helper as
+    /// `--auth-token <TOKEN>`, and stores it on the returned struct so every
+    /// subsequent command can echo it back.
     ///
     /// Returns `(helper, cancel_writer)` where `cancel_writer` is a `DuplicateHandle`'d
     /// copy of the helper's stdin pipe. This allows sending cancel commands even while
@@ -299,8 +393,14 @@ impl CrossUserHelperWin {
                 SessionError::Runtime("Cross-user on Windows requires WindowsSessionUser".into())
             })?;
 
+        let auth_token = generate_auth_token()?;
+
         let spawned = crate::win32::spawn_as_user_with_stdin(
-            &[helper_path.to_string_lossy().to_string()],
+            &[
+                helper_path.to_string_lossy().to_string(),
+                "--auth-token".to_string(),
+                auth_token.clone(),
+            ],
             &HashMap::new(),
             None, // working_dir — helper doesn't need one
             wu.password(),
@@ -308,7 +408,11 @@ impl CrossUserHelperWin {
             wu.logon_token(),
         )
         .map_err(|e| SessionError::SubprocessStart {
-            command: format!("spawn_as_user_with_stdin {}", helper_path.display()),
+            // Don't include the token in error messages.
+            command: format!(
+                "spawn_as_user_with_stdin {} --auth-token <redacted>",
+                helper_path.display()
+            ),
             source: std::io::Error::other(e),
         })?;
 
@@ -355,15 +459,23 @@ impl CrossUserHelperWin {
                 process_handle: spawned.process_handle,
                 stdin,
                 async_reader,
+                auth_token,
             },
             cancel_writer,
         ))
     }
 
-    /// Send a JSON command to the helper (writes JSON + newline, then flushes).
+    /// The shared auth token. Callers that write directly to the helper's
+    /// stdin (like the cancel_writer path) must include this in every request.
+    pub fn auth_token(&self) -> &str {
+        &self.auth_token
+    }
+
+    /// Send a JSON command to the helper, injecting the shared auth token.
     pub fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         use std::io::Write;
-        serde_json::to_writer(&mut self.stdin, cmd).map_err(|e| {
+        let payload = augment_with_token(cmd, &self.auth_token)?;
+        serde_json::to_writer(&mut self.stdin, &payload).map_err(|e| {
             SessionError::HelperCommunication(format!("Failed to write to helper stdin: {e}"))
         })?;
         self.stdin.write_all(b"\n").map_err(|e| {
@@ -375,9 +487,9 @@ impl CrossUserHelperWin {
         Ok(())
     }
 
-    /// Send "shutdown" and wait for the process to exit.
+    /// Send a tokenized shutdown command and wait for the process to exit.
     pub fn shutdown(&mut self) {
-        let _ = self.send_command(&serde_json::Value::String("shutdown".into()));
+        let _ = self.send_command(&serde_json::json!({"shutdown": true}));
         unsafe {
             let _ =
                 windows::Win32::System::Threading::WaitForSingleObject(self.process_handle, 5000);
@@ -405,6 +517,9 @@ impl Drop for CrossUserHelperWin {
 pub(crate) trait AsyncHelper: Send {
     fn async_reader(&mut self) -> &mut dyn AsyncHelperReader;
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError>;
+    /// The helper's shared auth token. Used by callers that bypass
+    /// `send_command` (e.g. the cancel_writer path in `run_via_helper`).
+    fn auth_token(&self) -> &str;
 }
 
 #[cfg(unix)]
@@ -415,6 +530,9 @@ impl AsyncHelper for CrossUserHelper {
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         CrossUserHelper::send_command(self, cmd)
     }
+    fn auth_token(&self) -> &str {
+        CrossUserHelper::auth_token(self)
+    }
 }
 
 #[cfg(windows)]
@@ -424,6 +542,9 @@ impl AsyncHelper for CrossUserHelperWin {
     }
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         CrossUserHelperWin::send_command(self, cmd)
+    }
+    fn auth_token(&self) -> &str {
+        CrossUserHelperWin::auth_token(self)
     }
 }
 
@@ -579,6 +700,7 @@ pub(crate) async fn run_via_helper(
                     let mut w = writer.try_clone().map_err(|e| {
                         SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
                     })?;
+                    let token = helper.auth_token();
                     let cancel_method = &config.cancel_method;
                     let notify_period = match cancel_method {
                         crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
@@ -586,17 +708,81 @@ pub(crate) async fn run_via_helper(
                         }
                         crate::runner::CancelMethod::Terminate => 0,
                     };
+                    // The token alphabet excludes `"` and `\`, so no
+                    // escaping is needed to embed it in a JSON literal.
                     if notify_period == 0 {
-                        let _ = writeln!(w, r#"{{"cancel":"TERMINATE"}}"#);
+                        let _ = writeln!(w, r#"{{"token":"{token}","cancel":"TERMINATE"}}"#);
                     } else {
                         let _ = writeln!(
                             w,
-                            r#"{{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+                            r#"{{"token":"{token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
                         );
                     }
                     let _ = w.flush();
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::*;
+
+    #[test]
+    fn token_is_22_chars_from_url_safe_alphabet() {
+        for _ in 0..100 {
+            let t = generate_auth_token().unwrap();
+            assert_eq!(
+                t.len(),
+                AUTH_TOKEN_LEN,
+                "token should be {AUTH_TOKEN_LEN} chars",
+            );
+            assert!(t.is_ascii(), "token must be ASCII");
+            for c in t.bytes() {
+                assert!(
+                    AUTH_TOKEN_ALPHABET.contains(&c),
+                    "token contains non-alphabet byte: {c:#x}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generated_tokens_differ() {
+        // This could technically collide, but the probability over two
+        // 128-bit draws is astronomically small. If this ever flakes, the
+        // CSPRNG is broken.
+        let a = generate_auth_token().unwrap();
+        let b = generate_auth_token().unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn augment_with_token_inserts_token() {
+        let cmd = serde_json::json!({"command": "echo", "args": ["hi"]});
+        let out = augment_with_token(&cmd, "T-O-K-E-N").unwrap();
+        assert_eq!(out.get("token").and_then(|v| v.as_str()), Some("T-O-K-E-N"),);
+        assert_eq!(out.get("command").and_then(|v| v.as_str()), Some("echo"));
+    }
+
+    #[test]
+    fn augment_rejects_non_object() {
+        let err = augment_with_token(&serde_json::json!("shutdown"), "tok").unwrap_err();
+        assert!(err.to_string().contains("must be a JSON object"));
+    }
+
+    #[test]
+    fn augment_overrides_caller_supplied_token() {
+        // augment_with_token is the sole owner of the "token" field on
+        // outgoing commands — a caller-supplied one must be overwritten
+        // so callers can't accidentally (or intentionally) poison it.
+        let cmd = serde_json::json!({"token": "bad", "command": "x"});
+        let out = augment_with_token(&cmd, "good").unwrap();
+        assert_eq!(
+            out.get("token").and_then(|v| v.as_str()),
+            Some("good"),
+            "augment_with_token must not let the caller override the token",
+        );
     }
 }

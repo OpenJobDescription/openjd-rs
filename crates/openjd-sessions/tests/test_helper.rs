@@ -13,6 +13,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+/// A constant token for these tests. Must be exactly [`AUTH_TOKEN_LEN`]
+/// characters from the URL-safe alphabet (the helper enforces the length
+/// before reading any stdin). The actual contents don't matter.
+const TEST_TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
+
 // ────────────────────────────────────────────────────────────────────
 // Platform helpers: the helper binary, long-running commands, shells.
 // ────────────────────────────────────────────────────────────────────
@@ -51,13 +56,13 @@ fn long_running_cmd() -> (&'static str, Vec<&'static str>) {
 fn echo_cmd(what: &str) -> String {
     if cfg!(windows) {
         format!(
-            r#"{{"command": "cmd", "args": ["/c", "echo {}"], "env": {{}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "cmd", "args": ["/c", "echo {}"], "env": {{}}, "cwd": "{}"}}"#,
             what,
             tmp_cwd().replace('\\', "\\\\")
         )
     } else {
         format!(
-            r#"{{"command": "echo", "args": ["{}"], "env": {{}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "echo", "args": ["{}"], "env": {{}}, "cwd": "{}"}}"#,
             what,
             tmp_cwd()
         )
@@ -68,13 +73,13 @@ fn echo_cmd(what: &str) -> String {
 fn exit_with_code_cmd(code: i32) -> String {
     if cfg!(windows) {
         format!(
-            r#"{{"command": "cmd", "args": ["/c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "cmd", "args": ["/c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
             code,
             tmp_cwd().replace('\\', "\\\\")
         )
     } else {
         format!(
-            r#"{{"command": "sh", "args": ["-c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "sh", "args": ["-c", "exit {}"], "env": {{}}, "cwd": "{}"}}"#,
             code,
             tmp_cwd()
         )
@@ -87,7 +92,7 @@ fn echo_env_var_cmd(var_name: &str, var_value: &str) -> String {
         // cmd echoes the literal %VAR% when the env isn't set at the cmd level,
         // but Command::envs is applied to the child process env, which cmd inherits.
         format!(
-            r#"{{"command": "cmd", "args": ["/c", "echo %{}%"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "cmd", "args": ["/c", "echo %{}%"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
             var_name,
             var_name,
             var_value,
@@ -95,7 +100,7 @@ fn echo_env_var_cmd(var_name: &str, var_value: &str) -> String {
         )
     } else {
         format!(
-            r#"{{"command": "sh", "args": ["-c", "echo ${}"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
+            r#"{{"token": "{TEST_TOKEN}", "command": "sh", "args": ["-c", "echo ${}"], "env": {{"{}": "{}"}}, "cwd": "{}"}}"#,
             var_name,
             var_name,
             var_value,
@@ -112,7 +117,7 @@ fn long_running_run_json() -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        r#"{{"command": "{}", "args": [{}], "env": {{}}, "cwd": "{}"}}"#,
+        r#"{{"token": "{TEST_TOKEN}", "command": "{}", "args": [{}], "env": {{}}, "cwd": "{}"}}"#,
         cmd,
         args_json,
         tmp_cwd().replace('\\', "\\\\")
@@ -132,6 +137,7 @@ struct Helper {
 impl Helper {
     fn spawn() -> Self {
         let mut child = Command::new(helper_path())
+            .args(["--auth-token", TEST_TOKEN])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -174,7 +180,7 @@ impl Helper {
     }
 
     fn shutdown(mut self) -> std::process::ExitStatus {
-        self.send("\"shutdown\"");
+        self.send(&format!(r#"{{"token": "{TEST_TOKEN}", "shutdown": true}}"#));
         self.child.wait().expect("wait for helper")
     }
 }
@@ -252,7 +258,7 @@ fn test_helper_command_not_found() {
 
     let cwd = tmp_cwd().replace('\\', "\\\\");
     h.send(&format!(
-        r#"{{"command": "nonexistent_binary_xyz_12345", "args": [], "env": {{}}, "cwd": "{cwd}"}}"#
+        r#"{{"token": "{TEST_TOKEN}", "command": "nonexistent_binary_xyz_12345", "args": [], "env": {{}}, "cwd": "{cwd}"}}"#
     ));
     let resp = h.read_until_done();
     assert!(
@@ -331,7 +337,9 @@ fn test_helper_cancel_during_execution_unix() {
     let pid_resp = h.read_line();
     assert!(pid_resp.get("pid").is_some(), "should get pid");
 
-    h.send(r#"{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}"#);
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}}"#
+    ));
 
     let resp = h.read_until_done();
     let last = resp.last().unwrap();
@@ -383,7 +391,9 @@ fn test_helper_terminate_during_execution_windows() {
     assert!(pid_resp.get("pid").is_some(), "should get pid");
     let child_pid = pid_resp["pid"].as_u64().unwrap() as u32;
 
-    h.send(r#"{"cancel": "TERMINATE"}"#);
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "cancel": "TERMINATE"}}"#
+    ));
 
     let start = std::time::Instant::now();
     let resp = h.read_until_done();
@@ -418,7 +428,9 @@ fn test_helper_ctrl_break_falls_back_to_terminate_windows() {
     let pid_resp = h.read_line();
     let child_pid = pid_resp["pid"].as_u64().unwrap() as u32;
 
-    h.send(r#"{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}"#);
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}}"#
+    ));
 
     let start = std::time::Instant::now();
     let resp = h.read_until_done();

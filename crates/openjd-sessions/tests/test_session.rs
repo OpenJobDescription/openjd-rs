@@ -2624,6 +2624,44 @@ mod cancel_escalation {
             "TERMINATE should not include notifyPeriodInSeconds"
         );
     }
+
+    /// When a helper auth token is configured, every cancel command written
+    /// through the cancel_writer must include it as a `"token"` field. This
+    /// is what `set_helper_auth_token_for_test` is for.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancel_includes_auth_token_when_configured() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_with_observable_writer(&tmp);
+        s.set_helper_auth_token_for_test("AbCdEfGhIjKlMnOpQrStUv".into());
+
+        // Soft cancel
+        s.cancel_action(None, false).expect("cancel_action ok");
+        std::thread::sleep(Duration::from_millis(200));
+        let msgs = read_cancel_messages(&path);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(
+            msgs[0]["token"].as_str().unwrap(),
+            "AbCdEfGhIjKlMnOpQrStUv",
+            "NOTIFY_THEN_TERMINATE cancel must carry the token",
+        );
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+    }
+
+    /// TERMINATE (zero grace) must also carry the token.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn terminate_cancel_includes_auth_token_when_configured() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_with_observable_writer(&tmp);
+        s.set_helper_auth_token_for_test("AbCdEfGhIjKlMnOpQrStUv".into());
+
+        s.cancel_action(Some(Duration::from_secs(0)), false)
+            .expect("cancel_action ok");
+        std::thread::sleep(Duration::from_millis(200));
+        let msgs = read_cancel_messages(&path);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["token"].as_str().unwrap(), "AbCdEfGhIjKlMnOpQrStUv",);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+    }
 }
 
 /// Test Option 1: Session-level test for the cancel race condition.

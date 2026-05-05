@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-use super::protocol::{send, Command as HelperCommand, Response, RunCommand};
+use super::protocol::{constant_time_eq, send, Command as HelperCommand, Response, RunCommand};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
@@ -13,7 +13,16 @@ use std::process::{Command, Stdio};
 
 /// Run a command, reading cancel commands from the provided stdin reader.
 /// The stdin reader must be the same one used by main() to avoid buffering conflicts.
-pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io::StdinLock<'_>>) -> Result<i32, String> {
+///
+/// `expected_token` is the raw byte string the main loop verified at startup.
+/// Every cancel command read from stdin during the run is verified against it
+/// the same way a run command would be; cancels with the wrong token are
+/// reported as `{"error":"invalid token"}` and do not affect the running child.
+pub fn run_command(
+    cmd: &RunCommand,
+    stdin_buf: &mut std::io::BufReader<std::io::StdinLock<'_>>,
+    expected_token: &str,
+) -> Result<i32, String> {
     let mut child = unsafe {
         Command::new(&cmd.command)
             .args(&cmd.args)
@@ -89,22 +98,34 @@ pub fn run_command(cmd: &RunCommand, stdin_buf: &mut std::io::BufReader<std::io:
         if stdin_ready {
             let mut line = String::new();
             if stdin_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                if let Ok(HelperCommand::Cancel(method)) = serde_json::from_str::<HelperCommand>(&line) {
-                    match method {
-                        super::protocol::CancelMethod::Terminate => {
-                            let _ = killpg(child_pid, Signal::SIGKILL);
-                            child_killed = true;
-                        }
-                        super::protocol::CancelMethod::NotifyThenTerminate {
-                            notify_period_in_seconds,
-                        } => {
-                            let _ = killpg(child_pid, Signal::SIGTERM);
-                            escalation_deadline = Some(
-                                std::time::Instant::now()
-                                    + std::time::Duration::from_secs(notify_period_in_seconds),
-                            );
+                if let Ok(parsed_cmd) = serde_json::from_str::<HelperCommand>(&line) {
+                    // Every cancel command must carry the shared token.
+                    // Cancels with a wrong/missing token are rejected with an
+                    // error response and must not affect the running child.
+                    if !constant_time_eq(parsed_cmd.token().as_bytes(), expected_token.as_bytes())
+                    {
+                        send(&Response::Error {
+                            error: "invalid token".into(),
+                        });
+                    } else if let HelperCommand::Cancel { method, .. } = parsed_cmd {
+                        match method {
+                            super::protocol::CancelMethod::Terminate => {
+                                let _ = killpg(child_pid, Signal::SIGKILL);
+                                child_killed = true;
+                            }
+                            super::protocol::CancelMethod::NotifyThenTerminate {
+                                notify_period_in_seconds,
+                            } => {
+                                let _ = killpg(child_pid, Signal::SIGTERM);
+                                escalation_deadline = Some(
+                                    std::time::Instant::now()
+                                        + std::time::Duration::from_secs(notify_period_in_seconds),
+                                );
+                            }
                         }
                     }
+                    // Run/Shutdown lines received mid-run are ignored here —
+                    // only Cancel is meaningful inside the runner.
                 }
             }
         }

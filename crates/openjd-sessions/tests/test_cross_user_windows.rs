@@ -229,9 +229,17 @@ struct CrossUserTestHelper {
 }
 
 impl CrossUserTestHelper {
+    /// Test token. See `TEST_TOKEN` in `test_helper.rs` for why the length
+    /// matters; the contents are irrelevant as long as they're 22 ASCII chars.
+    const TEST_TOKEN: &'static str = "AbCdEfGhIjKlMnOpQrStUv";
+
     fn spawn(user: &WindowsSessionUser) -> Self {
         let spawned = openjd_sessions::win32::spawn_as_user_with_stdin(
-            &[helper_path().to_string_lossy().to_string()],
+            &[
+                helper_path().to_string_lossy().to_string(),
+                "--auth-token".to_string(),
+                Self::TEST_TOKEN.to_string(),
+            ],
             &HashMap::new(),
             None,
             user.password(),
@@ -257,6 +265,7 @@ impl CrossUserTestHelper {
 
     fn send_run(&mut self, command: &str, args: &[&str], env: &serde_json::Value) {
         let cmd = serde_json::json!({
+            "token": Self::TEST_TOKEN,
             "command": command,
             "args": args,
             "env": env,
@@ -264,6 +273,21 @@ impl CrossUserTestHelper {
         });
         let msg = serde_json::to_string(&cmd).unwrap();
         self.send(&msg);
+    }
+
+    fn send_cancel_terminate(&mut self) {
+        self.send(&format!(
+            r#"{{"token":"{}","cancel":"TERMINATE"}}"#,
+            Self::TEST_TOKEN
+        ));
+    }
+
+    fn send_cancel_notify_then_terminate(&mut self, notify_period_in_seconds: u64) {
+        self.send(&format!(
+            r#"{{"token":"{}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{}}}"#,
+            Self::TEST_TOKEN,
+            notify_period_in_seconds,
+        ));
     }
 
     fn read_line(&mut self) -> serde_json::Value {
@@ -288,7 +312,10 @@ impl CrossUserTestHelper {
     }
 
     fn shutdown(mut self) {
-        self.send("\"shutdown\"");
+        self.send(&format!(
+            r#"{{"token":"{}","shutdown":true}}"#,
+            Self::TEST_TOKEN
+        ));
         unsafe {
             let _ =
                 windows::Win32::System::Threading::WaitForSingleObject(self.process_handle, 5000);
@@ -428,7 +455,7 @@ fn test_cross_user_helper_terminate() {
     std::thread::sleep(Duration::from_millis(500));
 
     let start = std::time::Instant::now();
-    h.send(r#"{"cancel": "TERMINATE"}"#);
+    h.send_cancel_terminate();
     let resp = h.read_until_done();
     let elapsed = start.elapsed();
 
@@ -462,7 +489,7 @@ fn test_cross_user_helper_notify_then_terminate() {
     std::thread::sleep(Duration::from_millis(500));
 
     let start = std::time::Instant::now();
-    h.send(r#"{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 5}"#);
+    h.send_cancel_notify_then_terminate(5);
     let resp = h.read_until_done();
     let elapsed = start.elapsed();
 
@@ -582,7 +609,7 @@ fn test_cross_user_helper_terminate_tree() {
     std::thread::sleep(Duration::from_secs(1));
 
     let start = std::time::Instant::now();
-    h.send(r#"{"cancel": "TERMINATE"}"#);
+    h.send_cancel_terminate();
     let resp = h.read_until_done();
     let elapsed = start.elapsed();
 
