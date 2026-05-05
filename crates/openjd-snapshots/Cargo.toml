@@ -51,7 +51,7 @@ features = ["derive"]
 optional = true
 
 [dependencies.rand]
-version = "0.9"
+version = "0.10"
 optional = true
 
 [dependencies.tempfile]
