@@ -18,8 +18,23 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs"] }
 tracing = { workspace = true }
 rayon = "1"
-aws-sdk-s3 = "1"
-aws-sdk-sts = "1"
+# Disable default features to avoid pulling in the legacy `rustls` feature,
+# which activates `aws-smithy-runtime/tls-rustls` → the hyper 0.14 + rustls 0.21
+# (`legacy-rustls-ring`) back-compat chain. Instead we opt into
+# `default-https-client`, which uses the modern rustls 0.23 + aws-lc path
+# (`rustls-aws-lc`). This removes the `rustls-webpki 0.101.x` advisory noise
+# from `cargo deny` entirely.
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+    "sigv4a",
+    "http-1x",
+    "default-https-client",
+    "rt-tokio",
+] }
+aws-sdk-sts = { version = "1", default-features = false, features = [
+    "sigv4a",
+    "default-https-client",
+    "rt-tokio",
+] }
 bytes = "1"
 async-trait = "0.1"
 futures-util = "0.3"
@@ -51,7 +66,7 @@ features = ["derive"]
 optional = true
 
 [dependencies.rand]
-version = "0.9"
+version = "0.10"
 optional = true
 
 [dependencies.tempfile]

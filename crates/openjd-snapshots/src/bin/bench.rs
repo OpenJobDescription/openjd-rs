@@ -7,7 +7,7 @@
 use clap::Parser;
 use openjd_snapshots::*;
 use rand::rngs::StdRng;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
