@@ -79,6 +79,9 @@ jobs:
       # Include the rustc version in the cache key so that a toolchain upgrade
       # automatically invalidates the target/ cache (stale rustc artifacts are
       # one of the main reasons cache restore-key hits produce slow rebuilds).
+      # Also include the workspace .cargo/config.toml hash, since rustflags
+      # changes (e.g. linker switches) invalidate every artifact's fingerprint
+      # but don't show up in Cargo.lock.
       - name: Compute rustc hash
         id: rustc
         shell: bash
@@ -93,8 +96,9 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
             rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
             rust-release-${{ matrix.os }}-
       # On a restore-key (non-exact) hit, target/ contains artifacts built
@@ -163,8 +167,9 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
             rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
             rust-release-ubuntu-latest-
       - name: Run cargo clippy (all features)
@@ -314,8 +319,9 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
             rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-
             rust-release-windows-latest-
       - name: Create test user

@@ -1,0 +1,34 @@
+# Workspace cargo configuration.
+#
+# Windows: use `rust-lld` (the LLD linker bundled with every rustup
+# stable toolchain) instead of MSVC's `link.exe`. For workspaces with
+# heavy dependency graphs — particularly the AWS SDK tree pulled in
+# by openjd-snapshots — `rust-lld` links substantially faster than
+# `link.exe`. On CI the final `openjd-cli` compile+link step was
+# observed to take ~9 minutes on Windows; LLD should cut that
+# significantly.
+#
+# Applies to both CI and local developer builds on Windows. No opt-in
+# required — `rust-lld.exe` ships with every rustup stable toolchain
+# under `<sysroot>/lib/rustlib/x86_64-pc-windows-msvc/bin/`, so every
+# Windows developer gets the faster linker automatically.
+#
+# We use `-C linker=rust-lld` (not the newer `-Clinker-features=+lld`
+# flag) because `linker-features=+lld` was stabilized for
+# `x86_64-unknown-linux-gnu` in Rust 1.90 but is not yet the
+# recommended path for `*-pc-windows-msvc`. Tracking issue:
+# https://github.com/rust-lang/rust/issues/71520
+#
+# If you hit LLD-specific issues (one of the known ones involves
+# thin-LTO combined with target-cpu overrides), you can revert to
+# the system linker temporarily by overriding RUSTFLAGS, for example:
+#   set RUSTFLAGS=-C linker=link   (PowerShell / cmd)
+#
+# We leave Linux and macOS on their default linkers. Since Rust 1.90
+# `rust-lld` is the default on `x86_64-unknown-linux-gnu` anyway.
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Clinker=rust-lld"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-Clinker=rust-lld"]
