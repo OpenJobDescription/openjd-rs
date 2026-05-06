@@ -680,19 +680,20 @@ fn test_cross_user_tempdir_cleanup() {
     // Mirrors Python:
     //   WindowsPermissionHelper.set_permissions(
     //       testfilename, principals_full_control=[windows_user.user])
-    let status = std::process::Command::new("icacls")
-        .args([
-            testfile.to_string_lossy().as_ref(),
-            "/inheritance:r",
-            "/grant",
-            &format!("{user_name}:(F)"),
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .expect("icacls invocation failed");
-    assert!(status.success(), "icacls should succeed to tighten DACL");
+    //
+    // We call the library's own win32_permissions::set_permissions (exposed
+    // under the `test-utils` feature) rather than shelling out to `icacls`.
+    // `SetFileSecurityW` replaces the DACL literally, so any previously-
+    // inherited ACEs for the process user are removed deterministically.
+    // `icacls /inheritance:r /grant` has ambiguous semantics across Windows
+    // builds and was observed leaving an explicit process-user ACE behind.
+    openjd_sessions::win32_permissions::set_permissions(
+        &testfile.to_string_lossy(),
+        &[user_name.as_str()],
+        &[],
+        &[],
+    )
+    .expect("set_permissions should succeed");
 
     // Sanity check: session user has Full Control, process user has no ACE.
     let aces = get_aces_for_object(&testfile.to_string_lossy());
@@ -704,7 +705,7 @@ fn test_cross_user_tempdir_cleanup() {
         !aces
             .iter()
             .any(|(n, _, _)| n.eq_ignore_ascii_case(&process_user_bare())),
-        "Process user should not appear in the file DACL after /inheritance:r, got aces: {aces:?}"
+        "Process user should not appear in the file DACL after set_permissions, got aces: {aces:?}"
     );
 
     // Cleanup should still succeed via the parent dir's FILE_DELETE_CHILD right.

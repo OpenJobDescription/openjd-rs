@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main, release, "patch_*"]
 
+# Cancel in-progress runs on PR pushes to save CI minutes and avoid cache-save
+# races (two concurrent runs trying to save to the same cache key). Pushes to
+# `main` are not cancelled so every landed commit produces a full signal.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
@@ -65,31 +72,56 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install rust stable with clippy
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup override set stable
-      - uses: actions/cache@v5
+      # Include the rustc version in the cache key so that a toolchain upgrade
+      # automatically invalidates the target/ cache (stale rustc artifacts are
+      # one of the main reasons cache restore-key hits produce slow rebuilds).
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: rust-release-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+            crates/openjd-sessions/src/helper/target
+          key: rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
             rust-release-${{ matrix.os }}-
+      # On a restore-key (non-exact) hit, target/ contains artifacts built
+      # against a different Cargo.lock. Cargo will spend a long time scanning
+      # fingerprints and discovering staleness, especially on Windows. Starting
+      # from an empty target/ with a warm registry cache is faster. We only
+      # drop target/, not the registry, so dependency downloads still skip.
+      - name: Discard stale target/ on restore-key-only hit
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          rm -rf target crates/openjd-sessions/src/helper/target
       # Single unified compile pass: builds lib/bin/test targets with one
       # feature-unified dep graph. This also produces the release binary
       # at target/release/openjd-rs as a side effect, so no explicit
       # `cargo build` step is needed before uploading the artifact.
+      # openjd-for-js is a wasm32 crate that has its own dedicated workflow
+      # (openjd-for-js.yml); compiling it natively here wastes ~45-60s
+      # recompiling wasm-bindgen, js-sys, web-sys, and serde-wasm-bindgen.
       - name: Build workspace (lib, bin, tests)
-        run: cargo test --release --workspace --all-targets --no-run
+        run: cargo test --release --workspace --exclude openjd-for-js --all-targets --no-run
       - name: Run cargo clippy
-        run: cargo clippy --release --all-features --all-targets --workspace -- -D warnings
+        run: cargo clippy --release --all-targets --workspace --exclude openjd-for-js -- -D warnings
       - name: Run helper clippy
         run: cargo clippy --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
       - name: Run tests
-        run: cargo test --release --workspace
+        run: cargo test --release --workspace --exclude openjd-for-js
       - name: Run helper integration tests
         run: cargo test --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
       - name: Upload CLI binary
@@ -100,6 +132,43 @@ jobs:
             target/release/openjd-rs
             target/release/openjd-rs.exe
           if-no-files-found: error
+
+  # Full-feature clippy exercises optional-feature code paths (like the
+  # openjd-snapshots `bench` feature that pulls in clap, rand, tempfile, and
+  # aws-config). It adds ~1-2 minutes on top of the regular clippy run and
+  # rarely surfaces issues the feature-unified clippy misses, so run it only
+  # on `main` pushes instead of gating every PR on it.
+  clippy-all-features:
+    name: Clippy (all features)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install rust stable with clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup override set stable
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Restore-only: build-test(ubuntu) owns the cache write. Saving from
+      # here too would race with that job on pushes to main.
+      - name: Restore build-test cache (read-only)
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+            crates/openjd-sessions/src/helper/target
+          key: rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
+            rust-release-ubuntu-latest-
+      - name: Run cargo clippy (all features)
+        run: cargo clippy --release --all-features --all-targets --workspace --exclude openjd-for-js -- -D warnings
 
   conformance:
     name: Conformance (${{ matrix.os }})
@@ -146,7 +215,10 @@ jobs:
       - name: Run conformance tests (Windows)
         if: runner.os == 'Windows'
         working-directory: openjd-specifications/conformance-tests
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $env:PATH = "$env:GITHUB_WORKSPACE\bin;$env:PATH"
           uv run run_openjd_cli_tests.py '2023-09/*'
 
@@ -213,38 +285,56 @@ jobs:
             bash scripts/run_cross_user_tests.sh
           fi
 
+  # Reuses the Windows build-test cache via a restore-only step so we don't
+  # pay another 3+ minutes recompiling openjd-expr/model/sessions. The
+  # test-utils feature used here isn't enabled in build-test, so cargo will
+  # recompile openjd-sessions with that feature — but all of its transitive
+  # dependencies are already cached.
   cross-user-windows:
     name: Cross-User Tests (Windows)
+    needs: build-test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - name: Install rust stable
+        shell: bash
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v5
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Restore build-test cache (read-only)
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: rust-cross-user-win-${{ hashFiles('**/Cargo.lock') }}
+            crates/openjd-sessions/src/helper/target
+          key: rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            rust-cross-user-win-
+            rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-
+            rust-release-windows-latest-
       - name: Create test user
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $password = -join ((48..57) + (65..90) + (97..122) + (33,35,36,37,38,42,64) | Get-Random -Count 10 | ForEach-Object {[char]$_})
           $password = "A1a!" + $password
           echo "Y" | net user openjdtestuser $password /add
           echo "OPENJD_TEST_WIN_USER_PASSWORD=$password" >> $env:GITHUB_ENV
-      - name: Run cross-user tests
+      - name: Run cross-user tests (test_cross_user_windows)
         env:
           OPENJD_TEST_WIN_USER_NAME: openjdtestuser
-        run: |
-          cargo test --release -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
-          cargo test --release -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
+        run: cargo test --release -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
+      - name: Run cross-user tests (test_windows_permissions)
+        env:
+          OPENJD_TEST_WIN_USER_NAME: openjdtestuser
+        run: cargo test --release -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
       - name: Remove test user
         if: always()
         run: net user openjdtestuser /delete

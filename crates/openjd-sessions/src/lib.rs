@@ -24,8 +24,13 @@ pub mod tempdir;
 pub mod win32;
 #[cfg(windows)]
 pub(crate) mod win32_locate;
-#[cfg(windows)]
+#[cfg(all(windows, not(feature = "test-utils")))]
 pub(crate) mod win32_permissions;
+// Under the `test-utils` feature, expose win32_permissions to integration
+// tests so they can drive DACL setup through the library's own API
+// (matching the Python reference's use of `WindowsPermissionHelper`).
+#[cfg(all(windows, feature = "test-utils"))]
+pub mod win32_permissions;
 
 // Re-export path mapping from openjd-expr (mirrors Python where sessions re-exports from expr)
 pub use openjd_expr::path_mapping;
