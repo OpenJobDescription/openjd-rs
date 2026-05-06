@@ -4,6 +4,7 @@
 
 //! CLI argument parsing and parameter coercion for the run command.
 
+use crate::common::{read_input_file_with, MAX_FILE_INPUT_SIZE};
 use openjd_sessions::path_mapping::PathMappingRule;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,15 +20,17 @@ pub fn parse_cli_parameters(
         let arg = arg.trim();
         if arg.starts_with("file://") {
             let path = PathBuf::from(arg.trim_start_matches("file://"));
-            if !path.exists() {
-                return Err(format!(
-                    "Provided parameter file '{}' does not exist.",
-                    path.display()
-                )
-                .into());
-            }
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Cannot read parameter file '{}': {e}", path.display()))?;
+            let content = read_input_file_with(
+                &path,
+                Some(MAX_FILE_INPUT_SIZE),
+                || {
+                    format!(
+                        "Provided parameter file '{}' does not exist.",
+                        path.display()
+                    )
+                },
+                || format!("Cannot read parameter file '{}'", path.display()),
+            )?;
             let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
                 openjd_model::parse::DocumentType::Json
             } else {
@@ -116,10 +119,12 @@ pub fn parse_tasks_arg(
     let arg = arg.trim();
     let raw: serde_json::Value = if arg.starts_with("file://") {
         let path = std::path::Path::new(arg.trim_start_matches("file://"));
-        if !path.exists() {
-            return Err(format!("Provided tasks file '{}' does not exist.", path.display()).into());
-        }
-        let content = std::fs::read_to_string(path)?;
+        let content = read_input_file_with(
+            path,
+            Some(MAX_FILE_INPUT_SIZE),
+            || format!("Provided tasks file '{}' does not exist.", path.display()),
+            || format!("Cannot read tasks file '{}'", path.display()),
+        )?;
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
             serde_json::from_str(&content)?
         } else {
@@ -194,9 +199,18 @@ pub fn coerce_task_params(
                 let v: f64 = value.parse().map_err(|_| {
                     format!("Task parameter '{name}': expected FLOAT, got '{value}'")
                 })?;
+                if !v.is_finite() {
+                    return Err(format!(
+                        "Task parameter '{name}': value must be finite, got '{value}'"
+                    )
+                    .into());
+                }
+                let float = openjd_expr::value::Float64::new(v).map_err(|e| {
+                    format!("Task parameter '{name}': invalid float '{value}': {e}")
+                })?;
                 (
                     TaskParameterType::Float,
-                    openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(v).unwrap()),
+                    openjd_expr::ExprValue::Float(float),
                 )
             }
             TaskParameter::String { .. } => (
@@ -240,12 +254,22 @@ pub fn load_path_mapping_rules(
 
     let content = if path_str.starts_with("file://") {
         let file_path = std::path::Path::new(path_str.trim_start_matches("file://"));
-        std::fs::read_to_string(file_path).map_err(|e| {
-            format!(
-                "Cannot read path mapping rules file '{}': {e}",
-                file_path.display()
-            )
-        })?
+        read_input_file_with(
+            file_path,
+            Some(MAX_FILE_INPUT_SIZE),
+            || {
+                format!(
+                    "Path mapping rules file '{}' does not exist.",
+                    file_path.display()
+                )
+            },
+            || {
+                format!(
+                    "Cannot read path mapping rules file '{}'",
+                    file_path.display()
+                )
+            },
+        )?
     } else {
         path_str.to_string()
     };

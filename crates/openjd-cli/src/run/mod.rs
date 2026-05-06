@@ -102,9 +102,6 @@ pub struct RunArgs {
 
 pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = &args.path;
-    if !path.exists() {
-        return Err(format!("'{}' does not exist.", path.display()).into());
-    }
 
     // Verbose logging
     if args.verbose {
@@ -137,7 +134,7 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Parse templates
-    let content = std::fs::read_to_string(path)?;
+    let content = crate::common::read_input_file(path)?;
     let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
         DocumentType::Json
     } else {

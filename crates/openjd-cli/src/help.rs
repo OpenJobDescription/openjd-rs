@@ -57,11 +57,7 @@ fn generate_template_help(
     path: &Path,
     extensions_arg: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    if !path.exists() {
-        return Err(format!("'{}' not found or does not exist.", path.display()).into());
-    }
-
-    let content = std::fs::read_to_string(path)?;
+    let content = crate::common::read_input_file(path)?;
     let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
         DocumentType::Json
     } else {

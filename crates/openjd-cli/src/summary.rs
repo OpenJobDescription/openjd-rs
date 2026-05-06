@@ -37,14 +37,7 @@ pub struct SummaryArgs {
 
 pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = &args.path;
-    if !path.exists() {
-        return Err(format!("'{}' does not exist.", path.display()).into());
-    }
-    if !path.is_file() {
-        return Err(format!("'{}' is not a file.", path.display()).into());
-    }
-
-    let content = std::fs::read_to_string(path)?;
+    let content = crate::common::read_input_file(path)?;
     let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
         DocumentType::Json
     } else {

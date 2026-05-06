@@ -41,9 +41,9 @@ optional with no default value at the clap level — the default is applied in `
 ```
 execute(args)
   │
-  ├── Validate path exists and is a file
-  │
-  ├── Read file content (std::fs::read_to_string)
+  ├── Read file content via common::read_input_file()
+  │   (single read that maps errors to:
+  │    "does not exist" / "is not a file" / "Cannot read ...")
   │
   ├── Detect document type from file extension
   │   └── .json → DocumentType::Json, anything else → DocumentType::Yaml

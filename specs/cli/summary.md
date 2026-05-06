@@ -45,8 +45,7 @@ pub struct SummaryArgs {
 ```
 execute(args)
   │
-  ├── Validate path exists and is a file
-  ├── Read and parse template (same pattern as check)
+  ├── Read and parse template (same pattern as check: common::read_input_file)
   ├── Resolve extensions list
   ├── decode_job_template()
   │

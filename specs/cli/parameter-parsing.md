@@ -53,6 +53,16 @@ Error messages match the Python CLI's format for consistency:
 - Bad format: `"Job parameter string ('<arg>') not formatted correctly. It must be key=value pairs, inline JSON, or a path to a JSON or YAML document prefixed with 'file://'."`
 - Non-dict file: `"Job parameter file '<arg>' should contain a dictionary."`
 - Non-dict JSON: `"Job parameter ('<arg>') must contain a dictionary mapping job parameters to their value."`
+- Oversized file: `"File '<path>' exceeds maximum size of <N> bytes."`
+
+### File Size Limit
+
+All `file://` inputs read by the `run` subcommand — job parameter files, task files
+(`--tasks`), and path-mapping rule files (`--path-mapping-rules`) — are capped at
+`common::MAX_FILE_INPUT_SIZE` (10 MiB). The cap is enforced by reading through
+`Read::take(cap + 1)`, so allocation is bounded to `cap + 1` bytes regardless of
+the underlying file size. The template itself has a separate limit enforced by
+the model crate's `CallerLimits::max_template_size`.
 
 ### Value Coercion
 

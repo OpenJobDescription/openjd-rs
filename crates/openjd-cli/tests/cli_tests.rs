@@ -1151,6 +1151,57 @@ mod run_command {
         );
         assert_ne!(code, 0, "task should fail due to timeout");
     }
+
+    /// Regression test: NaN / Infinity values for a FLOAT task parameter must
+    /// produce a clean error rather than panicking inside `Float64::new`.
+    /// See the 2026-05-06 security review ("[LOW] Potential Panic via unwrap()
+    /// on Float64::new() with NaN Input").
+    #[test]
+    fn test_run_task_param_float_rejects_nan_and_infinity() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: float-task-param
+steps:
+  - name: s1
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: MyFloat
+          type: FLOAT
+          range: [1.0, 2.0, 3.0]
+    script:
+      actions:
+        onRun:
+          command: python
+          args: ["-c", "print('{{{{Task.Param.MyFloat}}}}')"]
+"#
+        )
+        .unwrap();
+        let path = f.path().to_str().unwrap();
+
+        for bad in ["NaN", "inf", "-inf", "infinity"] {
+            let tasks = format!(r#"[{{"MyFloat":"{bad}"}}]"#);
+            let (code, _stdout, stderr) =
+                run_cli(&["run", path, "--step", "s1", "--tasks", &tasks]);
+            assert_ne!(
+                code, 0,
+                "expected non-zero exit for '{bad}', stderr: {stderr}"
+            );
+            // Must not be a Rust panic — check for our friendly error message.
+            assert!(
+                !stderr.contains("panicked"),
+                "must not panic on '{bad}'; stderr: {stderr}"
+            );
+            assert!(
+                stderr.contains("must be finite"),
+                "expected 'must be finite' error for '{bad}'; stderr: {stderr}"
+            );
+        }
+    }
 }
 
 // ============================================================
@@ -1383,6 +1434,104 @@ steps:
             stderr.contains("Invalid parameter format") || stderr.contains("not formatted"),
             "stderr: {stderr}"
         );
+    }
+
+    /// Regression test: `file://` parameter files larger than
+    /// `MAX_FILE_INPUT_SIZE` must be rejected with a clear error rather
+    /// than being fully read into memory.
+    /// See the 2026-05-06 security review ("[LOW] Unbounded File Read via
+    /// `file://` Parameter Paths").
+    #[test]
+    fn test_run_job_param_file_size_limit() {
+        // 11 MiB sparse file — exceeds the 10 MiB cap. Uses set_len so the
+        // test doesn't actually write gigabytes of data.
+        let oversized = NamedTempFile::with_suffix(".json").unwrap();
+        oversized
+            .as_file()
+            .set_len(11 * 1024 * 1024)
+            .expect("set_len should succeed");
+        let file_arg = format!("file://{}", oversized.path().display());
+
+        let mut tpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tpl,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: test
+steps:
+  - name: s1
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+
+        let (code, _stdout, stderr) =
+            run_cli(&["run", tpl.path().to_str().unwrap(), "-p", &file_arg]);
+        assert_ne!(code, 0, "oversized param file should be rejected");
+        assert!(stderr.contains("exceeds maximum size"), "stderr: {stderr}");
+    }
+
+    /// Regression test: oversized `file://` tasks files are also rejected.
+    #[test]
+    fn test_run_tasks_file_size_limit() {
+        let oversized = NamedTempFile::with_suffix(".json").unwrap();
+        oversized
+            .as_file()
+            .set_len(11 * 1024 * 1024)
+            .expect("set_len should succeed");
+        let tasks_arg = format!("file://{}", oversized.path().display());
+
+        let tdir = templates_dir();
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "TaskParamStep",
+            "--tasks",
+            &tasks_arg,
+            "--extensions",
+            "",
+        ]);
+        assert_ne!(code, 0, "oversized tasks file should be rejected");
+        assert!(stderr.contains("exceeds maximum size"), "stderr: {stderr}");
+    }
+
+    /// Regression test: oversized `file://` path-mapping-rules files are
+    /// also rejected.
+    #[test]
+    fn test_run_path_mapping_rules_file_size_limit() {
+        let oversized = NamedTempFile::with_suffix(".json").unwrap();
+        oversized
+            .as_file()
+            .set_len(11 * 1024 * 1024)
+            .expect("set_len should succeed");
+        let rules_arg = format!("file://{}", oversized.path().display());
+
+        let mut tpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tpl,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: test
+steps:
+  - name: s1
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            tpl.path().to_str().unwrap(),
+            "--path-mapping-rules",
+            &rules_arg,
+        ]);
+        assert_ne!(code, 0, "oversized path-mapping file should be rejected");
+        assert!(stderr.contains("exceeds maximum size"), "stderr: {stderr}");
     }
 }
 
