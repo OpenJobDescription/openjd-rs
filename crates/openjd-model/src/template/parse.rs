@@ -9,7 +9,7 @@
 use std::str::FromStr;
 
 use crate::error::{ModelError, ValidationErrors};
-use crate::template::validate_v2023_09 as validate;
+use crate::template::validation as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
     CallerLimits, Extensions, KnownExtension, SpecificationRevision, TemplateSpecificationVersion,
@@ -117,8 +117,13 @@ pub fn decode_job_template(
         )));
     }
 
-    let jt: JobTemplate = serde_json::from_value(template)
-        .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
+    let jt: JobTemplate = match version.revision() {
+        // Future revisions may decode into a different struct layout.
+        // Making the match explicit now localizes the dispatch point.
+        SpecificationRevision::V2023_09 => serde_json::from_value(template).map_err(|e| {
+            ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
+        })?,
+    };
 
     // Build extension set: intersection of template-requested and supported
     let mut extensions = Extensions::new();
@@ -163,7 +168,10 @@ pub fn decode_job_template(
         }
     }
 
-    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, extensions)
+    // Route to the revision-specific validation pipeline via the
+    // revision-neutral dispatcher. The revision comes from the template's
+    // declared `specificationVersion`, not from a hardcoded constant.
+    let ctx = ValidationContext::with_extensions(version.revision(), extensions)
         .with_caller_limits(caller_limits.clone());
     validate::validate_job_template(&jt, &ctx)?;
 
@@ -247,7 +255,7 @@ pub fn decode_environment_template(
         }
     }
 
-    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, extensions);
+    let ctx = ValidationContext::with_extensions(version.revision(), extensions);
     validate::validate_environment_template(&et, &ctx)?;
 
     Ok(et)

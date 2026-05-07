@@ -198,24 +198,23 @@ struct CrossUserFields {
     helper_auth_token: Option<String>,
 }
 
-/// Build the derived function library: `base` (or default) merged with a
-/// host-context registration that captures the current path-mapping `rules`.
+/// Build the session's function library from the specification revision +
+/// extensions carried on the validation context (or the current default
+/// profile when no context is set), with the current path-mapping `rules`
+/// registered as host context.
 ///
-/// Called whenever the user-supplied library or the rules change so that
-/// `apply_path_mapping` always reflects the session's current rules.
+/// Called whenever either the revision/extensions or the rules change so
+/// that `apply_path_mapping` always reflects the session's current rules.
 fn derive_library(
-    base: Option<&FunctionLibrary>,
+    ctx: Option<&openjd_model::types::ValidationContext>,
     rules: &Arc<Vec<PathMappingRule>>,
 ) -> Arc<FunctionLibrary> {
-    // Priority 2 will migrate to FunctionLibrary::for_profile.
-    #[allow(deprecated)]
-    let lib = match base {
-        Some(b) => b.clone(),
-        None => openjd_expr::default_library::get_default_library().clone(),
+    let host = openjd_expr::HostContext::WithRules(rules.clone());
+    let profile = match ctx {
+        Some(c) => c.to_expr_profile(host),
+        None => openjd_expr::ExprProfile::current().with_host_context(host),
     };
-    #[allow(deprecated)]
-    let out = lib.with_host_context(rules.clone());
-    Arc::new(out)
+    openjd_expr::FunctionLibrary::for_profile(&profile)
 }
 
 pub struct Session {
@@ -238,11 +237,10 @@ pub struct Session {
     created_env_vars: HashMap<EnvironmentIdentifier, EnvVarChanges>,
     // Expression evaluation
     //
-    // `library_base` is the user-supplied function library (without host
-    // context). `library` is the cached derived library that has
-    // `apply_path_mapping` registered for the current `path_mapping_rules`.
-    // Whenever `path_mapping_rules` change, `library` must be rebuilt.
-    library_base: Option<Arc<FunctionLibrary>>,
+    // `library` is the cached derived library, built from the session's
+    // `revision_extensions` (an optional `ValidationContext`) plus the
+    // current `path_mapping_rules`. Whenever either input changes, the
+    // library must be rebuilt via `derive_library`.
     library: Arc<FunctionLibrary>,
     path_mapping_rules: Arc<Vec<PathMappingRule>>,
     job_parameter_values: JobParameterValues,
@@ -279,7 +277,6 @@ impl Session {
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
-            library_base: None,
             library: derive_library(None, &Arc::new(Vec::new())),
             path_mapping_rules: Arc::new(Vec::new()),
             job_parameter_values: HashMap::new(),
@@ -322,7 +319,7 @@ impl Session {
     }
 
     /// Full constructor from SessionConfig.
-    pub fn with_config(config: SessionConfig) -> Result<Self, SessionError> {
+    pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
             Some(d) => d.clone(),
             None => crate::tempdir::openjd_temp_dir()?,
@@ -378,7 +375,8 @@ impl Session {
         let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
         path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         let path_mapping_rules = Arc::new(path_mapping_rules);
-        let library = derive_library(None, &path_mapping_rules);
+        let revision_extensions = config.revision_extensions.take();
+        let library = derive_library(revision_extensions.as_ref(), &path_mapping_rules);
         let process_env = config.os_env_vars.unwrap_or_default();
 
         // Create helpers directory and spawn cross-user helper if needed.
@@ -477,7 +475,6 @@ impl Session {
             env_vars: HashMap::new(),
             process_env,
             created_env_vars: HashMap::new(),
-            library_base: None,
             library,
             path_mapping_rules,
             job_parameter_values: config.job_parameter_values,
@@ -492,7 +489,7 @@ impl Session {
             },
             callback: config.callback,
             redacted_values: HashSet::new(),
-            revision_extensions: config.revision_extensions,
+            revision_extensions,
             debug_collect_stdout: config.debug_collect_stdout,
         })
     }
@@ -500,7 +497,7 @@ impl Session {
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
+        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
         self
     }
 
@@ -511,7 +508,7 @@ impl Session {
         rules.extend(additional);
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
+        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
     }
 
     /// Get the current path mapping rules.
@@ -519,14 +516,13 @@ impl Session {
         &self.path_mapping_rules
     }
 
-    pub fn with_library(mut self, library: FunctionLibrary) -> Self {
-        self.library_base = Some(Arc::new(library));
-        self.library = derive_library(self.library_base.as_deref(), &self.path_mapping_rules);
-        self
-    }
-
+    /// Set the [`ValidationContext`](openjd_model::types::ValidationContext)
+    /// that drives which expression functions and signatures are available
+    /// to this session. Rebuilds the session's derived function library
+    /// so subsequent expression evaluation sees the new profile.
     pub fn with_revision_extensions(mut self, ctx: openjd_model::types::ValidationContext) -> Self {
         self.revision_extensions = Some(ctx);
+        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
         self
     }
 

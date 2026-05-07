@@ -63,7 +63,8 @@ fn iterate(template: &str) -> Result<Vec<openjd_model::types::TaskParameterSet>,
         },
     )
     .map_err(|e| e.to_string())?;
-    let job = create_job(&jt, &processed, &CallerLimits::default()).map_err(|e| e.to_string())?;
+    let job =
+        create_job(&jt, &processed, &jt.default_validation_context()).map_err(|e| e.to_string())?;
     let step = &job.steps[0];
     match &step.parameter_space {
         Some(ps) => {

@@ -246,7 +246,12 @@ fn max_task_count_within_limit() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let result = create_job(&jt, &params, &limits);
+    let result = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    );
     assert!(
         result.is_ok(),
         "50 tasks within limit of 100: {:?}",
@@ -269,7 +274,13 @@ fn max_task_count_exceeded_single_step() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let err = create_job(&jt, &params, &limits).unwrap_err();
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Total task count (20) exceeds caller limit of 10"),
@@ -293,7 +304,13 @@ fn max_task_count_exceeded_across_steps() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let err = create_job(&jt, &params, &limits).unwrap_err();
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Total task count (20) exceeds caller limit of 15"),
@@ -313,7 +330,12 @@ fn max_task_count_none_means_no_limit() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let result = create_job(&jt, &params, &limits);
+    let result = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    );
     assert!(result.is_ok(), "No limit set: {:?}", result.err());
 }
 
@@ -333,7 +355,12 @@ fn max_task_count_step_without_param_space_counts_as_one() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let result = create_job(&jt, &params, &limits);
+    let result = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    );
     assert!(
         result.is_ok(),
         "3 tasks within limit of 5: {:?}",
@@ -382,7 +409,13 @@ fn max_task_count_counts_tasks_not_chunks() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let err = create_job(&jt, &params, &limits).unwrap_err();
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Total task count (100) exceeds caller limit of 50"),
@@ -441,7 +474,12 @@ fn max_step_script_size_within_limit() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let result = create_job(&jt, &params, &limits);
+    let result = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    );
     assert!(result.is_ok(), "Within limit: {:?}", result.err());
 }
 
@@ -460,7 +498,13 @@ fn max_step_script_size_exceeded() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let err = create_job(&jt, &params, &limits).unwrap_err();
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("script size") && msg.contains("exceeds caller limit of 1 bytes"),
@@ -487,7 +531,12 @@ fn max_environment_size_within_limit() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let result = create_job(&jt, &params, &limits);
+    let result = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    );
     assert!(result.is_ok(), "Within limit: {:?}", result.err());
 }
 
@@ -506,7 +555,13 @@ fn max_environment_size_exceeded() {
         &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
     )
     .unwrap();
-    let err = create_job(&jt, &params, &limits).unwrap_err();
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context()
+            .with_caller_limits(limits.clone()),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Environment") && msg.contains("exceeds caller limit of 1 bytes"),

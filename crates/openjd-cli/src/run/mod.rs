@@ -200,12 +200,26 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Build the validation context from the template's declared
+    // extensions. Used for create_job and then reused when building the
+    // session's host-context library.
+    let revision_ctx = {
+        let mut exts = std::collections::HashSet::new();
+        if let Some(ext_list) = &job_template.extensions {
+            exts.extend(ext_list.iter().filter_map(|e| {
+                e.as_str()
+                    .parse::<openjd_model::types::KnownExtension>()
+                    .ok()
+            }));
+        }
+        openjd_model::types::ValidationContext::with_extensions(
+            openjd_model::types::SpecificationRevision::V2023_09,
+            exts,
+        )
+    };
+
     // Create instantiated job
-    let job = match openjd_model::create_job(
-        &job_template,
-        &param_values,
-        &openjd_model::CallerLimits::default(),
-    ) {
+    let job = match openjd_model::create_job(&job_template, &param_values, &revision_ctx) {
         Ok(j) => j,
         Err(e) => {
             let help = crate::help::format_help(&job_template, path);
@@ -213,28 +227,6 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Build host-context library with path mapping rules
-    // Priority 2 will migrate to FunctionLibrary::for_profile.
-    #[allow(deprecated)]
-    let host_library = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(path_rules.clone());
-
-    // Set up session
-    let revision_ctx = {
-        let mut exts = std::collections::HashSet::new();
-        if let Some(ext_list) = &job.extensions {
-            exts.extend(
-                ext_list
-                    .iter()
-                    .filter_map(|s| s.parse::<openjd_model::types::KnownExtension>().ok()),
-            );
-        }
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            exts,
-        )
-    };
     let cancel_token = CancellationToken::new();
     let session_config = openjd_sessions::session::SessionConfig {
         session_id: format!("cli-{}", std::process::id()),
@@ -249,6 +241,8 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         os_env_vars: None,
         session_root_directory: None,
         user: None,
+        // Session derives its function library from this context + the
+        // path-mapping rules above; no need to pass a library separately.
         revision_extensions: Some(revision_ctx),
         cancel_token: Some(cancel_token.clone()),
         sticky_bit_policy: Default::default(),
@@ -256,7 +250,6 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut session = Session::with_config(session_config)
         .map_err(|e| format!("Failed to create session: {e}"))?;
-    session = session.with_library(host_library.clone());
 
     let working_dir = session.working_directory().to_path_buf();
 

@@ -334,11 +334,15 @@ pub fn validate_format_strings(
     errors: &mut ValidationErrors,
 ) {
     let expr_active = ctx.has_extension(KnownExtension::Expr);
-    // Priority 2 will migrate to FunctionLibrary::for_profile.
-    #[allow(deprecated)]
-    let default_lib = openjd_expr::default_library::get_default_library().clone();
-    #[allow(deprecated)]
-    let host_lib = default_lib.clone().with_unresolved_host_context();
+    // Template/task-range validation uses HostContext::None (host functions
+    // are not available in those scopes). Session/task scopes use
+    // HostContext::Unresolved so apply_path_mapping type-checks.
+    let default_lib = openjd_expr::FunctionLibrary::for_profile(
+        &ctx.to_expr_profile(openjd_expr::HostContext::None),
+    );
+    let host_lib = openjd_expr::FunctionLibrary::for_profile(
+        &ctx.to_expr_profile(openjd_expr::HostContext::Unresolved),
+    );
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt);

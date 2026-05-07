@@ -63,7 +63,7 @@ fn test_resolved_symtab_serialize_with_let_bindings() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let step = &job.steps[0];
     assert!(step.resolved_symtab.is_some());
@@ -139,7 +139,7 @@ fn test_resolved_symtab_round_trip() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let step = &job.steps[0];
     let original_symtab = step.resolved_symtab.as_ref().unwrap();
@@ -205,7 +205,7 @@ fn test_resolved_symtab_list_value() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let json = serde_json::to_value(&job.steps[0]).unwrap();
     let rb = json.get("resolvedSymTab").unwrap().as_array().unwrap();
@@ -259,7 +259,7 @@ fn test_resolved_symtab_serialized_without_expr() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let json = serde_json::to_value(&job.steps[0]).unwrap();
     let rb = json
@@ -315,7 +315,7 @@ fn test_script_let_apply_path_mapping_not_in_resolved_symtab() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let symtab = job.steps[0]
         .resolved_symtab
@@ -394,7 +394,7 @@ fn test_step_resolved_symtab_excludes_unreferenced_symbols() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let st = job.steps[0]
         .resolved_symtab
@@ -480,7 +480,7 @@ fn test_job_env_resolved_symtab_excludes_unreferenced_symbols() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     // Check the job environment's resolved_symtab
     let env = &job.job_environments.as_ref().unwrap()[0];
@@ -567,7 +567,7 @@ fn test_job_env_resolved_symtab_includes_embedded_file_refs() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let env = &job.job_environments.as_ref().unwrap()[0];
     let env_st = env
@@ -634,7 +634,7 @@ fn test_job_env_resolved_symtab_includes_raw_param_for_path() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 
     let env = &job.job_environments.as_ref().unwrap()[0];
     let env_st = env

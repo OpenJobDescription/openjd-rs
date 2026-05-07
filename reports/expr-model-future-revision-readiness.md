@@ -527,37 +527,80 @@ project is pre-release.
 
 ### Priority 2 — Plumb the profile through the model
 
-6. **Thread `ValidationContext` (or a derived `ExprProfile`) into
+6. ~~**Thread `ValidationContext` (or a derived `ExprProfile`) into
    `create_job`.** Accept it as a parameter rather than rebuilding it
    from the template. This makes application-layer policy (e.g.
    "strip EXPR even if requested" or "enforce stricter caller limits
    on this queue") applicable at job-creation time, not only at
-   decode time.
+   decode time.~~ **Resolved** — `create_job` now takes
+   `&ValidationContext` in place of `&CallerLimits`; `caller_limits`
+   are carried on the context. Added
+   `JobTemplate::default_validation_context()` so callers that just
+   want the template's declared extensions+revision can write
+   `create_job(&jt, &params, &jt.default_validation_context())`; tests
+   in `test_caller_limits.rs` that construct custom `CallerLimits`
+   attach them with `.with_caller_limits(...)`.
 
-7. **Use `EffectiveLimits::from_context(ctx)` at every limit check**
+7. ~~**Use `EffectiveLimits::from_context(ctx)` at every limit check**
    that currently reads hardcoded numbers. Audit for sites that
-   rebuild `EffectiveLimits::default()`.
+   rebuild `EffectiveLimits::default()`.~~ **Resolved** — removed
+   the unused `impl Default for EffectiveLimits` (would have drifted
+   from `from_context_v2023_09` on the next revision bump). Moved the
+   hardcoded `ENV_TEMPLATE_MAX_PARAMS = 50` local constant into a
+   proper `EffectiveLimits::max_env_template_param_count` field so
+   the environment-template param cap is on the same revision-aware
+   footing as every other limit.
 
-8. **Let `EffectiveLimits` and `EffectiveRules` branch on
+8. ~~**Let `EffectiveLimits` and `EffectiveRules` branch on
    `ctx.revision` as well as `ctx.extensions`.** Today they ignore
    the revision field. Add a `match ctx.revision { … }` at the top
    of `from_context` even if the match currently has one arm — this
    records the intent and flags the right spot for the first
-   revision bump.
+   revision bump.~~ **Resolved** — both `from_context` methods now
+   dispatch through `match ctx.revision { V2023_09 => ... }` to a
+   private `from_context_v2023_09`. The match lives intra-crate so
+   the compiler treats it exhaustively even though
+   `SpecificationRevision` is `#[non_exhaustive]`; a new variant
+   will produce a compile error at these sites.
 
-9. **Factor `template/validate_v2023_09/` so the passes themselves
+9. ~~**Factor `template/validate_v2023_09/` so the passes themselves
    are revision-agnostic.** Move shared infrastructure
    (`format_strings.rs`, `limits.rs`, `structure.rs`, helpers) out
    of the date-named directory into `template/validation/`, and keep
    only revision-specific glue in `v2023_09/`. Then a future
    `v2027_xx` submodule re-uses the pass implementations with
-   different `EffectiveLimits` / `EffectiveRules` inputs.
+   different `EffectiveLimits` / `EffectiveRules` inputs.~~
+   **Resolved (conservative form)** — created
+   `template/validation/` as the revision-neutral entry point. It
+   re-exports `EffectiveLimits` / `EffectiveRules` and its top-level
+   `validate_job_template` / `validate_environment_template` functions
+   dispatch on `ctx.revision` before calling into the revision-
+   specific pipeline (still located in `template/validate_v2023_09/`).
+   The decode layer in `template/parse.rs` now routes through
+   `template::validation` rather than directly into the v2023_09
+   module. A future `validate_v2027_xx` submodule adds a match arm
+   and its own pipeline; the physical file layout of the existing
+   v2023_09 passes was left intact because distinguishing
+   "revision-agnostic" from "operates on v2023_09 template types" is
+   not something Rust's type system helps with today — the passes
+   can be lifted into `validation/` when a second revision actually
+   needs to share them.
 
-10. **Introduce a `decode_*` dispatch layer** that inspects the
+10. ~~**Introduce a `decode_*` dispatch layer** that inspects the
     `specificationVersion` string and routes to the matching
     revision-specific validator. Today the dispatch is a one-arm
     match by construction. Making it explicit now is cheap; making
-    it explicit after a second revision is released is disruptive.
+    it explicit after a second revision is released is disruptive.~~
+    **Resolved** — `decode_job_template` and
+    `decode_environment_template` now (a) derive the revision via
+    `version.revision()` rather than hardcoding
+    `SpecificationRevision::V2023_09`, and (b) route the
+    `serde_json::from_value::<JobTemplate>` step through a
+    `match version.revision()` so future revisions that need a
+    different struct layout have an explicit dispatch point. The
+    resulting `ValidationContext` flows through
+    `template::validation::validate_*_template`, which is the
+    revision-dispatch layer added in item 9.
 
 ### Priority 3 — Internal cleanup to support future operators/keywords
 

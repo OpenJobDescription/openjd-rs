@@ -625,9 +625,6 @@ pub fn escape_format_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    // These tests exercise the deprecated host-context API explicitly.
-    // Kept in place until the deprecated surface is removed.
-    #![allow(deprecated)]
     use super::*;
 
     #[test]
@@ -692,9 +689,10 @@ mod tests {
     #[test]
     fn validate_catches_unknown_func() {
         let fs = FormatString::new("{{ bad_func(1) }}").unwrap();
-        let host_lib = crate::default_library::get_default_library()
-            .clone()
-            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
+        let host_lib =
+            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+            ));
         assert!(fs
             .validate_expressions(&SymbolTable::new(), &host_lib)
             .is_err());
@@ -711,9 +709,10 @@ mod tests {
             result.map(|v| v.to_display_string())
         );
 
-        let host_lib = crate::default_library::get_default_library()
-            .clone()
-            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
+        let host_lib =
+            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+            ));
         let fs = FormatString::new("{{ re_replace('hello', '', 'x') }}").unwrap();
         let result = fs.validate_expressions(&SymbolTable::new(), &host_lib);
         assert!(
@@ -751,9 +750,10 @@ mod tests {
             crate::ExprValue::unresolved(crate::ExprType::list(crate::ExprType::INT)),
         )
         .unwrap();
-        let host_lib = crate::default_library::get_default_library()
-            .clone()
-            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
+        let host_lib =
+            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+            ));
         assert!(fs.validate_expressions(&st, &host_lib).is_ok());
     }
     #[test]
@@ -765,9 +765,10 @@ mod tests {
             crate::ExprValue::unresolved(crate::ExprType::INT),
         )
         .unwrap();
-        let host_lib = crate::default_library::get_default_library()
-            .clone()
-            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
+        let host_lib =
+            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+            ));
         assert!(fs.validate_expressions(&st, &host_lib).is_ok());
     }
 

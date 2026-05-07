@@ -41,4 +41,37 @@ impl JobTemplate {
             None => &[],
         }
     }
+
+    /// Build a [`ValidationContext`](crate::types::ValidationContext)
+    /// matching this template: revision derived from
+    /// `specificationVersion`, extensions populated from the template's
+    /// declared `extensions` list (ignoring entries that don't parse as
+    /// a [`KnownExtension`](crate::types::KnownExtension)), and caller
+    /// limits left at their defaults.
+    ///
+    /// This is the convenient "do what the template says" context for
+    /// callers that do not want to override revision/extension policy.
+    /// Callers that *do* want to override (e.g. a service stripping EXPR
+    /// regardless of template intent) should build a
+    /// `ValidationContext` explicitly and use
+    /// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
+    /// as needed.
+    pub fn default_validation_context(&self) -> crate::types::ValidationContext {
+        use std::str::FromStr;
+        let revision =
+            crate::types::TemplateSpecificationVersion::from_str(&self.specification_version)
+                .map(|v| v.revision())
+                // Unknown spec versions shouldn't reach this point (the template
+                // was validated). Fall back to the first revision.
+                .unwrap_or(crate::types::SpecificationRevision::V2023_09);
+        let mut exts = crate::types::Extensions::new();
+        if let Some(list) = &self.extensions {
+            for e in list {
+                if let Ok(known) = crate::types::KnownExtension::from_str(e.as_str()) {
+                    exts.insert(known);
+                }
+            }
+        }
+        crate::types::ValidationContext::with_extensions(revision, exts)
+    }
 }

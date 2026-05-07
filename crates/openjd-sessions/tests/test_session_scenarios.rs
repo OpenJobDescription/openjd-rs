@@ -13,7 +13,6 @@ use openjd_model::create_job::{create_job, preprocess_job_parameters};
 use openjd_model::parse::decode_job_template;
 use openjd_model::step_param_space::StepParameterSpaceIterator;
 use openjd_model::types::JobParameterInputValues;
-use openjd_model::CallerLimits;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
 use openjd_sessions::PathMappingRule;
 
@@ -207,7 +206,21 @@ async fn run_scenario(scenario_path: &Path) {
     .unwrap_or_else(|e| panic!("Failed to preprocess params for '{}': {e}", scenario.name));
 
     // Create job
-    let job = create_job(&job_template, &job_params, &CallerLimits::default())
+    let ctx = {
+        let mut exts = std::collections::HashSet::new();
+        if let Some(ext_list) = &job_template.extensions {
+            exts.extend(
+                ext_list
+                    .iter()
+                    .filter_map(|e| e.as_str().parse::<openjd_model::KnownExtension>().ok()),
+            );
+        }
+        openjd_model::ValidationContext::with_extensions(
+            openjd_model::SpecificationRevision::V2023_09,
+            exts,
+        )
+    };
+    let job = create_job(&job_template, &job_params, &ctx)
         .unwrap_or_else(|e| panic!("Failed to create job for '{}': {e}", scenario.name));
 
     // Select step

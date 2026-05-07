@@ -119,7 +119,7 @@ fn job_name_with_path_parent() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     assert!(!job.name.contains('\\'));
     assert_eq!(job.name, "/projects/shot01");
 }

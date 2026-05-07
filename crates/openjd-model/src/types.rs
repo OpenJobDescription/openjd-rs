@@ -416,6 +416,46 @@ impl ValidationContext {
     pub fn has_extension(&self, ext: KnownExtension) -> bool {
         self.extensions.contains(&ext)
     }
+
+    /// Derive an [`ExprProfile`](openjd_expr::ExprProfile) matching this
+    /// context's revision and extensions, with the caller-specified
+    /// [`HostContext`](openjd_expr::HostContext).
+    ///
+    /// This is the bridge from `openjd-model`'s validation context to
+    /// `openjd-expr`'s profile-based library construction: call this and
+    /// pass the result to
+    /// [`FunctionLibrary::for_profile`](openjd_expr::FunctionLibrary::for_profile).
+    ///
+    /// The `host_context` argument is a caller responsibility because
+    /// the model has no opinion on it — template validation uses
+    /// [`HostContext::Unresolved`](openjd_expr::HostContext::Unresolved),
+    /// runtime session work uses
+    /// [`HostContext::WithRules`](openjd_expr::HostContext::WithRules),
+    /// and pure-template work (e.g. resolving the job name) uses
+    /// [`HostContext::None`](openjd_expr::HostContext::None).
+    pub fn to_expr_profile(
+        &self,
+        host_context: openjd_expr::HostContext,
+    ) -> openjd_expr::ExprProfile {
+        // Map this crate's SpecificationRevision onto openjd-expr's
+        // ExprRevision. The mapping is total today because both enums
+        // have a single variant each; future revisions will add arms
+        // here as both sides grow. The match on ctx.revision mirrors
+        // the pattern used in EffectiveLimits::from_context.
+        let revision = match self.revision {
+            SpecificationRevision::V2023_09 => openjd_expr::ExprRevision::V2026_02,
+        };
+        // `ExprExtension` is empty today — no expression-level
+        // extensions exist yet. Model-side `KnownExtension` variants
+        // gate *where* expressions are permitted in templates (EXPR,
+        // FEATURE_BUNDLE_1, TASK_CHUNKING, REDACTED_ENV_VARS), not
+        // which functions are registered once they are permitted, so
+        // the expression-level extension set is always empty for now.
+        let extensions = std::collections::HashSet::new();
+        openjd_expr::ExprProfile::new(revision)
+            .with_extensions(extensions)
+            .with_host_context(host_context)
+    }
 }
 
 #[cfg(test)]

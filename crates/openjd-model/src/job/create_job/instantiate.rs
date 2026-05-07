@@ -22,6 +22,7 @@ pub(super) fn instantiate_step(
     symtab: &SymbolTable,
     has_expr: bool,
     limits: &EffectiveLimits,
+    ctx: &crate::types::ValidationContext,
 ) -> Result<job::Step, ModelError> {
     let mut step_symtab = symtab.clone();
 
@@ -37,9 +38,9 @@ pub(super) fn instantiate_step(
     // Evaluate step-level let bindings (TEMPLATE scope — no PATH Param.*, no host context)
     if has_expr {
         if let Some(bindings) = &st.let_bindings {
-            // Priority 2 will migrate to FunctionLibrary::for_profile.
-            #[allow(deprecated)]
-            let lib = openjd_expr::default_library::get_default_library().clone();
+            let lib = openjd_expr::FunctionLibrary::for_profile(
+                &ctx.to_expr_profile(openjd_expr::HostContext::None),
+            );
             for binding in bindings {
                 if let Some(eq_pos) = binding.find('=') {
                     let name = binding[..eq_pos].trim();
@@ -160,11 +161,9 @@ pub(super) fn instantiate_step(
                     }
                 }
 
-                // Priority 2 will migrate to FunctionLibrary::for_profile.
-                #[allow(deprecated)]
-                let lib = openjd_expr::default_library::get_default_library()
-                    .clone()
-                    .with_unresolved_host_context();
+                let lib = openjd_expr::FunctionLibrary::for_profile(
+                    &ctx.to_expr_profile(openjd_expr::HostContext::Unresolved),
+                );
                 for binding in bindings {
                     if let Some(eq_pos) = binding.find('=') {
                         let name = binding[..eq_pos].trim();
