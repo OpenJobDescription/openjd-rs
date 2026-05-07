@@ -97,6 +97,21 @@ impl StepDependencyGraph {
         self.name_to_index.get(name).map(|&i| &self.nodes[i])
     }
 
+    /// Number of nodes in the graph.
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Get an edge by index.
+    pub fn edge(&self, index: usize) -> Option<&StepDependencyEdge> {
+        self.edges.get(index)
+    }
+
+    /// Get a node by index.
+    pub fn node(&self, index: usize) -> Option<&StepDependencyNode> {
+        self.nodes.get(index)
+    }
+
     /// Maximum in-degree (max number of dependencies any step has).
     pub fn max_indegree(&self) -> usize {
         self.nodes
