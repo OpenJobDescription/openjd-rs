@@ -110,12 +110,17 @@ pub fn read_input_file(path: &Path) -> Result<String, String> {
     )
 }
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "TASK_CHUNKING",
-    "REDACTED_ENV_VARS",
-    "FEATURE_BUNDLE_1",
-    "EXPR",
-];
+/// The full default list of supported OpenJD extension names,
+/// sourced from the authoritative [`openjd_model::KnownExtension::ALL`].
+/// Using the enum rather than a CLI-local string array keeps the
+/// CLI, JS bindings, and Python bindings in sync whenever a new
+/// extension is added upstream — one place to update.
+fn supported_extensions() -> Vec<&'static str> {
+    openjd_model::KnownExtension::ALL
+        .iter()
+        .map(|e| e.as_str())
+        .collect()
+}
 
 /// A CLI command result that can be rendered as JSON, YAML, or human-readable text.
 ///
@@ -150,6 +155,7 @@ pub fn print_cli_result(result: &dyn CliResult, format: &str) {
 /// Parse and validate the `--extensions` argument.
 /// Returns an error if any extension name is not recognized.
 pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
+    let supported = supported_extensions();
     match arg {
         Some(ext_str) if ext_str.is_empty() => Ok(vec![]),
         Some(ext_str) => {
@@ -160,7 +166,7 @@ pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
                 .collect();
             let unsupported: Vec<&str> = exts
                 .iter()
-                .filter(|e| !SUPPORTED_EXTENSIONS.contains(&e.as_str()))
+                .filter(|e| !supported.contains(&e.as_str()))
                 .map(|e| e.as_str())
                 .collect();
             if !unsupported.is_empty() {
@@ -171,6 +177,6 @@ pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
             }
             Ok(exts)
         }
-        None => Ok(SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect()),
+        None => Ok(supported.iter().map(|s| s.to_string()).collect()),
     }
 }

@@ -153,7 +153,7 @@ fn decode_str_rejects_template_exceeding_max_template_size() {
     // Template is ~200 bytes; cap at 50.
     limits.max_template_size = Some(50);
 
-    let err = match decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits)) {
+    let err = match decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits), None) {
         Ok(_) => panic!("must reject oversized template"),
         Err(e) => e,
     };
@@ -169,8 +169,9 @@ fn decode_str_rejects_template_exceeding_max_template_size() {
 /// Confirms the limit is actually opt-in rather than always-on.
 #[test]
 fn decode_str_default_limits_does_not_reject_normal_template() {
-    decode_job_template_str(MINIMAL_TEMPLATE, None, None).expect("default limits must accept");
-    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&JsCallerLimits::new()))
+    decode_job_template_str(MINIMAL_TEMPLATE, None, None, None)
+        .expect("default limits must accept");
+    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&JsCallerLimits::new()), None)
         .expect("explicit empty limits must accept");
 }
 
@@ -181,7 +182,7 @@ fn decode_str_rejects_template_exceeding_max_step_count() {
     let mut limits = JsCallerLimits::new();
     limits.max_step_count = Some(1);
 
-    let err = match decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits)) {
+    let err = match decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits), None) {
         Ok(_) => panic!("must reject too-many-steps"),
         Err(e) => e,
     };
@@ -203,7 +204,7 @@ fn decode_from_object_respects_max_step_count() {
     let mut limits = JsCallerLimits::new();
     limits.max_step_count = Some(1);
 
-    let err = match decode_job_template_from_object(v, Some(&limits)) {
+    let err = match decode_job_template_from_object(v, Some(&limits), None) {
         Ok(_) => panic!("must reject too-many-steps"),
         Err(e) => e,
     };
@@ -232,7 +233,7 @@ fn create_job_rejects_template_exceeding_max_task_count() {
             "script": {"actions": {"onRun": {"command": "x"}}}
         }]
     }"#;
-    let template = decode_job_template_str(template_json, None, None)
+    let template = decode_job_template_str(template_json, None, None, None)
         .expect("template decodes with default limits");
 
     let path_opts = JsPathParameterOptions::new("/tmpl", "/cwd");
@@ -267,7 +268,8 @@ fn create_job_default_limits_accepts_ten_tasks() {
             "script": {"actions": {"onRun": {"command": "x"}}}
         }]
     }"#;
-    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
+    let template =
+        decode_job_template_str(template_json, None, None, None).expect("template decodes");
     let path_opts = JsPathParameterOptions::new("/tmpl", "/cwd");
     let params = std::collections::HashMap::<String, String>::new();
 
@@ -285,12 +287,12 @@ fn decode_str_accepts_template_exactly_at_max_template_size() {
     let mut limits = JsCallerLimits::new();
     limits.max_template_size = Some(MINIMAL_TEMPLATE.len());
     // Boundary: `len == max` must succeed.
-    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits))
+    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits), None)
         .expect("template exactly at the size cap must be accepted");
 
     // One byte under the cap: also success.
     let mut limits = JsCallerLimits::new();
     limits.max_template_size = Some(MINIMAL_TEMPLATE.len() + 1);
-    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits))
+    decode_job_template_str(MINIMAL_TEMPLATE, None, Some(&limits), None)
         .expect("template under the cap must be accepted");
 }

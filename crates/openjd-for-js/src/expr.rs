@@ -205,55 +205,77 @@ impl JsSymbolTable {
         }
     }
 
-    /// Set a scoped value: `set("Param", "Frames", ExprValue.string("1-10"))`.
-    pub fn set(&mut self, scope: &str, name: &str, value: &JsExprValue) -> Result<(), JsError> {
-        let mut subtable = self
-            .inner
-            .get_table(scope)
-            .cloned()
-            .unwrap_or_else(openjd_expr::SymbolTable::new);
-        subtable
-            .set(name, value.inner.clone())
-            .map_err(symtab_to_js_error)?;
-        self.inner.set_table(scope, subtable);
-        Ok(())
+    /// Set an `ExprValue` at a dotted key.
+    ///
+    /// Dotted keys work like Python's `symtab["Param.Frames"] = ...`
+    /// — intermediate tables are created as needed. Mirrors the
+    /// Rust [`openjd_expr::SymbolTable::set`] API and the Python
+    /// binding's `__setitem__`.
+    ///
+    /// Returns an error if the key would collide with an existing
+    /// entry of the wrong shape — setting `"A.B"` when `"A"` already
+    /// holds a scalar, or setting `"A"` as a scalar when `"A.B"` is
+    /// already a subtable. Resolves review finding F6 ("silent
+    /// failures are worse than loud failures").
+    pub fn set(&mut self, key: &str, value: &JsExprValue) -> Result<(), JsError> {
+        self.inner
+            .set(key, value.inner.clone())
+            .map_err(symtab_to_js_error)
     }
 
-    /// Set a string value directly: `setString("Param", "Frames", "1-10")`.
+    /// Set a string value at a dotted key. Convenience for the
+    /// common case of parameter values arriving as strings from
+    /// the host — see [`Self::set`] for key and collision semantics.
     #[wasm_bindgen(js_name = "setString")]
-    pub fn set_string(&mut self, scope: &str, name: &str, value: &str) -> Result<(), JsError> {
-        let mut subtable = self
-            .inner
-            .get_table(scope)
-            .cloned()
-            .unwrap_or_else(openjd_expr::SymbolTable::new);
-        subtable
-            .set_string(name, value)
-            .map_err(symtab_to_js_error)?;
-        self.inner.set_table(scope, subtable);
-        Ok(())
-    }
-
-    /// Get a value by scope and name.
-    pub fn get(&self, scope: &str, name: &str) -> Option<JsExprValue> {
+    pub fn set_string(&mut self, key: &str, value: &str) -> Result<(), JsError> {
         self.inner
-            .get_table(scope)
-            .and_then(|t| t.get_value(name))
-            .map(|v| JsExprValue { inner: v.clone() })
+            .set_string(key, value)
+            .map_err(symtab_to_js_error)
     }
 
-    /// Check if a scoped key exists.
-    pub fn has(&self, scope: &str, name: &str) -> bool {
-        self.inner
-            .get_table(scope)
-            .map(|t| t.contains(name))
-            .unwrap_or(false)
+    /// Get the value at a dotted key, or `undefined` if the key is
+    /// unset or resolves to a subtable rather than a leaf value.
+    pub fn get(&self, key: &str) -> Option<JsExprValue> {
+        match self.inner.get(key) {
+            Some(openjd_expr::symbol_table::SymbolTableEntry::Value(v)) => {
+                Some(JsExprValue { inner: v.clone() })
+            }
+            _ => None,
+        }
     }
 
-    /// Get all symbol paths (e.g., ["Param.Frames", "Param.OutputDir"]).
+    /// True if the dotted key resolves to a leaf value (not a
+    /// subtable, not missing).
+    pub fn has(&self, key: &str) -> bool {
+        matches!(
+            self.inner.get(key),
+            Some(openjd_expr::symbol_table::SymbolTableEntry::Value(_))
+        )
+    }
+
+    /// Get all leaf-value paths as dotted strings (e.g.,
+    /// `["Param.Frames", "Param.OutputDir"]`).
     #[wasm_bindgen(js_name = "allPaths")]
     pub fn all_paths(&self) -> Vec<String> {
         self.inner.all_paths("")
+    }
+}
+
+/// Rust-side helpers on `JsSymbolTable` used by rlib tests. Exposed
+/// outside the `#[wasm_bindgen]` impl so they can return plain
+/// `Result<_, String>` rather than `JsError`, which formats through
+/// wasm-bindgen glue and panics on non-wasm targets.
+impl JsSymbolTable {
+    /// See [`Self::set`]. Returns `String` error for rlib tests.
+    pub fn set_rs(&mut self, key: &str, value: &JsExprValue) -> Result<(), String> {
+        self.inner
+            .set(key, value.inner.clone())
+            .map_err(|e| e.to_string())
+    }
+
+    /// See [`Self::set_string`]. Returns `String` error for rlib tests.
+    pub fn set_string_rs(&mut self, key: &str, value: &str) -> Result<(), String> {
+        self.inner.set_string(key, value).map_err(|e| e.to_string())
     }
 }
 

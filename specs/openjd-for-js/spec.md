@@ -90,10 +90,10 @@ This mirrors the PyO3 pattern used in the Python bindings where `PyJobTemplate` 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `decodeJobTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits) → JobTemplate` | Parse + validate a job template from a string. `format` defaults to `DocumentType.Yaml` (YAML is a superset of JSON, so this accepts either). `limits` lets the host impose additional caps on top of the spec-defined limits; omit for spec-only behavior. Mirrors the Python binding `decode_job_template_str`. Throws on failure. |
-| `decodeJobTemplateFromObject` | `(obj: object, limits?: CallerLimits) → JobTemplate` | Parse + validate from a pre-parsed JS object, skipping string parsing. Mirrors the Python binding `decode_job_template_dict`. |
-| `decodeEnvironmentTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_str`. |
-| `decodeEnvironmentTemplateFromObject` | `(obj: object, limits?: CallerLimits) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_dict`. |
+| `decodeJobTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits, supportedExtensions?: string[]) → JobTemplate` | Parse + validate a job template from a string. `format` defaults to `DocumentType.Yaml` (YAML is a superset of JSON, so this accepts either). `limits` lets the host impose additional caps on top of the spec-defined limits; omit for spec-only behavior. `supportedExtensions` restricts which OpenJD extensions the template may declare; omit to allow all known extensions (see `getSupportedExtensions()`), or pass `[]` to disable every extension. Mirrors the Python binding `decode_job_template_str`. Throws on failure. |
+| `decodeJobTemplateFromObject` | `(obj: object, limits?: CallerLimits, supportedExtensions?: string[]) → JobTemplate` | Parse + validate from a pre-parsed JS object, skipping string parsing. Mirrors the Python binding `decode_job_template_dict`. |
+| `decodeEnvironmentTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits, supportedExtensions?: string[]) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_str`. |
+| `decodeEnvironmentTemplateFromObject` | `(obj: object, limits?: CallerLimits, supportedExtensions?: string[]) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_dict`. |
 
 Callers who want non-throwing validation use `try { decodeJobTemplate(...) } catch (e) { ... }` — matching how the Python bindings handle validation errors. There is no separate `validateTemplate` function.
 
@@ -111,6 +111,12 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | `maxTemplateSize` | `number` | Max total template document size, in bytes. Checked before parsing begins. |
 
 `CallerLimits` is exposed as a plain object rather than an exported class: callers construct object literals and reuse them across calls with no `.free()` ceremony. Resolves review finding F4.
+
+`supportedExtensions` accepts the uppercase extension names listed by `getSupportedExtensions()`. The host can pass a subset to disable specific extensions (e.g., omit `"EXPR"` from a browser template-viewer that has no reason to evaluate expressions on untrusted input). Unknown names produce a clear error from the underlying validator. Resolves review finding F8.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `getSupportedExtensions` | `() → string[]` | Return the full default extension allowlist, sourced from `openjd_model::KnownExtension::ALL`. The same set used when `supportedExtensions` is omitted. Useful for callers that want to start from the default and remove a specific extension. |
 
 #### Job Creation
 
@@ -323,8 +329,14 @@ Enum: `String`, `Int`, `Float`, `Bool`, `Path`, `RangeExpr`, `ListString`, `List
 
 | Constructor | `new SymbolTable()` |
 |---|---|
-| `set(scope, name, value)` | `void` — e.g., `set("Param", "Frames", ExprValue.string("1-10"))` |
-| `get(scope, name)` | `ExprValue \| undefined` |
+| `set(key: string, value: ExprValue)` | `void` — accepts dotted keys, e.g. `set("Param.Frames", ExprValue.string("1-10"))`. Throws if the key would collide with an existing entry of the wrong shape (scalar-vs-subtable). |
+| `setString(key: string, value: string)` | `void` — convenience for the common string-parameter case. Same collision semantics as `set`. |
+| `get(key: string)` | `ExprValue \| undefined` — returns `undefined` for missing keys or keys that resolve to a subtable. |
+| `has(key: string)` | `boolean` — true iff the key resolves to a leaf value. |
+| `allPaths()` | `string[]` — every leaf-value path as a dotted string. |
+
+Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `get` single-dotted-key shape. Resolves review finding F6.
+
 
 #### `FunctionLibrary`
 

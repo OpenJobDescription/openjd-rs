@@ -321,6 +321,15 @@ pub enum KnownExtension {
 }
 
 impl KnownExtension {
+    /// All extension variants, in a stable order for iteration and
+    /// for building default "enable all" allowlists.
+    pub const ALL: &'static [KnownExtension] = &[
+        Self::TaskChunking,
+        Self::RedactedEnvVars,
+        Self::FeatureBundle1,
+        Self::Expr,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::TaskChunking => "TASK_CHUNKING",

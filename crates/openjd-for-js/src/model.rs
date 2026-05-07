@@ -349,12 +349,45 @@ impl JsStepParameterSpaceIterator {
 
 // ── Decode functions ───────────────────────────────────────────────
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "EXPR",
-    "TASK_CHUNKING",
-    "REDACTED_ENV_VARS",
-    "FEATURE_BUNDLE_1",
-];
+/// Build a `Vec<&str>` covering the full default extension list,
+/// sourced from [`openjd_model::KnownExtension::ALL`]. Use this as
+/// the fallback when the JS caller omits `supportedExtensions`.
+///
+/// Centralizing on the upstream enum resolves the F8 drift problem:
+/// the JS binding, the CLI, and Python all see the same authoritative
+/// list without hand-maintained local copies.
+fn default_supported_extensions() -> Vec<&'static str> {
+    openjd_model::KnownExtension::ALL
+        .iter()
+        .map(|e| e.as_str())
+        .collect()
+}
+
+/// Resolve the caller-provided `supported_extensions` slice to a
+/// `Vec<&str>` suitable for passing to `openjd_model` decode
+/// functions. `None` means "use the default"; `Some(&[])` means
+/// "no extensions at all."
+fn resolve_supported_extensions(supported_extensions: Option<&[String]>) -> Vec<&str> {
+    match supported_extensions {
+        Some(list) => list.iter().map(|s| s.as_str()).collect(),
+        None => default_supported_extensions(),
+    }
+}
+
+/// Return the full default list of supported extensions — the same
+/// set used when `supportedExtensions` is omitted on a decode call.
+///
+/// Exposed as a helper (rather than a constant) because wasm-bindgen
+/// does not support exporting Rust `const` / `static` items to JS.
+/// Callers that want to start from the default and subtract a
+/// specific extension can call this once and filter the result.
+#[wasm_bindgen(js_name = "getSupportedExtensions")]
+pub fn get_supported_extensions() -> Vec<String> {
+    default_supported_extensions()
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
 
 /// Document format for template string input.
 ///
@@ -400,27 +433,40 @@ pub fn decode_job_template(
     input: &str,
     format: Option<JsDocumentType>,
     limits: JsValue,
+    supported_extensions: Option<Vec<String>>,
 ) -> Result<JsJobTemplate, JsError> {
     let parsed = JsCallerLimits::from_js_value(limits)?;
-    decode_job_template_str(input, format, parsed.as_ref()).map_err(|e| JsError::new(&e))
+    decode_job_template_str(
+        input,
+        format,
+        parsed.as_ref(),
+        supported_extensions.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_job_template`].
 ///
 /// Exposed as a plain Rust function so rlib-target tests can exercise
 /// the behavior without the `JsError` wrapping layer.
+///
+/// `supported_extensions`: `None` uses the full default from
+/// [`openjd_model::KnownExtension::ALL`]; `Some(&[])` disables every
+/// extension; `Some(&["EXPR"])` allows only EXPR. See
+/// [`get_supported_extensions`] for the default list.
 pub fn decode_job_template_str(
     input: &str,
     format: Option<JsDocumentType>,
     limits: Option<&JsCallerLimits>,
+    supported_extensions: Option<&[String]>,
 ) -> Result<JsJobTemplate, String> {
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
     let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
+    let exts = resolve_supported_extensions(supported_extensions);
     let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
         .map_err(|e| e.to_string())?;
-    let template =
-        openjd_model::decode_job_template(value, Some(SUPPORTED_EXTENSIONS), &rust_limits)
-            .map_err(|e| e.to_string())?;
+    let template = openjd_model::decode_job_template(value, Some(&exts), &rust_limits)
+        .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
 }
 
@@ -433,29 +479,35 @@ pub fn decode_job_template_str(
 /// `limits` applies to validation (step count, env count, etc.). The
 /// `maxTemplateSize` cap is not meaningful here since the byte size
 /// of the source string has already been discarded.
+///
+/// `supportedExtensions` behaves the same as on
+/// [`decode_job_template`].
 #[wasm_bindgen(js_name = "decodeJobTemplateFromObject")]
 pub fn decode_job_template_from_object_js(
     obj: JsValue,
     limits: JsValue,
+    supported_extensions: Option<Vec<String>>,
 ) -> Result<JsJobTemplate, JsError> {
     let value: serde_json::Value =
         serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
     let parsed = JsCallerLimits::from_js_value(limits)?;
-    decode_job_template_from_object(value, parsed.as_ref()).map_err(|e| JsError::new(&e))
+    decode_job_template_from_object(value, parsed.as_ref(), supported_extensions.as_deref())
+        .map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_job_template_from_object_js`].
 pub fn decode_job_template_from_object(
     value: serde_json::Value,
     limits: Option<&JsCallerLimits>,
+    supported_extensions: Option<&[String]>,
 ) -> Result<JsJobTemplate, String> {
     if !value.is_object() {
         return Err("Template must be a JSON/YAML object".to_string());
     }
     let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
-    let template =
-        openjd_model::decode_job_template(value, Some(SUPPORTED_EXTENSIONS), &rust_limits)
-            .map_err(|e| e.to_string())?;
+    let exts = resolve_supported_extensions(supported_extensions);
+    let template = openjd_model::decode_job_template(value, Some(&exts), &rust_limits)
+        .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
 }
 
@@ -467,14 +519,24 @@ pub fn decode_job_template_from_object(
 /// `limits` applies only the `maxTemplateSize` cap here, since
 /// `openjd_model::decode_environment_template` does not accept
 /// `CallerLimits` at the validation step.
+///
+/// `supportedExtensions` behaves the same as on
+/// [`decode_job_template`].
 #[wasm_bindgen(js_name = "decodeEnvironmentTemplate")]
 pub fn decode_environment_template(
     input: &str,
     format: Option<JsDocumentType>,
     limits: JsValue,
+    supported_extensions: Option<Vec<String>>,
 ) -> Result<JsEnvironmentTemplate, JsError> {
     let parsed = JsCallerLimits::from_js_value(limits)?;
-    decode_environment_template_str(input, format, parsed.as_ref()).map_err(|e| JsError::new(&e))
+    decode_environment_template_str(
+        input,
+        format,
+        parsed.as_ref(),
+        supported_extensions.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_environment_template`].
@@ -482,13 +544,15 @@ pub fn decode_environment_template_str(
     input: &str,
     format: Option<JsDocumentType>,
     limits: Option<&JsCallerLimits>,
+    supported_extensions: Option<&[String]>,
 ) -> Result<JsEnvironmentTemplate, String> {
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
     let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
+    let exts = resolve_supported_extensions(supported_extensions);
     let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
         .map_err(|e| e.to_string())?;
-    let template = openjd_model::decode_environment_template(value, Some(SUPPORTED_EXTENSIONS))
-        .map_err(|e| e.to_string())?;
+    let template =
+        openjd_model::decode_environment_template(value, Some(&exts)).map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })
 }
 
@@ -502,23 +566,27 @@ pub fn decode_environment_template_str(
 pub fn decode_environment_template_from_object_js(
     obj: JsValue,
     limits: JsValue,
+    supported_extensions: Option<Vec<String>>,
 ) -> Result<JsEnvironmentTemplate, JsError> {
     let value: serde_json::Value =
         serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
     let parsed = JsCallerLimits::from_js_value(limits)?;
-    decode_environment_template_from_object(value, parsed.as_ref()).map_err(|e| JsError::new(&e))
+    decode_environment_template_from_object(value, parsed.as_ref(), supported_extensions.as_deref())
+        .map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_environment_template_from_object_js`].
 pub fn decode_environment_template_from_object(
     value: serde_json::Value,
     _limits: Option<&JsCallerLimits>,
+    supported_extensions: Option<&[String]>,
 ) -> Result<JsEnvironmentTemplate, String> {
     if !value.is_object() {
         return Err("Template must be a JSON/YAML object".to_string());
     }
-    let template = openjd_model::decode_environment_template(value, Some(SUPPORTED_EXTENSIONS))
-        .map_err(|e| e.to_string())?;
+    let exts = resolve_supported_extensions(supported_extensions);
+    let template =
+        openjd_model::decode_environment_template(value, Some(&exts)).map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })
 }
 

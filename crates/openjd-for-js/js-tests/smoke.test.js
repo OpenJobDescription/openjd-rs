@@ -192,11 +192,11 @@ describe("ExprValue", () => {
 describe("SymbolTable", () => {
   it("set and get string values", () => {
     const st = new mod.SymbolTable();
-    st.setString("Param", "Frames", "1-10");
-    expect(st.has("Param", "Frames")).toBe(true);
-    expect(st.has("Param", "Missing")).toBe(false);
+    st.setString("Param.Frames", "1-10");
+    expect(st.has("Param.Frames")).toBe(true);
+    expect(st.has("Param.Missing")).toBe(false);
 
-    const v = st.get("Param", "Frames");
+    const v = st.get("Param.Frames");
     expect(v.toString()).toBe("1-10");
     v.free();
     st.free();
@@ -205,8 +205,8 @@ describe("SymbolTable", () => {
   it("set ExprValue", () => {
     const st = new mod.SymbolTable();
     const val = mod.ExprValue.int(42n);
-    st.set("Param", "Count", val);
-    const got = st.get("Param", "Count");
+    st.set("Param.Count", val);
+    const got = st.get("Param.Count");
     expect(got.toString()).toBe("42");
     got.free();
     val.free();
@@ -215,8 +215,8 @@ describe("SymbolTable", () => {
 
   it("allPaths returns all symbol paths", () => {
     const st = new mod.SymbolTable();
-    st.setString("Param", "A", "1");
-    st.setString("Param", "B", "2");
+    st.setString("Param.A", "1");
+    st.setString("Param.B", "2");
     const paths = st.allPaths();
     expect(paths).toContain("Param.A");
     expect(paths).toContain("Param.B");
@@ -231,7 +231,7 @@ describe("FormatString", () => {
     expect(fs.references).toContain("Param.Dir");
 
     const st = new mod.SymbolTable();
-    st.setString("Param", "Dir", "/renders");
+    st.setString("Param.Dir", "/renders");
     const resolved = fs.resolve(st);
     expect(resolved).toBe("/renders/output.exr");
 
@@ -254,7 +254,7 @@ describe("ParsedExpression", () => {
     expect(expr.accessedSymbols).toContain("Param.X");
 
     const st = new mod.SymbolTable();
-    st.setString("Param", "X", "hello");
+    st.setString("Param.X", "hello");
     const result = expr.evaluate(st);
     expect(result.toString()).toBe("hello");
 
@@ -267,7 +267,7 @@ describe("ParsedExpression", () => {
 describe("evaluateExpression", () => {
   it("evaluates a simple expression", () => {
     const st = new mod.SymbolTable();
-    st.setString("Param", "Name", "world");
+    st.setString("Param.Name", "world");
     const result = mod.evaluateExpression("Param.Name", st);
     expect(result.toString()).toBe("world");
     result.free();
@@ -440,7 +440,7 @@ describe("mergeJobParameterDefinitions", () => {
 describe("evaluateLetBindings", () => {
   it("evaluates let bindings with expression references", () => {
     const st = new mod.SymbolTable();
-    st.setString("Param", "X", "hello");
+    st.setString("Param.X", "hello");
     // RHS of let binding is an expression, result stored at top level
     const result = mod.evaluateLetBindings(["Y=Param.X"], st);
     // allPaths should include the new binding
@@ -812,5 +812,165 @@ describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
     r.free();
     st.free();
     parsed.free();
+  });
+});
+
+// ── SymbolTable: dotted-key surface (F6) ────────────────────────────
+
+describe("SymbolTable dotted-key surface (F6)", () => {
+  it("rejects nesting under an existing scalar", () => {
+    const st = new mod.SymbolTable();
+    st.setString("A", "leaf");
+    expect(() => st.setString("A.B", "child")).toThrow(/A/);
+    st.free();
+  });
+
+  it("rejects scalar assignment over an existing subtable", () => {
+    const st = new mod.SymbolTable();
+    st.setString("Param.Frames", "1-10");
+    const v = mod.ExprValue.int(99n);
+    expect(() => st.set("Param", v)).toThrow(/Param/);
+    v.free();
+    st.free();
+  });
+
+  it("supports deep nesting round-trip", () => {
+    const st = new mod.SymbolTable();
+    st.setString("A.B.C", "deep");
+    const got = st.get("A.B.C");
+    expect(got.toString()).toBe("deep");
+    expect(st.has("A.B.C")).toBe(true);
+    expect(st.has("A.B")).toBe(false);   // intermediate is a table
+    expect(st.has("A")).toBe(false);     // intermediate is a table
+    got.free();
+    st.free();
+  });
+
+  it("overwrites a scalar at the same key", () => {
+    const st = new mod.SymbolTable();
+    st.setString("Param.X", "old");
+    st.setString("Param.X", "new");
+    const got = st.get("Param.X");
+    expect(got.toString()).toBe("new");
+    got.free();
+    st.free();
+  });
+
+  it("get returns undefined for an unset key", () => {
+    const st = new mod.SymbolTable();
+    expect(st.get("Missing.Key")).toBeUndefined();
+    st.free();
+  });
+});
+
+// ── getSupportedExtensions + supportedExtensions passthrough (F8) ───
+
+describe("getSupportedExtensions (F8)", () => {
+  it("returns the full default allowlist", () => {
+    const exts = mod.getSupportedExtensions();
+    expect(exts.length).toBe(4);
+    expect(exts).toContain("TASK_CHUNKING");
+    expect(exts).toContain("REDACTED_ENV_VARS");
+    expect(exts).toContain("FEATURE_BUNDLE_1");
+    expect(exts).toContain("EXPR");
+  });
+});
+
+describe("supportedExtensions enforcement on decode (F8)", () => {
+  const TEMPLATE_USING_EXPR = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    extensions: ["EXPR"],
+    steps: [
+      { name: "S", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  const TEMPLATE_NO_EXTENSIONS = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    steps: [
+      { name: "S", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  it("default (omitted) accepts EXPR template", () => {
+    const t = mod.decodeJobTemplate(TEMPLATE_USING_EXPR);
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("rejects EXPR template when EXPR is not in the allowlist", () => {
+    expect(() =>
+      mod.decodeJobTemplate(TEMPLATE_USING_EXPR, undefined, undefined, [
+        "TASK_CHUNKING",
+      ])
+    ).toThrow(/EXPR|extension/i);
+  });
+
+  it("empty allowlist accepts a template that uses no extensions", () => {
+    const t = mod.decodeJobTemplate(
+      TEMPLATE_NO_EXTENSIONS,
+      undefined,
+      undefined,
+      []
+    );
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("empty allowlist rejects an EXPR template", () => {
+    expect(() =>
+      mod.decodeJobTemplate(TEMPLATE_USING_EXPR, undefined, undefined, [])
+    ).toThrow(/EXPR|extension/i);
+  });
+
+  it("allowlist containing EXPR accepts EXPR template", () => {
+    const t = mod.decodeJobTemplate(
+      TEMPLATE_USING_EXPR,
+      undefined,
+      undefined,
+      ["EXPR"]
+    );
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("allowlist derived from getSupportedExtensions accepts all templates", () => {
+    const defaults = mod.getSupportedExtensions();
+    const t = mod.decodeJobTemplate(
+      TEMPLATE_USING_EXPR,
+      undefined,
+      undefined,
+      defaults
+    );
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("accepts the same allowlist array reused across multiple calls", () => {
+    const allowlist = mod.getSupportedExtensions();
+    const t1 = mod.decodeJobTemplate(TEMPLATE_NO_EXTENSIONS, undefined, undefined, allowlist);
+    const t2 = mod.decodeJobTemplate(TEMPLATE_USING_EXPR, undefined, undefined, allowlist);
+    expect(t1.name).toBe("T");
+    expect(t2.name).toBe("T");
+    t1.free();
+    t2.free();
+  });
+});
+
+describe("supportedExtensions on decodeJobTemplateFromObject (F8)", () => {
+  it("rejects EXPR template under restricted allowlist", () => {
+    const obj = {
+      specificationVersion: "jobtemplate-2023-09",
+      name: "T",
+      extensions: ["EXPR"],
+      steps: [
+        { name: "S", script: { actions: { onRun: { command: "x" } } } },
+      ],
+    };
+    expect(() =>
+      mod.decodeJobTemplateFromObject(obj, undefined, ["TASK_CHUNKING"])
+    ).toThrow(/EXPR|extension/i);
   });
 });
