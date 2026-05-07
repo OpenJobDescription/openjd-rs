@@ -73,7 +73,7 @@ fn document_type_round_trips() {
 /// `format=PyDocumentType.YAML`).
 #[test]
 fn decode_job_template_str_defaults_to_yaml() {
-    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_YAML, None)
+    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_YAML, None, None)
         .expect("default format must accept valid YAML");
     // JobTemplate has no Serialize, but `name` is exposed on the wrapper.
     assert_eq!(tmpl.name(), "T");
@@ -84,7 +84,7 @@ fn decode_job_template_str_defaults_to_yaml() {
 /// YAML correctly.
 #[test]
 fn decode_job_template_str_yaml_accepts_json() {
-    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_JSON, Some(JsDocumentType::Yaml))
+    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_JSON, Some(JsDocumentType::Yaml), None)
         .expect("YAML parser must accept JSON-shaped input");
     assert_eq!(tmpl.name(), "T");
 }
@@ -92,7 +92,7 @@ fn decode_job_template_str_yaml_accepts_json() {
 /// `DocumentType::Json` must accept JSON.
 #[test]
 fn decode_job_template_str_json_accepts_json() {
-    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_JSON, Some(JsDocumentType::Json))
+    let tmpl = decode_job_template_str(VALID_JOB_TEMPLATE_JSON, Some(JsDocumentType::Json), None)
         .expect("JSON parser must accept JSON");
     assert_eq!(tmpl.name(), "T");
 }
@@ -112,7 +112,7 @@ steps:
         onRun:
           command: x
 ";
-    let err = match decode_job_template_str(yaml_only, Some(JsDocumentType::Json)) {
+    let err = match decode_job_template_str(yaml_only, Some(JsDocumentType::Json), None) {
         Ok(_) => panic!("JSON parser must reject YAML-only syntax"),
         Err(e) => e,
     };
@@ -149,7 +149,7 @@ fn decode_job_template_str_yaml_rejects_deep_nesting() {
         doc.push_str("  b: 1\n");
     }
 
-    let result = decode_job_template_str(&doc, Some(JsDocumentType::Yaml));
+    let result = decode_job_template_str(&doc, Some(JsDocumentType::Yaml), None);
     assert!(
         result.is_err(),
         "200-level nested YAML must be rejected, not parsed"
@@ -162,7 +162,7 @@ fn decode_job_template_str_yaml_rejects_deep_nesting() {
 /// Malformed YAML returns a structured error (not a panic).
 #[test]
 fn decode_job_template_str_rejects_malformed_yaml() {
-    let err = match decode_job_template_str("{{{{", Some(JsDocumentType::Yaml)) {
+    let err = match decode_job_template_str("{{{{", Some(JsDocumentType::Yaml), None) {
         Ok(_) => panic!("must fail on garbage input"),
         Err(e) => e,
     };
@@ -181,7 +181,7 @@ fn decode_job_template_str_rejects_malformed_yaml() {
 #[test]
 fn decode_job_template_from_object_accepts_valid_value() {
     let v: serde_json::Value = serde_json::from_str(VALID_JOB_TEMPLATE_JSON).unwrap();
-    let tmpl = decode_job_template_from_object(v)
+    let tmpl = decode_job_template_from_object(v, None)
         .expect("decode_from_object must accept a valid parsed value");
     assert_eq!(tmpl.name(), "T");
 }
@@ -192,7 +192,7 @@ fn decode_job_template_from_object_accepts_valid_value() {
 fn decode_job_template_from_object_rejects_non_object() {
     let v: serde_json::Value = serde_json::Value::Array(vec![]);
     assert!(
-        decode_job_template_from_object(v).is_err(),
+        decode_job_template_from_object(v, None).is_err(),
         "non-object template must be rejected"
     );
 }
@@ -201,7 +201,7 @@ fn decode_job_template_from_object_rejects_non_object() {
 
 #[test]
 fn decode_environment_template_str_defaults_to_yaml() {
-    let et = decode_environment_template_str(VALID_ENV_TEMPLATE_YAML, None)
+    let et = decode_environment_template_str(VALID_ENV_TEMPLATE_YAML, None, None)
         .expect("default format must accept valid YAML");
     assert_eq!(et.specification_version(), "environment-2023-09");
 }
@@ -212,7 +212,7 @@ fn decode_environment_template_from_object_accepts_valid_value() {
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "E", "variables": {"FOO": "bar"}},
     });
-    let et = decode_environment_template_from_object(v)
+    let et = decode_environment_template_from_object(v, None)
         .expect("decode_from_object must accept a valid parsed value");
     assert_eq!(et.specification_version(), "environment-2023-09");
 }

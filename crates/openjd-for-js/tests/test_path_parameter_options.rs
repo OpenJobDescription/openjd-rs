@@ -107,14 +107,14 @@ fn create_job_rejects_absolute_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     // Construct an empty params value as JsValue. On non-wasm we can't
     // build JsValue, so this test delegates to the internal helper that
     // accepts a `HashMap<String, String>` directly — see create_job_with_map.
     let params = std::collections::HashMap::<String, String>::new();
-    let err = match openjd_for_js::model::create_job_with_map(&template, params, &opts) {
+    let err = match openjd_for_js::model::create_job_with_map(&template, params, &opts, None) {
         Ok(_) => panic!("expected error, got a job"),
         Err(e) => e,
     };
@@ -146,12 +146,12 @@ fn create_job_accepts_absolute_path_default_with_walk_up() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new("/tmpl", "/cwd");
     opts.set_allow_template_dir_walk_up(true);
 
     let params = std::collections::HashMap::<String, String>::new();
-    create_job_with_map(&template, params, &opts).expect("job created");
+    create_job_with_map(&template, params, &opts, None).expect("job created");
 }
 
 /// URI values in PATH defaults are rejected when `allow_uri_path_values`
@@ -172,11 +172,11 @@ fn create_job_rejects_uri_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     let params = std::collections::HashMap::<String, String>::new();
-    let err = match create_job_with_map(&template, params, &opts) {
+    let err = match create_job_with_map(&template, params, &opts, None) {
         Ok(_) => panic!("expected error, got a job"),
         Err(e) => e,
     };
@@ -205,12 +205,12 @@ fn create_job_accepts_uri_path_default_with_flag() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new("/tmpl", "/cwd");
     opts.set_allow_uri_path_values(true);
 
     let params = std::collections::HashMap::<String, String>::new();
-    create_job_with_map(&template, params, &opts).expect("job created");
+    create_job_with_map(&template, params, &opts, None).expect("job created");
 }
 
 /// `preprocess_job_parameters` must apply the same options as
@@ -231,7 +231,7 @@ fn preprocess_rejects_absolute_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     let params = std::collections::HashMap::<String, String>::new();
@@ -268,12 +268,12 @@ fn windows_path_format_rejects_escaping_default() {
         ]
     }"#;
 
-    let template = decode_job_template_str(template_json, None).expect("template decodes");
+    let template = decode_job_template_str(template_json, None, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new(r"C:\tmpl", r"C:\cwd");
     opts.set_path_format(JsPathFormat::Windows);
 
     let params = std::collections::HashMap::<String, String>::new();
-    let err = match create_job_with_map(&template, params, &opts) {
+    let err = match create_job_with_map(&template, params, &opts, None) {
         Ok(_) => panic!("expected error, got a job"),
         Err(e) => e,
     };

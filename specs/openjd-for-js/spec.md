@@ -90,21 +90,34 @@ This mirrors the PyO3 pattern used in the Python bindings where `PyJobTemplate` 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `decodeJobTemplate` | `(document: string, format?: DocumentType) → JobTemplate` | Parse + validate a job template from a string. `format` defaults to `DocumentType.Yaml` (YAML is a superset of JSON, so this accepts either). Mirrors the Python binding `decode_job_template_str`. Throws on failure. |
-| `decodeJobTemplateFromObject` | `(obj: object) → JobTemplate` | Parse + validate from a pre-parsed JS object, skipping string parsing. Mirrors the Python binding `decode_job_template_dict`. |
-| `decodeEnvironmentTemplate` | `(document: string, format?: DocumentType) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_str`. |
-| `decodeEnvironmentTemplateFromObject` | `(obj: object) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_dict`. |
+| `decodeJobTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits) → JobTemplate` | Parse + validate a job template from a string. `format` defaults to `DocumentType.Yaml` (YAML is a superset of JSON, so this accepts either). `limits` lets the host impose additional caps on top of the spec-defined limits; omit for spec-only behavior. Mirrors the Python binding `decode_job_template_str`. Throws on failure. |
+| `decodeJobTemplateFromObject` | `(obj: object, limits?: CallerLimits) → JobTemplate` | Parse + validate from a pre-parsed JS object, skipping string parsing. Mirrors the Python binding `decode_job_template_dict`. |
+| `decodeEnvironmentTemplate` | `(document: string, format?: DocumentType, limits?: CallerLimits) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_str`. |
+| `decodeEnvironmentTemplateFromObject` | `(obj: object, limits?: CallerLimits) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_dict`. |
 
 Callers who want non-throwing validation use `try { decodeJobTemplate(...) } catch (e) { ... }` — matching how the Python bindings handle validation errors. There is no separate `validateTemplate` function.
 
 `DocumentType` is a top-level enum with variants `Yaml` and `Json`. Mirrors `openjd_model::parse::DocumentType` and the Python `openjd._openjd_rs.DocumentType`.
 
+`CallerLimits` is a structural type (plain JS object) with optional camelCase keys mirroring `openjd_model::CallerLimits`. Omit or pass `undefined` for spec-only limits. Passing an empty object (`{}`) is equivalent to `undefined`. All fields are optional:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `maxStepCount` | `number` | Max number of steps in a job template. |
+| `maxEnvCount` | `number` | Max number of environments (job + all step environments combined). |
+| `maxTaskCount` | `bigint` | Max total task count across all steps (checked after parameter spaces resolve). |
+| `maxStepScriptSize` | `number` | Max JSON-encoded size of a step script, in bytes. |
+| `maxEnvironmentSize` | `number` | Max JSON-encoded size of an environment, in bytes. |
+| `maxTemplateSize` | `number` | Max total template document size, in bytes. Checked before parsing begins. |
+
+`CallerLimits` is exposed as a plain object rather than an exported class: callers construct object literals and reuse them across calls with no `.free()` ceremony. Resolves review finding F4.
+
 #### Job Creation
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `createJob` | `(template: JobTemplate, params: Record<string, string>) → Job` | Create a fully resolved Job from a template and parameter values. Resolves all format strings, expands parameter spaces. |
-| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>) → Map<string, ExprValue>` | Coerce raw string parameter values to typed ExprValues per the parameter definitions. |
+| `createJob` | `(template: JobTemplate, params: Record<string, string>, pathOptions: PathParameterOptions, limits?: CallerLimits) → Job` | Create a fully resolved Job from a template and parameter values. Resolves all format strings, expands parameter spaces. `limits.maxTaskCount` is checked after expansion. |
+| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>, pathOptions: PathParameterOptions) → Map<string, ExprValue>` | Coerce raw string parameter values to typed ExprValues per the parameter definitions. |
 | `mergeJobParameterDefinitions` | `(templates: (JobTemplate \| EnvironmentTemplate)[]) → JobParameterDefinition[]` | Merge parameter definitions from multiple templates per the spec's merging rules. |
 | `evaluateLetBindings` | `(bindings: string[], symbols: SymbolTable) → SymbolTable` | Evaluate `let` bindings and add results to the symbol table. |
 | `createEnvironment` | `(envTemplate: EnvironmentTemplate, params: Record<string, string>) → Environment` | Create a resolved Environment from a template. |

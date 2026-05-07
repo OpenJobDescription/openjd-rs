@@ -581,3 +581,134 @@ describe("preprocessJobParameters", () => {
     template.free();
   });
 });
+
+// ── CallerLimits ────────────────────────────────────────────────────
+//
+// CallerLimits is exposed as a plain structural type
+// ({ maxTemplateSize: N, maxTaskCount: Nn, ... }) rather than a
+// wasm_bindgen class. Callers construct object literals and reuse
+// them freely across calls; there is no .free() ceremony.
+
+describe("decodeJobTemplate CallerLimits enforcement (F4)", () => {
+  const MINIMAL_TEMPLATE = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    steps: [
+      { name: "S1", script: { actions: { onRun: { command: "x" } } } },
+      { name: "S2", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  it("rejects template exceeding maxTemplateSize", () => {
+    expect(() =>
+      mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, {
+        maxTemplateSize: 50,
+      })
+    ).toThrow(/exceeds caller limit/);
+  });
+
+  it("accepts template under maxTemplateSize", () => {
+    const t = mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, {
+      maxTemplateSize: 1_000_000,
+    });
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("rejects template exceeding maxStepCount", () => {
+    expect(() =>
+      mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, { maxStepCount: 1 })
+    ).toThrow(/[Ss]tep/);
+  });
+
+  it("accepts template when no caller limits are passed (default)", () => {
+    const t = mod.decodeJobTemplate(MINIMAL_TEMPLATE);
+    expect(t.name).toBe("T");
+    t.free();
+  });
+
+  it("accepts the same limits object reused across multiple calls", () => {
+    const limits = { maxTemplateSize: 1_000_000 };
+    const t1 = mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, limits);
+    const t2 = mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, limits);
+    expect(t1.name).toBe("T");
+    expect(t2.name).toBe("T");
+    t1.free();
+    t2.free();
+  });
+
+  it("accepts maxTaskCount as a BigInt (u64)", () => {
+    // maxTaskCount isn't checked by decode, but the deserializer
+    // must accept it without complaint for forward compatibility
+    // with createJob — same options object often gets reused.
+    const t = mod.decodeJobTemplate(MINIMAL_TEMPLATE, undefined, {
+      maxTaskCount: 1_000_000n,
+    });
+    expect(t.name).toBe("T");
+    t.free();
+  });
+});
+
+describe("decodeJobTemplateFromObject CallerLimits enforcement", () => {
+  it("rejects object with too many steps", () => {
+    const obj = {
+      specificationVersion: "jobtemplate-2023-09",
+      name: "T",
+      steps: [
+        { name: "S1", script: { actions: { onRun: { command: "x" } } } },
+        { name: "S2", script: { actions: { onRun: { command: "x" } } } },
+      ],
+    };
+    expect(() =>
+      mod.decodeJobTemplateFromObject(obj, { maxStepCount: 1 })
+    ).toThrow(/[Ss]tep/);
+  });
+});
+
+describe("createJob CallerLimits enforcement (F4)", () => {
+  const TEMPLATE_WITH_TASKS = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    steps: [
+      {
+        name: "S",
+        parameterSpace: {
+          taskParameterDefinitions: [
+            { name: "F", type: "INT", range: "1-10" },
+          ],
+        },
+        script: { actions: { onRun: { command: "x" } } },
+      },
+    ],
+  });
+
+  it("rejects job exceeding maxTaskCount", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_WITH_TASKS);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    expect(() =>
+      mod.createJob(template, {}, opts, { maxTaskCount: 5n })
+    ).toThrow(/[Tt]ask/);
+    opts.free();
+    template.free();
+  });
+
+  it("accepts job under maxTaskCount", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_WITH_TASKS);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts, { maxTaskCount: 100n });
+    expect(job.name).toBe("T");
+    job.free();
+    opts.free();
+    template.free();
+  });
+
+  it("accepts job when no caller limits are passed (default)", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_WITH_TASKS);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts);
+    expect(job.name).toBe("T");
+    job.free();
+    opts.free();
+    template.free();
+  });
+});

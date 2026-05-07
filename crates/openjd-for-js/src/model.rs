@@ -167,6 +167,85 @@ impl JsPathParameterOptions {
     }
 }
 
+// ── CallerLimits ───────────────────────────────────────────────────
+
+/// Optional caps that a host can apply on top of the spec-defined
+/// limits. Mirrors [`openjd_model::CallerLimits`] field-for-field.
+///
+/// Exposed to JS as a plain structural type rather than an opaque
+/// handle. Every field is optional; `undefined` (or omitted) means
+/// "no additional cap beyond the spec-defined limit." Caller
+/// limits can only add restrictions, never relax spec-defined ones.
+///
+/// On the JS side, construct as a plain object with camelCase
+/// keys matching this struct's fields:
+///
+/// ```ignore
+/// mod.decodeJobTemplate(doc, undefined, {
+///     maxTemplateSize: 10_000_000,   // 10 MB
+///     maxTaskCount: 1_000_000n,      // u64 — pass as BigInt
+/// });
+/// ```
+///
+/// Plain-object shape avoids the ownership footgun of passing an
+/// exported wasm_bindgen class by value (which invalidates the JS
+/// handle after one use). Callers can reuse the same options object
+/// across multiple calls without issue.
+///
+/// Resolves finding F4 from the security review: without these
+/// knobs a template author could submit arbitrarily large input
+/// and the host had no way to cap memory before parsing begins.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct JsCallerLimits {
+    #[serde(default)]
+    pub max_step_count: Option<usize>,
+    #[serde(default)]
+    pub max_env_count: Option<usize>,
+    #[serde(default)]
+    pub max_task_count: Option<u64>,
+    #[serde(default)]
+    pub max_step_script_size: Option<usize>,
+    #[serde(default)]
+    pub max_environment_size: Option<usize>,
+    #[serde(default)]
+    pub max_template_size: Option<usize>,
+}
+
+impl JsCallerLimits {
+    /// Factory used by rlib tests to build an empty limits value.
+    /// JS callers use the plain-object literal form instead.
+    pub fn new() -> JsCallerLimits {
+        JsCallerLimits::default()
+    }
+
+    /// Convert to the Rust-side struct for a call into
+    /// `openjd_model`. Cheap — copies six `Option` scalars.
+    pub fn as_rust(&self) -> openjd_model::CallerLimits {
+        openjd_model::CallerLimits {
+            max_step_count: self.max_step_count,
+            max_env_count: self.max_env_count,
+            max_task_count: self.max_task_count,
+            max_step_script_size: self.max_step_script_size,
+            max_environment_size: self.max_environment_size,
+            max_template_size: self.max_template_size,
+        }
+    }
+
+    /// Deserialize a JS value into `JsCallerLimits`. Returns `None`
+    /// when the caller passes `undefined`/`null` (the "no caps"
+    /// sentinel); returns `Err` when the value is present but
+    /// malformed (unknown key, wrong type, etc.).
+    pub fn from_js_value(value: JsValue) -> Result<Option<JsCallerLimits>, JsError> {
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let limits: JsCallerLimits =
+            serde_wasm_bindgen::from_value(value).map_err(serde_wasm_to_js_error)?;
+        Ok(Some(limits))
+    }
+}
+
 // ── Job wrappers ───────────────────────────────────────────────────
 
 /// A fully instantiated job with all format strings resolved.
@@ -305,15 +384,25 @@ impl JsDocumentType {
 /// Decode and validate a job template from a string.
 ///
 /// `format` selects JSON or YAML parsing. If omitted, defaults to
+/// Decode and validate a job template from a string.
+///
+/// `format` selects JSON or YAML parsing. If omitted, defaults to
 /// `DocumentType.Yaml` — which also accepts JSON, since JSON is a
 /// subset of YAML. Mirrors the Python binding
 /// `decode_job_template_str(document, format=DocumentType.YAML)`.
+///
+/// `limits` lets the host impose additional caps (template size,
+/// step count, environment count, etc.) on top of the spec-defined
+/// limits. Pass `undefined` for spec-only limits; pass a
+/// `CallerLimits` instance to apply additional restrictions.
 #[wasm_bindgen(js_name = "decodeJobTemplate")]
 pub fn decode_job_template(
     input: &str,
     format: Option<JsDocumentType>,
+    limits: JsValue,
 ) -> Result<JsJobTemplate, JsError> {
-    decode_job_template_str(input, format).map_err(|e| JsError::new(&e))
+    let parsed = JsCallerLimits::from_js_value(limits)?;
+    decode_job_template_str(input, format, parsed.as_ref()).map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_job_template`].
@@ -323,20 +412,15 @@ pub fn decode_job_template(
 pub fn decode_job_template_str(
     input: &str,
     format: Option<JsDocumentType>,
+    limits: Option<&JsCallerLimits>,
 ) -> Result<JsJobTemplate, String> {
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
-    let value = openjd_model::parse::document_string_to_object(
-        input,
-        doc_type,
-        &openjd_model::CallerLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
-    let template = openjd_model::decode_job_template(
-        value,
-        Some(SUPPORTED_EXTENSIONS),
-        &openjd_model::CallerLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
+    let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
+        .map_err(|e| e.to_string())?;
+    let template =
+        openjd_model::decode_job_template(value, Some(SUPPORTED_EXTENSIONS), &rust_limits)
+            .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
 }
 
@@ -345,24 +429,33 @@ pub fn decode_job_template_str(
 /// Mirrors the Python binding `decode_job_template_dict(template)`.
 /// Use this when the caller already has a parsed JSON/YAML object on
 /// the JS side; it skips the string-parsing step entirely.
+///
+/// `limits` applies to validation (step count, env count, etc.). The
+/// `maxTemplateSize` cap is not meaningful here since the byte size
+/// of the source string has already been discarded.
 #[wasm_bindgen(js_name = "decodeJobTemplateFromObject")]
-pub fn decode_job_template_from_object_js(obj: JsValue) -> Result<JsJobTemplate, JsError> {
+pub fn decode_job_template_from_object_js(
+    obj: JsValue,
+    limits: JsValue,
+) -> Result<JsJobTemplate, JsError> {
     let value: serde_json::Value =
         serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
-    decode_job_template_from_object(value).map_err(|e| JsError::new(&e))
+    let parsed = JsCallerLimits::from_js_value(limits)?;
+    decode_job_template_from_object(value, parsed.as_ref()).map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_job_template_from_object_js`].
-pub fn decode_job_template_from_object(value: serde_json::Value) -> Result<JsJobTemplate, String> {
+pub fn decode_job_template_from_object(
+    value: serde_json::Value,
+    limits: Option<&JsCallerLimits>,
+) -> Result<JsJobTemplate, String> {
     if !value.is_object() {
         return Err("Template must be a JSON/YAML object".to_string());
     }
-    let template = openjd_model::decode_job_template(
-        value,
-        Some(SUPPORTED_EXTENSIONS),
-        &openjd_model::CallerLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
+    let template =
+        openjd_model::decode_job_template(value, Some(SUPPORTED_EXTENSIONS), &rust_limits)
+            .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
 }
 
@@ -370,26 +463,30 @@ pub fn decode_job_template_from_object(value: serde_json::Value) -> Result<JsJob
 ///
 /// Mirrors the Python binding
 /// `decode_environment_template_str(document, format=DocumentType.YAML)`.
+///
+/// `limits` applies only the `maxTemplateSize` cap here, since
+/// `openjd_model::decode_environment_template` does not accept
+/// `CallerLimits` at the validation step.
 #[wasm_bindgen(js_name = "decodeEnvironmentTemplate")]
 pub fn decode_environment_template(
     input: &str,
     format: Option<JsDocumentType>,
+    limits: JsValue,
 ) -> Result<JsEnvironmentTemplate, JsError> {
-    decode_environment_template_str(input, format).map_err(|e| JsError::new(&e))
+    let parsed = JsCallerLimits::from_js_value(limits)?;
+    decode_environment_template_str(input, format, parsed.as_ref()).map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_environment_template`].
 pub fn decode_environment_template_str(
     input: &str,
     format: Option<JsDocumentType>,
+    limits: Option<&JsCallerLimits>,
 ) -> Result<JsEnvironmentTemplate, String> {
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
-    let value = openjd_model::parse::document_string_to_object(
-        input,
-        doc_type,
-        &openjd_model::CallerLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
+    let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
+        .map_err(|e| e.to_string())?;
     let template = openjd_model::decode_environment_template(value, Some(SUPPORTED_EXTENSIONS))
         .map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })
@@ -398,18 +495,24 @@ pub fn decode_environment_template_str(
 /// Decode and validate an environment template from a pre-parsed JS object.
 ///
 /// Mirrors the Python binding `decode_environment_template_dict(template)`.
+/// `limits` is accepted for API uniformity with the other decode
+/// entry points, but no cap in `CallerLimits` currently applies to
+/// the object path for environment templates.
 #[wasm_bindgen(js_name = "decodeEnvironmentTemplateFromObject")]
 pub fn decode_environment_template_from_object_js(
     obj: JsValue,
+    limits: JsValue,
 ) -> Result<JsEnvironmentTemplate, JsError> {
     let value: serde_json::Value =
         serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
-    decode_environment_template_from_object(value).map_err(|e| JsError::new(&e))
+    let parsed = JsCallerLimits::from_js_value(limits)?;
+    decode_environment_template_from_object(value, parsed.as_ref()).map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`decode_environment_template_from_object_js`].
 pub fn decode_environment_template_from_object(
     value: serde_json::Value,
+    _limits: Option<&JsCallerLimits>,
 ) -> Result<JsEnvironmentTemplate, String> {
     if !value.is_object() {
         return Err("Template must be a JSON/YAML object".to_string());
@@ -426,15 +529,21 @@ pub fn decode_environment_template_from_object(
 /// `params` is a JS object mapping parameter names to string values.
 /// `pathOptions` controls how `PATH` parameters are resolved. Construct
 /// with `new PathParameterOptions(jobTemplateDir, currentWorkingDir)`.
+///
+/// `limits` lets the host cap task count and other resource limits.
+/// `maxTaskCount` is checked after parameter space expansion.
 #[wasm_bindgen(js_name = "createJob")]
 pub fn create_job(
     template: &JsJobTemplate,
     params: JsValue,
     path_options: &JsPathParameterOptions,
+    limits: JsValue,
 ) -> Result<JsJob, JsError> {
     let raw_params: HashMap<String, String> =
         serde_wasm_bindgen::from_value(params).map_err(serde_wasm_to_js_error)?;
-    create_job_with_map(template, raw_params, path_options).map_err(|e| JsError::new(&e))
+    let parsed = JsCallerLimits::from_js_value(limits)?;
+    create_job_with_map(template, raw_params, path_options, parsed.as_ref())
+        .map_err(|e| JsError::new(&e))
 }
 
 /// Rust-native helper for [`create_job`].
@@ -447,6 +556,7 @@ pub fn create_job_with_map(
     template: &JsJobTemplate,
     raw_params: HashMap<String, String>,
     path_options: &JsPathParameterOptions,
+    limits: Option<&JsCallerLimits>,
 ) -> Result<JsJob, String> {
     let input_values: openjd_model::JobParameterInputValues = raw_params
         .into_iter()
@@ -454,16 +564,13 @@ pub fn create_job_with_map(
         .collect();
 
     let rust_opts = path_options.as_rust();
+    let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
     let param_values =
         openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &rust_opts)
             .map_err(|e| e.to_string())?;
 
-    let job = openjd_model::create_job(
-        &template.inner,
-        &param_values,
-        &openjd_model::CallerLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let job = openjd_model::create_job(&template.inner, &param_values, &rust_limits)
+        .map_err(|e| e.to_string())?;
     Ok(JsJob { inner: job })
 }
 
