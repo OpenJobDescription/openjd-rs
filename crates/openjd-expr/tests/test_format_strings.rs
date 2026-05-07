@@ -6,11 +6,10 @@
 //! Complements the inline unit tests in src/format_string.rs by exercising end-to-end
 //! resolution through the expression evaluator with real symbol tables.
 
-// These tests exercise the deprecated host-context API explicitly; kept
-// in place until the deprecated surface is removed.
-#![allow(deprecated)]
-
-use openjd_expr::{symtab, ExprType, ExprValue, FormatString, FormatStringOptions, SymbolTable};
+use openjd_expr::{
+    symtab, ExprProfile, ExprType, ExprValue, FormatString, FormatStringOptions, FunctionLibrary,
+    HostContext, SymbolTable,
+};
 
 fn resolve_str(input: &str, st: &SymbolTable) -> String {
     FormatString::new(input)
@@ -159,9 +158,9 @@ fn resolve_typed_single_expr_preserves_list() {
 #[test]
 fn validate_catches_undefined_variable() {
     let fs = FormatString::new("{{Param.Missing}}").unwrap();
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+    ));
     let result = fs.validate_expressions(&SymbolTable::new(), &lib);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -172,9 +171,9 @@ fn validate_catches_undefined_variable() {
 fn validate_passes_with_unresolved_types() {
     let fs = FormatString::new("{{Param.X + 1}}").unwrap();
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::INT));
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+    ));
     assert!(fs.validate_expressions(&st, &lib).is_ok());
 }
 

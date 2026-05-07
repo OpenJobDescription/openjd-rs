@@ -128,6 +128,6 @@ fn create_job_with_windows_path_parameter() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     assert_eq!(job.name, r"C:\projects\shot01\render");
 }

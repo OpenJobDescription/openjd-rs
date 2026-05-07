@@ -45,7 +45,7 @@ fn create_and_iterate(
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     let step = &job.steps[0];
     if let Some(ps) = &step.parameter_space {
         let iter = StepParameterSpaceIterator::new(ps).unwrap();
@@ -93,7 +93,7 @@ fn test_no_param_space() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     assert!(job.steps[0].parameter_space.is_none());
 }
 
@@ -486,7 +486,7 @@ fn test_contains_check() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     let iter = StepParameterSpaceIterator::new(ps).unwrap();
 
@@ -602,7 +602,7 @@ fn create_iterator(template_json: &str) -> StepParameterSpaceIterator {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     let step = &job.steps[0];
     let ps = step.parameter_space.as_ref().unwrap();
     StepParameterSpaceIterator::new(ps).unwrap()
@@ -672,7 +672,7 @@ fn test_product_getitem() {
                 },
             )
             .unwrap();
-            let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+            let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
             job.steps[0].parameter_space.clone().unwrap()
         },
     )
@@ -844,7 +844,7 @@ fn lazy_param_space_range_expr_within_limit() {
     );
     let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
     let space = job.steps[0].parameter_space.as_ref().unwrap();
     let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
     assert_eq!(iter.len(), 1024);
@@ -888,7 +888,7 @@ fn product_node_overflow_is_rejected() {
     let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
     // Overflow is caught at create_job time (parameter space iterator validation)
-    let msg = create_job(&jt, &params, &CallerLimits::default())
+    let msg = create_job(&jt, &params, &jt.default_validation_context())
         .unwrap_err()
         .to_string();
     assert!(

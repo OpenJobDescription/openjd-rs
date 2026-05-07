@@ -14,7 +14,7 @@ use crate::profile::{ExprProfile, ExprRevision, HostContext, HostKind, ProfileKe
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(build_default_library);
+pub(crate) static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(build_default_library);
 
 /// Cache of per-profile libraries, keyed by the rules-independent portion
 /// of an [`ExprProfile`].
@@ -23,28 +23,9 @@ static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(build_default_
 /// profile means that callers can construct many libraries sharing the
 /// same (revision, extensions, host kind) but different path-mapping
 /// rules without thrashing the cache — the cached skeleton is cloned
-/// once and `with_host_context(rules)` applied on top.
+/// once and the host-context registrations are applied on top.
 static PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Get the cached default function library (shared, immutable).
-///
-/// Deprecated in favour of [`FunctionLibrary::for_profile`], which
-/// expresses the revision, extensions, and host context as a single
-/// [`ExprProfile`] value rather than as a chain of `with_*` calls on
-/// the library type.
-///
-/// `get_default_library()` is equivalent to
-/// `FunctionLibrary::for_profile(&ExprProfile::current())` with
-/// `HostContext::None`, but returns a `&'static FunctionLibrary` for
-/// backward compatibility with callers that clone from the static.
-#[deprecated(
-    since = "0.2.0",
-    note = "use FunctionLibrary::for_profile(&ExprProfile::current()) instead"
-)]
-pub fn get_default_library() -> &'static FunctionLibrary {
-    &DEFAULT_LIBRARY
-}
 
 /// Build a library skeleton (no host context) for a given profile.
 ///
@@ -801,17 +782,15 @@ fn misc() -> FunctionLibrary {
 
 #[cfg(test)]
 mod tests {
-    // These tests exercise the deprecated `get_default_library()` /
-    // `with_host_context` / `with_unresolved_host_context` API explicitly.
-    // Priority 2 will migrate production call sites; until the deprecated
-    // surface is removed, its tests stay in place.
-    #![allow(deprecated)]
+    // Tests in this module exercise `DEFAULT_LIBRARY` directly because
+    // they inspect the contents of the default skeleton; external callers
+    // go through `FunctionLibrary::for_profile(&ExprProfile::current())`.
     use super::*;
     use crate::types::ExprType;
 
     #[test]
     fn default_library_has_all_categories() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         // Spot check each category
         assert!(!lib.get_signatures("__add__").is_empty(), "arithmetic");
         assert!(!lib.get_signatures("upper").is_empty(), "string functions");
@@ -827,7 +806,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_add_int() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
             Some(ExprType::INT)
@@ -836,7 +815,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_add_float_coercion() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
             Some(ExprType::FLOAT)
@@ -845,7 +824,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_getitem_generic() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type(
                 "__getitem__",
@@ -857,7 +836,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_sorted_generic() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type("sorted", &[ExprType::list(ExprType::INT)]),
             Some(ExprType::list(ExprType::INT))
@@ -866,7 +845,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_comparison_operators() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type("__eq__", &[ExprType::INT, ExprType::INT]),
             Some(ExprType::BOOL)
@@ -887,7 +866,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_contains_operators() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type(
                 "__contains__",
@@ -910,7 +889,7 @@ mod tests {
 
     #[test]
     fn derive_return_type_slice_operators() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.derive_return_type(
                 "__getitem__",
@@ -939,7 +918,7 @@ mod tests {
 
     #[test]
     fn get_property_type_path() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
             lib.get_property_type(&ExprType::PATH, "name"),
             Some(ExprType::STRING)
@@ -957,7 +936,7 @@ mod tests {
 
     #[test]
     fn signature_count() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         let total: usize = lib
             .function_names()
             .map(|n| lib.get_signatures(n).len())
@@ -1007,7 +986,7 @@ mod tests {
 
     #[test]
     fn python_function_names_present() {
-        let lib = get_default_library();
+        let lib = &*DEFAULT_LIBRARY;
         // All function names from the Python implementation
         let expected = vec![
             "__add__",
@@ -1124,9 +1103,9 @@ mod tests {
 
     #[test]
     fn host_context_has_apply_path_mapping() {
-        let lib = get_default_library()
-            .clone()
-            .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
+        let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
+            HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+        ));
         assert!(!lib.get_signatures("apply_path_mapping").is_empty());
         assert!(lib.host_context_enabled);
     }

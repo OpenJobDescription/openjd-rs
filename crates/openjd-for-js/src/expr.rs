@@ -345,9 +345,11 @@ impl JsFunctionLibrary {
     /// Get the default function library with all builtins.
     #[wasm_bindgen(js_name = "default")]
     pub fn get_default() -> JsFunctionLibrary {
-        // Priority 2 will migrate to FunctionLibrary::for_profile.
-        #[allow(deprecated)]
-        let inner = openjd_expr::default_library::get_default_library().clone();
+        // `for_profile` returns `Arc<FunctionLibrary>`; `JsFunctionLibrary`
+        // owns an inner `FunctionLibrary` by value, so clone out of the Arc.
+        let inner =
+            (*openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current()))
+                .clone();
         JsFunctionLibrary { inner }
     }
 
@@ -356,10 +358,12 @@ impl JsFunctionLibrary {
     pub fn with_path_mapping_rules(rules: Vec<JsPathMappingRule>) -> JsFunctionLibrary {
         let rust_rules: Vec<openjd_expr::PathMappingRule> =
             rules.into_iter().map(|r| r.inner).collect();
-        // Priority 2 will migrate to FunctionLibrary::for_profile.
-        #[allow(deprecated)]
-        let lib = openjd_expr::FunctionLibrary::new().with_host_context(rust_rules);
-        JsFunctionLibrary { inner: lib }
+        let inner = (*openjd_expr::FunctionLibrary::for_profile(
+            &openjd_expr::ExprProfile::current()
+                .with_host_context(openjd_expr::HostContext::with_rules(rust_rules)),
+        ))
+        .clone();
+        JsFunctionLibrary { inner }
     }
 }
 

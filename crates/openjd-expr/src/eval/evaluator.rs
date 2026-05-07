@@ -120,14 +120,13 @@ impl<'a> Evaluator<'a> {
             operation_count: 0,
             recursion_depth: 0,
             keyword_renames: &EMPTY_KEYWORD_RENAMES,
-            // We reach for the `&'static FunctionLibrary` variant here
-            // because the evaluator stores a borrow. `for_profile` returns
-            // an `Arc<FunctionLibrary>`; storing that would change the
-            // lifetime shape of `Evaluator` and ripple through its
-            // public API, which is Priority 2 work. The deprecated
-            // static is still correct for the current-revision default.
-            #[allow(deprecated)]
-            library: crate::default_library::get_default_library(),
+            // The evaluator stores a borrow, so we need a &'static
+            // FunctionLibrary. The public `for_profile` API returns an
+            // `Arc<FunctionLibrary>`; switching the evaluator to hold
+            // the Arc would ripple through its public API, so here we
+            // reach into the crate-private static that backs the
+            // `ExprProfile::current()` profile anyway.
+            library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
         }
@@ -135,7 +134,8 @@ impl<'a> Evaluator<'a> {
 
     /// Set a custom function library for operator and function dispatch.
     ///
-    /// Default: [`get_default_library()`](crate::default_library::get_default_library),
+    /// Default: [`FunctionLibrary::for_profile`](crate::FunctionLibrary::for_profile)
+    /// with the current revision's [`ExprProfile`](crate::ExprProfile),
     /// which includes all built-in functions. Use a custom library to add
     /// host-context functions or restrict available operations.
     #[must_use]

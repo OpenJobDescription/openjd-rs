@@ -17,6 +17,7 @@ mod parameters;
 mod step;
 mod task_parameters;
 pub(crate) mod validate_v2023_09;
+pub(crate) mod validation;
 
 // job_template
 pub use job_template::JobTemplate;

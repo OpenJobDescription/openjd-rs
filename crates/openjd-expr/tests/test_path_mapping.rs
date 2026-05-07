@@ -4,11 +4,12 @@
 
 //! Tests ported from Python test_path_mapping.py
 
-// These tests exercise the deprecated host-context API explicitly; kept
-// in place until the deprecated surface is removed.
-#![allow(deprecated)]
+// These tests exercise host-context registration for apply_path_mapping.
+// All call sites go through the non-deprecated FunctionLibrary::for_profile.
 
-use openjd_expr::{ExprValue, PathFormat, PathMappingRule, SymbolTable};
+use openjd_expr::{
+    ExprProfile, ExprValue, FunctionLibrary, HostContext, PathFormat, PathMappingRule, SymbolTable,
+};
 
 fn eval_with_rules(expr: &str, rules: Vec<PathMappingRule>, st: &SymbolTable) -> ExprValue {
     eval_with_rules_fmt(expr, rules, st, PathFormat::Posix)
@@ -22,9 +23,9 @@ fn eval_with_rules_fmt(
 ) -> ExprValue {
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(rules);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(rules)),
+    );
     parsed
         .with_library(&lib)
         .with_path_format(fmt)
@@ -996,9 +997,9 @@ fn apply_path_mapping_rejects_path_input() {
     st.set("P", ExprValue::new_path("/src/file.txt", PathFormat::Posix))
         .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.apply_path_mapping()").unwrap();
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(vec![rule]);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+    );
     let result = parsed.with_library(&lib).evaluate(&[&st]);
     assert!(
         result.is_err(),

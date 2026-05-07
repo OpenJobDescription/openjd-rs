@@ -111,11 +111,22 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let the_job = openjd_model::create_job(
-        &job_template,
-        &param_values,
-        &openjd_model::CallerLimits::default(),
-    )?;
+    let ctx = {
+        let mut exts = std::collections::HashSet::new();
+        if let Some(ext_list) = &job_template.extensions {
+            exts.extend(
+                ext_list
+                    .iter()
+                    .filter_map(|e| e.as_str().parse::<openjd_model::KnownExtension>().ok()),
+            );
+        }
+        openjd_model::ValidationContext::with_extensions(
+            openjd_model::SpecificationRevision::V2023_09,
+            exts,
+        )
+    };
+
+    let the_job = openjd_model::create_job(&job_template, &param_values, &ctx)?;
 
     if let Some(step_name) = &args.step {
         output_step_summary(&the_job, step_name, &args.output)

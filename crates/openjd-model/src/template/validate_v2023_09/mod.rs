@@ -30,6 +30,11 @@ pub struct EffectiveLimits {
     pub max_step_name_len: usize,
     pub max_env_name_len: usize,
     pub max_param_count: usize,
+    /// Maximum parameter count in an *environment template*. This is held
+    /// separately from `max_param_count` because environment templates
+    /// are always capped at 50 in 2023-09, even when `FEATURE_BUNDLE_1`
+    /// raises the job-template limit to 200.
+    pub max_env_template_param_count: usize,
     pub max_filename_len: usize,
     pub max_task_param_range_len: usize,
     pub max_task_param_string_len: usize,
@@ -38,26 +43,25 @@ pub struct EffectiveLimits {
     pub max_description_len: usize,
 }
 
-impl Default for EffectiveLimits {
-    fn default() -> Self {
-        Self {
-            max_identifier_len: 64,
-            max_job_name_len: 128,
-            max_step_name_len: 64,
-            max_env_name_len: 64,
-            max_param_count: 50,
-            max_filename_len: 64,
-            max_task_param_range_len: 1024,
-            max_task_param_string_len: 1024,
-            max_job_param_string_len: 1024,
-            max_command_len: 1024,
-            max_description_len: 2048,
-        }
-    }
-}
+// Note: there is no `Default` impl for `EffectiveLimits`. All call sites
+// must go through `from_context(&ValidationContext)` so that the limits
+// applied match the template's declared revision and extensions. A
+// stand-alone "default" value would duplicate the revision-specific
+// baseline below and could drift silently on the next revision bump.
 
 impl EffectiveLimits {
     pub fn from_context(ctx: &ValidationContext) -> Self {
+        // Dispatch on the revision first so that a future revision can
+        // change baseline limits — or the set of extensions that affect
+        // them — without reshaping this function. Today there is only one
+        // revision; the match records intent and localizes where the first
+        // revision bump needs to plug in.
+        match ctx.revision {
+            crate::types::SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx),
+        }
+    }
+
+    fn from_context_v2023_09(ctx: &ValidationContext) -> Self {
         let fb1 = ctx.has_extension(KnownExtension::FeatureBundle1);
         Self {
             max_identifier_len: if fb1 { 512 } else { 64 },
@@ -65,6 +69,8 @@ impl EffectiveLimits {
             max_step_name_len: if fb1 { 512 } else { 64 },
             max_env_name_len: if fb1 { 512 } else { 64 },
             max_param_count: if fb1 { 200 } else { 50 },
+            // Environment-template param count is NOT raised by FB1 in 2023-09.
+            max_env_template_param_count: 50,
             max_filename_len: if fb1 { 256 } else { 64 },
             max_task_param_range_len: 1024,
             max_task_param_string_len: 1024,
@@ -166,9 +172,9 @@ pub fn validate_environment_template(
     let rules = EffectiveRules::from_context(ctx);
     let mut errors = ValidationErrors::default();
 
-    // Parameter definitions — environment templates are always capped at 50
-    // (FEATURE_BUNDLE_1 does NOT raise this limit for environment templates)
-    const ENV_TEMPLATE_MAX_PARAMS: usize = 50;
+    // Parameter definitions — environment templates have their own cap,
+    // held in `limits.max_env_template_param_count` so the rule is
+    // revision-aware (and does NOT scale with FEATURE_BUNDLE_1 in 2023-09).
     if let Some(params) = &et.parameter_definitions {
         if params.is_empty() {
             errors.add(
@@ -176,12 +182,12 @@ pub fn validate_environment_template(
                 "parameterDefinitions, if provided, must contain at least one element.",
             );
         }
-        if params.len() > ENV_TEMPLATE_MAX_PARAMS {
+        if params.len() > limits.max_env_template_param_count {
             errors.add(
                 &[],
                 format!(
                     "parameterDefinitions must not contain more than {} elements.",
-                    ENV_TEMPLATE_MAX_PARAMS
+                    limits.max_env_template_param_count
                 ),
             );
         }

@@ -63,7 +63,7 @@ fn create_job_step_let_binding_division_by_zero_errors() {
     let mut input = JobParameterInputValues::new();
     input.insert("Divisor".into(), openjd_expr::ExprValue::Int(0));
     let params = preprocess(&jt, &input);
-    let result = create_job(&jt, &params, &CallerLimits::default());
+    let result = create_job(&jt, &params, &jt.default_validation_context());
 
     assert!(
         result.is_err(),
@@ -107,7 +107,7 @@ fn create_job_step_let_binding_type_error_at_instantiation() {
     let mut input = JobParameterInputValues::new();
     input.insert("Count".into(), openjd_expr::ExprValue::Int(5));
     let params = preprocess(&jt, &input);
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
     // Verify the let binding was evaluated and is in the resolved symtab
     let step = &job.steps[0];
     let symtab_json = step

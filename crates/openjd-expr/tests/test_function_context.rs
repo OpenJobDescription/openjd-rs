@@ -4,11 +4,17 @@
 
 //! Tests ported from Python test_function_context.py
 
-// These tests exercise the deprecated host-context API explicitly; kept
-// in place until the deprecated surface is removed.
-#![allow(deprecated)]
-
 use openjd_expr::*;
+
+// Build a host-context library (no path-mapping rules) for use in the
+// expression-evaluation helpers below. Goes through the profile-cached
+// construction path — same library the session path uses.
+fn host_lib_empty() -> std::sync::Arc<FunctionLibrary> {
+    FunctionLibrary::for_profile(
+        &ExprProfile::current()
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new())),
+    )
+}
 
 #[allow(dead_code)]
 fn eval(expr: &str) -> ExprValue {
@@ -21,9 +27,7 @@ fn eval_with_host_context(expr: &str) -> ExprValue {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<PathMappingRule>::new());
+    let lib = host_lib_empty();
     parsed.with_library(&lib).evaluate(&symtabs).unwrap()
 }
 
@@ -32,9 +36,7 @@ fn eval_with_host_context_fails(expr: &str) -> bool {
     let parsed = ParsedExpression::new(expr).unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<PathMappingRule>::new());
+    let lib = host_lib_empty();
     parsed.with_library(&lib).evaluate(&symtabs).is_err()
 }
 
@@ -85,23 +87,25 @@ fn conversion_functions_available() {
 // === Host context ===
 #[test]
 fn default_library_no_host_context() {
-    let lib = default_library::get_default_library();
+    // A profile with HostContext::None yields a library where
+    // host_context_enabled is false and apply_path_mapping is absent.
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
     assert!(!lib.host_context_enabled);
 }
 #[test]
 fn with_host_context_returns_new_library() {
-    let lib = default_library::get_default_library().clone();
-    let result = lib
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
-    assert!(result.host_context_enabled);
-    assert!(!lib.host_context_enabled);
+    // for_profile's cache returns the same Arc for two calls with the
+    // same profile, but HostContext::None and HostContext::WithRules
+    // are distinct profiles that yield distinct libraries — the first
+    // has host_context_enabled == false, the second true.
+    let base = FunctionLibrary::for_profile(&ExprProfile::current());
+    let with_host = host_lib_empty();
+    assert!(with_host.host_context_enabled);
+    assert!(!base.host_context_enabled);
 }
 #[test]
 fn with_host_context_chaining() {
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = host_lib_empty();
     assert!(lib.host_context_enabled);
 }
 
@@ -165,9 +169,7 @@ fn method_syntax_with_host_context() {
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/some/path".into())).unwrap();
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = host_lib_empty();
     let r = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
     assert!(matches!(r, ExprValue::Path { .. }));
 }
@@ -183,9 +185,9 @@ fn with_path_mapping_rules() {
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/old/file.txt".into()))
         .unwrap();
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(vec![rule]);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+    );
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
     let r = parsed
@@ -205,9 +207,9 @@ fn unmatched_path_unchanged() {
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/other/file.txt".into()))
         .unwrap();
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(vec![rule]);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+    );
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
     let r = parsed
@@ -220,9 +222,7 @@ fn unmatched_path_unchanged() {
 #[test]
 fn no_rules_returns_path_unchanged() {
     // Use Posix format so the path isn't normalized to backslashes on Windows
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = host_lib_empty();
     let parsed = ParsedExpression::new("apply_path_mapping('/any/path')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
@@ -339,9 +339,9 @@ fn function_syntax_with_path_mapping_rules() {
         source_path: "/old/path".into(),
         destination_path: "/new/path".into(),
     };
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(vec![rule]);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+    );
     let parsed = ParsedExpression::new("apply_path_mapping('/old/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];
@@ -359,9 +359,9 @@ fn function_syntax_unmatched_path_unchanged() {
         source_path: "/specific/path".into(),
         destination_path: "/mapped/path".into(),
     };
-    let lib = default_library::get_default_library()
-        .clone()
-        .with_host_context(vec![rule]);
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+    );
     let parsed = ParsedExpression::new("apply_path_mapping('/other/path/file.txt')").unwrap();
     let st = SymbolTable::new();
     let symtabs = [&st];

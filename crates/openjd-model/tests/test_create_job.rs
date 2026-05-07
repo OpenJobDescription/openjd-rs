@@ -4,10 +4,6 @@
 
 //! Tests ported from Python test_create_job.py and test_merge_job_parameters.py
 
-// These tests exercise the deprecated host-context API explicitly; kept
-// in place until the deprecated surface is removed.
-#![allow(deprecated)]
-
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::CallerLimits;
 use openjd_model::JobParameterInputValues;
@@ -1040,7 +1036,7 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
         },
     )
     .unwrap();
-    create_job(&jt, &processed, &CallerLimits::default()).unwrap()
+    create_job(&jt, &processed, &jt.default_validation_context()).unwrap()
 }
 
 fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String {
@@ -1068,7 +1064,7 @@ fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String 
         Err(e) => return e.to_string(),
         Ok(p) => p,
     };
-    create_job(&jt, &processed, &CallerLimits::default())
+    create_job(&jt, &processed, &jt.default_validation_context())
         .unwrap_err()
         .to_string()
 }
@@ -2106,7 +2102,7 @@ fn test_uneven_parameter_space_association() {
         },
     )
     .unwrap();
-    let result = create_job(&jt, &processed, &CallerLimits::default());
+    let result = create_job(&jt, &processed, &jt.default_validation_context());
     // The error may occur at create_job or at iteration time
     match result {
         Err(e) => {
@@ -3582,9 +3578,9 @@ fn test_evaluate_let_bindings_chained() {
 #[test]
 fn test_evaluate_let_bindings_with_library() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
-    let lib = openjd_expr::default_library::get_default_library();
+    let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current());
     let bindings = vec!["x = len('hello')".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, Some(lib), PathFormat::Posix).unwrap();
+    let result = evaluate_let_bindings(&bindings, &symtab, Some(&lib), PathFormat::Posix).unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(5)
@@ -3665,7 +3661,7 @@ fn zero_dimension_parameter_space() {
     );
     let jt = decode_job_template(template, None, &CallerLimits::default()).unwrap();
     let params: HashMap<String, openjd_model::JobParameterValue> = HashMap::new();
-    let job = create_job(&jt, &params, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
     let step = &job.steps[0];
     if let Some(ref space) = step.parameter_space {
         let iter = openjd_model::StepParameterSpaceIterator::new(space).unwrap();
@@ -3735,7 +3731,7 @@ fn resolved_symtab_includes_raw_param_for_referenced_path_param() {
         },
     )
     .unwrap();
-    let job = create_job(&jt, &processed, &CallerLimits::default()).unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
     let symtab = job.steps[0]
         .resolved_symtab
         .as_ref()
@@ -3793,7 +3789,7 @@ fn script_let_binding_param_dependent_division_by_zero_is_caught() {
         },
     )
     .unwrap();
-    let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
+    let result = openjd_model::create_job(&jt, &params, &jt.default_validation_context());
     assert!(
         result.is_err(),
         "Script-level let binding '100 / Param.Divisor' with Divisor=0 should error at create_job"
@@ -3847,7 +3843,7 @@ fn script_let_binding_syntax_error_is_caught() {
     // This should be caught either at validation or create_job time
     if let Ok(jt) = result {
         let params = std::collections::HashMap::new();
-        let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
+        let result = openjd_model::create_job(&jt, &params, &jt.default_validation_context());
         assert!(
             result.is_err(),
             "Script-level let binding with syntax error should produce an error"
@@ -3905,7 +3901,7 @@ fn range_expression_evaluation_error_is_caught() {
     )
     .unwrap();
     // "5" is a valid range expression (single value), so this succeeds
-    let result = openjd_model::create_job(&jt, &params, &CallerLimits::default());
+    let result = openjd_model::create_job(&jt, &params, &jt.default_validation_context());
     assert!(
         result.is_ok(),
         "Single int as range expression should work: {:?}",

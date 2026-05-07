@@ -5,10 +5,6 @@
 //! Tests for FunctionLibrary public API: dispatch phases, error messages,
 //! method vs function coercion, host context, and type derivation.
 
-// These tests exercise the deprecated host-context API explicitly; kept
-// in place until the deprecated surface is removed.
-#![allow(deprecated)]
-
 use openjd_expr::function_library::{EvalContext, FunctionLibrary};
 use openjd_expr::value::Float64;
 use openjd_expr::*;
@@ -453,23 +449,23 @@ fn derive_return_type_union_expansion() {
 
 #[test]
 fn with_host_context_enables_apply_path_mapping() {
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_host_context(Vec::<openjd_expr::PathMappingRule>::new());
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+    ));
     assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 }
 
 #[test]
 fn without_host_context_no_apply_path_mapping() {
-    let lib = openjd_expr::default_library::get_default_library();
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
     assert!(lib.get_signatures("apply_path_mapping").is_empty());
 }
 
 #[test]
 fn with_unresolved_host_context_has_signatures() {
-    let lib = openjd_expr::default_library::get_default_library()
-        .clone()
-        .with_unresolved_host_context();
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::Unresolved),
+    );
     assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 }
 
@@ -648,7 +644,7 @@ fn external_custom_fn_evaluates_via_with_library() {
         }
     }
     // Start from the default library so `+`, literals, etc. still work.
-    let mut lib = default_library::get_default_library().clone();
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
     lib.register_sig("triple", "(int) -> int", triple).unwrap();
 
     let parsed = ParsedExpression::new("triple(7) + 1").unwrap();
@@ -667,7 +663,7 @@ fn external_closure_fn_with_captured_state_evaluates() {
     let scale: Arc<i64> = Arc::new(10);
     let scale_cloned = Arc::clone(&scale);
 
-    let mut lib = default_library::get_default_library().clone();
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
     lib.register_sig(
         "scaled",
         "(int) -> int",
@@ -695,7 +691,7 @@ fn external_custom_fn_reads_path_format_from_evalcontext() {
     let seen: Arc<Mutex<Option<openjd_expr::PathFormat>>> = Arc::new(Mutex::new(None));
     let seen_cloned = Arc::clone(&seen);
 
-    let mut lib = default_library::get_default_library().clone();
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
     lib.register_sig(
         "probe",
         "(int) -> int",
@@ -723,7 +719,7 @@ fn external_custom_fn_error_propagates_through_evaluator() {
     fn always_fail(_: &mut dyn EvalContext, _: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
         Err(ExpressionError::new("boom"))
     }
-    let mut lib = default_library::get_default_library().clone();
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
     lib.register_sig("always_fail", "(int) -> int", always_fail)
         .unwrap();
 
@@ -750,7 +746,7 @@ fn external_custom_fn_respects_operation_limit_via_count_op() {
         }
         Ok(ExprValue::Int(0))
     }
-    let mut lib = default_library::get_default_library().clone();
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
     lib.register_sig("busy_loop", "(int) -> int", busy_loop)
         .unwrap();
 

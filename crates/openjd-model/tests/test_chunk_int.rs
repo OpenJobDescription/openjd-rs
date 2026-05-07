@@ -594,7 +594,7 @@ fn create_chunked_job(template_json: &str) -> openjd_model::job::Job {
         },
     )
     .unwrap();
-    create_job(&jt, &processed, &CallerLimits::default()).unwrap()
+    create_job(&jt, &processed, &jt.default_validation_context()).unwrap()
 }
 
 #[test]

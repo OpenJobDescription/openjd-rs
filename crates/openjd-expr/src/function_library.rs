@@ -50,27 +50,6 @@ pub struct FunctionEntry {
     pub implementation: FunctionImpl,
 }
 
-/// Convertible to an `Arc<Vec<PathMappingRule>>` for
-/// [`FunctionLibrary::with_host_context`].
-///
-/// Implemented for `Vec<PathMappingRule>` (takes ownership) and
-/// `Arc<Vec<PathMappingRule>>` (shares the existing allocation).
-pub trait IntoHostContextRules {
-    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>;
-}
-
-impl IntoHostContextRules for Vec<crate::path_mapping::PathMappingRule> {
-    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
-        std::sync::Arc::new(self)
-    }
-}
-
-impl IntoHostContextRules for std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
-    fn into_arc(self) -> std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>> {
-        self
-    }
-}
-
 /// Trait for the evaluator context that function implementations can access.
 pub trait EvalContext {
     fn path_format(&self) -> crate::path_mapping::PathFormat;
@@ -101,55 +80,6 @@ impl FunctionLibrary {
             functions: HashMap::new(),
             host_context_enabled: false,
         }
-    }
-
-    /// Return a copy with host-only functions (like `apply_path_mapping`) enabled.
-    ///
-    /// The supplied `rules` are captured in the closure registered for
-    /// `apply_path_mapping`, so the evaluator does not need to plumb them
-    /// through separately. Accepts any of:
-    /// - `Vec<PathMappingRule>` (common case)
-    /// - `Arc<Vec<PathMappingRule>>` (share rules across libraries cheaply)
-    ///
-    /// If rules change, re-derive the library.
-    ///
-    /// Deprecated in favour of [`FunctionLibrary::for_profile`] with
-    /// [`HostContext::WithRules`](crate::HostContext::WithRules), which
-    /// expresses revision, extensions, and host state as a single profile
-    /// value and participates in the per-profile library cache.
-    #[deprecated(
-        since = "0.2.0",
-        note = "use FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(HostContext::with_rules(rules))) instead"
-    )]
-    #[must_use]
-    pub fn with_host_context<R>(mut self, rules: R) -> Self
-    where
-        R: IntoHostContextRules,
-    {
-        if !self.host_context_enabled {
-            self.host_context_enabled = true;
-            crate::default_library::register_host_context_functions(&mut self, rules.into_arc());
-        }
-        self
-    }
-
-    /// Return a copy with host-only function signatures available, but returning
-    /// `Unresolved(PATH)` instead of actual values. Use at job creation time when
-    /// path mapping rules aren't available yet.
-    ///
-    /// Deprecated in favour of [`FunctionLibrary::for_profile`] with
-    /// [`HostContext::Unresolved`](crate::HostContext::Unresolved).
-    #[deprecated(
-        since = "0.2.0",
-        note = "use FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(HostContext::Unresolved)) instead"
-    )]
-    #[must_use]
-    pub fn with_unresolved_host_context(mut self) -> Self {
-        if !self.host_context_enabled {
-            self.host_context_enabled = true;
-            crate::default_library::register_unresolved_host_context_functions(&mut self);
-        }
-        self
     }
 
     /// Register a function overload with an `ExprType::Signature`.
