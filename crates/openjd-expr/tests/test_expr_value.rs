@@ -1237,3 +1237,69 @@ fn from_transport_value_deeply_nested_rejected() {
         "got: {err}"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// list_elem_type preserves type for empty typed lists
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn empty_list_bool_preserves_elem_type() {
+    let v = ExprValue::ListBool(vec![]);
+    assert_eq!(v.list_elem_type(), Some(ExprType::BOOL));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::BOOL));
+}
+
+#[test]
+fn empty_list_int_preserves_elem_type() {
+    let v = ExprValue::ListInt(vec![]);
+    assert_eq!(v.list_elem_type(), Some(ExprType::INT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT));
+}
+
+#[test]
+fn empty_list_float_preserves_elem_type() {
+    let v = ExprValue::ListFloat(vec![]);
+    assert_eq!(v.list_elem_type(), Some(ExprType::FLOAT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::FLOAT));
+}
+
+#[test]
+fn empty_list_string_preserves_elem_type() {
+    let v = ExprValue::ListString(vec![], 0);
+    assert_eq!(v.list_elem_type(), Some(ExprType::STRING));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::STRING));
+}
+
+#[test]
+fn empty_list_path_preserves_elem_type() {
+    let v = ExprValue::ListPath(vec![], PathFormat::Posix, 0);
+    assert_eq!(v.list_elem_type(), Some(ExprType::PATH));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::PATH));
+}
+
+#[test]
+fn empty_list_roundtrip_via_make_list_preserves_type() {
+    // Simulates: sorted([]) on a list[string] — the empty list goes through
+    // list_elem_type() -> make_list(vec![], hint) and should stay list[string].
+    let original = ExprValue::ListString(vec![], 0);
+    let hint = original.list_elem_type().unwrap();
+    let rebuilt = ExprValue::make_list(vec![], hint).unwrap();
+    assert_eq!(rebuilt.expr_type(), ExprType::list(ExprType::STRING));
+}
+
+#[test]
+fn empty_list_list_with_int_hint_preserves_type() {
+    let v = ExprValue::ListList(vec![], ExprType::INT, 0);
+    assert_eq!(v.list_elem_type(), Some(ExprType::INT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT));
+}
+
+#[test]
+fn nonempty_list_elem_type_unchanged() {
+    // Sanity check: non-empty lists still work as before.
+    let v = ExprValue::ListInt(vec![1, 2, 3]);
+    assert_eq!(v.list_elem_type(), Some(ExprType::INT));
+
+    let v = ExprValue::ListString(vec!["a".into(), "b".into()], 2);
+    assert_eq!(v.list_elem_type(), Some(ExprType::STRING));
+}

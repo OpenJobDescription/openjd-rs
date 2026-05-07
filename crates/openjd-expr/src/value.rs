@@ -878,33 +878,20 @@ impl ExprValue {
     }
 
     /// Element type of a list, or `None` for non-list values.
+    ///
+    /// Returns the element type based on the list variant, even for empty
+    /// lists. For example, an empty `ListString` returns `STRING`, not
+    /// `NULLTYPE`. This ensures that operations on empty typed lists
+    /// (e.g. `sorted([])` where `[]` was originally `list[string]`)
+    /// preserve the element type through round-trips via `into_list` +
+    /// `make_list`.
     pub fn list_elem_type(&self) -> Option<ExprType> {
         match self {
-            Self::ListBool(v) => Some(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::BOOL
-            }),
-            Self::ListInt(v) => Some(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::INT
-            }),
-            Self::ListFloat(v) => Some(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::FLOAT
-            }),
-            Self::ListString(v, _) => Some(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::STRING
-            }),
-            Self::ListPath(v, _, _) => Some(if v.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                ExprType::PATH
-            }),
+            Self::ListBool(_) => Some(ExprType::BOOL),
+            Self::ListInt(_) => Some(ExprType::INT),
+            Self::ListFloat(_) => Some(ExprType::FLOAT),
+            Self::ListString(_, _) => Some(ExprType::STRING),
+            Self::ListPath(_, _, _) => Some(ExprType::PATH),
             Self::ListList(_, elem_type, _) => Some(elem_type.clone()),
             _ => None,
         }
