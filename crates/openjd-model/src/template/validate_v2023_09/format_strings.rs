@@ -334,7 +334,10 @@ pub fn validate_format_strings(
     errors: &mut ValidationErrors,
 ) {
     let expr_active = ctx.has_extension(KnownExtension::Expr);
+    // Priority 2 will migrate to FunctionLibrary::for_profile.
+    #[allow(deprecated)]
     let default_lib = openjd_expr::default_library::get_default_library().clone();
+    #[allow(deprecated)]
     let host_lib = default_lib.clone().with_unresolved_host_context();
 
     // ── Job name: template scope (Param/RawParam only) ──

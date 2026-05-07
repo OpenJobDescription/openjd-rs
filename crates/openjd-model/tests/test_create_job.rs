@@ -4,6 +4,10 @@
 
 //! Tests ported from Python test_create_job.py and test_merge_job_parameters.py
 
+// These tests exercise the deprecated host-context API explicitly; kept
+// in place until the deprecated surface is removed.
+#![allow(deprecated)]
+
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::CallerLimits;
 use openjd_model::JobParameterInputValues;

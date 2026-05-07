@@ -5,6 +5,10 @@
 //! Tests for FunctionLibrary public API: dispatch phases, error messages,
 //! method vs function coercion, host context, and type derivation.
 
+// These tests exercise the deprecated host-context API explicitly; kept
+// in place until the deprecated surface is removed.
+#![allow(deprecated)]
+
 use openjd_expr::function_library::{EvalContext, FunctionLibrary};
 use openjd_expr::value::Float64;
 use openjd_expr::*;

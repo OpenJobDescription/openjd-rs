@@ -120,6 +120,13 @@ impl<'a> Evaluator<'a> {
             operation_count: 0,
             recursion_depth: 0,
             keyword_renames: &EMPTY_KEYWORD_RENAMES,
+            // We reach for the `&'static FunctionLibrary` variant here
+            // because the evaluator stores a borrow. `for_profile` returns
+            // an `Arc<FunctionLibrary>`; storing that would change the
+            // lifetime shape of `Evaluator` and ripple through its
+            // public API, which is Priority 2 work. The deprecated
+            // static is still correct for the current-revision default.
+            #[allow(deprecated)]
             library: crate::default_library::get_default_library(),
             target_type: None,
             regex_cache: std::collections::HashMap::new(),

@@ -207,11 +207,15 @@ fn derive_library(
     base: Option<&FunctionLibrary>,
     rules: &Arc<Vec<PathMappingRule>>,
 ) -> Arc<FunctionLibrary> {
+    // Priority 2 will migrate to FunctionLibrary::for_profile.
+    #[allow(deprecated)]
     let lib = match base {
         Some(b) => b.clone(),
         None => openjd_expr::default_library::get_default_library().clone(),
     };
-    Arc::new(lib.with_host_context(rules.clone()))
+    #[allow(deprecated)]
+    let out = lib.with_host_context(rules.clone());
+    Arc::new(out)
 }
 
 pub struct Session {

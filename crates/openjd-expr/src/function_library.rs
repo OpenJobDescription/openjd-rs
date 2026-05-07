@@ -112,6 +112,15 @@ impl FunctionLibrary {
     /// - `Arc<Vec<PathMappingRule>>` (share rules across libraries cheaply)
     ///
     /// If rules change, re-derive the library.
+    ///
+    /// Deprecated in favour of [`FunctionLibrary::for_profile`] with
+    /// [`HostContext::WithRules`](crate::HostContext::WithRules), which
+    /// expresses revision, extensions, and host state as a single profile
+    /// value and participates in the per-profile library cache.
+    #[deprecated(
+        since = "0.2.0",
+        note = "use FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(HostContext::with_rules(rules))) instead"
+    )]
     #[must_use]
     pub fn with_host_context<R>(mut self, rules: R) -> Self
     where
@@ -127,6 +136,13 @@ impl FunctionLibrary {
     /// Return a copy with host-only function signatures available, but returning
     /// `Unresolved(PATH)` instead of actual values. Use at job creation time when
     /// path mapping rules aren't available yet.
+    ///
+    /// Deprecated in favour of [`FunctionLibrary::for_profile`] with
+    /// [`HostContext::Unresolved`](crate::HostContext::Unresolved).
+    #[deprecated(
+        since = "0.2.0",
+        note = "use FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(HostContext::Unresolved)) instead"
+    )]
     #[must_use]
     pub fn with_unresolved_host_context(mut self) -> Self {
         if !self.host_context_enabled {

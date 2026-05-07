@@ -214,6 +214,8 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Build host-context library with path mapping rules
+    // Priority 2 will migrate to FunctionLibrary::for_profile.
+    #[allow(deprecated)]
     let host_library = openjd_expr::default_library::get_default_library()
         .clone()
         .with_host_context(path_rules.clone());

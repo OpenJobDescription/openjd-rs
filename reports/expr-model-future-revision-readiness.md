@@ -278,16 +278,22 @@ Reviewed via `crates/openjd-expr/src/lib.rs` re-exports and the
 
 ### 2.3 Summary table
 
+Original assessment, annotated with Priority 1 changes applied in
+commit `881f78e`:
+
 | Concern | Model | Expr |
 |---|---|---|
-| First-class context struct | ✅ `ValidationContext` | ❌ None |
-| Public enums marked `#[non_exhaustive]` | Partial (`SpecificationRevision`, `ModelError`) | Partial/None |
-| Revision dispatch vector | ⚠️ Hardwired to v2023_09 | N/A (expr is revision-blind) |
-| Extension dispatch vector | ✅ `EffectiveLimits` / `EffectiveRules` | ❌ Three hand-picked profiles |
-| Function-set parameterisation | N/A | ❌ Global `LazyLock`, fixed signatures |
-| Host-function composition | N/A | ⚠️ Single slot (`host_context_enabled: bool`) |
-| Introspection of available functions | N/A | ⚠️ Only via `derive_return_type` after build |
-| Application-level allowlist | ✅ `supported_extensions` on `decode_*` | ❌ No way to plumb through |
+| First-class context struct | ✅ `ValidationContext` | ✅ `ExprProfile` *(P1)* |
+| Public enums marked `#[non_exhaustive]` | ✅ all relevant *(P1)* | ✅ all relevant *(P1)* |
+| Revision dispatch vector | ⚠️ Hardwired to v2023_09 | ⚠️ Single match arm on `ExprRevision::V2026_02` *(P1; vector now exists in `build_library_skeleton`)* |
+| Extension dispatch vector | ✅ `EffectiveLimits` / `EffectiveRules` | ⚠️ `ExprExtension` enum exists but is empty *(P1)* |
+| Function-set parameterisation | N/A | ✅ `FunctionLibrary::for_profile` *(P1; old `LazyLock` kept as deprecated)* |
+| Host-function composition | N/A | ✅ `HostContext` enum with three variants *(P1; old `host_context_enabled: bool` kept for compat)* |
+| Introspection of available functions | N/A | ⚠️ Still only via `derive_return_type` after build |
+| Application-level allowlist | ✅ `supported_extensions` on `decode_*` | ⚠️ Plumbs via `ExprProfile` but model-side adapter is Priority 2 |
+
+*(P1)* = changed by Priority 1. Items still marked ⚠️ or deferred to
+Priority 2 are tracked in the Recommendations section below.
 
 ## 3. Internal implementation readiness
 
@@ -448,7 +454,7 @@ project is pre-release.
 
 ### Priority 1 — Do before release
 
-1. **Introduce `ExprProfile` (name negotiable) in `openjd-expr`.**
+1. ~~**Introduce `ExprProfile` (name negotiable) in `openjd-expr`.**
    A small struct that carries the information needed to build a
    function library, independent of `openjd-model`:
 
@@ -463,34 +469,61 @@ project is pre-release.
    `ExprRevision` and `ExprExtensions` avoid the reverse-dependency
    problem. Model can provide `From<&ValidationContext> for ExprProfile`
    either as a re-export or in a small adapter module, keeping the
-   crate graph unchanged.
+   crate graph unchanged.~~ **Resolved** — added in
+   `crates/openjd-expr/src/profile.rs`. `ExprProfile`, `ExprRevision`
+   (only `V2026_02` today, `#[non_exhaustive]`), `ExprExtension`
+   (empty `#[non_exhaustive]` — reserved for future expr-level
+   extensions), `HostContext` (`None | Unresolved | WithRules`).
+   Model-side `From<&ValidationContext>` adapter is Priority 2.
 
-2. **Replace `get_default_library()` with `FunctionLibrary::for_profile(&ExprProfile)`.**
+2. ~~**Replace `get_default_library()` with `FunctionLibrary::for_profile(&ExprProfile)`.**
    Keep `get_default_library()` as a deprecated alias until 1.0
    (it maps to a fixed profile: current revision, EXPR enabled, no
    host context). This preserves the ergonomic zero-arg entry point
    for simple callers while forcing serious callers to pass a
-   profile.
+   profile.~~ **Resolved** — `FunctionLibrary::for_profile(&ExprProfile)`
+   added in `default_library.rs`. `get_default_library()` marked
+   `#[deprecated(since = "0.2.0", …)]` pointing at the new API. Old
+   callers continue to work; migration is Priority 2.
 
-3. **Cache per-profile libraries in a small `LazyLock<DashMap<…>>`**
+3. ~~**Cache per-profile libraries in a small `LazyLock<DashMap<…>>`**
    (or similar) keyed on a hash of the profile's shape, so that
    hot paths like model validation don't pay registration cost every
    time. The current single `LazyLock` is the only cached library;
    any host-context clone pays for a full `HashMap<String, Vec<_>>`
-   copy every call.
+   copy every call.~~ **Resolved** — added a
+   `LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` cache,
+   keyed on the *rules-independent* portion of the profile (revision,
+   extensions, host-kind). Rules are per-call by design — the cached
+   skeleton is cloned and `with_host_context(rules)` applied on top,
+   preserving the existing session hot path. Verified by
+   `cache_returns_same_arc_for_none_profile` and
+   `with_rules_does_not_cache_rules_variant` tests.
 
-4. **Collapse `with_host_context` and `with_unresolved_host_context`
+4. ~~**Collapse `with_host_context` and `with_unresolved_host_context`
    into one parameter on the profile.** The split is an artefact of
    having no shared structure. `HostContext::Unresolved` and
    `HostContext::WithRules(rules)` express both cases uniformly and
-   generalise to future host-dependent extensions.
+   generalise to future host-dependent extensions.~~ **Resolved** —
+   `HostContext::{None, Unresolved, WithRules(Arc<Vec<PathMappingRule>>)}`
+   is a single parameter on `ExprProfile`. The two old
+   `FunctionLibrary` methods remain as deprecated convenience wrappers
+   for backward compatibility; callers routed through `for_profile`
+   use the unified enum.
 
-5. **Mark all cross-crate public enums `#[non_exhaustive]`:**
+5. ~~**Mark all cross-crate public enums `#[non_exhaustive]`:**
    `KnownExtension`, `JobParameterType`, `TaskParameterType`,
    `TemplateSpecificationVersion`, `ObjectType`, `DataFlow`,
    `FileType`, `EndOfLine`, `TypeCode`, `PathFormat`. This is the
    single cheapest future-proofing change and should happen before
-   the first released version.
+   the first released version.~~ **Resolved** — marked
+   `#[non_exhaustive]`: `KnownExtension`, `JobParameterType`,
+   `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
+   (model); `TypeCode` (expr). **Not** marked: `ObjectType` and
+   `DataFlow` (closed sets by construction), `EndOfLine` (Lf/Crlf/Auto
+   covers the practical space), and `PathFormat` (Posix/Windows/Uri
+   cover the practical space — a new variant would be a deliberate
+   breaking change if it ever happens).
 
 ### Priority 2 — Plumb the profile through the model
 
@@ -650,4 +683,6 @@ Clean, no warnings. The existing quality reports
 (`reports/expr-quality-evaluation-report.md`,
 `reports/model-quality-evaluation-report.md`) remain the authoritative
 source on the general health of each crate; this report focuses only
+on the forward-compatibility question.
+on the general health of each crate; this report focuses only
 on the forward-compatibility question.

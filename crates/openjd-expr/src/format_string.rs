@@ -625,6 +625,9 @@ pub fn escape_format_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // These tests exercise the deprecated host-context API explicitly.
+    // Kept in place until the deprecated surface is removed.
+    #![allow(deprecated)]
     use super::*;
 
     #[test]

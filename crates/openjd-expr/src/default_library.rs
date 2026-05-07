@@ -10,13 +10,140 @@
 //! is used for static type checking via `derive_return_type`.
 
 use crate::function_library::FunctionLibrary;
-use std::sync::LazyLock;
+use crate::profile::{ExprProfile, ExprRevision, HostContext, HostKind, ProfileKey};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(build_default_library);
 
+/// Cache of per-profile libraries, keyed by the rules-independent portion
+/// of an [`ExprProfile`].
+///
+/// Keeping the cache keyed on [`ProfileKey`] rather than on the full
+/// profile means that callers can construct many libraries sharing the
+/// same (revision, extensions, host kind) but different path-mapping
+/// rules without thrashing the cache — the cached skeleton is cloned
+/// once and `with_host_context(rules)` applied on top.
+static PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Get the cached default function library (shared, immutable).
+///
+/// Deprecated in favour of [`FunctionLibrary::for_profile`], which
+/// expresses the revision, extensions, and host context as a single
+/// [`ExprProfile`] value rather than as a chain of `with_*` calls on
+/// the library type.
+///
+/// `get_default_library()` is equivalent to
+/// `FunctionLibrary::for_profile(&ExprProfile::current())` with
+/// `HostContext::None`, but returns a `&'static FunctionLibrary` for
+/// backward compatibility with callers that clone from the static.
+#[deprecated(
+    since = "0.2.0",
+    note = "use FunctionLibrary::for_profile(&ExprProfile::current()) instead"
+)]
 pub fn get_default_library() -> &'static FunctionLibrary {
     &DEFAULT_LIBRARY
+}
+
+/// Build a library skeleton (no host context) for a given profile.
+///
+/// The skeleton is what goes into the profile cache. Host-context
+/// functions are added on top, in `for_profile`, either as stubs
+/// (`HostContext::Unresolved`) or as closures capturing rules
+/// (`HostContext::WithRules`).
+fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
+    match profile.revision() {
+        ExprRevision::V2026_02 => {
+            // Base library for 2026-02. Future revisions can diverge here.
+            // Expression-level extensions would be merged in based on
+            // `profile.extensions()`; today there are no variants in
+            // `ExprExtension`, so no conditional merges are needed.
+            build_default_library()
+        } // Intentionally no wildcard: this match lives in the same crate
+          // as `ExprRevision`, so adding a new revision variant will
+          // produce a compile error here, forcing an explicit decision
+          // about how the new revision builds its library.
+    }
+}
+
+impl FunctionLibrary {
+    /// Construct or retrieve a cached function library matching the
+    /// given expression profile.
+    ///
+    /// Libraries are cached keyed on the profile's
+    /// (revision, extensions, host-kind) triple. Profiles that differ
+    /// only in the specific `Arc<Vec<PathMappingRule>>` they carry share
+    /// a cached skeleton; the rules are applied as a cheap clone-and-
+    /// register on top for each call.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use openjd_expr::{ExprProfile, FunctionLibrary, HostContext};
+    ///
+    /// // Default library for template validation — host functions available
+    /// // as unresolved type-check stubs.
+    /// let profile = ExprProfile::current().with_host_context(HostContext::Unresolved);
+    /// let lib = FunctionLibrary::for_profile(&profile);
+    /// assert!(lib.host_context_enabled);
+    ///
+    /// // Runtime library with real path mapping rules.
+    /// let profile = ExprProfile::current()
+    ///     .with_host_context(HostContext::with_rules(Vec::new()));
+    /// let lib = FunctionLibrary::for_profile(&profile);
+    /// assert!(lib.host_context_enabled);
+    /// ```
+    pub fn for_profile(profile: &ExprProfile) -> Arc<FunctionLibrary> {
+        // Fast path: look up the skeleton (no-host or unresolved-host)
+        // in the cache. Insert if missing.
+        let key = profile.cache_key();
+        let cached = {
+            let mut cache = PROFILE_CACHE.lock().expect("profile cache mutex poisoned");
+            Arc::clone(cache.entry(key.clone()).or_insert_with(|| {
+                // Build a skeleton *without* any host-context
+                // registrations. For the Unresolved bucket we then
+                // register the stub inline; for WithRules we defer to
+                // the caller below.
+                let mut skeleton = build_library_skeleton(profile);
+                if matches!(key.host_kind, HostKind::Unresolved) {
+                    skeleton.host_context_enabled = true;
+                    register_unresolved_host_context_functions(&mut skeleton);
+                }
+                Arc::new(skeleton)
+            }))
+        };
+
+        // Slow path: WithRules always needs the rules applied on top of
+        // a no-host skeleton. We cache the *no-host* skeleton, not the
+        // WithRules variant, because the rules are per-call.
+        if let HostContext::WithRules(rules) = profile.host_context() {
+            // Pull the no-host skeleton (a separate cache entry, since
+            // the key for this call is `WithRules` but we want the
+            // `None` skeleton underneath). If it's absent, build it.
+            let base_key = ProfileKey {
+                host_kind: HostKind::None,
+                ..key
+            };
+            let base = {
+                let mut cache = PROFILE_CACHE.lock().expect("profile cache mutex poisoned");
+                Arc::clone(
+                    cache
+                        .entry(base_key)
+                        .or_insert_with(|| Arc::new(build_library_skeleton(profile))),
+                )
+            };
+            // Clone the base library and register host context on the clone.
+            // The clone is cheap — `FunctionLibrary` holds `Arc<dyn Fn>`
+            // entries in its `HashMap`.
+            let mut derived = (*base).clone();
+            derived.host_context_enabled = true;
+            register_host_context_functions(&mut derived, Arc::clone(rules));
+            return Arc::new(derived);
+        }
+
+        cached
+    }
 }
 
 /// Build the default library (called once by LazyLock).
@@ -674,6 +801,11 @@ fn misc() -> FunctionLibrary {
 
 #[cfg(test)]
 mod tests {
+    // These tests exercise the deprecated `get_default_library()` /
+    // `with_host_context` / `with_unresolved_host_context` API explicitly.
+    // Priority 2 will migrate production call sites; until the deprecated
+    // surface is removed, its tests stay in place.
+    #![allow(deprecated)]
     use super::*;
     use crate::types::ExprType;
 
@@ -997,5 +1129,98 @@ mod tests {
             .with_host_context(Vec::<crate::path_mapping::PathMappingRule>::new());
         assert!(!lib.get_signatures("apply_path_mapping").is_empty());
         assert!(lib.host_context_enabled);
+    }
+}
+
+#[cfg(test)]
+mod for_profile_tests {
+    //! Tests that use only the non-deprecated `FunctionLibrary::for_profile`
+    //! API. Kept out of the main `tests` module so they prove the new API
+    //! works without relying on the deprecated surface.
+
+    use crate::path_mapping::{PathFormat, PathMappingRule};
+    use crate::profile::{ExprProfile, HostContext};
+    use crate::FunctionLibrary;
+
+    #[test]
+    fn default_profile_has_builtins() {
+        let lib = FunctionLibrary::for_profile(&ExprProfile::current());
+        assert!(!lib.get_signatures("__add__").is_empty());
+        assert!(!lib.get_signatures("upper").is_empty());
+        // No host context → no apply_path_mapping.
+        assert!(lib.get_signatures("apply_path_mapping").is_empty());
+        assert!(!lib.host_context_enabled);
+    }
+
+    #[test]
+    fn unresolved_host_context_registers_stub() {
+        let profile = ExprProfile::current().with_host_context(HostContext::Unresolved);
+        let lib = FunctionLibrary::for_profile(&profile);
+        assert!(!lib.get_signatures("apply_path_mapping").is_empty());
+        assert!(lib.host_context_enabled);
+    }
+
+    #[test]
+    fn with_rules_host_context_registers_real_impl() {
+        let rule = PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/src".into(),
+            destination_path: "/dst".into(),
+        };
+        let profile = ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]));
+        let lib = FunctionLibrary::for_profile(&profile);
+        assert!(!lib.get_signatures("apply_path_mapping").is_empty());
+        assert!(lib.host_context_enabled);
+    }
+
+    #[test]
+    fn cache_returns_same_arc_for_none_profile() {
+        // Two requests with the same profile shape should share a cached
+        // skeleton Arc.
+        let profile = ExprProfile::current();
+        let a = FunctionLibrary::for_profile(&profile);
+        let b = FunctionLibrary::for_profile(&profile);
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn cache_returns_same_arc_for_unresolved_profile() {
+        let profile = ExprProfile::current().with_host_context(HostContext::Unresolved);
+        let a = FunctionLibrary::for_profile(&profile);
+        let b = FunctionLibrary::for_profile(&profile);
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn with_rules_does_not_cache_rules_variant() {
+        // Rules are per-call; the returned Arc must be fresh each time
+        // so that different rule sets don't alias.
+        let r1 = vec![PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/a".into(),
+            destination_path: "/b".into(),
+        }];
+        let r2 = vec![PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/c".into(),
+            destination_path: "/d".into(),
+        }];
+        let p1 = ExprProfile::current().with_host_context(HostContext::with_rules(r1));
+        let p2 = ExprProfile::current().with_host_context(HostContext::with_rules(r2));
+        let a = FunctionLibrary::for_profile(&p1);
+        let b = FunctionLibrary::for_profile(&p2);
+        assert!(!std::sync::Arc::ptr_eq(&a, &b));
+    }
+
+    #[test]
+    fn evaluator_works_with_for_profile_library() {
+        // Smoke test: evaluate a simple expression using a library from
+        // for_profile, end-to-end.
+        use crate::{ExprValue, ParsedExpression, SymbolTable};
+        let lib = FunctionLibrary::for_profile(&ExprProfile::current());
+        let parsed = ParsedExpression::new("1 + 2 * 3").unwrap();
+        let st = SymbolTable::new();
+        let v = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
+        assert_eq!(v, ExprValue::Int(7));
     }
 }

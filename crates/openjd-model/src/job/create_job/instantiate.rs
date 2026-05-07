@@ -37,6 +37,8 @@ pub(super) fn instantiate_step(
     // Evaluate step-level let bindings (TEMPLATE scope — no PATH Param.*, no host context)
     if has_expr {
         if let Some(bindings) = &st.let_bindings {
+            // Priority 2 will migrate to FunctionLibrary::for_profile.
+            #[allow(deprecated)]
             let lib = openjd_expr::default_library::get_default_library().clone();
             for binding in bindings {
                 if let Some(eq_pos) = binding.find('=') {
@@ -158,6 +160,8 @@ pub(super) fn instantiate_step(
                     }
                 }
 
+                // Priority 2 will migrate to FunctionLibrary::for_profile.
+                #[allow(deprecated)]
                 let lib = openjd_expr::default_library::get_default_library()
                     .clone()
                     .with_unresolved_host_context();

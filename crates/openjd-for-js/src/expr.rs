@@ -345,9 +345,10 @@ impl JsFunctionLibrary {
     /// Get the default function library with all builtins.
     #[wasm_bindgen(js_name = "default")]
     pub fn get_default() -> JsFunctionLibrary {
-        JsFunctionLibrary {
-            inner: openjd_expr::default_library::get_default_library().clone(),
-        }
+        // Priority 2 will migrate to FunctionLibrary::for_profile.
+        #[allow(deprecated)]
+        let inner = openjd_expr::default_library::get_default_library().clone();
+        JsFunctionLibrary { inner }
     }
 
     /// Create a library with path mapping rules.
@@ -355,6 +356,8 @@ impl JsFunctionLibrary {
     pub fn with_path_mapping_rules(rules: Vec<JsPathMappingRule>) -> JsFunctionLibrary {
         let rust_rules: Vec<openjd_expr::PathMappingRule> =
             rules.into_iter().map(|r| r.inner).collect();
+        // Priority 2 will migrate to FunctionLibrary::for_profile.
+        #[allow(deprecated)]
         let lib = openjd_expr::FunctionLibrary::new().with_host_context(rust_rules);
         JsFunctionLibrary { inner: lib }
     }

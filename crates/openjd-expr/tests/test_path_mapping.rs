@@ -4,6 +4,10 @@
 
 //! Tests ported from Python test_path_mapping.py
 
+// These tests exercise the deprecated host-context API explicitly; kept
+// in place until the deprecated surface is removed.
+#![allow(deprecated)]
+
 use openjd_expr::{ExprValue, PathFormat, PathMappingRule, SymbolTable};
 
 fn eval_with_rules(expr: &str, rules: Vec<PathMappingRule>, st: &SymbolTable) -> ExprValue {

@@ -12,7 +12,12 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// Type codes for expression values.
+///
+/// Marked `#[non_exhaustive]` so that future revisions and extensions can
+/// introduce new primitive types (e.g. `Duration`, `Url`) without a SemVer
+/// break. External callers must use a wildcard arm when matching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[non_exhaustive]
 pub enum TypeCode {
     NullType,
     Bool,

@@ -146,7 +146,12 @@ impl std::str::FromStr for TemplateSpecificationVersion {
 }
 
 /// The type of a job parameter definition.
+///
+/// Marked `#[non_exhaustive]` so that future revisions and extensions can
+/// add parameter types (as RFC 0007 already did for `Bool`, `RangeExpr`,
+/// and the `List[…]` family) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[non_exhaustive]
 pub enum JobParameterType {
     String,
     Int,

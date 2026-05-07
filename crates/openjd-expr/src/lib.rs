@@ -21,6 +21,7 @@ pub mod format_string;
 pub mod function_library;
 pub mod functions;
 pub mod path_mapping;
+pub mod profile;
 pub mod range_expr;
 pub mod symbol_table;
 pub mod types;
@@ -38,6 +39,7 @@ pub use format_string::FormatStringOptions;
 pub use format_string::FormatStringValidationError;
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
+pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
 pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS};
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,

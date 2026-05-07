@@ -6,6 +6,10 @@
 //! Complements the inline unit tests in src/format_string.rs by exercising end-to-end
 //! resolution through the expression evaluator with real symbol tables.
 
+// These tests exercise the deprecated host-context API explicitly; kept
+// in place until the deprecated surface is removed.
+#![allow(deprecated)]
+
 use openjd_expr::{symtab, ExprType, ExprValue, FormatString, FormatStringOptions, SymbolTable};
 
 fn resolve_str(input: &str, st: &SymbolTable) -> String {

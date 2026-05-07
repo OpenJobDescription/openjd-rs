@@ -4,6 +4,10 @@
 
 //! Tests ported from Python test_function_context.py
 
+// These tests exercise the deprecated host-context API explicitly; kept
+// in place until the deprecated surface is removed.
+#![allow(deprecated)]
+
 use openjd_expr::*;
 
 #[allow(dead_code)]
