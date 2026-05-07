@@ -69,8 +69,11 @@ jobs:
       # cargo-about renders `about.hbs` using the workspace Cargo.lock and
       # `about.toml`. The committed THIRD-PARTY-LICENSES is shipped with
       # every release, so it must stay in sync with the dependency graph.
+      # The `cli` feature is required to actually build the cargo-about
+      # binary; without it `cargo install` compiles the crate but emits
+      # "none of the package's binaries are available" and installs nothing.
       - name: Install cargo-about
-        run: cargo install cargo-about --locked
+        run: cargo install cargo-about --locked --features cli
       - name: Check THIRD-PARTY-LICENSES is up to date
         run: bash scripts/check_third_party_licenses.sh
 
