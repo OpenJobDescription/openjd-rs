@@ -23,8 +23,33 @@ use crate::session_log;
 use crate::session_user::SessionUser;
 use std::sync::Arc;
 
-/// Grace time to wait for stdout to close after process exits.
+/// Grace time to wait for `c.wait()` to reap the child when the stdout
+/// read loop exited through a non-kill path (natural EOF, read error) or
+/// after a `NotifyThenTerminate` cancellation where the process may still
+/// be winding down gracefully in response to the notify signal. Used
+/// when no terminate has been issued yet from inside the stdout-read
+/// loop.
 const STDOUT_GRACE_TIME: Duration = Duration::from_secs(5);
+
+/// Grace time to wait for `c.wait()` to reap the child after we have
+/// already issued `send_terminate` from inside the stdout-read loop
+/// (timeout fired, urgent cancel with `time_limit=0`, or
+/// `CancelMethod::Terminate`).
+///
+/// `send_terminate` resolves to SIGKILL on Unix and `TerminateProcess`
+/// (via `kill_process_tree`) on Windows. In these cases the process
+/// tree was killed at least `STDOUT_DRAIN_AFTER_KILL` (1s) ago — by
+/// the time the drain deadline fires and we get here, `c.wait()`
+/// should reap the already-dead child almost immediately. Two seconds
+/// is a generous bound for runtime scheduling delay (especially on
+/// loaded Windows CI) while still being much tighter than the 5s we
+/// allow on graceful-exit paths.
+///
+/// A shorter bound here means the three "timeout should have fired
+/// quickly" integration tests in `tests/test_session.rs` don't pick up
+/// 3-4s of dead time on every run, which in turn means their 10s
+/// assertion holds with comfortable margin on slow CI.
+const STDOUT_GRACE_TIME_POST_TERMINATE: Duration = Duration::from_secs(2);
 
 /// Grace time to drain stdout after sending a kill signal.
 const STDOUT_DRAIN_AFTER_KILL: Duration = Duration::from_secs(1);
@@ -521,6 +546,18 @@ pub async fn run_subprocess(
     // Read merged stdout+stderr from the child
     let mut cancel_requested = false;
     let mut timed_out = false;
+    // True once we've issued `send_terminate` on the process tree from
+    // inside the stdout read loop (timeout path, urgent cancel, or
+    // `CancelMethod::Terminate`). `send_terminate` is the crate's
+    // platform-agnostic "kill now" — SIGKILL on Unix, `TerminateProcess`
+    // via `kill_process_tree` on Windows.
+    //
+    // Stays false for `NotifyThenTerminate` cancel — there the terminate
+    // is only scheduled (via `spawn_delayed_terminate`), so the process
+    // may still be winding down gracefully in response to the notify
+    // signal when the loop exits and needs the longer `STDOUT_GRACE_TIME`
+    // on the final `c.wait()`.
+    let mut terminate_sent = false;
     let mut stdout_collected = String::new();
     let mut saw_fail = false;
 
@@ -564,10 +601,12 @@ pub async fn run_subprocess(
                         (_, Some(limit)) if limit.is_zero() => {
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Urgent cancel (time_limit=0), sending SIGKILL to process group {}", pid);
                             send_terminate(pid);
+                            terminate_sent = true;
                         }
                         (CancelMethod::Terminate, _) => {
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Sending SIGKILL to process group {}", pid);
                             send_terminate(pid);
+                            terminate_sent = true;
                         }
                         (CancelMethod::NotifyThenTerminate { terminate_delay }, _) => {
                             let delay = match time_limit {
@@ -580,6 +619,13 @@ pub async fn run_subprocess(
                             session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Sending SIGTERM to process group {} (grace period: {:?})", pid, delay);
                             send_notify(pid);
                             spawn_delayed_terminate(pid, delay);
+                            // Deliberately do NOT set terminate_sent here —
+                            // the terminate is only scheduled (via
+                            // `spawn_delayed_terminate`), not yet delivered.
+                            // The process may still be exiting gracefully in
+                            // response to the notify signal, and the final
+                            // `c.wait()` should get the longer
+                            // `STDOUT_GRACE_TIME`.
                         }
                     }
                 }
@@ -590,6 +636,7 @@ pub async fn run_subprocess(
                     drain_deadline.as_mut().reset(tokio::time::Instant::now() + STDOUT_DRAIN_AFTER_KILL);
                     session_log!(info, session_id, LogContent::PROCESS_CONTROL, "Action timed out, sending SIGKILL to process group");
                     send_terminate(pid);
+                    terminate_sent = true;
                 }
 
                 n = reader.read_until(b'\n', &mut line_buf) => {
@@ -624,7 +671,17 @@ pub async fn run_subprocess(
 
     // Wait for process to exit
     let exit_status = if let Some(ref mut c) = child {
-        match tokio::time::timeout(STDOUT_GRACE_TIME, c.wait()).await {
+        // If we already issued `send_terminate` from inside the read loop
+        // (timeout, urgent cancel, or Terminate cancel), the child should
+        // be dead and `c.wait()` just needs to reap it — a short bound
+        // is plenty. Otherwise give the full 5s to accommodate graceful
+        // shutdown (natural EOF or `NotifyThenTerminate`).
+        let grace = if terminate_sent {
+            STDOUT_GRACE_TIME_POST_TERMINATE
+        } else {
+            STDOUT_GRACE_TIME
+        };
+        match tokio::time::timeout(grace, c.wait()).await {
             Ok(Ok(s)) => Some(s),
             Ok(Err(_)) => {
                 send_terminate(pid);
