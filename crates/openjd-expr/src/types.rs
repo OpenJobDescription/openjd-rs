@@ -14,7 +14,7 @@ use std::fmt;
 /// Type codes for expression values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 pub enum TypeCode {
-    Null,
+    NullType,
     Bool,
     Int,
     Float,
@@ -72,7 +72,7 @@ impl ExprType {
         params: Vec::new(),
     };
     pub const NULLTYPE: ExprType = ExprType {
-        code: TypeCode::Null,
+        code: TypeCode::NullType,
         params: Vec::new(),
     };
     pub const ANY: ExprType = ExprType {
@@ -527,7 +527,7 @@ fn split_params(s: &str) -> Vec<&str> {
 impl fmt::Display for ExprType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.code {
-            TypeCode::Null => write!(f, "nulltype"),
+            TypeCode::NullType => write!(f, "nulltype"),
             TypeCode::Bool => write!(f, "bool"),
             TypeCode::Int => write!(f, "int"),
             TypeCode::Float => write!(f, "float"),
@@ -562,7 +562,7 @@ impl fmt::Display for ExprType {
                 let non_null: Vec<_> = self
                     .params
                     .iter()
-                    .filter(|t| t.code != TypeCode::Null)
+                    .filter(|t| t.code != TypeCode::NullType)
                     .collect();
                 let has_null = non_null.len() < self.params.len();
                 if has_null && non_null.len() == 1 {

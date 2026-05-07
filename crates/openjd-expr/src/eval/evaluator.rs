@@ -1123,7 +1123,7 @@ impl<'a> Evaluator<'a> {
                 .iter()
                 .filter(|t| {
                     // nulltype is compatible with anything
-                    t.code() == crate::types::TypeCode::Null ||
+                    t.code() == crate::types::TypeCode::NullType ||
                 // int is compatible if float is also present (promotion)
                 (**t == ExprType::INT && seen_types.contains(&ExprType::FLOAT)) ||
                 // float is compatible if int is also present (promotion)
@@ -1138,7 +1138,7 @@ impl<'a> Evaluator<'a> {
             let compatible = dominated.len() == seen_types.len() ||
                 seen_types.len() == 1 ||
                 // All list types are compatible (make_list handles inner promotion)
-                seen_types.iter().all(|t| t.code() == crate::types::TypeCode::List || t.code() == crate::types::TypeCode::Null);
+                seen_types.iter().all(|t| t.code() == crate::types::TypeCode::List || t.code() == crate::types::TypeCode::NullType);
             if !compatible {
                 let type_strs: Vec<String> = seen_types.iter().map(|t| t.to_string()).collect();
                 let msg = if type_strs.len() == 2 {

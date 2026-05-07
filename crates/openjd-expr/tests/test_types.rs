@@ -1342,7 +1342,7 @@ fn value_from_list() {
 fn value_null() {
     let val = ExprValue::Null;
     assert!(matches!(val, ExprValue::Null));
-    assert_eq!(val.expr_type().code(), TypeCode::Null);
+    assert_eq!(val.expr_type().code(), TypeCode::NullType);
 }
 
 #[test]

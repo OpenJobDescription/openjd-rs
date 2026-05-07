@@ -43,7 +43,7 @@ ExprType::FLOAT         // TypeCode::Float
 ExprType::STRING        // TypeCode::String
 ExprType::BOOL          // TypeCode::Bool
 ExprType::PATH          // TypeCode::Path
-ExprType::NULLTYPE      // TypeCode::Null
+ExprType::NULLTYPE      // TypeCode::NullType
 ExprType::NORETURN      // TypeCode::NoReturn
 ExprType::RANGE_EXPR    // TypeCode::RangeExpr
 ExprType::ANY           // TypeCode::Any

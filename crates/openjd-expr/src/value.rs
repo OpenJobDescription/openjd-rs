@@ -385,7 +385,9 @@ impl ExprValue {
                 }
                 crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
                 crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
-                crate::types::TypeCode::Null => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
+                crate::types::TypeCode::NullType => {
+                    Self::ListList(Vec::new(), ExprType::NULLTYPE, 0)
+                }
                 _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
             });
         }
@@ -594,7 +596,7 @@ impl ExprValue {
                     })?;
                 Ok(ExprValue::RangeExpr(r))
             }
-            TypeCode::Null if s == "null" => Ok(ExprValue::Null),
+            TypeCode::NullType if s == "null" => Ok(ExprValue::Null),
             _ => Err(format!("Cannot coerce string to {target}")),
         }
     }
