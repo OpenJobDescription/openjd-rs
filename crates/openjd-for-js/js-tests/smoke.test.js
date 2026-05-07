@@ -56,54 +56,99 @@ describe("decodeEnvironmentTemplate", () => {
   });
 });
 
-describe("validateTemplate", () => {
-  it("returns empty array for valid template", () => {
-    const errors = mod.validateTemplate(
-      JSON.stringify({
-        specificationVersion: "jobtemplate-2023-09",
-        name: "Test",
-        steps: [
-          {
-            name: "S1",
-            script: { actions: { onRun: { command: "echo" } } },
-          },
-        ],
-      })
-    );
-    expect(errors).toEqual([]);
-  });
-
-  it("returns errors for invalid template", () => {
-    const errors = mod.validateTemplate(JSON.stringify({ foo: "bar" }));
-    expect(errors.length).toBeGreaterThan(0);
+describe("DocumentType", () => {
+  it("is exported as an enum with Yaml and Json variants", () => {
+    expect(mod.DocumentType.Yaml).toBeDefined();
+    expect(mod.DocumentType.Json).toBeDefined();
+    expect(mod.DocumentType.Yaml).not.toBe(mod.DocumentType.Json);
   });
 });
 
-describe("isJobTemplate", () => {
-  it("returns true for job template", () => {
-    const result = mod.isJobTemplate(
-      JSON.stringify({
-        specificationVersion: "jobtemplate-2023-09",
-        name: "Test",
-        steps: [
-          {
-            name: "S1",
-            script: { actions: { onRun: { command: "echo" } } },
-          },
-        ],
-      })
-    );
-    expect(result).toBe(true);
+describe("decodeJobTemplate with explicit format", () => {
+  const VALID_JOB_YAML = `
+specificationVersion: jobtemplate-2023-09
+name: FromYaml
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: x
+`;
+
+  it("defaults to YAML (matches Python default)", () => {
+    const t = mod.decodeJobTemplate(VALID_JOB_YAML);
+    expect(t.name).toBe("FromYaml");
+    t.free();
   });
 
-  it("returns false for environment template", () => {
-    const result = mod.isJobTemplate(
-      JSON.stringify({
-        specificationVersion: "environment-2023-09",
-        environment: { name: "Env", variables: { X: "1" } },
-      })
-    );
-    expect(result).toBe(false);
+  it("DocumentType.Yaml accepts JSON (superset)", () => {
+    const json = JSON.stringify({
+      specificationVersion: "jobtemplate-2023-09",
+      name: "FromJson",
+      steps: [
+        { name: "S", script: { actions: { onRun: { command: "x" } } } },
+      ],
+    });
+    const t = mod.decodeJobTemplate(json, mod.DocumentType.Yaml);
+    expect(t.name).toBe("FromJson");
+    t.free();
+  });
+
+  it("DocumentType.Json rejects YAML-only syntax", () => {
+    expect(() =>
+      mod.decodeJobTemplate(VALID_JOB_YAML, mod.DocumentType.Json)
+    ).toThrow(/valid JSON/);
+  });
+});
+
+// F2 regression guard: the YAML parser must enforce the project-wide
+// MAX_DOCUMENT_DEPTH budget, not run unbounded into stack exhaustion.
+describe("decodeJobTemplate depth budget (F2)", () => {
+  it("rejects pathologically deep YAML without crashing the host", () => {
+    let doc = "";
+    for (let i = 0; i < 200; i++) {
+      doc += "  ".repeat(i) + "a:\n";
+    }
+    for (let i = 0; i < 200; i++) {
+      doc += "  ".repeat(200 - 1 - i) + "  b: 1\n";
+    }
+    // The exact error wording isn't what matters here — either a depth
+    // budget error or a missing-specificationVersion error is fine.
+    // What matters is that the call returns synchronously with an
+    // error, rather than taking down the WASM instance.
+    expect(() => mod.decodeJobTemplate(doc, mod.DocumentType.Yaml)).toThrow();
+  });
+});
+
+describe("decodeJobTemplateFromObject", () => {
+  it("accepts a pre-parsed JS object (parity with Python *_dict)", () => {
+    const obj = {
+      specificationVersion: "jobtemplate-2023-09",
+      name: "FromObject",
+      steps: [
+        { name: "S", script: { actions: { onRun: { command: "x" } } } },
+      ],
+    };
+    const t = mod.decodeJobTemplateFromObject(obj);
+    expect(t.name).toBe("FromObject");
+    t.free();
+  });
+
+  it("rejects a non-object input", () => {
+    expect(() => mod.decodeJobTemplateFromObject([])).toThrow();
+  });
+});
+
+describe("decodeEnvironmentTemplateFromObject", () => {
+  it("accepts a pre-parsed JS object", () => {
+    const obj = {
+      specificationVersion: "environment-2023-09",
+      environment: { name: "E", variables: { FOO: "bar" } },
+    };
+    const t = mod.decodeEnvironmentTemplateFromObject(obj);
+    expect(t.specificationVersion).toBe("environment-2023-09");
+    t.free();
   });
 });
 

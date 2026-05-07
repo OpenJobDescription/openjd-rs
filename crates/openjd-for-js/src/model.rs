@@ -30,18 +30,6 @@ impl JsJobTemplate {
         self.inner.specification_version.clone()
     }
 
-    /// Get the full template as a JS object via JSON serialization.
-    #[wasm_bindgen(js_name = "toJSON")]
-    pub fn to_json(&self) -> Result<JsValue, JsError> {
-        // Serialize the YAML value back to JSON for JS consumption
-        let yaml_str = serde_yaml::to_string(
-            &serde_yaml::to_value(&self.inner.specification_version)
-                .map_err(|e| JsError::new(&e.to_string()))?,
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(JsValue::from_str(&yaml_str))
-    }
-
     /// Number of steps.
     #[wasm_bindgen(getter, js_name = "stepCount")]
     pub fn step_count(&self) -> usize {
@@ -289,108 +277,146 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "FEATURE_BUNDLE_1",
 ];
 
-/// Decode and validate a job template from a JSON/YAML string.
+/// Document format for template string input.
+///
+/// Mirrors [`openjd_model::parse::DocumentType`] and the `DocumentType`
+/// enum exported by the Python bindings (`openjd._openjd_rs.DocumentType`).
+/// `Yaml` is the safe default for untrusted input because YAML is a
+/// strict superset of JSON — a caller that doesn't know which format
+/// they received can pass `Yaml` and get the correct answer either way.
+#[wasm_bindgen(js_name = "DocumentType")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JsDocumentType {
+    Yaml = 0,
+    Json = 1,
+}
+
+impl JsDocumentType {
+    /// Convert to the Rust-side enum. Public so the rlib tests can
+    /// verify the mapping.
+    pub fn into_inner(self) -> openjd_model::parse::DocumentType {
+        match self {
+            JsDocumentType::Yaml => openjd_model::parse::DocumentType::Yaml,
+            JsDocumentType::Json => openjd_model::parse::DocumentType::Json,
+        }
+    }
+}
+
+/// Decode and validate a job template from a string.
+///
+/// `format` selects JSON or YAML parsing. If omitted, defaults to
+/// `DocumentType.Yaml` — which also accepts JSON, since JSON is a
+/// subset of YAML. Mirrors the Python binding
+/// `decode_job_template_str(document, format=DocumentType.YAML)`.
 #[wasm_bindgen(js_name = "decodeJobTemplate")]
-pub fn decode_job_template(input: &str) -> Result<JsJobTemplate, JsError> {
-    let yaml_value: serde_json::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
+pub fn decode_job_template(
+    input: &str,
+    format: Option<JsDocumentType>,
+) -> Result<JsJobTemplate, JsError> {
+    decode_job_template_str(input, format).map_err(|e| JsError::new(&e))
+}
+
+/// Rust-native helper for [`decode_job_template`].
+///
+/// Exposed as a plain Rust function so rlib-target tests can exercise
+/// the behavior without the `JsError` wrapping layer.
+pub fn decode_job_template_str(
+    input: &str,
+    format: Option<JsDocumentType>,
+) -> Result<JsJobTemplate, String> {
+    let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
+    let value = openjd_model::parse::document_string_to_object(
+        input,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
     let template = openjd_model::decode_job_template(
-        yaml_value,
+        value,
         Some(SUPPORTED_EXTENSIONS),
         &openjd_model::CallerLimits::default(),
     )
-    .map_err(to_js_error)?;
+    .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
 }
 
-/// Decode and validate an environment template from a JSON/YAML string.
-#[wasm_bindgen(js_name = "decodeEnvironmentTemplate")]
-pub fn decode_environment_template(input: &str) -> Result<JsEnvironmentTemplate, JsError> {
-    let yaml_value: serde_json::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
-    let template =
-        openjd_model::decode_environment_template(yaml_value, Some(SUPPORTED_EXTENSIONS))
-            .map_err(to_js_error)?;
-    Ok(JsEnvironmentTemplate { inner: template })
+/// Decode and validate a job template from a pre-parsed JS object.
+///
+/// Mirrors the Python binding `decode_job_template_dict(template)`.
+/// Use this when the caller already has a parsed JSON/YAML object on
+/// the JS side; it skips the string-parsing step entirely.
+#[wasm_bindgen(js_name = "decodeJobTemplateFromObject")]
+pub fn decode_job_template_from_object_js(obj: JsValue) -> Result<JsJobTemplate, JsError> {
+    let value: serde_json::Value =
+        serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
+    decode_job_template_from_object(value).map_err(|e| JsError::new(&e))
 }
 
-/// Validate a template string. Returns an array of structured error objects (empty = valid).
-/// Each error has `path` (array of {type, value} elements), `message`, and `severity` fields.
-#[wasm_bindgen(js_name = "validateTemplate")]
-pub fn validate_template(input: &str) -> Result<JsValue, JsError> {
-    let yaml_value: serde_json::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
-    match openjd_model::decode_template(
-        yaml_value,
-        Some(SUPPORTED_EXTENSIONS),
-        &openjd_model::CallerLimits::default(),
-    ) {
-        Ok(_) => serde_wasm_bindgen::to_value(&Vec::<serde_json::Value>::new())
-            .map_err(serde_wasm_to_js_error),
-        Err(openjd_model::ModelError::ModelValidation(errors)) => {
-            let js_errors: Vec<serde_json::Value> = errors
-                .errors
-                .iter()
-                .map(|e| {
-                    let path_elements: Vec<serde_json::Value> = e
-                        .path
-                        .iter()
-                        .map(|p| match p {
-                            openjd_model::PathElement::Field(name) => {
-                                serde_json::json!({"type": "field", "value": name})
-                            }
-                            openjd_model::PathElement::Index(i) => {
-                                serde_json::json!({"type": "index", "value": i})
-                            }
-                        })
-                        .collect();
-                    serde_json::json!({
-                        "path": path_elements,
-                        "message": e.message,
-                        "severity": "error",
-                    })
-                })
-                .collect();
-            serde_wasm_bindgen::to_value(&js_errors).map_err(serde_wasm_to_js_error)
-        }
-        Err(e) => {
-            // Fatal decode error — return as a single root-level error
-            let js_errors = vec![serde_json::json!({
-                "path": [],
-                "message": e.to_string(),
-                "severity": "error",
-            })];
-            serde_wasm_bindgen::to_value(&js_errors).map_err(serde_wasm_to_js_error)
-        }
+/// Rust-native helper for [`decode_job_template_from_object_js`].
+pub fn decode_job_template_from_object(value: serde_json::Value) -> Result<JsJobTemplate, String> {
+    if !value.is_object() {
+        return Err("Template must be a JSON/YAML object".to_string());
     }
-}
-
-/// Check if a template string is a job template (true), environment template (false), or invalid (throws).
-#[wasm_bindgen(js_name = "isJobTemplate")]
-pub fn is_job_template(input: &str) -> Result<bool, JsError> {
-    let yaml_value: serde_json::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
-    match openjd_model::decode_template(
-        yaml_value,
-        Some(SUPPORTED_EXTENSIONS),
-        &openjd_model::CallerLimits::default(),
-    ) {
-        Ok(openjd_model::DecodedTemplate::Job(_)) => Ok(true),
-        Ok(openjd_model::DecodedTemplate::Environment(_)) => Ok(false),
-        Err(e) => Err(to_js_error(e)),
-    }
-}
-
-/// Get the specification version from a template string.
-#[wasm_bindgen(js_name = "getSpecVersion")]
-pub fn get_spec_version(input: &str) -> Result<String, JsError> {
-    let yaml_value: serde_json::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
-    let decoded = openjd_model::decode_template(
-        yaml_value,
+    let template = openjd_model::decode_job_template(
+        value,
         Some(SUPPORTED_EXTENSIONS),
         &openjd_model::CallerLimits::default(),
     )
-    .map_err(to_js_error)?;
-    match decoded {
-        openjd_model::DecodedTemplate::Job(t) => Ok(t.specification_version.to_string()),
-        openjd_model::DecodedTemplate::Environment(t) => Ok(t.specification_version.to_string()),
+    .map_err(|e| e.to_string())?;
+    Ok(JsJobTemplate { inner: template })
+}
+
+/// Decode and validate an environment template from a string.
+///
+/// Mirrors the Python binding
+/// `decode_environment_template_str(document, format=DocumentType.YAML)`.
+#[wasm_bindgen(js_name = "decodeEnvironmentTemplate")]
+pub fn decode_environment_template(
+    input: &str,
+    format: Option<JsDocumentType>,
+) -> Result<JsEnvironmentTemplate, JsError> {
+    decode_environment_template_str(input, format).map_err(|e| JsError::new(&e))
+}
+
+/// Rust-native helper for [`decode_environment_template`].
+pub fn decode_environment_template_str(
+    input: &str,
+    format: Option<JsDocumentType>,
+) -> Result<JsEnvironmentTemplate, String> {
+    let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
+    let value = openjd_model::parse::document_string_to_object(
+        input,
+        doc_type,
+        &openjd_model::CallerLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
+    let template = openjd_model::decode_environment_template(value, Some(SUPPORTED_EXTENSIONS))
+        .map_err(|e| e.to_string())?;
+    Ok(JsEnvironmentTemplate { inner: template })
+}
+
+/// Decode and validate an environment template from a pre-parsed JS object.
+///
+/// Mirrors the Python binding `decode_environment_template_dict(template)`.
+#[wasm_bindgen(js_name = "decodeEnvironmentTemplateFromObject")]
+pub fn decode_environment_template_from_object_js(
+    obj: JsValue,
+) -> Result<JsEnvironmentTemplate, JsError> {
+    let value: serde_json::Value =
+        serde_wasm_bindgen::from_value(obj).map_err(serde_wasm_to_js_error)?;
+    decode_environment_template_from_object(value).map_err(|e| JsError::new(&e))
+}
+
+/// Rust-native helper for [`decode_environment_template_from_object_js`].
+pub fn decode_environment_template_from_object(
+    value: serde_json::Value,
+) -> Result<JsEnvironmentTemplate, String> {
+    if !value.is_object() {
+        return Err("Template must be a JSON/YAML object".to_string());
     }
+    let template = openjd_model::decode_environment_template(value, Some(SUPPORTED_EXTENSIONS))
+        .map_err(|e| e.to_string())?;
+    Ok(JsEnvironmentTemplate { inner: template })
 }
 
 // ── Job creation ───────────────────────────────────────────────────
@@ -521,11 +547,4 @@ pub fn evaluate_let_bindings(
     )
     .map_err(to_js_error)?;
     Ok(JsSymbolTable { inner: result })
-}
-
-/// Parse a YAML or JSON string into a JS object.
-#[wasm_bindgen(js_name = "parseYaml")]
-pub fn parse_yaml(input: &str) -> Result<JsValue, JsError> {
-    let value: serde_yaml::Value = serde_yaml::from_str(input).map_err(yaml_to_js_error)?;
-    serde_wasm_bindgen::to_value(&value).map_err(serde_wasm_to_js_error)
 }

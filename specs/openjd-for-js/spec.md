@@ -90,11 +90,14 @@ This mirrors the PyO3 pattern used in the Python bindings where `PyJobTemplate` 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `decodeJobTemplate` | `(input: string) → JobTemplate` | Parse + validate a job template from JSON/YAML string. Throws `DecodeValidationError` or `ModelValidationError` on failure. |
-| `decodeJobTemplateFromObject` | `(obj: object) → JobTemplate` | Parse + validate from a JS object (already parsed JSON). |
-| `decodeEnvironmentTemplate` | `(input: string) → EnvironmentTemplate` | Parse + validate an environment template from string. |
-| `decodeEnvironmentTemplateFromObject` | `(obj: object) → EnvironmentTemplate` | Parse + validate from a JS object. |
-| `validateTemplate` | `(input: string) → string[]` | Validate without throwing. Returns array of error messages (empty = valid). |
+| `decodeJobTemplate` | `(document: string, format?: DocumentType) → JobTemplate` | Parse + validate a job template from a string. `format` defaults to `DocumentType.Yaml` (YAML is a superset of JSON, so this accepts either). Mirrors the Python binding `decode_job_template_str`. Throws on failure. |
+| `decodeJobTemplateFromObject` | `(obj: object) → JobTemplate` | Parse + validate from a pre-parsed JS object, skipping string parsing. Mirrors the Python binding `decode_job_template_dict`. |
+| `decodeEnvironmentTemplate` | `(document: string, format?: DocumentType) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_str`. |
+| `decodeEnvironmentTemplateFromObject` | `(obj: object) → EnvironmentTemplate` | As above, for environment templates. Mirrors `decode_environment_template_dict`. |
+
+Callers who want non-throwing validation use `try { decodeJobTemplate(...) } catch (e) { ... }` — matching how the Python bindings handle validation errors. There is no separate `validateTemplate` function.
+
+`DocumentType` is a top-level enum with variants `Yaml` and `Json`. Mirrors `openjd_model::parse::DocumentType` and the Python `openjd._openjd_rs.DocumentType`.
 
 #### Job Creation
 
@@ -425,7 +428,8 @@ console.log(fmt.resolve(symbols)); // "/renders/shot01/frame.####.exr"
 ## Implementation Phases
 
 ### Phase 1: Core (MVP for viewer integration)
-- `decodeJobTemplate`, `decodeEnvironmentTemplate`, `validateTemplate`
+- `decodeJobTemplate`, `decodeEnvironmentTemplate`, `DocumentType`
+- `decodeJobTemplateFromObject`, `decodeEnvironmentTemplateFromObject`
 - `JobTemplate`, `EnvironmentTemplate` wrapper types with getters
 - Error types
 - Build pipeline (cargo + wasm-bindgen + wasm-opt)
@@ -470,7 +474,7 @@ Based on the proven methodology used to port OpenJD from Python to Rust (see `sp
 The conformance suite in `openjd-specifications/conformance-tests` exercises template validation and job execution through `openjd check` and `openjd run`. We adapt this for JS:
 
 1. Load the WASM module in Node.js (Vitest test runner)
-2. For each conformance test case, call `validateTemplate()` or `decodeJobTemplate()` through the JS bindings
+2. For each conformance test case, call `decodeJobTemplate()` (or `decodeEnvironmentTemplate()`) through the JS bindings, expect throw for check-fail cases
 3. Assert pass/fail matches the expected result
 4. Grind until 100% conformance suite pass rate
 
@@ -569,7 +573,7 @@ crates/openjd-for-js/
 Load each template from `openjd-specifications/conformance-tests`, call through JS bindings, assert pass/fail:
 
 ```js
-import { decodeJobTemplate, validateTemplate } from 'openjd-for-js';
+import { decodeJobTemplate } from 'openjd-for-js';
 
 // For each .json/.yaml in conformance-tests/check-pass/
 test('conformance: check-pass/basic-job.yaml', () => {
@@ -578,8 +582,7 @@ test('conformance: check-pass/basic-job.yaml', () => {
 
 // For each .json/.yaml in conformance-tests/check-fail/
 test('conformance: check-fail/missing-steps.yaml', () => {
-  const errors = validateTemplate(readFile('missing-steps.yaml'));
-  expect(errors.length).toBeGreaterThan(0);
+  expect(() => decodeJobTemplate(readFile('missing-steps.yaml'))).toThrow();
 });
 ```
 

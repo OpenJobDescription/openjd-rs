@@ -31,11 +31,6 @@ pub fn symtab_to_js_error(e: openjd_expr::SymbolTableError) -> JsError {
     JsError::new(&e.to_string())
 }
 
-// Convenience: convert serde_yaml parse errors
-pub fn yaml_to_js_error(e: serde_yaml::Error) -> JsError {
-    JsError::new(&format!("Parse error: {e}"))
-}
-
 // Convenience: convert serde_wasm_bindgen errors
 pub fn serde_wasm_to_js_error(e: serde_wasm_bindgen::Error) -> JsError {
     JsError::new(&format!("Serialization error: {e}"))

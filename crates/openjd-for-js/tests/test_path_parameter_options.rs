@@ -94,7 +94,7 @@ fn path_format_uri_variant_round_trips() {
 /// `reports/openjd-for-js-security-review.md` finding F1.
 #[test]
 fn create_job_rejects_absolute_path_default_by_default() {
-    use openjd_for_js::model::decode_job_template;
+    use openjd_for_js::model::decode_job_template_str;
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -107,7 +107,7 @@ fn create_job_rejects_absolute_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     // Construct an empty params value as JsValue. On non-wasm we can't
@@ -133,7 +133,7 @@ fn create_job_rejects_absolute_path_default_by_default() {
 /// Rust API's behavior.
 #[test]
 fn create_job_accepts_absolute_path_default_with_walk_up() {
-    use openjd_for_js::model::{create_job_with_map, decode_job_template};
+    use openjd_for_js::model::{create_job_with_map, decode_job_template_str};
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -146,7 +146,7 @@ fn create_job_accepts_absolute_path_default_with_walk_up() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new("/tmpl", "/cwd");
     opts.set_allow_template_dir_walk_up(true);
 
@@ -158,7 +158,7 @@ fn create_job_accepts_absolute_path_default_with_walk_up() {
 /// is false (the default) even with `EXPR` enabled.
 #[test]
 fn create_job_rejects_uri_path_default_by_default() {
-    use openjd_for_js::model::{create_job_with_map, decode_job_template};
+    use openjd_for_js::model::{create_job_with_map, decode_job_template_str};
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -172,7 +172,7 @@ fn create_job_rejects_uri_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     let params = std::collections::HashMap::<String, String>::new();
@@ -191,7 +191,7 @@ fn create_job_rejects_uri_path_default_by_default() {
 /// and EXPR is enabled on the template.
 #[test]
 fn create_job_accepts_uri_path_default_with_flag() {
-    use openjd_for_js::model::{create_job_with_map, decode_job_template};
+    use openjd_for_js::model::{create_job_with_map, decode_job_template_str};
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -205,7 +205,7 @@ fn create_job_accepts_uri_path_default_with_flag() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new("/tmpl", "/cwd");
     opts.set_allow_uri_path_values(true);
 
@@ -218,7 +218,7 @@ fn create_job_accepts_uri_path_default_with_flag() {
 /// confirms both call sites were updated.
 #[test]
 fn preprocess_rejects_absolute_path_default_by_default() {
-    use openjd_for_js::model::{decode_job_template, preprocess_job_parameters_with_map};
+    use openjd_for_js::model::{decode_job_template_str, preprocess_job_parameters_with_map};
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -231,7 +231,7 @@ fn preprocess_rejects_absolute_path_default_by_default() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
 
     let params = std::collections::HashMap::<String, String>::new();
@@ -255,7 +255,7 @@ fn preprocess_rejects_absolute_path_default_by_default() {
 /// template directory").
 #[test]
 fn windows_path_format_rejects_escaping_default() {
-    use openjd_for_js::model::{create_job_with_map, decode_job_template};
+    use openjd_for_js::model::{create_job_with_map, decode_job_template_str};
 
     let template_json = r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -268,7 +268,7 @@ fn windows_path_format_rejects_escaping_default() {
         ]
     }"#;
 
-    let template = decode_job_template(template_json).expect("template decodes");
+    let template = decode_job_template_str(template_json, None).expect("template decodes");
     let mut opts = JsPathParameterOptions::new(r"C:\tmpl", r"C:\cwd");
     opts.set_path_format(JsPathFormat::Windows);
 
