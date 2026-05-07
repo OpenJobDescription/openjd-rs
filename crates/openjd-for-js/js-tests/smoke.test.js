@@ -294,30 +294,36 @@ describe("createJob", () => {
 
   it("creates a job with default parameters", () => {
     const template = mod.decodeJobTemplate(TEMPLATE_WITH_PARAMS);
-    const job = mod.createJob(template, {});
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts);
     expect(job.name).toBe("DefaultJob");
     expect(job.stepCount).toBe(1);
     expect(job.stepNames).toEqual(["Render"]);
     job.free();
+    opts.free();
     template.free();
   });
 
   it("creates a job with custom parameters", () => {
     const template = mod.decodeJobTemplate(TEMPLATE_WITH_PARAMS);
-    const job = mod.createJob(template, { JobName: "MyJob" });
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, { JobName: "MyJob" }, opts);
     expect(job.name).toBe("MyJob");
     job.free();
+    opts.free();
     template.free();
   });
 
   it("job.toJSON() returns a JS object", () => {
     const template = mod.decodeJobTemplate(TEMPLATE_WITH_PARAMS);
-    const job = mod.createJob(template, { JobName: "JsonTest" });
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, { JobName: "JsonTest" }, opts);
     const json = job.toJSON();
     expect(json.name).toBe("JsonTest");
     expect(json.steps).toHaveLength(1);
     expect(json.steps[0].name).toBe("Render");
     job.free();
+    opts.free();
     template.free();
   });
 });
@@ -343,12 +349,14 @@ describe("StepDependencyGraph", () => {
 
   it("returns topological order", () => {
     const template = mod.decodeJobTemplate(MULTI_STEP);
-    const job = mod.createJob(template, {});
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts);
     const graph = new mod.StepDependencyGraph(job);
     const order = graph.topologicalOrder();
     expect(order.indexOf("Render")).toBeLessThan(order.indexOf("Composite"));
     graph.free();
     job.free();
+    opts.free();
     template.free();
   });
 });
@@ -395,5 +403,136 @@ describe("evaluateLetBindings", () => {
     expect(paths.some((p) => p.includes("Y"))).toBe(true);
     result.free();
     st.free();
+  });
+});
+
+// ── PathParameterOptions ───────────────────────────────────────────
+
+describe("PathParameterOptions", () => {
+  it("constructor sets required fields and safe defaults", () => {
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    expect(opts.jobTemplateDir).toBe("/tmpl");
+    expect(opts.currentWorkingDir).toBe("/cwd");
+    // PathFormat.Posix matches openjd_expr::PathFormat::host() on wasm32.
+    expect(opts.pathFormat).toBe(mod.PathFormat.Posix);
+    expect(opts.allowTemplateDirWalkUp).toBe(false);
+    expect(opts.allowUriPathValues).toBe(false);
+    opts.free();
+  });
+
+  it("setters update fields", () => {
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    opts.jobTemplateDir = "/other";
+    opts.currentWorkingDir = "/wd";
+    opts.pathFormat = mod.PathFormat.Windows;
+    opts.allowTemplateDirWalkUp = true;
+    opts.allowUriPathValues = true;
+
+    expect(opts.jobTemplateDir).toBe("/other");
+    expect(opts.currentWorkingDir).toBe("/wd");
+    expect(opts.pathFormat).toBe(mod.PathFormat.Windows);
+    expect(opts.allowTemplateDirWalkUp).toBe(true);
+    expect(opts.allowUriPathValues).toBe(true);
+    opts.free();
+  });
+
+  it("PathFormat exposes Uri variant (parity with Rust)", () => {
+    expect(mod.PathFormat.Uri).toBeDefined();
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    opts.pathFormat = mod.PathFormat.Uri;
+    expect(opts.pathFormat).toBe(mod.PathFormat.Uri);
+    opts.free();
+  });
+});
+
+// ── F1 regression guards: PATH-default walk-up protection ─────────
+
+describe("createJob PATH default walk-up protection", () => {
+  const TEMPLATE_ABS_PATH_DEFAULT = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    parameterDefinitions: [
+      { name: "Out", type: "PATH", default: "/etc/passwd" },
+    ],
+    steps: [
+      { name: "S", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  it("rejects absolute PATH default with default options (F1)", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_ABS_PATH_DEFAULT);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    expect(() => mod.createJob(template, {}, opts)).toThrow(/absolute path/);
+    opts.free();
+    template.free();
+  });
+
+  it("accepts absolute PATH default when allowTemplateDirWalkUp=true", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_ABS_PATH_DEFAULT);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    opts.allowTemplateDirWalkUp = true;
+    const job = mod.createJob(template, {}, opts);
+    expect(job.name).toBe("T");
+    job.free();
+    opts.free();
+    template.free();
+  });
+});
+
+describe("createJob URI path value protection", () => {
+  const TEMPLATE_URI_PATH_DEFAULT = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    extensions: ["EXPR"],
+    parameterDefinitions: [
+      { name: "Out", type: "PATH", default: "s3://bucket/key" },
+    ],
+    steps: [
+      { name: "S", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  it("rejects URI PATH default with default options (F3)", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_URI_PATH_DEFAULT);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    expect(() => mod.createJob(template, {}, opts)).toThrow(
+      /URI path values are not permitted/
+    );
+    opts.free();
+    template.free();
+  });
+
+  it("accepts URI PATH default when allowUriPathValues=true", () => {
+    const template = mod.decodeJobTemplate(TEMPLATE_URI_PATH_DEFAULT);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    opts.allowUriPathValues = true;
+    const job = mod.createJob(template, {}, opts);
+    expect(job.name).toBe("T");
+    job.free();
+    opts.free();
+    template.free();
+  });
+});
+
+describe("preprocessJobParameters", () => {
+  it("applies the same options as createJob (F1 via preprocess)", () => {
+    const template = mod.decodeJobTemplate(
+      JSON.stringify({
+        specificationVersion: "jobtemplate-2023-09",
+        name: "T",
+        parameterDefinitions: [
+          { name: "Out", type: "PATH", default: "/etc/passwd" },
+        ],
+        steps: [
+          { name: "S", script: { actions: { onRun: { command: "x" } } } },
+        ],
+      })
+    );
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    expect(() => mod.preprocessJobParameters(template, {}, opts)).toThrow(
+      /absolute path/
+    );
+    opts.free();
+    template.free();
   });
 });

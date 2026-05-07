@@ -69,6 +69,116 @@ impl JsEnvironmentTemplate {
     }
 }
 
+// ── PathParameterOptions ───────────────────────────────────────────
+
+/// Options controlling how `PATH`-typed job parameters are resolved.
+///
+/// Mirrors [`openjd_model::PathParameterOptions`] field-for-field.
+/// Construct with `new(jobTemplateDir, currentWorkingDir)` — the
+/// remaining fields default to the same values as
+/// `PathParameterOptions::new` in Rust:
+/// - `pathFormat`: Posix (equivalent to `PathFormat::host()` on wasm32,
+///   which always evaluates to Posix since `target_os` is not `windows`),
+/// - `allowTemplateDirWalkUp`: `false`,
+/// - `allowUriPathValues`: `false`.
+///
+/// Tune fields as needed via setters before passing the options to
+/// `createJob` or `preprocessJobParameters`.
+#[wasm_bindgen(js_name = "PathParameterOptions")]
+#[derive(Clone, Debug)]
+pub struct JsPathParameterOptions {
+    job_template_dir: String,
+    current_working_dir: String,
+    path_format: crate::expr::JsPathFormat,
+    allow_template_dir_walk_up: bool,
+    allow_uri_path_values: bool,
+}
+
+#[wasm_bindgen(js_class = "PathParameterOptions")]
+impl JsPathParameterOptions {
+    /// Construct options with the same safe defaults as
+    /// `openjd_model::PathParameterOptions::new` in Rust.
+    #[wasm_bindgen(constructor)]
+    pub fn new(job_template_dir: &str, current_working_dir: &str) -> JsPathParameterOptions {
+        JsPathParameterOptions {
+            job_template_dir: job_template_dir.to_string(),
+            current_working_dir: current_working_dir.to_string(),
+            // `PathFormat::host()` returns `Posix` on `wasm32-unknown-unknown`
+            // because `cfg!(windows)` is false there. We hardcode `Posix`
+            // to make the WASM default deterministic and to match what
+            // `PathFormat::host()` would return anyway.
+            path_format: crate::expr::JsPathFormat::Posix,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        }
+    }
+
+    #[wasm_bindgen(getter, js_name = "jobTemplateDir")]
+    pub fn job_template_dir(&self) -> String {
+        self.job_template_dir.clone()
+    }
+
+    #[wasm_bindgen(setter, js_name = "jobTemplateDir")]
+    pub fn set_job_template_dir(&mut self, v: String) {
+        self.job_template_dir = v;
+    }
+
+    #[wasm_bindgen(getter, js_name = "currentWorkingDir")]
+    pub fn current_working_dir(&self) -> String {
+        self.current_working_dir.clone()
+    }
+
+    #[wasm_bindgen(setter, js_name = "currentWorkingDir")]
+    pub fn set_current_working_dir(&mut self, v: String) {
+        self.current_working_dir = v;
+    }
+
+    #[wasm_bindgen(getter, js_name = "pathFormat")]
+    pub fn path_format(&self) -> crate::expr::JsPathFormat {
+        self.path_format
+    }
+
+    #[wasm_bindgen(setter, js_name = "pathFormat")]
+    pub fn set_path_format(&mut self, v: crate::expr::JsPathFormat) {
+        self.path_format = v;
+    }
+
+    #[wasm_bindgen(getter, js_name = "allowTemplateDirWalkUp")]
+    pub fn allow_template_dir_walk_up(&self) -> bool {
+        self.allow_template_dir_walk_up
+    }
+
+    #[wasm_bindgen(setter, js_name = "allowTemplateDirWalkUp")]
+    pub fn set_allow_template_dir_walk_up(&mut self, v: bool) {
+        self.allow_template_dir_walk_up = v;
+    }
+
+    #[wasm_bindgen(getter, js_name = "allowUriPathValues")]
+    pub fn allow_uri_path_values(&self) -> bool {
+        self.allow_uri_path_values
+    }
+
+    #[wasm_bindgen(setter, js_name = "allowUriPathValues")]
+    pub fn set_allow_uri_path_values(&mut self, v: bool) {
+        self.allow_uri_path_values = v;
+    }
+}
+
+impl JsPathParameterOptions {
+    /// Borrow as the Rust-side options struct for a call into
+    /// `openjd_model`. The returned struct borrows `&self`'s strings,
+    /// so the returned value cannot outlive `self`.
+    pub fn as_rust(&self) -> openjd_model::PathParameterOptions<'_> {
+        openjd_model::PathParameterOptions {
+            job_template_dir: &self.job_template_dir,
+            current_working_dir: &self.current_working_dir,
+            path_format: self.path_format.into_inner(),
+            allow_template_dir_walk_up: self.allow_template_dir_walk_up,
+            allow_uri_path_values: self.allow_uri_path_values,
+        }
+    }
+}
+
 // ── Job wrappers ───────────────────────────────────────────────────
 
 /// A fully instantiated job with all format strings resolved.
@@ -288,37 +398,46 @@ pub fn get_spec_version(input: &str) -> Result<String, JsError> {
 /// Create a fully resolved Job from a template and parameter values.
 ///
 /// `params` is a JS object mapping parameter names to string values.
+/// `pathOptions` controls how `PATH` parameters are resolved. Construct
+/// with `new PathParameterOptions(jobTemplateDir, currentWorkingDir)`.
 #[wasm_bindgen(js_name = "createJob")]
-pub fn create_job(template: &JsJobTemplate, params: JsValue) -> Result<JsJob, JsError> {
-    // Convert JS object to HashMap<String, String>
+pub fn create_job(
+    template: &JsJobTemplate,
+    params: JsValue,
+    path_options: &JsPathParameterOptions,
+) -> Result<JsJob, JsError> {
     let raw_params: HashMap<String, String> =
         serde_wasm_bindgen::from_value(params).map_err(serde_wasm_to_js_error)?;
+    create_job_with_map(template, raw_params, path_options).map_err(|e| JsError::new(&e))
+}
 
-    // Convert to JobParameterInputValues (HashMap<String, ExprValue>)
+/// Rust-native helper for [`create_job`].
+///
+/// Exposed as a plain Rust function so that rlib-target integration
+/// tests can exercise the same behavior without going through the
+/// `JsValue` boundary. The `JsError` returned from [`create_job`] is
+/// constructed from the `String` this helper returns.
+pub fn create_job_with_map(
+    template: &JsJobTemplate,
+    raw_params: HashMap<String, String>,
+    path_options: &JsPathParameterOptions,
+) -> Result<JsJob, String> {
     let input_values: openjd_model::JobParameterInputValues = raw_params
         .into_iter()
         .map(|(k, v)| (k, openjd_expr::ExprValue::String(v)))
         .collect();
 
-    // Preprocess parameters
-    let path_options = openjd_model::PathParameterOptions {
-        job_template_dir: "/",
-        current_working_dir: "/",
-        path_format: openjd_expr::PathFormat::Posix,
-        allow_template_dir_walk_up: true,
-        allow_uri_path_values: true,
-    };
+    let rust_opts = path_options.as_rust();
     let param_values =
-        openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &path_options)
-            .map_err(to_js_error)?;
+        openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &rust_opts)
+            .map_err(|e| e.to_string())?;
 
-    // Create the job
     let job = openjd_model::create_job(
         &template.inner,
         &param_values,
         &openjd_model::CallerLimits::default(),
     )
-    .map_err(to_js_error)?;
+    .map_err(|e| e.to_string())?;
     Ok(JsJob { inner: job })
 }
 
@@ -327,29 +446,35 @@ pub fn create_job(template: &JsJobTemplate, params: JsValue) -> Result<JsJob, Js
 pub fn preprocess_job_parameters(
     template: &JsJobTemplate,
     raw_values: JsValue,
+    path_options: &JsPathParameterOptions,
 ) -> Result<JsValue, JsError> {
     let raw_params: HashMap<String, String> =
         serde_wasm_bindgen::from_value(raw_values).map_err(serde_wasm_to_js_error)?;
+    let map = preprocess_job_parameters_with_map(template, raw_params, path_options)
+        .map_err(|e| JsError::new(&e))?;
+    serde_wasm_bindgen::to_value(&map).map_err(serde_wasm_to_js_error)
+}
 
+/// Rust-native helper for [`preprocess_job_parameters`].
+///
+/// Returns the `{name: {type, value}}` map directly so rlib-target
+/// tests can exercise the behavior without `JsValue` round-tripping.
+pub fn preprocess_job_parameters_with_map(
+    template: &JsJobTemplate,
+    raw_params: HashMap<String, String>,
+    path_options: &JsPathParameterOptions,
+) -> Result<HashMap<String, serde_json::Value>, String> {
     let input_values: openjd_model::JobParameterInputValues = raw_params
         .into_iter()
         .map(|(k, v)| (k, openjd_expr::ExprValue::String(v)))
         .collect();
 
-    let path_options = openjd_model::PathParameterOptions {
-        job_template_dir: "/",
-        current_working_dir: "/",
-        path_format: openjd_expr::PathFormat::Posix,
-        allow_template_dir_walk_up: true,
-        allow_uri_path_values: true,
-    };
-
+    let rust_opts = path_options.as_rust();
     let param_values =
-        openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &path_options)
-            .map_err(to_js_error)?;
+        openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &rust_opts)
+            .map_err(|e| e.to_string())?;
 
-    // Convert to {name: {type, value}} since JobParameterValue doesn't impl Serialize
-    let map: HashMap<String, serde_json::Value> = param_values
+    Ok(param_values
         .into_iter()
         .map(|(k, v)| {
             (
@@ -360,8 +485,7 @@ pub fn preprocess_job_parameters(
                 }),
             )
         })
-        .collect();
-    serde_wasm_bindgen::to_value(&map).map_err(serde_wasm_to_js_error)
+        .collect())
 }
 
 /// Merge parameter definitions from job and environment templates.

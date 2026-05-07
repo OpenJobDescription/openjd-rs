@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PKG_DIR = join(__dirname, "..", "..", "pkg");
+// pkg/ is produced by `npm run build` as a sibling of this crate's
+// package.json, one directory up from js-tests/.
+const PKG_DIR = join(__dirname, "..", "pkg");
 
 let initialized = false;
 

@@ -32,26 +32,19 @@ openjd-rs/
 │   ├── openjd-expr/          ← Expression engine (Rust)
 │   ├── openjd-model/         ← Template model (Rust)
 │   ├── openjd-sessions/      ← Runtime sessions (Rust, not exposed to JS)
-│   └── openjd-for-js/            ← WASM bindings crate (Rust → wasm-bindgen)
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs         ← Module registration
-│           ├── expr.rs        ← Expression engine bindings
-│           ├── model/
-│           │   ├── mod.rs
-│           │   ├── decode.rs  ← Template decode functions
-│           │   ├── types.rs   ← Enum/type bindings
-│           │   ├── template.rs ← JobTemplate, EnvironmentTemplate wrappers
-│           │   ├── job.rs     ← Job, Step, Action, Environment wrappers
-│           │   ├── create_job.rs ← createJob, preprocessJobParameters
-│           │   ├── step_param_space.rs
-│           │   └── step_dependency_graph.rs
-│           └── errors.rs      ← Error type bindings
-└── js/                        ← npm package
-    ├── package.json           ← "openjd-for-js"
-    ├── src/index.ts           ← TypeScript re-exports
-    ├── tests/                 ← Integration tests
-    └── README.md
+│   └── openjd-for-js/        ← WASM bindings crate — all JS concerns collocated
+│       ├── Cargo.toml        ← Rust crate manifest
+│       ├── package.json      ← npm manifest ("openjd-for-js")
+│       ├── package-lock.json
+│       ├── vitest.config.ts  ← JS test runner config
+│       ├── src/              ← Rust sources
+│       │   ├── lib.rs         ← Module registration
+│       │   ├── expr.rs        ← Expression engine bindings
+│       │   ├── model.rs       ← Model bindings (decode, job, etc.)
+│       │   └── errors.rs      ← Error type bindings
+│       ├── tests/            ← Rust (rlib) integration tests
+│       ├── js-tests/         ← JS-side integration tests (vitest)
+│       └── pkg/              ← wasm-bindgen output (gitignored)
 ```
 
 ### Build Pipeline
@@ -60,7 +53,7 @@ openjd-rs/
 Rust source → cargo build --target wasm32-unknown-unknown
            → wasm-bindgen --target web → .wasm + .js + .d.ts
            → wasm-opt -Oz → optimized .wasm (~400KB gzipped)
-           → npm package in js/
+           → npm package in crates/openjd-for-js/
 ```
 
 ### Binding Pattern
@@ -452,7 +445,7 @@ console.log(fmt.resolve(symbols)); // "/renders/shot01/frame.####.exr"
 - `parseRangeExpr`
 
 ### Phase 4: Polish
-- TypeScript wrapper package in `js/`
+- TypeScript wrapper package in `crates/openjd-for-js/`
 - Comprehensive tests (port from Python binding tests)
 - CI/CD for WASM builds
 - npm publishing
@@ -559,16 +552,14 @@ The JS bindings are considered production-ready when:
 ## Test Architecture
 
 ```
-openjd-for-js/
-├── crate/
-│   └── tests/           ← Rust-side unit tests (test wasm_bindgen wrappers)
-├── js/
-│   └── tests/
-│       ├── conformance/ ← Conformance suite adapted for JS
-│       ├── expr/        ← Ported from Python expr binding tests
-│       ├── model/       ← Ported from Python model binding tests
-│       ├── boundary/    ← WASM serialization boundary edge cases
-│       └── memory/      ← Memory leak / lifecycle tests
+crates/openjd-for-js/
+├── tests/               ← Rust (rlib) integration tests for wasm_bindgen wrappers
+├── js-tests/            ← JS-side integration tests (run via vitest)
+│   ├── conformance/     ← Conformance suite adapted for JS
+│   ├── expr/            ← Ported from Python expr binding tests
+│   ├── model/           ← Ported from Python model binding tests
+│   ├── boundary/        ← WASM serialization boundary edge cases
+│   └── memory/          ← Memory leak / lifecycle tests
 ├── TEST_PORT_CHECKLIST.md
 └── vitest.config.ts
 ```
@@ -649,11 +640,13 @@ describe('memory management', () => {
 ### CI Steps
 
 1. `cargo build --target wasm32-unknown-unknown -p openjd-for-js --release`
-2. `wasm-bindgen --target web --out-dir pkg`
-3. `wasm-opt -Oz pkg/openjd_for_javascript_bg.wasm -o pkg/openjd_for_javascript_bg.wasm`
+2. `wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm`
+3. `wasm-opt -Oz crates/openjd-for-js/pkg/openjd_for_js_bg.wasm -o crates/openjd-for-js/pkg/openjd_for_js_bg.wasm`
 4. `cargo test -p openjd-for-js` (Rust-side tests)
-5. `cd js && npm install && npx vitest run` (JS-side tests)
-6. `cd js && npm pack` (produce distributable)
+5. `cd crates/openjd-for-js && npm install && npx vitest run` (JS-side tests)
+6. `cd crates/openjd-for-js && npm pack` (produce distributable)
+
+Steps 1–3 are combined into `npm run build` when invoked from `crates/openjd-for-js/`.
 
 ## Relationship to Other Bindings
 

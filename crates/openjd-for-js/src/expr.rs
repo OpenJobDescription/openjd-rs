@@ -80,11 +80,13 @@ impl JsExprValue {
 
 // ── PathFormat ─────────────────────────────────────────────────────
 
-/// Path format: Posix or Windows.
+/// Path format: Posix, Windows, or URI. Mirrors [`openjd_expr::PathFormat`].
 #[wasm_bindgen(js_name = "PathFormat")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum JsPathFormat {
     Posix = 0,
     Windows = 1,
+    Uri = 2,
 }
 
 impl JsPathFormat {
@@ -92,6 +94,15 @@ impl JsPathFormat {
         match self {
             JsPathFormat::Posix => openjd_expr::PathFormat::Posix,
             JsPathFormat::Windows => openjd_expr::PathFormat::Windows,
+            JsPathFormat::Uri => openjd_expr::PathFormat::Uri,
+        }
+    }
+
+    pub fn from_inner(f: openjd_expr::PathFormat) -> Self {
+        match f {
+            openjd_expr::PathFormat::Posix => JsPathFormat::Posix,
+            openjd_expr::PathFormat::Windows => JsPathFormat::Windows,
+            openjd_expr::PathFormat::Uri => JsPathFormat::Uri,
         }
     }
 }
