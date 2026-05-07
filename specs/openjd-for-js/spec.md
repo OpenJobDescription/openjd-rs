@@ -127,11 +127,24 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary) → ExprValue` | Evaluate an EXPR extension expression. |
+| `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions) → ExprValue` | Evaluate an EXPR extension expression. `options` lets the host cap memory and operation use per call; omit to use the built-in defaults. |
 | `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. |
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
+| `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
+| `getDefaultOperationLimit` | `() → number` | Report the built-in operation budget used when `EvalOptions.operationLimit` is omitted. Informational only. |
 | `escapeFormatString` | `(s: string) → string` | Escape `{{` and `}}` in a string for literal use in format strings. |
 | `parseRangeExpr` | `(expr: string) → number[]` | Parse an IntRangeExpr (e.g., `"1-10:2"`) into an array of integers. |
+
+`EvalOptions` is a structural type (plain JS object) with optional camelCase keys mirroring [`openjd_expr::EvalBuilder`]. Omit or pass `undefined` / `{}` to use the spec-default budgets:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memoryLimit` | `number` | Max bytes of evaluator-heap use. Defaults to `getDefaultMemoryLimit()`. |
+| `operationLimit` | `number` | Max operations before aborting. Defaults to `getDefaultOperationLimit()`. |
+
+`EvalOptions` is exposed as a plain object rather than an exported class: callers construct object literals and reuse them across calls with no `.free()` ceremony. Same shape pattern as `CallerLimits`. Resolves review findings F5 and F9.
+
+`ParsedExpression` gains the same optional trailing `options: EvalOptions` argument on its `evaluate(symbols, lib?, options?)` method.
 
 ### Classes — Model
 
@@ -304,7 +317,7 @@ Enum: `String`, `Int`, `Float`, `Bool`, `Path`, `RangeExpr`, `ListString`, `List
 
 | Constructor | Via `parseExpression(expr)` |
 |---|---|
-| `evaluate(symbols: SymbolTable, lib?: FunctionLibrary)` | `ExprValue` |
+| `evaluate(symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions)` | `ExprValue` — `options` lets the host override the per-call memory/operation caps |
 
 #### `SymbolTable`
 

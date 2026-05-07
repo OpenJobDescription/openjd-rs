@@ -712,3 +712,105 @@ describe("createJob CallerLimits enforcement (F4)", () => {
     template.free();
   });
 });
+
+// ── EvalOptions ─────────────────────────────────────────────────────
+//
+// EvalOptions is a plain structural type ({ memoryLimit?, operationLimit? })
+// passed as the optional trailing argument to evaluateExpression and
+// ParsedExpression.evaluate. Omitting it, or passing undefined / {},
+// keeps the built-in defaults. Callers can reuse the same options
+// literal across calls — there is no .free() ceremony, matching the
+// CallerLimits pattern.
+
+describe("evaluateExpression EvalOptions enforcement (F5)", () => {
+  it("respects memoryLimit override — rejects memory-blowing expression", () => {
+    const st = new mod.SymbolTable();
+    expect(() =>
+      mod.evaluateExpression("'x' * 1000000", st, undefined, {
+        memoryLimit: 1_000,
+      })
+    ).toThrow(/memory/i);
+    st.free();
+  });
+
+  it("respects operationLimit override — rejects op-exhausting expression", () => {
+    const st = new mod.SymbolTable();
+    expect(() =>
+      mod.evaluateExpression(
+        "sum([i for i in range(10000)])",
+        st,
+        undefined,
+        { operationLimit: 10 }
+      )
+    ).toThrow(/operation/i);
+    st.free();
+  });
+
+  it("accepts the same options literal reused across calls", () => {
+    const st = new mod.SymbolTable();
+    const opts = { memoryLimit: 50_000_000, operationLimit: 1_000_000 };
+    const r1 = mod.evaluateExpression("1 + 1", st, undefined, opts);
+    const r2 = mod.evaluateExpression("2 + 2", st, undefined, opts);
+    expect(r1.toString()).toBe("2");
+    expect(r2.toString()).toBe("4");
+    r1.free();
+    r2.free();
+    st.free();
+  });
+
+  it("defaults stay in effect when options are omitted", () => {
+    const st = new mod.SymbolTable();
+    const r = mod.evaluateExpression("sum([i for i in range(100)])", st);
+    expect(r.toString()).toBe("4950");
+    r.free();
+    st.free();
+  });
+
+  it("accepts empty options literal as equivalent to undefined", () => {
+    const st = new mod.SymbolTable();
+    const r = mod.evaluateExpression("1 + 1", st, undefined, {});
+    expect(r.toString()).toBe("2");
+    r.free();
+    st.free();
+  });
+});
+
+describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
+  it("respects memoryLimit override", () => {
+    const parsed = mod.parseExpression("'x' * 1000000");
+    const st = new mod.SymbolTable();
+    expect(() =>
+      parsed.evaluate(st, undefined, { memoryLimit: 1_000 })
+    ).toThrow(/memory/i);
+    st.free();
+    parsed.free();
+  });
+
+  it("accepts default when options are omitted", () => {
+    const parsed = mod.parseExpression("2 + 3");
+    const st = new mod.SymbolTable();
+    const r = parsed.evaluate(st);
+    expect(r.toString()).toBe("5");
+    r.free();
+    st.free();
+    parsed.free();
+  });
+
+  it("works with a library argument and options together", () => {
+    const parsed = mod.parseExpression("1 + 1");
+    const st = new mod.SymbolTable();
+    // Note: passing `lib` by value to evaluate() consumes the JS
+    // handle (wasm-bindgen moves the internal pointer), so we must
+    // NOT call `.free()` on it after. The library is freed by
+    // wasm-bindgen when it's consumed.
+    const lib = mod.getDefaultLibrary();
+    const r = parsed.evaluate(st, lib, {
+      memoryLimit: 10_000_000,
+      operationLimit: 100_000,
+    });
+    expect(r.toString()).toBe("2");
+    r.free();
+    st.free();
+    parsed.free();
+  });
+});

@@ -7,6 +7,60 @@
 use crate::errors::*;
 use wasm_bindgen::prelude::*;
 
+// ── EvalOptions ────────────────────────────────────────────────────
+
+/// Optional per-call caps for expression evaluation. Mirrors the
+/// relevant knobs on [`openjd_expr::EvalBuilder`]: `memory_limit`
+/// and `operation_limit`.
+///
+/// Exposed to JS as a plain structural type (same shape pattern as
+/// [`crate::model::JsCallerLimits`]). Callers pass object literals
+/// and reuse them freely — no `.free()` ceremony, no by-value
+/// handle consumption.
+///
+/// ```ignore
+/// mod.evaluateExpression(expr, symbols, undefined, {
+///     memoryLimit: 50_000_000,   // 50 MB
+///     operationLimit: 1_000_000, // 1M ops
+/// });
+/// ```
+///
+/// Every field is optional; `undefined` (the default) means "use
+/// the spec-default budget from `openjd_expr`". The defaults are
+/// accessible via [`get_default_memory_limit`] and
+/// [`get_default_operation_limit`], mostly for informational use.
+///
+/// Resolves review findings F5 (Medium) and F9 (Low).
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct JsEvalOptions {
+    #[serde(default)]
+    pub memory_limit: Option<usize>,
+    #[serde(default)]
+    pub operation_limit: Option<usize>,
+}
+
+impl JsEvalOptions {
+    /// Factory used by rlib tests to build an empty options value.
+    /// JS callers use the plain-object literal form instead.
+    pub fn new() -> JsEvalOptions {
+        JsEvalOptions::default()
+    }
+
+    /// Deserialize a JS value into `JsEvalOptions`. Returns `None`
+    /// when the caller passes `undefined`/`null` (the "use defaults"
+    /// sentinel); returns `Err` when the value is present but
+    /// malformed.
+    pub fn from_js_value(value: JsValue) -> Result<Option<JsEvalOptions>, JsError> {
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let opts: JsEvalOptions =
+            serde_wasm_bindgen::from_value(value).map_err(serde_wasm_to_js_error)?;
+        Ok(Some(opts))
+    }
+}
+
 // ── ExprValue ──────────────────────────────────────────────────────
 
 /// An expression value (string, int, float, bool, path, list, range).
@@ -307,23 +361,110 @@ impl JsParsedExpression {
     }
 
     /// Evaluate the expression against symbol tables.
+    ///
+    /// `options` (optional, plain-object shape) lets the host cap
+    /// `memoryLimit` and/or `operationLimit` for this specific call.
+    /// Omitted / `undefined` / `{}` keeps the built-in defaults.
     pub fn evaluate(
         &self,
         symbols: &JsSymbolTable,
         library: Option<JsFunctionLibrary>,
+        options: JsValue,
     ) -> Result<JsExprValue, JsError> {
-        let value = match library.as_ref() {
-            Some(lib) => self
-                .inner
-                .with_library(&lib.inner)
-                .evaluate(&[&symbols.inner])
-                .map_err(expr_to_js_error)?,
-            None => self
-                .inner
-                .evaluate(&symbols.inner)
-                .map_err(expr_to_js_error)?,
-        };
-        Ok(JsExprValue { inner: value })
+        let parsed_opts = JsEvalOptions::from_js_value(options)?;
+        let inner_result = evaluate_inner(
+            &self.inner,
+            &symbols.inner,
+            library.as_ref().map(|lib| &lib.inner),
+            parsed_opts.as_ref(),
+        );
+        inner_result
+            .map(|v| JsExprValue { inner: v })
+            .map_err(expr_to_js_error)
+    }
+}
+
+/// Rust-native helper for evaluating an expression string directly.
+/// Exposed so rlib tests can exercise the evaluation surface without
+/// going through the `JsValue` boundary.
+pub fn evaluate_expression_str(
+    expr: &str,
+    symbols: &JsSymbolTable,
+    library: Option<&JsFunctionLibrary>,
+    options: Option<&JsEvalOptions>,
+) -> Result<JsExprValue, String> {
+    let parsed = openjd_expr::ParsedExpression::new(expr).map_err(|e| e.to_string())?;
+    let value = evaluate_inner(
+        &parsed,
+        &symbols.inner,
+        library.map(|lib| &lib.inner),
+        options,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(JsExprValue { inner: value })
+}
+
+/// Rust-native helper for evaluating a pre-parsed expression. Mirrors
+/// the public [`JsParsedExpression::evaluate`] surface without the
+/// `JsValue` boundary.
+pub fn parsed_expression_evaluate(
+    expr: &str,
+    symbols: &JsSymbolTable,
+    library: Option<&JsFunctionLibrary>,
+    options: Option<&JsEvalOptions>,
+) -> Result<JsExprValue, String> {
+    let parsed = openjd_expr::ParsedExpression::new(expr).map_err(|e| e.to_string())?;
+    let value = evaluate_inner(
+        &parsed,
+        &symbols.inner,
+        library.map(|lib| &lib.inner),
+        options,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(JsExprValue { inner: value })
+}
+
+/// Configure and run an evaluation. Private helper shared by the
+/// free-function entry point and the `ParsedExpression::evaluate`
+/// method. Applies each `with_*` on the builder only if the caller
+/// supplied a value — letting `openjd_expr` defaults pass through
+/// unchanged when the caller doesn't override.
+fn evaluate_inner(
+    parsed: &openjd_expr::ParsedExpression,
+    symbols: &openjd_expr::SymbolTable,
+    library: Option<&openjd_expr::FunctionLibrary>,
+    options: Option<&JsEvalOptions>,
+) -> Result<openjd_expr::ExprValue, openjd_expr::ExpressionError> {
+    // Short-circuit when nothing is overridden: the default direct
+    // evaluate path is the cheapest.
+    let has_overrides = library.is_some() || options.map(|o| o.has_any_limit()).unwrap_or(false);
+    if !has_overrides {
+        return parsed.evaluate(symbols);
+    }
+
+    // Bootstrap the builder. `ParsedExpression::with_library` and
+    // `with_memory_limit` / `with_operation_limit` each create a
+    // fresh `EvalBuilder`, after which the builder itself chains.
+    let mut builder = match library {
+        Some(lib) => parsed.with_library(lib),
+        None => parsed.with_memory_limit(openjd_expr::DEFAULT_MEMORY_LIMIT),
+    };
+    if let Some(opts) = options {
+        if let Some(limit) = opts.memory_limit {
+            builder = builder.with_memory_limit(limit);
+        }
+        if let Some(limit) = opts.operation_limit {
+            builder = builder.with_operation_limit(limit);
+        }
+    }
+    builder.evaluate(&[symbols])
+}
+
+impl JsEvalOptions {
+    /// Returns true if at least one limit field is set. Used by the
+    /// fast-path check in `evaluate_inner`.
+    fn has_any_limit(&self) -> bool {
+        self.memory_limit.is_some() || self.operation_limit.is_some()
     }
 }
 
@@ -337,21 +478,20 @@ pub fn parse_expression(expr: &str) -> Result<JsParsedExpression, JsError> {
 }
 
 /// Evaluate an expression string directly.
+///
+/// `options` (optional, plain-object shape) lets the host cap
+/// `memoryLimit` and/or `operationLimit` for this specific call.
+/// Omitted / `undefined` / `{}` keeps the built-in defaults.
 #[wasm_bindgen(js_name = "evaluateExpression")]
 pub fn evaluate_expression(
     expr: &str,
     symbols: &JsSymbolTable,
     library: Option<JsFunctionLibrary>,
+    options: JsValue,
 ) -> Result<JsExprValue, JsError> {
-    let parsed = openjd_expr::ParsedExpression::new(expr).map_err(expr_to_js_error)?;
-    let value = match library.as_ref() {
-        Some(lib) => parsed
-            .with_library(&lib.inner)
-            .evaluate(&[&symbols.inner])
-            .map_err(expr_to_js_error)?,
-        None => parsed.evaluate(&symbols.inner).map_err(expr_to_js_error)?,
-    };
-    Ok(JsExprValue { inner: value })
+    let parsed_opts = JsEvalOptions::from_js_value(options)?;
+    evaluate_expression_str(expr, symbols, library.as_ref(), parsed_opts.as_ref())
+        .map_err(|e| JsError::new(&e))
 }
 
 /// Get the default function library.
@@ -376,12 +516,18 @@ pub fn parse_range_expr(expr: &str) -> Result<Vec<i64>, JsError> {
 }
 
 /// Default memory limit for expression evaluation.
+///
+/// Exported as a function because wasm-bindgen does not support
+/// exporting `const` or `static` items to JS. Informational —
+/// hosts that want to tighten the limit pass `EvalOptions.memoryLimit`
+/// on the decode/evaluate call.
 #[wasm_bindgen(js_name = "getDefaultMemoryLimit")]
 pub fn get_default_memory_limit() -> usize {
     openjd_expr::DEFAULT_MEMORY_LIMIT
 }
 
-/// Default operation limit for expression evaluation.
+/// Default operation limit for expression evaluation. See
+/// [`get_default_memory_limit`] for rationale on the getter style.
 #[wasm_bindgen(js_name = "getDefaultOperationLimit")]
 pub fn get_default_operation_limit() -> usize {
     openjd_expr::DEFAULT_OPERATION_LIMIT
