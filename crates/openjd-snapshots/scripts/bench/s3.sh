@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+#
 # Benchmark openjd-snapshots upload/download against s5cmd on the same dataset.
 #
 # Compares across the full matrix:

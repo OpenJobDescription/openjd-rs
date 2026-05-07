@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+#
 # Focused variance study: measure HASH_UPLOAD throughput across multiple trials
 # for each (runtime_flavor, max_workers) combination, plus s5cmd upload
 # baseline. Emits a Markdown summary with min/median/max per cell.

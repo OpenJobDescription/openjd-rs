@@ -222,6 +222,7 @@ PRs run these checks (all must pass):
 | **Conformance** | Full OpenJD conformance suite (1,038 tests) on all three platforms |
 | **MSRV** | `cargo check --workspace` with Rust 1.92 |
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
+| **Compliance** | Copyright header check + `THIRD-PARTY-LICENSES` freshness (`cargo about`) |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 
