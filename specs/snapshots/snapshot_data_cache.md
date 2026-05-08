@@ -6,15 +6,14 @@
 
 ## Overview
 
-A content-addressed data cache stores data using the content's hash as the key, enabling deduplication, efficient retrieval, and integrity verification. The crate provides four trait abstractions and two concrete implementations:
+A content-addressed data cache stores data using the content's hash as the key, enabling deduplication, efficient retrieval, and integrity verification. The crate provides three trait abstractions and two concrete implementations:
 
 ```
-ContentAddressedDataCache (sync trait)
 AsyncDataCache            (core async trait, used by HASH_UPLOAD, DOWNLOAD, CACHE_SYNC)
 ├── MultipartDataCache    (extension trait: S3-style multipart upload)
 └── RangeReadDataCache    (extension trait: byte-range reads)
 
-S3DataCache           - implements all three async traits (multipart + range reads)
+S3DataCache           - implements all three traits (multipart + range reads)
 FileSystemDataCache   - implements only AsyncDataCache (no multipart, no range reads)
 ```
 
@@ -53,17 +52,6 @@ HASH_UPLOAD always computes the hash while reading data for upload, never upload
 
 **FileSystemDataCache:**
 - Direct filesystem `exists()` check (no caching)
-
-## Sync Trait: `ContentAddressedDataCache`
-
-```rust
-pub trait ContentAddressedDataCache: Send + Sync {
-    fn object_key(&self, hash: &str, algorithm: &str) -> String;
-    fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool>;
-    fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String>;
-    fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>>;
-}
-```
 
 ## Async Trait: `AsyncDataCache`
 

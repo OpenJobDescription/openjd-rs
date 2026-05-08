@@ -276,8 +276,8 @@ The `openjd-snapshots` crate has integration tests that run against a real S3 bu
 | `AWS_REGION` | No | AWS region (default: `us-west-2`) |
 
 ```bash
-AWS_PROFILE=GammaSandbox \
-OPENJD_TEST_S3_BUCKET=rendering-agent-spaces-workshop \
+AWS_PROFILE=your-profile \
+OPENJD_TEST_S3_BUCKET=your-test-bucket \
 OPENJD_TEST_S3_PREFIX=OpenJDSnapshotsTests \
 cargo test -p openjd-snapshots --test integration -- --ignored test_s3_integration::
 ```

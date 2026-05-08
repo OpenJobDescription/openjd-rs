@@ -32,7 +32,7 @@ openjd-rs/
 │   │   └── src/
 │   │       ├── lib.rs                  # Public API re-exports
 │   │       ├── manifest.rs             # Manifest structs + entry types
-│   │       ├── data_cache.rs           # ContentAddressedDataCache trait + impls
+│   │       ├── data_cache.rs           # AsyncDataCache trait + impls
 │   │       ├── hash_cache.rs           # Local SQLite hash cache
 │   │       ├── hash.rs                 # Hashing utilities (xxh128, file chunking)
 │   │       ├── path_util.rs            # Path normalization, absolute/relative detection
@@ -176,7 +176,7 @@ pub const DEFAULT_S3_MULTIPART_PART_SIZE: usize = 32 * 1024 * 1024;  // 32 MB
 
 ```rust
 #[async_trait]
-pub trait ContentAddressedDataCache: Send + Sync {
+pub trait AsyncDataCache: Send + Sync {
     fn object_key(&self, hash: &str, algorithm: &str) -> String;
     async fn object_exists(&self, hash: &str, algorithm: &str) -> Result<bool>;
 }
@@ -209,7 +209,7 @@ pub struct FileSystemDataCache {
 }
 ```
 
-Both implement `ContentAddressedDataCache`.
+Both implement `AsyncDataCache`.
 
 ## Hash Cache
 
@@ -293,7 +293,7 @@ for computing hashes. Progress callback with sliding-window rate estimation.
 ```rust
 pub async fn hash_upload_abs_manifest(
     manifest: &AbsManifest,
-    data_cache: &dyn ContentAddressedDataCache,
+    data_cache: &dyn AsyncDataCache,
     options: HashUploadOptions,
 ) -> Result<UploadResult>
 
@@ -360,7 +360,7 @@ Two-pass approach when `WHOLE_FILE_CHUNK_SIZE` and file > `max_memory_bytes`:
 ```rust
 pub async fn download_abs_manifest(
     manifest: &AbsManifest,
-    data_cache: &dyn ContentAddressedDataCache,
+    data_cache: &dyn AsyncDataCache,
     options: DownloadOptions,
 ) -> Result<DownloadResult>
 

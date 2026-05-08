@@ -135,12 +135,9 @@ async fn s3_round_trip_collect_upload_download() {
     for f in &abs_snap.files {
         if let Some(ref hash) = f.hash {
             assert!(
-                openjd_snapshots::ContentAddressedDataCache::object_exists(
-                    &*data_cache,
-                    hash,
-                    "xxh128"
-                )
-                .unwrap(),
+                openjd_snapshots::AsyncDataCache::object_exists(&*data_cache, hash, "xxh128")
+                    .await
+                    .unwrap(),
                 "object should exist in S3: {hash}"
             );
         }

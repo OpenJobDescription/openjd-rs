@@ -216,7 +216,7 @@ See [snapshot_data_cache.md](snapshot_data_cache.md) for detailed documentation.
 openjd-snapshots/src/
 ├── lib.rs              # Public API re-exports
 ├── manifest.rs         # Manifest<P,K>, FileEntry, DirEntry, SymlinkPolicy, enum wrappers
-├── data_cache.rs       # ContentAddressedDataCache, AsyncDataCache, FileSystemDataCache, S3DataCache
+├── data_cache.rs       # AsyncDataCache, MultipartDataCache, RangeReadDataCache, FileSystemDataCache, S3DataCache
 ├── hash_cache.rs       # Local SQLite hash cache
 ├── s3_check_cache.rs   # Local SQLite S3 check cache
 ├── hash.rs             # HashAlgorithm, hash_data(), hash_file(), hash_file_chunked()

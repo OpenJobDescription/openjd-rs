@@ -9,7 +9,7 @@
 
 use openjd_snapshots::{
     download_abs_manifest, hash_upload_abs_manifest, AbsManifest, AbsSnapshot, AbsSnapshotDiff,
-    ContentAddressedDataCache, DirEntry, DownloadOptions, FileConflictResolution, FileEntry,
+    AsyncDataCache, DirEntry, DownloadOptions, FileConflictResolution, FileEntry,
     FileSystemDataCache, HashAlgorithm, HashUploadOptions, Manifest, DEFAULT_FILE_CHUNK_SIZE,
 };
 use std::sync::Arc;
@@ -27,14 +27,16 @@ fn new_data_cache(tmp: &TempDir) -> Arc<FileSystemDataCache> {
     Arc::new(FileSystemDataCache::new(tmp.path().join("data")).unwrap())
 }
 
-fn store(dc: &dyn ContentAddressedDataCache, content: &[u8]) -> String {
+async fn store(dc: &dyn AsyncDataCache, content: &[u8]) -> String {
     let hash = openjd_snapshots::hash::hash_data(content);
-    dc.put_object(&hash, "xxh128", content).unwrap();
+    dc.put_object(&hash, "xxh128", content.to_vec())
+        .await
+        .unwrap();
     hash
 }
 
-fn hashed_entry(path: &str, content: &[u8], dc: &dyn ContentAddressedDataCache) -> FileEntry {
-    let hash = store(dc, content);
+async fn hashed_entry(path: &str, content: &[u8], dc: &dyn AsyncDataCache) -> FileEntry {
+    let hash = store(dc, content).await;
     // Use 2020-01-01T00:00:00 UTC — a realistic timestamp that works on all platforms
     // (Windows set_modified fails for timestamps near the Unix epoch).
     let mut e = FileEntry::file(path, content.len() as u64, 1_577_836_800_000_000);
@@ -67,7 +69,7 @@ async fn download_single_file() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("output.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"hello world", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"hello world", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -89,7 +91,7 @@ async fn download_creates_parent_dirs() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("a/b/c/file.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"nested", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"nested", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -113,9 +115,9 @@ async fn download_multiple_files_with_subdirs() {
     let p3 = tmp.path().join("subdir/file3.txt");
 
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc),
-        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc),
-        hashed_entry(&p3.to_string_lossy(), b"Content 3", &*dc),
+        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc).await,
+        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc).await,
+        hashed_entry(&p3.to_string_lossy(), b"Content 3", &*dc).await,
     ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -138,7 +140,7 @@ async fn download_updates_mtime_in_manifest() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("file.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"data", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"data", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -188,7 +190,7 @@ async fn conflict_skip() {
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -213,7 +215,7 @@ async fn conflict_overwrite() {
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -234,7 +236,7 @@ async fn conflict_create_copy() {
     let dest = tmp.path().join("file.txt");
     std::fs::write(&dest, b"old").unwrap();
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"new", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"new", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -442,14 +444,12 @@ async fn download_chunked_file() {
     let dc = new_data_cache(&cache_dir);
 
     let chunks: Vec<&[u8]> = vec![b"aaa", b"bbb", b"ccc", b"ddd"];
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let h = openjd_snapshots::hash::hash_data(c);
-            dc.put_object(&h, "xxh128", c).unwrap();
-            h
-        })
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        let h = openjd_snapshots::hash::hash_data(c);
+        dc.put_object(&h, "xxh128", c.to_vec()).await.unwrap();
+        chunk_hashes.push(h);
+    }
 
     let dest = tmp.path().join("chunked.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
@@ -570,7 +570,7 @@ async fn hash_cache_skip_on_second_download() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"hello", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"hello", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     // First download
@@ -611,7 +611,7 @@ async fn hash_cache_stale_mtime_redownloads() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"original", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"original", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     // First download
@@ -656,7 +656,7 @@ async fn hash_cache_deleted_file_redownloads() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     download_abs_manifest(
@@ -693,7 +693,7 @@ async fn without_hash_cache_always_downloads() {
     let dc = new_data_cache(&cache_dir);
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     let r1 = download_abs_manifest(
@@ -728,8 +728,8 @@ async fn no_temp_files_after_success() {
     let p1 = dl_dir.join("file1.txt");
     let p2 = dl_dir.join("file2.txt");
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc),
-        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc),
+        hashed_entry(&p1.to_string_lossy(), b"Content 1", &*dc).await,
+        hashed_entry(&p2.to_string_lossy(), b"Content 2", &*dc).await,
     ]);
 
     download_abs_manifest(
@@ -755,7 +755,7 @@ async fn atomic_write_produces_correct_content() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("atomic.txt");
 
-    let entry = hashed_entry(&dest.to_string_lossy(), b"atomic content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"atomic content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     download_abs_manifest(
@@ -780,14 +780,12 @@ async fn chunked_download_round_trip_with_hash_cache() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let chunks: Vec<&[u8]> = vec![b"AAAA", b"BBBB", b"CC"];
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let h = openjd_snapshots::hash::hash_data(c);
-            dc.put_object(&h, "xxh128", c).unwrap();
-            h
-        })
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        let h = openjd_snapshots::hash::hash_data(c);
+        dc.put_object(&h, "xxh128", c.to_vec()).await.unwrap();
+        chunk_hashes.push(h);
+    }
 
     let dest = tmp.path().join("chunked.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 10, 1000);
@@ -838,8 +836,8 @@ async fn download_progress_callback_invoked() {
     let p1 = tmp.path().join("a.txt");
     let p2 = tmp.path().join("b.txt");
     let manifest = make_snapshot(vec![
-        hashed_entry(&p1.to_string_lossy(), b"aaa", &*dc),
-        hashed_entry(&p2.to_string_lossy(), b"bbb", &*dc),
+        hashed_entry(&p1.to_string_lossy(), b"aaa", &*dc).await,
+        hashed_entry(&p2.to_string_lossy(), b"bbb", &*dc).await,
     ]);
 
     let call_count = Arc::new(AtomicUsize::new(0));
@@ -871,7 +869,7 @@ async fn download_progress_callback_cancel() {
     let mut files = Vec::new();
     for i in 0..20 {
         let p = tmp.path().join(format!("f{i}.txt"));
-        files.push(hashed_entry(&p.to_string_lossy(), b"data", &*dc));
+        files.push(hashed_entry(&p.to_string_lossy(), b"data", &*dc).await);
     }
 
     let manifest = make_snapshot(files);
@@ -903,7 +901,7 @@ async fn parallel_download_produces_same_results() {
         let content = format!("content_{i}");
         let p1 = tmp1.path().join(format!("f{i}.txt"));
         let p2 = tmp2.path().join(format!("f{i}.txt"));
-        let hash = store(&*dc, content.as_bytes());
+        let hash = store(&*dc, content.as_bytes()).await;
         let mut e1 = FileEntry::file(p1.to_string_lossy().to_string(), content.len() as u64, 1000);
         e1.hash = Some(hash.clone());
         let mut e2 = FileEntry::file(p2.to_string_lossy().to_string(), content.len() as u64, 1000);
@@ -956,7 +954,9 @@ async fn download_progress_fields_populated() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), b"hello", &*dc)]);
+    let manifest = make_snapshot(vec![
+        hashed_entry(&dest.to_string_lossy(), b"hello", &*dc).await,
+    ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -993,11 +993,14 @@ async fn download_progress_callback_receives_timing() {
     let mut files = Vec::new();
     for i in 0..5 {
         let p = tmp.path().join(format!("f{i}.txt"));
-        files.push(hashed_entry(
-            &p.to_string_lossy(),
-            format!("content{i}").repeat(100).as_bytes(),
-            &*dc,
-        ));
+        files.push(
+            hashed_entry(
+                &p.to_string_lossy(),
+                format!("content{i}").repeat(100).as_bytes(),
+                &*dc,
+            )
+            .await,
+        );
     }
     let manifest = make_snapshot(files);
     let times = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1028,11 +1031,9 @@ async fn download_progress_rate_positive() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("big.txt");
-    let manifest = make_snapshot(vec![hashed_entry(
-        &dest.to_string_lossy(),
-        &vec![0u8; 10000],
-        &*dc,
-    )]);
+    let manifest = make_snapshot(vec![
+        hashed_entry(&dest.to_string_lossy(), &vec![0u8; 10000], &*dc).await,
+    ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -1051,11 +1052,9 @@ async fn download_progress_message_contains_rate() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(
-        &dest.to_string_lossy(),
-        b"rate test",
-        &*dc,
-    )]);
+    let manifest = make_snapshot(vec![
+        hashed_entry(&dest.to_string_lossy(), b"rate test", &*dc).await,
+    ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -1076,11 +1075,9 @@ async fn download_progress_message_contains_elapsed_time() {
     let cache_dir = TempDir::new().unwrap();
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
-    let manifest = make_snapshot(vec![hashed_entry(
-        &dest.to_string_lossy(),
-        b"time test",
-        &*dc,
-    )]);
+    let manifest = make_snapshot(vec![
+        hashed_entry(&dest.to_string_lossy(), b"time test", &*dc).await,
+    ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -1108,7 +1105,9 @@ async fn download_final_statistics_transfer_rate_calculation() {
     let dc = new_data_cache(&cache_dir);
     let dest = tmp.path().join("out.txt");
     let content = vec![0u8; 10000];
-    let manifest = make_snapshot(vec![hashed_entry(&dest.to_string_lossy(), &content, &*dc)]);
+    let manifest = make_snapshot(vec![
+        hashed_entry(&dest.to_string_lossy(), &content, &*dc).await,
+    ]);
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
         dc.clone(),
@@ -1139,7 +1138,7 @@ async fn download_excludes_symlinks_with_exclude_policy() {
     let link_path = tmp.path().join("link.txt");
 
     let manifest = make_snapshot(vec![
-        hashed_entry(&file_path.to_string_lossy(), b"real file", &*dc),
+        hashed_entry(&file_path.to_string_lossy(), b"real file", &*dc).await,
         FileEntry::symlink(
             link_path.to_string_lossy().to_string(),
             file_path.to_string_lossy().to_string(),
@@ -1215,21 +1214,19 @@ async fn snapshot_manifest_ignores_apply_deletes() {
 
 // ===== Chunked download tests =====
 
-fn chunked_entry(
+async fn chunked_entry(
     path: &str,
     chunks: &[&[u8]],
     chunk_size: i64,
-    dc: &dyn ContentAddressedDataCache,
+    dc: &dyn AsyncDataCache,
 ) -> (FileEntry, AbsSnapshot) {
     let total: u64 = chunks.iter().map(|c| c.len() as u64).sum();
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let h = openjd_snapshots::hash::hash_data(c);
-            dc.put_object(&h, "xxh128", c).unwrap();
-            h
-        })
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in chunks {
+        let h = openjd_snapshots::hash::hash_data(c);
+        dc.put_object(&h, "xxh128", c.to_vec()).await.unwrap();
+        chunk_hashes.push(h);
+    }
     let mut entry = FileEntry::file(path, total, 1_577_836_800_000_000);
     entry.chunk_hashes = Some(chunk_hashes);
     let manifest: AbsSnapshot =
@@ -1244,18 +1241,16 @@ async fn download_mixed_regular_and_chunked_files() {
     let dc = new_data_cache(&cache_dir);
 
     let regular_path = tmp.path().join("regular.txt");
-    let regular = hashed_entry(&regular_path.to_string_lossy(), b"whole file", &*dc);
+    let regular = hashed_entry(&regular_path.to_string_lossy(), b"whole file", &*dc).await;
 
     let chunked_path = tmp.path().join("chunked.bin");
     let chunks: &[&[u8]] = &[b"AA", b"BB", b"CC"];
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let h = openjd_snapshots::hash::hash_data(c);
-            dc.put_object(&h, "xxh128", c).unwrap();
-            h
-        })
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in chunks {
+        let h = openjd_snapshots::hash::hash_data(c);
+        dc.put_object(&h, "xxh128", c.to_vec()).await.unwrap();
+        chunk_hashes.push(h);
+    }
     let mut chunked = FileEntry::file(chunked_path.to_string_lossy().to_string(), 6, 1000);
     chunked.chunk_hashes = Some(chunk_hashes);
 
@@ -1286,7 +1281,7 @@ async fn download_chunked_file_conflict_skip() {
     let dest = tmp.path().join("chunked.bin");
     std::fs::write(&dest, b"old data").unwrap();
 
-    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc);
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc).await;
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1312,7 +1307,7 @@ async fn download_chunked_file_conflict_overwrite() {
     let dest = tmp.path().join("chunked.bin");
     std::fs::write(&dest, b"old data").unwrap();
 
-    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc);
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"new", b"dat"], 3, &*dc).await;
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1332,7 +1327,7 @@ async fn download_chunked_file_preserves_mtime() {
     let dc = new_data_cache(&cache_dir);
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"XX", b"YY"], 2, &*dc);
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"XX", b"YY"], 2, &*dc).await;
 
     let result = download_abs_manifest(
         &AbsManifest::Snapshot(manifest),
@@ -1363,7 +1358,8 @@ async fn chunked_file_downloaded_when_hash_mismatch() {
     let dest = tmp.path().join("chunked.bin");
 
     // First download with old content
-    let (_, manifest_old) = chunked_entry(&dest.to_string_lossy(), &[b"old", b"dat"], 3, &*dc);
+    let (_, manifest_old) =
+        chunked_entry(&dest.to_string_lossy(), &[b"old", b"dat"], 3, &*dc).await;
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest_old),
         dc.clone(),
@@ -1377,7 +1373,8 @@ async fn chunked_file_downloaded_when_hash_mismatch() {
     assert_eq!(std::fs::read(&dest).unwrap(), b"olddat");
 
     // Now create a new manifest with different chunk content
-    let (_, manifest_new) = chunked_entry(&dest.to_string_lossy(), &[b"NEW", b"DAT"], 3, &*dc);
+    let (_, manifest_new) =
+        chunked_entry(&dest.to_string_lossy(), &[b"NEW", b"DAT"], 3, &*dc).await;
 
     let r = download_abs_manifest(
         &AbsManifest::Snapshot(manifest_new),
@@ -1403,7 +1400,7 @@ async fn hash_cache_updated_after_chunked_download() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"AA", b"BB"], 2, &*dc);
+    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"AA", b"BB"], 2, &*dc).await;
 
     // First download populates hash cache
     let r1 = download_abs_manifest(
@@ -1442,7 +1439,8 @@ async fn second_download_skips_chunked_file() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("chunked.bin");
-    let (_, manifest) = chunked_entry(&dest.to_string_lossy(), &[b"abc", b"def", b"gh"], 3, &*dc);
+    let (_, manifest) =
+        chunked_entry(&dest.to_string_lossy(), &[b"abc", b"def", b"gh"], 3, &*dc).await;
 
     download_abs_manifest(
         &AbsManifest::Snapshot(manifest.clone()),
@@ -1503,7 +1501,7 @@ async fn download_progress_with_hash_cache_hits() {
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
 
     let dest = tmp.path().join("file.txt");
-    let entry = hashed_entry(&dest.to_string_lossy(), b"cached content", &*dc);
+    let entry = hashed_entry(&dest.to_string_lossy(), b"cached content", &*dc).await;
     let manifest = make_snapshot(vec![entry]);
 
     // First download to populate cache
@@ -1544,11 +1542,14 @@ async fn download_progress_total_time_increases_monotonically() {
     let mut files = Vec::new();
     for i in 0..10 {
         let p = tmp.path().join(format!("f{i}.txt"));
-        files.push(hashed_entry(
-            &p.to_string_lossy(),
-            format!("data_{i}").repeat(50).as_bytes(),
-            &*dc,
-        ));
+        files.push(
+            hashed_entry(
+                &p.to_string_lossy(),
+                format!("data_{i}").repeat(50).as_bytes(),
+                &*dc,
+            )
+            .await,
+        );
     }
     let manifest = make_snapshot(files);
 
@@ -1593,7 +1594,9 @@ async fn download_with_corrupted_cache_object() {
 
     let real_hash = openjd_snapshots::hash::hash_data(b"correct content");
     // Store wrong bytes under the real hash
-    dc.put_object(&real_hash, "xxh128", b"WRONG").unwrap();
+    dc.put_object(&real_hash, "xxh128", b"WRONG".to_vec())
+        .await
+        .unwrap();
 
     let dest = tmp.path().join("file.txt");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 15, 1000);
@@ -1622,7 +1625,9 @@ async fn download_with_truncated_cache_object() {
     let dc = new_data_cache(&cache_dir);
 
     let real_hash = openjd_snapshots::hash::hash_data(b"full file content here");
-    dc.put_object(&real_hash, "xxh128", b"full").unwrap();
+    dc.put_object(&real_hash, "xxh128", b"full".to_vec())
+        .await
+        .unwrap();
 
     let dest = tmp.path().join("file.txt");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 21, 1000);
@@ -1678,7 +1683,7 @@ async fn stale_hash_cache_triggers_redownload() {
     let dest = tmp.path().join("file.txt");
 
     // First: download old content
-    let old_hash = store(&*dc, b"old content");
+    let old_hash = store(&*dc, b"old content").await;
     let mut old_entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
     old_entry.hash = Some(old_hash);
 
@@ -1695,7 +1700,7 @@ async fn stale_hash_cache_triggers_redownload() {
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old content");
 
     // Now: manifest has new hash, file on disk has old content with cached mtime
-    let new_hash = store(&*dc, b"new content");
+    let new_hash = store(&*dc, b"new content").await;
     let actual_mtime = dest
         .metadata()
         .unwrap()
@@ -1735,8 +1740,12 @@ async fn corrupted_chunked_cache_object() {
     let chunk2_hash = openjd_snapshots::hash::hash_data(b"BBBB");
 
     // Store chunk1 correctly, chunk2 with wrong content
-    dc.put_object(&chunk1_hash, "xxh128", b"AAAA").unwrap();
-    dc.put_object(&chunk2_hash, "xxh128", b"XX").unwrap();
+    dc.put_object(&chunk1_hash, "xxh128", b"AAAA".to_vec())
+        .await
+        .unwrap();
+    dc.put_object(&chunk2_hash, "xxh128", b"XX".to_vec())
+        .await
+        .unwrap();
 
     let dest = tmp.path().join("chunked.bin");
     let chunk_size = 4i64;
@@ -1774,7 +1783,7 @@ async fn download_restores_mtime_from_manifest() {
 
     // Use a specific mtime in the past (2020-01-01T00:00:00 UTC in microseconds)
     let manifest_mtime: u64 = 1_577_836_800_000_000;
-    let hash = store(&*dc, b"mtime test");
+    let hash = store(&*dc, b"mtime test").await;
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 10, manifest_mtime);
     entry.hash = Some(hash);
 
@@ -1818,8 +1827,8 @@ async fn download_restores_mtime_chunked() {
 
     let manifest_mtime: u64 = 1_577_836_800_000_000;
     let chunk_size = 4i64;
-    let h1 = store(&*dc, b"aaaa");
-    let h2 = store(&*dc, b"bbbb");
+    let h1 = store(&*dc, b"aaaa").await;
+    let h2 = store(&*dc, b"bbbb").await;
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 8, manifest_mtime);
     entry.chunk_hashes = Some(vec![h1, h2]);
 

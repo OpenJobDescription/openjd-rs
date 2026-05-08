@@ -6,7 +6,6 @@
 
 use aws_sdk_s3::config::{Credentials, Region};
 use openjd_snapshots::hash::hash_data;
-use openjd_snapshots::ContentAddressedDataCache as SyncCache;
 use openjd_snapshots::{
     collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
     subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, CopyResult, DirEntry,
@@ -85,9 +84,12 @@ fn make_test_file(dir: &Path, name: &str, content: &[u8]) -> (String, u64, u64) 
     )
 }
 
-fn upload_to_s3(cache: &dyn openjd_snapshots::ContentAddressedDataCache, content: &[u8]) -> String {
+async fn upload_to_s3(cache: &dyn AsyncDataCache, content: &[u8]) -> String {
     let hash = hash_data(content);
-    cache.put_object(&hash, "xxh128", content).unwrap();
+    cache
+        .put_object(&hash, "xxh128", content.to_vec())
+        .await
+        .unwrap();
     hash
 }
 
@@ -99,15 +101,11 @@ type AbsSnapshotDiff = Manifest<openjd_snapshots::manifest::Abs, openjd_snapshot
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_put_and_get_object() {
     let (_tmp, cache) = make_s3_fixture().await;
-    openjd_snapshots::ContentAddressedDataCache::put_object(
-        &*cache,
-        "abc123",
-        "xxh128",
-        b"hello world",
-    )
-    .unwrap();
-    let data = openjd_snapshots::ContentAddressedDataCache::get_object(&*cache, "abc123", "xxh128")
+    cache
+        .put_object("abc123", "xxh128", b"hello world".to_vec())
+        .await
         .unwrap();
+    let data = cache.get_object("abc123", "xxh128").await.unwrap();
     assert_eq!(data, b"hello world");
 }
 
@@ -117,21 +115,24 @@ async fn s3_object_exists_after_put() {
     // Note: s3s-fs returns NoSuchKey for missing objects on HeadObject,
     // but the AWS SDK expects NotFound. So object_exists returns Err
     // for missing objects instead of Ok(false). We test the positive case.
-    SyncCache::put_object(&*cache, "abc123", "xxh128", b"data").unwrap();
-    assert!(SyncCache::object_exists(&*cache, "abc123", "xxh128").unwrap());
+    cache
+        .put_object("abc123", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
+    assert!(cache.object_exists("abc123", "xxh128").await.unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_object_key_format() {
     let (_tmp, cache) = make_s3_fixture().await;
-    let key = SyncCache::object_key(&*cache, "abc123", "xxh128");
+    let key = AsyncDataCache::object_key(&*cache, "abc123", "xxh128");
     assert_eq!(key, "Data/abc123.xxh128");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_get_nonexistent_returns_error() {
     let (_tmp, cache) = make_s3_fixture().await;
-    assert!(SyncCache::get_object(&*cache, "missing", "xxh128").is_err());
+    assert!(cache.get_object("missing", "xxh128").await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -140,7 +141,7 @@ async fn s3_object_exists_nonexistent_returns_error() {
     // which the SDK doesn't map to is_not_found(). This causes object_exists
     // to return Err instead of Ok(false) when used with s3s.
     let (_tmp, cache) = make_s3_fixture().await;
-    assert!(SyncCache::object_exists(&*cache, "nonexistent", "xxh128").is_err());
+    assert!(cache.object_exists("nonexistent", "xxh128").await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -172,7 +173,9 @@ async fn s3_copy_from_between_buckets() {
     ));
 
     // Put object in source
-    SyncCache::put_object(&*src, "abc123", "xxh128", b"copy me").unwrap();
+    src.put_object("abc123", "xxh128", b"copy me".to_vec())
+        .await
+        .unwrap();
 
     // Server-side copy
     let result = dst
@@ -182,7 +185,7 @@ async fn s3_copy_from_between_buckets() {
     assert_eq!(result, CopyResult::ServerSideCopy);
 
     // Verify data arrived
-    let data = SyncCache::get_object(&*dst, "abc123", "xxh128").unwrap();
+    let data = dst.get_object("abc123", "xxh128").await.unwrap();
     assert_eq!(data, b"copy me");
 }
 
@@ -207,8 +210,8 @@ async fn s3_hash_upload_single_file() {
 
     let hash = result.manifest.files()[0].hash.as_ref().unwrap();
     assert!(!hash.is_empty());
-    assert!(SyncCache::object_exists(&*data_cache, hash, "xxh128").unwrap());
-    let stored = SyncCache::get_object(&*data_cache, hash, "xxh128").unwrap();
+    assert!(data_cache.object_exists(hash, "xxh128").await.unwrap());
+    let stored = data_cache.get_object(hash, "xxh128").await.unwrap();
     assert_eq!(stored, b"hello world");
     assert_eq!(result.statistics.uploaded_files, 1);
     assert_eq!(result.statistics.uploaded_bytes, 11);
@@ -329,7 +332,7 @@ async fn s3_download_single_file() {
     let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*data_cache, b"hello world");
+    let hash = upload_to_s3(&*data_cache, b"hello world").await;
     let dest = tmp.path().join("output.txt");
 
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
@@ -355,7 +358,7 @@ async fn s3_download_creates_parent_dirs() {
     let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*data_cache, b"nested");
+    let hash = upload_to_s3(&*data_cache, b"nested").await;
     let dest = tmp.path().join("a/b/c/file.txt");
 
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 6, 1000);
@@ -381,10 +384,10 @@ async fn s3_download_chunked_file() {
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<&[u8]> = vec![b"aaa", b"bbb", b"ccc", b"ddd"];
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| upload_to_s3(&*data_cache, c))
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        chunk_hashes.push(upload_to_s3(&*data_cache, c).await);
+    }
 
     let dest = tmp.path().join("chunked.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
@@ -408,7 +411,7 @@ async fn s3_download_skip_conflict() {
     let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*data_cache, b"new content");
+    let hash = upload_to_s3(&*data_cache, b"new content").await;
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
@@ -438,7 +441,7 @@ async fn s3_download_overwrite_conflict() {
     let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*data_cache, b"new content");
+    let hash = upload_to_s3(&*data_cache, b"new content").await;
     let dest = tmp.path().join("existing.txt");
     std::fs::write(&dest, b"old content").unwrap();
 
@@ -464,7 +467,7 @@ async fn s3_download_create_copy_conflict() {
     let (_s3_tmp, data_cache) = make_s3_fixture().await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*data_cache, b"new");
+    let hash = upload_to_s3(&*data_cache, b"new").await;
     let dest = tmp.path().join("file.txt");
     std::fs::write(&dest, b"old").unwrap();
 
@@ -727,8 +730,14 @@ async fn s3_check_cache_miss_calls_head_object() {
     assert!(!data_cache_with_check.check_cache_exists("missing", "xxh128"));
 
     // Upload an object, then call object_exists which should do HeadObject and populate cache
-    SyncCache::put_object(&*data_cache, "missing", "xxh128", b"data").unwrap();
-    assert!(SyncCache::object_exists(&data_cache_with_check, "missing", "xxh128").unwrap());
+    data_cache
+        .put_object("missing", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
+    assert!(data_cache_with_check
+        .object_exists("missing", "xxh128")
+        .await
+        .unwrap());
 
     // Now the check cache should have the entry
     assert!(data_cache_with_check.check_cache_exists("missing", "xxh128"));
@@ -755,7 +764,7 @@ async fn s3_multipart_download_large_file() {
 
     // File size >= 2 * SMALL_PART_SIZE (64 bytes) triggers multipart
     let content: Vec<u8> = (0..100u8).collect();
-    let hash = upload_to_s3(&*data_cache, &content);
+    let hash = upload_to_s3(&*data_cache, &content).await;
     let dest = tmp.path().join("large.bin");
 
     let mut entry = FileEntry::file(
@@ -787,7 +796,7 @@ async fn s3_multipart_download_small_file() {
 
     // File size < 2 * SMALL_PART_SIZE (64 bytes) — single request path
     let content = b"short";
-    let hash = upload_to_s3(&*data_cache, content);
+    let hash = upload_to_s3(&*data_cache, content).await;
     let dest = tmp.path().join("small.bin");
 
     let mut entry = FileEntry::file(
@@ -822,10 +831,10 @@ async fn s3_multipart_download_chunked_file() {
     // This verifies chunked download still works with a small part size.
     let chunk_size = SMALL_PART_SIZE * 3; // 96 bytes per chunk
     let chunks: Vec<Vec<u8>> = (0..3u8).map(|i| vec![i; chunk_size]).collect();
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| upload_to_s3(&*data_cache, c))
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        chunk_hashes.push(upload_to_s3(&*data_cache, c).await);
+    }
 
     let total_size = chunks.iter().map(|c| c.len()).sum::<usize>();
     let dest = tmp.path().join("chunked_large.bin");
@@ -855,11 +864,11 @@ async fn s3_multipart_download_mixed_sizes() {
 
     // Large file (>= 2 * 32 = 64 bytes) — multipart path
     let large_content: Vec<u8> = (0..100u8).collect();
-    let large_hash = upload_to_s3(&*data_cache, &large_content);
+    let large_hash = upload_to_s3(&*data_cache, &large_content).await;
 
     // Small file (< 64 bytes) — single request path
     let small_content = b"tiny";
-    let small_hash = upload_to_s3(&*data_cache, small_content);
+    let small_hash = upload_to_s3(&*data_cache, small_content).await;
 
     let large_dest = tmp.path().join("large.bin");
     let small_dest = tmp.path().join("small.bin");
@@ -913,12 +922,12 @@ async fn s3_data_cache_expected_bucket_owner_none() {
     let (_tmp, cache) = make_s3_fixture().await;
     assert!(cache.expected_bucket_owner().is_none());
 
-    SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
-    assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(
-        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
-        b"data"
-    );
+    cache
+        .put_object("abc", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
+    assert!(cache.object_exists("abc", "xxh128").await.unwrap());
+    assert_eq!(cache.get_object("abc", "xxh128").await.unwrap(), b"data");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -928,12 +937,12 @@ async fn s3_data_cache_expected_bucket_owner_set() {
     let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012").await;
     assert_eq!(cache.expected_bucket_owner(), Some("123456789012"));
 
-    SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
-    assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(
-        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
-        b"data"
-    );
+    cache
+        .put_object("abc", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
+    assert!(cache.object_exists("abc", "xxh128").await.unwrap());
+    assert_eq!(cache.get_object("abc", "xxh128").await.unwrap(), b"data");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -942,12 +951,12 @@ async fn s3_data_cache_expected_bucket_owner_mismatch() {
     // This test documents that behavior and confirms the field is wired through.
     let (_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("999999999999").await;
 
-    SyncCache::put_object(&*cache, "abc", "xxh128", b"data").unwrap();
-    assert!(SyncCache::object_exists(&*cache, "abc", "xxh128").unwrap());
-    assert_eq!(
-        SyncCache::get_object(&*cache, "abc", "xxh128").unwrap(),
-        b"data"
-    );
+    cache
+        .put_object("abc", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
+    assert!(cache.object_exists("abc", "xxh128").await.unwrap());
+    assert_eq!(cache.get_object("abc", "xxh128").await.unwrap(), b"data");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -971,7 +980,7 @@ async fn s3_upload_with_expected_bucket_owner() {
     let hash = result.manifest.files()[0].hash.as_ref().unwrap();
     assert!(!hash.is_empty());
     assert_eq!(result.statistics.uploaded_files, 1);
-    let stored = SyncCache::get_object(&*cache, hash, "xxh128").unwrap();
+    let stored = cache.get_object(hash, "xxh128").await.unwrap();
     assert_eq!(stored, b"hello owner");
 }
 
@@ -981,7 +990,7 @@ async fn s3_download_with_expected_bucket_owner() {
     let (_s3_tmp, cache) = make_s3_fixture_with_expected_bucket_owner("123456789012").await;
     let tmp = TempDir::new().unwrap();
 
-    let hash = upload_to_s3(&*cache, b"owner download");
+    let hash = upload_to_s3(&*cache, b"owner download").await;
     let dest = tmp.path().join("output.txt");
 
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 14, 1000);
@@ -1024,7 +1033,7 @@ async fn s3_upload_excludes_expected_bucket_owner_when_disabled() {
 
     assert_eq!(result.statistics.uploaded_files, 1);
     let hash = result.manifest.files()[0].hash.as_ref().unwrap();
-    let stored = SyncCache::get_object(&*cache, hash, "xxh128").unwrap();
+    let stored = cache.get_object(hash, "xxh128").await.unwrap();
     assert_eq!(stored, b"no owner header");
 }
 
@@ -1035,7 +1044,7 @@ async fn s3_download_excludes_expected_bucket_owner_when_disabled() {
     assert!(cache.expected_bucket_owner().is_none());
 
     let tmp = TempDir::new().unwrap();
-    let hash = upload_to_s3(&*cache, b"no owner download");
+    let hash = upload_to_s3(&*cache, b"no owner download").await;
     let dest = tmp.path().join("output.txt");
 
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 16, 1000);
@@ -1164,7 +1173,7 @@ async fn s3_stream_range_to_file_at_offset() {
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..50u8).collect();
-    let hash = upload_to_s3(&*data_cache, &content);
+    let hash = upload_to_s3(&*data_cache, &content).await;
     let dest = tmp.path().join("stream_range.bin");
     std::fs::write(&dest, vec![0u8; 50]).unwrap();
     data_cache
@@ -1185,7 +1194,7 @@ async fn s3_stream_write_object_to_file_at_offset() {
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..20u8).collect();
-    let hash = upload_to_s3(&*data_cache, &content);
+    let hash = upload_to_s3(&*data_cache, &content).await;
     let dest = tmp.path().join("write_offset.bin");
     std::fs::write(&dest, vec![0u8; 40]).unwrap();
     data_cache
@@ -1203,7 +1212,7 @@ async fn s3_stream_copy_object_to_file() {
     let tmp = TempDir::new().unwrap();
 
     let content: Vec<u8> = (0..30u8).collect();
-    let hash = upload_to_s3(&*data_cache, &content);
+    let hash = upload_to_s3(&*data_cache, &content).await;
     let dest = tmp.path().join("copy_obj.bin");
     data_cache
         .copy_object_to_file(&hash, "xxh128", &dest)
@@ -1221,10 +1230,10 @@ async fn s3_download_chunked_with_stream_range() {
     let tmp = TempDir::new().unwrap();
 
     let chunks: Vec<Vec<u8>> = (0..3u8).map(|i| vec![i; 16]).collect();
-    let chunk_hashes: Vec<String> = chunks
-        .iter()
-        .map(|c| upload_to_s3(&*data_cache, c))
-        .collect();
+    let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+    for c in &chunks {
+        chunk_hashes.push(upload_to_s3(&*data_cache, c).await);
+    }
 
     let dest = tmp.path().join("chunked_stream.bin");
     let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 48, 1000);
@@ -1257,9 +1266,9 @@ async fn s3_download_chunked_mixed_stream_and_write() {
     let chunk1: Vec<u8> = vec![0xBB; 16];
     let chunk2: Vec<u8> = vec![0xCC; 8];
     let chunk_hashes = vec![
-        upload_to_s3(&*data_cache, &chunk0),
-        upload_to_s3(&*data_cache, &chunk1),
-        upload_to_s3(&*data_cache, &chunk2),
+        upload_to_s3(&*data_cache, &chunk0).await,
+        upload_to_s3(&*data_cache, &chunk1).await,
+        upload_to_s3(&*data_cache, &chunk2).await,
     ];
 
     let dest = tmp.path().join("chunked_mixed.bin");
@@ -1413,7 +1422,10 @@ async fn s3_force_s3_check_bypasses_cache() {
 
     // Upload the object so HeadObject succeeds, then verify object_exists
     // goes through the HeadObject path (not the cache short-circuit)
-    SyncCache::put_object(&*base_cache, "test_hash", "xxh128", b"data").unwrap();
+    base_cache
+        .put_object("test_hash", "xxh128", b"data".to_vec())
+        .await
+        .unwrap();
     let exists = AsyncDataCache::object_exists(&dc, "test_hash", "xxh128")
         .await
         .unwrap();
@@ -1462,7 +1474,10 @@ async fn s3_cache_validation_valid_entry_confirmed() {
     let check_cache = Arc::new(openjd_snapshots::S3CheckCache::new(tmp.path()).unwrap());
 
     // Upload a real object
-    SyncCache::put_object(&*data_cache, "real_hash", "xxh128", b"real data").unwrap();
+    data_cache
+        .put_object("real_hash", "xxh128", b"real data".to_vec())
+        .await
+        .unwrap();
 
     let dc = S3DataCache::new(
         BUCKET.to_string(),

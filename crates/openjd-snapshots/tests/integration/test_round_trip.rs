@@ -257,13 +257,9 @@ async fn delete_via_diff_manifest() {
 
     let keep_hash = {
         let h = openjd_snapshots::hash::hash_data(b"keep");
-        openjd_snapshots::ContentAddressedDataCache::put_object(
-            &*data_cache,
-            &h,
-            "xxh128",
-            b"keep",
-        )
-        .unwrap();
+        openjd_snapshots::AsyncDataCache::put_object(&*data_cache, &h, "xxh128", b"keep".to_vec())
+            .await
+            .unwrap();
         h
     };
 

@@ -308,17 +308,6 @@ want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 
 ## Data Cache
 
-### Sync Trait
-
-```rust
-pub trait ContentAddressedDataCache: Send + Sync {
-    fn object_key(&self, hash: &str, algorithm: &str) -> String;
-    fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool>;
-    fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String>;
-    fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>>;
-}
-```
-
 ### Async Trait
 
 ```rust
@@ -397,7 +386,7 @@ impl FileSystemDataCache {
 }
 ```
 
-Implements `ContentAddressedDataCache` and `AsyncDataCache`. Does not implement
+Implements `AsyncDataCache`. Does not implement
 `MultipartDataCache` or `RangeReadDataCache`, so `as_multipart()` and
 `as_range_read()` return `None`.
 
@@ -429,7 +418,7 @@ impl S3DataCache {
 }
 ```
 
-Implements `ContentAddressedDataCache`, `AsyncDataCache` (with `copy_from` for
+Implements `AsyncDataCache` (with `copy_from` for
 S3-to-S3 server-side copy), `MultipartDataCache`, and `RangeReadDataCache`.
 
 ### CacheValidationState

@@ -8,19 +8,6 @@ use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Content-addressed data cache abstraction.
-/// Files are stored with keys derived from their content hash: `{hash}.{algorithm}`.
-pub trait ContentAddressedDataCache: Send + Sync {
-    /// Returns the storage key/path for a given hash.
-    fn object_key(&self, hash: &str, algorithm: &str) -> String;
-    /// Checks if an object with the given hash already exists.
-    fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool>;
-    /// Writes data to the cache. Returns the key.
-    fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String>;
-    /// Reads data from the cache.
-    fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>>;
-}
-
 use async_trait::async_trait;
 
 /// Result of a copy_from attempt.
@@ -211,28 +198,6 @@ impl FileSystemDataCache {
     }
 }
 
-impl ContentAddressedDataCache for FileSystemDataCache {
-    fn object_key(&self, hash: &str, algorithm: &str) -> String {
-        self.object_path(hash, algorithm)
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool> {
-        Ok(self.object_path(hash, algorithm).exists())
-    }
-
-    fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String> {
-        let path = self.object_path(hash, algorithm);
-        std::fs::write(&path, data)?;
-        Ok(path.to_string_lossy().into_owned())
-    }
-
-    fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.object_path(hash, algorithm))
-    }
-}
-
 #[async_trait]
 impl AsyncDataCache for FileSystemDataCache {
     fn object_key(&self, hash: &str, algorithm: &str) -> String {
@@ -320,37 +285,43 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn put_and_get_object() {
+    #[tokio::test]
+    async fn put_and_get_object() {
         let tmp = TempDir::new().unwrap();
         let cache = FileSystemDataCache::new(tmp.path().join("cache")).unwrap();
-        ContentAddressedDataCache::put_object(&cache, "abc123", "xxh128", b"hello").unwrap();
-        let data = ContentAddressedDataCache::get_object(&cache, "abc123", "xxh128").unwrap();
+        cache
+            .put_object("abc123", "xxh128", b"hello".to_vec())
+            .await
+            .unwrap();
+        let data = cache.get_object("abc123", "xxh128").await.unwrap();
         assert_eq!(data, b"hello");
     }
 
-    #[test]
-    fn object_exists_check() {
+    #[tokio::test]
+    async fn object_exists_check() {
         let tmp = TempDir::new().unwrap();
         let cache = FileSystemDataCache::new(tmp.path().join("cache")).unwrap();
-        assert!(!ContentAddressedDataCache::object_exists(&cache, "abc123", "xxh128").unwrap());
-        ContentAddressedDataCache::put_object(&cache, "abc123", "xxh128", b"data").unwrap();
-        assert!(ContentAddressedDataCache::object_exists(&cache, "abc123", "xxh128").unwrap());
+        assert!(!cache.object_exists("abc123", "xxh128").await.unwrap());
+        cache
+            .put_object("abc123", "xxh128", b"data".to_vec())
+            .await
+            .unwrap();
+        assert!(cache.object_exists("abc123", "xxh128").await.unwrap());
     }
 
     #[test]
     fn object_key_format() {
         let tmp = TempDir::new().unwrap();
         let cache = FileSystemDataCache::new(tmp.path().join("cache")).unwrap();
-        let key = ContentAddressedDataCache::object_key(&cache, "abc123", "xxh128");
+        let key = AsyncDataCache::object_key(&cache, "abc123", "xxh128");
         assert!(key.ends_with("abc123.xxh128"));
     }
 
-    #[test]
-    fn get_nonexistent_returns_error() {
+    #[tokio::test]
+    async fn get_nonexistent_returns_error() {
         let tmp = TempDir::new().unwrap();
         let cache = FileSystemDataCache::new(tmp.path().join("cache")).unwrap();
-        assert!(ContentAddressedDataCache::get_object(&cache, "missing", "xxh128").is_err());
+        assert!(cache.get_object("missing", "xxh128").await.is_err());
     }
 
     #[tokio::test]
@@ -564,46 +535,6 @@ fn format_copy_source(bucket: &str, key: &str) -> String {
         format!("{}/object/{}", bucket, key)
     } else {
         format!("{}/{}", bucket, key)
-    }
-}
-
-/// Run a future to completion, handling the case where we're already inside a tokio runtime.
-fn block_on_async<F: std::future::Future>(f: F) -> F::Output {
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
-        Err(_) => {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("failed to create tokio runtime");
-            rt.block_on(f)
-        }
-    }
-}
-
-impl ContentAddressedDataCache for S3DataCache {
-    fn object_key(&self, hash: &str, algorithm: &str) -> String {
-        format!("{}/{hash}.{algorithm}", self.key_prefix)
-    }
-
-    fn object_exists(&self, hash: &str, algorithm: &str) -> std::io::Result<bool> {
-        if self.check_cache_exists(hash, algorithm) {
-            return Ok(true);
-        }
-        block_on_async(AsyncDataCache::object_exists(self, hash, algorithm))
-    }
-
-    fn put_object(&self, hash: &str, algorithm: &str, data: &[u8]) -> std::io::Result<String> {
-        block_on_async(AsyncDataCache::put_object(
-            self,
-            hash,
-            algorithm,
-            data.to_vec(),
-        ))
-    }
-
-    fn get_object(&self, hash: &str, algorithm: &str) -> std::io::Result<Vec<u8>> {
-        block_on_async(AsyncDataCache::get_object(self, hash, algorithm))
     }
 }
 
@@ -1053,39 +984,5 @@ mod cache_validation_tests {
         }
         // If we get here without panic, thread safety is confirmed
         assert!(state.is_invalidated());
-    }
-}
-
-#[cfg(test)]
-mod block_on_async_tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn block_on_async_without_runtime() {
-        let result = block_on_async(async { 42 });
-        assert_eq!(result, 42);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn block_on_async_inside_runtime() {
-        let result = block_on_async(async { 42 });
-        assert_eq!(result, 42);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn sync_trait_inside_runtime() {
-        let tmp = TempDir::new().unwrap();
-        let cache = FileSystemDataCache::new(tmp.path().join("cache")).unwrap();
-
-        // These calls use the sync ContentAddressedDataCache trait.
-        // Before the fix, calling from within a tokio runtime would panic with
-        // "Cannot start a runtime from within a runtime" for S3DataCache.
-        // FileSystemDataCache doesn't go through block_on_async, but this
-        // validates the sync trait works inside an async context.
-        ContentAddressedDataCache::put_object(&cache, "abc", "xxh128", b"hello").unwrap();
-        assert!(ContentAddressedDataCache::object_exists(&cache, "abc", "xxh128").unwrap());
-        let data = ContentAddressedDataCache::get_object(&cache, "abc", "xxh128").unwrap();
-        assert_eq!(data, b"hello");
     }
 }

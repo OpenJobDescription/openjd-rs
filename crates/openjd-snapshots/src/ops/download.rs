@@ -955,16 +955,19 @@ fn create_copy_path(path: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_cache::{ContentAddressedDataCache, FileSystemDataCache};
+    use crate::data_cache::{AsyncDataCache, FileSystemDataCache};
     use crate::hash::{hash_data, HashAlgorithm};
     use crate::manifest::{AbsManifest, AbsSnapshot, AbsSnapshotDiff, DirEntry, Manifest};
     use crate::DEFAULT_FILE_CHUNK_SIZE;
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn setup_data_cache_with_file(cache: &FileSystemDataCache, content: &[u8]) -> String {
+    async fn setup_data_cache_with_file(cache: &FileSystemDataCache, content: &[u8]) -> String {
         let hash = hash_data(content);
-        ContentAddressedDataCache::put_object(cache, &hash, "xxh128", content).unwrap();
+        cache
+            .put_object(&hash, "xxh128", content.to_vec())
+            .await
+            .unwrap();
         hash
     }
 
@@ -974,7 +977,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"hello world");
+        let hash = setup_data_cache_with_file(&data_cache, b"hello world").await;
         let dest = tmp.path().join("output.txt");
 
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 11, 1000);
@@ -1002,7 +1005,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"nested");
+        let hash = setup_data_cache_with_file(&data_cache, b"nested").await;
         let dest = tmp.path().join("a/b/c/file.txt");
 
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 6, 1000);
@@ -1028,7 +1031,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"new content");
+        let hash = setup_data_cache_with_file(&data_cache, b"new content").await;
         let dest = tmp.path().join("existing.txt");
         std::fs::write(&dest, b"old content").unwrap();
 
@@ -1059,7 +1062,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"new content");
+        let hash = setup_data_cache_with_file(&data_cache, b"new content").await;
         let dest = tmp.path().join("existing.txt");
         std::fs::write(&dest, b"old content").unwrap();
 
@@ -1086,7 +1089,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"new");
+        let hash = setup_data_cache_with_file(&data_cache, b"new").await;
         let dest = tmp.path().join("file.txt");
         std::fs::write(&dest, b"old").unwrap();
 
@@ -1145,14 +1148,15 @@ mod tests {
 
         // Store 4 chunks of 3 bytes each
         let chunks: Vec<&[u8]> = vec![b"aaa", b"bbb", b"ccc", b"ddd"];
-        let chunk_hashes: Vec<String> = chunks
-            .iter()
-            .map(|c| {
-                let h = hash_data(c);
-                ContentAddressedDataCache::put_object(&data_cache, &h, "xxh128", c).unwrap();
-                h
-            })
-            .collect();
+        let mut chunk_hashes: Vec<String> = Vec::with_capacity(chunks.len());
+        for c in &chunks {
+            let h = hash_data(c);
+            data_cache
+                .put_object(&h, "xxh128", c.to_vec())
+                .await
+                .unwrap();
+            chunk_hashes.push(h);
+        }
 
         let dest = tmp.path().join("chunked.bin");
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
@@ -1177,7 +1181,7 @@ mod tests {
         let cache_dir = TempDir::new().unwrap();
         let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
 
-        let hash = setup_data_cache_with_file(&data_cache, b"data");
+        let hash = setup_data_cache_with_file(&data_cache, b"data").await;
         let dest = tmp.path().join("file.txt");
 
         let mut entry =

@@ -71,8 +71,8 @@ pub use codec::{
     ManifestFormat,
 };
 pub use data_cache::{
-    AsyncDataCache, ContentAddressedDataCache, CopyResult, FileSystemDataCache, MultipartDataCache,
-    RangeReadDataCache, S3DataCache,
+    AsyncDataCache, CopyResult, FileSystemDataCache, MultipartDataCache, RangeReadDataCache,
+    S3DataCache,
 };
 pub use error::{Result, SnapshotError};
 pub use hash::{
