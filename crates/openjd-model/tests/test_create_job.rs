@@ -2322,11 +2322,19 @@ fn test_preprocess_checks_constraints_with_environments() {
         },
     )
     .unwrap_err();
-    let msg = err.to_string();
-    // At minimum, the first constraint violation should be reported
-    assert!(
-        msg.contains("Foo") || msg.contains("Bar"),
-        "Expected constraint error for Foo or Bar, got: {msg}"
+    // Both parameter-level constraint violations must surface in the same
+    // result — the function accumulates errors instead of failing on the
+    // first one. Asserting on the full message (including the
+    // `Validation error:` Display prefix and the exact ordering produced
+    // by `merge_job_parameter_definitions`, which processes environment
+    // templates before the job template) guards against (a) silent extra
+    // errors slipping in and (b) regression to fail-fast behaviour, which
+    // would shorten the message.
+    assert_eq!(
+        err.to_string(),
+        "Validation error: \
+         Parameter 'Bar': value length 3 is less than minimum 5\n\
+         Parameter 'Foo': value length 3 exceeds maximum 1",
     );
 }
 
@@ -2362,12 +2370,17 @@ fn test_preprocess_collects_multiple_errors() {
         },
     )
     .unwrap_err();
-    let msg = err.to_string();
-    // The Rust implementation may report errors differently (one at a time or all at once)
-    // At minimum, one of the errors should be reported
-    assert!(
-        msg.contains("Foo") || msg.contains("Bar") || msg.contains("Buz"),
-        "Expected at least one error about Foo, Bar, or Buz, got: {msg}"
+    // All three error categories must surface together, in the documented
+    // order (per-parameter input violations → extras → missing required).
+    // Asserting the full message content prevents regressions that would
+    // (a) reorder these categories, (b) drop one silently, or (c) revert
+    // to fail-fast where only the first would appear.
+    assert_eq!(
+        err.to_string(),
+        "Validation error: \
+         Parameter 'Foo': value length 3 exceeds maximum 1\n\
+         Job parameter values provided for parameters that are not defined in the template: Bar\n\
+         Values missing for required job parameters: Buz",
     );
 }
 

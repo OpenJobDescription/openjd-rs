@@ -499,6 +499,21 @@ impl<'a> PathParameterOptions<'a> {
 }
 
 /// Preprocess job parameters: validate inputs, fill defaults, check constraints.
+///
+/// Errors are accumulated rather than fail-fast: a single bad parameter
+/// won't mask later problems. The returned `ModelError::DecodeValidation`
+/// contains all collected messages joined by newlines, in this order:
+///
+/// 1. Per-parameter satisfiability errors (constraint conflicts after merging).
+/// 2. Per-parameter input handling errors (bad coercion, constraint violations,
+///    forbidden URI paths) and per-parameter default handling errors.
+/// 3. A single "extra parameters" line for inputs that don't match any defined
+///    parameter (Pythonish behavior: one line listing them all).
+/// 4. A single "missing required" line for parameters with no value or default.
+///
+/// Preconditions that prevent any per-parameter work — a non-absolute
+/// `job_template_dir` and structural failures from
+/// [`merge_job_parameter_definitions`] — still fail fast.
 pub fn preprocess_job_parameters(
     job_template: &JobTemplate,
     input_values: &JobParameterInputValues,
@@ -520,15 +535,11 @@ pub fn preprocess_job_parameters(
 
     let merged = merge_job_parameter_definitions(job_template, environment_templates)?;
 
-    for param in &merged {
-        param.validate_satisfiable()?;
-    }
+    let mut errors: Vec<String> = Vec::new();
 
-    for key in input_values.keys() {
-        if !merged.iter().any(|p| p.name == *key) {
-            return Err(ModelError::DecodeValidation(format!(
-                "Job parameter values provided for parameters that are not defined in the template: {key}"
-            )));
+    for param in &merged {
+        if let Err(e) = param.validate_satisfiable() {
+            errors.push(model_err_message(e));
         }
     }
 
@@ -543,67 +554,85 @@ pub fn preprocess_job_parameters(
     for param in &merged {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
-            let coerced = if param.param_type == JobParameterType::Path {
-                let s = input_val.as_str_repr();
-                if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
-                    // EXPR extension: URI handling depends on allow_uri_path_values
-                    if !allow_uri_path_values {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': URI path values are not permitted. Got '{}'",
-                            param.name, s
-                        )));
+            let coerced_opt: Option<openjd_expr::ExprValue> =
+                if param.param_type == JobParameterType::Path {
+                    let s = input_val.as_str_repr();
+                    if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
+                        // EXPR extension: URI handling depends on allow_uri_path_values
+                        if !allow_uri_path_values {
+                            errors.push(format!(
+                                "Parameter '{}': URI path values are not permitted. Got '{}'",
+                                param.name, s
+                            ));
+                            None
+                        } else {
+                            Some(input_val.clone())
+                        }
+                    } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
+                        // We already know s is not absolute (URI-unaware check).
+                        // Use join_for_format for root-relative handling, but the value
+                        // won't be recognized as a URI by join since left (cwd) isn't a URI
+                        // and right was already checked. However, path::join's is_absolute
+                        // still recognizes scheme:// in right. So we do a direct concat
+                        // using the format-appropriate separator.
+                        Some(openjd_expr::ExprValue::String(
+                            openjd_expr::functions::path::non_uri_join(
+                                current_working_dir,
+                                &s,
+                                path_format,
+                            ),
+                        ))
+                    } else {
+                        Some(input_val.clone())
                     }
-                    input_val.clone()
-                } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
-                    // We already know s is not absolute (URI-unaware check).
-                    // Use join_for_format for root-relative handling, but the value
-                    // won't be recognized as a URI by join since left (cwd) isn't a URI
-                    // and right was already checked. However, path::join's is_absolute
-                    // still recognizes scheme:// in right. So we do a direct concat
-                    // using the format-appropriate separator.
-                    openjd_expr::ExprValue::String(openjd_expr::functions::path::non_uri_join(
-                        current_working_dir,
-                        &s,
-                        path_format,
-                    ))
                 } else {
-                    input_val.clone()
+                    Some(input_val.clone())
+                };
+            let Some(coerced) = coerced_opt else { continue };
+            match coerce_to_type(&coerced, param_type) {
+                Ok(expr_value) => {
+                    if let Err(e) = param.check_constraints(&expr_value) {
+                        errors.push(model_err_message(e));
+                    } else {
+                        result.insert(
+                            param.name.clone(),
+                            JobParameterValue {
+                                param_type,
+                                value: expr_value,
+                            },
+                        );
+                    }
                 }
-            } else {
-                input_val.clone()
-            };
-            let expr_value = coerce_to_type(&coerced, param_type).map_err(|e| {
-                ModelError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
-            })?;
-            param.check_constraints(&expr_value)?;
-            result.insert(
-                param.name.clone(),
-                JobParameterValue {
-                    param_type,
-                    value: expr_value,
-                },
-            );
+                Err(e) => {
+                    errors.push(format!("Parameter '{}': {e}", param.name));
+                }
+            }
         } else if let Some(default) = &param.default {
-            let value_str = if param.param_type == JobParameterType::Path && !default.is_empty() {
+            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path
+                && !default.is_empty()
+            {
                 if has_expr && allow_uri_path_values && openjd_expr::uri_path::is_uri(default) {
                     // EXPR + allow: URI preserved as-is
-                    default.clone()
+                    Some(default.clone())
                 } else if has_expr
                     && !allow_uri_path_values
                     && openjd_expr::uri_path::is_uri(default)
                 {
-                    return Err(ModelError::DecodeValidation(format!(
+                    errors.push(format!(
                         "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
                         param.name, default
-                    )));
+                    ));
+                    None
                 } else if is_absolute_for_format_no_uri(default, path_format) {
                     if !allow_job_template_dir_walk_up {
-                        return Err(ModelError::DecodeValidation(format!(
+                        errors.push(format!(
                             "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
                             param.name
-                        )));
+                        ));
+                        None
+                    } else {
+                        Some(default.clone())
                     }
-                    default.clone()
                 } else if !allow_job_template_dir_walk_up
                     && is_absolute_for_format(job_template_dir, path_format)
                 {
@@ -611,45 +640,83 @@ pub fn preprocess_job_parameters(
                     let normalized = normalize_path_str(&joined, path_format);
                     let normalized_dir = normalize_path_str(job_template_dir, path_format);
                     if !normalized.starts_with(&normalized_dir) {
-                        return Err(ModelError::DecodeValidation(format!(
+                        errors.push(format!(
                             "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
                             param.name
-                        )));
+                        ));
+                        None
+                    } else {
+                        Some(normalized)
                     }
-                    normalized
                 } else if is_absolute_for_format(job_template_dir, path_format) {
                     let joined = join_for_format(job_template_dir, default, path_format);
-                    normalize_path_str(&joined, path_format)
+                    Some(normalize_path_str(&joined, path_format))
                 } else {
-                    default.clone()
+                    Some(default.clone())
                 }
             } else {
-                default.clone()
+                Some(default.clone())
             };
-            let expr_value = coerce_from_str(&value_str, param_type).map_err(|e| {
-                ModelError::DecodeValidation(format!("Parameter '{}': {e}", param.name))
-            })?;
-            result.insert(
-                param.name.clone(),
-                JobParameterValue {
-                    param_type,
-                    value: expr_value,
-                },
-            );
+            let Some(value_str) = value_str_opt else {
+                continue;
+            };
+            match coerce_from_str(&value_str, param_type) {
+                Ok(expr_value) => {
+                    result.insert(
+                        param.name.clone(),
+                        JobParameterValue {
+                            param_type,
+                            value: expr_value,
+                        },
+                    );
+                }
+                Err(e) => errors.push(format!("Parameter '{}': {e}", param.name)),
+            }
         } else {
             missing.push(param.name.clone());
         }
     }
 
+    let mut extras: Vec<&str> = input_values
+        .keys()
+        .filter(|k| !merged.iter().any(|p| p.name == **k))
+        .map(String::as_str)
+        .collect();
+    if !extras.is_empty() {
+        extras.sort();
+        errors.push(format!(
+            "Job parameter values provided for parameters that are not defined in the template: {}",
+            extras.join(", ")
+        ));
+    }
+
     if !missing.is_empty() {
         missing.sort();
-        return Err(ModelError::DecodeValidation(format!(
+        errors.push(format!(
             "Values missing for required job parameters: {}",
             missing.join(", ")
-        )));
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(ModelError::DecodeValidation(errors.join("\n")));
     }
 
     Ok(result)
+}
+
+/// Extract a flat string from a `ModelError`.
+///
+/// `validate_satisfiable` and `check_constraints` may return either
+/// `DecodeValidation` or `Compatibility` variants; both carry their
+/// human-readable text directly. For other variants we fall back to
+/// `Display`, which is fine because those cases don't occur in this code
+/// path today.
+fn model_err_message(e: ModelError) -> String {
+    match e {
+        ModelError::DecodeValidation(msg) | ModelError::Compatibility(msg) => msg,
+        other => other.to_string(),
+    }
 }
 
 /// Check whether a path string is absolute according to the given path format.
