@@ -279,6 +279,6 @@ The `openjd-snapshots` crate has integration tests that run against a real S3 bu
 AWS_PROFILE=GammaSandbox \
 OPENJD_TEST_S3_BUCKET=rendering-agent-spaces-workshop \
 OPENJD_TEST_S3_PREFIX=OpenJDSnapshotsTests \
-cargo test -p openjd-snapshots --test test_s3_integration -- --ignored
+cargo test -p openjd-snapshots --test integration -- --ignored test_s3_integration::
 ```
 

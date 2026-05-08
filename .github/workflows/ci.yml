@@ -351,14 +351,20 @@ jobs:
           $password = "A1a!" + $password
           echo "Y" | net user openjdtestuser $password /add
           echo "OPENJD_TEST_WIN_USER_PASSWORD=$password" >> $env:GITHUB_ENV
+      # The individual test_cross_user_windows.rs and test_windows_permissions.rs
+      # files are now included as modules inside the single `integration` test
+      # binary (see crates/openjd-sessions/tests/integration.rs). Select them by
+      # module-path substring. On Windows the sibling `test_cross_user.rs`
+      # module is `#![cfg(unix)]`-gated and compiles to zero tests, so
+      # `cross_user_windows` unambiguously selects only the Windows tests.
       - name: Run cross-user tests (test_cross_user_windows)
         env:
           OPENJD_TEST_WIN_USER_NAME: openjdtestuser
-        run: cargo test --release -p openjd-sessions --features test-utils --test test_cross_user_windows -- --include-ignored --test-threads=1
+        run: "cargo test --release -p openjd-sessions --features test-utils --test integration -- --include-ignored --test-threads=1 test_cross_user_windows::"
       - name: Run cross-user tests (test_windows_permissions)
         env:
           OPENJD_TEST_WIN_USER_NAME: openjdtestuser
-        run: cargo test --release -p openjd-sessions --features test-utils --test test_windows_permissions -- --include-ignored --test-threads=1
+        run: "cargo test --release -p openjd-sessions --features test-utils --test integration -- --include-ignored --test-threads=1 test_windows_permissions::"
       - name: Remove test user
         if: always()
         run: net user openjdtestuser /delete

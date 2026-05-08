@@ -19,7 +19,7 @@
 ///
 /// Run with:
 ///   RUSTUP_TOOLCHAIN=stable OPENJD_TEST_S3_BUCKET=my-bucket \
-///     cargo test -p openjd-snapshots --test test_s3_integration -- --ignored
+///     cargo test -p openjd-snapshots --test integration -- --ignored test_s3_integration::
 use openjd_snapshots::{
     cache_sync_manifest, collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest,
     join_snapshot, subtree_snapshot, AbsManifest, AsyncDataCache, CacheSyncOptions, CollectOptions,
