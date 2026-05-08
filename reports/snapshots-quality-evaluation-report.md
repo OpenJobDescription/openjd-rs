@@ -7,7 +7,7 @@
 
 The `openjd-snapshots` crate is a substantial, high-quality standalone Rust implementation of the job-attachments snapshots subsystem. It carries ~260k of source across a clean module boundary (manifest types, codec, two cache traits plus two backends, hash/S3-check caches, a complete set of 11 operations, and memory-pool/rate helpers), backed by roughly 1,047 passing tests (244 unit + 802 integration + 1 doc, with a handful of ignored S3-integration tests). Build is clean, clippy `-D warnings` is clean, and all documented error-message contracts are pinned. The specs in `specs/snapshots/` are thorough — there's a README index, a dedicated `public-api.md`, per-operation pages, and cross-cutting docs for manifests, caches, errors, and symlinks — and the code generally matches them well. The phantom-type design for path style (`Abs`/`Rel`) and manifest kind (`Full`/`Diff`) is idiomatic Rust and adds real compile-time safety; the trie-based `compose` and the `tokio`-based memory-bounded pipeline for HASH_UPLOAD / DOWNLOAD / CACHE_SYNC are strong contributions relative to the Python reference.
 
-Findings are mostly polish: the `public-api.md` signature for `hash_file_chunked` is out of date (missing the mandatory `expected_size` param); `Manifest::validate()` has two latent divide-by-zero / wraparound error-message bugs on pathological `file_chunk_size_bytes` (already documented as `#[ignore]`-marked probes); `FileSystemDataCache.root_path` is `pub` which leaks an otherwise internal field; and there are several places where `std::sync::Mutex` is used in operation pipelines with a comment explaining the choice but no assertion that the lock is never held across an `.await`. No correctness bugs were found in the core operations; exploratory probing confirmed that compose, diff, subtree, join, filter, partition, and v2025 codec behave as the specs describe. The crate is in good shape overall; the recommendations in §8 are primarily doc fixes, a couple of easy validator hardenings, and some targeted test-coverage additions (diff options / subtree cycles / CACHE_SYNC cancellation).
+Findings are mostly polish: the `public-api.md` signature for `hash_file_chunked` is out of date (missing the mandatory `expected_size` param); ~~`Manifest::validate()` has two latent divide-by-zero / wraparound error-message bugs on pathological `file_chunk_size_bytes` (already documented as `#[ignore]`-marked probes)~~ **(Resolved — see §3 issue 1 and §8 recommendation 4)**; `FileSystemDataCache.root_path` is `pub` which leaks an otherwise internal field; and there are several places where `std::sync::Mutex` is used in operation pipelines with a comment explaining the choice but no assertion that the lock is never held across an `.await`. No correctness bugs were found in the core operations; exploratory probing confirmed that compose, diff, subtree, join, filter, partition, and v2025 codec behave as the specs describe. The crate is in good shape overall; the recommendations in §8 are primarily doc fixes, a couple of easy validator hardenings, and some targeted test-coverage additions (diff options / subtree cycles / CACHE_SYNC cancellation).
 
 ## 1. Specifications Review
 
@@ -87,11 +87,11 @@ Reviewed `lib.rs`, `error.rs`, `path_util.rs`, `hash.rs`, `manifest.rs`, `codec.
 
 **Issues / concerns:**
 
-1. **`Manifest::validate()` has two latent bugs on pathological `file_chunk_size_bytes`.** Both are already documented as `#[ignore]`-marked probes in `tests/test_quality_probes.rs`:
+1. ~~**`Manifest::validate()` has two latent bugs on pathological `file_chunk_size_bytes`.** Both are already documented as `#[ignore]`-marked probes in `tests/test_quality_probes.rs`:
    - Zero chunk size: integer division by zero in `((size as f64) / (chunk_size as f64)).ceil()` becomes `inf`, then `as usize` wraps to `usize::MAX`. The error message reads `"should have 18446744073709551615 chunks (chunk_size=0)"`.
    - Negative chunk size other than `-1`: cast `self.file_chunk_size_bytes as u64` wraps to e.g. `18446744073709551614`, which then appears in the error: `"must have size > 18446744073709551614 (chunk size)"`.
 
-   Fix: at the top of `validate()`, reject `file_chunk_size_bytes == 0` and `file_chunk_size_bytes < 0 && file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE` with a clean message. Then remove the `#[ignore]` on those probes.
+   Fix: at the top of `validate()`, reject `file_chunk_size_bytes == 0` and `file_chunk_size_bytes < 0 && file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE` with a clean message. Then remove the `#[ignore]` on those probes.~~ **Resolved.** `Manifest::validate()` now rejects zero and unsupported-negative `file_chunk_size_bytes` values up front with a clear error: `"invalid fileChunkSizeBytes: got N, must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer"`. The downstream chunk-count computation was also switched from float-based `ceil()` to integer `u64::div_ceil`, since the up-front check now guarantees `chunk_size > 0`. The probe tests were promoted to full-message `assert_eq!` tests and integrated into `tests/test_manifest.rs` under a new `TestValidateChunkSize` section, alongside four supporting cases (invariant holds without any chunk_hashes; sanity tests for `WHOLE_FILE_CHUNK_SIZE` and positive values). The rest of `tests/test_quality_probes.rs` was folded into its natural homes (see §4) and the probe file was removed.
 
 2. **`encode_v2025` persists a caller-supplied `total_size` without recomputing.** If a caller mutates `files` but forgets `recompute_total_size()`, the on-disk manifest has a wrong `totalSize`. The decode side does `m.total_size = total_size;` and `m.validate()` — but `validate()` does not cross-check `total_size` against the sum of file sizes. Consider either (a) recompute in the encoder, or (b) add a validation check that `total_size` matches the sum of non-deleted non-symlink file sizes.
 
@@ -129,10 +129,9 @@ Total: 1,047 tests passing, 5 ignored.
 | `tests/test_hash.rs` | 45 | |
 | `tests/test_hash_upload.rs` | 47 | Includes chunked upload, whole-file, multipart, dedup, cache hits. |
 | `tests/test_join.rs` | 60 | |
-| `tests/test_manifest.rs` | 35 | Ported from `deadline-cloud` test_manifest.py. |
+| `tests/test_manifest.rs` | 21 | Ported from `deadline-cloud` test_manifest.py, plus new `TestValidateChunkSize` and `TestPhantomTypes` sections folded in from the retired `test_quality_probes.rs`. |
 | `tests/test_partition.rs` | 14 | Adequate but thin for this complex op. See gaps below. |
-| `tests/test_quality_probes.rs` | 6 (4 ok + 2 ignored) | Documents known latent bugs. |
-| `tests/test_round_trip.rs` | 40 | |
+| `tests/test_round_trip.rs` | 40 |  |
 | `tests/test_s3_data_cache.rs` | 6 (4 ok + 2 ignored) | Uses `s3s` in-process mock. |
 | `tests/test_s3_integration.rs` | 7 | Real S3, `#[ignore]` by default. |
 | `tests/test_subtree.rs` | 58 (57 ok + 1 ignored) | Comprehensive subtree + symlink cases. |
@@ -142,7 +141,7 @@ Total: 1,047 tests passing, 5 ignored.
 **Strengths:**
 - The error-message quality tests (`test_error_messages.rs`) pin the exact Display output for every `SnapshotError` variant, matching the project's convention in AGENTS.md.
 - `test_v2023_canonical.rs` runs Python-generated fixture JSON through the Rust decode-encode round trip, verifying byte-for-byte match. This is exactly the kind of cross-implementation guardrail that should exist and it pays off: the codec has 38 tests between unit + integration + canonical.
-- The "quality probes" file is a nice pattern — documenting known-issue behaviours with a failing `#[ignore]` test and a clear comment explaining the fix, so the test becomes the regression check once the fix lands.
+- ~~The "quality probes" file is a nice pattern — documenting known-issue behaviours with a failing `#[ignore]` test and a clear comment explaining the fix, so the test becomes the regression check once the fix lands.~~ **Resolved** — the `test_quality_probes.rs` file has been retired now that its known-issue findings are fixed; its surviving tests were folded into their natural homes (validation in `test_manifest.rs`, chunked-hash determinism in `src/hash.rs`'s unit tests, the duplicate-path v2025 decode in `test_codec.rs`).
 
 **Gaps:**
 - `test_upload_dedup.rs` has only 2 tests for what is a subtle and concurrency-sensitive subsystem. Consider adding: a test where the first uploader fails (waiters should see an error propagated or a retry), a test with 100+ concurrent uploaders of the same hash (stress), and a test that the dedup map is emptied after the broadcast fires (no leak).
@@ -201,7 +200,7 @@ test result: ok. 244 passed; 0 failed; ... (lib unit tests)
 test result: ok. 1 passed; 0 failed; 0 ignored; ... (doctest)
 [21 integration test files, all passing]
 ```
-Summary: **1,047 tests passing**, 5 ignored (2 in `test_quality_probes.rs` pinning known bugs; 1 in `test_subtree.rs`; 2 in `test_s3_integration.rs` for real-S3 credentials).
+Summary: **1,047 tests passing**, 3 ignored (1 in `test_subtree.rs`; 2 in `test_s3_integration.rs` for real-S3 credentials). The two previously-ignored probes in `test_quality_probes.rs` were fixed and promoted to active tests in `test_manifest.rs`; see §3 issue 1.
 
 S3 integration tests (`test_s3_integration.rs`) were not run in this evaluation; they are `#[ignore]`d by default and require `OPENJD_TEST_S3_BUCKET`.
 
@@ -210,8 +209,8 @@ S3 integration tests (`test_s3_integration.rs`) were not run in this evaluation;
 Targeted exploratory probing focused on boundaries, invariant violations, and round-trip consistency. A few findings of note:
 
 **Findings that are already documented.**
-- The two `file_chunk_size_bytes` pathological-value bugs in `Manifest::validate()` (zero and negative-other-than-`-1`) are already captured as `#[ignore]`-marked probes. They remain unfixed; the exploratory run confirms both still produce nonsensical error messages (`"should have 18446744073709551615 chunks"` and `"must have size > 18446744073709551614"`). These should be fixed; see §8 recommendation 1.
-- `manifest_deserialization_ignores_phantom_types` confirms that `serde_json::from_str::<Snapshot>(...)` of a manifest containing absolute paths succeeds. The `#[serde(skip)]` PhantomData makes the path-style trait bound irrelevant at deserialize time; `validate()` catches it. The lib.rs doc comment already warns about this.
+- ~~The two `file_chunk_size_bytes` pathological-value bugs in `Manifest::validate()` (zero and negative-other-than-`-1`) are already captured as `#[ignore]`-marked probes. They remain unfixed; the exploratory run confirms both still produce nonsensical error messages (`"should have 18446744073709551615 chunks"` and `"must have size > 18446744073709551614"`). These should be fixed; see §8 recommendation 1.~~ **Resolved** — both bugs are now fixed; `Manifest::validate()` rejects invalid `file_chunk_size_bytes` up front with a clear error, and the probes were promoted to active tests in `test_manifest.rs`. See §3 issue 1 for the full resolution note.
+- `manifest_deserialization_ignores_phantom_types` confirms that `serde_json::from_str::<Snapshot>(...)` of a manifest containing absolute paths succeeds. The `#[serde(skip)]` PhantomData makes the path-style trait bound irrelevant at deserialize time; `validate()` catches it. The lib.rs doc comment already warns about this. *(This probe was folded into `test_manifest.rs` as `deserialization_accepts_mismatched_paths_and_validate_rejects_them` with a full-message `assert_eq!`.)*
 
 **New probes written during this review (all pass):**
 - `can_construct_invalid_manifest_directly`: confirms that `m.files = vec![...]` with an absolute path in a `Rel` manifest compiles; `validate()` catches it. Also confirms that `total_size` drift is possible via direct field mutation.
@@ -224,7 +223,7 @@ Targeted exploratory probing focused on boundaries, invariant violations, and ro
 
 The probe tests were removed after verification; they duplicate coverage the existing tests provide.
 
-**No new bugs were found** beyond the two already-documented `validate()` latent-message issues and the doc-vs-implementation drift items called out in §2, §3, §5.
+**No new bugs were found** beyond the two already-documented `validate()` latent-message issues (now resolved — see §3 issue 1) and the doc-vs-implementation drift items called out in §2, §3, §5.
 
 ## 8. Recommendations
 
@@ -248,7 +247,7 @@ Priority order: 1–3 are doc fixes that should land together; 4–7 are small c
 
 ### Priority 2 — small code hardenings
 
-4. **Fix `Manifest::validate()` negative-and-zero `file_chunk_size_bytes` handling.** Add a guard at the top of `validate()`:
+4. ~~**Fix `Manifest::validate()` negative-and-zero `file_chunk_size_bytes` handling.** Add a guard at the top of `validate()`:
    ```rust
    if self.file_chunk_size_bytes == 0
        || (self.file_chunk_size_bytes < 0 && self.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE) {
@@ -258,7 +257,7 @@ Priority order: 1–3 are doc fixes that should land together; 4–7 are small c
        )));
    }
    ```
-   Then remove the `#[ignore]` on the two matching probes in `test_quality_probes.rs`.
+   Then remove the `#[ignore]` on the two matching probes in `test_quality_probes.rs`.~~ **Resolved.** The guard was added at the top of `Manifest::validate()` and the downstream `ceil()` was replaced with integer `u64::div_ceil` now that `chunk_size > 0` is guaranteed. The probes were promoted to active full-message tests and folded into `tests/test_manifest.rs`. See §3 issue 1 for the full resolution note.
 
 5. **Add a `validate()` cross-check for `total_size`.** In `Manifest::validate()`, after the per-file checks, verify that `total_size` equals the sum of non-deleted non-symlink file sizes. Return a clear error if not. Prevents bugs where a caller edits `files` directly and forgets `recompute_total_size()`.
 

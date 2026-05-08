@@ -515,6 +515,20 @@ impl<P, K> Manifest<P, K> {
 
 impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
     pub fn validate(&self) -> crate::Result<()> {
+        // The chunk size is a manifest-level invariant: either the sentinel
+        // WHOLE_FILE_CHUNK_SIZE (-1, meaning "no chunking") or a positive
+        // integer. Reject other values up front so downstream code (chunk-
+        // count computation, size-vs-chunk-size comparisons) can safely treat
+        // the value as a positive u64.
+        if self.file_chunk_size_bytes != crate::hash::WHOLE_FILE_CHUNK_SIZE
+            && self.file_chunk_size_bytes <= 0
+        {
+            return Err(crate::SnapshotError::Validation(format!(
+                "invalid fileChunkSizeBytes: got {}, must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer",
+                self.file_chunk_size_bytes
+            )));
+        }
+
         for f in &self.files {
             P::validate_path(&f.path)?;
             K::validate_deleted(f.deleted)?;
@@ -583,6 +597,9 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                         f.path, self.file_chunk_size_bytes
                     )));
                 }
+                // The up-front check above guarantees `file_chunk_size_bytes`
+                // is either WHOLE_FILE_CHUNK_SIZE (handled above) or a
+                // positive integer, so this cast is lossless and non-zero.
                 let chunk_size = self.file_chunk_size_bytes as u64;
                 if size <= chunk_size {
                     return Err(crate::SnapshotError::Validation(format!(
@@ -590,7 +607,8 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                         f.path, chunk_size, size
                     )));
                 }
-                let expected = ((size as f64) / (chunk_size as f64)).ceil() as usize;
+                // Integer ceil-div: chunk_size is guaranteed > 0 above.
+                let expected = size.div_ceil(chunk_size) as usize;
                 if ch.len() != expected {
                     return Err(crate::SnapshotError::Validation(format!(
                         "file '{}' with size {} should have {} chunks (chunk_size={}), got {}",

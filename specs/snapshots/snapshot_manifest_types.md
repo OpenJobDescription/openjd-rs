@@ -140,6 +140,7 @@ All constructors apply `normalize_path()` to the path (and symlink target).
 - Regular files: at most one of `hash` or `chunk_hashes`; must have `size` and `mtime`
 - Chunkhashes count must equal `ceil(size / file_chunk_size_bytes)`
 - Chunkhashes not allowed when `file_chunk_size_bytes == WHOLE_FILE_CHUNK_SIZE`
+- `file_chunk_size_bytes` must be either `WHOLE_FILE_CHUNK_SIZE` (-1, the sentinel for "no chunking") or a positive integer. Zero and other negative values are rejected by `validate()`.
 
 ## DirEntry
 

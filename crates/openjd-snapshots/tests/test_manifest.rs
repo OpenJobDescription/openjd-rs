@@ -5,7 +5,9 @@
 // Ported from deadline-cloud test_manifest.py
 
 use openjd_snapshots::{AbsSnapshot, AbsSnapshotDiff, DirEntry, Snapshot, SnapshotDiff};
-use openjd_snapshots::{FileEntry, HashAlgorithm, Manifest, DEFAULT_FILE_CHUNK_SIZE};
+use openjd_snapshots::{
+    FileEntry, HashAlgorithm, Manifest, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE,
+};
 
 fn abs_snapshot(files: Vec<FileEntry>) -> AbsSnapshot {
     Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(files)
@@ -163,4 +165,120 @@ fn validate_accepts_unique_paths() {
     ]);
     m.dirs = vec![DirEntry::new("c")];
     assert!(m.validate().is_ok());
+}
+
+// --- TestValidateChunkSize ---
+
+/// `Manifest::validate()` rejects negative `file_chunk_size_bytes` values other
+/// than `-1` (`WHOLE_FILE_CHUNK_SIZE`) with a sensible, self-describing error.
+/// Guards against a previous bug where the unchecked `as u64` cast wrapped
+/// negative values to enormous u64s (e.g. `"size > 18446744073709551614"`).
+#[test]
+fn validate_rejects_bad_negative_chunk_size_with_sensible_message() {
+    let mut f = FileEntry::file("a.bin", 1024, 1);
+    f.chunk_hashes = Some(vec!["a".into(), "b".into()]);
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, -2).with_files(vec![f]);
+    let err = m.validate().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Manifest validation error: invalid fileChunkSizeBytes: got -2, \
+         must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer",
+    );
+}
+
+/// The chunk-size invariant is manifest-level, so `validate()` must reject a
+/// bad value even when no file declares `chunk_hashes` (i.e. before any
+/// chunk-count computation would ever run).
+#[test]
+fn validate_rejects_bad_negative_chunk_size_without_chunked_files() {
+    let m: Snapshot =
+        Manifest::new(HashAlgorithm::Xxh128, -2).with_files(vec![FileEntry::file("a.bin", 10, 1)]);
+    let err = m.validate().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Manifest validation error: invalid fileChunkSizeBytes: got -2, \
+         must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer",
+    );
+}
+
+/// `Manifest::validate()` rejects `file_chunk_size_bytes = 0` with a sensible
+/// error. Guards against a previous bug where `size / 0` (as f64 ceil) produced
+/// messages like `"should have 18446744073709551615 chunks (chunk_size=0)"`.
+#[test]
+fn validate_rejects_zero_chunk_size_with_sensible_message() {
+    let mut f = FileEntry::file("a.bin", 3, 1);
+    f.chunk_hashes = Some(vec!["a".into()]);
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, 0).with_files(vec![f]);
+    let err = m.validate().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Manifest validation error: invalid fileChunkSizeBytes: got 0, \
+         must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer",
+    );
+}
+
+/// Same as above: zero is rejected even without any chunked files.
+#[test]
+fn validate_rejects_zero_chunk_size_without_chunked_files() {
+    let m: Snapshot =
+        Manifest::new(HashAlgorithm::Xxh128, 0).with_files(vec![FileEntry::file("a.bin", 10, 1)]);
+    let err = m.validate().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Manifest validation error: invalid fileChunkSizeBytes: got 0, \
+         must be -1 (WHOLE_FILE_CHUNK_SIZE) or a positive integer",
+    );
+}
+
+/// Sanity: `file_chunk_size_bytes = -1` (`WHOLE_FILE_CHUNK_SIZE`) is accepted —
+/// it's the sentinel meaning "no chunking".
+#[test]
+fn validate_accepts_whole_file_chunk_size_sentinel() {
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+        .with_files(vec![FileEntry::file("a.bin", 10, 1)]);
+    assert!(m.validate().is_ok());
+}
+
+/// Sanity: a positive `file_chunk_size_bytes` is accepted.
+#[test]
+fn validate_accepts_positive_chunk_size() {
+    let m: Snapshot = Manifest::new(HashAlgorithm::Xxh128, 1024)
+        .with_files(vec![FileEntry::file("a.bin", 10, 1)]);
+    assert!(m.validate().is_ok());
+}
+
+// --- TestPhantomTypes ---
+
+/// Phantom type parameters on [`Manifest<P, K>`] are `#[serde(skip)]`, so
+/// deserializing directly via `serde_json::from_str` does not enforce path-style
+/// or kind constraints — `validate()` is responsible for catching mismatches at
+/// runtime. This test pins that documented two-step behaviour: deserialize
+/// succeeds, then `validate()` rejects.
+#[test]
+fn deserialization_accepts_mismatched_paths_and_validate_rejects_them() {
+    let abs: AbsSnapshot =
+        Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![FileEntry {
+            path: "/absolute/path.txt".into(),
+            hash: Some("abc123".into()),
+            size: Some(100),
+            mtime: Some(1000),
+            chunk_hashes: None,
+            symlink_target: None,
+            runnable: false,
+            deleted: false,
+        }]);
+
+    let json = serde_json::to_string(&abs).unwrap();
+
+    // Step 1: deserializing an absolute-path payload as a relative Snapshot
+    // succeeds at the serde layer — phantom types are skipped.
+    let rel: Snapshot = serde_json::from_str(&json)
+        .expect("serde deserialization does not enforce phantom type constraints");
+
+    // Step 2: validate() catches the mismatch with a clear error.
+    let err = rel.validate().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Manifest validation error: expected relative path, got: /absolute/path.txt",
+    );
 }

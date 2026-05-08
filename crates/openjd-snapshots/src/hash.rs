@@ -170,6 +170,22 @@ mod tests {
     }
 
     #[test]
+    fn hash_chunked_file_is_deterministic() {
+        // Chunk hashing must be deterministic — two hashings of the same file
+        // must produce identical chunk-hash vectors.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("testfile");
+        let chunk_size: u64 = 1024;
+        let data: Vec<u8> = (0..3 * chunk_size).map(|i| (i % 256) as u8).collect();
+        std::fs::write(&p, &data).unwrap();
+
+        let h1 = hash_file_chunked(&p, chunk_size, data.len() as u64).unwrap();
+        let h2 = hash_file_chunked(&p, chunk_size, data.len() as u64).unwrap();
+        assert_eq!(h1.len(), 3);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
     fn hash_chunked_empty_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("empty.bin");

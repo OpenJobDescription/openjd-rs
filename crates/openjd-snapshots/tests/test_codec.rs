@@ -531,6 +531,23 @@ fn v2025_runnable_preserved() {
     assert!(snap2.files[0].runnable);
 }
 
+#[test]
+fn v2025_decode_rejects_duplicate_file_paths() {
+    // v2025 decoding runs manifest validation, which detects duplicate paths
+    // across the files/dirs arrays.
+    let dup = r#"{
+        "specificationVersion":"absolute-manifest-snapshot-beta-2025-12",
+        "hashAlg":"xxh128","totalSize":10,"fileChunkSizeBytes":-1,
+        "dirs":[],
+        "files":[
+            {"name":"/a.txt","hash":"abc","size":10,"mtime":1},
+            {"name":"/a.txt","hash":"def","size":20,"mtime":2}
+        ]
+    }"#;
+    let err = decode_v2025(dup).unwrap_err().to_string();
+    assert_eq!(err, "Manifest validation error: duplicate path: /a.txt",);
+}
+
 // ===== Auto-detection =====
 
 #[test]
