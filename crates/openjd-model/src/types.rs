@@ -17,8 +17,14 @@ use serde::{Deserialize, Serialize};
 // ── String-typed enums for compile-time safety ──
 
 /// §6 Embedded file type.
+///
+/// Marked `#[non_exhaustive]` so that future revisions or extensions
+/// can add new file types (for example, a `Binary` variant, which has
+/// been reserved space in the spec since RFC 0001 discussion) without
+/// a SemVer break for downstream crates that match on this enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[non_exhaustive]
 pub enum FileType {
     Text,
 }
@@ -237,7 +243,13 @@ impl fmt::Display for JobParameterType {
 }
 
 /// The type of a task parameter definition.
+///
+/// Marked `#[non_exhaustive]` so that future revisions and extensions
+/// can add task parameter types (for example, a list-typed task
+/// parameter analogous to `JobParameterType::ListInt`, or additional
+/// chunked variants) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TaskParameterType {
     Int,
     Float,
@@ -329,6 +341,7 @@ pub type Extensions = std::collections::HashSet<ModelExtension>;
 /// boundary, so once an `Extensions` set has been constructed every
 /// element is guaranteed to be a known extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,

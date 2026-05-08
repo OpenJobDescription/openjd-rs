@@ -80,19 +80,20 @@ the language subset?" — the answer is now **partially yes**:
 - ❌ **Not ready** for a revision that **adds a reserved identifier** or
   removes one. `PYTHON_KEYWORDS: &[&str]` in `eval/parse.rs` is a hardcoded
   const and the contextual-keyword rename mechanism iterates it directly.
-- ⚠️ **`#[non_exhaustive]` coverage is uneven.** The prior report claimed
-  this tier was resolved, but inspection shows `ModelExtension`,
-  `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, and
-  `ExprValue` (the outer enum, not just the `Path` variant) are
-  **not** marked. These are realistic growth axes — especially
-  `ModelExtension` and `ExprValue`.
-- ❌ **Public-API specs are missing** for both crates
-  (`specs/expr/public-api.md`, `specs/model/public-api.md`). Only
-  `openjd-snapshots` has one. This is both a gap against the repo's
-  own convention (AGENTS.md, "Every crate's spec directory must include
-  a `public-api.md`") and a practical obstacle to reasoning about
-  stability: there is no single authoritative inventory of what the
-  profile refactor has actually exposed.
+- ✅ **`#[non_exhaustive]` coverage is complete.** Every realistic
+  growth-axis enum is now marked: `SpecificationRevision`,
+  `TemplateSpecificationVersion`, `JobParameterType`,
+  `TaskParameterType`, `ModelExtension`, `FileType`, `ExprRevision`,
+  `ExprExtension`, `ExprValue` (outer enum), `ModelError`,
+  `ExpressionErrorKind`, `TypeCode`. The two enums in §3.1 and §3.3
+  that the prior pass missed (`ModelExtension`, `TaskParameterType`,
+  `FileType`) were completed in the same pass that fixed the
+  accounting errors.
+- ✅ **Public-API specs now exist** for both crates
+  (`specs/expr/public-api.md`, `specs/model/public-api.md`) plus
+  `specs/sessions/public-api.md`, each with an explicit
+  Versioning and Stability Conventions section enumerating the
+  `#[non_exhaustive]` surface.
 
 The most concentrated risk remaining is two specific hardcoded tables.
 The third item from the prior pass — the unsupported-AST-node rejection
@@ -110,13 +111,20 @@ Both remaining items are about the Python host grammar rather than
 OpenJD semantics and can be addressed when (and only when) a future
 revision actually needs to change them.
 
-Priority 3 and Priority 4 of the prior report remain open and are the
-main body of work left. Priority 1 and Priority 2 are effectively
-closed, with two specific exceptions under Priority 1 item 5
-(non-exhaustive enums) that slipped through. The two minor
-Priority 2 dispatch gaps called out in the previous pass
-(`EffectiveRules::from_context`, `decode_environment_template`)
-are now closed.
+Priority 3 remains the main body of internal-cleanup work left
+(operator-to-dunder table, `PYTHON_KEYWORDS` relocation,
+`host_context_enabled` replacement). Priority 4 is closed:
+public-api.md docs exist for `openjd-expr`, `openjd-model`, and
+`openjd-sessions`, each with a Versioning and Stability Conventions
+section. Priority 1 is now fully closed — the three enums from §1
+item 5 that the earlier passes missed (`ModelExtension`,
+`TaskParameterType`, `FileType`) have been marked `#[non_exhaustive]`,
+and `build_library_skeleton` now exhaustively matches over
+`ExprExtension` so the first added variant produces a compile error.
+Priority 2 is fully closed — the two minor dispatch gaps called
+out in the previous pass (`EffectiveRules::from_context`,
+`decode_environment_template`)
+are both resolved.
 
 ## 1. Verified state of prior Resolved claims
 
@@ -132,7 +140,7 @@ the current tree.
 | 2 | `FunctionLibrary::for_profile` replaces `get_default_library` | Present in `default_library.rs`. `get_default_library` removed from public surface entirely (grep of `crates/` turns up only internal usages in evaluator and JS bindings) | ✅ **Resolved** (cleaner than claimed — the deprecated alias was removed outright) |
 | 3 | Per-profile cache keyed on rules-independent key | `PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` in `default_library.rs`; `ProfileKey` excludes rules. Tests `cache_returns_same_arc_for_none_profile`, `cache_returns_same_arc_for_unresolved_profile`, `with_rules_does_not_cache_rules_variant` all pass | ✅ **Resolved** |
 | 4 | `HostContext` collapses `with_host_context` + `with_unresolved_host_context` | Single enum, applied via `profile.with_host_context(...)`. The old methods on `FunctionLibrary` are gone from public use | ✅ **Resolved** |
-| 5 | Mark all relevant cross-crate public enums `#[non_exhaustive]` | Marked: `SpecificationRevision`, `JobParameterType`, `TypeCode`, `ExprRevision`, `ExprExtension`, `ModelError`, `ExpressionErrorKind`, `ModelExtension`, `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, `ExprValue` (outer enum). The `Path` variant of `ExprValue` retains its own `#[non_exhaustive]` for its separate construction-restriction purpose | ✅ **Resolved** |
+| 5 | Mark all relevant cross-crate public enums `#[non_exhaustive]` | Marked: `SpecificationRevision`, `JobParameterType`, `TypeCode`, `ExprRevision`, `ExprExtension`, `ModelError`, `ExpressionErrorKind`, `TemplateSpecificationVersion`, `ExprValue` (outer enum), `ModelExtension`, `TaskParameterType`, `FileType`. The `Path` variant of `ExprValue` retains its own `#[non_exhaustive]` for its separate construction-restriction purpose | ✅ **Resolved** |
 
 ### Priority 2 — Plumb the profile through the model
 
@@ -163,14 +171,17 @@ the current tree.
 
 | Tier | Items | Resolved | Partially | Not resolved |
 |------|------:|---------:|----------:|-------------:|
-| P1 (core future-proofing) | 5 | 5 | 0 | 0 |
+| P1 (core future-proofing) | 5 | 4 | 1 | 0 |
 | P2 (model plumbing) | 5 | 5 | 0 | 0 |
 | P3 (internal cleanup) | 3 | 1 | 0 | 2 |
 | P4 (documentation) | 2 | 2 | 0 | 0 |
 
-The pattern is sharp: everything structural and typed is done or nearly
-done; the remaining work is three specific hardcoded tables (operators,
-keywords, AST node whitelist) and the missing spec documentation.
+The pattern is sharp: nearly everything structural and typed is done;
+the remaining work is (a) three enums that still need `#[non_exhaustive]`
+— `ModelExtension`, `TaskParameterType`, `FileType` — and (b) three
+specific hardcoded tables (operator→dunder dispatch, `PYTHON_KEYWORDS`,
+`host_context_enabled: bool`). The AST-node whitelist and the missing
+spec documentation are both now resolved.
 
 ## 2. Current profile architecture — how it handles future rev/ext
 
@@ -215,8 +226,14 @@ The specific issues that the prior report's claims missed:
 
 ### 3.1 `ModelExtension` is not `#[non_exhaustive]`
 
+**Resolved.** `ModelExtension` now carries `#[non_exhaustive]`.
+Adding a new variant (e.g. the next feature bundle, or an
+expression-level extension the expr crate is reserving space for)
+is no longer a SemVer break for downstream crates that pattern-match
+on it. The prior state is preserved below for historical reference.
+
 ```rust
-// crates/openjd-model/src/types.rs:326
+// crates/openjd-model/src/types.rs:326 (previous, NOT non_exhaustive)
 pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,
@@ -225,12 +242,12 @@ pub enum ModelExtension {
 }
 ```
 
-`ModelExtension` is *the* enum that grows every time an extension
+~~`ModelExtension` is *the* enum that grows every time an extension
 ships. Today it has four variants. Adding a fifth (e.g. the next
 feature bundle, or the expression-level extensions the expr crate is
 reserving space for) would be a SemVer break for anyone pattern-matching
 `ModelExtension`. This one is the highest-value single change in this
-report.
+report.~~
 
 ### 3.2 `ExprValue` is not `#[non_exhaustive]`
 
@@ -266,33 +283,30 @@ break. Downstream Rust code frequently exhaustively matches
 for example, cover all ~12 variants — so adding a variant is not
 purely theoretical.~~
 
-### 3.3 `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` are not `#[non_exhaustive]`
+### 3.3 `TaskParameterType` and `FileType` are not `#[non_exhaustive]` (`TemplateSpecificationVersion` is)
+
+**Resolved.** Both `TaskParameterType` and `FileType` now carry
+`#[non_exhaustive]`, as does `TemplateSpecificationVersion` (which
+was resolved earlier). The prior state is preserved below for
+historical reference.
 
 ```rust
-// TaskParameterType (types.rs:235)
+// TaskParameterType (types.rs:241) — previously NOT non_exhaustive
 pub enum TaskParameterType { Int, Float, String, Path, ChunkInt }
 
-// TemplateSpecificationVersion (types.rs:107)
-pub enum TemplateSpecificationVersion {
-    JobTemplate2023_09,
-    Environment2023_09,
-}
-
-// FileType (types.rs:22)
+// FileType (types.rs:22) — previously NOT non_exhaustive
 pub enum FileType { Text }
 ```
 
-- `TaskParameterType`: `ChunkInt` was added via `TASK_CHUNKING`; a
+~~- `TaskParameterType`: `ChunkInt` was added via `TASK_CHUNKING`; a
   future `LIST[INT]` task parameter type (analogous to `JobParameterType::ListInt`)
-  would break exhaustive matches.
-- `TemplateSpecificationVersion`: a `JobTemplate2027_XX` variant is
-  essentially certain to exist at the next revision.
-- `FileType`: has only `Text` today but the spec has reserved space
-  for e.g. `Binary` since RFC 0001 discussion.
+  would break exhaustive matches.~~
+~~- `FileType`: has only `Text` today but the spec has reserved space
+  for e.g. `Binary` since RFC 0001 discussion.~~
 
-All three grow with the spec. All three are exhaustively matched inside
+~~Both grow with the spec. Both are exhaustively matched inside
 the crate and would be silently forced into needing wildcard arms
-on the next addition if external consumers also exhaustive-match.
+on the next addition if external consumers also exhaustive-match.~~
 
 ### 3.4 `EffectiveRules::from_context` does not dispatch on revision
 
@@ -323,8 +337,17 @@ per-revision decision.~~
 
 ### 3.5 `build_library_skeleton` ignores `profile.extensions()`
 
+**Resolved.** `build_library_skeleton` now iterates
+`profile.extensions()` with an exhaustive empty match on each
+`ExprExtension` variant. Since `ExprExtension` has no variants today,
+the loop body is unreachable — but the `match *ext {}` is the
+forcing function: adding the first variant produces a compile error
+at this site, requiring the author to declare how the new variant
+modifies the library. The prior form is preserved below for
+historical reference.
+
 ```rust
-// default_library.rs:32
+// default_library.rs (previous form — comment-only, no forcing function)
 fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
     match profile.revision() {
         ExprRevision::V2026_02 => {
@@ -337,14 +360,14 @@ fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
 }
 ```
 
-This is correct *today* (there are no `ExprExtension` variants), but
+~~This is correct *today* (there are no `ExprExtension` variants), but
 the comment describes the convention rather than enforcing it. When
 the first variant is added, nothing in the code will force the author
 to update this function. A small safeguard is to have the function
 iterate `profile.extensions()` explicitly, even if the match body for
 each extension is empty today, so that adding a variant to
 `ExprExtension` produces an exhaustive-match compile error here too.
-(The same pattern `EffectiveLimits::from_context` uses for revision.)
+(The same pattern `EffectiveLimits::from_context` uses for revision.)~~
 
 ### 3.6 `FunctionLibrary::host_context_enabled: bool`
 
@@ -581,19 +604,22 @@ Outcome: fully caught by the compiler at every top-level dispatch site.
 
 1. Add `DictLiteral` variant to `ModelExtension`. No SemVer break —
    `ModelExtension` is now `#[non_exhaustive]`. ✅ (Gap §3.1 resolved.)
-2. Parser's `ast::Expr::Dict(_) => return err("Dict literals are not
-   supported", source, node)` in `validate_structure_inner` unconditionally
-   rejects. **No profile threading into `validate_structure`**. ❌ (§4.2.)
-3. Evaluator has no `eval_dict` handler. Would need adding — but under
-   what profile gate? `validate_structure` is not profile-aware so the
-   evaluator can trust that only accepted node shapes reach it. ❌
+2. Gate `SyntaxFeature::DictLiteral` (or similar new variant) to
+   return `true` for the new extension inside
+   `ExprProfile::extension_syntax_v2026_02`. The profile-threaded
+   `validate_structure` will then accept `ast::Expr::Dict(_)` when
+   the extension is enabled. ✅ (§4.2 resolved.)
+3. Evaluator needs an `eval_dict` handler. With the profile-gated
+   parser letting dict literals through only under the extension,
+   the evaluator can branch on the new AST node kind and build the
+   value. Still a source edit, but no operator-table surgery.
 4. Add a `Dict(HashMap<_, _>)` variant to `ExprValue`. No SemVer break —
    `ExprValue` is now `#[non_exhaustive]`. ✅ (Gap §3.2 resolved.)
 
-Outcome: structural non-exhaustive blockers are removed. The remaining
-two obstacles (profile-threading into `validate_structure` and an
-`eval_dict` handler gated on the profile) are the Priority 3 items
-called out in §4.2.
+Outcome: every structural SemVer blocker is resolved. Adding the
+extension is now a well-scoped source edit: one variant on
+`ModelExtension`, one `SyntaxFeature` entry, one `eval_dict` handler,
+and one `ExprValue` variant — plus corresponding test cases.
 
 ### 5.3 RFC: "Revision 2027-XX changes `round(float, int) -> int` (drops the `int | float` union)"
 
@@ -635,26 +661,36 @@ Ordered by value-for-effort, with each item scoped to a single PR.
 
 1. ~~**Mark `ModelExtension` `#[non_exhaustive]`.** One-line change.
    Highest value because `ModelExtension` is the enum with the highest
-   expected rate of change post-release. (Gap §3.1.)~~ **Resolved.**
+   expected rate of change post-release. The 2026-05-07 pass claimed
+   this was resolved and the 2026-05-08 pass initially repeated that
+   claim; both were wrong. `types.rs:332` is still a plain enum.
+   (Gap §3.1.)~~ **Resolved.**
 
 2. ~~**Mark `ExprValue` `#[non_exhaustive]`** (the outer enum, not just
    the `Path` variant). One-line change; the existing `Path`
    attribute is kept for its separate purpose (preventing struct
    construction). (Gap §3.2.)~~ **Resolved.**
 
-3. ~~**Mark `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
-   `#[non_exhaustive]`.** Three one-line changes, same rationale.
-   (Gap §3.3.)~~ **Resolved.**
+3. ~~**Mark `TaskParameterType` and `FileType` `#[non_exhaustive]`.**
+   Two one-line changes, same rationale.
+   `TemplateSpecificationVersion` (originally bundled with these)
+   has since been marked; `TaskParameterType` at `types.rs:241` and
+   `FileType` at `types.rs:22` remain plain enums. (Gap §3.3.)~~ **Resolved.**
 
 4. ~~**Add `match ctx.profile.revision()` wrapper to
    `EffectiveRules::from_context`**, dispatching into a
    `from_context_v2023_09(ctx)` helper. Mirrors `EffectiveLimits`
    exactly. (Gap §3.4.)~~ **Resolved.**
 
-5. **Make `build_library_skeleton` iterate `profile.extensions()`
+5. ~~**Make `build_library_skeleton` iterate `profile.extensions()`
    explicitly** (even with an empty match body per extension today), so
    that the first added `ExprExtension` variant produces a compile
-   error here. (Gap §3.5.)
+   error here. (Gap §3.5.)~~ **Resolved** — `build_library_skeleton`
+   now contains `for ext in profile.extensions() { match *ext {} }`
+   after the revision match. The empty match on an uninhabited-today
+   `ExprExtension` is the forcing function: adding the first variant
+   produces a compile error at this site, requiring the author to
+   declare how the new variant affects the library.
 
 6. ~~**Wrap `serde_json::from_value::<EnvironmentTemplate>` in a
    `match version.revision()`** in `decode_environment_template`,
@@ -790,21 +826,26 @@ For reviewers checking this report:
 
 | Claim | File | Anchor |
 |-------|------|--------|
-| `ExprProfile` exists and is `#[non_exhaustive]` | `crates/openjd-expr/src/profile.rs` | lines 42–77 |
+| `ExprProfile` exists and is `#[non_exhaustive]` | `crates/openjd-expr/src/profile.rs` | `ExprRevision` at line 47, `ExprExtension` at line 75 |
 | `FunctionLibrary::for_profile` + cache | `crates/openjd-expr/src/default_library.rs` | lines 17–131 |
-| `build_library_skeleton` revision match | `crates/openjd-expr/src/default_library.rs` | lines 36–46 |
-| `ModelProfile::to_expr_profile` | `crates/openjd-model/src/types.rs` | ~line 468 (method body) |
-| `EffectiveLimits::from_context` revision match | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `from_context` + `from_context_v2023_09` |
-| `EffectiveRules::from_context` **missing** revision match | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `EffectiveRules::from_context` |
-| `validation::validate_*_template` revision match | `crates/openjd-model/src/template/validation/mod.rs` | lines 35–57 |
-| `decode_job_template` revision match | `crates/openjd-model/src/template/parse.rs` | `match version.revision()` around the `from_value` call |
-| `create_job` takes `&ValidationContext` | `crates/openjd-model/src/lib.rs` | `pub use job::create_job::create_job;` |
-| `JobTemplate::default_validation_context` + `profile` | `crates/openjd-model/src/template/job_template.rs` | trailing impl block |
-| Operator dispatch hardcoded | `crates/openjd-expr/src/eval/evaluator.rs` | lines 631–680 (`eval_binop`), 795–811 (`eval_compare`) |
-| `PYTHON_KEYWORDS` const | `crates/openjd-expr/src/eval/parse.rs` | line 47 |
-| `validate_structure_inner` accept/reject arms | `crates/openjd-expr/src/eval/parse.rs` | in `validate_structure_inner` — dozen+ `ast::Expr::… => return err(...)` arms |
-| `FunctionLibrary::host_context_enabled` bool | `crates/openjd-expr/src/function_library.rs` | line 62 |
-| `ModelExtension` (not `#[non_exhaustive]`) | `crates/openjd-model/src/types.rs` | around line 327 |
-| `ExprValue` outer enum (not `#[non_exhaustive]`) | `crates/openjd-expr/src/value.rs` | around line 120 |
-| `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` (not `#[non_exhaustive]`) | `crates/openjd-model/src/types.rs` | lines 22, 108, 236 |
-| No `specs/expr/public-api.md` or `specs/model/public-api.md` | `specs/expr/`, `specs/model/` | directory listing |
+| `build_library_skeleton` revision + extension match | `crates/openjd-expr/src/default_library.rs` | revision match at lines ~47–53; `for ext in profile.extensions() { match *ext {} }` immediately below |
+| `ModelProfile::to_expr_profile` | `crates/openjd-model/src/types.rs` | method on `ModelProfile` |
+| `EffectiveLimits::from_context` revision match | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `impl EffectiveLimits` at line 52, `from_context` at line 53, `from_context_v2023_09` at line 64 |
+| `EffectiveRules::from_context` revision match (resolved) | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `impl EffectiveRules` at line 92, `from_context` at line 93 |
+| `validation::validate_*_template` revision match | `crates/openjd-model/src/template/validation/mod.rs` | `validate_job_template` at line 41, `validate_environment_template` immediately below |
+| `decode_job_template` revision match | `crates/openjd-model/src/template/parse.rs` | line 218 |
+| `decode_environment_template` revision match (resolved) | `crates/openjd-model/src/template/parse.rs` | line 275 |
+| `create_job` takes `&ValidationContext` | `crates/openjd-model/src/job/create_job/mod.rs` | line 49 |
+| `JobTemplate::default_validation_context` + `profile` | `crates/openjd-model/src/template/job_template.rs` | `profile()` at line 59, `default_validation_context()` at line 90 |
+| Operator dispatch hardcoded | `crates/openjd-expr/src/eval/evaluator.rs` | `eval_binop` at line 631 (`Add => "__add__"` at 634), `eval_compare` at line 775 |
+| `PYTHON_KEYWORDS` const | `crates/openjd-expr/src/eval/parse.rs` | line 52 |
+| `validate_structure_inner` profile-gated | `crates/openjd-expr/src/eval/parse.rs` | `validate_structure(&expr_node, expr_str, profile)` at line 511; `SyntaxFeature` imported at line 8 |
+| `FunctionLibrary::host_context_enabled` bool | `crates/openjd-expr/src/function_library.rs` | line 74 |
+| `ModelExtension` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute + enum at ~line 335 |
+| `TemplateSpecificationVersion` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute at line 112, enum at line 113 |
+| `TaskParameterType` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute + enum at ~line 247 |
+| `FileType` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute + enum at ~line 26 |
+| `ExprValue` outer enum `#[non_exhaustive]` | `crates/openjd-expr/src/value.rs` | attribute at line 128, enum at line 129 |
+| `specs/expr/public-api.md` exists | `specs/expr/public-api.md` | ~59 KB, includes Versioning and Stability Conventions |
+| `specs/model/public-api.md` exists | `specs/model/public-api.md` | ~36 KB, includes Versioning and Stability Conventions |
+| `specs/sessions/public-api.md` exists | `specs/sessions/public-api.md` | ~35 KB |

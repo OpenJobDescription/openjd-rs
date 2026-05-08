@@ -485,6 +485,7 @@ pub enum SpecificationRevision {
     V2023_09,
 }
 
+#[non_exhaustive]
 pub enum ModelExtension {
     TaskChunking,      // RFC 0001 — "TASK_CHUNKING"
     RedactedEnvVars,   // RFC 0003 — "REDACTED_ENV_VARS"
@@ -1048,15 +1049,11 @@ Enums that are marked `#[non_exhaustive]` today:
 
 - `SpecificationRevision`
 - `JobParameterType`
-- `ModelError`
-
-Enums that are **not yet** `#[non_exhaustive]` but are expected to
-grow with future revisions (see report):
-
+- `TemplateSpecificationVersion`
 - `ModelExtension`
 - `TaskParameterType`
-- `TemplateSpecificationVersion`
 - `FileType`
+- `ModelError`
 
 `EndOfLine`, `ObjectType`, and `DataFlow` are intentionally closed:
 they represent decidable logical concepts (newline mode, filesystem

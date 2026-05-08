@@ -33,19 +33,45 @@ static PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>
 /// functions are added on top, in `for_profile`, either as stubs
 /// (`HostContext::Unresolved`) or as closures capturing rules
 /// (`HostContext::WithRules`).
+///
+/// Revision selects the base library; the subsequent extension loop
+/// merges in any expression-level extensions enabled on the profile.
+/// Both the revision match and the per-extension match are
+/// intentionally exhaustive-without-wildcard — adding a new
+/// `ExprRevision` variant *or* a new `ExprExtension` variant produces
+/// a compile error here, forcing an explicit decision about how the
+/// new variant affects the library.
 fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
-    match profile.revision() {
+    let lib = match profile.revision() {
         ExprRevision::V2026_02 => {
-            // Base library for 2026-02. Future revisions can diverge here.
-            // Expression-level extensions would be merged in based on
-            // `profile.extensions()`; today there are no variants in
-            // `ExprExtension`, so no conditional merges are needed.
+            // Base library for 2026-02. Future revisions can diverge
+            // here.
             build_default_library()
-        } // Intentionally no wildcard: this match lives in the same crate
-          // as `ExprRevision`, so adding a new revision variant will
-          // produce a compile error here, forcing an explicit decision
-          // about how the new revision builds its library.
+        } // Intentionally no wildcard: this match lives in the same
+          // crate as `ExprRevision`, so adding a new revision variant
+          // will produce a compile error here.
+    };
+
+    // Merge in expression-level extensions. `ExprExtension` has no
+    // variants today, so this loop body is unreachable — but the
+    // exhaustive match on `*ext` below is the forcing function that
+    // makes adding the first variant produce a compile error at this
+    // site, rather than silently inheriting the base library.
+    //
+    // `#[allow(clippy::never_loop)]` is required because the empty
+    // match on an uninhabited-today enum diverges, so clippy's
+    // `never_loop` lint flags the loop. That's exactly the property
+    // we want preserved: when `ExprExtension` gains its first variant,
+    // the empty match becomes a compile error and the lint stops
+    // firing in one step.
+    #[allow(clippy::never_loop)]
+    for ext in profile.extensions() {
+        match *ext {} // Intentionally empty — every future variant
+                      // must add an arm describing how it modifies
+                      // the library.
     }
+
+    lib
 }
 
 impl FunctionLibrary {
