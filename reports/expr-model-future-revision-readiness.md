@@ -150,7 +150,7 @@ the current tree.
 | P1 (core future-proofing) | 5 | 4 | 1 | 0 |
 | P2 (model plumbing) | 5 | 3 | 2 | 0 |
 | P3 (internal cleanup) | 3 | 0 | 0 | 3 |
-| P4 (documentation) | 2 | 0 | 0 | 2 |
+| P4 (documentation) | 2 | 2 | 0 | 0 |
 
 The pattern is sharp: everything structural and typed is done or nearly
 done; the remaining work is three specific hardcoded tables (operators,
@@ -610,21 +610,39 @@ structural Priority 1/2 gap.
 
 ### Documentation debt
 
-11. **Write `specs/expr/public-api.md`.** The re-exports in
+11. ~~**Write `specs/expr/public-api.md`.** The re-exports in
     `crates/openjd-expr/src/lib.rs` are the starting inventory; each
     item needs a one-line description and a stability classification
     (stable / stable construction-only / non-exhaustive). Use this
     as the opportunity to document the profile concept from first
-    principles. (Priority 4 item 14.)
+    principles. (Priority 4 item 14.)~~ **Resolved** — added in
+    `specs/expr/public-api.md`. Organised by module role (profile,
+    library, types, values, symbol table, format string, range
+    expression, path mapping, error), with explicit stability
+    classification per enum (which ones are `#[non_exhaustive]`,
+    which are intentionally closed, what the defensive caps'
+    contract is). Documents the profile axes (revision / extension
+    / host-context) from first principles.
 
-12. **Write `specs/model/public-api.md`.** Same, for `openjd-model`.
+12. ~~**Write `specs/model/public-api.md`.** Same, for `openjd-model`.
     Especially call out `ModelProfile::to_expr_profile` as the
-    supported bridge to `openjd-expr`. (Priority 4 item 14.)
+    supported bridge to `openjd-expr`. (Priority 4 item 14.)~~
+    **Resolved** — added in `specs/model/public-api.md`. Covers every
+    crate-root re-export plus the reachable `job::*` and `template::*`
+    surfaces, with emphasis on `ModelProfile::to_expr_profile` as the
+    documented bridge to `openjd-expr`. Also resolves the parallel
+    need for `specs/sessions/public-api.md`, which was out of scope
+    of the original report but shares the same conventions.
 
-13. **Document the `#[non_exhaustive]` surface.** Either in the
+13. ~~**Document the `#[non_exhaustive]` surface.** Either in the
     public-api.md docs above, or in a short `specs/expr/stability.md`
     (and model equivalent). The list is small enough to enumerate.
-    (Priority 4 item 15.)
+    (Priority 4 item 15.)~~ **Resolved** — each of the three
+    public-api.md documents ends with a Versioning and Stability
+    Conventions section enumerating the enums marked
+    `#[non_exhaustive]`, the enums intentionally closed (with
+    rationale), and the defensive caps whose values form part of
+    the stability contract.
 
 ## 7. What the current architecture gets right
 

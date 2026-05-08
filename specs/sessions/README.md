@@ -15,6 +15,7 @@ replaces all of that with async/await, channels, and cancellation tokens.
 | Document | Description |
 |----------|-------------|
 | [architecture.md](architecture.md) | Crate structure, module layout, dependency graph, public API surface |
+| [public-api.md](public-api.md) | Authoritative reference for every public type, function, and re-export |
 | [session.md](session.md) | Session struct, state machine, lifecycle, environment tracking, symbol table construction |
 | [subprocess.md](subprocess.md) | Async subprocess execution, stdout streaming, signal delivery, process group isolation |
 | [action-filter.md](action-filter.md) | Parsing `openjd_*` directives from stdout, redaction, malformed command detection |

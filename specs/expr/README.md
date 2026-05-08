@@ -8,6 +8,7 @@ implementation in Rust.
 | Document | Description |
 |----------|-------------|
 | [architecture.md](architecture.md) | Crate structure, module layout, dependency graph, public API surface |
+| [public-api.md](public-api.md) | Authoritative reference for every public type, function, trait, and constant |
 | [type-system.md](type-system.md) | ExprType, TypeCode, type matching, union normalization, type variables |
 | [values.md](values.md) | ExprValue, typed list variants, Float64, memory sizing, coercion |
 | [symbol-table.md](symbol-table.md) | Hierarchical symbol table with dotted path lookup |

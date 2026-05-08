@@ -14,6 +14,7 @@ but redesigned for Rust's type system and performance characteristics.
 | Document | Description |
 |----------|-------------|
 | [architecture.md](architecture.md) | Crate structure, module layout, dependency graph, and key design decisions |
+| [public-api.md](public-api.md) | Authoritative reference for every public type, function, and re-export |
 | [template-types.md](template-types.md) | Unresolved template types (deserialized from YAML, format strings unevaluated) |
 | [job-types.md](job-types.md) | Instantiated job types (fully resolved, output of `create_job`) |
 | [parameters.md](parameters.md) | Job and task parameter type systems, value coercion, constraint checking |
