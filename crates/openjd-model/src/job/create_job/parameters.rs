@@ -569,19 +569,18 @@ pub fn preprocess_job_parameters(
                             Some(input_val.clone())
                         }
                     } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
-                        // We already know s is not absolute (URI-unaware check).
-                        // Use join_for_format for root-relative handling, but the value
-                        // won't be recognized as a URI by join since left (cwd) isn't a URI
-                        // and right was already checked. However, path::join's is_absolute
-                        // still recognizes scheme:// in right. So we do a direct concat
-                        // using the format-appropriate separator.
-                        Some(openjd_expr::ExprValue::String(
-                            openjd_expr::functions::path::non_uri_join(
-                                current_working_dir,
-                                &s,
-                                path_format,
-                            ),
-                        ))
+                        // Relative path: join with current_working_dir if non-empty.
+                        if current_working_dir.is_empty() {
+                            Some(input_val.clone())
+                        } else {
+                            Some(openjd_expr::ExprValue::String(
+                                openjd_expr::functions::path::non_uri_join(
+                                    current_working_dir,
+                                    &s,
+                                    path_format,
+                                ),
+                            ))
+                        }
                     } else {
                         Some(input_val.clone())
                     }

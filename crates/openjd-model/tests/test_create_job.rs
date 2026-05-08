@@ -4125,3 +4125,98 @@ fn test_preprocess_float_to_int_overflow_rejected() {
     );
     assert!(result.is_err(), "1e19 should not silently coerce to i64");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Empty cwd/template_dir should not prefix relative paths
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn path_user_value_with_empty_cwd_no_prefix() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert("P".into(), openjd_expr::ExprValue::String("12".into()));
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "",
+            current_working_dir: "",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "12",
+        "relative path with empty cwd should remain unchanged"
+    );
+}
+
+#[test]
+fn path_user_value_with_empty_cwd_subdir_no_prefix() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "P".into(),
+        openjd_expr::ExprValue::String("sub/file.txt".into()),
+    );
+    let params = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "",
+            current_working_dir: "",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "sub/file.txt",
+        "relative path with empty cwd should remain unchanged"
+    );
+}
+
+#[test]
+fn path_default_with_empty_template_dir_no_prefix() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "output"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "",
+            current_working_dir: "",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "output",
+        "relative default with empty template_dir should remain unchanged"
+    );
+}
