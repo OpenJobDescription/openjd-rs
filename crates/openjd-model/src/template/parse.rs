@@ -8,11 +8,12 @@
 
 use std::str::FromStr;
 
-use crate::error::{ModelError, ValidationErrors};
+use crate::error::{path_field, ModelError, ValidationErrors};
+use crate::template::constrained_strings::ExtensionName;
 use crate::template::validation as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
-    CallerLimits, Extensions, KnownExtension, SpecificationRevision, TemplateSpecificationVersion,
+    CallerLimits, Extensions, ModelExtension, SpecificationRevision, TemplateSpecificationVersion,
     ValidationContext,
 };
 
@@ -83,6 +84,103 @@ pub fn document_string_to_object(
     Ok(parsed)
 }
 
+/// Validate a template's `extensions` list against the library's known
+/// set and the caller's allowlist, accumulating problems into
+/// `errors`.
+///
+/// The returned [`Extensions`] contains every entry that was both
+/// recognized by [`ModelExtension`] and permitted by
+/// `supported_extensions`. Invalid entries don't stop the function;
+/// they're reported via `errors` and skipped, so the caller sees every
+/// problem in one validation pass.
+///
+/// Problems reported, each at path `extensions`:
+///
+/// * Empty list: `"if provided, must be a non-empty list."`
+/// * One or more duplicate names: a single aggregated message
+///   `"Duplicate values for extension name are not allowed. Duplicate values: A,B,C"`
+///   (values are sorted for stable output).
+/// * One or more unrecognized or not-permitted names: a single
+///   aggregated message
+///   `"Unsupported extension names: A, B, C"` (sorted).
+///
+/// The duplicate pass and the unsupported pass run independently —
+/// callers see errors from both when both apply, matching the Python
+/// Pydantic reference implementation.
+fn validate_extensions_list(
+    template_exts: Option<&[ExtensionName]>,
+    supported_extensions: Option<&[&str]>,
+    errors: &mut ValidationErrors,
+) -> Extensions {
+    let path = path_field(&[], "extensions");
+    let mut result = Extensions::new();
+
+    let Some(exts) = template_exts else {
+        return result;
+    };
+
+    if exts.is_empty() {
+        errors.add(&path, "if provided, must be a non-empty list.");
+        return result;
+    }
+
+    // Duplicate detection: collect all names that appear more than once,
+    // report them in a single message with a stable (sorted) order.
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut duplicates: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for ext in exts {
+        let name = ext.as_str();
+        if !seen.insert(name) {
+            duplicates.insert(name);
+        }
+    }
+    if !duplicates.is_empty() {
+        let joined: Vec<&str> = duplicates.iter().copied().collect();
+        errors.add(
+            &path,
+            format!(
+                "Duplicate values for extension name are not allowed. Duplicate values: {}",
+                joined.join(",")
+            ),
+        );
+    }
+
+    // Support/recognition: a name is "supported" iff it's in the caller's
+    // allowlist AND is a recognized ModelExtension. Both checks collapse
+    // into a single "Unsupported extension names" message to match
+    // Python's wording and to avoid two near-identical errors for the
+    // common "caller didn't enable the extension" case.
+    let allowlist: std::collections::HashSet<&str> = supported_extensions
+        .unwrap_or(&[])
+        .iter()
+        .copied()
+        .collect();
+    let mut unsupported: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for ext in exts {
+        let name = ext.as_str();
+        match (
+            ModelExtension::from_str(name).ok(),
+            allowlist.contains(name),
+        ) {
+            (Some(known), true) => {
+                result.insert(known);
+            }
+            _ => {
+                unsupported.insert(name);
+            }
+        }
+    }
+    if !unsupported.is_empty() {
+        let joined: Vec<&str> = unsupported.iter().copied().collect();
+        errors.add(
+            &path,
+            format!("Unsupported extension names: {}", joined.join(", ")),
+        );
+    }
+
+    result
+}
+
 /// Decode and validate a job template from a YAML value.
 pub fn decode_job_template(
     template: serde_json::Value,
@@ -125,48 +223,13 @@ pub fn decode_job_template(
         })?,
     };
 
-    // Build extension set: intersection of template-requested and supported
-    let mut extensions = Extensions::new();
-    if let Some(template_exts) = &jt.extensions {
-        if template_exts.is_empty() {
-            return Err(ModelError::DecodeValidation(
-                "extensions, if provided, must be a non-empty list.".to_string(),
-            ));
-        }
-        // Check for duplicate extension names
-        let mut seen = std::collections::HashSet::new();
-        for ext in template_exts {
-            if !seen.insert(ext.as_str()) {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Duplicate values for extension name are not allowed. Duplicate values: {}",
-                    ext.as_str()
-                )));
-            }
-        }
-        let supported: std::collections::HashSet<&str> = supported_extensions
-            .unwrap_or(&[])
-            .iter()
-            .copied()
-            .collect();
-        for ext in template_exts {
-            let ext_str = ext.as_str();
-            if !supported.contains(ext_str) {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Unknown or unsupported extension: {ext_str}"
-                )));
-            }
-            match KnownExtension::from_str(ext_str) {
-                Ok(known) => {
-                    extensions.insert(known);
-                }
-                Err(_) => {
-                    return Err(ModelError::DecodeValidation(format!(
-                        "Unknown or unsupported extension: {ext_str}"
-                    )));
-                }
-            }
-        }
-    }
+    // Build extension set with collect-all error reporting. Any problems
+    // (empty list, duplicates, unsupported names) are reported through
+    // `errors` with path `extensions` and aggregated messages.
+    let mut errors = ValidationErrors::default();
+    let extensions =
+        validate_extensions_list(jt.extensions.as_deref(), supported_extensions, &mut errors);
+    errors.into_result("JobTemplate")?;
 
     // Route to the revision-specific validation pipeline via the
     // revision-neutral dispatcher. The revision comes from the template's
@@ -212,48 +275,12 @@ pub fn decode_environment_template(
     let et: EnvironmentTemplate = serde_json::from_value(template)
         .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
 
-    // Build extension set: intersection of template-requested and supported
-    let mut extensions = Extensions::new();
-    if let Some(template_exts) = &et.extensions {
-        if template_exts.is_empty() {
-            return Err(ModelError::DecodeValidation(
-                "extensions, if provided, must be a non-empty list.".to_string(),
-            ));
-        }
-        // Check for duplicate extension names
-        let mut seen = std::collections::HashSet::new();
-        for ext in template_exts {
-            if !seen.insert(ext.as_str()) {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Duplicate values for extension name are not allowed. Duplicate values: {}",
-                    ext.as_str()
-                )));
-            }
-        }
-        let supported: std::collections::HashSet<&str> = supported_extensions
-            .unwrap_or(&[])
-            .iter()
-            .copied()
-            .collect();
-        for ext in template_exts {
-            let ext_str = ext.as_str();
-            if !supported.contains(ext_str) {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Unknown or unsupported extension: {ext_str}"
-                )));
-            }
-            match KnownExtension::from_str(ext_str) {
-                Ok(known) => {
-                    extensions.insert(known);
-                }
-                Err(_) => {
-                    return Err(ModelError::DecodeValidation(format!(
-                        "Unknown or unsupported extension: {ext_str}"
-                    )));
-                }
-            }
-        }
-    }
+    // Build extension set with collect-all error reporting. Same helper
+    // as decode_job_template; the error model name is different.
+    let mut errors = ValidationErrors::default();
+    let extensions =
+        validate_extensions_list(et.extensions.as_deref(), supported_extensions, &mut errors);
+    errors.into_result("EnvironmentTemplate")?;
 
     let ctx = ValidationContext::with_extensions(version.revision(), extensions);
     validate::validate_environment_template(&et, &ctx)?;

@@ -79,7 +79,12 @@ pub struct SessionConfig {
     pub os_env_vars: Option<HashMap<String, String>>,
     pub session_root_directory: Option<PathBuf>,
     pub user: Option<Arc<dyn SessionUser>>,
-    pub revision_extensions: Option<openjd_model::types::ValidationContext>,
+    /// Revision + extensions profile that drives expression-function
+    /// availability and redaction behaviour. Sessions do not use
+    /// caller-policy limits, so a [`ModelProfile`](openjd_model::ModelProfile)
+    /// is the right shape here — not a full
+    /// [`ValidationContext`](openjd_model::ValidationContext).
+    pub profile: Option<openjd_model::ModelProfile>,
     /// Optional external cancellation token. When cancelled, all running and
     /// future actions will be cancelled via the spec's cancellation sequence.
     pub cancel_token: Option<CancellationToken>,
@@ -198,23 +203,23 @@ struct CrossUserFields {
     helper_auth_token: Option<String>,
 }
 
-/// Build the session's function library from the specification revision +
-/// extensions carried on the validation context (or the current default
-/// profile when no context is set), with the current path-mapping `rules`
+/// Build the session's function library from the session's
+/// [`ModelProfile`](openjd_model::ModelProfile) (or the current default
+/// expr profile when none is set), with the current path-mapping `rules`
 /// registered as host context.
 ///
-/// Called whenever either the revision/extensions or the rules change so
-/// that `apply_path_mapping` always reflects the session's current rules.
+/// Called whenever either the profile or the rules change so that
+/// `apply_path_mapping` always reflects the session's current rules.
 fn derive_library(
-    ctx: Option<&openjd_model::types::ValidationContext>,
+    profile: Option<&openjd_model::ModelProfile>,
     rules: &Arc<Vec<PathMappingRule>>,
 ) -> Arc<FunctionLibrary> {
     let host = openjd_expr::HostContext::WithRules(rules.clone());
-    let profile = match ctx {
-        Some(c) => c.to_expr_profile(host),
+    let expr_profile = match profile {
+        Some(p) => p.to_expr_profile(host),
         None => openjd_expr::ExprProfile::current().with_host_context(host),
     };
-    openjd_expr::FunctionLibrary::for_profile(&profile)
+    openjd_expr::FunctionLibrary::for_profile(&expr_profile)
 }
 
 pub struct Session {
@@ -238,9 +243,10 @@ pub struct Session {
     // Expression evaluation
     //
     // `library` is the cached derived library, built from the session's
-    // `revision_extensions` (an optional `ValidationContext`) plus the
-    // current `path_mapping_rules`. Whenever either input changes, the
-    // library must be rebuilt via `derive_library`.
+    // `library` is the cached derived library, built from the session's
+    // `profile` (an optional `ModelProfile`) plus the current
+    // `path_mapping_rules`. Whenever either input changes, the library
+    // must be rebuilt via `derive_library`.
     library: Arc<FunctionLibrary>,
     path_mapping_rules: Arc<Vec<PathMappingRule>>,
     job_parameter_values: JobParameterValues,
@@ -252,7 +258,7 @@ pub struct Session {
     callback: Option<SessionCallbackType>,
     // Redaction
     redacted_values: HashSet<String>,
-    revision_extensions: Option<openjd_model::types::ValidationContext>,
+    profile: Option<openjd_model::ModelProfile>,
     debug_collect_stdout: bool,
 }
 
@@ -291,7 +297,7 @@ impl Session {
             },
             callback: None,
             redacted_values: HashSet::new(),
-            revision_extensions: None,
+            profile: None,
             debug_collect_stdout: true, // test constructor — tests need captured stdout
         }
     }
@@ -375,8 +381,8 @@ impl Session {
         let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
         path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         let path_mapping_rules = Arc::new(path_mapping_rules);
-        let revision_extensions = config.revision_extensions.take();
-        let library = derive_library(revision_extensions.as_ref(), &path_mapping_rules);
+        let profile = config.profile.take();
+        let library = derive_library(profile.as_ref(), &path_mapping_rules);
         let process_env = config.os_env_vars.unwrap_or_default();
 
         // Create helpers directory and spawn cross-user helper if needed.
@@ -489,7 +495,7 @@ impl Session {
             },
             callback: config.callback,
             redacted_values: HashSet::new(),
-            revision_extensions,
+            profile,
             debug_collect_stdout: config.debug_collect_stdout,
         })
     }
@@ -497,7 +503,7 @@ impl Session {
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
         self
     }
 
@@ -508,7 +514,7 @@ impl Session {
         rules.extend(additional);
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
     }
 
     /// Get the current path mapping rules.
@@ -516,23 +522,24 @@ impl Session {
         &self.path_mapping_rules
     }
 
-    /// Set the [`ValidationContext`](openjd_model::types::ValidationContext)
-    /// that drives which expression functions and signatures are available
-    /// to this session. Rebuilds the session's derived function library
-    /// so subsequent expression evaluation sees the new profile.
-    pub fn with_revision_extensions(mut self, ctx: openjd_model::types::ValidationContext) -> Self {
-        self.revision_extensions = Some(ctx);
-        self.library = derive_library(self.revision_extensions.as_ref(), &self.path_mapping_rules);
+    /// Set the [`ModelProfile`](openjd_model::ModelProfile) that drives
+    /// which expression functions and signatures are available to this
+    /// session and which redaction rules apply. Rebuilds the session's
+    /// derived function library so subsequent expression evaluation
+    /// sees the new profile.
+    pub fn with_profile(mut self, profile: openjd_model::ModelProfile) -> Self {
+        self.profile = Some(profile);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
         self
     }
 
     /// Check whether redacted env vars are enabled, mirroring Python's `_redactions_enabled()`.
     /// True if spec revision > v2023_09 OR "REDACTED_ENV_VARS" extension is present.
     fn redactions_enabled(&self) -> bool {
-        match &self.revision_extensions {
-            Some(ctx) => {
-                ctx.revision > openjd_model::types::SpecificationRevision::V2023_09
-                    || ctx.has_extension(openjd_model::types::KnownExtension::RedactedEnvVars)
+        match &self.profile {
+            Some(p) => {
+                p.revision() > openjd_model::types::SpecificationRevision::V2023_09
+                    || p.has_extension(openjd_model::types::ModelExtension::RedactedEnvVars)
             }
             None => false,
         }
@@ -555,12 +562,12 @@ impl Session {
     // --- Properties ---
 
     /// Returns the list of enabled extensions for this session.
-    /// If no revision_extensions are set, returns an empty vec.
+    /// If no profile is set, returns an empty vec.
     pub fn get_enabled_extensions(&self) -> Vec<String> {
-        match &self.revision_extensions {
-            Some(ctx) => {
-                let mut exts: Vec<String> = ctx
-                    .extensions
+        match &self.profile {
+            Some(p) => {
+                let mut exts: Vec<String> = p
+                    .extensions()
                     .iter()
                     .map(|e| e.as_str().to_string())
                     .collect();

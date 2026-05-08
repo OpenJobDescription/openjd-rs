@@ -1304,7 +1304,10 @@ fn test_create_job_extensions_carried_forward() {
     }"#,
         &[],
     );
-    assert_eq!(job.extensions, Some(vec!["EXPR".to_string()]));
+    assert_eq!(
+        job.extensions,
+        Some(vec![openjd_model::ModelExtension::Expr])
+    );
 }
 
 #[test]
@@ -2017,7 +2020,10 @@ fn test_create_job_v2023_09_task_chunking() {
     );
 
     assert_eq!(job.name, "Job 10");
-    assert_eq!(job.extensions, Some(vec!["TASK_CHUNKING".to_string()]));
+    assert_eq!(
+        job.extensions,
+        Some(vec![openjd_model::ModelExtension::TaskChunking])
+    );
 
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     match &ps.task_parameter_definitions["ParamE"] {

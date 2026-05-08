@@ -20,7 +20,7 @@ mod task_chunking;
 
 use crate::error::{ModelError, ValidationErrors};
 use crate::template::*;
-use crate::types::{JobParameterType, KnownExtension, TaskParameterType, ValidationContext};
+use crate::types::{JobParameterType, ModelExtension, TaskParameterType, ValidationContext};
 
 /// Numeric limits computed from revision + extensions.
 #[derive(Debug, Clone)]
@@ -56,13 +56,13 @@ impl EffectiveLimits {
         // them — without reshaping this function. Today there is only one
         // revision; the match records intent and localizes where the first
         // revision bump needs to plug in.
-        match ctx.revision {
+        match ctx.profile.revision() {
             crate::types::SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx),
         }
     }
 
     fn from_context_v2023_09(ctx: &ValidationContext) -> Self {
-        let fb1 = ctx.has_extension(KnownExtension::FeatureBundle1);
+        let fb1 = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
         Self {
             max_identifier_len: if fb1 { 512 } else { 64 },
             max_job_name_len: if fb1 { 512 } else { 128 },
@@ -91,9 +91,9 @@ pub struct EffectiveRules {
 
 impl EffectiveRules {
     pub fn from_context(ctx: &ValidationContext) -> Self {
-        let expr = ctx.has_extension(KnownExtension::Expr);
-        let fb1 = ctx.has_extension(KnownExtension::FeatureBundle1);
-        let chunking = ctx.has_extension(KnownExtension::TaskChunking);
+        let expr = ctx.profile.has_extension(ModelExtension::Expr);
+        let fb1 = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
+        let chunking = ctx.profile.has_extension(ModelExtension::TaskChunking);
 
         let mut job_param_types: std::collections::HashSet<JobParameterType> = [
             JobParameterType::String,

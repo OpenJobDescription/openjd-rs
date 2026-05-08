@@ -212,7 +212,7 @@ async fn run_scenario(scenario_path: &Path) {
             exts.extend(
                 ext_list
                     .iter()
-                    .filter_map(|e| e.as_str().parse::<openjd_model::KnownExtension>().ok()),
+                    .filter_map(|e| e.as_str().parse::<openjd_model::ModelExtension>().ok()),
             );
         }
         openjd_model::ValidationContext::with_extensions(
@@ -236,15 +236,17 @@ async fn run_scenario(scenario_path: &Path) {
     // Build session
     let tmp = tempfile::TempDir::new().unwrap();
 
-    // Build validation context for extensions
-    let revision_extensions = if !extensions.is_empty() {
-        Some(openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            extensions
-                .iter()
-                .filter_map(|s| s.parse::<openjd_model::types::KnownExtension>().ok())
-                .collect(),
-        ))
+    // Build model profile for extensions
+    let profile = if !extensions.is_empty() {
+        Some(
+            openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+                .with_extensions(
+                    extensions
+                        .iter()
+                        .filter_map(|s| s.parse::<openjd_model::types::ModelExtension>().ok())
+                        .collect(),
+                ),
+        )
     } else {
         None
     };
@@ -262,7 +264,7 @@ async fn run_scenario(scenario_path: &Path) {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions,
+        profile,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,

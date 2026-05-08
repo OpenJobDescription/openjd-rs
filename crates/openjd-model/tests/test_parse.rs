@@ -262,7 +262,10 @@ fn job_extensions_unsupported_no_supported_list() {
         "extensions": ["FEATURE_BUNDLE_1"],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
-        &["Unknown or unsupported extension: FEATURE_BUNDLE_1"],
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: FEATURE_BUNDLE_1",
+        ],
     );
 }
 
@@ -277,7 +280,10 @@ fn job_extensions_unsupported_wrong_supported_list() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
         &["EXPR"],
-        &["Unknown or unsupported extension: FEATURE_BUNDLE_1"],
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: FEATURE_BUNDLE_1",
+        ],
     );
 }
 
@@ -291,7 +297,10 @@ fn job_extensions_unsupported_empty_supported_list() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
         &[],
-        &["Unknown or unsupported extension: FEATURE_BUNDLE_1"],
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: FEATURE_BUNDLE_1",
+        ],
     );
 }
 

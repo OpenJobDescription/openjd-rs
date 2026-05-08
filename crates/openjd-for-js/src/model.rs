@@ -350,14 +350,14 @@ impl JsStepParameterSpaceIterator {
 // ── Decode functions ───────────────────────────────────────────────
 
 /// Build a `Vec<&str>` covering the full default extension list,
-/// sourced from [`openjd_model::KnownExtension::ALL`]. Use this as
+/// sourced from [`openjd_model::ModelExtension::ALL`]. Use this as
 /// the fallback when the JS caller omits `supportedExtensions`.
 ///
 /// Centralizing on the upstream enum resolves the F8 drift problem:
 /// the JS binding, the CLI, and Python all see the same authoritative
 /// list without hand-maintained local copies.
 fn default_supported_extensions() -> Vec<&'static str> {
-    openjd_model::KnownExtension::ALL
+    openjd_model::ModelExtension::ALL
         .iter()
         .map(|e| e.as_str())
         .collect()
@@ -451,7 +451,7 @@ pub fn decode_job_template(
 /// the behavior without the `JsError` wrapping layer.
 ///
 /// `supported_extensions`: `None` uses the full default from
-/// [`openjd_model::KnownExtension::ALL`]; `Some(&[])` disables every
+/// [`openjd_model::ModelExtension::ALL`]; `Some(&[])` disables every
 /// extension; `Some(&["EXPR"])` allows only EXPR. See
 /// [`get_supported_extensions`] for the default list.
 pub fn decode_job_template_str(
@@ -645,7 +645,7 @@ pub fn create_job_with_map(
             exts.extend(
                 ext_list
                     .iter()
-                    .filter_map(|s| s.as_str().parse::<openjd_model::KnownExtension>().ok()),
+                    .filter_map(|s| s.as_str().parse::<openjd_model::ModelExtension>().ok()),
             );
         }
         openjd_model::ValidationContext::with_extensions(

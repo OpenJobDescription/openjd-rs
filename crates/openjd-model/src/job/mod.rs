@@ -32,7 +32,7 @@ use crate::types::JobParameterType;
 pub struct Job {
     pub name: String,
     pub description: Option<String>,
-    pub extensions: Option<Vec<String>>,
+    pub extensions: Option<Vec<crate::types::ModelExtension>>,
     pub parameters: IndexMap<String, JobParameter>,
     pub steps: Vec<Step>,
     pub job_environments: Option<Vec<Environment>>,

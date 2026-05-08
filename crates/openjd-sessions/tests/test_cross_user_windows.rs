@@ -196,7 +196,7 @@ fn make_session(user: Arc<WindowsSessionUser>) -> Session {
         os_env_vars: None,
         session_root_directory: Some(root),
         user: Some(user),
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,

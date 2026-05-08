@@ -57,8 +57,8 @@ fn redacted_env_vars_extension_not_supported_default() {
         .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
-        "Expected 'Unknown or unsupported extension: REDACTED_ENV_VARS', got: {msg}"
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
+        "Expected 'extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS', got: {msg}"
     );
 }
 
@@ -73,8 +73,8 @@ fn redacted_env_vars_extension_not_supported_empty_list() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
-        "Expected 'Unknown or unsupported extension: REDACTED_ENV_VARS', got: {msg}"
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
+        "Expected 'extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS', got: {msg}"
     );
 }
 
@@ -89,8 +89,8 @@ fn redacted_env_vars_extension_not_supported_wrong_list() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
-        "Expected 'Unknown or unsupported extension: REDACTED_ENV_VARS', got: {msg}"
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
+        "Expected 'extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS', got: {msg}"
     );
 }
 
@@ -137,7 +137,7 @@ fn redacted_env_vars_only_one_of_two_supported() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
         "Expected error about REDACTED_ENV_VARS, got: {msg}"
     );
 }
@@ -174,8 +174,8 @@ fn redacted_env_vars_env_template_not_supported() {
     let err = decode_environment_template(redacted_env_vars_env_template(), None).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
-        "Expected 'Unknown or unsupported extension: REDACTED_ENV_VARS', got: {msg}"
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
+        "Expected 'extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS', got: {msg}"
     );
 }
 
@@ -188,7 +188,7 @@ fn redacted_env_vars_env_template_wrong_list() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Unknown or unsupported extension: REDACTED_ENV_VARS"),
+        msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
         "Expected error about REDACTED_ENV_VARS, got: {msg}"
     );
 }

@@ -61,7 +61,10 @@ fn extension_not_supported() {
         "name": "Test",
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
     }"#,
-        &["Unknown or unsupported extension: FEATURE_BUNDLE_1"],
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: FEATURE_BUNDLE_1",
+        ],
     );
 }
 

@@ -96,7 +96,7 @@ async fn test_root_dir_permissions_posix() {
         callback: None,
         os_env_vars: None,
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -137,7 +137,7 @@ async fn test_sticky_bit_policy_strict_rejects_unsafe_dir() {
         callback: None,
         os_env_vars: None,
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
@@ -169,7 +169,7 @@ async fn test_sticky_bit_policy_strict_allows_safe_dir() {
         callback: None,
         os_env_vars: None,
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
@@ -200,7 +200,7 @@ async fn test_sticky_bit_policy_warn_allows_unsafe_dir() {
         callback: None,
         os_env_vars: None,
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Warn,
@@ -241,7 +241,7 @@ async fn test_sticky_bit_policy_disabled_skips_check() {
         callback: None,
         os_env_vars: None,
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -505,7 +505,7 @@ async fn test_enter_environment_with_resolved_variables() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -781,13 +781,13 @@ async fn test_undef_via_stdout() {
 #[tokio::test]
 async fn test_def_via_redacted_env_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            [openjd_model::types::KnownExtension::RedactedEnvVars]
-                .into_iter()
-                .collect(),
-        ),
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(
+                [openjd_model::types::ModelExtension::RedactedEnvVars]
+                    .into_iter()
+                    .collect(),
+            ),
     );
     let env = env_with_enter(
         "env1",
@@ -911,13 +911,13 @@ async fn test_def_via_redacted_env_json_stdout() {
 async fn test_def_via_redacted_env_with_extension() {
     // Test that redacted env vars ARE set when extension is enabled
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            [openjd_model::types::KnownExtension::RedactedEnvVars]
-                .into_iter()
-                .collect(),
-        ),
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(
+                [openjd_model::types::ModelExtension::RedactedEnvVars]
+                    .into_iter()
+                    .collect(),
+            ),
     );
     let env = env_with_enter(
         "env1",
@@ -988,13 +988,13 @@ async fn test_def_via_redacted_env_with_variables() {
 async fn test_multiple_different_redacted_env_vars() {
     // Test that multiple redacted env vars with different values are handled correctly
     let tmp = TempDir::new().unwrap();
-    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            [openjd_model::types::KnownExtension::RedactedEnvVars]
-                .into_iter()
-                .collect(),
-        ),
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(
+                [openjd_model::types::ModelExtension::RedactedEnvVars]
+                    .into_iter()
+                    .collect(),
+            ),
     );
     let env = env_with_enter("env1", "sh", vec!["-c",
         "echo 'openjd_redacted_env: PASSWORD=secret123'; echo 'openjd_redacted_env: PASSWORD2=mysecret123'"
@@ -1036,7 +1036,7 @@ async fn test_run_subprocess_basic() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1070,7 +1070,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1110,7 +1110,7 @@ async fn test_run_subprocess_with_os_env_vars() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1147,7 +1147,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
         os_env_vars: Some(ctor_env),
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1179,7 +1179,7 @@ async fn test_run_subprocess_empty_command_fails() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1203,7 +1203,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1332,7 +1332,7 @@ fn realtime_test_config(
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1565,7 +1565,7 @@ async fn test_cancel_action_mark_failed() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -1630,16 +1630,16 @@ async fn test_invalid_env_var_name_cancels_and_marks_failed() {
 #[tokio::test]
 async fn test_get_enabled_extensions_with_extensions() {
     let tmp = TempDir::new().unwrap();
-    let s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            [
-                openjd_model::types::KnownExtension::Expr,
-                openjd_model::types::KnownExtension::RedactedEnvVars,
-            ]
-            .into_iter()
-            .collect(),
-        ),
+    let s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(
+                [
+                    openjd_model::types::ModelExtension::Expr,
+                    openjd_model::types::ModelExtension::RedactedEnvVars,
+                ]
+                .into_iter()
+                .collect(),
+            ),
     );
     let mut exts = s.get_enabled_extensions();
     exts.sort();
@@ -1878,7 +1878,7 @@ fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionCon
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -2272,7 +2272,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -2326,7 +2326,7 @@ async fn test_cancel_action_with_mark_failed() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -2420,19 +2420,20 @@ async fn test_run_subprocess_rejects_zero_timeout() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// redactions_enabled interaction with revision_extensions
+// redactions_enabled interaction with profile
 // ══════════════════════════════════════════════════════════════
 
 #[tokio::test]
 async fn test_redacted_env_sets_var_with_extension() {
-    use openjd_model::types::{KnownExtension, SpecificationRevision, ValidationContext};
+    use openjd_model::types::{ModelExtension, SpecificationRevision};
+    use openjd_model::ModelProfile;
 
     let tmp = TempDir::new().unwrap();
     let mut exts = std::collections::HashSet::new();
-    exts.insert(KnownExtension::RedactedEnvVars);
-    let ctx = ValidationContext::with_extensions(SpecificationRevision::V2023_09, exts);
+    exts.insert(ModelExtension::RedactedEnvVars);
+    let profile = ModelProfile::new(SpecificationRevision::V2023_09).with_extensions(exts);
 
-    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(profile);
 
     // With REDACTED_ENV_VARS extension, openjd_redacted_env should set env vars.
     let env = Environment {
@@ -2463,12 +2464,13 @@ async fn test_redacted_env_sets_var_with_extension() {
 
 #[tokio::test]
 async fn test_redacted_env_does_not_set_var_without_extension() {
-    use openjd_model::types::{SpecificationRevision, ValidationContext};
+    use openjd_model::types::SpecificationRevision;
+    use openjd_model::ModelProfile;
 
     let tmp = TempDir::new().unwrap();
-    let ctx = ValidationContext::new(SpecificationRevision::V2023_09);
+    let profile = ModelProfile::new(SpecificationRevision::V2023_09);
 
-    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(ctx);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_profile(profile);
 
     // Without REDACTED_ENV_VARS extension, openjd_redacted_env should NOT set env vars.
     let env = Environment {
@@ -2497,9 +2499,9 @@ async fn test_redacted_env_does_not_set_var_without_extension() {
 }
 
 #[tokio::test]
-async fn test_redactions_disabled_with_no_revision_extensions() {
+async fn test_redactions_disabled_with_no_profile() {
     let tmp = TempDir::new().unwrap();
-    // No revision_extensions at all (default Session::new)
+    // No profile at all (default Session::new)
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let env = Environment {
@@ -2523,7 +2525,7 @@ async fn test_redactions_disabled_with_no_revision_extensions() {
     let out = s.exit_environment(&id, None, true, None).await.unwrap();
     assert!(
         out.contains("SECRET=unset"),
-        "SECRET should not be set with no revision_extensions, got: {out}"
+        "SECRET should not be set with no profile, got: {out}"
     );
 }
 
@@ -2697,7 +2699,7 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: false,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
@@ -2748,7 +2750,7 @@ async fn test_callback_reports_intermediate_progress() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: false,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,

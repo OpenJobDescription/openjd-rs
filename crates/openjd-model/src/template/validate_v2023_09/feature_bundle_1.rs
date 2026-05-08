@@ -6,14 +6,14 @@
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
-use crate::types::{KnownExtension, ValidationContext};
+use crate::types::{ModelExtension, ValidationContext};
 
 pub fn validate_feature_bundle_1(
     jt: &JobTemplate,
     ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
-    let active = ctx.has_extension(KnownExtension::FeatureBundle1);
+    let active = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
 
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];

@@ -223,8 +223,14 @@ pub fn validate_structure(
         if let Some(hr) = &step.host_requirements {
             let hr_path = path_field(&step_path, "hostRequirements");
             match (
-                capabilities::standard_amount_capability_names(ctx.revision, &ctx.extensions),
-                capabilities::standard_attribute_capability_names(ctx.revision, &ctx.extensions),
+                capabilities::standard_amount_capability_names(
+                    ctx.profile.revision(),
+                    ctx.profile.extensions(),
+                ),
+                capabilities::standard_attribute_capability_names(
+                    ctx.profile.revision(),
+                    ctx.profile.extensions(),
+                ),
             ) {
                 (Ok(std_amounts), Ok(std_attrs)) => {
                     validate_host_requirements(
@@ -237,12 +243,17 @@ pub fn validate_structure(
                     );
                 }
                 _ => {
-                    let ext_list: Vec<_> = ctx.extensions.iter().map(|e| e.as_str()).collect();
+                    let ext_list: Vec<_> = ctx
+                        .profile
+                        .extensions()
+                        .iter()
+                        .map(|e| e.as_str())
+                        .collect();
                     errors.add(
                         &hr_path,
                         format!(
                             "cannot validate: no capability definitions for revision {} with extensions {:?}.",
-                            ctx.revision, ext_list
+                            ctx.profile.revision(), ext_list
                         ),
                     );
                 }

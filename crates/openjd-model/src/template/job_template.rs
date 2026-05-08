@@ -42,21 +42,21 @@ impl JobTemplate {
         }
     }
 
-    /// Build a [`ValidationContext`](crate::types::ValidationContext)
-    /// matching this template: revision derived from
-    /// `specificationVersion`, extensions populated from the template's
-    /// declared `extensions` list (ignoring entries that don't parse as
-    /// a [`KnownExtension`](crate::types::KnownExtension)), and caller
-    /// limits left at their defaults.
+    /// Derive the [`ModelProfile`](crate::ModelProfile) described by
+    /// this template: the revision from `specificationVersion` and the
+    /// extensions set declared on the template.
     ///
-    /// This is the convenient "do what the template says" context for
-    /// callers that do not want to override revision/extension policy.
-    /// Callers that *do* want to override (e.g. a service stripping EXPR
-    /// regardless of template intent) should build a
-    /// `ValidationContext` explicitly and use
-    /// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
-    /// as needed.
-    pub fn default_validation_context(&self) -> crate::types::ValidationContext {
+    /// Entries in the `extensions` list that don't parse as a known
+    /// [`ModelExtension`](crate::types::ModelExtension) are silently
+    /// skipped.
+    ///
+    /// This is the "what the template says it needs" profile — the one
+    /// to pass to sessions, to
+    /// [`ModelProfile::to_expr_profile`](crate::ModelProfile::to_expr_profile),
+    /// or to wrap in a
+    /// [`ValidationContext`](crate::types::ValidationContext) when
+    /// calling `create_job`.
+    pub fn profile(&self) -> crate::ModelProfile {
         use std::str::FromStr;
         let revision =
             crate::types::TemplateSpecificationVersion::from_str(&self.specification_version)
@@ -67,11 +67,27 @@ impl JobTemplate {
         let mut exts = crate::types::Extensions::new();
         if let Some(list) = &self.extensions {
             for e in list {
-                if let Ok(known) = crate::types::KnownExtension::from_str(e.as_str()) {
+                if let Ok(known) = crate::types::ModelExtension::from_str(e.as_str()) {
                     exts.insert(known);
                 }
             }
         }
-        crate::types::ValidationContext::with_extensions(revision, exts)
+        crate::ModelProfile::new(revision).with_extensions(exts)
+    }
+
+    /// Convenience: wrap [`profile`](Self::profile) in a
+    /// [`ValidationContext`](crate::types::ValidationContext) with
+    /// default caller limits. Equivalent to
+    /// `ValidationContext::from_profile(self.profile())`.
+    ///
+    /// This is the convenient "do what the template says" context for
+    /// callers that do not want to override revision/extension policy.
+    /// Callers that *do* want to override (e.g. a service stripping EXPR
+    /// regardless of template intent) should build a
+    /// `ValidationContext` explicitly and use
+    /// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
+    /// as needed.
+    pub fn default_validation_context(&self) -> crate::types::ValidationContext {
+        crate::types::ValidationContext::from_profile(self.profile())
     }
 }

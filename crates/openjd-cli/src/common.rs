@@ -111,12 +111,12 @@ pub fn read_input_file(path: &Path) -> Result<String, String> {
 }
 
 /// The full default list of supported OpenJD extension names,
-/// sourced from the authoritative [`openjd_model::KnownExtension::ALL`].
+/// sourced from the authoritative [`openjd_model::ModelExtension::ALL`].
 /// Using the enum rather than a CLI-local string array keeps the
 /// CLI, JS bindings, and Python bindings in sync whenever a new
 /// extension is added upstream — one place to update.
 fn supported_extensions() -> Vec<&'static str> {
-    openjd_model::KnownExtension::ALL
+    openjd_model::ModelExtension::ALL
         .iter()
         .map(|e| e.as_str())
         .collect()

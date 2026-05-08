@@ -200,23 +200,27 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Build the validation context from the template's declared
-    // extensions. Used for create_job and then reused when building the
-    // session's host-context library.
-    let revision_ctx = {
+    // Build the model profile from the template's declared extensions.
+    // The profile drives which extensions are enabled when validating
+    // and instantiating the job; it's reused verbatim when configuring
+    // the session's derived function library.
+    let revision_profile = {
         let mut exts = std::collections::HashSet::new();
         if let Some(ext_list) = &job_template.extensions {
             exts.extend(ext_list.iter().filter_map(|e| {
                 e.as_str()
-                    .parse::<openjd_model::types::KnownExtension>()
+                    .parse::<openjd_model::types::ModelExtension>()
                     .ok()
             }));
         }
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            exts,
-        )
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(exts)
     };
+    // create_job takes the full ValidationContext (profile + caller
+    // limits). The CLI has no custom caller limits, so we wrap the
+    // profile with defaults.
+    let revision_ctx =
+        openjd_model::types::ValidationContext::from_profile(revision_profile.clone());
 
     // Create instantiated job
     let job = match openjd_model::create_job(&job_template, &param_values, &revision_ctx) {
@@ -241,9 +245,10 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         os_env_vars: None,
         session_root_directory: None,
         user: None,
-        // Session derives its function library from this context + the
-        // path-mapping rules above; no need to pass a library separately.
-        revision_extensions: Some(revision_ctx),
+        // Session derives its function library from this profile +
+        // the path-mapping rules above; no need to pass a library
+        // separately.
+        profile: Some(revision_profile),
         cancel_token: Some(cancel_token.clone()),
         sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,

@@ -53,7 +53,9 @@ pub fn create_job(
 ) -> Result<job::Job, ModelError> {
     let mut symtab = build_symbol_table(job_parameter_values)?;
 
-    let has_expr = ctx.has_extension(crate::types::KnownExtension::Expr);
+    let has_expr = ctx
+        .profile
+        .has_extension(crate::types::ModelExtension::Expr);
     let limits = EffectiveLimits::from_context(ctx);
 
     let job_name = job_template
@@ -123,10 +125,18 @@ pub fn create_job(
             .collect()
     });
 
-    let extensions = job_template
-        .extensions
-        .as_ref()
-        .map(|exts| exts.iter().map(|e| e.as_str().to_string()).collect());
+    // job_template.extensions is `Option<Vec<ExtensionName>>` where every
+    // entry has already passed decode-time recognition: any string that
+    // isn't a valid ModelExtension would have been rejected in parse.rs.
+    // Map into the typed Job.extensions form; in the unexpected case that
+    // an entry doesn't parse (e.g. directly-constructed JobTemplate
+    // bypassing decode), skip it — the decode path is the single source
+    // of truth for extension recognition.
+    let extensions = job_template.extensions.as_ref().map(|exts| {
+        exts.iter()
+            .filter_map(|e| std::str::FromStr::from_str(e.as_str()).ok())
+            .collect()
+    });
 
     // Caller-imposed step script size limit (JSON-encoded bytes)
     if let Some(max) = ctx.caller_limits.max_step_script_size {

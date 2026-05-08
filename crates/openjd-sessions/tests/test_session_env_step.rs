@@ -390,13 +390,13 @@ async fn test_session_state_ended_after_failure() {
 #[tokio::test]
 async fn test_redacted_env_via_stdout() {
     let tmp = TempDir::new().unwrap();
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_revision_extensions(
-        openjd_model::types::ValidationContext::with_extensions(
-            openjd_model::types::SpecificationRevision::V2023_09,
-            [openjd_model::types::KnownExtension::RedactedEnvVars]
-                .into_iter()
-                .collect(),
-        ),
+    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_profile(
+        openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+            .with_extensions(
+                [openjd_model::types::ModelExtension::RedactedEnvVars]
+                    .into_iter()
+                    .collect(),
+            ),
     );
     let env = make_env(
         "test_env",
@@ -443,7 +443,7 @@ async fn test_env_with_resolved_variables() {
         os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
-        revision_extensions: None,
+        profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,

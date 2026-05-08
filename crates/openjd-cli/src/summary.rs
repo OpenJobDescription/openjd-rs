@@ -117,7 +117,7 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
             exts.extend(
                 ext_list
                     .iter()
-                    .filter_map(|e| e.as_str().parse::<openjd_model::KnownExtension>().ok()),
+                    .filter_map(|e| e.as_str().parse::<openjd_model::ModelExtension>().ok()),
             );
         }
         openjd_model::ValidationContext::with_extensions(

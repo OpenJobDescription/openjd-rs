@@ -7,7 +7,7 @@
 //! Resolves F8: every decode call previously used a JS-binding-local
 //! hardcoded list of supported extensions. That list diverged from
 //! the CLI's list and silently lagged `openjd-model`'s
-//! `KnownExtension` authority. Hosts could not tighten the set —
+//! `ModelExtension` authority. Hosts could not tighten the set —
 //! e.g. a template-viewer extension had no way to disable EXPR.
 //!
 //! The new surface:
@@ -15,7 +15,7 @@
 //! * Every decode entry point takes an optional trailing
 //!   `supportedExtensions: Option<Vec<String>>` argument.
 //! * Omitted / `None` means "use the full default from
-//!   `KnownExtension::ALL`" — which is now the one authoritative
+//!   `ModelExtension::ALL`" — which is now the one authoritative
 //!   source in `openjd-model`.
 //! * An empty slice `[]` disables every extension.
 //! * An unknown extension name in the list is rejected by the
@@ -59,7 +59,7 @@ const ENV_TEMPLATE: &str = r#"{
 // ── get_supported_extensions ────────────────────────────────────────
 
 /// The helper returns the full authoritative default list,
-/// sourced from `openjd_model::KnownExtension::ALL`. Must include
+/// sourced from `openjd_model::ModelExtension::ALL`. Must include
 /// every currently-known extension.
 #[test]
 fn get_supported_extensions_returns_full_default_list() {

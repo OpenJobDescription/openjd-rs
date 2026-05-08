@@ -44,8 +44,8 @@ pub use step_param_space::StepParameterSpaceIterator;
 pub use template::TaskParameterDefinition;
 pub use types::{
     CallerLimits, DataFlow, EndOfLine, Extensions, FileType, JobParameterInputValues,
-    JobParameterType, JobParameterValue, JobParameterValues, KnownExtension, ObjectType,
-    SpecificationRevision, TaskParameterSet, TaskParameterType, TaskParameterValue,
+    JobParameterType, JobParameterValue, JobParameterValues, ModelExtension, ModelProfile,
+    ObjectType, SpecificationRevision, TaskParameterSet, TaskParameterType, TaskParameterValue,
     TemplateSpecificationVersion, ValidationContext,
 };
 

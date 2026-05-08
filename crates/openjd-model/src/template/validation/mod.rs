@@ -42,7 +42,7 @@ pub(crate) fn validate_job_template(
     jt: &JobTemplate,
     ctx: &ValidationContext,
 ) -> Result<(), ModelError> {
-    match ctx.revision {
+    match ctx.profile.revision() {
         SpecificationRevision::V2023_09 => {
             crate::template::validate_v2023_09::validate_job_template(jt, ctx)
         }
@@ -55,7 +55,7 @@ pub fn validate_environment_template(
     et: &EnvironmentTemplate,
     ctx: &ValidationContext,
 ) -> Result<(), ModelError> {
-    match ctx.revision {
+    match ctx.profile.revision() {
         SpecificationRevision::V2023_09 => {
             crate::template::validate_v2023_09::validate_environment_template(et, ctx)
         }

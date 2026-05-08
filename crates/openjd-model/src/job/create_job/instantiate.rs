@@ -39,7 +39,7 @@ pub(super) fn instantiate_step(
     if has_expr {
         if let Some(bindings) = &st.let_bindings {
             let lib = openjd_expr::FunctionLibrary::for_profile(
-                &ctx.to_expr_profile(openjd_expr::HostContext::None),
+                &ctx.profile.to_expr_profile(openjd_expr::HostContext::None),
             );
             for binding in bindings {
                 if let Some(eq_pos) = binding.find('=') {
@@ -162,7 +162,8 @@ pub(super) fn instantiate_step(
                 }
 
                 let lib = openjd_expr::FunctionLibrary::for_profile(
-                    &ctx.to_expr_profile(openjd_expr::HostContext::Unresolved),
+                    &ctx.profile
+                        .to_expr_profile(openjd_expr::HostContext::Unresolved),
                 );
                 for binding in bindings {
                     if let Some(eq_pos) = binding.find('=') {

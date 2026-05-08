@@ -326,3 +326,177 @@ fn multiple_errors() {
         ],
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Extension list errors (Gold standard: full count + path + message)
+//
+// These tests pin the exact error output produced by the
+// extensions-list validation pass in `parse.rs`. Matches the Python
+// Pydantic wording for duplicates and unsupported names.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn extensions_empty_list() {
+    // An explicit empty `extensions: []` is rejected with a
+    // single error at the `extensions` path.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": [],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tif provided, must be a non-empty list.",
+        ],
+    );
+}
+
+#[test]
+fn extensions_single_unsupported() {
+    // One unsupported extension produces one error with an
+    // aggregated (single-value) "Unsupported extension names" message.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["NOT_A_REAL_EXTENSION"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: NOT_A_REAL_EXTENSION",
+        ],
+    );
+}
+
+#[test]
+fn extensions_multiple_unsupported_sorted() {
+    // Multiple unsupported extensions are reported in a single
+    // message with names sorted alphabetically for stable output.
+    // The input order here is deliberately reversed to verify
+    // sort behavior.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["ZZZ_LAST", "AAA_FIRST", "MMM_MIDDLE"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tUnsupported extension names: AAA_FIRST, MMM_MIDDLE, ZZZ_LAST",
+        ],
+    );
+}
+
+#[test]
+fn extensions_known_but_not_enabled_by_caller() {
+    // A *recognized* ModelExtension (EXPR) still counts as
+    // unsupported when the caller's allowlist excludes it — the
+    // helper collapses both cases into one message, matching the
+    // Python implementation. This test uses a restricted allowlist
+    // (only FEATURE_BUNDLE_1) so that EXPR, though a known variant,
+    // is not permitted here.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+    );
+    let err = decode_job_template(v, Some(&["FEATURE_BUNDLE_1"]), &CallerLimits::default())
+        .expect_err("Expected validation error");
+    let msg = err.to_string();
+    for line in &[
+        "1 validation error for JobTemplate\n",
+        "extensions:\n\tUnsupported extension names: EXPR",
+    ] {
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
+    }
+}
+
+#[test]
+fn extensions_single_duplicate() {
+    // A single duplicate name is reported via a dedicated
+    // "Duplicate values for extension name" message. The duplicate
+    // name (EXPR) is also listed in the (empty here) "Unsupported"
+    // pass set because EXPR *is* in the caller allowlist — so only
+    // one error is produced.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "EXPR"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tDuplicate values for extension name are not allowed. Duplicate values: EXPR",
+        ],
+    );
+}
+
+#[test]
+fn extensions_multiple_duplicates_sorted() {
+    // Multiple duplicate names are listed comma-separated, sorted
+    // alphabetically. Each duplicate is named at most once in the
+    // output regardless of how many times it recurs in the input.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["TASK_CHUNKING", "EXPR", "TASK_CHUNKING", "EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "1 validation error for JobTemplate\n",
+            "extensions:\n\tDuplicate values for extension name are not allowed. Duplicate values: EXPR,TASK_CHUNKING",
+        ],
+    );
+}
+
+#[test]
+fn extensions_duplicate_and_unsupported_collected_together() {
+    // Duplicates and unsupported names are independent passes —
+    // when both apply, the caller sees both errors together. This
+    // is the collect-all behavior: fail-fast would have reported
+    // only the first. Order here is duplicate-pass before
+    // unsupported-pass (they're added in that order).
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "EXPR", "NOT_A_REAL_EXTENSION"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
+    }"#,
+        &[
+            "2 validation errors for JobTemplate\n",
+            "extensions:\n\tDuplicate values for extension name are not allowed. Duplicate values: EXPR",
+            "extensions:\n\tUnsupported extension names: NOT_A_REAL_EXTENSION",
+        ],
+    );
+}
+
+#[test]
+fn extensions_errors_use_environment_template_model_name() {
+    // Extension-list errors on an environment template use
+    // `EnvironmentTemplate` as the model name in the count header.
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["NOT_REAL", "NOT_REAL", "OTHER_BOGUS"],
+        "environment": {"name": "E", "script": {"actions": {"onEnter": {"command": "cmd"}}}}
+    }"#,
+        &[
+            "2 validation errors for EnvironmentTemplate\n",
+            "extensions:\n\tDuplicate values for extension name are not allowed. Duplicate values: NOT_REAL",
+            "extensions:\n\tUnsupported extension names: NOT_REAL, OTHER_BOGUS",
+        ],
+    );
+}

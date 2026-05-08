@@ -21,7 +21,7 @@ use openjd_expr::FormatString;
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
-use crate::types::{KnownExtension, ValidationContext};
+use crate::types::{ModelExtension, ValidationContext};
 
 /// Build a symbol table containing Param/RawParam entries from job parameter definitions.
 /// RawParam.* is always STRING for PATH types and LIST_STRING for LIST_PATH types,
@@ -333,15 +333,16 @@ pub fn validate_format_strings(
     ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
-    let expr_active = ctx.has_extension(KnownExtension::Expr);
+    let expr_active = ctx.profile.has_extension(ModelExtension::Expr);
     // Template/task-range validation uses HostContext::None (host functions
     // are not available in those scopes). Session/task scopes use
     // HostContext::Unresolved so apply_path_mapping type-checks.
     let default_lib = openjd_expr::FunctionLibrary::for_profile(
-        &ctx.to_expr_profile(openjd_expr::HostContext::None),
+        &ctx.profile.to_expr_profile(openjd_expr::HostContext::None),
     );
     let host_lib = openjd_expr::FunctionLibrary::for_profile(
-        &ctx.to_expr_profile(openjd_expr::HostContext::Unresolved),
+        &ctx.profile
+            .to_expr_profile(openjd_expr::HostContext::Unresolved),
     );
 
     // ── Job name: template scope (Param/RawParam only) ──
@@ -851,7 +852,7 @@ pub fn validate_format_strings(
                     }
                 }
                 if let Some(let_bindings) = &sa.let_bindings {
-                    if ctx.has_extension(KnownExtension::FeatureBundle1) {
+                    if ctx.profile.has_extension(ModelExtension::FeatureBundle1) {
                         let enclosing: HashSet<String> = step
                             .let_bindings
                             .as_ref()

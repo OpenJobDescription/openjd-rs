@@ -314,21 +314,27 @@ pub type JobParameterValues = HashMap<String, JobParameterValue>;
 pub type TaskParameterSet = IndexMap<String, TaskParameterValue>;
 
 /// Set of extensions enabled for a template.
-pub type Extensions = std::collections::HashSet<KnownExtension>;
+pub type Extensions = std::collections::HashSet<ModelExtension>;
 
-/// Known extension names for the 2023-09 specification revision.
+/// Extension variants recognized by `openjd-model` for the 2023-09
+/// specification revision.
+///
+/// Template `extensions` lists are parsed into `ModelExtension`
+/// values; unrecognized strings produce a `FromStr` error at the parse
+/// boundary, so once an `Extensions` set has been constructed every
+/// element is guaranteed to be a known extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum KnownExtension {
+pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,
     FeatureBundle1,
     Expr,
 }
 
-impl KnownExtension {
+impl ModelExtension {
     /// All extension variants, in a stable order for iteration and
     /// for building default "enable all" allowlists.
-    pub const ALL: &'static [KnownExtension] = &[
+    pub const ALL: &'static [ModelExtension] = &[
         Self::TaskChunking,
         Self::RedactedEnvVars,
         Self::FeatureBundle1,
@@ -345,7 +351,7 @@ impl KnownExtension {
     }
 }
 
-impl std::str::FromStr for KnownExtension {
+impl std::str::FromStr for ModelExtension {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -355,6 +361,15 @@ impl std::str::FromStr for KnownExtension {
             "EXPR" => Ok(Self::Expr),
             _ => Err(format!("Unknown extension: {s}")),
         }
+    }
+}
+
+/// Serialize as the canonical UPPER_SNAKE_CASE extension name, so the
+/// transport form matches what appears in template YAML/JSON and in
+/// the Python implementation (e.g. `"EXPR"`, not `"Expr"`).
+impl serde::Serialize for ModelExtension {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -383,47 +398,73 @@ pub struct CallerLimits {
     pub max_template_size: Option<usize>,
 }
 
-/// Context for validation, carrying spec revision and enabled extensions.
+/// Model-side profile: the specification revision plus the set of
+/// enabled extensions that together describe what features a template
+/// or job may use.
+///
+/// `ModelProfile` is the `openjd-model` counterpart of
+/// [`openjd_expr::ExprProfile`]. Both crates share the pattern:
+///
+/// - `openjd-expr`: [`ExprProfile`](openjd_expr::ExprProfile) drives
+///   [`FunctionLibrary::for_profile`](openjd_expr::FunctionLibrary::for_profile).
+///   Its third axis is [`HostContext`](openjd_expr::HostContext) — host-supplied
+///   runtime state (path mapping rules).
+/// - `openjd-model`: `ModelProfile` drives template validation and
+///   job creation. Caller policy is orthogonal and carried separately
+///   in [`CallerLimits`]; the two are bundled into a
+///   [`ValidationContext`] where both are needed together.
+///
+/// Profiles are small value types: clone them freely, store them on
+/// sessions, pass them by reference into validators. `ModelProfile`
+/// has no mutable operations other than builder-style `with_*`
+/// methods that return a new profile.
+///
+/// Use [`ModelProfile::to_expr_profile`] to derive a matching
+/// `ExprProfile` when calling into `openjd-expr`; the caller supplies
+/// the appropriate `HostContext` for their situation.
 #[derive(Debug, Clone)]
-pub struct ValidationContext {
-    pub revision: SpecificationRevision,
-    pub extensions: Extensions,
-    pub caller_limits: CallerLimits,
+pub struct ModelProfile {
+    revision: SpecificationRevision,
+    extensions: Extensions,
 }
 
-impl ValidationContext {
+impl ModelProfile {
+    /// Build a profile for the given revision with no extensions enabled.
     pub fn new(revision: SpecificationRevision) -> Self {
         Self {
             revision,
             extensions: Extensions::new(),
-            caller_limits: CallerLimits::default(),
         }
     }
 
-    pub fn with_extensions(revision: SpecificationRevision, extensions: Extensions) -> Self {
-        Self {
-            revision,
-            extensions,
-            caller_limits: CallerLimits::default(),
-        }
-    }
-
-    pub fn with_caller_limits(mut self, caller_limits: CallerLimits) -> Self {
-        self.caller_limits = caller_limits;
+    /// Set the enabled extensions (replaces any existing set).
+    #[must_use]
+    pub fn with_extensions(mut self, extensions: Extensions) -> Self {
+        self.extensions = extensions;
         self
     }
 
-    pub fn has_extension(&self, ext: KnownExtension) -> bool {
+    /// The specification revision this profile targets.
+    pub fn revision(&self) -> SpecificationRevision {
+        self.revision
+    }
+
+    /// The set of extensions this profile enables.
+    pub fn extensions(&self) -> &Extensions {
+        &self.extensions
+    }
+
+    /// True iff `ext` is enabled in this profile.
+    pub fn has_extension(&self, ext: ModelExtension) -> bool {
         self.extensions.contains(&ext)
     }
 
     /// Derive an [`ExprProfile`](openjd_expr::ExprProfile) matching this
-    /// context's revision and extensions, with the caller-specified
+    /// profile's revision and extensions, with the caller-specified
     /// [`HostContext`](openjd_expr::HostContext).
     ///
-    /// This is the bridge from `openjd-model`'s validation context to
-    /// `openjd-expr`'s profile-based library construction: call this and
-    /// pass the result to
+    /// This is the bridge from `openjd-model` to `openjd-expr`: call
+    /// this and pass the result to
     /// [`FunctionLibrary::for_profile`](openjd_expr::FunctionLibrary::for_profile).
     ///
     /// The `host_context` argument is a caller responsibility because
@@ -440,13 +481,13 @@ impl ValidationContext {
         // Map this crate's SpecificationRevision onto openjd-expr's
         // ExprRevision. The mapping is total today because both enums
         // have a single variant each; future revisions will add arms
-        // here as both sides grow. The match on ctx.revision mirrors
-        // the pattern used in EffectiveLimits::from_context.
+        // here as both sides grow. The match on revision mirrors the
+        // pattern used in EffectiveLimits::from_context.
         let revision = match self.revision {
             SpecificationRevision::V2023_09 => openjd_expr::ExprRevision::V2026_02,
         };
         // `ExprExtension` is empty today — no expression-level
-        // extensions exist yet. Model-side `KnownExtension` variants
+        // extensions exist yet. Model-side `ModelExtension` variants
         // gate *where* expressions are permitted in templates (EXPR,
         // FEATURE_BUNDLE_1, TASK_CHUNKING, REDACTED_ENV_VARS), not
         // which functions are registered once they are permitted, so
@@ -455,6 +496,54 @@ impl ValidationContext {
         openjd_expr::ExprProfile::new(revision)
             .with_extensions(extensions)
             .with_host_context(host_context)
+    }
+}
+
+/// Context for validation, carrying a [`ModelProfile`] and caller-policy
+/// [`CallerLimits`] as a single bundle.
+///
+/// Use this type when a function needs both the profile (revision +
+/// extensions) and the caller's policy overrides. When only the
+/// profile is needed, take `&ModelProfile` directly.
+#[derive(Debug, Clone)]
+pub struct ValidationContext {
+    pub profile: ModelProfile,
+    pub caller_limits: CallerLimits,
+}
+
+impl ValidationContext {
+    /// Build a context for the given revision with no extensions and
+    /// default caller limits.
+    pub fn new(revision: SpecificationRevision) -> Self {
+        Self {
+            profile: ModelProfile::new(revision),
+            caller_limits: CallerLimits::default(),
+        }
+    }
+
+    /// Build a context with the given revision + extensions and
+    /// default caller limits.
+    pub fn with_extensions(revision: SpecificationRevision, extensions: Extensions) -> Self {
+        Self {
+            profile: ModelProfile::new(revision).with_extensions(extensions),
+            caller_limits: CallerLimits::default(),
+        }
+    }
+
+    /// Build a context from an existing [`ModelProfile`], with default
+    /// caller limits.
+    pub fn from_profile(profile: ModelProfile) -> Self {
+        Self {
+            profile,
+            caller_limits: CallerLimits::default(),
+        }
+    }
+
+    /// Attach caller limits, consuming and returning `self`.
+    #[must_use]
+    pub fn with_caller_limits(mut self, caller_limits: CallerLimits) -> Self {
+        self.caller_limits = caller_limits;
+        self
     }
 }
 
@@ -667,5 +756,34 @@ mod tests {
     fn test_task_param_type_display() {
         assert_eq!(format!("{}", TaskParameterType::ChunkInt), "CHUNK[INT]");
         assert_eq!(format!("{}", TaskParameterType::Int), "INT");
+    }
+
+    #[test]
+    fn test_model_extension_serializes_as_canonical_string() {
+        // ModelExtension must round-trip through the canonical
+        // UPPER_SNAKE_CASE name rather than the Rust variant name, so
+        // serialized Jobs match the form consumed by tools and the
+        // Python implementation.
+        assert_eq!(
+            serde_json::to_string(&ModelExtension::Expr).unwrap(),
+            "\"EXPR\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelExtension::TaskChunking).unwrap(),
+            "\"TASK_CHUNKING\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelExtension::RedactedEnvVars).unwrap(),
+            "\"REDACTED_ENV_VARS\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelExtension::FeatureBundle1).unwrap(),
+            "\"FEATURE_BUNDLE_1\""
+        );
+        let v = vec![ModelExtension::Expr, ModelExtension::TaskChunking];
+        assert_eq!(
+            serde_json::to_string(&v).unwrap(),
+            "[\"EXPR\",\"TASK_CHUNKING\"]"
+        );
     }
 }

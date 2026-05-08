@@ -508,7 +508,8 @@ fn test_env_template_with_extensions_field() {
 
 #[test]
 fn test_env_template_extensions_unsupported() {
-    // Extension not in supported list should fail
+    // Extension not in supported list fails with the aggregated
+    // "Unsupported extension names" message at the `extensions` path.
     check_env_err_with_exts(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -516,13 +517,19 @@ fn test_env_template_extensions_unsupported() {
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
     }"#,
         &[],
-        &["unsupported extension"],
+        &[
+            "1 validation error for EnvironmentTemplate\n",
+            "extensions:\n\tUnsupported extension names: EXPR",
+        ],
     );
 }
 
 #[test]
 fn test_env_template_extensions_unknown() {
-    // Completely unknown extension name should fail
+    // Unrecognized extension name (not a ModelExtension variant) is
+    // also reported via "Unsupported extension names" — the library
+    // does not distinguish "unknown" from "not permitted by caller";
+    // both are unsupported from the template's perspective.
     check_env_err_with_exts(
         r#"{
         "specificationVersion": "environment-2023-09",
@@ -530,7 +537,10 @@ fn test_env_template_extensions_unknown() {
         "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
     }"#,
         &["NOT_A_REAL_EXTENSION"],
-        &["Unknown or unsupported extension"],
+        &[
+            "1 validation error for EnvironmentTemplate\n",
+            "extensions:\n\tUnsupported extension names: NOT_A_REAL_EXTENSION",
+        ],
     );
 }
 
