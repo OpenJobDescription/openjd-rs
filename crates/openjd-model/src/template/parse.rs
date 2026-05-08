@@ -272,8 +272,14 @@ pub fn decode_environment_template(
         )));
     }
 
-    let et: EnvironmentTemplate = serde_json::from_value(template)
-        .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
+    let et: EnvironmentTemplate = match version.revision() {
+        // Future revisions may decode into a different struct layout.
+        // Making the match explicit now localizes the dispatch point,
+        // mirroring `decode_job_template`.
+        SpecificationRevision::V2023_09 => serde_json::from_value(template).map_err(|e| {
+            ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}"))
+        })?,
+    };
 
     // Build extension set with collect-all error reporting. Same helper
     // as decode_job_template; the error model name is different.

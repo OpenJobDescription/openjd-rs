@@ -116,7 +116,16 @@ impl PartialOrd<f64> for Float64 {
 }
 
 /// A typed value during expression evaluation.
+///
+/// `#[non_exhaustive]` because future revisions or extensions may add
+/// new primitive types (e.g., `Duration`, `Url`, `Decimal`). Adding a
+/// variant must not be a breaking change for downstream crates that
+/// match on this enum. The `Path` variant has its own `#[non_exhaustive]`
+/// attribute, which serves a separate purpose (preventing direct
+/// struct-literal construction so that `ExprValue::new_path` can
+/// enforce the separator-normalization invariant).
 #[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
 pub enum ExprValue {
     Null,
     Bool(bool),

@@ -57,10 +57,11 @@ the language subset?" — the answer is now **partially yes**:
   function like the enum match that would catch the drift automatically.
 - ⚠️ **Partially ready** for a revision or extension that **adds a new
   primitive type** (e.g., `Duration`, `Url`). `TypeCode` is
-  `#[non_exhaustive]` and the dispatch generalises, but `ExprValue`
-  itself is *not* `#[non_exhaustive]` — adding a new variant is a
-  breaking change. The parser's literal handlers (`NumberLiteral`,
-  `StringLiteral`) would need conditional paths based on revision.
+  `#[non_exhaustive]`, `ExprValue` is now `#[non_exhaustive]` (so adding
+  a new variant is no longer a SemVer break), and the dispatch
+  generalises. The remaining gap is that the parser's literal handlers
+  (`NumberLiteral`, `StringLiteral`) would need conditional paths based
+  on revision to recognise new literal forms for such a type.
 - ❌ **Not ready** for a revision or extension that changes the
   **Python subset the language accepts** — dict comprehensions, walrus,
   multiple `for` clauses, lambda, tuple literals, set comprehensions,
@@ -100,7 +101,10 @@ want to change:
 Priority 3 and Priority 4 of the prior report remain open and are the
 main body of work left. Priority 1 and Priority 2 are effectively
 closed, with two specific exceptions under Priority 1 item 5
-(non-exhaustive enums) that slipped through.
+(non-exhaustive enums) that slipped through. The two minor
+Priority 2 dispatch gaps called out in the previous pass
+(`EffectiveRules::from_context`, `decode_environment_template`)
+are now closed.
 
 ## 1. Verified state of prior Resolved claims
 
@@ -116,7 +120,7 @@ the current tree.
 | 2 | `FunctionLibrary::for_profile` replaces `get_default_library` | Present in `default_library.rs`. `get_default_library` removed from public surface entirely (grep of `crates/` turns up only internal usages in evaluator and JS bindings) | ✅ **Resolved** (cleaner than claimed — the deprecated alias was removed outright) |
 | 3 | Per-profile cache keyed on rules-independent key | `PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` in `default_library.rs`; `ProfileKey` excludes rules. Tests `cache_returns_same_arc_for_none_profile`, `cache_returns_same_arc_for_unresolved_profile`, `with_rules_does_not_cache_rules_variant` all pass | ✅ **Resolved** |
 | 4 | `HostContext` collapses `with_host_context` + `with_unresolved_host_context` | Single enum, applied via `profile.with_host_context(...)`. The old methods on `FunctionLibrary` are gone from public use | ✅ **Resolved** |
-| 5 | Mark all relevant cross-crate public enums `#[non_exhaustive]` | Marked: `SpecificationRevision`, `JobParameterType`, `TypeCode`, `ExprRevision`, `ExprExtension`, `ModelError`, `ExpressionErrorKind`. **Not** marked: `ModelExtension`, `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, `ExprValue`. The prior report claimed `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` were resolved but they are bare enums in `openjd-model/src/types.rs`. `ExprValue` has `#[non_exhaustive]` only on the `Path` variant, not on the enum itself | ⚠️ **Partially resolved** — see §3 for the specific gaps |
+| 5 | Mark all relevant cross-crate public enums `#[non_exhaustive]` | Marked: `SpecificationRevision`, `JobParameterType`, `TypeCode`, `ExprRevision`, `ExprExtension`, `ModelError`, `ExpressionErrorKind`, `ModelExtension`, `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, `ExprValue` (outer enum). The `Path` variant of `ExprValue` retains its own `#[non_exhaustive]` for its separate construction-restriction purpose | ✅ **Resolved** |
 
 ### Priority 2 — Plumb the profile through the model
 
@@ -124,9 +128,9 @@ the current tree.
 |---|---|---|---|
 | 6 | `create_job` takes `&ValidationContext` + `JobTemplate::default_validation_context()` convenience | `create_job::create_job(&JobTemplate, &JobParameterInputValues, &ValidationContext) -> Result<Job, ModelError>` in `lib.rs`; `JobTemplate::default_validation_context()` and `JobTemplate::profile()` in `template/job_template.rs` | ✅ **Resolved** |
 | 7 | `EffectiveLimits::from_context` used at every limit check; no stray `default()` | No `impl Default for EffectiveLimits` exists; `max_env_template_param_count` field present. Grep for "EffectiveLimits" across the crate shows only `from_context` construction | ✅ **Resolved** |
-| 8 | `EffectiveLimits` / `EffectiveRules` dispatch on revision | `EffectiveLimits::from_context` has the required `match ctx.profile.revision() { SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx) }` pattern. `EffectiveRules::from_context` **does not** yet use the same dispatch pattern — it reads extensions directly without a revision match. Minor regression: the intent in item 8 was for both to branch on revision | ⚠️ **Partially resolved** — `EffectiveRules` needs the same `match` wrapper |
+| 8 | `EffectiveLimits` / `EffectiveRules` dispatch on revision | `EffectiveLimits::from_context` has the required `match ctx.profile.revision() { SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx) }` pattern. `EffectiveRules::from_context` ~~**does not** yet use the same dispatch pattern — it reads extensions directly without a revision match. Minor regression: the intent in item 8 was for both to branch on revision~~ **Resolved** — `EffectiveRules::from_context` now wraps its extension-reading body in `match ctx.profile.revision() { V2023_09 => Self::from_context_v2023_09(ctx) }`, mirroring the limits dispatch exactly | ✅ **Resolved** |
 | 9 | `template/validation/` layer for revision-neutral dispatch | Present. `template::validation::validate_job_template` / `validate_environment_template` dispatch via `match ctx.profile.revision()` into `validate_v2023_09::*` | ✅ **Resolved** (conservative form, as the prior note said) |
-| 10 | Decode layer dispatches on revision | `decode_job_template` now has `match version.revision() { V2023_09 => serde_json::from_value(...) }`. The env-template sibling `decode_environment_template` derives the revision via `version.revision()` and passes it into the context, but does **not** wrap the `serde_json::from_value` call in a revision match. Minor asymmetry: one decoder will produce a compile error at the first revision bump, the other will silently keep using the 2023-09 struct layout | ⚠️ **Partially resolved** — `decode_environment_template` needs the same wrapper |
+| 10 | Decode layer dispatches on revision | `decode_job_template` now has `match version.revision() { V2023_09 => serde_json::from_value(...) }`. ~~The env-template sibling `decode_environment_template` derives the revision via `version.revision()` and passes it into the context, but does **not** wrap the `serde_json::from_value` call in a revision match. Minor asymmetry: one decoder will produce a compile error at the first revision bump, the other will silently keep using the 2023-09 struct layout~~ **Resolved** — `decode_environment_template` now wraps its `serde_json::from_value::<EnvironmentTemplate>` call in the same `match version.revision()` pattern | ✅ **Resolved** |
 
 ### Priority 3 — Internal cleanup
 
@@ -147,8 +151,8 @@ the current tree.
 
 | Tier | Items | Resolved | Partially | Not resolved |
 |------|------:|---------:|----------:|-------------:|
-| P1 (core future-proofing) | 5 | 4 | 1 | 0 |
-| P2 (model plumbing) | 5 | 3 | 2 | 0 |
+| P1 (core future-proofing) | 5 | 5 | 0 | 0 |
+| P2 (model plumbing) | 5 | 5 | 0 | 0 |
 | P3 (internal cleanup) | 3 | 0 | 0 | 3 |
 | P4 (documentation) | 2 | 2 | 0 | 0 |
 
@@ -165,9 +169,9 @@ three-axis model, matching §4 of the prior report:
   `SpecificationRevision` in `openjd-model`. Both `#[non_exhaustive]`
   and exactly one variant today.
 - **Axis B — extensions.** `ExprExtension` (empty `#[non_exhaustive]`)
-  in `openjd-expr`, `ModelExtension` in `openjd-model` (not `#[non_exhaustive]` —
-  see §3). The crates are independent: `ModelProfile::to_expr_profile`
-  is the bridge.
+  in `openjd-expr`, `ModelExtension` (`#[non_exhaustive]` with four
+  variants today) in `openjd-model`. The crates are independent:
+  `ModelProfile::to_expr_profile` is the bridge.
 - **Axis C — host state.** `HostContext::{None, Unresolved, WithRules}`
   on `ExprProfile`. Carried as a method call argument (not a profile
   field) into `ModelProfile::to_expr_profile`, since the model has no
@@ -179,7 +183,7 @@ a compute-derived answer is produced:
 | Question | Location | Revision-aware? |
 |----------|----------|-----------------|
 | Which limits apply? | `EffectiveLimits::from_context` | ✅ `match` arm |
-| Which rules apply? | `EffectiveRules::from_context` | ❌ Extensions only |
+| Which rules apply? | `EffectiveRules::from_context` | ✅ `match` arm |
 | Which function library? | `FunctionLibrary::for_profile` → `build_library_skeleton` | ✅ `match` arm |
 | Which template types validate? | `template::validation::validate_*_template` | ✅ `match` arm |
 | Which template shape decodes? | `decode_*_template` | ✅ `match` arm |
@@ -218,8 +222,17 @@ report.
 
 ### 3.2 `ExprValue` is not `#[non_exhaustive]`
 
+**Resolved.** The outer `ExprValue` enum now carries
+`#[non_exhaustive]`. Adding a new variant such as `Duration(i64)` or
+`Url(String)` to support a future revision's new primitive type is no
+longer a SemVer break. The `Path` variant retains its own
+`#[non_exhaustive]` attribute, which serves a separate purpose —
+preventing direct struct-literal construction from outside the crate
+so that `ExprValue::new_path` can enforce the separator-normalization
+invariant.
+
 ```rust
-// crates/openjd-expr/src/value.rs:120
+// crates/openjd-expr/src/value.rs (previous)
 pub enum ExprValue {
     Null,
     Bool(bool),
@@ -233,13 +246,13 @@ pub enum ExprValue {
 }
 ```
 
-The `Path` variant is `#[non_exhaustive]`, but the outer enum is not.
+~~The `Path` variant is `#[non_exhaustive]`, but the outer enum is not.
 Adding a new variant such as `Duration(i64)` or `Url(String)` to
 support a future revision's new primitive type would be a SemVer
 break. Downstream Rust code frequently exhaustively matches
 `ExprValue` — the openjd-model crate's parameter-coercion paths,
 for example, cover all ~12 variants — so adding a variant is not
-purely theoretical.
+purely theoretical.~~
 
 ### 3.3 `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` are not `#[non_exhaustive]`
 
@@ -271,8 +284,13 @@ on the next addition if external consumers also exhaustive-match.
 
 ### 3.4 `EffectiveRules::from_context` does not dispatch on revision
 
+**Resolved.** `EffectiveRules::from_context` now wraps its body in
+`match ctx.profile.revision() { V2023_09 => Self::from_context_v2023_09(ctx) }`,
+mirroring `EffectiveLimits::from_context` exactly. The prior form is
+preserved below for historical reference.
+
 ```rust
-// template/validate_v2023_09/mod.rs (current)
+// template/validate_v2023_09/mod.rs (previous)
 impl EffectiveRules {
     pub fn from_context(ctx: &ValidationContext) -> Self {
         let expr = ctx.profile.has_extension(ModelExtension::Expr);
@@ -282,14 +300,14 @@ impl EffectiveRules {
 }
 ```
 
-`EffectiveLimits::from_context` now dispatches on revision via
+~~`EffectiveLimits::from_context` now dispatches on revision via
 `match { V2023_09 => from_context_v2023_09(ctx) }`, but its sibling
 `EffectiveRules::from_context` was never given the same treatment.
 This is the specific gap from Priority 2 item 8. The fix is one-line
 and mirrors the pattern already established for limits; leaving it
 out means the first revision bump will have one call site that
 silently inherits 2023-09 rules instead of forcing an explicit
-per-revision decision.
+per-revision decision.~~
 
 ### 3.5 `build_library_skeleton` ignores `profile.extensions()`
 
@@ -341,23 +359,31 @@ letting the field disappear.
 
 ### 3.7 `decode_environment_template` does not wrap struct decoding in a revision match
 
+**Resolved.** `decode_environment_template` now wraps its
+`serde_json::from_value::<EnvironmentTemplate>` call in
+`match version.revision() { SpecificationRevision::V2023_09 => … }`,
+matching `decode_job_template`. A future revision that changes the
+`EnvironmentTemplate` struct layout will produce a compile error at
+this site. The prior asymmetry is preserved below for historical
+reference.
+
 ```rust
-// template/parse.rs — env template decoder
+// template/parse.rs — env template decoder (previous)
 let et: EnvironmentTemplate = serde_json::from_value(template)
     .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
-// … compared to decode_job_template, which has:
+// … compared to decode_job_template, which already had:
 let jt: JobTemplate = match version.revision() {
     SpecificationRevision::V2023_09 => serde_json::from_value(template)
         .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?,
 };
 ```
 
-The two decoders diverge. `decode_job_template` was updated to gate
+~~The two decoders diverge. `decode_job_template` was updated to gate
 the struct-layout choice behind a revision match (so a future revision
 that changes `JobTemplate`'s fields produces a compile error at this
 site); `decode_environment_template` was not. The fix is to wrap its
 `from_value` call in the same match. One-line change, parallels the
-Priority 2 item 10 dispatch work.
+Priority 2 item 10 dispatch work.~~
 
 ## 4. Internal implementation readiness for language changes
 
@@ -485,37 +511,35 @@ would hit the codebase today.
 2. Compile error in `EffectiveLimits::from_context` forces a decision.
    Add `V2027_XX => Self::from_context_v2027_xx(ctx)` arm. ✅
 3. Compile error in `decode_job_template` → match `version.revision()`
-   forces a decision about `JobTemplate` struct layout. `decode_environment_template`
-   **silently** keeps using the 2023-09 `EnvironmentTemplate` struct
-   because its `from_value` call isn't gated. ⚠️ (Gap §3.7.)
+   forces a decision about `JobTemplate` struct layout. Compile error
+   in `decode_environment_template` likewise forces a decision about
+   `EnvironmentTemplate` struct layout. ✅ (Gap §3.7 resolved.)
 4. Compile error in `template::validation::validate_*_template`
    dispatch forces a decision about pipeline reuse. ✅
 5. Compile error in `build_library_skeleton` forces a decision about
    library. ✅
-6. `EffectiveRules::from_context` **silently** returns 2023-09 rules —
-   no compile error because the function doesn't match on revision.
-   ❌ (Gap §3.4.)
+6. Compile error in `EffectiveRules::from_context` forces a decision
+   about per-revision rules. ✅ (Gap §3.4 resolved.)
 
-Outcome: mostly caught by the compiler, two silent gaps
-(§3.4, §3.7).
+Outcome: fully caught by the compiler at every top-level dispatch site.
 
 ### 5.2 RFC: "New extension `DICT_LITERAL` adds dict literals"
 
-1. Add `DictLiteral` variant to `ModelExtension`. **Breaks any
-   external pattern-match** because `ModelExtension` is not
-   `#[non_exhaustive]`. ❌ (Gap §3.1.)
+1. Add `DictLiteral` variant to `ModelExtension`. No SemVer break —
+   `ModelExtension` is now `#[non_exhaustive]`. ✅ (Gap §3.1 resolved.)
 2. Parser's `ast::Expr::Dict(_) => return err("Dict literals are not
    supported", source, node)` in `validate_structure_inner` unconditionally
    rejects. **No profile threading into `validate_structure`**. ❌ (§4.2.)
 3. Evaluator has no `eval_dict` handler. Would need adding — but under
    what profile gate? `validate_structure` is not profile-aware so the
    evaluator can trust that only accepted node shapes reach it. ❌
-4. `ExprValue` has no `Dict(HashMap<_, _>)` variant. Adding one breaks
-   exhaustive matches. ❌ (Gap §3.2.)
+4. Add a `Dict(HashMap<_, _>)` variant to `ExprValue`. No SemVer break —
+   `ExprValue` is now `#[non_exhaustive]`. ✅ (Gap §3.2 resolved.)
 
-Outcome: impossible to add this extension without structural code
-changes in at least four places; none of them produce compile errors
-against the un-upgraded baseline. All four are gaps listed above.
+Outcome: structural non-exhaustive blockers are removed. The remaining
+two obstacles (profile-threading into `validate_structure` and an
+`eval_dict` handler gated on the profile) are the Priority 3 items
+called out in §4.2.
 
 ### 5.3 RFC: "Revision 2027-XX changes `round(float, int) -> int` (drops the `int | float` union)"
 
@@ -555,32 +579,32 @@ Ordered by value-for-effort, with each item scoped to a single PR.
 
 ### Urgent (before release)
 
-1. **Mark `ModelExtension` `#[non_exhaustive]`.** One-line change.
+1. ~~**Mark `ModelExtension` `#[non_exhaustive]`.** One-line change.
    Highest value because `ModelExtension` is the enum with the highest
-   expected rate of change post-release. (Gap §3.1.)
+   expected rate of change post-release. (Gap §3.1.)~~ **Resolved.**
 
-2. **Mark `ExprValue` `#[non_exhaustive]`** (the outer enum, not just
+2. ~~**Mark `ExprValue` `#[non_exhaustive]`** (the outer enum, not just
    the `Path` variant). One-line change; the existing `Path`
    attribute is kept for its separate purpose (preventing struct
-   construction). (Gap §3.2.)
+   construction). (Gap §3.2.)~~ **Resolved.**
 
-3. **Mark `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
+3. ~~**Mark `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
    `#[non_exhaustive]`.** Three one-line changes, same rationale.
-   (Gap §3.3.)
+   (Gap §3.3.)~~ **Resolved.**
 
-4. **Add `match ctx.profile.revision()` wrapper to
+4. ~~**Add `match ctx.profile.revision()` wrapper to
    `EffectiveRules::from_context`**, dispatching into a
    `from_context_v2023_09(ctx)` helper. Mirrors `EffectiveLimits`
-   exactly. (Gap §3.4.)
+   exactly. (Gap §3.4.)~~ **Resolved.**
 
 5. **Make `build_library_skeleton` iterate `profile.extensions()`
    explicitly** (even with an empty match body per extension today), so
    that the first added `ExprExtension` variant produces a compile
    error here. (Gap §3.5.)
 
-6. **Wrap `serde_json::from_value::<EnvironmentTemplate>` in a
+6. ~~**Wrap `serde_json::from_value::<EnvironmentTemplate>` in a
    `match version.revision()`** in `decode_environment_template`,
-   mirroring `decode_job_template`. (Gap §3.7.)
+   mirroring `decode_job_template`. (Gap §3.7.)~~ **Resolved.**
 
 The six together are probably 35 lines of code and close every
 structural Priority 1/2 gap.

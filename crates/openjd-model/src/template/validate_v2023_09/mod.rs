@@ -91,6 +91,18 @@ pub struct EffectiveRules {
 
 impl EffectiveRules {
     pub fn from_context(ctx: &ValidationContext) -> Self {
+        // Dispatch on the revision first so that a future revision can
+        // change the baseline rule set — or the set of extensions that
+        // affect those rules — without reshaping this function. Mirrors
+        // the pattern used by `EffectiveLimits::from_context`. Today
+        // there is only one revision; the match records intent and
+        // localizes where the first revision bump needs to plug in.
+        match ctx.profile.revision() {
+            crate::types::SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx),
+        }
+    }
+
+    fn from_context_v2023_09(ctx: &ValidationContext) -> Self {
         let expr = ctx.profile.has_extension(ModelExtension::Expr);
         let fb1 = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
         let chunking = ctx.profile.has_extension(ModelExtension::TaskChunking);

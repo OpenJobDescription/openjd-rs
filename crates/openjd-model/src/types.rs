@@ -104,7 +104,12 @@ impl fmt::Display for SpecificationRevision {
 }
 
 /// Template specification version strings (the `specificationVersion` field value).
+///
+/// `#[non_exhaustive]` because future revisions will add new variants
+/// (e.g., `JobTemplate2027_XX`, `Environment2027_XX`). Adding a variant
+/// must not be a breaking change for downstream crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TemplateSpecificationVersion {
     JobTemplate2023_09,
     Environment2023_09,
