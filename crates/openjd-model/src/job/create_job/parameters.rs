@@ -98,6 +98,18 @@ pub fn merge_job_parameter_definitions(
                     allowed_values_int: None,
                     allowed_values_float: None,
                     allowed_values_str: None,
+                    item_min_value_i64: None,
+                    item_max_value_i64: None,
+                    item_allowed_values_int: None,
+                    item_min_value_f64: None,
+                    item_max_value_f64: None,
+                    item_allowed_values_float: None,
+                    item_min_length: None,
+                    item_max_length: None,
+                    item_allowed_values_str: None,
+                    item_item_min_value_i64: None,
+                    item_item_max_value_i64: None,
+                    item_item_allowed_values_int: None,
                 };
                 m.merge_constraints(p);
                 m
@@ -145,6 +157,19 @@ pub struct MergedParameterDefinition {
     pub(crate) allowed_values_int: Option<Vec<i64>>,
     pub(crate) allowed_values_float: Option<Vec<f64>>,
     pub(crate) allowed_values_str: Option<Vec<String>>,
+    // List per-item constraints
+    pub(crate) item_min_value_i64: Option<i64>,
+    pub(crate) item_max_value_i64: Option<i64>,
+    pub(crate) item_allowed_values_int: Option<Vec<i64>>,
+    pub(crate) item_min_value_f64: Option<f64>,
+    pub(crate) item_max_value_f64: Option<f64>,
+    pub(crate) item_allowed_values_float: Option<Vec<f64>>,
+    pub(crate) item_min_length: Option<usize>,
+    pub(crate) item_max_length: Option<usize>,
+    pub(crate) item_allowed_values_str: Option<Vec<String>>,
+    pub(crate) item_item_min_value_i64: Option<i64>,
+    pub(crate) item_item_max_value_i64: Option<i64>,
+    pub(crate) item_item_allowed_values_int: Option<Vec<i64>>,
 }
 
 impl MergedParameterDefinition {
@@ -193,6 +218,68 @@ impl MergedParameterDefinition {
                     .collect(),
                 None => new_vals,
             });
+        }
+
+        // Note: list count constraints are merged via min_length()/max_length()
+        // above, which now dispatches to list types as well as string types.
+        if let Some(v) = def.item_min_value_i64() {
+            self.item_min_value_i64 = Some(self.item_min_value_i64.map_or(v, |cur| cur.max(v)));
+        }
+        if let Some(v) = def.item_max_value_i64() {
+            self.item_max_value_i64 = Some(self.item_max_value_i64.map_or(v, |cur| cur.min(v)));
+        }
+        if let Some(new_vals) = def.item_allowed_values_i64() {
+            let new_set: std::collections::HashSet<i64> = new_vals.into_iter().collect();
+            self.item_allowed_values_int = Some(match self.item_allowed_values_int.take() {
+                Some(cur) => cur.into_iter().filter(|v| new_set.contains(v)).collect(),
+                None => new_set.into_iter().collect(),
+            });
+        }
+        if let Some(v) = def.item_min_value_f64() {
+            self.item_min_value_f64 = Some(self.item_min_value_f64.map_or(v, |cur| cur.max(v)));
+        }
+        if let Some(v) = def.item_max_value_f64() {
+            self.item_max_value_f64 = Some(self.item_max_value_f64.map_or(v, |cur| cur.min(v)));
+        }
+        if let Some(new_vals) = def.item_allowed_values_f64() {
+            let new_bits: std::collections::HashSet<u64> =
+                new_vals.iter().map(|f| f.to_bits()).collect();
+            self.item_allowed_values_float = Some(match self.item_allowed_values_float.take() {
+                Some(cur) => cur
+                    .into_iter()
+                    .filter(|v| new_bits.contains(&v.to_bits()))
+                    .collect(),
+                None => new_vals,
+            });
+        }
+        if let Some(v) = def.item_min_length() {
+            self.item_min_length = Some(self.item_min_length.map_or(v, |cur| cur.max(v)));
+        }
+        if let Some(v) = def.item_max_length() {
+            self.item_max_length = Some(self.item_max_length.map_or(v, |cur| cur.min(v)));
+        }
+        if let Some(new_vals) = def.item_allowed_values_strings() {
+            let new_set: std::collections::HashSet<String> = new_vals.into_iter().collect();
+            self.item_allowed_values_str = Some(match self.item_allowed_values_str.take() {
+                Some(cur) => cur.into_iter().filter(|v| new_set.contains(v)).collect(),
+                None => new_set.into_iter().collect(),
+            });
+        }
+        if let Some(v) = def.item_item_min_value_i64() {
+            self.item_item_min_value_i64 =
+                Some(self.item_item_min_value_i64.map_or(v, |cur| cur.max(v)));
+        }
+        if let Some(v) = def.item_item_max_value_i64() {
+            self.item_item_max_value_i64 =
+                Some(self.item_item_max_value_i64.map_or(v, |cur| cur.min(v)));
+        }
+        if let Some(new_vals) = def.item_item_allowed_values_i64() {
+            let new_set: std::collections::HashSet<i64> = new_vals.into_iter().collect();
+            self.item_item_allowed_values_int =
+                Some(match self.item_item_allowed_values_int.take() {
+                    Some(cur) => cur.into_iter().filter(|v| new_set.contains(v)).collect(),
+                    None => new_set.into_iter().collect(),
+                });
         }
     }
 
@@ -336,7 +423,236 @@ impl MergedParameterDefinition {
                     }
                 }
             }
-            _ => {} // BOOL, RANGE_EXPR, LIST types — no cross-template mergeable constraints
+            openjd_expr::ExprValue::ListBool(items) => {
+                if let Some(min) = self.min_length {
+                    if items.len() < min {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} is less than minimum {min}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                if let Some(max) = self.max_length {
+                    if items.len() > max {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} exceeds maximum {max}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+            }
+            openjd_expr::ExprValue::ListInt(items) => {
+                if let Some(min) = self.min_length {
+                    if items.len() < min {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} is less than minimum {min}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                if let Some(max) = self.max_length {
+                    if items.len() > max {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} exceeds maximum {max}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                for (i, v) in items.iter().enumerate() {
+                    if let Some(min) = self.item_min_value_i64 {
+                        if *v < min {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {v} is less than minimum {min}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(max) = self.item_max_value_i64 {
+                        if *v > max {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {v} exceeds maximum {max}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(allowed) = &self.item_allowed_values_int {
+                        if !allowed.contains(v) {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {v} is not in allowed values",
+                                self.name
+                            )));
+                        }
+                    }
+                }
+            }
+            openjd_expr::ExprValue::ListFloat(items) => {
+                if let Some(min) = self.min_length {
+                    if items.len() < min {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} is less than minimum {min}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                if let Some(max) = self.max_length {
+                    if items.len() > max {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} exceeds maximum {max}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                for (i, v) in items.iter().enumerate() {
+                    let f = v.value();
+                    if let Some(min) = self.item_min_value_f64 {
+                        if f < min {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {f} is less than minimum {min}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(max) = self.item_max_value_f64 {
+                        if f > max {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {f} exceeds maximum {max}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(allowed) = &self.item_allowed_values_float {
+                        if !allowed.contains(&f) {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value {f} is not in allowed values",
+                                self.name
+                            )));
+                        }
+                    }
+                }
+            }
+            openjd_expr::ExprValue::ListString(items, _)
+            | openjd_expr::ExprValue::ListPath(items, _, _) => {
+                if let Some(min) = self.min_length {
+                    if items.len() < min {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} is less than minimum {min}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                if let Some(max) = self.max_length {
+                    if items.len() > max {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} exceeds maximum {max}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                for (i, s) in items.iter().enumerate() {
+                    let char_len = s.chars().count();
+                    if let Some(min) = self.item_min_length {
+                        if char_len < min {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] length {char_len} is less than minimum {min}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(max) = self.item_max_length {
+                        if char_len > max {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] length {char_len} exceeds maximum {max}",
+                                self.name
+                            )));
+                        }
+                    }
+                    if let Some(allowed) = &self.item_allowed_values_str {
+                        if !allowed.iter().any(|a| a == s) {
+                            return Err(ModelError::DecodeValidation(format!(
+                                "Parameter '{}': item[{i}] value '{}' is not in allowed values",
+                                self.name, s
+                            )));
+                        }
+                    }
+                }
+            }
+            openjd_expr::ExprValue::ListList(items, _, _) => {
+                if let Some(min) = self.min_length {
+                    if items.len() < min {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} is less than minimum {min}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                if let Some(max) = self.max_length {
+                    if items.len() > max {
+                        return Err(ModelError::DecodeValidation(format!(
+                            "Parameter '{}': list length {} exceeds maximum {max}",
+                            self.name,
+                            items.len()
+                        )));
+                    }
+                }
+                for (i, inner) in items.iter().enumerate() {
+                    if let openjd_expr::ExprValue::ListInt(ints) = inner {
+                        if let Some(min) = self.item_min_length {
+                            if ints.len() < min {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "Parameter '{}': item[{i}] length {} is less than minimum {min}",
+                                    self.name,
+                                    ints.len()
+                                )));
+                            }
+                        }
+                        if let Some(max) = self.item_max_length {
+                            if ints.len() > max {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "Parameter '{}': item[{i}] length {} exceeds maximum {max}",
+                                    self.name,
+                                    ints.len()
+                                )));
+                            }
+                        }
+                        for (j, v) in ints.iter().enumerate() {
+                            if let Some(min) = self.item_item_min_value_i64 {
+                                if *v < min {
+                                    return Err(ModelError::DecodeValidation(format!(
+                                        "Parameter '{}': item[{i}][{j}] value {v} is less than minimum {min}",
+                                        self.name
+                                    )));
+                                }
+                            }
+                            if let Some(max) = self.item_item_max_value_i64 {
+                                if *v > max {
+                                    return Err(ModelError::DecodeValidation(format!(
+                                        "Parameter '{}': item[{i}][{j}] value {v} exceeds maximum {max}",
+                                        self.name
+                                    )));
+                                }
+                            }
+                            if let Some(allowed) = &self.item_item_allowed_values_int {
+                                if !allowed.contains(v) {
+                                    return Err(ModelError::DecodeValidation(format!(
+                                        "Parameter '{}': item[{i}][{j}] value {v} is not in allowed values",
+                                        self.name
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {} // BOOL, RANGE_EXPR — no cross-template mergeable constraints
         }
         Ok(())
     }

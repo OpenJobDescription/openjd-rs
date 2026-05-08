@@ -4220,3 +4220,635 @@ fn path_default_with_empty_template_dir_no_prefix() {
         "relative default with empty template_dir should remain unchanged"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// create_job: parameter constraint validation
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn create_job_rejects_int_below_min() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "Foo", "type": "INT", "minValue": 10}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::Int,
+            value: openjd_expr::ExprValue::Int(5),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': value 5 is less than minimum 10"
+    );
+}
+
+#[test]
+fn create_job_rejects_int_above_max() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "Foo", "type": "INT", "maxValue": 100}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::Int,
+            value: openjd_expr::ExprValue::Int(200),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': value 200 exceeds maximum 100"
+    );
+}
+
+#[test]
+fn create_job_rejects_string_exceeding_max_length() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "Foo", "type": "STRING", "maxLength": 5}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::String,
+            value: openjd_expr::ExprValue::String("too long".into()),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': value length 8 exceeds maximum 5"
+    );
+}
+
+#[test]
+fn create_job_accepts_value_within_constraints() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "Foo", "type": "INT", "minValue": 1, "maxValue": 100}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::Int,
+            value: openjd_expr::ExprValue::Int(50),
+        },
+    );
+    let job = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+    assert_eq!(job.name, "test");
+}
+
+// ══════════════════════════════════════════════════════════════
+// create_job: job name length validation
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn create_job_rejects_interpolated_name_exceeding_128_chars() {
+    let template_json = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "{{Param.N}}",
+        "parameterDefinitions": [{"name": "N", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "x"}}}}]
+    }"#;
+    let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+
+    let long_name = "a".repeat(200);
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "N".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::String,
+            value: openjd_expr::ExprValue::String(long_name),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Job name exceeds maximum length of 128 characters (got 200)"
+    );
+}
+
+#[test]
+fn create_job_allows_name_at_max_length() {
+    let template_json = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "{{Param.N}}",
+        "parameterDefinitions": [{"name": "N", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "x"}}}}]
+    }"#;
+    let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+
+    let name_128 = "b".repeat(128);
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "N".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::String,
+            value: openjd_expr::ExprValue::String(name_128.clone()),
+        },
+    );
+    let job = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+    assert_eq!(job.name, name_128);
+}
+
+// ══════════════════════════════════════════════════════════════
+// List parameter constraint validation in create_job
+// ══════════════════════════════════════════════════════════════
+
+/// Helper: build an EXPR-enabled job template with one list parameter definition.
+fn expr_list_job_template(param_def: &str) -> serde_json::Value {
+    let s = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{param_def}],
+        "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
+    }}"#
+    );
+    serde_saphyr::from_str(&s).unwrap()
+}
+
+// ────────────────────────────────────────────────────────────────
+// 1. LIST[INT] constraints
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn create_job_rejects_list_int_too_short() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[INT]", "minLength": 2}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![1]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': list length 1 is less than minimum 2"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_int_too_long() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[INT]", "maxLength": 3}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![1, 2, 3, 4, 5]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': list length 5 exceeds maximum 3"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_int_item_below_min() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[INT]", "item": {"minValue": 0}}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![-5]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] value -5 is less than minimum 0"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_int_item_above_max() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[INT]", "item": {"maxValue": 100}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![200]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] value 200 exceeds maximum 100"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_int_item_not_in_allowed() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[INT]", "item": {"allowedValues": [1, 2, 3]}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![99]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] value 99 is not in allowed values"
+    );
+}
+
+#[test]
+fn create_job_accepts_list_int_within_constraints() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[INT]", "minLength": 1, "maxLength": 5, "item": {"minValue": 0, "maxValue": 100}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListInt,
+            value: openjd_expr::ExprValue::ListInt(vec![1, 50, 100]),
+        },
+    );
+    openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+}
+
+// ────────────────────────────────────────────────────────────────
+// 2. LIST[STRING] constraints
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn create_job_rejects_list_string_too_short() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[STRING]", "minLength": 2}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListString,
+            value: openjd_expr::ExprValue::ListString(vec!["a".into()], 0),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': list length 1 is less than minimum 2"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_string_item_too_long() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[STRING]", "item": {"maxLength": 3}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListString,
+            value: openjd_expr::ExprValue::ListString(vec!["abcdef".into()], 0),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] length 6 exceeds maximum 3"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_string_item_not_in_allowed() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[STRING]", "item": {"allowedValues": ["a", "b", "c"]}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListString,
+            value: openjd_expr::ExprValue::ListString(vec!["xyz".into()], 0),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] value 'xyz' is not in allowed values"
+    );
+}
+
+#[test]
+fn create_job_accepts_list_string_within_constraints() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[STRING]", "minLength": 1, "maxLength": 5, "item": {"maxLength": 10, "allowedValues": ["hello", "world"]}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListString,
+            value: openjd_expr::ExprValue::ListString(vec!["hello".into(), "world".into()], 0),
+        },
+    );
+    openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+}
+
+// ────────────────────────────────────────────────────────────────
+// 3. LIST[FLOAT] constraints
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn create_job_rejects_list_float_item_below_min() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[FLOAT]", "item": {"minValue": 0.0}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListFloat,
+            value: openjd_expr::ExprValue::ListFloat(vec![
+                openjd_expr::value::Float64::new(-5.0).unwrap()
+            ]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] value -5 is less than minimum 0"
+    );
+}
+
+#[test]
+fn create_job_accepts_list_float_within_constraints() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[FLOAT]", "minLength": 1, "maxLength": 5, "item": {"minValue": 0.0, "maxValue": 100.0}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListFloat,
+            value: openjd_expr::ExprValue::ListFloat(vec![
+                openjd_expr::value::Float64::new(1.5).unwrap(),
+                openjd_expr::value::Float64::new(50.0).unwrap(),
+            ]),
+        },
+    );
+    openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+}
+
+// ────────────────────────────────────────────────────────────────
+// 4. LIST[BOOL] constraints
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn create_job_rejects_list_bool_too_long() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[BOOL]", "maxLength": 2}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListBool,
+            value: openjd_expr::ExprValue::ListBool(vec![true, false, true]),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': list length 3 exceeds maximum 2"
+    );
+}
+
+#[test]
+fn create_job_accepts_list_bool_within_constraints() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[BOOL]", "minLength": 1, "maxLength": 3}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListBool,
+            value: openjd_expr::ExprValue::ListBool(vec![true, false]),
+        },
+    );
+    openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+}
+
+// ────────────────────────────────────────────────────────────────
+// 5. LIST[LIST[INT]] constraints
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn create_job_rejects_list_list_int_outer_too_long() {
+    let jt = decode_job_template(
+        expr_list_job_template(r#"{"name": "Foo", "type": "LIST[LIST[INT]]", "maxLength": 2}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListListInt,
+            value: openjd_expr::ExprValue::ListList(
+                vec![
+                    openjd_expr::ExprValue::ListInt(vec![1]),
+                    openjd_expr::ExprValue::ListInt(vec![2]),
+                    openjd_expr::ExprValue::ListInt(vec![3]),
+                ],
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                0,
+            ),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': list length 3 exceeds maximum 2"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_list_int_inner_too_long() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[LIST[INT]]", "item": {"maxLength": 3}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListListInt,
+            value: openjd_expr::ExprValue::ListList(
+                vec![openjd_expr::ExprValue::ListInt(vec![1, 2, 3, 4, 5])],
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                0,
+            ),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0] length 5 exceeds maximum 3"
+    );
+}
+
+#[test]
+fn create_job_rejects_list_list_int_inner_item_below_min() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[LIST[INT]]", "item": {"item": {"minValue": 0}}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListListInt,
+            value: openjd_expr::ExprValue::ListList(
+                vec![openjd_expr::ExprValue::ListInt(vec![-1])],
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                0,
+            ),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Foo': item[0][0] value -1 is less than minimum 0"
+    );
+}
+
+#[test]
+fn create_job_accepts_list_list_int_within_constraints() {
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "Foo", "type": "LIST[LIST[INT]]", "minLength": 1, "maxLength": 3, "item": {"minLength": 1, "maxLength": 4, "item": {"minValue": 0, "maxValue": 100}}}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut params = openjd_model::JobParameterValues::new();
+    params.insert(
+        "Foo".into(),
+        openjd_model::types::JobParameterValue {
+            param_type: openjd_model::JobParameterType::ListListInt,
+            value: openjd_expr::ExprValue::ListList(
+                vec![
+                    openjd_expr::ExprValue::ListInt(vec![1, 2, 3]),
+                    openjd_expr::ExprValue::ListInt(vec![50, 100]),
+                ],
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                0,
+            ),
+        },
+    );
+    openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+}

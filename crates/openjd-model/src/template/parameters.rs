@@ -303,6 +303,12 @@ impl JobParameterDefinition {
             Self::STRING(p) => p.min_length,
             Self::PATH(p) => p.min_length,
             Self::RANGE_EXPR(p) => p.min_length,
+            Self::LIST_STRING(p) => p.min_length,
+            Self::LIST_PATH(p) => p.min_length,
+            Self::LIST_INT(p) => p.min_length,
+            Self::LIST_FLOAT(p) => p.min_length,
+            Self::LIST_BOOL(p) => p.min_length,
+            Self::LIST_LIST_INT(p) => p.min_length,
             _ => None,
         }
     }
@@ -312,6 +318,12 @@ impl JobParameterDefinition {
             Self::STRING(p) => p.max_length,
             Self::PATH(p) => p.max_length,
             Self::RANGE_EXPR(p) => p.max_length,
+            Self::LIST_STRING(p) => p.max_length,
+            Self::LIST_PATH(p) => p.max_length,
+            Self::LIST_INT(p) => p.max_length,
+            Self::LIST_FLOAT(p) => p.max_length,
+            Self::LIST_BOOL(p) => p.max_length,
+            Self::LIST_LIST_INT(p) => p.max_length,
             _ => None,
         }
     }
@@ -326,6 +338,146 @@ impl JobParameterDefinition {
     pub fn max_value_f64(&self) -> Option<f64> {
         match self {
             Self::FLOAT(p) => p.max_value.as_ref().map(|v| v.0),
+            _ => None,
+        }
+    }
+
+    // --- List per-item constraint accessors ---
+
+    /// `item.minValue` for `LIST[INT]`; the `item.item.minValue` path for `LIST[LIST[INT]]` is separate.
+    pub fn item_min_value_i64(&self) -> Option<i64> {
+        match self {
+            Self::LIST_INT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.min_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.maxValue` for `LIST[INT]`.
+    pub fn item_max_value_i64(&self) -> Option<i64> {
+        match self {
+            Self::LIST_INT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.max_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.allowedValues` for `LIST[INT]` as `Vec<i64>`.
+    pub fn item_allowed_values_i64(&self) -> Option<Vec<i64>> {
+        match self {
+            Self::LIST_INT(p) => p.item.as_ref().and_then(|i| {
+                i.allowed_values
+                    .as_ref()
+                    .map(|v| v.iter().map(|x| x.0).collect())
+            }),
+            _ => None,
+        }
+    }
+
+    /// `item.minValue` for `LIST[FLOAT]`.
+    pub fn item_min_value_f64(&self) -> Option<f64> {
+        match self {
+            Self::LIST_FLOAT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.min_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.maxValue` for `LIST[FLOAT]`.
+    pub fn item_max_value_f64(&self) -> Option<f64> {
+        match self {
+            Self::LIST_FLOAT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.max_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.allowedValues` for `LIST[FLOAT]` as `Vec<f64>`.
+    pub fn item_allowed_values_f64(&self) -> Option<Vec<f64>> {
+        match self {
+            Self::LIST_FLOAT(p) => p.item.as_ref().and_then(|i| {
+                i.allowed_values
+                    .as_ref()
+                    .map(|v| v.iter().map(|x| x.0).collect())
+            }),
+            _ => None,
+        }
+    }
+
+    /// `item.minLength` for `LIST[STRING]`/`LIST[PATH]` (char count) or `LIST[LIST[INT]]` (inner list count).
+    pub fn item_min_length(&self) -> Option<usize> {
+        match self {
+            Self::LIST_STRING(p) => p.item.as_ref().and_then(|i| i.min_length),
+            Self::LIST_PATH(p) => p.item.as_ref().and_then(|i| i.min_length),
+            Self::LIST_LIST_INT(p) => p.item.as_ref().and_then(|i| i.min_length),
+            _ => None,
+        }
+    }
+
+    /// `item.maxLength` for `LIST[STRING]`/`LIST[PATH]` (char count) or `LIST[LIST[INT]]` (inner list count).
+    pub fn item_max_length(&self) -> Option<usize> {
+        match self {
+            Self::LIST_STRING(p) => p.item.as_ref().and_then(|i| i.max_length),
+            Self::LIST_PATH(p) => p.item.as_ref().and_then(|i| i.max_length),
+            Self::LIST_LIST_INT(p) => p.item.as_ref().and_then(|i| i.max_length),
+            _ => None,
+        }
+    }
+
+    /// `item.allowedValues` for `LIST[STRING]`/`LIST[PATH]` as `Vec<String>`.
+    pub fn item_allowed_values_strings(&self) -> Option<Vec<String>> {
+        match self {
+            Self::LIST_STRING(p) => p.item.as_ref().and_then(|i| i.allowed_values.clone()),
+            Self::LIST_PATH(p) => p.item.as_ref().and_then(|i| i.allowed_values.clone()),
+            _ => None,
+        }
+    }
+
+    /// `item.item.minValue` for `LIST[LIST[INT]]`.
+    pub fn item_item_min_value_i64(&self) -> Option<i64> {
+        match self {
+            Self::LIST_LIST_INT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.item.as_ref())
+                .and_then(|ii| ii.min_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.item.maxValue` for `LIST[LIST[INT]]`.
+    pub fn item_item_max_value_i64(&self) -> Option<i64> {
+        match self {
+            Self::LIST_LIST_INT(p) => p
+                .item
+                .as_ref()
+                .and_then(|i| i.item.as_ref())
+                .and_then(|ii| ii.max_value.as_ref().map(|v| v.0)),
+            _ => None,
+        }
+    }
+
+    /// `item.item.allowedValues` for `LIST[LIST[INT]]` as `Vec<i64>`.
+    pub fn item_item_allowed_values_i64(&self) -> Option<Vec<i64>> {
+        match self {
+            Self::LIST_LIST_INT(p) => {
+                p.item
+                    .as_ref()
+                    .and_then(|i| i.item.as_ref())
+                    .and_then(|ii| {
+                        ii.allowed_values
+                            .as_ref()
+                            .map(|v| v.iter().map(|x| x.0).collect())
+                    })
+            }
             _ => None,
         }
     }

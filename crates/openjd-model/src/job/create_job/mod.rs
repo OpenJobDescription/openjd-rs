@@ -51,6 +51,14 @@ pub fn create_job(
     job_parameter_values: &JobParameterValues,
     ctx: &ValidationContext,
 ) -> Result<job::Job, ModelError> {
+    // Validate parameter values against template constraints.
+    let merged = parameters::merge_job_parameter_definitions(job_template, &[])?;
+    for param in &merged {
+        if let Some(jpv) = job_parameter_values.get(&param.name) {
+            param.check_constraints(&jpv.value)?;
+        }
+    }
+
     let mut symtab = build_symbol_table(job_parameter_values)?;
 
     let has_expr = ctx
@@ -70,6 +78,14 @@ pub fn create_job(
             start: None,
             end: None,
         })?;
+
+    if job_name.len() > limits.max_job_name_len {
+        return Err(ModelError::DecodeValidation(format!(
+            "Job name exceeds maximum length of {} characters (got {})",
+            limits.max_job_name_len,
+            job_name.len()
+        )));
+    }
 
     if has_expr {
         symtab.set("Job.Name", openjd_expr::ExprValue::String(job_name.clone()))?;
