@@ -62,11 +62,17 @@ the language subset?" — the answer is now **partially yes**:
   generalises. The remaining gap is that the parser's literal handlers
   (`NumberLiteral`, `StringLiteral`) would need conditional paths based
   on revision to recognise new literal forms for such a type.
-- ❌ **Not ready** for a revision or extension that changes the
-  **Python subset the language accepts** — dict comprehensions, walrus,
+- ✅ **Ready** for a revision or extension that changes the **Python
+  subset the language accepts** — dict comprehensions, walrus,
   multiple `for` clauses, lambda, tuple literals, set comprehensions,
-  etc. Those are rejected by hardcoded match arms in
-  `validate_structure` in `eval/parse.rs`. There is no profile hook.
+  etc. `ParsedExpression::with_profile` and `FormatString::with_profile`
+  thread an `&ExprProfile` through `validate_structure_inner`, and each
+  rejection is gated on `profile.allows_syntax(SyntaxFeature::X)`.
+  `ExprProfile::allows_syntax` resolves in two stages: a revision
+  baseline followed by an additive extension layer, so a future
+  revision can widen the baseline or a future extension can grant
+  additional features. Under V2026_02 both layers return `false`,
+  preserving today's behavior.
 - ❌ **Not ready** for a revision or extension that **adds a new
   operator or renames an existing one**. The `Operator::* → "__add__"`
   mapping is a hardcoded `match` in `eval_binop`; `eval_compare` has
@@ -88,15 +94,21 @@ the language subset?" — the answer is now **partially yes**:
   stability: there is no single authoritative inventory of what the
   profile refactor has actually exposed.
 
-The most concentrated risk going forward is not the profile machinery —
-that part of the design is now good — but three specific hardcoded
-tables that any non-trivial language-level extension or revision will
-want to change:
+The most concentrated risk remaining is two specific hardcoded tables.
+The third item from the prior pass — the unsupported-AST-node rejection
+list in `validate_structure` — has been resolved:
+`ParsedExpression::with_profile` / `FormatString::with_profile` now
+thread a profile through each rejection arm, gated on
+`ExprProfile::allows_syntax(SyntaxFeature::X)`.
 
 1. The operator → dunder name dispatch in `evaluator.rs`.
 2. The `PYTHON_KEYWORDS` reserved-word list in `eval/parse.rs`.
-3. The unsupported-AST-node rejection list in `validate_structure`
-   in `eval/parse.rs`.
+3. ~~The unsupported-AST-node rejection list in `validate_structure`
+   in `eval/parse.rs`.~~ **Resolved** — now profile-gated.
+
+Both remaining items are about the Python host grammar rather than
+OpenJD semantics and can be addressed when (and only when) a future
+revision actually needs to change them.
 
 Priority 3 and Priority 4 of the prior report remain open and are the
 main body of work left. Priority 1 and Priority 2 are effectively
@@ -153,7 +165,7 @@ the current tree.
 |------|------:|---------:|----------:|-------------:|
 | P1 (core future-proofing) | 5 | 5 | 0 | 0 |
 | P2 (model plumbing) | 5 | 5 | 0 | 0 |
-| P3 (internal cleanup) | 3 | 0 | 0 | 3 |
+| P3 (internal cleanup) | 3 | 1 | 0 | 2 |
 | P4 (documentation) | 2 | 2 | 0 | 0 |
 
 The pattern is sharp: everything structural and typed is done or nearly
@@ -187,7 +199,7 @@ a compute-derived answer is produced:
 | Which function library? | `FunctionLibrary::for_profile` → `build_library_skeleton` | ✅ `match` arm |
 | Which template types validate? | `template::validation::validate_*_template` | ✅ `match` arm |
 | Which template shape decodes? | `decode_*_template` | ✅ `match` arm |
-| Which Python subset parses? | `eval/parse.rs::validate_structure` | ❌ Hardcoded list |
+| Which Python subset parses? | `eval/parse.rs::validate_structure` | ✅ Profile-threaded, data-driven via `SyntaxFeature` |
 | Which operators are active? | `eval/evaluator.rs::eval_binop`, `eval_compare` | ❌ Hardcoded map |
 | Which reserved words rename? | `eval/parse.rs::PYTHON_KEYWORDS` | ❌ Hardcoded const |
 
@@ -436,8 +448,45 @@ and the table itself is a tiny associated-const or
 
 ### 4.2 Python-subset acceptance is a hardcoded match
 
+**Resolved.** `validate_structure` now takes an `&ExprProfile`, each
+rejection arm is gated on `profile.allows_syntax(SyntaxFeature::X)`,
+and the `SyntaxFeature` enum enumerates the full set of optional
+syntax points (lambda, walrus, dict/set literals, f-strings, each
+bitwise operator, keyword arguments, multi-`for`/multi-`if`
+comprehensions, etc.). Under V2026_02 every feature returns `false`,
+preserving today's rejection list exactly.
+
+`ExprProfile::allows_syntax` resolves in two stages:
+
+1. **Revision baseline** — each revision has a per-revision helper
+   (today `baseline_syntax_v2026_02`) that decides which features are
+   in the baseline for that revision. A future revision that wants to
+   fold dict literals into the core language flips one match arm
+   here.
+2. **Extension layer (additive)** — each revision also has a helper
+   (today `extension_syntax_v2026_02`) that iterates the profile's
+   enabled `ExprExtension` variants and returns `true` if any of them
+   grants the feature under the current revision. Extensions can only
+   add features; they cannot remove features already in the baseline.
+   The shape is in place even though `ExprExtension` has no variants
+   today — adding a variant produces a compile error inside the
+   exhaustive `match *ext` that forces the contributor to declare
+   which syntax features (if any) the new variant grants.
+
+`ParsedExpression::new(expr)` now uses `ExprProfile::latest()` (the
+current revision + every `ExprExtension::ALL`, intentionally unstable
+across crate versions). `ParsedExpression::with_profile(expr, profile)`
+gives callers stability. The same split applies to `FormatString::new`
+and `FormatString::with_profile`. Production call sites in
+`openjd-model` (let-binding evaluation in `instantiate.rs`,
+let-binding validation in
+`template/validate_v2023_09/format_strings.rs`) have been migrated to
+`with_profile` using the `ValidationContext`'s model profile.
+
+The prior state is preserved below for historical reference:
+
 ```rust
-// eval/parse.rs::validate_structure_inner
+// eval/parse.rs::validate_structure_inner (previous)
 // ~100 lines of `ast::Expr::Named(_) => return err("Walrus operator (:=) is not supported", …)`,
 // `ast::Expr::Lambda(_) => ...`, `ast::Expr::Tuple(_) => ...`, `ast::Expr::DictComp(_) => ...`,
 // `ast::Expr::SetComp(_) => ...`, `ast::Expr::Generator(_) => ...`, `ast::Expr::FString(_) => ...`,
@@ -446,26 +495,31 @@ and the table itself is a tiny associated-const or
 // "Tuple unpacking ... is not supported", "Multiple 'if' clauses ... are not supported").
 ```
 
-This list answers the question "what Python-subset does OpenJD
+~~This list answers the question "what Python-subset does OpenJD
 accept?" — precisely the thing a future revision or extension would
 most plausibly want to widen (allow dict literals so users can pass
 `{"key": value}`? allow f-strings? lift the "multiple `for`
 clauses" restriction?). Every one of those decisions is currently a
-match arm, not a profile option.
+match arm, not a profile option.~~
 
-An extension that wanted to lift the "no `match` statements" rule,
+~~An extension that wanted to lift the "no `match` statements" rule,
 for example, would need either:
 - A profile-threaded parameter into `validate_structure`, with a
   `profile.ast_allows(NodeKind::Match)` gate inside each rejection arm, or
 - A data-driven `AstAcceptance` set on the profile that the match
-  consults, with each arm becoming `if !self.ast_allows(NodeKind::Match) { return err(…) }`.
+  consults, with each arm becoming `if !self.ast_allows(NodeKind::Match) { return err(…) }`.~~
 
-Either way, `validate_structure` today takes no profile. The function
-signature is `validate_structure_inner(node, source, depth)`.
+~~Either way, `validate_structure` today takes no profile. The function
+signature is `validate_structure_inner(node, source, depth)`.~~
 
 The same shape applies to `eval/parse.rs::check_comprehension_shadowing`
 (a validation rule specific to one aspect of the accepted subset)
 and to the list-comp restrictions inside `validate_structure_inner`.
+Those remain open — `check_comprehension_shadowing` still runs
+unconditionally. However, comprehension shadowing is a semantic
+constraint (what does a repeated name mean?) rather than a
+Python-subset gate, so it is much less likely to be something a
+future revision wants to toggle.
 
 ### 4.3 `PYTHON_KEYWORDS` is a hardcoded const
 
@@ -622,12 +676,20 @@ structural Priority 1/2 gap.
    + the BitOp reject list), then allow profile-driven overrides
    as a second step. (§4.1, Priority 3 item 11.)
 
-9. **Thread the profile into `validate_structure`.** Add a
+9. ~~**Thread the profile into `validate_structure`.** Add a
    `profile: &ExprProfile` parameter to `validate_structure_inner`
    and each rejection arm. Start with every arm reading an empty
    default (no behaviour change), then add `if !profile.allows_dict_literals() { return err(...) }`
    kinds of gates as extensions require them. This is Priority 3
-   item 12 generalized. (§4.2.)
+   item 12 generalized. (§4.2.)~~ **Resolved.** `ParsedExpression::with_profile`
+   and `FormatString::with_profile` thread an `&ExprProfile` through
+   `validate_structure_inner`. Every previously-hardcoded rejection is
+   gated on `profile.allows_syntax(SyntaxFeature::X)`; under V2026_02
+   every `SyntaxFeature` variant returns `false`, preserving behavior.
+   `ParsedExpression::new` / `FormatString::new` retain their zero-arg
+   form but now use the "latest" profile (current revision + every
+   known extension enabled), explicitly documented as unstable across
+   crate versions.
 
 10. **Move `PYTHON_KEYWORDS` to a profile-owned set.** Smallest of
     the Priority 3 items. (§4.3.)

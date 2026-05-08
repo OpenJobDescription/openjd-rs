@@ -5,6 +5,7 @@
 //! Expression parsing using the ruff Python parser.
 
 use crate::error::ExpressionError;
+use crate::profile::{ExprProfile, SyntaxFeature};
 use ruff_python_ast as ast;
 use ruff_python_parser;
 use std::collections::HashMap;
@@ -89,7 +90,50 @@ fn make_replacement(keyword: &str, source: &str) -> String {
 /// 4. Retry
 /// 5. After success, record renames so evaluator can map back
 impl ParsedExpression {
+    /// Parse an expression using the "latest" profile
+    /// ([`ExprProfile::latest`]): the current revision with *every* known
+    /// extension enabled.
+    ///
+    /// **This constructor is intentionally unstable across crate
+    /// versions.** The set of accepted syntax, functions, and types
+    /// grows as new extensions and revisions land. Use it for ad-hoc
+    /// parsing, prototyping, or when the source of the expression is
+    /// known to target the newest capabilities.
+    ///
+    /// For stability across crate versions, build a profile with an
+    /// explicit revision and extension set and use
+    /// [`with_profile`](Self::with_profile).
     pub fn new(expr: &str) -> Result<ParsedExpression, ExpressionError> {
+        Self::with_profile(expr, &ExprProfile::latest())
+    }
+
+    /// Parse an expression under a caller-supplied profile.
+    ///
+    /// The profile governs which syntax features the parser accepts
+    /// (determined by its revision and enabled extensions) and — once
+    /// expression-level extensions exist — which functions and types
+    /// are in scope. An expression that parses successfully under one
+    /// profile may fail to parse under another; conversely, a template
+    /// that pinned a specific revision at decode time will continue to
+    /// parse identically across crate upgrades if it is re-parsed
+    /// against the same profile.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use openjd_expr::{ExprProfile, ParsedExpression};
+    ///
+    /// // Stable: this call will parse the same expression the same way
+    /// // regardless of future crate versions.
+    /// let profile = ExprProfile::current();
+    /// let parsed = ParsedExpression::with_profile("1 + 2", &profile)
+    ///     .expect("parses");
+    /// # let _ = parsed;
+    /// ```
+    pub fn with_profile(
+        expr: &str,
+        profile: &ExprProfile,
+    ) -> Result<ParsedExpression, ExpressionError> {
         let expr_str = expr.trim();
         if expr_str.is_empty() {
             return Err(ExpressionError::new("Empty expression"));
@@ -118,7 +162,7 @@ impl ParsedExpression {
         // catches excessive AST depth that might arise from the parser's
         // own node-building patterns.
         if expr_str.len() <= FAST_PATH_INPUT_LEN {
-            return parse_inner(expr, expr_str);
+            return parse_inner(expr, expr_str, profile);
         }
 
         // Longer inputs could drive the parser's recursive descent past
@@ -129,12 +173,13 @@ impl ParsedExpression {
         // exceeds `MAX_EXPRESSION_DEPTH`, so this thread allocation is
         // purely about surviving long enough to apply that check.
         let expr_owned = expr.to_string();
+        let profile_owned = profile.clone();
         let handle = std::thread::Builder::new()
             .name("openjd-expr-parse".into())
             .stack_size(PARSER_THREAD_STACK_SIZE)
             .spawn(move || {
                 let expr_str = expr_owned.trim();
-                parse_inner(&expr_owned, expr_str)
+                parse_inner(&expr_owned, expr_str, &profile_owned)
             })
             .map_err(|e| ExpressionError::new(format!("Failed to spawn parser thread: {e}")))?;
         match handle.join() {
@@ -441,7 +486,11 @@ const PARSER_THREAD_STACK_SIZE: usize = 32 * 1024 * 1024;
 /// be invoked either on the current thread (short inputs) or on a
 /// stack-enlarged worker thread (long inputs), without duplicating the
 /// loop body.
-fn parse_inner(raw: &str, expr_str: &str) -> Result<ParsedExpression, ExpressionError> {
+fn parse_inner(
+    raw: &str,
+    expr_str: &str,
+    profile: &ExprProfile,
+) -> Result<ParsedExpression, ExpressionError> {
     let mut source = expr_str.to_string();
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
 
@@ -459,7 +508,7 @@ fn parse_inner(raw: &str, expr_str: &str) -> Result<ParsedExpression, Expression
             Ok(parsed) => {
                 let expr_node = parsed.into_expr();
                 // Structural validation (matches Python implementation)
-                validate_structure(&expr_node, expr_str)?;
+                validate_structure(&expr_node, expr_str, profile)?;
                 let mut accessed_symbols = HashSet::new();
                 let mut called_functions = HashSet::new();
                 let mut local_bindings = HashSet::new();
@@ -535,14 +584,19 @@ fn parse_inner(raw: &str, expr_str: &str) -> Result<ParsedExpression, Expression
 }
 
 /// Validate structural constraints on the AST that can't be caught by the parser.
-fn validate_structure(node: &ast::Expr, source: &str) -> Result<(), ExpressionError> {
-    validate_structure_inner(node, source, 0)
+fn validate_structure(
+    node: &ast::Expr,
+    source: &str,
+    profile: &ExprProfile,
+) -> Result<(), ExpressionError> {
+    validate_structure_inner(node, source, 0, profile)
 }
 
 fn validate_structure_inner(
     node: &ast::Expr,
     source: &str,
     depth: usize,
+    profile: &ExprProfile,
 ) -> Result<(), ExpressionError> {
     if depth > MAX_EXPRESSION_DEPTH {
         return Err(
@@ -555,20 +609,23 @@ fn validate_structure_inner(
     }
     match node {
         ast::Expr::ListComp(lc) => {
-            if lc.generators.len() > 1 {
+            if lc.generators.len() > 1 && !profile.allows_syntax(SyntaxFeature::MultipleForClauses)
+            {
                 return Err(ExpressionError::new(
                     "Multiple 'for' clauses in list comprehensions are not supported",
                 )
                 .with_span(source, 0, source.len()));
             }
             for gen in &lc.generators {
-                if matches!(&gen.target, ast::Expr::Tuple(_)) {
+                if matches!(&gen.target, ast::Expr::Tuple(_))
+                    && !profile.allows_syntax(SyntaxFeature::TupleUnpackingInComprehension)
+                {
                     return Err(ExpressionError::new(
                         "Tuple unpacking in list comprehension is not supported",
                     )
                     .with_node(source, &gen.target));
                 }
-                if gen.ifs.len() > 1 {
+                if gen.ifs.len() > 1 && !profile.allows_syntax(SyntaxFeature::MultipleIfClauses) {
                     return Err(ExpressionError::new(
                         "Multiple 'if' clauses in a list comprehension are not supported; combine with 'and'",
                     ).with_span(source, 0, source.len()));
@@ -584,63 +641,65 @@ fn validate_structure_inner(
                     }
                 }
             }
-            validate_structure_inner(&lc.elt, source, depth + 1)?;
+            validate_structure_inner(&lc.elt, source, depth + 1, profile)?;
             for gen in &lc.generators {
-                validate_structure_inner(&gen.iter, source, depth + 1)?;
+                validate_structure_inner(&gen.iter, source, depth + 1, profile)?;
                 for if_clause in &gen.ifs {
-                    validate_structure_inner(if_clause, source, depth + 1)?;
+                    validate_structure_inner(if_clause, source, depth + 1, profile)?;
                 }
             }
         }
         ast::Expr::BinOp(b) => {
             match b.op {
-                ast::Operator::BitAnd => {
+                ast::Operator::BitAnd if !profile.allows_syntax(SyntaxFeature::BitwiseAnd) => {
                     return err("Bitwise AND (&) is not supported", source, node)
                 }
-                ast::Operator::BitOr => {
+                ast::Operator::BitOr if !profile.allows_syntax(SyntaxFeature::BitwiseOr) => {
                     return err("Bitwise OR (|) is not supported", source, node)
                 }
-                ast::Operator::BitXor => {
+                ast::Operator::BitXor if !profile.allows_syntax(SyntaxFeature::BitwiseXor) => {
                     return err("Bitwise XOR (^) is not supported", source, node)
                 }
-                ast::Operator::LShift => {
+                ast::Operator::LShift if !profile.allows_syntax(SyntaxFeature::LeftShift) => {
                     return err("Left shift (<<) is not supported", source, node)
                 }
-                ast::Operator::RShift => {
+                ast::Operator::RShift if !profile.allows_syntax(SyntaxFeature::RightShift) => {
                     return err("Right shift (>>) is not supported", source, node)
                 }
-                ast::Operator::MatMult => {
+                ast::Operator::MatMult if !profile.allows_syntax(SyntaxFeature::MatMult) => {
                     return err("Matrix multiply (@) is not supported", source, node)
                 }
                 _ => {}
             }
-            validate_structure_inner(&b.left, source, depth + 1)?;
-            validate_structure_inner(&b.right, source, depth + 1)?;
+            validate_structure_inner(&b.left, source, depth + 1, profile)?;
+            validate_structure_inner(&b.right, source, depth + 1, profile)?;
         }
         ast::Expr::UnaryOp(u) => {
-            if matches!(u.op, ast::UnaryOp::Invert) {
+            if matches!(u.op, ast::UnaryOp::Invert)
+                && !profile.allows_syntax(SyntaxFeature::BitwiseNot)
+            {
                 return err("Bitwise NOT (~) is not supported", source, node);
             }
-            validate_structure_inner(&u.operand, source, depth + 1)?;
+            validate_structure_inner(&u.operand, source, depth + 1, profile)?;
         }
         ast::Expr::BoolOp(b) => {
             for v in &b.values {
-                validate_structure_inner(v, source, depth + 1)?;
+                validate_structure_inner(v, source, depth + 1, profile)?;
             }
         }
         ast::Expr::Compare(c) => {
             for op in &c.ops {
                 match op {
-                    ast::CmpOp::Is => {
+                    ast::CmpOp::Is if !profile.allows_syntax(SyntaxFeature::IsOperator) => {
                         return err("'is' operator is not supported; use '=='", source, node)
                     }
-                    ast::CmpOp::IsNot => {
+                    ast::CmpOp::IsNot if !profile.allows_syntax(SyntaxFeature::IsNotOperator) => {
                         return err("'is not' operator is not supported; use '!='", source, node)
                     }
                     _ => {}
                 }
             }
-            validate_structure_inner(&c.left, source, depth + 1)?;
+            validate_structure_inner(&c.left, source, depth + 1, profile)?;
             // Chained comparisons (1<2<3<...) also grow without bound via the
             // comparators vector; treat each comparator as +1 depth to catch
             // `1<2<3<...<N` patterns that would otherwise be O(N) wide but
@@ -653,98 +712,113 @@ fn validate_structure_inner(
                 .with_node(source, node));
             }
             for comp in &c.comparators {
-                validate_structure_inner(comp, source, depth + 1)?;
+                validate_structure_inner(comp, source, depth + 1, profile)?;
             }
         }
         ast::Expr::If(i) => {
-            validate_structure_inner(&i.test, source, depth + 1)?;
-            validate_structure_inner(&i.body, source, depth + 1)?;
-            validate_structure_inner(&i.orelse, source, depth + 1)?;
+            validate_structure_inner(&i.test, source, depth + 1, profile)?;
+            validate_structure_inner(&i.body, source, depth + 1, profile)?;
+            validate_structure_inner(&i.orelse, source, depth + 1, profile)?;
         }
         ast::Expr::Call(c) => {
-            validate_structure_inner(&c.func, source, depth + 1)?;
+            validate_structure_inner(&c.func, source, depth + 1, profile)?;
             for arg in &c.arguments.args {
-                validate_structure_inner(arg, source, depth + 1)?;
+                validate_structure_inner(arg, source, depth + 1, profile)?;
             }
-            if !c.arguments.keywords.is_empty() {
+            if !c.arguments.keywords.is_empty()
+                && !profile.allows_syntax(SyntaxFeature::KeywordArguments)
+            {
                 return err("Keyword arguments are not supported", source, node);
             }
         }
         ast::Expr::List(l) => {
             for elt in &l.elts {
-                validate_structure_inner(elt, source, depth + 1)?;
+                validate_structure_inner(elt, source, depth + 1, profile)?;
             }
         }
         ast::Expr::Subscript(s) => {
-            validate_structure_inner(&s.value, source, depth + 1)?;
-            validate_structure_inner(&s.slice, source, depth + 1)?;
+            validate_structure_inner(&s.value, source, depth + 1, profile)?;
+            validate_structure_inner(&s.slice, source, depth + 1, profile)?;
         }
         ast::Expr::Attribute(a) => {
-            validate_structure_inner(&a.value, source, depth + 1)?;
+            validate_structure_inner(&a.value, source, depth + 1, profile)?;
         }
         ast::Expr::StringLiteral(s) => {
             for part in &s.value {
                 if matches!(
                     part.flags.prefix(),
                     ruff_python_ast::str_prefix::StringLiteralPrefix::Unicode
-                ) {
+                ) && !profile.allows_syntax(SyntaxFeature::UnicodeStringPrefix)
+                {
                     return Err(ExpressionError::new(
                         "Unicode string prefix u'...' is not supported. Use '...' or \"...\" instead."
                     ).with_node(source, &ast::Expr::StringLiteral(s.clone())));
                 }
             }
         }
-        ast::Expr::BytesLiteral(b) => {
+        ast::Expr::BytesLiteral(b) if !profile.allows_syntax(SyntaxFeature::BytesLiteral) => {
             return Err(ExpressionError::new(
                 "Byte strings (b'...') are not supported. Use '...' or \"...\" instead.",
             )
             .with_node(source, &ast::Expr::BytesLiteral(b.clone())));
         }
         // Unsupported expression types
-        ast::Expr::Named(_) => return err("Walrus operator (:=) is not supported", source, node),
-        ast::Expr::Lambda(_) => return err("Lambda expressions are not supported", source, node),
-        ast::Expr::Tuple(_) => {
+        ast::Expr::Named(_) if !profile.allows_syntax(SyntaxFeature::Walrus) => {
+            return err("Walrus operator (:=) is not supported", source, node)
+        }
+        ast::Expr::Lambda(_) if !profile.allows_syntax(SyntaxFeature::Lambda) => {
+            return err("Lambda expressions are not supported", source, node)
+        }
+        ast::Expr::Tuple(_) if !profile.allows_syntax(SyntaxFeature::TupleLiteral) => {
             return err(
                 "Tuple literals are not supported; use a list instead",
                 source,
                 node,
             )
         }
-        ast::Expr::Dict(_) => return err("Dict literals are not supported", source, node),
-        ast::Expr::Set(_) => return err("Set literals are not supported", source, node),
-        ast::Expr::DictComp(_) => {
+        ast::Expr::Dict(_) if !profile.allows_syntax(SyntaxFeature::DictLiteral) => {
+            return err("Dict literals are not supported", source, node)
+        }
+        ast::Expr::Set(_) if !profile.allows_syntax(SyntaxFeature::SetLiteral) => {
+            return err("Set literals are not supported", source, node)
+        }
+        ast::Expr::DictComp(_) if !profile.allows_syntax(SyntaxFeature::DictComprehension) => {
             return err(
                 "Dict comprehensions are not supported; only list comprehensions are allowed",
                 source,
                 node,
             )
         }
-        ast::Expr::SetComp(_) => {
+        ast::Expr::SetComp(_) if !profile.allows_syntax(SyntaxFeature::SetComprehension) => {
             return err(
                 "Set comprehensions are not supported; only list comprehensions are allowed",
                 source,
                 node,
             )
         }
-        ast::Expr::Generator(_) => {
+        ast::Expr::Generator(_) if !profile.allows_syntax(SyntaxFeature::GeneratorExpression) => {
             return err(
                 "Generator expressions are not supported; use a list comprehension",
                 source,
                 node,
             )
         }
-        ast::Expr::FString(_) => {
+        ast::Expr::FString(_) if !profile.allows_syntax(SyntaxFeature::FString) => {
             return err(
                 "f-strings are not supported; use string concatenation",
                 source,
                 node,
             )
         }
-        ast::Expr::EllipsisLiteral(_) => {
+        ast::Expr::EllipsisLiteral(_) if !profile.allows_syntax(SyntaxFeature::Ellipsis) => {
             return err("Ellipsis (...) is not supported", source, node)
         }
-        ast::Expr::Starred(_) => return err("Star expressions are not supported", source, node),
-        ast::Expr::Await(_) => return err("Await expressions are not supported", source, node),
+        ast::Expr::Starred(_) if !profile.allows_syntax(SyntaxFeature::Starred) => {
+            return err("Star expressions are not supported", source, node)
+        }
+        ast::Expr::Await(_) if !profile.allows_syntax(SyntaxFeature::Await) => {
+            return err("Await expressions are not supported", source, node)
+        }
         _ => {}
     }
     Ok(())

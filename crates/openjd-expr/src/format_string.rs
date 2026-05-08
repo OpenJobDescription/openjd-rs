@@ -5,6 +5,7 @@
 //! Format string parsing and resolution.
 
 use crate::error::ExpressionError;
+use crate::profile::ExprProfile;
 use crate::symbol_table::{SymbolTable, SymbolTableEntry};
 use crate::value::ExprValue;
 use serde::de::{self, Deserializer};
@@ -50,7 +51,29 @@ pub const MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
 pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
 
 impl FormatString {
+    /// Parse a format string using the "latest" profile
+    /// ([`ExprProfile::latest`]): the current revision with every known
+    /// extension enabled.
+    ///
+    /// **This constructor is intentionally unstable across crate
+    /// versions.** The set of accepted syntax, functions, and types
+    /// grows as new extensions and revisions land. Use it for ad-hoc
+    /// parsing or prototyping.
+    ///
+    /// For stability across crate versions, build a profile with an
+    /// explicit revision and extension set and use
+    /// [`with_profile`](Self::with_profile).
     pub fn new(input: &str) -> Result<Self, ExpressionError> {
+        Self::with_profile(input, &ExprProfile::latest())
+    }
+
+    /// Parse a format string under a caller-supplied profile.
+    ///
+    /// Each `{{...}}` interpolation is parsed as an expression under
+    /// the same profile, so the syntax features accepted inside
+    /// interpolations are determined by the profile in exactly the same
+    /// way as [`ParsedExpression::with_profile`](crate::ParsedExpression::with_profile).
+    pub fn with_profile(input: &str, profile: &ExprProfile) -> Result<Self, ExpressionError> {
         if input.len() > MAX_FORMAT_STRING_LEN {
             return Err(ExpressionError::new(format!(
                 "Format string length ({} bytes) exceeds maximum allowed size ({} bytes)",
@@ -58,7 +81,7 @@ impl FormatString {
                 MAX_FORMAT_STRING_LEN
             )));
         }
-        let segments = parse_segments(input)?;
+        let segments = parse_segments(input, profile)?;
         if segments.len() > MAX_FORMAT_STRING_SEGMENTS {
             return Err(ExpressionError::new(format!(
                 "Format string contains too many interpolation segments ({}); maximum is {}",
@@ -431,7 +454,7 @@ fn check_comprehension_vars(
     Ok(())
 }
 
-fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
+fn parse_segments(input: &str, profile: &ExprProfile) -> Result<Vec<Segment>, ExpressionError> {
     let mut segments = Vec::new();
     let len = input.len();
     let mut pos = 0;
@@ -481,16 +504,17 @@ fn parse_segments(input: &str) -> Result<Vec<Segment>, ExpressionError> {
                             ))
                             .with_span(input, op, be));
                         }
-                        let parsed = crate::eval::ParsedExpression::new(et).map_err(|e| {
-                            // Attach the raw format-string source + {{...}} span so
-                            // users see a caret on the failing interpolation rather
-                            // than a bare parse error.
-                            ExpressionError::new(format!(
+                        let parsed = crate::eval::ParsedExpression::with_profile(et, profile)
+                            .map_err(|e| {
+                                // Attach the raw format-string source + {{...}} span so
+                                // users see a caret on the failing interpolation rather
+                                // than a bare parse error.
+                                ExpressionError::new(format!(
                                 "Failed to parse interpolation expression at [{op}, {be}]. Reason: {}",
                                 e.message()
                             ))
-                            .with_span(input, op, be)
-                        })?;
+                                .with_span(input, op, be)
+                            })?;
                         segments.push(Segment::Expression { start: op, end: be, parsed });
                         pos = be;
                     }

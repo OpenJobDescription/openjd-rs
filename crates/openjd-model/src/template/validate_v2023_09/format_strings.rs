@@ -337,20 +337,19 @@ pub fn validate_format_strings(
     // Template/task-range validation uses HostContext::None (host functions
     // are not available in those scopes). Session/task scopes use
     // HostContext::Unresolved so apply_path_mapping type-checks.
-    let default_lib = openjd_expr::FunctionLibrary::for_profile(
-        &ctx.profile.to_expr_profile(openjd_expr::HostContext::None),
-    );
-    let host_lib = openjd_expr::FunctionLibrary::for_profile(
-        &ctx.profile
-            .to_expr_profile(openjd_expr::HostContext::Unresolved),
-    );
+    let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
+    let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt);
     validate_fs(
         &jt.name,
         &template_symtab,
-        &default_lib,
+        &template_lib,
         &path_field(&[], "name"),
         errors,
     );
@@ -377,7 +376,8 @@ pub fn validate_format_strings(
                         &HashSet::new(),
                         &mut hr_let_names,
                         &mut hr_symtab,
-                        &default_lib,
+                        &template_lib,
+                        &template_profile,
                         errors,
                     );
                 }
@@ -390,7 +390,7 @@ pub fn validate_format_strings(
                         validate_fs(
                             min,
                             &hr_symtab,
-                            &default_lib,
+                            &template_lib,
                             &path_field(&amt_path, "min"),
                             errors,
                         );
@@ -399,7 +399,7 @@ pub fn validate_format_strings(
                         validate_fs(
                             max,
                             &hr_symtab,
-                            &default_lib,
+                            &template_lib,
                             &path_field(&amt_path, "max"),
                             errors,
                         );
@@ -414,7 +414,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 v,
                                 &hr_symtab,
-                                &default_lib,
+                                &template_lib,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
                                 errors,
                             );
@@ -425,7 +425,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 v,
                                 &hr_symtab,
-                                &default_lib,
+                                &template_lib,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
                                 errors,
                             );
@@ -455,6 +455,7 @@ pub fn validate_format_strings(
                             &mut env_let_names,
                             &mut env_symtab,
                             &host_lib,
+                            &host_profile,
                             errors,
                         );
                     }
@@ -494,11 +495,14 @@ pub fn validate_format_strings(
                             let name = binding[..eq_pos].trim();
                             let expr_str = binding[eq_pos + 1..].trim();
                             if !name.is_empty() && !expr_str.is_empty() {
-                                match openjd_expr::eval::ParsedExpression::new(expr_str) {
+                                match openjd_expr::eval::ParsedExpression::with_profile(
+                                    expr_str,
+                                    &template_profile,
+                                ) {
                                     Ok(parsed) => {
                                         match parsed
                                             .with_path_format(PathFormat::Posix)
-                                            .with_library(&default_lib)
+                                            .with_library(&template_lib)
                                             .evaluate(&[&range_symtab as &SymbolTable])
                                         {
                                             Ok(val) => {
@@ -530,7 +534,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &default_lib,
+                                &template_lib,
                                 &path_field(&p_path, "range"),
                                 errors,
                             );
@@ -542,7 +546,7 @@ pub fn validate_format_strings(
                                 validate_fs(
                                     item,
                                     &range_symtab,
-                                    &default_lib,
+                                    &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     errors,
                                 );
@@ -555,7 +559,7 @@ pub fn validate_format_strings(
                                 validate_fs(
                                     item,
                                     &range_symtab,
-                                    &default_lib,
+                                    &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     errors,
                                 );
@@ -567,7 +571,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &default_lib,
+                                &template_lib,
                                 &path_field(&p_path, "range"),
                                 errors,
                             );
@@ -581,7 +585,7 @@ pub fn validate_format_strings(
         let mut task_symtab = build_task_scope_symtab(jt, step, expr_active);
 
         // Let bindings: validate and evaluate into symtab if EXPR, reject if not.
-        // Step-level let bindings are TEMPLATE scope (default_lib, no Session.*, no PATH Param.*).
+        // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
         // Script-level let bindings are TASK scope (host_lib).
         if let Some(bindings) = &step.let_bindings {
             let let_path = path_field(&step_path, "let");
@@ -604,7 +608,8 @@ pub fn validate_format_strings(
                     &HashSet::new(),
                     &mut step_let_names,
                     &mut step_let_symtab,
-                    &default_lib,
+                    &template_lib,
+                    &template_profile,
                     errors,
                 );
                 // Copy evaluated let bindings into task_symtab so script-level code can use them
@@ -642,6 +647,7 @@ pub fn validate_format_strings(
                         &mut script_let_names,
                         &mut task_symtab,
                         &host_lib,
+                        &host_profile,
                         errors,
                     );
                 }
@@ -816,6 +822,7 @@ pub fn validate_format_strings(
                                 &mut env_let_names,
                                 &mut env_symtab,
                                 &host_lib,
+                                &host_profile,
                                 errors,
                             );
                         }
@@ -872,6 +879,7 @@ pub fn validate_format_strings(
                             &mut new_names,
                             &mut task_symtab,
                             &host_lib,
+                            &host_profile,
                             errors,
                         );
                         sa_let_names.extend(new_names);
@@ -1000,6 +1008,7 @@ fn validate_env_comprehensions(envs: &Option<Vec<Environment>>, errors: &mut Val
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_let_bindings(
     bindings: &[String],
     path: &[PathElement],
@@ -1007,6 +1016,7 @@ fn validate_let_bindings(
     out_names: &mut HashSet<String>,
     symtab: &mut SymbolTable,
     lib: &FunctionLibrary,
+    profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
 ) {
     if bindings.is_empty() {
@@ -1063,7 +1073,7 @@ fn validate_let_bindings(
         let expr_start =
             eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len();
         let prefix = &binding[..expr_start];
-        match ParsedExpression::new(expr) {
+        match ParsedExpression::with_profile(expr, profile) {
             Ok(parsed) => {
                 // Check self-reference using the parsed AST's accessed symbols
                 // rather than heuristic regex matching on the raw expression string.

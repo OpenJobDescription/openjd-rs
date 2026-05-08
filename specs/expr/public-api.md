@@ -75,15 +75,33 @@ for building custom host-side tools.
 pub struct ParsedExpression { /* private fields */ }
 
 impl ParsedExpression {
-    /// Parse a Python-syntax expression string. Runs ruff's Python parser
-    /// plus structural validation against the OpenJD language subset (no
-    /// lambda, no walrus, no dict/set literals, list comprehensions limited
-    /// to one `for` + at most one `if`, etc., per the EXPR spec §1).
+    /// Parse a Python-syntax expression string under the "latest" profile
+    /// ([`ExprProfile::latest`]): the current revision with every known
+    /// extension enabled. Runs ruff's Python parser plus structural
+    /// validation against the OpenJD language subset (no lambda, no
+    /// walrus, no dict/set literals, list comprehensions limited to one
+    /// `for` + at most one `if`, etc., per the EXPR spec §1).
+    ///
+    /// **This constructor is intentionally unstable across crate versions.**
+    /// The set of accepted syntax grows as new extensions/revisions land.
+    /// For parse behavior that is stable across crate versions, build a
+    /// profile explicitly and use [`with_profile`](Self::with_profile).
     ///
     /// Long inputs (>200 bytes) are parsed on a dedicated 32 MB-stack
     /// worker thread to survive recursive-descent depth on debug builds;
     /// this is transparent to the caller.
     pub fn new(expr: &str) -> Result<ParsedExpression, ExpressionError>;
+
+    /// Parse an expression under a caller-supplied profile.
+    ///
+    /// The profile governs which syntax features the parser accepts (via
+    /// [`ExprProfile::allows_syntax`]) and — once expression-level
+    /// extensions exist — which functions and types are in scope. An
+    /// expression that parses under one profile may fail under another.
+    pub fn with_profile(
+        expr: &str,
+        profile: &ExprProfile,
+    ) -> Result<ParsedExpression, ExpressionError>;
 
     /// The trimmed expression source.
     pub fn expression(&self) -> &str;
@@ -274,6 +292,7 @@ pub struct ExprProfile { /* private fields */ }
 impl ExprProfile {
     pub fn new(revision: ExprRevision) -> Self;
     pub fn current() -> Self;  // ExprProfile::new(ExprRevision::CURRENT)
+    pub fn latest() -> Self;   // current revision + every ExprExtension::ALL enabled
 
     #[must_use]
     pub fn with_extensions(self, extensions: HashSet<ExprExtension>) -> Self;
@@ -284,9 +303,41 @@ impl ExprProfile {
     pub fn extensions(&self) -> &HashSet<ExprExtension>;
     pub fn host_context(&self) -> &HostContext;
     pub fn has_extension(&self, ext: ExprExtension) -> bool;
+
+    // `allows_syntax(SyntaxFeature)` is crate-private — consulted by
+    // the parser's structural validator. External callers describe
+    // their language flavor by choosing the profile's revision and
+    // extensions; they never construct `SyntaxFeature` values directly.
 }
 
 impl Default for ExprProfile { /* ::current() */ }
+```
+
+**Syntax-acceptance resolution (crate-internal).** `ExprProfile`
+internally resolves "does this profile accept syntax feature X" in two
+stages, both per-revision:
+
+1. **Revision baseline** — each revision defines a baseline set of
+   accepted features. Under V2026_02 the baseline rejects every
+   optional syntax feature, matching the Python implementation.
+2. **Extension layer (additive)** — enabled extensions may grant
+   additional features the baseline rejects. Extensions never remove
+   features the baseline allows.
+
+The concrete feature set (`SyntaxFeature` enum with variants for
+walrus, lambda, dict/set literals, bitwise operators, keyword
+arguments, multi-for/multi-if comprehensions, etc.) is a crate-private
+implementation detail, not part of the stability contract. Callers
+influence the outcome through the profile's revision and extensions,
+not by naming features directly.
+
+`ExprProfile::latest()` is intentionally **unstable across crate versions**:
+it tracks `ExprRevision::CURRENT` and `ExprExtension::ALL`, both of which
+grow over time. Use it for ad-hoc parsing where the caller opts in to
+"whatever the newest crate version accepts." For parse behavior that is
+stable across crate versions, use `ExprProfile::new(revision)` or
+`ExprProfile::current()` explicitly and pass to
+`ParsedExpression::with_profile` / `FormatString::with_profile`.
 ```
 
 A profile is passed to [`FunctionLibrary::for_profile`] to obtain the library
@@ -878,7 +929,18 @@ pub struct FormatString { /* private fields */ }
 
 ```rust
 impl FormatString {
+    /// Parse a format string under the "latest" profile
+    /// ([`ExprProfile::latest`]). Embedded `{{...}}` expressions are
+    /// parsed via `ParsedExpression::new` (same instability caveat).
     pub fn new(input: &str) -> Result<Self, ExpressionError>;
+
+    /// Parse a format string under a caller-supplied profile. Embedded
+    /// `{{...}}` expressions are parsed via
+    /// `ParsedExpression::with_profile` with the same profile.
+    pub fn with_profile(
+        input: &str,
+        profile: &ExprProfile,
+    ) -> Result<Self, ExpressionError>;
 
     /// The raw source text.
     pub fn raw(&self) -> &str;
@@ -1395,13 +1457,20 @@ Enums marked `#[non_exhaustive]`:
 - `ExprExtension` (empty today — reserved for future expression-level extensions)
 - `TypeCode`
 - `ExpressionErrorKind`
+- `ExprValue` (outer enum) — so new primitive types can be added to
+  future revisions without a SemVer break
+
+The crate-private `SyntaxFeature` enum is also `#[non_exhaustive]` for
+internal consistency, but it is not part of the public API — callers
+describe their desired language flavor by choosing the profile's
+revision and extensions, not by naming syntax features directly.
 
 The `Path` variant of `ExprValue` is marked `#[non_exhaustive]` so
 that external code cannot build paths without going through
-`ExprValue::new_path` (which enforces separator normalization). The
-outer `ExprValue` enum is **not** `#[non_exhaustive]` today — see the
-future-revision-readiness report for the discussion of whether to mark
-it before stable release.
+`ExprValue::new_path` (which enforces separator normalization). This
+is a separate concern from the outer-enum `#[non_exhaustive]` —
+together they give a stable growth path for both new variants and new
+fields within existing variants.
 
 Enums that are intentionally closed:
 

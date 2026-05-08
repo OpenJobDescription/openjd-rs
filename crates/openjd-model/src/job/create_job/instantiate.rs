@@ -38,23 +38,25 @@ pub(super) fn instantiate_step(
     // Evaluate step-level let bindings (TEMPLATE scope — no PATH Param.*, no host context)
     if has_expr {
         if let Some(bindings) = &st.let_bindings {
-            let lib = openjd_expr::FunctionLibrary::for_profile(
-                &ctx.profile.to_expr_profile(openjd_expr::HostContext::None),
-            );
+            let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+            let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
             for binding in bindings {
                 if let Some(eq_pos) = binding.find('=') {
                     let name = binding[..eq_pos].trim();
                     let expr = binding[eq_pos + 1..].trim();
                     if !name.is_empty() && !expr.is_empty() {
-                        let parsed =
-                            openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "let binding '{name}': {e}"
-                                )))
-                            })?;
+                        let parsed = openjd_expr::eval::ParsedExpression::with_profile(
+                            expr,
+                            &template_profile,
+                        )
+                        .map_err(|e| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "let binding '{name}': {e}"
+                            )))
+                        })?;
                         let val = parsed
                             .with_path_format(PathFormat::Posix)
-                            .with_library(&lib)
+                            .with_library(&template_lib)
                             .evaluate(&[&step_symtab as &SymbolTable])
                             .map_err(|e| {
                                 ModelError::Expression(ExpressionError::new(format!(
@@ -161,24 +163,27 @@ pub(super) fn instantiate_step(
                     }
                 }
 
-                let lib = openjd_expr::FunctionLibrary::for_profile(
-                    &ctx.profile
-                        .to_expr_profile(openjd_expr::HostContext::Unresolved),
-                );
+                let host_profile = ctx
+                    .profile
+                    .to_expr_profile(openjd_expr::HostContext::Unresolved);
+                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
                 for binding in bindings {
                     if let Some(eq_pos) = binding.find('=') {
                         let name = binding[..eq_pos].trim();
                         let expr = binding[eq_pos + 1..].trim();
                         if !name.is_empty() && !expr.is_empty() {
-                            let parsed =
-                                openjd_expr::eval::ParsedExpression::new(expr).map_err(|e| {
-                                    ModelError::Expression(ExpressionError::new(format!(
-                                        "script let binding '{name}': {e}"
-                                    )))
-                                })?;
+                            let parsed = openjd_expr::eval::ParsedExpression::with_profile(
+                                expr,
+                                &host_profile,
+                            )
+                            .map_err(|e| {
+                                ModelError::Expression(ExpressionError::new(format!(
+                                    "script let binding '{name}': {e}"
+                                )))
+                            })?;
                             let val = parsed
                                 .with_path_format(PathFormat::Posix)
-                                .with_library(&lib)
+                                .with_library(&host_lib)
                                 .evaluate(&[&check_symtab as &SymbolTable])
                                 .map_err(|e| {
                                     ModelError::Expression(ExpressionError::new(format!(
