@@ -1,731 +1,706 @@
 # Readiness of `openjd-expr` and `openjd-model` for Future Spec Revisions and Extensions
 
-**Date:** 2026-05-07
+**Date:** 2026-05-08
 **Scope:** `openjd-expr`, `openjd-model`
 **Focus:** Can the current public interface and internal implementation
 accommodate a new spec revision (e.g. `2027-xx`) and new extensions that
 add functions, modify function semantics, or change template/expression
 interpretation rules?
 
+This report **supersedes** the earlier 2026-05-07 report of the same
+name. The earlier pass identified four priority tiers of refactors; the
+Priority 1 and Priority 2 tiers have since been implemented (profile
+types, `FunctionLibrary::for_profile`, per-profile cache,
+revision-dispatch scaffolding in `EffectiveLimits` / `validation::`
+/ `decode_*`, `ModelProfile::to_expr_profile`, `create_job` taking a
+`ValidationContext`). This pass re-evaluates against the current
+codebase, verifies which claims in the prior report's
+"Resolved" markers actually hold, and focuses on what remains.
+
 ## Executive Summary
 
-The `openjd-model` crate is in reasonable shape for extension/revision
-evolution: it has a `ValidationContext` that already threads through most
-of the validation pipeline, and it derives "effective" limits/rules from
-(revision, extensions). The main gaps on the model side are that
-`SpecificationRevision` has only one variant, `EffectiveLimits` /
-`EffectiveRules` ignore the revision field, and the validation entry
-points are hardwired to `validate_v2023_09::*`.
+The readiness picture has improved substantially since the prior report:
 
-The `openjd-expr` crate is **not ready** for extension-driven evolution
-in the way the user described. Its function library has exactly three
-construction modes — *default*, *with host context*, *with unresolved
-host context* — each of which bakes in a single fixed set of registered
-functions and signatures. There is no concept of "which revision" or
-"which extensions are active" inside the library, and model-side
-validation code currently picks between those three modes by hand. When
-a new revision or extension adds a function, removes one, changes a
-signature, or restricts an operator, there is no vector in the public
-API to express that — callers would need to build a library from
-scratch outside the crate, which duplicates the default library and
-loses `LazyLock` caching.
+- **Profile plumbing is in place end-to-end.** `ExprProfile` / `ModelProfile` are
+  first-class types, `FunctionLibrary::for_profile` replaces the
+  `get_default_library` + `with_*_host_context` triple, and the
+  revision-dispatch pattern (`match ctx.profile.revision() { … }`) is
+  installed at every decision site the prior report called out:
+  decode, `EffectiveLimits::from_context`, `validation::validate_*`,
+  `create_job`, `JobTemplate::default_validation_context`, and the
+  session's derived-library rebuild.
+- **Rules-independent profile caching works.** Per-profile libraries are
+  cached keyed on `(revision, extensions, host-kind)` so that path-mapping
+  rules (which are per-call) don't thrash the cache. The session and
+  CLI hot paths pay near-zero registration cost.
+- **The library skeleton is now revision-aware.** `build_library_skeleton(profile)`
+  has an explicit `match profile.revision()` whose single arm is a
+  compile-error sentinel for the first revision bump.
 
-The recommended direction is:
+Against the original question — "is the library ready to accept a new
+revision and new extensions that add/modify/remove functions or change
+the language subset?" — the answer is now **partially yes**:
 
-1. Make `ValidationContext` (or an expression-local equivalent
-   `ExprProfile` / `ExprContext`) a first-class input to function
-   library construction. Replace `get_default_library()` /
-   `with_host_context` / `with_unresolved_host_context` with a small
-   set of profile-parameterised builders that consult the context.
-2. Push the "submission time vs host context" distinction into that
-   context rather than having separate `with_*_host_context` methods.
-3. Expose the `ValidationContext` the model uses (or a derived
-   `FunctionProfile`) at the `openjd-expr` layer, without creating a
-   reverse dependency on `openjd-model`.
-4. Internally, stop hardwiring operator names, keyword names, and
-   property names to global constants and route them through the same
-   context so an extension can add/hide them.
+- ✅ Ready for a revision that **adds or removes functions / signatures**
+  at the library level. The profile machinery cleanly selects a
+  skeleton, and the in-crate match on `ExprRevision` forces an explicit
+  decision for each new revision.
+- ✅ Ready for a revision that **changes effective limits, rules, and
+  parameter-type allowances** via `EffectiveLimits::from_context_vXXXX_XX`
+  and `EffectiveRules::from_context`.
+- ⚠️ **Partially ready** for a revision that **changes function
+  signatures in place** (e.g., `round(float, int) -> int` in
+  2027 vs `float | int` today). The library can hold the new signatures,
+  but several callers (evaluator keyword-arg rejection, derive-return-type
+  heuristics, coercion rules) have baked-in assumptions that would
+  need re-examination. No single obvious failure — but also no forcing
+  function like the enum match that would catch the drift automatically.
+- ⚠️ **Partially ready** for a revision or extension that **adds a new
+  primitive type** (e.g., `Duration`, `Url`). `TypeCode` is
+  `#[non_exhaustive]` and the dispatch generalises, but `ExprValue`
+  itself is *not* `#[non_exhaustive]` — adding a new variant is a
+  breaking change. The parser's literal handlers (`NumberLiteral`,
+  `StringLiteral`) would need conditional paths based on revision.
+- ❌ **Not ready** for a revision or extension that changes the
+  **Python subset the language accepts** — dict comprehensions, walrus,
+  multiple `for` clauses, lambda, tuple literals, set comprehensions,
+  etc. Those are rejected by hardcoded match arms in
+  `validate_structure` in `eval/parse.rs`. There is no profile hook.
+- ❌ **Not ready** for a revision or extension that **adds a new
+  operator or renames an existing one**. The `Operator::* → "__add__"`
+  mapping is a hardcoded `match` in `eval_binop`; `eval_compare` has
+  the same pattern. There's no data-driven operator table.
+- ❌ **Not ready** for a revision that **adds a reserved identifier** or
+  removes one. `PYTHON_KEYWORDS: &[&str]` in `eval/parse.rs` is a hardcoded
+  const and the contextual-keyword rename mechanism iterates it directly.
+- ⚠️ **`#[non_exhaustive]` coverage is uneven.** The prior report claimed
+  this tier was resolved, but inspection shows `ModelExtension`,
+  `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, and
+  `ExprValue` (the outer enum, not just the `Path` variant) are
+  **not** marked. These are realistic growth axes — especially
+  `ModelExtension` and `ExprValue`.
+- ❌ **Public-API specs are missing** for both crates
+  (`specs/expr/public-api.md`, `specs/model/public-api.md`). Only
+  `openjd-snapshots` has one. This is both a gap against the repo's
+  own convention (AGENTS.md, "Every crate's spec directory must include
+  a `public-api.md`") and a practical obstacle to reasoning about
+  stability: there is no single authoritative inventory of what the
+  profile refactor has actually exposed.
 
-This is a pre-release window — breaking changes are cheap now and
-expensive after release. Doing this refactor now is significantly
-cheaper than retrofitting it behind a released public API.
+The most concentrated risk going forward is not the profile machinery —
+that part of the design is now good — but three specific hardcoded
+tables that any non-trivial language-level extension or revision will
+want to change:
 
-## 1. How the current design encodes "which rules to apply"
+1. The operator → dunder name dispatch in `evaluator.rs`.
+2. The `PYTHON_KEYWORDS` reserved-word list in `eval/parse.rs`.
+3. The unsupported-AST-node rejection list in `validate_structure`
+   in `eval/parse.rs`.
 
-### 1.1 Model-side: `ValidationContext` + effective-rules pattern
+Priority 3 and Priority 4 of the prior report remain open and are the
+main body of work left. Priority 1 and Priority 2 are effectively
+closed, with two specific exceptions under Priority 1 item 5
+(non-exhaustive enums) that slipped through.
 
-`openjd-model/src/types.rs` defines the current context:
+## 1. Verified state of prior Resolved claims
+
+This section walks every item from the prior report's
+recommendations list and records whether it is actually resolved in
+the current tree.
+
+### Priority 1 — Do before release
+
+| # | Prior claim | Verification | Status |
+|---|---|---|---|
+| 1 | `ExprProfile`, `ExprRevision`, `ExprExtension`, `HostContext` added | Present in `crates/openjd-expr/src/profile.rs`, re-exported from `lib.rs`, `ExprRevision` and `ExprExtension` both `#[non_exhaustive]`, `HostContext::{None, Unresolved, WithRules(Arc<Vec<PathMappingRule>>)}` | ✅ **Resolved** |
+| 2 | `FunctionLibrary::for_profile` replaces `get_default_library` | Present in `default_library.rs`. `get_default_library` removed from public surface entirely (grep of `crates/` turns up only internal usages in evaluator and JS bindings) | ✅ **Resolved** (cleaner than claimed — the deprecated alias was removed outright) |
+| 3 | Per-profile cache keyed on rules-independent key | `PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` in `default_library.rs`; `ProfileKey` excludes rules. Tests `cache_returns_same_arc_for_none_profile`, `cache_returns_same_arc_for_unresolved_profile`, `with_rules_does_not_cache_rules_variant` all pass | ✅ **Resolved** |
+| 4 | `HostContext` collapses `with_host_context` + `with_unresolved_host_context` | Single enum, applied via `profile.with_host_context(...)`. The old methods on `FunctionLibrary` are gone from public use | ✅ **Resolved** |
+| 5 | Mark all relevant cross-crate public enums `#[non_exhaustive]` | Marked: `SpecificationRevision`, `JobParameterType`, `TypeCode`, `ExprRevision`, `ExprExtension`, `ModelError`, `ExpressionErrorKind`. **Not** marked: `ModelExtension`, `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`, `ExprValue`. The prior report claimed `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` were resolved but they are bare enums in `openjd-model/src/types.rs`. `ExprValue` has `#[non_exhaustive]` only on the `Path` variant, not on the enum itself | ⚠️ **Partially resolved** — see §3 for the specific gaps |
+
+### Priority 2 — Plumb the profile through the model
+
+| # | Prior claim | Verification | Status |
+|---|---|---|---|
+| 6 | `create_job` takes `&ValidationContext` + `JobTemplate::default_validation_context()` convenience | `create_job::create_job(&JobTemplate, &JobParameterInputValues, &ValidationContext) -> Result<Job, ModelError>` in `lib.rs`; `JobTemplate::default_validation_context()` and `JobTemplate::profile()` in `template/job_template.rs` | ✅ **Resolved** |
+| 7 | `EffectiveLimits::from_context` used at every limit check; no stray `default()` | No `impl Default for EffectiveLimits` exists; `max_env_template_param_count` field present. Grep for "EffectiveLimits" across the crate shows only `from_context` construction | ✅ **Resolved** |
+| 8 | `EffectiveLimits` / `EffectiveRules` dispatch on revision | `EffectiveLimits::from_context` has the required `match ctx.profile.revision() { SpecificationRevision::V2023_09 => Self::from_context_v2023_09(ctx) }` pattern. `EffectiveRules::from_context` **does not** yet use the same dispatch pattern — it reads extensions directly without a revision match. Minor regression: the intent in item 8 was for both to branch on revision | ⚠️ **Partially resolved** — `EffectiveRules` needs the same `match` wrapper |
+| 9 | `template/validation/` layer for revision-neutral dispatch | Present. `template::validation::validate_job_template` / `validate_environment_template` dispatch via `match ctx.profile.revision()` into `validate_v2023_09::*` | ✅ **Resolved** (conservative form, as the prior note said) |
+| 10 | Decode layer dispatches on revision | `decode_job_template` now has `match version.revision() { V2023_09 => serde_json::from_value(...) }`. The env-template sibling `decode_environment_template` derives the revision via `version.revision()` and passes it into the context, but does **not** wrap the `serde_json::from_value` call in a revision match. Minor asymmetry: one decoder will produce a compile error at the first revision bump, the other will silently keep using the 2023-09 struct layout | ⚠️ **Partially resolved** — `decode_environment_template` needs the same wrapper |
+
+### Priority 3 — Internal cleanup
+
+| # | Prior claim | Verification | Status |
+|---|---|---|---|
+| 11 | Operator → dunder table driven by data | Not implemented. `eval_binop` still uses `match b.op { ast::Operator::Add => "__add__", ... }` (evaluator.rs:633). `eval_compare` has the same pattern for `CmpOp` (evaluator.rs:802). Nothing consults the profile | ❌ **Not resolved** |
+| 12 | `PYTHON_KEYWORDS` behind a profile-derived set | Not implemented. `const PYTHON_KEYWORDS: &[&str] = &[…]` in `eval/parse.rs` is a static list, referenced directly by `make_replacement` and by the keyword-rename loop in `parse_inner` | ❌ **Not resolved** |
+| 13 | Replace `host_context_enabled: bool` with set | Not implemented. `FunctionLibrary` still has `pub host_context_enabled: bool` | ❌ **Not resolved** |
+
+### Priority 4 — Documentation
+
+| # | Prior claim | Verification | Status |
+|---|---|---|---|
+| 14 | `specs/expr/public-api.md` and `specs/model/public-api.md` | Neither file exists. Only `specs/snapshots/public-api.md` is present | ❌ **Not resolved** |
+| 15 | Document stable/unstable surface of `openjd-expr` | Not done. There is no spec document enumerating which types are `#[non_exhaustive]` or construction-only | ❌ **Not resolved** |
+
+### Summary
+
+| Tier | Items | Resolved | Partially | Not resolved |
+|------|------:|---------:|----------:|-------------:|
+| P1 (core future-proofing) | 5 | 4 | 1 | 0 |
+| P2 (model plumbing) | 5 | 3 | 2 | 0 |
+| P3 (internal cleanup) | 3 | 0 | 0 | 3 |
+| P4 (documentation) | 2 | 0 | 0 | 2 |
+
+The pattern is sharp: everything structural and typed is done or nearly
+done; the remaining work is three specific hardcoded tables (operators,
+keywords, AST node whitelist) and the missing spec documentation.
+
+## 2. Current profile architecture — how it handles future rev/ext
+
+The refactor that went in between the two reports settled on a clean
+three-axis model, matching §4 of the prior report:
+
+- **Axis A — revision.** `ExprRevision` in `openjd-expr`,
+  `SpecificationRevision` in `openjd-model`. Both `#[non_exhaustive]`
+  and exactly one variant today.
+- **Axis B — extensions.** `ExprExtension` (empty `#[non_exhaustive]`)
+  in `openjd-expr`, `ModelExtension` in `openjd-model` (not `#[non_exhaustive]` —
+  see §3). The crates are independent: `ModelProfile::to_expr_profile`
+  is the bridge.
+- **Axis C — host state.** `HostContext::{None, Unresolved, WithRules}`
+  on `ExprProfile`. Carried as a method call argument (not a profile
+  field) into `ModelProfile::to_expr_profile`, since the model has no
+  opinion on it.
+
+Each axis has a single place where "for revision R with extensions E",
+a compute-derived answer is produced:
+
+| Question | Location | Revision-aware? |
+|----------|----------|-----------------|
+| Which limits apply? | `EffectiveLimits::from_context` | ✅ `match` arm |
+| Which rules apply? | `EffectiveRules::from_context` | ❌ Extensions only |
+| Which function library? | `FunctionLibrary::for_profile` → `build_library_skeleton` | ✅ `match` arm |
+| Which template types validate? | `template::validation::validate_*_template` | ✅ `match` arm |
+| Which template shape decodes? | `decode_*_template` | ✅ `match` arm |
+| Which Python subset parses? | `eval/parse.rs::validate_structure` | ❌ Hardcoded list |
+| Which operators are active? | `eval/evaluator.rs::eval_binop`, `eval_compare` | ❌ Hardcoded map |
+| Which reserved words rename? | `eval/parse.rs::PYTHON_KEYWORDS` | ❌ Hardcoded const |
+
+The top five rows are the profile-driven part — and they cover the
+majority of "a new revision changes limits / rules / functions / which
+shape decodes". The bottom three rows are the still-hardcoded part and
+determine how ready the crate is for a revision or extension that
+changes the *language itself*.
+
+## 3. Remaining public-API gaps for future revisions
+
+The specific issues that the prior report's claims missed:
+
+### 3.1 `ModelExtension` is not `#[non_exhaustive]`
 
 ```rust
-pub enum SpecificationRevision {
-    V2023_09,
-}
-
-pub enum KnownExtension {
+// crates/openjd-model/src/types.rs:326
+pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,
     FeatureBundle1,
     Expr,
 }
+```
 
-pub struct ValidationContext {
-    pub revision: SpecificationRevision,
-    pub extensions: Extensions,              // HashSet<KnownExtension>
-    pub caller_limits: CallerLimits,
+`ModelExtension` is *the* enum that grows every time an extension
+ships. Today it has four variants. Adding a fifth (e.g. the next
+feature bundle, or the expression-level extensions the expr crate is
+reserving space for) would be a SemVer break for anyone pattern-matching
+`ModelExtension`. This one is the highest-value single change in this
+report.
+
+### 3.2 `ExprValue` is not `#[non_exhaustive]`
+
+```rust
+// crates/openjd-expr/src/value.rs:120
+pub enum ExprValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(Float64),
+    String(String),
+    #[non_exhaustive]
+    Path { value: String, format: PathFormat },
+    ListBool(Vec<bool>),
+    // …
 }
 ```
 
-This is threaded as `&ValidationContext` through the whole validation
-pipeline in `validate_v2023_09/`. Each pass derives `EffectiveLimits`
-and `EffectiveRules`:
+The `Path` variant is `#[non_exhaustive]`, but the outer enum is not.
+Adding a new variant such as `Duration(i64)` or `Url(String)` to
+support a future revision's new primitive type would be a SemVer
+break. Downstream Rust code frequently exhaustively matches
+`ExprValue` — the openjd-model crate's parameter-coercion paths,
+for example, cover all ~12 variants — so adding a variant is not
+purely theoretical.
+
+### 3.3 `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` are not `#[non_exhaustive]`
 
 ```rust
-pub struct EffectiveLimits {
-    pub max_identifier_len: usize,
-    pub max_job_name_len: usize,
+// TaskParameterType (types.rs:235)
+pub enum TaskParameterType { Int, Float, String, Path, ChunkInt }
+
+// TemplateSpecificationVersion (types.rs:107)
+pub enum TemplateSpecificationVersion {
+    JobTemplate2023_09,
+    Environment2023_09,
+}
+
+// FileType (types.rs:22)
+pub enum FileType { Text }
+```
+
+- `TaskParameterType`: `ChunkInt` was added via `TASK_CHUNKING`; a
+  future `LIST[INT]` task parameter type (analogous to `JobParameterType::ListInt`)
+  would break exhaustive matches.
+- `TemplateSpecificationVersion`: a `JobTemplate2027_XX` variant is
+  essentially certain to exist at the next revision.
+- `FileType`: has only `Text` today but the spec has reserved space
+  for e.g. `Binary` since RFC 0001 discussion.
+
+All three grow with the spec. All three are exhaustively matched inside
+the crate and would be silently forced into needing wildcard arms
+on the next addition if external consumers also exhaustive-match.
+
+### 3.4 `EffectiveRules::from_context` does not dispatch on revision
+
+```rust
+// template/validate_v2023_09/mod.rs (current)
+impl EffectiveRules {
+    pub fn from_context(ctx: &ValidationContext) -> Self {
+        let expr = ctx.profile.has_extension(ModelExtension::Expr);
+        let fb1 = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
+        // … no `match ctx.profile.revision()` — directly reads extensions
+    }
+}
+```
+
+`EffectiveLimits::from_context` now dispatches on revision via
+`match { V2023_09 => from_context_v2023_09(ctx) }`, but its sibling
+`EffectiveRules::from_context` was never given the same treatment.
+This is the specific gap from Priority 2 item 8. The fix is one-line
+and mirrors the pattern already established for limits; leaving it
+out means the first revision bump will have one call site that
+silently inherits 2023-09 rules instead of forcing an explicit
+per-revision decision.
+
+### 3.5 `build_library_skeleton` ignores `profile.extensions()`
+
+```rust
+// default_library.rs:32
+fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
+    match profile.revision() {
+        ExprRevision::V2026_02 => {
+            // Expression-level extensions would be merged in based on
+            // `profile.extensions()`; today there are no variants in
+            // `ExprExtension`, so no conditional merges are needed.
+            build_default_library()
+        }
+    }
+}
+```
+
+This is correct *today* (there are no `ExprExtension` variants), but
+the comment describes the convention rather than enforcing it. When
+the first variant is added, nothing in the code will force the author
+to update this function. A small safeguard is to have the function
+iterate `profile.extensions()` explicitly, even if the match body for
+each extension is empty today, so that adding a variant to
+`ExprExtension` produces an exhaustive-match compile error here too.
+(The same pattern `EffectiveLimits::from_context` uses for revision.)
+
+### 3.6 `FunctionLibrary::host_context_enabled: bool`
+
+```rust
+// function_library.rs:62
+pub struct FunctionLibrary {
+    functions: HashMap<String, Vec<FunctionEntry>>,
+    pub host_context_enabled: bool,
+}
+```
+
+This flag is currently meaningful only for `apply_path_mapping`. Any
+future host-state-dependent function (e.g., a hypothetical
+`host_env_var(name)` registered via a `SECRETS` extension) collides
+with this single bit. Readers today are `tests/test_function_context.rs`
+and the doc examples in `profile.rs` / `default_library.rs`; all of
+them use the bool as a "is the host context active?" shorthand. The
+cleanest fix is to replace it with a `HashSet<HostFeature>` (parallel
+to `Extensions`) so "is feature X active?" remains a single-bit read
+but generalises to multiple features. If that seems heavyweight for a
+single-feature system, a method `is_host_enabled()` that derives the
+answer from signature inspection keeps the reading API stable while
+letting the field disappear.
+
+### 3.7 `decode_environment_template` does not wrap struct decoding in a revision match
+
+```rust
+// template/parse.rs — env template decoder
+let et: EnvironmentTemplate = serde_json::from_value(template)
+    .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?;
+// … compared to decode_job_template, which has:
+let jt: JobTemplate = match version.revision() {
+    SpecificationRevision::V2023_09 => serde_json::from_value(template)
+        .map_err(|e| ModelError::DecodeValidation(format!("'{version_str}' failed checks: {e}")))?,
+};
+```
+
+The two decoders diverge. `decode_job_template` was updated to gate
+the struct-layout choice behind a revision match (so a future revision
+that changes `JobTemplate`'s fields produces a compile error at this
+site); `decode_environment_template` was not. The fix is to wrap its
+`from_value` call in the same match. One-line change, parallels the
+Priority 2 item 10 dispatch work.
+
+## 4. Internal implementation readiness for language changes
+
+The following three items are the concrete Priority 3 work from the
+prior report. None has been done.
+
+### 4.1 Operator dispatch is a hardcoded match
+
+```rust
+// eval/evaluator.rs:631
+fn eval_binop(&mut self, b: &ast::ExprBinOp) -> Result<ExprValue, ExpressionError> {
+    let op_name = match b.op {
+        ast::Operator::Add => "__add__",
+        ast::Operator::Sub => "__sub__",
+        // ... 10 more arms ...
+        ast::Operator::BitAnd => {
+            return Err(ExpressionError::unsupported(
+                "Bitwise AND (&) is not supported",
+            ))
+        }
+        // ... more rejected operators ...
+    };
     // ...
 }
-
-impl EffectiveLimits {
-    pub fn from_context(ctx: &ValidationContext) -> Self {
-        let fb1 = ctx.has_extension(KnownExtension::FeatureBundle1);
-        Self {
-            max_identifier_len: if fb1 { 512 } else { 64 },
-            // ...
-        }
-    }
-}
 ```
 
-This is a sound pattern. The rest of the model code consults
-`EffectiveLimits` and `EffectiveRules` rather than branching on
-`KnownExtension` directly, which means new extensions can change the
-effective values without rippling through the whole codebase.
+The same pattern repeats in `eval_compare` (CmpOp → "__eq__" etc.)
+and `eval_boolop`. Consequences for future rev/ext:
 
-### 1.2 Expr-side: three-way library selection with no context
+- A revision that introduces a new binary operator (say `|>` for
+  pipeline application) would need source edits to `eval_binop`
+  plus a new AST node handler, rather than "register the dunder and
+  wire a profile flag."
+- An extension that wants to *remove* `**` (pow) or `%` (mod) has no
+  hook: the match always accepts them and dispatches. `FunctionLibrary`
+  would fail the call with "no matching signature," but the error
+  message would be wrong for the case ("Cannot use '**' operator
+  with int and int" instead of "operator ** is not available under
+  this profile").
+- An extension that remaps `@` (MatMult) to a domain-specific
+  operation, as a pure plugin feature, has no hook at all: the match
+  unconditionally rejects `@`.
 
-`openjd-expr/src/default_library.rs` exposes exactly one cached library
-and two host-context variants:
+The cleanest refactor is an `OperatorTable` type on (or derived from)
+`FunctionLibrary` that maps `ast::Operator` / `ast::CmpOp` / `ast::UnaryOp`
+to dunder names, with reject-list support. A single `lookup(op) ->
+Result<&str, &'static str>` replaces 14 match arms at each call site,
+and the table itself is a tiny associated-const or
+`LazyLock<HashMap<…>>`.
+
+### 4.2 Python-subset acceptance is a hardcoded match
 
 ```rust
-static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(default_library);
-
-pub fn get_default_library() -> &'static FunctionLibrary { &DEFAULT_LIBRARY }
-
-// On the library type:
-pub fn with_host_context<R>(self, rules: R) -> Self where R: IntoHostContextRules;
-pub fn with_unresolved_host_context(self) -> Self;
+// eval/parse.rs::validate_structure_inner
+// ~100 lines of `ast::Expr::Named(_) => return err("Walrus operator (:=) is not supported", …)`,
+// `ast::Expr::Lambda(_) => ...`, `ast::Expr::Tuple(_) => ...`, `ast::Expr::DictComp(_) => ...`,
+// `ast::Expr::SetComp(_) => ...`, `ast::Expr::Generator(_) => ...`, `ast::Expr::FString(_) => ...`,
+// `ast::Expr::EllipsisLiteral(_) => ...`, `ast::Expr::Starred(_) => ...`, `ast::Expr::Await(_) => ...`,
+// plus ListComp constraints ("Multiple 'for' clauses ... are not supported",
+// "Tuple unpacking ... is not supported", "Multiple 'if' clauses ... are not supported").
 ```
 
-There are **exactly** three profiles available:
+This list answers the question "what Python-subset does OpenJD
+accept?" — precisely the thing a future revision or extension would
+most plausibly want to widen (allow dict literals so users can pass
+`{"key": value}`? allow f-strings? lift the "multiple `for`
+clauses" restriction?). Every one of those decisions is currently a
+match arm, not a profile option.
 
-| Profile | How constructed | Used by |
-|---|---|---|
-| Default (submission-time, no host functions) | `get_default_library().clone()` | Job name, task param ranges, template-scope format strings |
-| Host context (rules-bearing) | `…clone().with_host_context(rules)` | `openjd-sessions` runtime, CLI `run` |
-| Unresolved host context (type-checking stub) | `…clone().with_unresolved_host_context()` | Model validation of task/session-scope strings |
+An extension that wanted to lift the "no `match` statements" rule,
+for example, would need either:
+- A profile-threaded parameter into `validate_structure`, with a
+  `profile.ast_allows(NodeKind::Match)` gate inside each rejection arm, or
+- A data-driven `AstAcceptance` set on the profile that the match
+  consults, with each arm becoming `if !self.ast_allows(NodeKind::Match) { return err(…) }`.
 
-The fixed set of registered signatures lives in a single
-`build_default_library()` function that calls ~13 category builders
-(`arithmetic`, `string_ops`, …). None of these accept any argument.
+Either way, `validate_structure` today takes no profile. The function
+signature is `validate_structure_inner(node, source, depth)`.
 
-Model-side code then picks between those three profiles by hand:
+The same shape applies to `eval/parse.rs::check_comprehension_shadowing`
+(a validation rule specific to one aspect of the accepted subset)
+and to the list-comp restrictions inside `validate_structure_inner`.
+
+### 4.3 `PYTHON_KEYWORDS` is a hardcoded const
 
 ```rust
-// format_strings.rs pass 8
-let default_lib = openjd_expr::default_library::get_default_library().clone();
-let host_lib = default_lib.clone().with_unresolved_host_context();
-// … then passes `&default_lib` or `&host_lib` to each validate_fs call
-// depending on the scope of the format string being validated.
+// eval/parse.rs:47
+const PYTHON_KEYWORDS: &[&str] = &[
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+    "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+    "with", "yield",
+];
 ```
 
-and again in `instantiate.rs`, `create_job/mod.rs`, and the CLI/sessions
-runtime. There is no central function-library construction policy — each
-site recapitulates which variant it needs.
-
-### 1.3 Why this matters for future revisions and extensions
-
-Every one of the following kinds of change from a future RFC has to cross
-one of these boundaries:
-
-1. A new revision adds a function (e.g. `uuid4()` for deterministic
-   labels).
-2. A new revision changes a signature (e.g. `round(float, int) -> int`
-   vs. today's `round(float, int) -> float | int`).
-3. A new revision removes or deprecates a function.
-4. A new extension adds functions that are *only* available with that
-   extension enabled (the natural analogue of how `apply_path_mapping`
-   is host-context-only today).
-5. A new extension changes operator semantics (e.g. a `STRING_OPS`
-   extension where `+` on `(path, path)` means "append second to first
-   as a relative path").
-6. A new extension changes validation-only behaviour (e.g. allowing
-   format strings in new positions, introducing a new parameter type).
-
-Case 6 is already handled well by `EffectiveLimits` / `EffectiveRules`.
-Cases 1–5 touch the function library, and the current
-`FunctionLibrary` has no machinery for any of them except (4) —
-partially — via `with_host_context`.
-
-## 2. Public interface readiness
-
-### 2.1 `openjd-expr` public interface
-
-Reviewed via `crates/openjd-expr/src/lib.rs` re-exports and the
-`ParsedExpression` / `EvalBuilder` chain.
-
-**What is good:**
-
-- `EvalBuilder` already decouples parse from evaluate and takes a
-  `&FunctionLibrary` — this is the right place to inject a profile.
-- `FunctionLibrary` is `Clone` and backed by `Arc<dyn Fn>` entries, so
-  a builder-style API that derives libraries from a context is cheap.
-- `FunctionLibrary::register_sig` / `register` / `merge` / `derive_return_type`
-  are already a reasonable "plugin" surface for extensions — they just
-  aren't used that way.
-- `host_context_enabled: bool` is already a runtime capability marker
-  (albeit a narrow one).
-
-**What is not ready:**
-
-- **No way to express "a library for revision R with extensions E".**
-  The only knobs are "default", "host", "unresolved host". Adding a
-  fourth (e.g., a new extension) via another `with_foo()` method does
-  not scale — the combinatorial space is revision × powerset(extensions).
-- **The default library is a `static LazyLock`.** It is baked once at
-  first access from the hardcoded 200-ish signatures in
-  `default_library.rs`. Any caller that wants a different set must
-  clone the static and then mutate — which means model code pays to
-  instantiate and register signatures on every template validation, and
-  any revision-specific default has nowhere to cache itself.
-- **Host context is hard-split from extension context.** Today,
-  "functions that need host state" and "functions from the EXPR
-  extension" are orthogonal, but `with_host_context(rules)` can only
-  be called once, and it captures a fixed set (currently just
-  `apply_path_mapping`). A second host-sensitive extension would need
-  a second `with_*_host_context` method, entrenching the combinatorial
-  growth.
-- **No introspection of "what is available."** Callers cannot query
-  "given this revision + these extensions, is `sum(list[float])`
-  defined?" without building the library first and calling
-  `derive_return_type`. For validation tooling (`openjd check`,
-  editor integrations) this is awkward.
-- **`ExprType`, `TypeCode`, `ExprValue` are effectively frozen** in
-  their public enums. `TypeCode` in `types.rs` is not marked
-  `#[non_exhaustive]` (neither are most of the other public enums in
-  `openjd-expr/src/value.rs`). An extension that introduces a new
-  primitive type (say `duration` or `url`) would be a SemVer-breaking
-  change today.
-- **`KnownExtension` is exported from `openjd-model` but not
-  `openjd-expr`.** The expression crate has no vocabulary to talk
-  about extensions even though its library content depends on them.
-  The only place extension presence is acknowledged in `openjd-expr`
-  is implicitly via host-context registration.
-
-### 2.2 `openjd-model` public interface
-
-**What is good:**
-
-- `ValidationContext` is a stable-looking API with `new`,
-  `with_extensions`, `with_caller_limits`, `has_extension`. It already
-  contains all the information a downstream function-library builder
-  would need.
-- `SpecificationRevision` and `ModelError` are `#[non_exhaustive]`
-  (confirmed in existing model-quality-evaluation-report.md and in
-  `types.rs`). Adding `V2027_xx` is SemVer-compatible.
-- `KnownExtension` variants can be added SemVer-compatibly if the enum
-  is marked `#[non_exhaustive]` — **and this is NOT currently the
-  case**. `KnownExtension`, `JobParameterType`, `TaskParameterType`,
-  `TemplateSpecificationVersion`, `ObjectType`, `DataFlow`, `FileType`,
-  `EndOfLine` are all plain enums.
-- `decode_job_template` / `decode_template` accept a
-  `supported_extensions: Option<&[&str]>` allowlist, so applications
-  can restrict which extensions their environment honours. This is
-  the right pattern.
-- `ValidationContext` is already threaded through all five validation
-  passes and into `create_job`.
-
-**What is not ready:**
-
-- **`ValidationContext` is not exposed to expression evaluation sites.**
-  Model code re-derives `has_expr = ext.contains("EXPR")` or
-  `ctx.has_extension(KnownExtension::FeatureBundle1)` in many places,
-  sometimes from the template's own `extensions` list rather than from
-  a caller-supplied context (e.g. `create_job` rebuilds a
-  `ValidationContext` from `job_template.extensions`). This means an
-  application that wants to reject EXPR in a specific queue cannot do
-  so at `create_job` time — only at `decode_*` time.
-- **Validation entry points are hardwired to
-  `validate_v2023_09::*`.** `template/parse.rs` has `use
-  crate::template::validate_v2023_09 as validate;`. A new revision
-  would require adding `validate_v2027_xx` and a dispatch step in
-  `decode_job_template`. That dispatch does not exist yet. This is a
-  deferred but known cost, not a bug.
-- **`EffectiveLimits::from_context` ignores `ctx.revision`.** All
-  limits branch only on extensions. A new revision that raises a
-  base-spec limit (e.g. 2027 raises `max_identifier_len` to 128 as
-  the baseline) has nowhere to hook in.
-- **`EffectiveRules` likewise ignores revision.** It's extension-only.
-- **`KnownExtension` enum name variants are tied to today's names.**
-  If 2027 renames or deprecates an extension, the enum becomes
-  ambiguous. A forward-compatible approach would make `KnownExtension`
-  carry an association with a revision or be scoped per-revision.
-- **`create_job` rebuilds a `ValidationContext` locally** instead of
-  accepting one from the caller. This makes it impossible for a
-  caller to pass supplementary context (e.g. "treat this job as if
-  it were under a different revision" for testing, or "reject tasks
-  over N even if the template is valid").
-
-### 2.3 Summary table
-
-Original assessment, annotated with Priority 1 changes applied in
-commit `881f78e`:
-
-| Concern | Model | Expr |
-|---|---|---|
-| First-class context struct | ✅ `ValidationContext` | ✅ `ExprProfile` *(P1)* |
-| Public enums marked `#[non_exhaustive]` | ✅ all relevant *(P1)* | ✅ all relevant *(P1)* |
-| Revision dispatch vector | ⚠️ Hardwired to v2023_09 | ⚠️ Single match arm on `ExprRevision::V2026_02` *(P1; vector now exists in `build_library_skeleton`)* |
-| Extension dispatch vector | ✅ `EffectiveLimits` / `EffectiveRules` | ⚠️ `ExprExtension` enum exists but is empty *(P1)* |
-| Function-set parameterisation | N/A | ✅ `FunctionLibrary::for_profile` *(P1; old `LazyLock` kept as deprecated)* |
-| Host-function composition | N/A | ✅ `HostContext` enum with three variants *(P1; old `host_context_enabled: bool` kept for compat)* |
-| Introspection of available functions | N/A | ⚠️ Still only via `derive_return_type` after build |
-| Application-level allowlist | ✅ `supported_extensions` on `decode_*` | ⚠️ Plumbs via `ExprProfile` but model-side adapter is Priority 2 |
-
-*(P1)* = changed by Priority 1. Items still marked ⚠️ or deferred to
-Priority 2 are tracked in the Recommendations section below.
-
-## 3. Internal implementation readiness
-
-### 3.1 `openjd-expr/src/function_library.rs`
-
-The dispatch algorithm itself is extension-friendly: it's purely
-signature-based. If a new signature appears in the library, it gets
-tried in phase 1/2/3 like any other.
-
-The issue is everything around dispatch:
-
-- `FunctionLibrary::new` + `register_sig` is the plugin hook, but
-  there is no "extension registration" convention in the source. A
-  future `FEATURE_BUNDLE_2` that adds `uuid4()`, `now()`, and
-  `env_var(string)` would need (a) a place to live — presumably a new
-  category like `feature_bundle_2()` — and (b) a branch in
-  `build_default_library` that includes it only when the extension
-  is enabled. The current `build_default_library()` has no
-  parameters.
-- `host_context_enabled: bool` is a single flag. A second extension
-  that needs host state (say a hypothetical `SECRETS` extension that
-  registers `get_secret(name) -> string` from a host-supplied
-  callback) cannot coexist with `apply_path_mapping` in a single
-  introspection bit. The flag should become a `HashSet<…>` or be
-  replaced by an "enabled extensions" set on the library.
-- The operator dispatch path in `evaluator.rs` matches AST operator
-  kinds directly to hardcoded dunder names (`Add → "__add__"`, etc.).
-  This is fine for today but means an extension cannot, say, remove
-  `**` or remap `@` to a domain-specific function. A
-  `FunctionLibrary` (or context) should own the operator-to-name map
-  so the operator set is data, not code.
-- `PYTHON_KEYWORDS: &[&str]` and the keyword rename mechanism in
-  `eval/parse.rs` is also hardcoded. If a new revision adds a
-  reserved word (e.g., `when`) or lifts one (e.g. allows bare
-  `match`), the parse layer can't express it.
-
-### 3.2 `openjd-expr/src/default_library.rs`
-
-200+ `register_sig("…").expect("bad builtin signature")` calls split
-across 13 category functions (`arithmetic`, `string_ops`, `list_ops`,
-…). Each `.expect(…)` on a builtin literal is fine; the category
-functions could each take a context and conditionally register.
-Example shape the current code is missing:
-
-```rust
-fn string_ops(ctx: &LibraryContext) -> FunctionLibrary { … }
-fn fb2_ops(ctx: &LibraryContext) -> FunctionLibrary { … }
-
-pub fn build_library(ctx: &LibraryContext) -> FunctionLibrary {
-    let mut lib = FunctionLibrary::new();
-    lib = lib.merge(arithmetic(ctx));
-    lib = lib.merge(string_ops(ctx));
-    // …
-    if ctx.has_extension(KnownExtension::FeatureBundle2) {
-        lib = lib.merge(fb2_ops(ctx));
-    }
-    if ctx.host_rules.is_some() {
-        lib = register_host_context_functions(lib, ctx.host_rules.clone().unwrap());
-    }
-    lib
-}
-```
-
-Today, the entire library is revision/extension-blind and baked once
-into a `LazyLock`.
-
-### 3.3 `openjd-expr/src/eval/evaluator.rs`
-
-Hotspots that a new revision could plausibly touch:
-
-- `eval_binop` hardcodes the operator → dunder mapping (Add, Sub,
-  Mult, Div, FloorDiv, Mod, Pow, and a set of explicit rejections for
-  BitAnd/BitOr/BitXor/LShift/RShift/MatMult).
-- `eval_ifexp`, `eval_listcomp`, `eval_slice`, `eval_subscript`,
-  `eval_boolop`, `eval_compare` implement structural semantics
-  directly. List comprehensions and the walrus operator are
-  effectively part of "the language shape"; a new revision that adds
-  dict comprehensions or lambda expressions would touch this file
-  rather than the library.
-- `MAX_EXPRESSION_DEPTH`, `MAX_PARSE_INPUT_LEN`, `DEFAULT_MEMORY_LIMIT`,
-  `DEFAULT_OPERATION_LIMIT` are public constants. Tuning them per
-  revision would be SemVer-safe (values can change) but forcing them
-  per revision is not possible without new API.
-
-None of these are catastrophic, but they indicate that "what the
-evaluator supports" is scattered across three layers (AST dispatch,
-operator-to-dunder map, library signatures) rather than concentrated
-in a single context.
-
-### 3.4 `openjd-model/src/template/validate_v2023_09/*`
-
-Well-structured. Each pass reads `&ValidationContext` and derives its
-own view. The passes themselves are extension-parameterised in the
-right way. Adding a new pass (or skipping an existing one under a
-future revision) is straightforward.
-
-The main internal coupling issue is the module name itself —
-`validate_v2023_09`. A future revision won't be able to reuse or
-extend this module without a reorganisation.
-
-### 3.5 `openjd-model/src/template/validate_v2023_09/format_strings.rs`
-
-This is where the model directly constructs the three "profiles"
-today:
-
-```rust
-let default_lib = openjd_expr::default_library::get_default_library().clone();
-let host_lib = default_lib.clone().with_unresolved_host_context();
-```
-
-and then picks between `&default_lib` / `&host_lib` on a per-call
-basis depending on the scope being validated. Every future scope
-(e.g. a hypothetical "post-run cleanup" script that has access to a
-new `post_run_exit_code()` function) would require another library
-variable here and another line of branching, duplicating the pattern.
-
-### 3.6 `openjd-model/src/job/create_job/{mod.rs, instantiate.rs}`
-
-`create_job` rebuilds the `ValidationContext` from
-`job_template.extensions` — it does not accept one from the caller.
-Similarly `instantiate.rs` calls
-`openjd_expr::default_library::get_default_library().clone()` and
-`.with_unresolved_host_context()` directly. The choice is hardwired.
-
-## 4. Where the "profile" concept is already implicit
-
-The current code already *has* a profile concept; it is just expressed
-as three magic sites rather than data:
-
-| Implicit profile | Where | What it represents |
-|---|---|---|
-| "submission-time default" | `get_default_library()` | Job / template scope — functions that don't need host state |
-| "unresolved host context" | `…with_unresolved_host_context()` | Session / task scope at template-validation time — same signatures as host, but stub implementations |
-| "host context" | `…with_host_context(rules)` | Session / task scope at runtime, with real path-mapping rules |
-
-The 2×2 of (revision, scope) is collapsed to a 1×3 by assuming one
-revision. Once a second revision exists, it becomes 2×3 minimum and
-the three-way choice stops scaling.
-
-A cleaner factoring is to separate the **axes**:
-
-- Axis A: revision (governs which base functions and operators exist).
-- Axis B: extension set (governs which add-on functions exist).
-- Axis C: host state (governs whether host-context implementations
-  are real or stubs).
-- Axis D: scope-specific symbol availability (already handled by the
-  symbol-table builders in `format_strings.rs`).
-
-Axes A + B + C are exactly what a `ValidationContext`-like struct on
-the expr side would model. Axis D is orthogonal and rightly lives
-outside the library.
-
-## 5. Recommendations
-
-Priority ordering below reflects both user-impact (future-proofing)
-and implementation cost. All are worth considering now while the
-project is pre-release.
-
-### Priority 1 — Do before release
-
-1. ~~**Introduce `ExprProfile` (name negotiable) in `openjd-expr`.**
-   A small struct that carries the information needed to build a
-   function library, independent of `openjd-model`:
-
-   ```rust
-   pub struct ExprProfile {
-       pub revision: ExprRevision,    // expr's own revision enum, mirrors SpecificationRevision
-       pub extensions: ExprExtensions,
-       pub host_context: HostContext, // None | Unresolved | WithRules(Arc<Vec<PathMappingRule>>)
-   }
-   ```
-
-   `ExprRevision` and `ExprExtensions` avoid the reverse-dependency
-   problem. Model can provide `From<&ValidationContext> for ExprProfile`
-   either as a re-export or in a small adapter module, keeping the
-   crate graph unchanged.~~ **Resolved** — added in
-   `crates/openjd-expr/src/profile.rs`. `ExprProfile`, `ExprRevision`
-   (only `V2026_02` today, `#[non_exhaustive]`), `ExprExtension`
-   (empty `#[non_exhaustive]` — reserved for future expr-level
-   extensions), `HostContext` (`None | Unresolved | WithRules`).
-   Model-side `From<&ValidationContext>` adapter is Priority 2.
-
-2. ~~**Replace `get_default_library()` with `FunctionLibrary::for_profile(&ExprProfile)`.**
-   Keep `get_default_library()` as a deprecated alias until 1.0
-   (it maps to a fixed profile: current revision, EXPR enabled, no
-   host context). This preserves the ergonomic zero-arg entry point
-   for simple callers while forcing serious callers to pass a
-   profile.~~ **Resolved** — `FunctionLibrary::for_profile(&ExprProfile)`
-   added in `default_library.rs`. `get_default_library()` marked
-   `#[deprecated(since = "0.2.0", …)]` pointing at the new API. Old
-   callers continue to work; migration is Priority 2.
-
-3. ~~**Cache per-profile libraries in a small `LazyLock<DashMap<…>>`**
-   (or similar) keyed on a hash of the profile's shape, so that
-   hot paths like model validation don't pay registration cost every
-   time. The current single `LazyLock` is the only cached library;
-   any host-context clone pays for a full `HashMap<String, Vec<_>>`
-   copy every call.~~ **Resolved** — added a
-   `LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` cache,
-   keyed on the *rules-independent* portion of the profile (revision,
-   extensions, host-kind). Rules are per-call by design — the cached
-   skeleton is cloned and `with_host_context(rules)` applied on top,
-   preserving the existing session hot path. Verified by
-   `cache_returns_same_arc_for_none_profile` and
-   `with_rules_does_not_cache_rules_variant` tests.
-
-4. ~~**Collapse `with_host_context` and `with_unresolved_host_context`
-   into one parameter on the profile.** The split is an artefact of
-   having no shared structure. `HostContext::Unresolved` and
-   `HostContext::WithRules(rules)` express both cases uniformly and
-   generalise to future host-dependent extensions.~~ **Resolved** —
-   `HostContext::{None, Unresolved, WithRules(Arc<Vec<PathMappingRule>>)}`
-   is a single parameter on `ExprProfile`. The two old
-   `FunctionLibrary` methods remain as deprecated convenience wrappers
-   for backward compatibility; callers routed through `for_profile`
-   use the unified enum.
-
-5. ~~**Mark all cross-crate public enums `#[non_exhaustive]`:**
-   `KnownExtension`, `JobParameterType`, `TaskParameterType`,
-   `TemplateSpecificationVersion`, `ObjectType`, `DataFlow`,
-   `FileType`, `EndOfLine`, `TypeCode`, `PathFormat`. This is the
-   single cheapest future-proofing change and should happen before
-   the first released version.~~ **Resolved** — marked
-   `#[non_exhaustive]`: `KnownExtension`, `JobParameterType`,
-   `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
-   (model); `TypeCode` (expr). **Not** marked: `ObjectType` and
-   `DataFlow` (closed sets by construction), `EndOfLine` (Lf/Crlf/Auto
-   covers the practical space), and `PathFormat` (Posix/Windows/Uri
-   cover the practical space — a new variant would be a deliberate
-   breaking change if it ever happens).
-
-### Priority 2 — Plumb the profile through the model
-
-6. ~~**Thread `ValidationContext` (or a derived `ExprProfile`) into
-   `create_job`.** Accept it as a parameter rather than rebuilding it
-   from the template. This makes application-layer policy (e.g.
-   "strip EXPR even if requested" or "enforce stricter caller limits
-   on this queue") applicable at job-creation time, not only at
-   decode time.~~ **Resolved** — `create_job` now takes
-   `&ValidationContext` in place of `&CallerLimits`; `caller_limits`
-   are carried on the context. Added
-   `JobTemplate::default_validation_context()` so callers that just
-   want the template's declared extensions+revision can write
-   `create_job(&jt, &params, &jt.default_validation_context())`; tests
-   in `test_caller_limits.rs` that construct custom `CallerLimits`
-   attach them with `.with_caller_limits(...)`.
-
-7. ~~**Use `EffectiveLimits::from_context(ctx)` at every limit check**
-   that currently reads hardcoded numbers. Audit for sites that
-   rebuild `EffectiveLimits::default()`.~~ **Resolved** — removed
-   the unused `impl Default for EffectiveLimits` (would have drifted
-   from `from_context_v2023_09` on the next revision bump). Moved the
-   hardcoded `ENV_TEMPLATE_MAX_PARAMS = 50` local constant into a
-   proper `EffectiveLimits::max_env_template_param_count` field so
-   the environment-template param cap is on the same revision-aware
-   footing as every other limit.
-
-8. ~~**Let `EffectiveLimits` and `EffectiveRules` branch on
-   `ctx.revision` as well as `ctx.extensions`.** Today they ignore
-   the revision field. Add a `match ctx.revision { … }` at the top
-   of `from_context` even if the match currently has one arm — this
-   records the intent and flags the right spot for the first
-   revision bump.~~ **Resolved** — both `from_context` methods now
-   dispatch through `match ctx.revision { V2023_09 => ... }` to a
-   private `from_context_v2023_09`. The match lives intra-crate so
-   the compiler treats it exhaustively even though
-   `SpecificationRevision` is `#[non_exhaustive]`; a new variant
-   will produce a compile error at these sites.
-
-9. ~~**Factor `template/validate_v2023_09/` so the passes themselves
-   are revision-agnostic.** Move shared infrastructure
-   (`format_strings.rs`, `limits.rs`, `structure.rs`, helpers) out
-   of the date-named directory into `template/validation/`, and keep
-   only revision-specific glue in `v2023_09/`. Then a future
-   `v2027_xx` submodule re-uses the pass implementations with
-   different `EffectiveLimits` / `EffectiveRules` inputs.~~
-   **Resolved (conservative form)** — created
-   `template/validation/` as the revision-neutral entry point. It
-   re-exports `EffectiveLimits` / `EffectiveRules` and its top-level
-   `validate_job_template` / `validate_environment_template` functions
-   dispatch on `ctx.revision` before calling into the revision-
-   specific pipeline (still located in `template/validate_v2023_09/`).
-   The decode layer in `template/parse.rs` now routes through
-   `template::validation` rather than directly into the v2023_09
-   module. A future `validate_v2027_xx` submodule adds a match arm
-   and its own pipeline; the physical file layout of the existing
-   v2023_09 passes was left intact because distinguishing
-   "revision-agnostic" from "operates on v2023_09 template types" is
-   not something Rust's type system helps with today — the passes
-   can be lifted into `validation/` when a second revision actually
-   needs to share them.
-
-10. ~~**Introduce a `decode_*` dispatch layer** that inspects the
-    `specificationVersion` string and routes to the matching
-    revision-specific validator. Today the dispatch is a one-arm
-    match by construction. Making it explicit now is cheap; making
-    it explicit after a second revision is released is disruptive.~~
-    **Resolved** — `decode_job_template` and
-    `decode_environment_template` now (a) derive the revision via
-    `version.revision()` rather than hardcoding
-    `SpecificationRevision::V2023_09`, and (b) route the
-    `serde_json::from_value::<JobTemplate>` step through a
-    `match version.revision()` so future revisions that need a
-    different struct layout have an explicit dispatch point. The
-    resulting `ValidationContext` flows through
-    `template::validation::validate_*_template`, which is the
-    revision-dispatch layer added in item 9.
-
-### Priority 3 — Internal cleanup to support future operators/keywords
-
-11. **Make the operator→dunder map data, not match arms.** Move
-    `Add → "__add__"`, etc. into a small table owned by the
-    library (or the profile). This enables an extension to register
-    a new operator (if one is ever specified) or remove one.
-
-12. **Move `PYTHON_KEYWORDS` and the keyword-rename mechanism
-    behind a profile-derived set.** If a future revision adds a
-    reserved word, the parser can pick it up from the profile
-    rather than requiring a source edit that becomes a SemVer
-    consideration.
-
-13. **Replace `host_context_enabled: bool` with a
-    `HashSet<KnownHostFeature>` (or similar).** Prevents "is this
-    library host-context-enabled?" from becoming a leaky
-    abstraction the moment a second host-sensitive extension
-    appears.
-
-### Priority 4 — Documentation
-
-14. **Add `specs/expr/public-api.md` and `specs/model/public-api.md`.**
-    Per AGENTS.md ("Every crate's spec directory must include a
-    `public-api.md`"), this is currently missing for both crates.
-    Use the opportunity to document the profile concept once it
-    lands.
-
-15. **Document the stable/unstable surface of `openjd-expr`.** In
-    particular, call out which types are `#[non_exhaustive]` and
-    which are construction-only (no destructuring guarantees).
-    The current public surface is large and tolerably well
-    documented per-item, but the stability contract is implicit.
-
-## 6. Appendix — Concrete change sketch for the Priority 1 refactor
-
-This is illustrative, not a finished API. It shows the shape of the
-change so the decision becomes concrete.
-
-```rust
-// openjd-expr/src/profile.rs (new)
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ExprRevision {
-    V2026_02,   // first EXPR revision
-    // future: V2027_xx
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ExprExtension {
-    // Populated as language-level extensions appear.
-    // "EXPR" itself is implicit in having an expression language at all,
-    // so revisions gate "is there a language" and extensions gate add-ons.
-}
-
-#[derive(Debug, Clone, Default)]
-pub enum HostContext {
-    #[default]
-    None,
-    Unresolved,
-    WithRules(Arc<Vec<PathMappingRule>>),
-}
-
-#[derive(Debug, Clone)]
-pub struct ExprProfile {
-    pub revision: ExprRevision,
-    pub extensions: HashSet<ExprExtension>,
-    pub host_context: HostContext,
-}
-
-impl ExprProfile {
-    pub fn current() -> Self { /* latest revision, no extensions, no host */ }
-    pub fn has_extension(&self, ext: ExprExtension) -> bool { /* … */ }
-}
-
-// openjd-expr/src/default_library.rs
-
-impl FunctionLibrary {
-    pub fn for_profile(profile: &ExprProfile) -> Arc<Self> {
-        // Look up in a profile cache, build if missing
-    }
-}
-
-#[deprecated(note = "use FunctionLibrary::for_profile(&ExprProfile::current())")]
-pub fn get_default_library() -> &'static FunctionLibrary { /* … */ }
-```
-
-Model-side integration is then a small adapter:
-
-```rust
-// openjd-model/src/types.rs
-
-impl ValidationContext {
-    pub fn to_expr_profile(&self, host: HostContext) -> ExprProfile {
-        ExprProfile {
-            revision: self.revision.into(),
-            extensions: self.extensions.iter().filter_map(to_expr_ext).collect(),
-            host_context: host,
-        }
-    }
-}
-```
-
-Callers that today read `openjd_expr::default_library::get_default_library().clone()`
-become `FunctionLibrary::for_profile(&ctx.to_expr_profile(HostContext::None))`,
-and the library choice is uniformly driven from the context rather
-than from three ad-hoc variants.
-
-## 7. Verification
-
-Baseline build before writing this report:
+This is the list the contextual-keyword-rename mechanism iterates to
+recover from parse errors ("user wrote `Param.if`, rewrite to
+`Param.xf`, reparse"). It's reachable because Python's grammar is
+context-insensitive but OpenJD wants `.if` to be a legal attribute.
+
+A future revision could plausibly widen or narrow the set:
+- If a future Python parser (ruff is on a rolling version) adds a new
+  reserved word (e.g., `match`/`case` as hard keywords in a future
+  Python), this const silently falls out of sync — the parser will
+  reject `Param.match`, but the fallback rename won't kick in because
+  `match` isn't in the list.
+- If OpenJD decides to allow users to name identifiers that clash
+  with Python keywords by some other mechanism (`\if` escape? a
+  dedicated syntax?), the rename code needs rewriting. A profile
+  hook lets the decision be per-revision.
+
+The refactor is small: move the const into the profile (or into a
+library-owned table derived from the profile), and pass it into
+`parse_inner`.
+
+## 5. Composite scenario walkthroughs
+
+To make the gaps concrete, here is how four realistic future RFCs
+would hit the codebase today.
+
+### 5.1 RFC: "Revision 2027-XX raises `max_identifier_len` baseline to 128"
+
+1. Add `V2027_XX` variant to `SpecificationRevision` (non_exhaustive —
+   no SemVer break). ✅
+2. Compile error in `EffectiveLimits::from_context` forces a decision.
+   Add `V2027_XX => Self::from_context_v2027_xx(ctx)` arm. ✅
+3. Compile error in `decode_job_template` → match `version.revision()`
+   forces a decision about `JobTemplate` struct layout. `decode_environment_template`
+   **silently** keeps using the 2023-09 `EnvironmentTemplate` struct
+   because its `from_value` call isn't gated. ⚠️ (Gap §3.7.)
+4. Compile error in `template::validation::validate_*_template`
+   dispatch forces a decision about pipeline reuse. ✅
+5. Compile error in `build_library_skeleton` forces a decision about
+   library. ✅
+6. `EffectiveRules::from_context` **silently** returns 2023-09 rules —
+   no compile error because the function doesn't match on revision.
+   ❌ (Gap §3.4.)
+
+Outcome: mostly caught by the compiler, two silent gaps
+(§3.4, §3.7).
+
+### 5.2 RFC: "New extension `DICT_LITERAL` adds dict literals"
+
+1. Add `DictLiteral` variant to `ModelExtension`. **Breaks any
+   external pattern-match** because `ModelExtension` is not
+   `#[non_exhaustive]`. ❌ (Gap §3.1.)
+2. Parser's `ast::Expr::Dict(_) => return err("Dict literals are not
+   supported", source, node)` in `validate_structure_inner` unconditionally
+   rejects. **No profile threading into `validate_structure`**. ❌ (§4.2.)
+3. Evaluator has no `eval_dict` handler. Would need adding — but under
+   what profile gate? `validate_structure` is not profile-aware so the
+   evaluator can trust that only accepted node shapes reach it. ❌
+4. `ExprValue` has no `Dict(HashMap<_, _>)` variant. Adding one breaks
+   exhaustive matches. ❌ (Gap §3.2.)
+
+Outcome: impossible to add this extension without structural code
+changes in at least four places; none of them produce compile errors
+against the un-upgraded baseline. All four are gaps listed above.
+
+### 5.3 RFC: "Revision 2027-XX changes `round(float, int) -> int` (drops the `int | float` union)"
+
+1. `FunctionLibrary::for_profile` for the new revision can register
+   the new signature *instead of* the old one — the library supports
+   per-profile signature sets cleanly. ✅
+2. In `build_library_skeleton`, the new revision's arm builds a
+   library without the old signature. ✅
+3. Test cases in `crates/openjd-expr/tests/` that use `round(x, 1)`
+   and expect `float | int` return would need updating — but these
+   would fail at test time against the new profile. ✅
+4. `derive_return_type` correctly returns `int` for the new signature.
+   ✅
+
+Outcome: this case is handled well. The profile design does its job.
+
+### 5.4 RFC: "New extension `PIPELINE_OP` adds `|>` as a new binary operator"
+
+1. `ruff_python_parser` does not parse `|>`. This extension would need
+   to change parsers or add a pre-processor. ❌ Out-of-scope for this
+   report, but worth noting.
+2. If the parser accepted `|>` and produced `ast::Operator::Pipeline`,
+   `eval_binop`'s match would not cover it and produce a warning
+   (non-exhaustive match) at compile time — but `ast::Operator` is
+   external, so the match today uses exhaustive coverage and would
+   need a new arm. No profile gating. ❌ (§4.1.)
+3. The dispatch would wire through `dispatch_with_node("__pipeline__", ...)`
+   and `FunctionLibrary` would register the dunder cleanly. ✅
+
+Outcome: the library accommodates the new operator, but the dispatch
+layer is code-shaped, not data-shaped, so the extension has to patch
+two files rather than one.
+
+## 6. Specific recommendations
+
+Ordered by value-for-effort, with each item scoped to a single PR.
+
+### Urgent (before release)
+
+1. **Mark `ModelExtension` `#[non_exhaustive]`.** One-line change.
+   Highest value because `ModelExtension` is the enum with the highest
+   expected rate of change post-release. (Gap §3.1.)
+
+2. **Mark `ExprValue` `#[non_exhaustive]`** (the outer enum, not just
+   the `Path` variant). One-line change; the existing `Path`
+   attribute is kept for its separate purpose (preventing struct
+   construction). (Gap §3.2.)
+
+3. **Mark `TaskParameterType`, `TemplateSpecificationVersion`, `FileType`
+   `#[non_exhaustive]`.** Three one-line changes, same rationale.
+   (Gap §3.3.)
+
+4. **Add `match ctx.profile.revision()` wrapper to
+   `EffectiveRules::from_context`**, dispatching into a
+   `from_context_v2023_09(ctx)` helper. Mirrors `EffectiveLimits`
+   exactly. (Gap §3.4.)
+
+5. **Make `build_library_skeleton` iterate `profile.extensions()`
+   explicitly** (even with an empty match body per extension today), so
+   that the first added `ExprExtension` variant produces a compile
+   error here. (Gap §3.5.)
+
+6. **Wrap `serde_json::from_value::<EnvironmentTemplate>` in a
+   `match version.revision()`** in `decode_environment_template`,
+   mirroring `decode_job_template`. (Gap §3.7.)
+
+The six together are probably 35 lines of code and close every
+structural Priority 1/2 gap.
+
+### Priority — before first non-trivial extension lands
+
+7. **Replace `host_context_enabled: bool` with a
+   `HashSet<HostFeature>`**, or hide it behind an `is_host_enabled()`
+   method so callers stop depending on the field directly. (Gap §3.6.)
+
+8. **Extract the operator-to-dunder map.** Move the `match b.op`
+   arms in `eval_binop`, the `match op` arms in `eval_compare`, and
+   the `UnaryOp` → dunder mapping into a single `OperatorTable`.
+   Start with the table owning exactly today's behavior (all accepts
+   + the BitOp reject list), then allow profile-driven overrides
+   as a second step. (§4.1, Priority 3 item 11.)
+
+9. **Thread the profile into `validate_structure`.** Add a
+   `profile: &ExprProfile` parameter to `validate_structure_inner`
+   and each rejection arm. Start with every arm reading an empty
+   default (no behaviour change), then add `if !profile.allows_dict_literals() { return err(...) }`
+   kinds of gates as extensions require them. This is Priority 3
+   item 12 generalized. (§4.2.)
+
+10. **Move `PYTHON_KEYWORDS` to a profile-owned set.** Smallest of
+    the Priority 3 items. (§4.3.)
+
+### Documentation debt
+
+11. **Write `specs/expr/public-api.md`.** The re-exports in
+    `crates/openjd-expr/src/lib.rs` are the starting inventory; each
+    item needs a one-line description and a stability classification
+    (stable / stable construction-only / non-exhaustive). Use this
+    as the opportunity to document the profile concept from first
+    principles. (Priority 4 item 14.)
+
+12. **Write `specs/model/public-api.md`.** Same, for `openjd-model`.
+    Especially call out `ModelProfile::to_expr_profile` as the
+    supported bridge to `openjd-expr`. (Priority 4 item 14.)
+
+13. **Document the `#[non_exhaustive]` surface.** Either in the
+    public-api.md docs above, or in a short `specs/expr/stability.md`
+    (and model equivalent). The list is small enough to enumerate.
+    (Priority 4 item 15.)
+
+## 7. What the current architecture gets right
+
+Since the refactor, several things are notably well-designed for
+forward compatibility; worth preserving as the above recommendations
+are implemented:
+
+- **The `From<SpecificationRevision>` to `ExprRevision` conversion
+  in `ModelProfile::to_expr_profile` is explicit** (a match, not a
+  default). When the two enums' variant sets diverge (e.g., model
+  V2023_09 keeps working with expr V2026_02 but V2027_XX changes
+  both), this is the single place to record the mapping. Well-placed.
+
+- **`ProfileKey` excludes rules** (`HostKind` discriminates only
+  `None` / `Unresolved` / `WithRules` presence, not the rules
+  themselves), so the session's hot path of "build a library with
+  every new set of rules" is a cheap clone-and-register on top of a
+  cached skeleton. The comment in `default_library.rs` explaining
+  this is also worth keeping.
+
+- **Host state is an argument to `to_expr_profile`, not a field of
+  `ModelProfile`.** Correct: the model has no opinion on host state,
+  and sessions/CLI do. The current signature `to_expr_profile(&self,
+  host_context: HostContext) -> ExprProfile` reflects that cleanly.
+
+- **`JobTemplate::default_validation_context()` and `JobTemplate::profile()`
+  give callers a one-call ergonomic hook** for the "just do what the
+  template says" case, with override still possible. The session
+  hot path and CLI use this pattern consistently.
+
+- **`create_job` takes the validation context already** — so a caller
+  that wants to (for example) enforce stricter caller limits at
+  job-creation time distinct from decode time can do so, matching
+  the prior report's item 6.
+
+- **Tests like `cache_returns_same_arc_for_none_profile` and
+  `with_rules_does_not_cache_rules_variant` codify the cache
+  behavior as invariants**, not just "probably works." The
+  `for_profile_tests` module in `default_library.rs` deliberately
+  avoids the deprecated surface to prove the new API stands alone.
+
+## 8. Build and test verification
 
 ```text
 $ cargo build -p openjd-expr -p openjd-model
-   Compiling openjd-expr v0.1.0 (…/crates/openjd-expr)
-   Compiling openjd-model v0.1.0 (…/crates/openjd-model)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.63s
+   Compiling openjd-model v0.1.0 (.../crates/openjd-model)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.18s
+
+$ cargo test -p openjd-expr -p openjd-model --lib
+# (truncated) test result: ok. 333 passed; 0 failed; 0 ignored
 ```
 
-Clean, no warnings. The existing quality reports
-(`reports/expr-quality-evaluation-report.md`,
-`reports/model-quality-evaluation-report.md`) remain the authoritative
-source on the general health of each crate; this report focuses only
-on the forward-compatibility question.
-on the general health of each crate; this report focuses only
-on the forward-compatibility question.
+Clean build, no warnings, no failed tests. Baseline is sound; the
+gaps above are about structure and specification, not correctness.
+
+## 9. Appendix — Verified file/line references
+
+For reviewers checking this report:
+
+| Claim | File | Anchor |
+|-------|------|--------|
+| `ExprProfile` exists and is `#[non_exhaustive]` | `crates/openjd-expr/src/profile.rs` | lines 42–77 |
+| `FunctionLibrary::for_profile` + cache | `crates/openjd-expr/src/default_library.rs` | lines 17–131 |
+| `build_library_skeleton` revision match | `crates/openjd-expr/src/default_library.rs` | lines 36–46 |
+| `ModelProfile::to_expr_profile` | `crates/openjd-model/src/types.rs` | ~line 468 (method body) |
+| `EffectiveLimits::from_context` revision match | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `from_context` + `from_context_v2023_09` |
+| `EffectiveRules::from_context` **missing** revision match | `crates/openjd-model/src/template/validate_v2023_09/mod.rs` | `EffectiveRules::from_context` |
+| `validation::validate_*_template` revision match | `crates/openjd-model/src/template/validation/mod.rs` | lines 35–57 |
+| `decode_job_template` revision match | `crates/openjd-model/src/template/parse.rs` | `match version.revision()` around the `from_value` call |
+| `create_job` takes `&ValidationContext` | `crates/openjd-model/src/lib.rs` | `pub use job::create_job::create_job;` |
+| `JobTemplate::default_validation_context` + `profile` | `crates/openjd-model/src/template/job_template.rs` | trailing impl block |
+| Operator dispatch hardcoded | `crates/openjd-expr/src/eval/evaluator.rs` | lines 631–680 (`eval_binop`), 795–811 (`eval_compare`) |
+| `PYTHON_KEYWORDS` const | `crates/openjd-expr/src/eval/parse.rs` | line 47 |
+| `validate_structure_inner` accept/reject arms | `crates/openjd-expr/src/eval/parse.rs` | in `validate_structure_inner` — dozen+ `ast::Expr::… => return err(...)` arms |
+| `FunctionLibrary::host_context_enabled` bool | `crates/openjd-expr/src/function_library.rs` | line 62 |
+| `ModelExtension` (not `#[non_exhaustive]`) | `crates/openjd-model/src/types.rs` | around line 327 |
+| `ExprValue` outer enum (not `#[non_exhaustive]`) | `crates/openjd-expr/src/value.rs` | around line 120 |
+| `TaskParameterType`, `TemplateSpecificationVersion`, `FileType` (not `#[non_exhaustive]`) | `crates/openjd-model/src/types.rs` | lines 22, 108, 236 |
+| No `specs/expr/public-api.md` or `specs/model/public-api.md` | `specs/expr/`, `specs/model/` | directory listing |
