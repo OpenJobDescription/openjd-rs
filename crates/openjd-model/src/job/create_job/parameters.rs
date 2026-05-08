@@ -618,7 +618,8 @@ pub fn preprocess_job_parameters(
                     }
                     normalized
                 } else if is_absolute_for_format(job_template_dir, path_format) {
-                    join_for_format(job_template_dir, default, path_format)
+                    let joined = join_for_format(job_template_dir, default, path_format);
+                    normalize_path_str(&joined, path_format)
                 } else {
                     default.clone()
                 }
