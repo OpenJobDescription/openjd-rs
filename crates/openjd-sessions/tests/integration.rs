@@ -36,3 +36,5 @@ mod test_session_scenarios;
 mod test_tempdir_os;
 #[path = "integration/test_windows_permissions.rs"]
 mod test_windows_permissions;
+#[path = "integration/test_wrap_actions.rs"]
+mod test_wrap_actions;

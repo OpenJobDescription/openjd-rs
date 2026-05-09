@@ -24,6 +24,7 @@ fn action(cmd: &str, args: Vec<&str>) -> Action {
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: None,
         cancelation: None,
+        run_on_host: None,
     }
 }
 
@@ -45,6 +46,9 @@ fn env_with_enter(name: &str, cmd: &str, args: Vec<&str>) -> Environment {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action(cmd, args)),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -368,6 +372,7 @@ async fn test_run_task_with_variables() {
                 args: Some(vec![fs("-c"), fs("echo {{ Task.Param.Greeting }}")]),
                 timeout: None,
                 cancelation: None,
+                run_on_host: None,
             },
         },
         embedded_files: None,
@@ -403,6 +408,9 @@ async fn test_enter_environment_with_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo ENV_VAR=$ENV_VAR"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -479,6 +487,9 @@ async fn test_enter_no_action() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -526,6 +537,9 @@ async fn test_enter_environment_with_resolved_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo RESOLVED=$RESOLVED"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -550,6 +564,9 @@ async fn test_exit_environment_basic() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo exited"])),
             },
             embedded_files: None,
@@ -575,6 +592,9 @@ async fn test_exit_environment_with_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo EXIT_VAR=$EXIT_VAR"])),
             },
             embedded_files: None,
@@ -621,6 +641,9 @@ async fn test_exit_environment_fail_run() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "exit 1"])),
             },
             embedded_files: None,
@@ -737,6 +760,9 @@ async fn test_def_via_stdout_overrides_direct() {
                     "sh",
                     vec!["-c", "echo 'openjd_env: OVERRIDE=from_stdout'"],
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -964,6 +990,9 @@ async fn test_def_via_redacted_env_with_variables() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: TOKEN=secret-token'"],
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -1484,6 +1513,9 @@ async fn test_exit_environment_with_per_action_os_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo EXIT_VAR=$EXIT_VAR"])),
             },
             embedded_files: None,
@@ -1744,6 +1776,7 @@ fn action_with_timeout(cmd: &str, args: Vec<&str>, timeout_secs: &str) -> Action
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: Some(fs(timeout_secs)),
         cancelation: None,
+        run_on_host: None,
     }
 }
 
@@ -1800,6 +1833,9 @@ async fn test_enter_environment_action_timeout_enforced() {
                     vec!["-c", "echo entering; sleep 30"],
                     "1",
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -1835,6 +1871,9 @@ async fn test_exit_environment_action_timeout_enforced() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("echo", vec!["entered"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action_with_timeout(
                     "sh",
                     vec!["-c", "echo exiting; sleep 30"],
@@ -1968,6 +2007,9 @@ async fn test_callback_exit_env_with_script() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo bye"])),
             },
             embedded_files: None,
@@ -2181,6 +2223,9 @@ async fn test_exit_environment_failure_still_pops_for_lifo() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo enter2"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "exit 1"])),
             },
             embedded_files: None,
@@ -2463,6 +2508,9 @@ async fn test_redacted_env_sets_var_with_extension() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,
@@ -2500,6 +2548,9 @@ async fn test_redacted_env_does_not_set_var_without_extension() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,
@@ -2531,6 +2582,9 @@ async fn test_redactions_disabled_with_no_profile() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,

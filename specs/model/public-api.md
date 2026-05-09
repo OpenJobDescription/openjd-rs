@@ -378,6 +378,11 @@ pub struct job::Action {
     pub args: Option<Vec<FormatString>>,
     pub timeout: Option<FormatString>,
     pub cancelation: Option<CancelationMode>,
+    /// RFC 0008 — if `Some(true)`, this action runs directly on the host
+    /// and is not intercepted by any active wrap hook. Requires the
+    /// `WRAP_ACTIONS` extension at template-validation time. Serialized
+    /// only when non-`None`.
+    pub run_on_host: Option<bool>,
 }
 
 pub struct job::Environment {
@@ -397,6 +402,15 @@ pub struct job::EnvironmentScript {
 
 pub struct job::EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions. Requires
+    /// the `WRAP_ACTIONS` extension at template-validation time.
+    pub on_wrap_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions. Requires the
+    /// `WRAP_ACTIONS` extension at template-validation time.
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions. Requires
+    /// the `WRAP_ACTIONS` extension at template-validation time.
+    pub on_wrap_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }
 
@@ -491,6 +505,7 @@ pub enum ModelExtension {
     RedactedEnvVars,   // RFC 0003 — "REDACTED_ENV_VARS"
     FeatureBundle1,    // RFC 0004 — "FEATURE_BUNDLE_1"
     Expr,              // RFC 0005 — "EXPR"
+    WrapActions,       // RFC 0008 — "WRAP_ACTIONS"
 }
 
 impl ModelExtension {

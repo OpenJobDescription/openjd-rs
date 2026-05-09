@@ -161,6 +161,38 @@ impl EnvironmentScriptRunner {
         self.base.state
     }
 
+    /// Run an arbitrary pre-resolved `Action` against a caller-supplied
+    /// symbol table. This is the low-level entry point used by the
+    /// session's RFC 0008 wrap-hook dispatch, which chooses the action
+    /// (the outer environment's `onWrapEnter` or `onWrapExit`) and the
+    /// symbol table (seeded with `Env.Wrapped.*`) outside the runner.
+    ///
+    /// Unlike `enter` / `exit`, this method does NOT materialize any
+    /// embedded files or evaluate let bindings — the caller is
+    /// responsible for preparing the symbol table before calling.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_wrap_action(
+        &mut self,
+        action: &Action,
+        symtab: &SymbolTable,
+        library: Option<&FunctionLibrary>,
+        env_vars: &HashMap<String, Option<String>>,
+        message_tx: mpsc::UnboundedSender<ActionMessage>,
+        default_timeout: Option<Duration>,
+    ) -> Result<SubprocessResult, SessionError> {
+        self.base
+            .run_action(
+                action,
+                symtab,
+                library,
+                env_vars,
+                message_tx,
+                default_timeout,
+                Duration::from_secs(30),
+            )
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run_env_action(
         &mut self,

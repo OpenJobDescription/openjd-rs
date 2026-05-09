@@ -87,6 +87,12 @@ pub struct Action {
     pub args: Option<Vec<FormatString>>,
     pub timeout: Option<FormatString>,
     pub cancelation: Option<CancelationMode>,
+    /// RFC 0008 — if `Some(true)`, this action always runs directly on the
+    /// host and is not intercepted by any active wrap hook. `None` is
+    /// equivalent to `Some(false)` for runtime purposes; both forms are
+    /// preserved through serialization for round-trip fidelity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_on_host: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +120,15 @@ pub struct EnvironmentScript {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }
 

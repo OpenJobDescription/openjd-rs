@@ -15,6 +15,11 @@ pub struct Action {
     pub args: Option<Vec<FormatString>>,
     pub cancelation: Option<CancelationMode>,
     pub timeout: Option<FormatString>,
+    /// §5 Action — if `true`, this action always runs directly on the host
+    /// and is not intercepted by any active wrap hook. Requires the
+    /// `WRAP_ACTIONS` extension. See RFC 0008.
+    #[serde(default)]
+    pub run_on_host: Option<bool>,
 }
 
 /// §5.3 CancelationMethod — discriminated union on `mode`.
@@ -86,5 +91,14 @@ pub struct StepActions {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }

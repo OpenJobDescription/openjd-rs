@@ -105,6 +105,7 @@ impl StepTemplate {
                         args: Some(args),
                         cancelation: sa.cancelation.clone(),
                         timeout: sa.timeout.clone(),
+                        run_on_host: None,
                     },
                 },
                 embedded_files: Some(vec![EmbeddedFile {

@@ -25,7 +25,13 @@ fn make_env(name: &str, on_enter: Option<Action>, on_exit: Option<Action>) -> En
         description: None,
         script: Some(EnvironmentScript {
             let_bindings: None,
-            actions: EnvironmentActions { on_enter, on_exit },
+            actions: EnvironmentActions {
+                on_enter,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
+                on_exit,
+            },
             embedded_files: None,
         }),
         variables: None,
@@ -39,6 +45,7 @@ fn make_action(command: &str, args: Vec<&str>) -> Action {
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: None,
         cancelation: None,
+        run_on_host: None,
     }
 }
 
@@ -159,7 +166,11 @@ async fn test_env_with_embedded_files() {
                     args: Some(vec![fs("{{ Env.File.Script }}")]),
                     timeout: None,
                     cancelation: None,
+                    run_on_host: None,
                 }),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {
@@ -193,6 +204,9 @@ async fn test_env_with_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo MY_VAR=$MY_VAR"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -459,6 +473,9 @@ async fn test_env_with_resolved_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo RESOLVED=$RESOLVED"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -489,7 +506,11 @@ async fn test_env_with_let_bindings_and_embedded_files() {
                     args: Some(vec![fs("-c"), fs("echo {{ configPath }}")]),
                     timeout: None,
                     cancelation: None,
+                    run_on_host: None,
                 }),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {
@@ -531,6 +552,7 @@ async fn test_step_with_let_bindings_and_embedded_files() {
                 args: Some(vec![fs("{{ Task.File.Data }}")]),
                 timeout: None,
                 cancelation: None,
+                run_on_host: None,
             },
         },
         embedded_files: Some(vec![EmbeddedFile {
