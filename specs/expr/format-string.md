@@ -110,7 +110,7 @@ Defaults:
 
 | Field | Default |
 |---|---|
-| `library` | `None` (use `get_default_library()`) |
+| `library` | `None` (evaluator falls back to `FunctionLibrary::for_profile(&ExprProfile::current())`) |
 | `path_format` | `PathFormat::host()` |
 | `target_type` | `None` |
 
@@ -119,10 +119,12 @@ Example — configure every axis:
 ```rust
 // Build a library with host context baked in — this is how
 // apply_path_mapping gets its rules.
-let lib = get_default_library().clone().with_host_context(rules);
+let profile = ExprProfile::current()
+    .with_host_context(HostContext::with_rules(rules));
+let lib = FunctionLibrary::for_profile(&profile);
 
 let opts = FormatStringOptions::new()
-    .with_library(&lib)
+    .with_library(&*lib)
     .with_path_format(PathFormat::Posix)
     .with_target_type(&ExprType::PATH);
 
@@ -131,9 +133,11 @@ let string = fs.resolve_string_with(&symtab, &opts)?;  // String (ignores target
 ```
 
 Path mapping rules are **not** a format-string option. They belong to the
-`apply_path_mapping` closure registered on the library via
-[`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
-Pass the configured library into `with_library` and the closure handles the rest.
+`apply_path_mapping` closure registered on the library when that library is
+built from an [`ExprProfile`](../../crates/openjd-expr/src/profile.rs) whose
+`host_context` is `HostContext::WithRules(...)` — see
+[function-library.md § Host Context](function-library.md#host-context). Pass
+the configured library into `with_library` and the closure handles the rest.
 
 The `with_library` method accepts either `&FunctionLibrary` or
 `Option<&FunctionLibrary>` (via `impl Into<Option<...>>`), so callers can plumb

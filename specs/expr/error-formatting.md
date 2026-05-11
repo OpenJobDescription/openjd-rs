@@ -85,6 +85,7 @@ pub enum ExpressionErrorKind {
     IndexOutOfBounds  { message: String },
     MemoryLimitExceeded { used: usize, limit: usize },
     OperationLimitExceeded { count: usize, limit: usize },
+    ExpressionTooDeep { depth: usize, limit: usize },
     UnsupportedSyntax { feature: String },
     ExplicitFail(String),
     ParseError(String),
@@ -103,6 +104,7 @@ pub enum ExpressionErrorKind {
 | `IndexOutOfBounds` | List or range index outside valid range |
 | `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit |
 | `OperationLimitExceeded` | Operation count exceeds configured limit; reports the count and limit |
+| `ExpressionTooDeep` | AST nesting depth exceeds `MAX_EXPRESSION_DEPTH`; raised by parser structural validator and by evaluator recursion guard |
 | `UnsupportedSyntax` | Valid Python syntax not supported by the expression language |
 | `ExplicitFail` | The `fail()` function was called |
 | `ParseError` | Expression could not be parsed |
@@ -114,11 +116,21 @@ Callers should always include a wildcard arm when matching.
 Convenience constructors on `ExpressionError` set the kind automatically:
 
 ```rust
-ExpressionError::undefined_variable("Param.Missing")
 ExpressionError::type_error("expected int, got string")
 ExpressionError::integer_overflow()           // no arg — message is fixed
 ExpressionError::division_by_zero("Division") // op label: "Division" or "Modulo"
+ExpressionError::float_error("NaN")
+ExpressionError::index_out_of_bounds("Index 5 out of bounds for list of length 3")
+ExpressionError::unsupported("Lambda expressions are not supported")
+ExpressionError::explicit_fail("custom failure message")
+ExpressionError::parse_error("Syntax error: ...")
+ExpressionError::expression_too_deep(depth, MAX_EXPRESSION_DEPTH)
 ```
+
+`UndefinedVariable` and `UnknownFunction` carry structured fields that no
+convenience constructor shortcut wraps today — build them via
+`ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable { name, suggestion })`
+or the equivalent `UnknownFunction` form.
 
 ## Smart Caret Positioning
 

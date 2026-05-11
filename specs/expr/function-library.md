@@ -51,8 +51,9 @@ default library to add host-context extensions.
 
 The `host_context_enabled` flag is a runtime marker used by callers (model-layer
 template validation) to discover whether host-only functions like
-`apply_path_mapping` are available on this library instance. It is set by
-`with_host_context()`.
+`apply_path_mapping` are available on this library instance. It is set when
+`FunctionLibrary::for_profile` builds a library from an `ExprProfile` whose
+`host_context` is `HostContext::WithRules(...)` or `HostContext::Unresolved`.
 
 Function pointers and closures both work — `Arc<dyn Fn + Send + Sync>` is
 `Clone` and thread-safe, preserving `FunctionLibrary: Clone + Send + Sync`.
@@ -259,65 +260,108 @@ fn build_default_library() -> FunctionLibrary {
 ```
 
 The category builders (`arithmetic()`, `string_ops()`, …) are not part of the public
-API; the only publicly exported constructor is `get_default_library()`.
+API; the publicly exported entry point is
+[`FunctionLibrary::for_profile(&ExprProfile)`](#for_profile).
 
 ## Caching
 
-The default library is immutable after construction and contains only `fn` pointers,
-so it's `Send + Sync`. It's cached in a global static via `LazyLock`:
+The default library skeleton (no host context) is immutable and contains only
+`fn` pointers, so it is `Send + Sync`. A crate-private `LazyLock<FunctionLibrary>`
+holds it; `FunctionLibrary::for_profile` builds on top of it per the profile's
+host-context setting and caches the result in a per-profile `Arc` map keyed
+on the rules-independent portion of the profile (see
+[profile.md § ProfileKey](../../crates/openjd-expr/src/profile.rs)).
 
 ```rust
-static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(default_library);
-
-pub fn get_default_library() -> &'static FunctionLibrary {
-    &DEFAULT_LIBRARY
-}
+pub fn for_profile(profile: &ExprProfile) -> Arc<FunctionLibrary>;
 ```
+
+Profiles that differ only in their `Arc<Vec<PathMappingRule>>` share a single
+cached no-host skeleton; the rules closure is applied on top as a cheap clone
+per call.
 
 ## Host Context
 
 Host-context functions (like `apply_path_mapping`) need host-supplied state
 (path mapping rules) that the expression evaluator has no knowledge of. They
-are added to a library by capturing that state in a closure registered at
-construction time:
+are registered on a library obtained from `FunctionLibrary::for_profile`
+when the profile carries a non-`None` host context:
 
 ```rust
+use std::sync::Arc;
+use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathMappingRule};
+
 let rules: Vec<PathMappingRule> = /* ... */;
-let lib = get_default_library().clone().with_host_context(rules);
+
+// Runtime: real rules baked into an `apply_path_mapping` closure.
+let profile = ExprProfile::current()
+    .with_host_context(HostContext::with_rules(rules));
+let lib: Arc<FunctionLibrary> = FunctionLibrary::for_profile(&profile);
+assert!(lib.host_context_enabled);
 ```
 
-`with_host_context` accepts either `Vec<PathMappingRule>` (takes ownership) or
-`Arc<Vec<PathMappingRule>>` (shares the allocation across library clones).
-The `apply_path_mapping` closure captures an `Arc<Vec<PathMappingRule>>`
-internally, so applying the same rules to many cloned libraries is cheap.
+`HostContext::with_rules(Vec<PathMappingRule>)` takes ownership of the rules
+and wraps them in an `Arc` internally. Callers that already have an
+`Arc<Vec<PathMappingRule>>` can construct `HostContext::WithRules(arc)`
+directly. The `apply_path_mapping` closure captures the `Arc` by reference,
+so many libraries built from the same rules share a single allocation.
 
 For template validation at job creation time (when path mapping rules aren't
-available yet), `with_unresolved_host_context()` registers the host-context
-function signatures with stub implementations that return `Unresolved(PATH)`:
+available yet), use `HostContext::Unresolved`. This registers the
+host-context function signatures with stub implementations that return
+`Unresolved(PATH)`:
 
 ```rust
-let lib = get_default_library().clone().with_unresolved_host_context();
+let profile = ExprProfile::current()
+    .with_host_context(HostContext::Unresolved);
+let lib = FunctionLibrary::for_profile(&profile);
+assert!(lib.host_context_enabled);
 ```
 
 This allows the type checker to verify that calls to host-context functions
 are well-typed without requiring actual rules. The validation stub takes no
 arguments — rules don't matter for a signature-only check.
 
-### Rule-change semantics
+### Low-level primitives
 
-Rules are captured at the point of `with_host_context` and the closure holds
-an immutable reference to them for the library's lifetime. If the host's
-rules change (e.g. `openjd-sessions` accumulates path mapping rules across
-let-binding evaluations), the host must rebuild the library:
+`FunctionLibrary::for_profile` composes internally from two crate-public
+free functions in `default_library`, exposed for advanced callers that
+want to layer host-context functions onto a custom-built library:
 
 ```rust
-// Rebuild with updated rules
-let updated_lib = base_library.clone().with_host_context(new_rules);
+pub fn default_library::register_host_context_functions(
+    lib: &mut FunctionLibrary,
+    rules: Arc<Vec<PathMappingRule>>,
+);
+
+pub fn default_library::register_unresolved_host_context_functions(
+    lib: &mut FunctionLibrary,
+);
 ```
 
-`FunctionLibrary::clone()` copies the `HashMap<String, Vec<FunctionEntry>>`
-of `Arc<dyn Fn>` entries, so rebuilds are cheap — no deep copy of the
-underlying function implementations.
+Most callers should not call these directly — go through
+`FunctionLibrary::for_profile(&profile)` to get the cached result. These
+primitives are documented in [public-api.md § Default Library](public-api.md#default-library-default_library).
+
+### Rule-change semantics
+
+Rules are captured at the point `FunctionLibrary::for_profile` resolves a
+`HostContext::WithRules(rules)` profile. The `apply_path_mapping` closure
+holds an immutable `Arc<Vec<PathMappingRule>>` reference for the library's
+lifetime. If the host's rules change (e.g. `openjd-sessions` accumulates
+path mapping rules across let-binding evaluations), the host must rebuild
+the library by calling `for_profile` with a new rules-carrying profile:
+
+```rust
+// Rebuild with updated rules.
+let updated_profile = ExprProfile::current()
+    .with_host_context(HostContext::with_rules(new_rules));
+let updated_lib = FunctionLibrary::for_profile(&updated_profile);
+```
+
+The underlying no-host skeleton is cached and shared across `for_profile`
+calls, so the per-call cost is a `HashMap` clone plus one
+`apply_path_mapping` registration — not a full library rebuild.
 
 ### Host-Context Function Inventory
 

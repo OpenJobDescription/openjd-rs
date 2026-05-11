@@ -109,7 +109,12 @@ impl FormatString {
     /// Pass `&FormatStringOptions::default()` for the simplest call. Build
     /// options with `.with_library(...)`, `.with_path_format(...)`, and
     /// `.with_target_type(...)`. Path mapping rules, if needed, are baked
-    /// into the library via `FunctionLibrary::with_host_context(rules)`.
+    /// into the library via [`FunctionLibrary::for_profile`] with an
+    /// [`ExprProfile`] whose host context is [`HostContext::WithRules`].
+    ///
+    /// [`FunctionLibrary::for_profile`]: crate::FunctionLibrary::for_profile
+    /// [`ExprProfile`]: crate::ExprProfile
+    /// [`HostContext::WithRules`]: crate::HostContext::WithRules
     pub fn resolve_with(
         &self,
         symtab: &SymbolTable,
@@ -600,8 +605,12 @@ impl<'a> FormatStringOptions<'a> {
     /// Use the given function library instead of the default (built-in) one.
     ///
     /// Accepts either `&FunctionLibrary` or `Option<&FunctionLibrary>`; `None`
-    /// means "use the default library". To enable `apply_path_mapping`,
-    /// pass a library built with `.with_host_context(rules)`.
+    /// means "use the default library". To enable `apply_path_mapping`, pass
+    /// a library obtained from [`FunctionLibrary::for_profile`] with
+    /// [`HostContext::WithRules`] on the profile.
+    ///
+    /// [`FunctionLibrary::for_profile`]: crate::FunctionLibrary::for_profile
+    /// [`HostContext::WithRules`]: crate::HostContext::WithRules
     #[must_use]
     pub fn with_library(
         mut self,

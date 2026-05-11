@@ -145,12 +145,14 @@ Path-related operations in the expression language:
 
 `apply_path_mapping(path_string)` is a host-context-only function that applies
 the rules captured in its implementing closure to a string, returning a path
-value. Rules are supplied at library-construction time via
-`FunctionLibrary::with_host_context(rules)` — see
+value. It is registered on a [`FunctionLibrary`](../../crates/openjd-expr/src/function_library.rs)
+obtained from [`FunctionLibrary::for_profile`](../../crates/openjd-expr/src/default_library.rs)
+with an [`ExprProfile`](../../crates/openjd-expr/src/profile.rs) whose
+`host_context` is `HostContext::WithRules(Arc::new(rules))` — see
 [function-library.md § Host Context](function-library.md#host-context).
-During template validation (when rules aren't available yet) callers should
-use `FunctionLibrary::with_unresolved_host_context()` instead, which registers
-a stub that returns `Unresolved(path)` for type checking.
+During template validation, when rules aren't available yet, callers build
+the profile with `HostContext::Unresolved` instead, which registers a stub
+that returns `Unresolved(path)` for type checking.
 
 ## Divergence from Python
 

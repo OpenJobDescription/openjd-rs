@@ -965,14 +965,16 @@ impl FormatString {
     /// Returns structured errors with the position of the first failing
     /// interpolation so callers can produce diagnostics.
     pub fn validate_expressions(
-        &self, symtab: &SymbolTable, library: Option<&FunctionLibrary>,
+        &self, symtab: &SymbolTable, library: &FunctionLibrary,
     ) -> Result<(), FormatStringValidationError>;
 
-    /// Validate the list-comprehension loop-variable rules on any
-    /// expressions in this format string.
+    /// Validate that list-comprehension loop variables in this format
+    /// string's interpolations don't shadow names from the enclosing
+    /// scope (typically the let-binding names active at this point in
+    /// the template).
     pub fn validate_comprehension_vars(
-        &self,
-    ) -> Result<(), FormatStringValidationError>;
+        &self, let_names: &HashSet<String>,
+    ) -> Result<(), ExpressionError>;
 
     /// Does this format string contain any non-simple-name interpolation?
     /// A cheap check for "can I skip the EXPR extension type-check pass?"

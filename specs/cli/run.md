@@ -275,8 +275,9 @@ host-context functions (path mapping). This library is passed to:
 - `FormatString::resolve_string()` for embedded file content resolution
 - `Session::with_library()` for action argument resolution during subprocess execution
 
-The library is cloned from `openjd_expr::default_library::get_default_library()` and
-extended via `.with_host_context()`.
+The library is obtained from
+`openjd_expr::FunctionLibrary::for_profile(&profile)`, where `profile` is
+an `ExprProfile` carrying `HostContext::with_rules(path_mapping_rules)`.
 
 ## Session Configuration
 

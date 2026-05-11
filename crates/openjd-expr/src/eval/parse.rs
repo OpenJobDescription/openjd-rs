@@ -140,7 +140,7 @@ impl ParsedExpression {
         }
 
         // Hard cap on parser input length. A recursive-descent parser can
-        // recurse at most once per input character; the 8 MB worker-thread
+        // recurse at most once per input character; the 32 MB worker-thread
         // stack comfortably handles inputs up to
         // [`MAX_PARSE_INPUT_LEN`], but beyond that we would risk overflow
         // even in the dedicated thread. Inputs exceeding this size are

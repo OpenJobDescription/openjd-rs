@@ -640,7 +640,9 @@ fn path_ops() -> FunctionLibrary {
         .expect("bad builtin signature");
     lib.register_sig("relative_to", "(path, string) -> path", relative_to_fn)
         .expect("bad builtin signature");
-    // apply_path_mapping is host-context only — registered via with_host_context()
+    // apply_path_mapping is host-context only — registered on a library
+    // built via `FunctionLibrary::for_profile` with a host context of
+    // `HostContext::WithRules` or `HostContext::Unresolved`.
     // Properties (handled by eval_attribute, registered for type checking)
     lib.register_sig("__property_name__", "(path) -> string", prop_name)
         .expect("bad builtin signature");

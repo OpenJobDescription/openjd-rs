@@ -47,15 +47,18 @@ peak memory and operation count in an `EvalResult`.
 
 Path mapping rules are **not** an evaluator configuration. They are state owned
 by the `apply_path_mapping` implementation, which is a closure registered on the
-function library via [`FunctionLibrary::with_host_context(rules)`](function-library.md#host-context).
-The evaluator just calls functions; it has no direct awareness of mapping rules.
+function library when that library is built with
+[`FunctionLibrary::for_profile`](function-library.md#for_profile) against an
+[`ExprProfile`](../../crates/openjd-expr/src/profile.rs) whose `host_context` is
+`HostContext::WithRules(...)`. The evaluator just calls functions; it has no
+direct awareness of mapping rules.
 
 Builder methods on `EvalBuilder` (also available as shortcut
 methods on `ParsedExpression`):
 
 | Method | Default | Purpose | Notes |
 |--------|---------|---------|-------|
-| `with_library(&FunctionLibrary)` | `get_default_library()` | Custom function library | Add host-context functions or restrict operations |
+| `with_library(&FunctionLibrary)` | `FunctionLibrary::for_profile(&ExprProfile::current())` | Custom function library | Add host-context functions or restrict operations |
 | `with_memory_limit(usize)` | 100,000,000 (100 MB) | Memory bound | Tracks all intermediate values; returns `MemoryLimitExceeded` |
 | `with_operation_limit(usize)` | 10,000,000 (10M) | Operation bound | Each call=1, list iteration=N, string ops=ceil(len/256) |
 | `with_path_format(PathFormat)` | Host native | Path normalization format | Also validates that `Path` values in symbol table match |

@@ -460,7 +460,7 @@ haves.
 
 ### [P1] Spec–implementation synchronization
 
-1. **Rewrite the host-context sections of `architecture.md`,
+1. ~~**Rewrite the host-context sections of `architecture.md`,
    `evaluator.md`, `format-string.md`, `function-library.md`, and
    `path-mapping.md`** to describe the real API: `FunctionLibrary::for_profile(&ExprProfile)`,
    `ExprProfile::with_host_context(HostContext::WithRules(…))`, and
@@ -468,32 +468,44 @@ haves.
    `FunctionLibrary::with_host_context(rules)`,
    `FunctionLibrary::with_unresolved_host_context()`, and
    `get_default_library()`. The `public-api.md` text for this area is
-   accurate and can serve as the canonical source.
+   accurate and can serve as the canonical source.~~ **Resolved** — all
+   five spec docs now describe the real API, plus `specs/cli/run.md`
+   and `specs/model/validation.md` (which had the same drift).
+   Stale doc comments in `format_string.rs` and
+   `default_library.rs` source were also updated.
 
-2. **Fix `FormatString::validate_expressions` signature in
+2. ~~**Fix `FormatString::validate_expressions` signature in
    `public-api.md`** — the implementation takes a non-optional
    `&FunctionLibrary`, not `Option<&FunctionLibrary>`. (Alternatively,
    change the implementation to match the spec; the optional form is
    more flexible for callers that don't want to load a library for
-   simple validations.)
+   simple validations.)~~ **Resolved** — spec updated to match the
+   implementation (non-optional `&FunctionLibrary`).
 
-3. **Fix `FormatString::validate_comprehension_vars` signature in
+3. ~~**Fix `FormatString::validate_comprehension_vars` signature in
    `public-api.md`** — the implementation takes `&HashSet<String>`
    (the set of active let-binding names) and returns
    `Result<(), ExpressionError>`. The spec shows it as zero-argument
    returning `Result<(), FormatStringValidationError>`. Align the spec
-   to the code.
+   to the code.~~ **Resolved** — spec updated to match the
+   implementation.
 
-4. **Remove or rename `ExpressionError::undefined_variable(...)` in
+4. ~~**Remove or rename `ExpressionError::undefined_variable(...)` in
    `error-formatting.md`** — the constructor does not exist in the
    code. Either add it for symmetry with the other `integer_overflow`,
    `division_by_zero`, etc. shortcuts, or update the spec to show
    `ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable
-   { name, suggestion })` instead.
+   { name, suggestion })` instead.~~ **Resolved** — the
+   non-existent constructor example was replaced with the correct list
+   of real convenience constructors plus guidance to build
+   `UndefinedVariable`/`UnknownFunction` via `from_kind`. Also added
+   the missing `ExpressionTooDeep` variant to the enum listing and
+   trigger table.
 
-5. **Fix the inline "8 MB worker-thread stack" comment in
+5. ~~**Fix the inline "8 MB worker-thread stack" comment in
    `eval/parse.rs`** (in `with_profile` doc) to say 32 MB, matching
-   `PARSER_THREAD_STACK_SIZE` and the comment on that constant.
+   `PARSER_THREAD_STACK_SIZE` and the comment on that constant.~~
+   **Resolved.**
 
 ### [P2] Code consistency and polish
 

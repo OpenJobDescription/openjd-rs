@@ -148,8 +148,17 @@ Let bindings are validated with these rules:
 ### Function Libraries
 
 Two libraries control available functions in expressions:
-- **`default_lib`** — Template-scope expressions (no host functions)
-- **`host_lib`** — `default_lib.with_host_context()` for task/session-scope expressions
+- **`template_lib`** — Template-scope expressions. Built from a profile with
+  `HostContext::None` (no host functions registered at all).
+- **`host_lib`** — Task/session-scope expressions. Built from a profile with
+  `HostContext::Unresolved` so `apply_path_mapping` type-checks against its
+  signature (a stub returning `Unresolved(path)`) without real rules being
+  available at validation time.
+
+Both libraries are obtained from
+`openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
+`SpecificationProfile::to_expr_profile(host_context)` helper produces the
+right `ExprProfile` from a model profile.
 
 ## Pass 9: TASK_CHUNKING Gating
 

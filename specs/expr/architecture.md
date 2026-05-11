@@ -107,7 +107,8 @@ defers symbol-table binding until its terminal `.evaluate(&symtabs)` (or
 implementation handles via optional keyword arguments on `ParsedExpression.evaluate()`
 — library, limits, and path format are all configurable per-evaluation without re-parsing.
 Path mapping rules
-live on the function library (see `FunctionLibrary::with_host_context`) rather than
+live on the function library (obtained via `FunctionLibrary::for_profile` with an
+`ExprProfile` whose `host_context` is `HostContext::WithRules(...)`) rather than
 the evaluator.
 
 The `accessed_symbols` set also enables dependency analysis between expressions. By
