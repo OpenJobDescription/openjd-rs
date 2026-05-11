@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! `openjd-rs check` command — validate a template file.
+//! `openjd check` command — validate a template file.
 
 use clap::Args;
 use openjd_model::parse::{self, DocumentType};

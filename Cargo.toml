@@ -11,9 +11,9 @@ resolver = "2"
 
 # Workspace-wide metadata inherited by crates via `*.workspace = true`. Each
 # publishable crate sets its own `version` (independent versioning) but inherits
-# everything else from here. Non-publishable crates (openjd-snapshots,
-# openjd-for-js) inherit the workspace version below as a convenience — they
-# have `publish = false` so the version number is not meaningful on crates.io.
+# everything else from here. The non-publishable crate openjd-for-js inherits
+# the workspace version below as a convenience — it has `publish = false` so
+# the version number is not meaningful on npm.
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

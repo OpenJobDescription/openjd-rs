@@ -2,7 +2,7 @@
 
 ## Purpose
 
-When a user runs `openjd-rs run <template> --help`, the CLI generates help text that
+When a user runs `openjd run <template> --help`, the CLI generates help text that
 includes the job template's parameter definitions — their names, types, defaults,
 constraints, and descriptions. This is more useful than generic clap help because it
 tells the user exactly what parameters the specific template expects.
@@ -72,7 +72,7 @@ try_context_aware_help(&args)
       │
       └── format_help(&template, &path)
           │
-          ├── Usage line: "usage: openjd-rs run <path> [arguments]"
+          ├── Usage line: "usage: openjd run <path> [arguments]"
           ├── Job name
           ├── Job description (if present)
           ├── Parameter definitions (if any)
@@ -149,7 +149,7 @@ Standard Options:
   -h, --help                 Print help (leave out template to list all options)
 ```
 
-Running `openjd-rs run --help` (without a template path) bypasses the context-aware
+Running `openjd run --help` (without a template path) bypasses the context-aware
 interception and falls through to clap's standard help, which lists every option with
 full descriptions. This two-tier approach keeps the template-focused help clean while
 still making the complete option reference discoverable.

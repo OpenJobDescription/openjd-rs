@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! Context-aware help for `openjd-rs run <template> --help`.
+//! Context-aware help for `openjd run <template> --help`.
 
 use openjd_model::parse::{self, DocumentType};
 use openjd_model::{JobParameterDefinition, JobTemplate};
@@ -96,7 +96,7 @@ pub fn format_help(template: &JobTemplate, path: &Path) -> String {
 
     // Usage line
     out.push_str(&format!(
-        "usage: openjd-rs run {} [arguments]\n\n",
+        "usage: openjd run {} [arguments]\n\n",
         path.display()
     ));
 

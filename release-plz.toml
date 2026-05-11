@@ -16,8 +16,8 @@
 #     CARGO_REGISTRY_TOKEN secret is used. Each crate must be registered with
 #     trusted publishing in its crates.io settings. See RELEASING.md.
 #
-# The two non-publishable crates (openjd-snapshots, openjd-for-js) are excluded
-# below (belt-and-suspenders; their Cargo.toml also has `publish = false`).
+# The non-publishable crate (openjd-for-js) is excluded below
+# (belt-and-suspenders; its Cargo.toml also has `publish = false`).
 
 [workspace]
 # Always create a GitHub Release when a version is published.
@@ -99,17 +99,14 @@ name = "openjd-sessions"
 [[package]]
 name = "openjd-cli"
 
+[[package]]
+name = "openjd-snapshots"
+
 # ── Non-publishable crates ──────────────────────────────────────────────────
 # release-plz reads `publish = false` from Cargo.toml and will automatically
 # skip publishing for these crates. The explicit entries below also disable
 # version bumps and changelog generation, keeping them out of the Release PR
 # entirely.
-
-[[package]]
-name = "openjd-snapshots"
-publish = false
-release = false
-changelog_update = false
 
 [[package]]
 name = "openjd-for-js"

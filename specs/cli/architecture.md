@@ -45,7 +45,7 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 
 ## Public API Surface
 
-The crate is a binary (`[[bin]] name = "openjd-rs"`), so it has no library API. However,
+The crate is a binary (`[[bin]] name = "openjd"`), so it has no library API. However,
 `run.rs` is `pub mod` to allow `summary.rs` to call `parse_cli_parameters()` — the only
 cross-module dependency within the crate.
 

@@ -3,6 +3,21 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Encode/decode manifests to/from on-disk v2023 and v2025 JSON formats.
+//!
+//! # Format Status
+//!
+//! - **v2023** — **Stable.** The on-disk format used by AWS Deadline Cloud's
+//!   job attachments. Identified on disk by `"manifestVersion": "2023-03-03"`.
+//!   Entry points: [`encode_snapshot_v2023`], [`encode_snapshot_diff_v2023`],
+//!   [`decode_v2023`], [`decode_v2023_as_diff`].
+//! - **v2025** — **Experimental draft.** A proposed evolution adding diffs,
+//!   explicit directories, symlinks, and file chunking. Identified on disk by
+//!   `specificationVersion` strings that include the `beta-2025-12` tag. The
+//!   wire format is expected to change before any stable release and is not
+//!   suitable for long-term storage or external interop. Entry points:
+//!   [`encode_v2025`], [`encode_abs_snapshot_v2025`],
+//!   [`encode_abs_snapshot_diff_v2025`], [`encode_snapshot_v2025`],
+//!   [`encode_snapshot_diff_v2025`], [`decode_v2025`].
 
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
@@ -17,6 +32,15 @@ use tracing::warn;
 
 // --- Public types ---
 
+/// Identifier for the two supported on-disk manifest formats.
+///
+/// See the [module-level docs](self) for the status of each format.
+///
+/// - [`V2023`](Self::V2023) — stable; the on-disk format used by AWS
+///   Deadline Cloud's job attachments.
+/// - [`V2025`](Self::V2025) — **experimental draft**. The on-disk wire format
+///   is expected to change before any stable release (its
+///   `specificationVersion` strings carry the `beta-2025-12` tag).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManifestFormat {
     V2023,
@@ -209,6 +233,9 @@ pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
 }
 
 /// Encode any manifest to v2025 JSON.
+///
+/// **Experimental draft format.** The v2025 wire format is expected to change
+/// before any stable release; see the [module-level docs](self) for details.
 pub fn encode_v2025<P: Clone + std::fmt::Debug, K: Clone + std::fmt::Debug>(
     manifest: &Manifest<P, K>,
     spec_version: &str,
@@ -299,22 +326,30 @@ pub fn encode_v2025<P: Clone + std::fmt::Debug, K: Clone + std::fmt::Debug>(
 }
 
 /// Encode an absolute snapshot to v2025 JSON.
+///
+/// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_abs_snapshot_v2025(m: &AbsSnapshot) -> Result<String> {
     encode_v2025(m, SPEC_ABS_SNAPSHOT)
 }
 
 /// Encode an absolute snapshot diff to v2025 JSON.
+///
+/// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_abs_snapshot_diff_v2025(m: &AbsSnapshotDiff) -> Result<String> {
     encode_v2025(m, SPEC_ABS_DIFF)
 }
 
 /// Encode a relative snapshot to v2025 JSON.
+///
+/// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String> {
     validate_symlink_targets_relative(&m.files)?;
     encode_v2025(m, SPEC_REL_SNAPSHOT)
 }
 
 /// Encode a relative snapshot diff to v2025 JSON.
+///
+/// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String> {
     validate_symlink_targets_relative(&m.files)?;
     encode_v2025(m, SPEC_REL_DIFF)
@@ -417,6 +452,8 @@ fn decode_v2023_with_kind<K: ValidateKind>(json: &str) -> Result<Manifest<Rel, K
 }
 
 /// Decode v2025 JSON to the appropriate manifest type.
+///
+/// **Experimental draft format.** See the [module-level docs](self).
 pub fn decode_v2025(json: &str) -> Result<DecodedManifest> {
     let data: Value = serde_json::from_str(json)
         .map_err(|e| SnapshotError::Validation(format!("Invalid JSON: {e}")))?;

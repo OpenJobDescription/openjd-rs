@@ -4,6 +4,21 @@
 
 **Location:** `manifest.rs`
 
+> **Note on format status.** The in-memory `Manifest<P, K>` type described
+> here is used by both on-disk formats, but those formats have very different
+> maturity:
+>
+> - **v2023** (what AWS Deadline Cloud uses) — **stable**. v2023 does not use
+>   the `Diff` kind structurally (it has no deleted entries or explicit
+>   directories), but any v2023 file is also a valid `Snapshot` / `Rel,Full`
+>   manifest in this type system.
+> - **v2025** — **experimental draft**. The full `Snapshot` / `SnapshotDiff` /
+>   `AbsSnapshot` / `AbsSnapshotDiff` matrix only round-trips through the
+>   v2025 on-disk format, whose wire format is expected to change. Encoders
+>   and decoders for v2025 are marked experimental in the Rust docs.
+>
+> See [snapshot_overview.md](snapshot_overview.md#status) for details.
+
 ## Overview
 
 The crate provides four concrete manifest types organized by two dimensions (path style × manifest kind), encoded as phantom type parameters on a single generic struct:

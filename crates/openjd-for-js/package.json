@@ -1,7 +1,7 @@
 {
   "name": "openjd-for-js",
   "version": "0.1.0",
-  "description": "ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./pkg/openjd_for_js.js",

@@ -11,7 +11,7 @@ See [README.md](README.md) for user-facing documentation and [DEVELOPMENT.md](DE
 ## Quick Reference
 
 ```bash
-cargo build --release                    # Build (binary at target/release/openjd-rs)
+cargo build --release                    # Build (binary at target/release/openjd)
 cargo test --workspace                   # All tests
 cargo test -p openjd-expr                # Single crate
 cargo clippy --all-features --all-targets --workspace -- -D warnings  # Lint
@@ -32,7 +32,8 @@ openjd-cli
 │   └── openjd-expr
 └── openjd-model
 
-openjd-snapshots (standalone)
+openjd-snapshots (standalone, experimental)
+openjd-for-js (depends on openjd-model + openjd-expr, experimental)
 ```
 
 Changes to `openjd-expr` can affect all other crates. `openjd-snapshots` has no in-workspace dependents.
@@ -79,7 +80,7 @@ Spec entry point: `specs/sessions/README.md`
 
 ### openjd-cli (`crates/openjd-cli`)
 
-CLI binary (`openjd-rs`) with `check`, `summary`, and `run` subcommands.
+CLI binary (`openjd`) with `check`, `summary`, and `run` subcommands.
 
 - **check** (`src/check.rs`) — Template validation.
 - **summary** (`src/summary.rs`) — Job/step summary display.
@@ -90,6 +91,12 @@ Spec entry point: `specs/cli/README.md`
 
 ### openjd-snapshots (`crates/openjd-snapshots`)
 
+**Status: experimental.** Public API may change without notice. Its on-disk
+formats have distinct maturity: **v2023** is stable and is the format AWS
+Deadline Cloud uses; **v2025** is an **experimental draft** (on-disk
+`specificationVersion` strings carry the `beta-2025-12` tag) whose wire
+format is expected to change before any stable release.
+
 Job attachments: content-addressed file tree snapshots with xxHash3 hashing, manifest diffing, S3 upload/download. Standalone — no dependency on other workspace crates.
 
 - **Manifest** (`src/manifest.rs`) — Manifest types, serialization (v2023 and v2025 formats), validation.
@@ -98,6 +105,16 @@ Job attachments: content-addressed file tree snapshots with xxHash3 hashing, man
 - **Codec** (`src/codec.rs`) — Binary encoding/decoding for manifest formats.
 
 Spec entry point: `specs/snapshots/README.md`
+
+### openjd-for-js (`crates/openjd-for-js`)
+
+**Status: experimental.** Not published to crates.io or to npm. The JS
+surface, the Rust API, the WASM package layout, and the build pipeline may
+all change without notice.
+
+ECMAScript/WebAssembly bindings for `openjd-model` and `openjd-expr`. Depends on both via Cargo, compiles to `wasm32-unknown-unknown`, and produces an npm package via `wasm-bindgen`. Source is Rust (`src/lib.rs`, `src/model.rs`, `src/expr.rs`, `src/errors.rs`) alongside npm manifest, Vitest config, and JS-side integration tests (`js-tests/`).
+
+Spec entry point: `specs/openjd-for-js/spec.md`
 
 ## Navigating the Codebase
 
@@ -246,8 +263,8 @@ cargo test --workspace
 
 Releases are automated via [release-plz](https://release-plz.dev/). Every push to `mainline` runs `.github/workflows/release-plz.yml`, which maintains a single "chore: release" PR. Merging that PR publishes the changed crates to crates.io via OIDC Trusted Publishing.
 
-- Published crates: `openjd-expr`, `openjd-model`, `openjd-sessions`, `openjd-cli` — independent versions, conventional-commit-driven bumps.
-- Non-published crates: `openjd-snapshots`, `openjd-for-js` — marked `publish = false`.
+- Published crates: `openjd-expr`, `openjd-model`, `openjd-sessions`, `openjd-cli`, `openjd-snapshots` — independent versions, conventional-commit-driven bumps.
+- Non-published crate: `openjd-for-js` — marked `publish = false`.
 
 See [RELEASING.md](RELEASING.md) for the full process, one-time setup steps, and how to add new crates.
 
@@ -256,21 +273,20 @@ See [RELEASING.md](RELEASING.md) for the full process, one-time setup steps, and
 The [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications) conformance test suite validates CLI behavior against the spec.
 
 ```bash
-# Build and create a symlink the test runner can find as "openjd"
+# Build (produces the CLI at target/release/openjd, which is the
+# binary name the conformance test runner expects).
 # (run from the openjd-rs repo root)
 cargo build --release
-mkdir -p bin
-ln -sf "$(pwd)/target/release/openjd-rs" bin/openjd
 
 # Run the full suite (requires openjd-specifications repo checked out nearby)
 cd /path/to/openjd-specifications/conformance-tests
-PATH="/path/to/openjd-rs/bin:$PATH" uv run run_openjd_cli_tests.py '2023-09/*'
+PATH="/path/to/openjd-rs/target/release:$PATH" uv run run_openjd_cli_tests.py '2023-09/*'
 
 # Filter to a category
-PATH="/path/to/openjd-rs/bin:$PATH" uv run run_openjd_cli_tests.py '2023-09/EXPR/*'
+PATH="/path/to/openjd-rs/target/release:$PATH" uv run run_openjd_cli_tests.py '2023-09/EXPR/*'
 
 # Single test
-PATH="/path/to/openjd-rs/bin:$PATH" uv run run_openjd_cli_tests.py '2023-09/EXPR/jobs/expr1.1.3--keyword-attrs-in-exprs.test.yaml'
+PATH="/path/to/openjd-rs/target/release:$PATH" uv run run_openjd_cli_tests.py '2023-09/EXPR/jobs/expr1.1.3--keyword-attrs-in-exprs.test.yaml'
 ```
 
 The test runner expects the CLI to have `check` and `run` subcommands with the same interface as the Python `openjd` CLI.

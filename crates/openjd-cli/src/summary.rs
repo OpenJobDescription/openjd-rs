@@ -2,7 +2,7 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! `openjd-rs summary` command — print summary information about a Job Template.
+//! `openjd summary` command — print summary information about a Job Template.
 
 use clap::Args;
 use openjd_model::job;

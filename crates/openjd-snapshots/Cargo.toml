@@ -1,11 +1,14 @@
 [package]
 name = "openjd-snapshots"
-description = "Job attachments snapshot library for content-addressed file tree operations"
+description = "[Experimental] Job attachments snapshot library for content-addressed file tree operations. The v2023 on-disk manifest format is stable and used by AWS Deadline Cloud; the v2025 format is an experimental draft."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 repository.workspace = true
-publish = false
+homepage.workspace = true
+readme = "README.md"
 
 [dependencies]
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

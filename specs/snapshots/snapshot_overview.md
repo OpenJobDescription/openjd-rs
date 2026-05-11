@@ -2,6 +2,18 @@
 
 [README](README.md) · Overview
 
+## Status
+
+The `openjd-snapshots` crate is **experimental** — its public API may
+change without notice.
+
+Two on-disk manifest formats are supported, with distinct status:
+
+| Format | Status | Deadline Cloud | Notes |
+|--------|--------|----------------|-------|
+| **v2023** | **Stable** | In production | The `"manifestVersion": "2023-03-03"` format used by AWS Deadline Cloud's job attachments. No structural deletions or explicit directories. |
+| **v2025** | **Experimental draft** | — | Proposed evolution with diffs, explicit directories, symlinks, file chunking. On-disk `specificationVersion` strings include a `beta-2025-12` tag. Expected to change before any stable release; do not use for long-term storage or external interop. |
+
 ## Overview
 
 The `openjd-snapshots` crate captures directory tree snapshots, computes diffs, and transfers

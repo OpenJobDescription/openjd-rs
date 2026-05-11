@@ -1,5 +1,10 @@
 # openjd-for-js — ECMAScript/WebAssembly Bindings for OpenJD
 
+> **Status: experimental.** The `openjd-for-js` crate is under active
+> development and is not published to crates.io or to npm. The JS surface,
+> the underlying Rust API, the WASM package layout, and the build pipeline
+> may all change without notice. Not recommended for production use.
+
 ## Overview
 
 `openjd-for-js` provides ECMAScript bindings for the OpenJD Rust implementation (`openjd-rs`), compiled to WebAssembly. It enables spec-compliant template parsing, validation, job creation, expression evaluation, and parameter space expansion in browsers and VS Code extensions.

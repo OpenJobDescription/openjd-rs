@@ -40,9 +40,9 @@ implementation:
 
 | Command | Description |
 |---------|-------------|
-| `openjd-rs check <path>` | Validate a job or environment template file |
-| `openjd-rs summary <path>` | Print summary information about a job template |
-| `openjd-rs run <path>` | Run a job template locally in an OpenJD session |
+| `openjd check <path>` | Validate a job or environment template file |
+| `openjd summary <path>` | Print summary information about a job template |
+| `openjd run <path>` | Run a job template locally in an OpenJD session |
 
 ## Not Yet Implemented
 

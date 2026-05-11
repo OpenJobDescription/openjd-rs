@@ -107,6 +107,28 @@ Commands: `check` (validate templates), `summary` (job/step summary), `run` (exe
 - **Error handling**: `thiserror`-based enums throughout
 - **Workspace layout**: `crates/` directory (rattler convention)
 
+## Crate Status
+
+The beta crates — `openjd-expr`, `openjd-model`, `openjd-sessions`,
+and `openjd-cli` — are released to crates.io via
+[release-plz](https://release-plz.dev). They are still on the 0.x
+version line, so breaking changes may land in minor-version bumps per
+Cargo's [pre-1.0 semver rules][pre-1.0].
+
+[pre-1.0]: https://doc.rust-lang.org/cargo/reference/semver.html
+
+Two crates are **experimental**, meaning their public APIs may change
+without notice:
+
+- **`openjd-snapshots`** — job attachments library. Its v2023 on-disk
+  manifest format is stable and is the format AWS Deadline Cloud uses;
+  the v2025 format is an **experimental draft** whose wire format is
+  expected to change.
+- **`openjd-for-js`** — WebAssembly bindings for `openjd-model` and
+  `openjd-expr`. Built as an npm package; not published to crates.io
+  (`publish = false`). Both the Rust side and the npm package layout
+  are subject to change.
+
 ## Detailed Specifications
 
 Detailed design specifications for individual crates:
@@ -114,5 +136,6 @@ Detailed design specifications for individual crates:
 - [model/](model/) — `openjd-model` crate: template types, validation, job creation, parameter space iteration
 - [expr/](expr/) — `openjd-expr` crate: expression language, format strings, symbol tables
 - [sessions/](sessions/) — `openjd-sessions` crate: session runtime, subprocess management, action monitoring
-- [snapshots/](snapshots/) — `openjd-snapshots` crate: job attachment snapshot operations
+- [snapshots/](snapshots/) — `openjd-snapshots` crate (**experimental**): job attachment snapshot operations
 - [cli/](cli/) — `openjd-cli` crate: CLI binary, command implementations, output formatting, context-aware help
+- [openjd-for-js/spec.md](openjd-for-js/spec.md) — `openjd-for-js` crate (**experimental**): ECMAScript/WebAssembly bindings

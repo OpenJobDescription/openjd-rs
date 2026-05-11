@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`openjd-rs run <path>` executes a job template locally in an OpenJD session. It is the
+`openjd run <path>` executes a job template locally in an OpenJD session. It is the
 most complex command in the CLI, orchestrating the full session lifecycle: template parsing,
 parameter resolution, job creation, environment enter/exit, task iteration with adaptive
 chunking, embedded file materialization, let binding evaluation, and structured result output.
@@ -10,7 +10,7 @@ chunking, embedded file materialization, let binding evaluation, and structured 
 ## Interface
 
 ```
-openjd-rs run <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [-t <KEY=VALUE>]...
+openjd run <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [-t <KEY=VALUE>]...
     [--tasks <JSON|file://path>] [--maximum-tasks <N>]
     [--environment <PATH>]... [--path-mapping-rules <JSON|file://path>]
     [--run-dependencies] [--no-run-dependencies]

@@ -4,13 +4,26 @@ A Rust implementation of the [Open Job Description](https://github.com/OpenJobDe
 
 ## Crates
 
-| Crate | Description |
-|-------|-------------|
-| [`openjd-expr`](crates/openjd-expr) | Expression language: type system, ruff-based parser, bounded evaluator, range expressions, path mapping |
-| [`openjd-model`](crates/openjd-model) | Core library: template parsing, validation, job creation, parameter spaces, step dependency graphs |
-| [`openjd-sessions`](crates/openjd-sessions) | Session runtime: async action execution, environment lifecycle, cross-user subprocess management, structured logging |
-| [`openjd-snapshots`](crates/openjd-snapshots) | Job attachments: content-addressed file tree snapshots, xxHash3 hashing, manifest diffing, S3 upload/download |
-| [`openjd-cli`](crates/openjd-cli) | CLI binary (`openjd-rs`): `check` and `run` commands |
+| Crate | Status | Description |
+|-------|--------|-------------|
+| [`openjd-expr`](crates/openjd-expr) | Beta | Expression language: type system, ruff-based parser, bounded evaluator, range expressions, path mapping |
+| [`openjd-model`](crates/openjd-model) | Beta | Core library: template parsing, validation, job creation, parameter spaces, step dependency graphs |
+| [`openjd-sessions`](crates/openjd-sessions) | Beta | Session runtime: async action execution, environment lifecycle, cross-user subprocess management, structured logging |
+| [`openjd-snapshots`](crates/openjd-snapshots) | **Experimental** | Job attachments: content-addressed file tree snapshots, xxHash3 hashing, manifest diffing, S3 upload/download |
+| [`openjd-cli`](crates/openjd-cli) | Beta | CLI binary (`openjd`): `check` and `run` commands |
+| [`openjd-for-js`](crates/openjd-for-js) | **Experimental** | ECMAScript/WebAssembly bindings for `openjd-model` and `openjd-expr` |
+
+The "Beta" crates are released to crates.io via
+[release-plz](https://release-plz.dev). They are still on the 0.x
+version line, so breaking changes are possible in minor-version bumps
+per Cargo's [pre-1.0 semver rules][pre-1.0]. The **experimental** crates
+are under active development and their public APIs may change without
+notice. For `openjd-snapshots`, the v2025 on-disk manifest format is a
+**draft** — the v2023 format is what AWS Deadline Cloud uses and is
+stable. `openjd-for-js` is built as an npm package and is not on
+crates.io.
+
+[pre-1.0]: https://doc.rust-lang.org/cargo/reference/semver.html
 
 ## Building
 
@@ -22,11 +35,11 @@ cargo build --release
 
 ```bash
 # Validate a template
-./target/release/openjd-rs check path/to/template.yaml
+./target/release/openjd check path/to/template.yaml
 
 # Run a job template locally
-./target/release/openjd-rs run path/to/template.yaml -p Key=Value
-./target/release/openjd-rs run path/to/template.yaml -p file://params.yaml
+./target/release/openjd run path/to/template.yaml -p Key=Value
+./target/release/openjd run path/to/template.yaml -p file://params.yaml
 ```
 
 ## Testing

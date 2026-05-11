@@ -1,5 +1,12 @@
 # Job Attachments Snapshots — Rust Implementation Spec
 
+> **Status: experimental.** This spec describes the `openjd-snapshots` crate,
+> which is under active development — its public API may change without
+> notice. See [snapshots/snapshot_overview.md](snapshots/snapshot_overview.md#status)
+> for on-disk format status: v2023 is stable (the format AWS Deadline
+> Cloud uses); v2025 is an experimental draft whose wire format is
+> expected to change.
+
 ## Overview
 
 Port the job attachments snapshots library from `deadline-cloud` (Python) into a new
@@ -16,7 +23,7 @@ to map that design into idiomatic Rust.
 - Rust gives us memory safety without GC, predictable performance, and easy parallelism
   via `tokio` or `rayon` — all critical for a data pipeline that hashes and transfers
   large file trees.
-- A single `openjd-rs` binary can ship snapshot operations alongside template validation
+- A single `openjd` binary can ship snapshot operations alongside template validation
   and local job execution, reducing deployment complexity.
 - The Python implementation uses threads with a manual memory pool; Rust's ownership
   model and async I/O can achieve the same bounded-memory pipeline more naturally.
@@ -552,10 +559,10 @@ pub enum SnapshotError {
 Add snapshot subcommands to `openjd-cli`:
 
 ```
-openjd-rs snapshot collect <dir>...          # COLLECT + optional HASH + SUBTREE
-openjd-rs snapshot diff <parent> <dir>       # COLLECT + DIFF
-openjd-rs snapshot upload <manifest> <s3uri>  # JOIN + HASH_UPLOAD
-openjd-rs snapshot download <manifest> <dir>  # JOIN + DOWNLOAD
+openjd snapshot collect <dir>...          # COLLECT + optional HASH + SUBTREE
+openjd snapshot diff <parent> <dir>       # COLLECT + DIFF
+openjd snapshot upload <manifest> <s3uri>  # JOIN + HASH_UPLOAD
+openjd snapshot download <manifest> <dir>  # JOIN + DOWNLOAD
 ```
 
 These mirror the `deadline manifest snapshot`, `deadline manifest diff`,

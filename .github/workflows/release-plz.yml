@@ -25,9 +25,10 @@
 #   at this repo and this workflow filename). See RELEASING.md.
 #
 # Release policy:
-#   - Publishable: openjd-expr, openjd-model, openjd-sessions, openjd-cli
-#   - Excluded:    openjd-snapshots, openjd-for-js  (publish = false + explicit
-#                  `release = false` entries in release-plz.toml)
+#   - Publishable: openjd-expr, openjd-model, openjd-sessions, openjd-cli,
+#                  openjd-snapshots
+#   - Excluded:    openjd-for-js  (publish = false + explicit
+#                  `release = false` entry in release-plz.toml)
 #   - Independent versions per crate, driven by conventional commits.
 #
 # See release-plz.toml for the tool configuration.

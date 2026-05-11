@@ -7,13 +7,13 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 description = "Open Job Description CLI — validate, summarize, and run job templates"
 keywords = ["openjd", "openjobdescription", "cli", "job-template", "render-farm"]
 categories = ["command-line-utilities"]
 
 [[bin]]
-name = "openjd-rs"
+name = "openjd"
 path = "src/main.rs"
 
 [dependencies]

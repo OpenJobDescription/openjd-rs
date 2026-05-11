@@ -4,9 +4,31 @@
 
 //! Content-addressed directory tree snapshots with S3 integration.
 //!
+//! > **Status: experimental.** This crate is under active development and its
+//! > public API may change without notice between releases. Some on-disk
+//! > formats are not yet stable — see below for the per-format status.
+//!
 //! This crate captures directory tree snapshots, computes diffs, and transfers data
 //! to/from content-addressed storage (S3 or local filesystem). It is a standalone
 //! library with no dependency on `openjd-model` or `openjd-expr`.
+//!
+//! # On-disk Manifest Formats
+//!
+//! The crate supports two JSON manifest formats, identified at runtime by
+//! the [`codec::ManifestFormat`] enum:
+//!
+//! - **`V2023`** — **Stable.** The on-disk format used by [AWS Deadline Cloud]'s
+//!   job attachments. The [`encode_snapshot_v2023`] / [`decode_v2023`] entry
+//!   points and the `"manifestVersion": "2023-03-03"` wire format are the
+//!   authoritative reference for Deadline Cloud interop.
+//! - **`V2025`** — **Experimental draft.** A proposed evolution with richer
+//!   features (diffs, explicit directories, symlinks, file chunking). Its on-disk
+//!   `specificationVersion` strings already carry the `beta-2025-12` tag
+//!   (e.g. `"absolute-manifest-snapshot-beta-2025-12"`). The wire format is
+//!   expected to change before any stable release; do not use it for long-term
+//!   storage or for interop with external systems.
+//!
+//! [AWS Deadline Cloud]: https://aws.amazon.com/deadline-cloud/
 //!
 //! # Manifest Types
 //!

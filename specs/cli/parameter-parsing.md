@@ -15,7 +15,7 @@ a `HashMap<String, ExprValue>`.
 ### Format 1: Key=Value Pairs
 
 ```
-openjd-rs run template.yaml -p Frames=1-100 -p OutputDir=/output
+openjd run template.yaml -p Frames=1-100 -p OutputDir=/output
 ```
 
 The string is split on the first `=`. The key becomes the parameter name, the value
@@ -25,8 +25,8 @@ becomes an `ExprValue::String`. No type coercion is performed — the model crat
 ### Format 2: File Reference
 
 ```
-openjd-rs run template.yaml -p file://params.json
-openjd-rs run template.yaml -p file://params.yaml
+openjd run template.yaml -p file://params.json
+openjd run template.yaml -p file://params.yaml
 ```
 
 The file is read and parsed as JSON (if `.json` extension) or YAML (otherwise). The file
@@ -39,7 +39,7 @@ must contain a dictionary mapping parameter names to values. Each value is conve
 ### Format 3: Inline JSON
 
 ```
-openjd-rs run template.yaml -p '{"Frames": "1-100", "OutputDir": "/output"}'
+openjd run template.yaml -p '{"Frames": "1-100", "OutputDir": "/output"}'
 ```
 
 Detected by checking if the string starts with `{` and ends with `}`. Parsed as JSON and
@@ -88,7 +88,7 @@ parameter values pass through as strings initially.
 accepts only `NAME=VALUE` format and returns a `HashMap<String, String>`.
 
 ```
-openjd-rs run template.yaml -t Frame=42 -t Quality=high
+openjd run template.yaml -t Frame=42 -t Quality=high
 ```
 
 ### Validation Rules
@@ -118,14 +118,14 @@ task parameter sets. It returns a `Vec<HashMap<String, String>>`.
 ### Format: Inline JSON Array
 
 ```
-openjd-rs run template.yaml --tasks '[{"Frame": "1"}, {"Frame": "2"}, {"Frame": "3"}]'
+openjd run template.yaml --tasks '[{"Frame": "1"}, {"Frame": "2"}, {"Frame": "3"}]'
 ```
 
 ### Format: File Reference
 
 ```
-openjd-rs run template.yaml --tasks file://tasks.json
-openjd-rs run template.yaml --tasks file://tasks.yaml
+openjd run template.yaml --tasks file://tasks.json
+openjd run template.yaml --tasks file://tasks.yaml
 ```
 
 The file or inline string must parse to a JSON array of objects. Each object maps parameter
@@ -147,13 +147,13 @@ Error messages are terse: `"--tasks argument must be a list of maps from string 
 ### Format: Inline JSON
 
 ```
-openjd-rs run template.yaml --path-mapping-rules '{"version": "pathmapping-1.0", "path_mapping_rules": [...]}'
+openjd run template.yaml --path-mapping-rules '{"version": "pathmapping-1.0", "path_mapping_rules": [...]}'
 ```
 
 ### Format: File Reference
 
 ```
-openjd-rs run template.yaml --path-mapping-rules file://rules.json
+openjd run template.yaml --path-mapping-rules file://rules.json
 ```
 
 ### Validation

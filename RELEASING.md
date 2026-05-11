@@ -36,7 +36,7 @@ dependents when an intra-workspace dependency's version changes.
 | `openjd-model`     | ✅ yes |
 | `openjd-sessions`  | ✅ yes |
 | `openjd-cli`       | ✅ yes |
-| `openjd-snapshots` | ❌ no (`publish = false`) |
+| `openjd-snapshots` | ✅ yes |
 | `openjd-for-js`    | ❌ no (`publish = false`, built as npm package) |
 
 ## Configuration files

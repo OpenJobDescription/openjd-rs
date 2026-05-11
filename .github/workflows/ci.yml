@@ -133,7 +133,7 @@ jobs:
           rm -rf target crates/openjd-sessions/src/helper/target
       # Single unified compile pass: builds lib/bin/test targets with one
       # feature-unified dep graph. This also produces the release binary
-      # at target/release/openjd-rs as a side effect, so no explicit
+      # at target/release/openjd as a side effect, so no explicit
       # `cargo build` step is needed before uploading the artifact.
       # openjd-for-js is a wasm32 crate that has its own dedicated workflow
       # (openjd-for-js.yml); compiling it natively here wastes ~45-60s
@@ -153,8 +153,8 @@ jobs:
         with:
           name: openjd-cli-${{ matrix.os }}
           path: |
-            target/release/openjd-rs
-            target/release/openjd-rs.exe
+            target/release/openjd
+            target/release/openjd.exe
           if-no-files-found: error
 
   # Full-feature clippy exercises optional-feature code paths (like the
@@ -205,11 +205,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
-            binary: openjd-rs
+            binary: openjd
           - os: windows-latest
-            binary: openjd-rs.exe
+            binary: openjd.exe
           - os: macos-latest
-            binary: openjd-rs
+            binary: openjd
     steps:
       - name: Download CLI binary
         uses: actions/download-artifact@v8
@@ -219,13 +219,6 @@ jobs:
       - name: Make binary executable
         if: runner.os != 'Windows'
         run: chmod +x bin/${{ matrix.binary }}
-      - name: Symlink as openjd
-        if: runner.os != 'Windows'
-        run: ln -s ${{ matrix.binary }} bin/openjd
-      - name: Copy as openjd.exe
-        if: runner.os == 'Windows'
-        run: copy bin\openjd-rs.exe bin\openjd.exe
-        shell: cmd
       - name: Checkout openjd-specifications
         uses: actions/checkout@v6
         with:

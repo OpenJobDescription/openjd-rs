@@ -3,17 +3,17 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Port of Python openjd-cli unit tests to Rust integration tests.
-//! Tests the openjd-rs binary via `Command` invocations.
+//! Tests the `openjd` binary via `Command` invocations.
 
 use std::path::PathBuf;
 use std::process::Command;
 
 fn openjd_bin() -> PathBuf {
     // Use cargo to find the binary
-    let mut path = PathBuf::from(env!("CARGO_BIN_EXE_openjd-rs"));
+    let mut path = PathBuf::from(env!("CARGO_BIN_EXE_openjd"));
     if !path.exists() {
         // Fallback
-        path = PathBuf::from("target/debug/openjd-rs");
+        path = PathBuf::from("target/debug/openjd");
     }
     path
 }
@@ -27,7 +27,7 @@ fn run_cli(args: &[&str]) -> (i32, String, String) {
         .args(args)
         .env("RUSTUP_TOOLCHAIN", "1.94.1")
         .output()
-        .expect("failed to execute openjd-rs");
+        .expect("failed to execute openjd");
     let exit_code = output.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

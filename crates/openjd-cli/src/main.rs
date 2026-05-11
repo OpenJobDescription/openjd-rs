@@ -81,7 +81,7 @@ impl Log for SessionLogger {
 }
 
 #[derive(Parser)]
-#[command(name = "openjd-rs", about = "Open Job Description CLI (Rust)")]
+#[command(name = "openjd", about = "Open Job Description CLI (Rust)")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

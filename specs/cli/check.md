@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`openjd-rs check <path>` validates a job template or environment template file against the
+`openjd check <path>` validates a job template or environment template file against the
 OpenJD 2023-09 specification. It reports whether the template passes all validation checks
 or prints the first error encountered.
 
@@ -12,7 +12,7 @@ a success or error message. No job instantiation or parameter processing occurs.
 ## Interface
 
 ```
-openjd-rs check <PATH> [--extensions <EXTENSIONS>]
+openjd check <PATH> [--extensions <EXTENSIONS>]
 ```
 
 ### Arguments

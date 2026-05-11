@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`openjd-rs summary <path>` prints summary information about a job template: its parameters,
+`openjd summary <path>` prints summary information about a job template: its parameters,
 steps, task counts, environments, and dependencies. It can summarize the entire job or a
 single step. The command instantiates the job (resolving parameters and creating the job
 object) to produce accurate task counts that reflect parameter space expansion.
@@ -10,7 +10,7 @@ object) to produce accurate task counts that reflect parameter space expansion.
 ## Interface
 
 ```
-openjd-rs summary <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [--extensions <EXT>] [--output <FMT>]
+openjd summary <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [--extensions <EXT>] [--output <FMT>]
 ```
 
 ### Arguments

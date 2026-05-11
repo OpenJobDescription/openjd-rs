@@ -1,5 +1,11 @@
 # Job Attachments Snapshots — Rust Design Specs
 
+> **Status: experimental.** The `openjd-snapshots` crate is under active
+> development and its public API may change without notice. Its v2025
+> on-disk manifest format is a **draft** — see
+> [snapshot_overview.md](snapshot_overview.md) for the per-format status.
+> The v2023 on-disk format is stable and is what AWS Deadline Cloud uses.
+
 This directory contains the design specifications for the `openjd-snapshots` crate,
 ported from the Python design docs in `deadline-cloud/docs/design/job_attachments_snapshots*.md`
 and adapted for the idiomatic Rust implementation.
