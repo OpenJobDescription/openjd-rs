@@ -231,7 +231,7 @@ Priority order: 1–3 are doc fixes that should land together; 4–7 are small c
 
 ### Priority 1 — doc/spec fixes (should land soon)
 
-1. **Update `public-api.md` to reflect the current `hash_file_chunked` signature.** Change:
+1. ~~**Update `public-api.md` to reflect the current `hash_file_chunked` signature.** Change:
    ```rust
    pub fn hash_file_chunked(path: &Path, chunk_size: u64) -> std::io::Result<Vec<String>>;
    ```
@@ -239,7 +239,7 @@ Priority order: 1–3 are doc fixes that should land together; 4–7 are small c
    ```rust
    pub fn hash_file_chunked(path: &Path, chunk_size: u64, expected_size: u64) -> std::io::Result<Vec<String>>;
    ```
-   and note why `expected_size` is mandatory (content-addressed correctness; file-size-drift detection).
+   and note why `expected_size` is mandatory (content-addressed correctness; file-size-drift detection).~~ **Resolved** — `specs/snapshots/public-api.md` now shows the three-argument signature and includes a short paragraph explaining that `expected_size` is mandatory for content-addressed correctness and detects file-size drift before hashing.
 
 2. **Fix the `DashMap` spec claim.** `snapshot_operation_hash_upload_pipeline.md` says upload dedup uses `DashMap` but the implementation uses `Arc<Mutex<HashMap<...>>>`. Either update the spec or switch the implementation. Recommend updating the spec to reflect reality (lock-held-briefly is an intentional pattern used elsewhere in the crate).
 
@@ -264,6 +264,14 @@ Priority order: 1–3 are doc fixes that should land together; 4–7 are small c
 6. **Extract the dedup-broadcast lookup pattern in `hash_upload.rs` into a helper.** Reduces the duplicated code between `dedup_upload` and `process_whole_multipart`. Suggestion: `async fn dedup_begin(&dedup, key) -> DedupToken` returning either "you own this" with a cleanup guard or "another task owns it, here's an rx to wait on."
 
 7. **Add `#[non_exhaustive]` to options structs.** `CollectOptions`, `HashOptions`, `HashUploadOptions`, `DownloadOptions`, `CacheSyncOptions`, `DiffOptions`, `PartitionOptions` are all currently fully exhaustive. `#[non_exhaustive]` would allow adding new fields in future without a breaking change, while still letting callers use `..Default::default()`.
+
+   **Correction (2026-05-08):** The claim that `..Default::default()` continues to work is wrong. `#[non_exhaustive]` disallows struct-literal construction from outside the crate *even with a rest pattern*. A direct attribute addition was attempted on a branch and produced 262 compile errors across ~269 external call sites (integration tests, benchmarks). The forward-compatibility rationale still holds, but the implementation path is heavier than a single-line attribute addition:
+
+   - **Option A — mutate-from-default**: Callers switch from `HashUploadOptions { max_workers: Some(8), ..Default::default() }` to `let mut opts = HashUploadOptions::default(); opts.max_workers = Some(8);`. Mechanical but widespread (~269 sites).
+   - **Option B — introduce builders**: Add a builder for each options struct (e.g. `HashUploadOptions::builder().max_workers(8).build()`). More ergonomic at call sites but requires designing and implementing seven builders and migrating call sites.
+   - **Option C — defer**: Accept that adding a field to an options struct is a SemVer-major bump until this is properly addressed.
+
+   Recommend Option B, grouped as a separate structured-API refactor, possibly after the related sessions recommendation `SessionConfigBuilder` (§sessions report item 12) establishes the builder pattern convention.
 
 ### Priority 3 — test coverage additions
 

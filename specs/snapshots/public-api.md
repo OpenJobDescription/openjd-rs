@@ -59,8 +59,21 @@ The following hash functions are public but only accessible via the `hash` modul
 ```rust
 pub fn hash_data(data: &[u8]) -> String;
 pub fn hash_file(path: &Path) -> std::io::Result<String>;
-pub fn hash_file_chunked(path: &Path, chunk_size: u64) -> std::io::Result<Vec<String>>;
+pub fn hash_file_chunked(
+    path: &Path,
+    chunk_size: u64,
+    expected_size: u64,
+) -> std::io::Result<Vec<String>>;
 ```
+
+`expected_size` is mandatory on `hash_file_chunked`. Content-addressed
+hashing requires the file on disk to match what the manifest claims,
+so the function checks the actual file size against `expected_size`
+before hashing and returns `io::ErrorKind::InvalidData` on mismatch.
+This lets callers detect file-size drift (for example, a file that
+was truncated or extended after being recorded in a manifest) without
+a separate stat call, and guarantees that the returned chunk hashes
+describe exactly the bytes the caller intended to hash.
 
 Re-exported at the crate root:
 
