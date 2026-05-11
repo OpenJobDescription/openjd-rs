@@ -139,9 +139,9 @@ jobs:
       # feature-unified dep graph. This also produces the release binary
       # at target/release/openjd as a side effect, so no explicit
       # `cargo build` step is needed before uploading the artifact.
-      # openjd-for-js is a wasm32 crate that has its own dedicated workflow
-      # (openjd-for-js.yml); compiling it natively here wastes ~45-60s
-      # recompiling wasm-bindgen, js-sys, web-sys, and serde-wasm-bindgen.
+      # openjd-for-js is a wasm32 crate built in its own job below; compiling
+      # it natively here wastes ~45-60s recompiling wasm-bindgen, js-sys,
+      # web-sys, and serde-wasm-bindgen.
       - name: Restore helper manifest
         shell: bash
         run: cp crates/openjd-sessions/src/helper/Cargo.bundled.toml crates/openjd-sessions/src/helper/Cargo.toml
@@ -371,3 +371,39 @@ jobs:
         if: always()
         run: net user openjdtestuser /delete
         shell: cmd
+
+  # Builds the openjd-for-js crate as WebAssembly and runs its vitest suite.
+  # Kept in a separate job with its own cache so that the wasm32 build doesn't
+  # interleave with the native workspace builds in `build-test`. The main
+  # workspace jobs explicitly `--exclude openjd-for-js` to avoid recompiling
+  # wasm-bindgen, js-sys, web-sys, and serde-wasm-bindgen there.
+  openjd-for-js:
+    name: openjd-for-js (WASM + JS tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install rust stable with wasm32 target
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+          rustup target add wasm32-unknown-unknown
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/registry
+            target
+          key: wasm-${{ hashFiles('Cargo.lock') }}
+      - name: Install wasm-bindgen-cli
+        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.121
+      - name: Install JS deps
+        run: cd crates/openjd-for-js && npm install
+      - name: Build WASM + generate JS bindings
+        run: cd crates/openjd-for-js && npm run build
+      - name: Run JS tests
+        run: cd crates/openjd-for-js && npx vitest run

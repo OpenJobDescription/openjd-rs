@@ -3,9 +3,15 @@ on:
   issue_comment:
     types: [created, edited]
 
+# Workflow-root default: deny everything. The reusable workflow declares its
+# own per-job permissions (`issues: write` and `pull-requests: write` on the
+# respective jobs); the job-level block below is the upper bound forwarded
+# to it.
+permissions: {}
+
 jobs:
   check-for-response:
-    uses: OpenJobDescription/.github/.github/workflows/reusable_responded.yml@mainline
+    uses: OpenJobDescription/.github/.github/workflows/responded.yml@mainline
     permissions:
       issues: write
       pull-requests: write

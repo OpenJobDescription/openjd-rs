@@ -74,6 +74,10 @@ fn get_aces_for_object(path: &str) -> Vec<(String, Vec<u32>, Vec<u32>)> {
         assert!(result.is_ok(), "GetNamedSecurityInfoW failed: {result:?}");
     }
 
+    assert!(
+        !dacl_ptr.is_null(),
+        "GetNamedSecurityInfoW returned null DACL pointer"
+    );
     let acl_ref = unsafe { &*dacl_ptr };
     let ace_count = acl_ref.AceCount as u32;
 
@@ -83,6 +87,10 @@ fn get_aces_for_object(path: &str) -> Vec<(String, Vec<u32>, Vec<u32>)> {
         let mut ace_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let ok = unsafe { GetAce(dacl_ptr as *const ACL, i, &mut ace_ptr) };
         assert!(ok.is_ok(), "GetAce failed for index {i}");
+        assert!(
+            !ace_ptr.is_null(),
+            "GetAce returned null ACE pointer for index {i}"
+        );
 
         let header = unsafe { &*(ace_ptr as *const ACE_HEADER) };
         let ace_type = header.AceType;

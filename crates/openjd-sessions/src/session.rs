@@ -3,6 +3,27 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Session management — core state machine.
+//!
+//! # Session identifiers
+//!
+//! A [`Session`] is identified by an opaque `session_id: String` supplied by
+//! the caller (see [`SessionConfig::session_id`]). This identifier is **a
+//! correlation key for log messages**, not a credential:
+//!
+//! - It is deliberately included in log output so operators can trace which
+//!   log lines belong to which session, as both a formatted message component
+//!   and a structured log field (`session_id = ...`).
+//! - It does not authenticate or authorize anything. The OpenJD sessions
+//!   runtime does not consume session IDs as bearer tokens or secrets.
+//! - It has no meaning outside the process that created the session; the
+//!   runtime does not persist it to any shared store.
+//! - Auto-generated values (when the runtime needs to fabricate one) are
+//!   `<caller-id>:<uuid>` — random, but not secret.
+//!
+//! Static analyzers that flag "session_id" under a "cleartext logging of
+//! sensitive information" rule are producing false positives for this crate.
+//! The rule's heuristic assumes web-application session cookies, which is not
+//! the concept modeled here.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -450,6 +471,10 @@ impl Session {
             "Architecture: {}",
             std::env::consts::ARCH
         );
+        // `session_id` is an opaque correlation identifier, not a secret —
+        // it is emitted both as a structured field and in the message text so
+        // log consumers can associate this line with the rest of the session.
+        // See the module-level docs for rationale.
         log::info!(target: "openjd.sessions", session_id = config.session_id.as_str(); "Initializing Open Job Description Session: {}", &config.session_id);
         session_log!(
             info,
@@ -1816,6 +1841,10 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if !self.cleanup_called {
+            // `session_id` is an opaque correlation identifier, not a secret.
+            // Including it in this warning is essential for diagnosing which
+            // session leaked its working directory. See the module-level docs
+            // for rationale.
             log::warn!(
                 target: "openjd.sessions",
                 "Session '{}' was dropped without calling cleanup(). \

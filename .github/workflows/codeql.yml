@@ -8,9 +8,16 @@ on:
   schedule:
     - cron: "0 8 * * MON"
 
+# Workflow-root default: deny everything. This caller has no steps of its
+# own; the job below forwards `security-events: write` to the reusable
+# workflow, which declares its own per-job permissions (including the
+# `contents: read` needed by `actions/checkout` and `codeql-action/init`).
+permissions: {}
+
 jobs:
   Analysis:
     name: Analysis
     uses: OpenJobDescription/.github/.github/workflows/reusable_codeql.yml@mainline
     permissions:
+      contents: read
       security-events: write

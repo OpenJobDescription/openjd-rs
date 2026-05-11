@@ -242,6 +242,7 @@ PRs run these checks (all must pass):
 | **Compliance** | Copyright header check + `THIRD-PARTY-LICENSES` freshness (`cargo about`) |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
+| **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
 
 After updating dependencies (anything that changes `Cargo.lock`),
 regenerate `THIRD-PARTY-LICENSES` so the Compliance job stays green:
@@ -250,8 +251,9 @@ bash scripts/check_third_party_licenses.sh --update
 ```
 
 If the update bumps `wasm-bindgen`, also bump the matching
-`wasm-bindgen-cli` version pinned in `.github/workflows/openjd-for-js.yml`
-— the CLI and the linked Wasm schema version must match exactly.
+`wasm-bindgen-cli` version pinned in the `openjd-for-js` job in
+`.github/workflows/ci.yml` — the CLI and the linked Wasm schema version must
+match exactly.
 
 Before recommending the user can push, at minimum run:
 ```bash

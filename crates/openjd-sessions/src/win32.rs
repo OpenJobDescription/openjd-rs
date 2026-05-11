@@ -104,6 +104,14 @@ pub fn environment_for_user(
         CreateEnvironmentBlock(&mut block_ptr, Some(token), false)?;
     }
 
+    // `CreateEnvironmentBlock` writes a pointer to the environment block into
+    // `block_ptr` on success. `?` above propagates any error, so a `null`
+    // here would indicate a Windows API misbehavior; guard defensively rather
+    // than dereferencing.
+    if block_ptr.is_null() {
+        return Ok(HashMap::new());
+    }
+
     let env = parse_environment_block(block_ptr);
 
     unsafe {
@@ -114,8 +122,13 @@ pub fn environment_for_user(
 }
 
 /// Parse a Win32 environment block (null-delimited, double-null terminated).
+///
+/// Returns an empty map if `block` is null.
 fn parse_environment_block(block: *mut std::ffi::c_void) -> HashMap<String, String> {
     let mut env = HashMap::new();
+    if block.is_null() {
+        return env;
+    }
     let mut ptr = block as *const u16;
 
     unsafe {

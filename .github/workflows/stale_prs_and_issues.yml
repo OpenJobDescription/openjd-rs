@@ -4,6 +4,11 @@ on:
     # Run every hour on the hour
     - cron: "0 * * * *"
 
+# Workflow-root default: deny everything. This caller has no steps of its
+# own; the job below forwards the permissions declared by the reusable
+# workflow's own `workflow_call` permissions block.
+permissions: {}
+
 jobs:
   check-for-stales:
     uses: OpenJobDescription/.github/.github/workflows/reusable_stale_prs_and_issues.yml@mainline

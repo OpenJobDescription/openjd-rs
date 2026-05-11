@@ -194,6 +194,19 @@ async fn test_cross_user_subprocess_terminate_tree() {
 // === Cross-user runner identity tests ===
 
 /// Verify the subprocess runs as the target user's UID, not ours.
+///
+/// Note on including UIDs in assertion messages:
+/// A numeric POSIX UID is not sensitive information. UIDs are public on any
+/// POSIX system — visible via `id`, `ps`, `stat`, `/proc`, and `/etc/passwd`.
+/// This test runs in an isolated Docker container (`#[cfg(unix)] #[ignore]`,
+/// executed only by the Cross-User (Linux) CI job) against a throwaway test
+/// account whose UID has no meaning outside that container.
+///
+/// The entire purpose of this test is to verify that the subprocess runs as
+/// the expected UID, so including both the observed and expected UIDs in the
+/// assertion message is essential for debugging failures. Static analyzers
+/// that flag `assert_eq!` with a UID as "cleartext logging of sensitive
+/// information" are producing a false positive here.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_runner_uid() {
