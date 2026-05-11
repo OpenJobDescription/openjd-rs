@@ -18,10 +18,7 @@ const MAX_LINE_LENGTH: usize = 128 * 1024;
 
 /// Read a single line from `reader`, enforcing [`MAX_LINE_LENGTH`].
 /// Returns `Ok(0)` on EOF, `Ok(n)` on success, or `Err` if the line is too long.
-fn read_bounded_line(
-    reader: &mut impl BufRead,
-    buf: &mut String,
-) -> std::io::Result<usize> {
+fn read_bounded_line(reader: &mut impl BufRead, buf: &mut String) -> std::io::Result<usize> {
     buf.clear();
     let n = Read::take(&mut *reader, MAX_LINE_LENGTH as u64).read_line(buf)?;
     if n == MAX_LINE_LENGTH && !buf.ends_with('\n') {

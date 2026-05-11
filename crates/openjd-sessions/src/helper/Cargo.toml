@@ -11,7 +11,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process", "poll"] }
+nix = { version = "0.31", features = ["signal", "process", "poll"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

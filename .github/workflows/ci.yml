@@ -34,6 +34,8 @@ jobs:
           rustup override set nightly
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
+      - name: Run helper cargo fmt
+        run: cargo fmt --manifest-path crates/openjd-sessions/src/helper/Cargo.toml --all -- --check
 
   cargo-deny:
     name: cargo-deny (licenses, advisories, bans, sources)

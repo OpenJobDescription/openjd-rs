@@ -215,7 +215,7 @@ PRs run these checks (all must pass):
 
 | Job | What it does |
 |-----|-------------|
-| **Rustfmt** | `cargo fmt --all -- --check` (nightly) |
+| **Rustfmt** | `cargo fmt --all -- --check` (nightly) — includes the helper sub-crate |
 | **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary |
 | **Build** | Release build on all three platforms |
 | **Test** | `cargo test --workspace` + helper tests on all three platforms |
@@ -225,6 +225,16 @@ PRs run these checks (all must pass):
 | **Compliance** | Copyright header check + `THIRD-PARTY-LICENSES` freshness (`cargo about`) |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
+
+After updating dependencies (anything that changes `Cargo.lock`),
+regenerate `THIRD-PARTY-LICENSES` so the Compliance job stays green:
+```bash
+bash scripts/check_third_party_licenses.sh --update
+```
+
+If the update bumps `wasm-bindgen`, also bump the matching
+`wasm-bindgen-cli` version pinned in `.github/workflows/openjd-for-js.yml`
+— the CLI and the linked Wasm schema version must match exactly.
 
 Before recommending the user can push, at minimum run:
 ```bash

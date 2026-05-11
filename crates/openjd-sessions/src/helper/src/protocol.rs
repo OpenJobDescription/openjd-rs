@@ -181,10 +181,9 @@ mod tests {
 
     #[test]
     fn parses_cancel_with_token() {
-        let cmd: Command = serde_json::from_str(
-            r#"{"token":"AbCdEfGhIjKlMnOpQrStUv","cancel":"TERMINATE"}"#,
-        )
-        .unwrap();
+        let cmd: Command =
+            serde_json::from_str(r#"{"token":"AbCdEfGhIjKlMnOpQrStUv","cancel":"TERMINATE"}"#)
+                .unwrap();
         match cmd {
             Command::Cancel { token, method } => {
                 assert_eq!(token, "AbCdEfGhIjKlMnOpQrStUv");
@@ -202,9 +201,10 @@ mod tests {
         .unwrap();
         match cmd {
             Command::Cancel {
-                method: CancelMethod::NotifyThenTerminate {
-                    notify_period_in_seconds: 5,
-                },
+                method:
+                    CancelMethod::NotifyThenTerminate {
+                        notify_period_in_seconds: 5,
+                    },
                 ..
             } => {}
             _ => panic!("expected NotifyThenTerminate(5)"),

@@ -92,9 +92,11 @@ pub fn run_command(
 
         // Check for cancel on stdin
         let stdin_ready = stdin_has_buffered
-            || pollfds
-                .as_ref()
-                .is_some_and(|fds| fds[0].revents().is_some_and(|r| r.contains(PollFlags::POLLIN)));
+            || pollfds.as_ref().is_some_and(|fds| {
+                fds[0]
+                    .revents()
+                    .is_some_and(|r| r.contains(PollFlags::POLLIN))
+            });
         if stdin_ready {
             let mut line = String::new();
             if stdin_buf.read_line(&mut line).unwrap_or(0) > 0 {
@@ -102,8 +104,7 @@ pub fn run_command(
                     // Every cancel command must carry the shared token.
                     // Cancels with a wrong/missing token are rejected with an
                     // error response and must not affect the running child.
-                    if !constant_time_eq(parsed_cmd.token().as_bytes(), expected_token.as_bytes())
-                    {
+                    if !constant_time_eq(parsed_cmd.token().as_bytes(), expected_token.as_bytes()) {
                         send(&Response::Error {
                             error: "invalid token".into(),
                         });
@@ -131,10 +132,11 @@ pub fn run_command(
         }
 
         // Check for child output (only if we actually polled)
-        if pollfds
-            .as_ref()
-            .is_some_and(|fds| fds[1].revents().is_some_and(|r| r.contains(PollFlags::POLLIN)))
-        {
+        if pollfds.as_ref().is_some_and(|fds| {
+            fds[1]
+                .revents()
+                .is_some_and(|r| r.contains(PollFlags::POLLIN))
+        }) {
             let mut line = String::new();
             match child_buf.read_line(&mut line) {
                 Ok(0) => {
@@ -151,10 +153,11 @@ pub fn run_command(
         }
 
         // Check for child stdout closed (only if we actually polled)
-        if pollfds
-            .as_ref()
-            .is_some_and(|fds| fds[1].revents().is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR)))
-        {
+        if pollfds.as_ref().is_some_and(|fds| {
+            fds[1]
+                .revents()
+                .is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
+        }) {
             let mut line = String::new();
             while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
                 send(&Response::Out {

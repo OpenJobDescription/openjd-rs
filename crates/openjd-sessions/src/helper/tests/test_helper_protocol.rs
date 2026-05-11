@@ -56,7 +56,10 @@ fn read_line(reader: &mut BufReader<std::process::ChildStdout>) -> String {
 }
 
 fn echo_cmd_json(token: &str) -> String {
-    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     if cfg!(windows) {
         format!(
             r#"{{"token":"{}","command":"cmd","args":["/C","echo hello"],"cwd":"{}"}}"#,
@@ -72,7 +75,10 @@ fn echo_cmd_json(token: &str) -> String {
 }
 
 fn sleep_cmd_json(token: &str) -> String {
-    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     if cfg!(windows) {
         format!(
             r#"{{"token":"{}","command":"powershell","args":["-Command","Start-Sleep 300"],"cwd":"{}"}}"#,
@@ -80,7 +86,10 @@ fn sleep_cmd_json(token: &str) -> String {
             cwd.replace('\\', "\\\\"),
         )
     } else {
-        format!(r#"{{"token":"{}","command":"sleep","args":["300"],"cwd":"{}"}}"#, token, cwd)
+        format!(
+            r#"{{"token":"{}","command":"sleep","args":["300"],"cwd":"{}"}}"#,
+            token, cwd
+        )
     }
 }
 
@@ -99,13 +108,19 @@ fn test_helper_echo_command() {
     // Read pid response
     let pid_line = read_line(&mut stdout);
     let pid_json: serde_json::Value = serde_json::from_str(&pid_line).unwrap();
-    assert!(pid_json.get("pid").is_some(), "Expected pid response, got: {pid_line}");
+    assert!(
+        pid_json.get("pid").is_some(),
+        "Expected pid response, got: {pid_line}"
+    );
 
     // Read output line
     let out_line = read_line(&mut stdout);
     let out_json: serde_json::Value = serde_json::from_str(&out_line).unwrap();
     let output = out_json.get("out").and_then(|v| v.as_str()).unwrap_or("");
-    assert!(output.contains("hello"), "Expected 'hello' in output, got: {output}");
+    assert!(
+        output.contains("hello"),
+        "Expected 'hello' in output, got: {output}"
+    );
 
     // Read exit response
     let exit_line = read_line(&mut stdout);
@@ -128,7 +143,10 @@ fn test_helper_cancel_terminates_quickly() {
     // Read pid response
     let pid_line = read_line(&mut stdout);
     let pid_json: serde_json::Value = serde_json::from_str(&pid_line).unwrap();
-    assert!(pid_json.get("pid").is_some(), "Expected pid response, got: {pid_line}");
+    assert!(
+        pid_json.get("pid").is_some(),
+        "Expected pid response, got: {pid_line}"
+    );
 
     // Wait a moment for the process to start
     std::thread::sleep(Duration::from_millis(500));
@@ -163,7 +181,10 @@ fn test_helper_nonexistent_command() {
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
-    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let cmd = format!(
         r#"{{"token":"{}","command":"nonexistentcommand12345","args":[],"cwd":"{}"}}"#,
         TEST_TOKEN,
@@ -197,11 +218,19 @@ fn test_helper_rejects_missing_auth_token_cli() {
     let status = child
         .wait_timeout_or_kill(Duration::from_secs(5))
         .expect("helper should exit quickly on missing --auth-token");
-    assert!(!status.success(), "helper should exit non-zero on missing --auth-token");
+    assert!(
+        !status.success(),
+        "helper should exit non-zero on missing --auth-token"
+    );
 
     // stdout should be empty (no JSON produced).
     let mut stdout_buf = String::new();
-    child.stdout.take().unwrap().read_to_string(&mut stdout_buf).unwrap();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout_buf)
+        .unwrap();
     assert!(
         stdout_buf.trim().is_empty(),
         "helper stdout should be empty on missing --auth-token, got: {stdout_buf:?}"
@@ -218,7 +247,10 @@ fn test_helper_rejects_malformed_auth_token() {
     let status = child
         .wait_timeout_or_kill(Duration::from_secs(5))
         .expect("helper should exit quickly on malformed --auth-token");
-    assert!(!status.success(), "helper should exit non-zero on malformed --auth-token");
+    assert!(
+        !status.success(),
+        "helper should exit non-zero on malformed --auth-token"
+    );
 }
 
 #[test]
@@ -229,7 +261,10 @@ fn test_helper_rejects_missing_token_field() {
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
-    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let bad_cmd = if cfg!(windows) {
         format!(
             r#"{{"command":"cmd","args":["/C","echo hello"],"cwd":"{}"}}"#,
