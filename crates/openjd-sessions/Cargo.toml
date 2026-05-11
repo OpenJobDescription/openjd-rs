@@ -11,6 +11,7 @@ readme = "README.md"
 description = "Open Job Description sessions — local job execution runtime"
 include = [
     "/src/**",
+    "!/src/helper/target",
     "/tests/**",
     "/build.rs",
     "/README.md",
