@@ -34,6 +34,8 @@ jobs:
           rustup override set nightly
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
+      - name: Restore helper manifest
+        run: cp crates/openjd-sessions/src/helper/Cargo.bundled.toml crates/openjd-sessions/src/helper/Cargo.toml
       - name: Run helper cargo fmt
         run: cargo fmt --manifest-path crates/openjd-sessions/src/helper/Cargo.toml --all -- --check
 
@@ -44,6 +46,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
+      - name: Restore helper manifest
+        run: cp crates/openjd-sessions/src/helper/Cargo.bundled.toml crates/openjd-sessions/src/helper/Cargo.toml
       # Licenses, bans, and sources apply to every crate we compile,
       # including dev-dependencies, so scan the full graph.
       - name: Run cargo deny check licenses, bans, sources (workspace)
@@ -138,6 +142,9 @@ jobs:
       # openjd-for-js is a wasm32 crate that has its own dedicated workflow
       # (openjd-for-js.yml); compiling it natively here wastes ~45-60s
       # recompiling wasm-bindgen, js-sys, web-sys, and serde-wasm-bindgen.
+      - name: Restore helper manifest
+        shell: bash
+        run: cp crates/openjd-sessions/src/helper/Cargo.bundled.toml crates/openjd-sessions/src/helper/Cargo.toml
       - name: Build workspace (lib, bin, tests)
         run: cargo test --release --workspace --exclude openjd-for-js --all-targets --no-run
       - name: Run cargo clippy

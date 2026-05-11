@@ -9,6 +9,14 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 description = "Open Job Description sessions — local job execution runtime"
+include = [
+    "/src/**",
+    "/tests/**",
+    "/build.rs",
+    "/README.md",
+    "/LICENSE-*",
+    "/NOTICE",
+]
 keywords = ["openjd", "openjobdescription", "session", "subprocess", "runtime"]
 categories = ["command-line-utilities", "os"]
 build = "build.rs"

@@ -6,6 +6,7 @@ package*.json
 !crates/openjd-for-js/package.json
 !crates/openjd-for-js/package-lock.json
 crates/openjd-sessions/src/helper/target/
+crates/openjd-sessions/src/helper/Cargo.toml
 
 # Build artifacts
 crates/openjd-for-js/node_modules/
