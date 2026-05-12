@@ -320,3 +320,23 @@ token is available) or `CreateProcessWithLogonW` (username + password). The
 - Environment block construction for the target user
 - Stdin/stdout pipe creation with inheritable handles
 - Process creation with `CREATE_NEW_PROCESS_GROUP` flag
+
+### CreateEnvironmentBlock profile-unload race
+
+`environment_for_user()` retries `CreateEnvironmentBlock` on transient
+profile-unload-race errors. The API reads from the user's registry hive at
+`HKEY_USERS\<SID>`; Windows unloads that hive asynchronously when the
+profile's refcount drops to zero. Back-to-back logons for the same user can
+race with an in-progress unload and surface as:
+
+- `0x800703FA` `ERROR_KEY_DELETED` — "Illegal operation attempted on a
+  registry key that has been marked for deletion" (the symptom observed in
+  the cross-user integration tests).
+- `0x80070005` `E_ACCESSDENIED` — documented by Microsoft as a related
+  symptom of the same race.
+
+Retries are bounded at 5 attempts with geometric backoff (20/40/80/160 ms,
+worst-case ~300 ms total). Non-transient errors return immediately so real
+failures aren't hidden. The upstream Python implementation has a first-hand
+comment describing this same class of error in `_win32/_locate_executable.py`
+but uses a different mitigation (forcing handle cleanup between calls).

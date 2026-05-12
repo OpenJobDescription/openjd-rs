@@ -4,10 +4,13 @@ on:
   pull_request:
     types: [opened, reopened]
 
-# This workflow only invokes a reusable workflow, which declares its own
-# `permissions: contents: read`. The caller itself needs no permissions.
+# Workflow-root default: deny everything. This caller has no steps of its
+# own; the job below forwards the `contents: read` that the reusable
+# workflow declares in its own `workflow_call` permissions block.
 permissions: {}
 
 jobs:
   call-record-workflow:
     uses: OpenJobDescription/.github/.github/workflows/reusable_record_pr_details.yml@mainline
+    permissions:
+      contents: read

@@ -96,29 +96,70 @@ pub fn logon_user(username: &str, password: &str) -> Result<LogonToken, windows:
 }
 
 /// Create an environment block for a logon token and return it as a HashMap.
+///
+/// Retries transient profile-unload-race errors. `CreateEnvironmentBlock`
+/// reads from the user's registry hive (`HKEY_USERS\<SID>`); Windows unloads
+/// that hive asynchronously when the profile's refcount drops to zero. When
+/// a new logon for the same user races with a not-yet-complete unload of the
+/// previous session, `CreateEnvironmentBlock` can fail with:
+///
+/// - `0x800703FA` `ERROR_KEY_DELETED` — "Illegal operation attempted on a
+///   registry key that has been marked for deletion." This is the canonical
+///   symptom observed in our cross-user test suite when tests run back-to-back
+///   against the same Windows test user.
+/// - `0x80070005` `E_ACCESSDENIED` — documented by Microsoft as a related
+///   symptom of the same race.
+///
+/// Both are transient: the hive finishes unloading (and reloading under the
+/// new logon) within milliseconds. The upstream Python implementation has a
+/// first-hand comment describing this same error in
+/// `_win32/_locate_executable.py`.
+///
+/// Retries are bounded: 5 attempts with geometric backoff (~20/40/80/160 ms,
+/// worst-case ~300 ms total) so a real failure still surfaces promptly.
 pub fn environment_for_user(
     token: HANDLE,
 ) -> Result<HashMap<String, String>, windows::core::Error> {
-    let mut block_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-    unsafe {
-        CreateEnvironmentBlock(&mut block_ptr, Some(token), false)?;
+    /// `ERROR_KEY_DELETED` as an HRESULT (`HRESULT_FROM_WIN32(1018)`).
+    const ERROR_KEY_DELETED_HRESULT: u32 = 0x800703FA;
+    /// `E_ACCESSDENIED` — documented transient symptom of the profile-unload race.
+    const E_ACCESSDENIED_HRESULT: u32 = 0x80070005;
+    const MAX_ATTEMPTS: u32 = 5;
+
+    let mut attempt: u32 = 0;
+    loop {
+        let mut block_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let result = unsafe { CreateEnvironmentBlock(&mut block_ptr, Some(token), false) };
+
+        match result {
+            Ok(()) => {
+                // `CreateEnvironmentBlock` writes a pointer to the environment
+                // block into `block_ptr` on success. An `Ok(())` with a null
+                // pointer would indicate a Windows API misbehavior; guard
+                // defensively rather than dereferencing or passing to
+                // `DestroyEnvironmentBlock`.
+                if block_ptr.is_null() {
+                    return Ok(HashMap::new());
+                }
+                let env = parse_environment_block(block_ptr);
+                unsafe {
+                    let _ = DestroyEnvironmentBlock(block_ptr);
+                }
+                return Ok(env);
+            }
+            Err(e) => {
+                let code = e.code().0 as u32;
+                let transient = code == ERROR_KEY_DELETED_HRESULT || code == E_ACCESSDENIED_HRESULT;
+                attempt += 1;
+                if !transient || attempt >= MAX_ATTEMPTS {
+                    return Err(e);
+                }
+                // Geometric backoff: 20, 40, 80, 160 ms.
+                let backoff_ms = 20u64 << (attempt - 1);
+                std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+            }
+        }
     }
-
-    // `CreateEnvironmentBlock` writes a pointer to the environment block into
-    // `block_ptr` on success. `?` above propagates any error, so a `null`
-    // here would indicate a Windows API misbehavior; guard defensively rather
-    // than dereferencing.
-    if block_ptr.is_null() {
-        return Ok(HashMap::new());
-    }
-
-    let env = parse_environment_block(block_ptr);
-
-    unsafe {
-        let _ = DestroyEnvironmentBlock(block_ptr);
-    }
-
-    Ok(env)
 }
 
 /// Parse a Win32 environment block (null-delimited, double-null terminated).
