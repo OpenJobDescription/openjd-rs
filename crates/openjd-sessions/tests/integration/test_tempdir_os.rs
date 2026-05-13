@@ -10,7 +10,7 @@ use std::path::Path;
 
 #[test]
 fn test_openjd_temp_dir_creates_dir() {
-    let dir = openjd_temp_dir().unwrap();
+    let dir = openjd_temp_dir(None).unwrap();
     assert!(dir.exists());
     assert!(dir.is_dir());
     assert_eq!(dir.file_name().unwrap(), "OpenJD");
@@ -21,7 +21,7 @@ fn test_tempdir_default_parent() {
     let mut tmp = TempDir::new(None, None, None).unwrap();
     assert!(tmp.path().exists());
     assert!(tmp.path().is_dir());
-    let expected_parent = openjd_temp_dir().unwrap();
+    let expected_parent = openjd_temp_dir(None).unwrap();
     assert_eq!(tmp.path().parent().unwrap(), expected_parent);
     tmp.cleanup().unwrap();
 }

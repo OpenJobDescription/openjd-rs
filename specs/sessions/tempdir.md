@@ -6,18 +6,24 @@
 working directories and files directories. It handles platform-specific paths,
 permissions, cross-user ownership, and sticky bit validation.
 
-## custom_gettempdir
+## openjd_temp_dir
 
 ```rust
-pub fn custom_gettempdir() -> PathBuf
+pub fn openjd_temp_dir(base_dir: Option<&Path>) -> Result<PathBuf, SessionError>
 ```
 
-Returns the OpenJD-specific temp directory root:
-- POSIX: `{std::env::temp_dir()}/OpenJD` (typically `/tmp/OpenJD`)
-- Windows: `%PROGRAMDATA%\Amazon\OpenJD` (falls back to `C:\ProgramData` if env var
-  not set)
+Returns the OpenJD temp directory, creating it (and any missing parents) if
+needed. `base_dir` is the OpenJD directory itself.
 
-Creates the directory if it doesn't exist.
+- `None` → derive from the environment:
+  - POSIX: `<std::env::temp_dir()>/OpenJD` (typically `/tmp/OpenJD`).
+  - Windows: `%PROGRAMDATA%\Amazon\OpenJD` (with a warning and fallback to
+    `C:\ProgramData\Amazon\OpenJD` if `PROGRAMDATA` is unset).
+- `Some(p)` → use `p` directly.
+
+Production callers pass `None`. Tests pass `Some(...)` to avoid mutating
+process-global environment variables, which races with parallel tests that
+read them.
 
 ### Why a custom temp directory
 

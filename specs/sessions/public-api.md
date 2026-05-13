@@ -758,9 +758,17 @@ pub mod let_bindings {
 
 ```rust
 /// Platform-specific base dir for OpenJD session working directories:
-/// POSIX: `$TMPDIR/OpenJD`. Windows: `%PROGRAMDATA%\Amazon\OpenJD`
-/// (creating `<PROGRAMDATA>\Amazon` and `\OpenJD` as needed).
-pub fn tempdir::openjd_temp_dir() -> Result<PathBuf, SessionError>;
+/// Returns the OpenJD temp directory, creating it if needed.
+///
+/// `base_dir` is the OpenJD directory itself.
+/// - `None` → derive from the environment:
+///   - POSIX: `<std::env::temp_dir()>/OpenJD` (typically `/tmp/OpenJD`).
+///   - Windows: `%PROGRAMDATA%\Amazon\OpenJD` (with a warning and fallback to
+///     `C:\ProgramData\Amazon\OpenJD` if `PROGRAMDATA` is unset).
+/// - `Some(p)` → use `p` directly.
+///
+/// Tests should pass `Some(...)` to avoid mutating process-global env vars.
+pub fn tempdir::openjd_temp_dir(base_dir: Option<&Path>) -> Result<PathBuf, SessionError>;
 
 /// Walk ancestors of `root_dir` looking for a world-writable directory
 /// missing the sticky bit — a security risk that lets other users
@@ -787,7 +795,7 @@ pub enum StickyBitPolicy {
 pub struct TempDir { /* private fields */ }
 
 impl TempDir {
-    /// `dir`: parent directory (defaults to `openjd_temp_dir()`).
+    /// `dir`: parent directory (defaults to `openjd_temp_dir(None)`).
     /// `prefix`: name prefix for the new subdirectory.
     /// `user`: if cross-user, sets group ownership and 0o770 perms.
     pub fn new(

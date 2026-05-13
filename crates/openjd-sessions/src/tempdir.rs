@@ -26,30 +26,66 @@ pub enum StickyBitPolicy {
     Disabled,
 }
 
-/// Returns the platform-specific OpenJD temp directory, creating it if needed.
-pub fn openjd_temp_dir() -> Result<PathBuf, SessionError> {
-    #[cfg(unix)]
-    let base = std::env::temp_dir();
-
-    #[cfg(windows)]
-    let base = {
-        let program_data = std::env::var("PROGRAMDATA").unwrap_or_else(|_| {
-            log::warn!(
-                target: "openjd.sessions",
-                "Environment variable \"PROGRAMDATA\" is not set. \
-                 Creating session working directories under C:\\ProgramData"
-            );
-            r"C:\ProgramData".to_string()
-        });
-        PathBuf::from(program_data).join("Amazon")
+/// Returns the OpenJD temp directory, creating it if needed.
+///
+/// `base_dir` is the OpenJD directory itself — the directory under which
+/// individual session and file temp directories will be created.
+///
+/// - `None` → derive from the environment:
+///   - Unix: `<std::env::temp_dir()>/OpenJD` (typically `/tmp/OpenJD`).
+///   - Windows: `%PROGRAMDATA%\Amazon\OpenJD` (with a warning and fallback to
+///     `C:\ProgramData\Amazon\OpenJD` if `PROGRAMDATA` is unset).
+/// - `Some(p)` → use `p` directly.
+///
+/// Tests should pass `Some(...)` to avoid mutating process-global environment
+/// variables, which races with parallel tests that read them.
+pub fn openjd_temp_dir(base_dir: Option<&Path>) -> Result<PathBuf, SessionError> {
+    let dir = match base_dir {
+        Some(p) => p.to_path_buf(),
+        None => default_openjd_dir(),
     };
 
-    let dir = base.join("OpenJD");
     std::fs::create_dir_all(&dir).map_err(|e| SessionError::TempDir {
         path: dir.clone(),
         source: e,
     })?;
     Ok(dir)
+}
+
+/// Compute the default OpenJD directory from the environment.
+///
+/// Split out so the env-var inspection (and Windows warning) can be tested
+/// without `openjd_temp_dir` doing filesystem work, and without tests having
+/// to mutate process-global env vars.
+fn default_openjd_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        std::env::temp_dir().join("OpenJD")
+    }
+
+    #[cfg(windows)]
+    {
+        openjd_dir_from_programdata(std::env::var("PROGRAMDATA").ok())
+    }
+}
+
+/// Build the Windows OpenJD directory from a `PROGRAMDATA` value.
+///
+/// Pure function: takes an explicit value (as if from the environment),
+/// performs no I/O, and is fully testable without touching real env vars.
+/// Logs a warning when `programdata` is `None` and falls back to
+/// `C:\ProgramData`.
+#[cfg(windows)]
+fn openjd_dir_from_programdata(programdata: Option<String>) -> PathBuf {
+    let program_data = programdata.unwrap_or_else(|| {
+        log::warn!(
+            target: "openjd.sessions",
+            "Environment variable \"PROGRAMDATA\" is not set. \
+             Creating session working directories under C:\\ProgramData"
+        );
+        r"C:\ProgramData".to_string()
+    });
+    PathBuf::from(program_data).join("Amazon").join("OpenJD")
 }
 
 /// Check parent directories for world-writable dirs missing the sticky bit (POSIX only).
@@ -110,7 +146,7 @@ impl AsRef<std::path::Path> for TempDir {
 impl TempDir {
     /// Create a new secure temp directory.
     ///
-    /// - `dir`: parent directory (defaults to `openjd_temp_dir()`)
+    /// - `dir`: parent directory (defaults to `openjd_temp_dir(None)`)
     /// - `prefix`: optional name prefix
     /// - `user`: optional session user for cross-user ownership
     pub fn new(
@@ -120,7 +156,7 @@ impl TempDir {
     ) -> Result<Self, SessionError> {
         let parent = match dir {
             Some(d) => d.to_path_buf(),
-            None => openjd_temp_dir()?,
+            None => openjd_temp_dir(None)?,
         };
 
         let prefix = prefix.unwrap_or("");
@@ -274,24 +310,18 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — warns when PROGRAMDATA unset.
+    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — verifies the
+    /// warning when `PROGRAMDATA` is unset.
+    ///
+    /// Tests the pure helper `openjd_dir_from_programdata` directly so we
+    /// don't have to mutate the real `PROGRAMDATA` env var, which would race
+    /// with parallel tests that read it.
     #[cfg(windows)]
     #[test]
-    fn openjd_temp_dir_warns_when_programdata_unset() {
+    fn openjd_dir_from_programdata_warns_when_unset() {
         testing_logger::setup();
-        // Temporarily remove PROGRAMDATA
-        let original = std::env::var("PROGRAMDATA").ok();
-        unsafe {
-            std::env::remove_var("PROGRAMDATA");
-        }
-        let result = openjd_temp_dir();
-        // Restore
-        if let Some(val) = original {
-            unsafe {
-                std::env::set_var("PROGRAMDATA", val);
-            }
-        }
-        assert!(result.is_ok());
+        let dir = openjd_dir_from_programdata(None);
+        assert_eq!(dir, PathBuf::from(r"C:\ProgramData\Amazon\OpenJD"));
         testing_logger::validate(|captured_logs| {
             assert!(
                 captured_logs.iter().any(|log| {
@@ -302,58 +332,49 @@ mod tests {
         });
     }
 
-    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — positive
-    /// path: when PROGRAMDATA is set to a custom value, the OpenJD root is
-    /// `<PROGRAMDATA>\Amazon\OpenJD` and the `<PROGRAMDATA>\Amazon` parent
-    /// directory is created as a side effect.
-    ///
-    /// The Python test is in a class-scoped fixture so PROGRAMDATA can be
-    /// swapped per-test; here we mutate the process env var, capture the
-    /// result, and always restore — using an RAII guard to avoid leaking the
-    /// override to other tests even on panic.
+    /// Confirms the helper composes the path correctly when `PROGRAMDATA` is
+    /// provided. No warning should be emitted.
     #[cfg(windows)]
     #[test]
-    fn openjd_temp_dir_honors_programdata_override() {
-        struct EnvGuard {
-            key: &'static str,
-            original: Option<String>,
-        }
-        impl EnvGuard {
-            fn set(key: &'static str, new_value: &str) -> Self {
-                let original = std::env::var(key).ok();
-                unsafe {
-                    std::env::set_var(key, new_value);
-                }
-                Self { key, original }
-            }
-        }
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    match &self.original {
-                        Some(v) => std::env::set_var(self.key, v),
-                        None => std::env::remove_var(self.key),
-                    }
-                }
-            }
-        }
+    fn openjd_dir_from_programdata_uses_provided_value() {
+        testing_logger::setup();
+        let dir = openjd_dir_from_programdata(Some(r"D:\ProgramData".to_string()));
+        assert_eq!(dir, PathBuf::from(r"D:\ProgramData\Amazon\OpenJD"));
+        testing_logger::validate(|captured_logs| {
+            assert!(
+                !captured_logs
+                    .iter()
+                    .any(|log| log.level == log::Level::Warn),
+                "Expected no warning when PROGRAMDATA is provided"
+            );
+        });
+    }
 
-        let custom_root = std::env::temp_dir().join("OpenJDProgramDataTest");
+    /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — positive
+    /// path: when an explicit OpenJD directory is provided, `openjd_temp_dir`
+    /// uses it and creates it (and any missing parents) on disk.
+    ///
+    /// This test passes the directory directly via the `base_dir` parameter
+    /// instead of mutating `PROGRAMDATA`, which would race with parallel
+    /// tests that read it.
+    #[cfg(windows)]
+    #[test]
+    fn openjd_temp_dir_honors_base_dir_override() {
+        let custom_root = std::env::temp_dir().join("OpenJDBaseDirTest");
         // Ensure a clean slate so create_dir_all does real work.
         let _ = std::fs::remove_dir_all(&custom_root);
 
-        let _guard = EnvGuard::set("PROGRAMDATA", &custom_root.to_string_lossy());
-
-        let dir = openjd_temp_dir().expect("openjd_temp_dir should succeed with override");
-        let expected = custom_root.join("Amazon").join("OpenJD");
+        let openjd_dir = custom_root.join("Amazon").join("OpenJD");
+        let dir = openjd_temp_dir(Some(&openjd_dir))
+            .expect("openjd_temp_dir should succeed with override");
         assert_eq!(
-            dir, expected,
-            "openjd_temp_dir should respect PROGRAMDATA override"
+            dir, openjd_dir,
+            "openjd_temp_dir should return the path it was given"
         );
         assert!(dir.exists(), "openjd_temp_dir should create the directory");
         assert!(
             custom_root.join("Amazon").exists(),
-            "the <PROGRAMDATA>\\Amazon parent must exist"
+            "missing parents should be created as a side effect"
         );
 
         // Clean up

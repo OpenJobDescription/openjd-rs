@@ -349,7 +349,7 @@ impl Session {
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
             Some(d) => d.clone(),
-            None => crate::tempdir::openjd_temp_dir()?,
+            None => crate::tempdir::openjd_temp_dir(None)?,
         };
 
         #[cfg(unix)]
