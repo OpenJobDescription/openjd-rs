@@ -252,6 +252,7 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         cancel_token: Some(cancel_token.clone()),
         sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,
+        echo_openjd_directives: true,
     };
     let mut session = Session::with_config(session_config)
         .map_err(|e| format!("Failed to create session: {e}"))?;

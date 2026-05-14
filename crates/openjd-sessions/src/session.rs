@@ -119,6 +119,25 @@ pub struct SessionConfig {
     /// Default is `false` — output is still streamed through the callback in
     /// real time, but `ActionResult.stdout` and similar fields stay empty.
     pub debug_collect_stdout: bool,
+    /// Whether to echo `openjd_*` directive lines (e.g. `openjd_progress`,
+    /// `openjd_status`, `openjd_env`, `openjd_redacted_env`, …) from
+    /// subprocess stdout to the session log.
+    ///
+    /// Default is `true`, matching the Python `openjd-sessions` reference
+    /// implementation. When `false`, recognised directives are still parsed
+    /// and acted on (progress, status, env-var changes, redacted-value
+    /// registration, …) but the directive lines themselves are filtered
+    /// out of the log stream.
+    ///
+    /// **Redaction interaction**: regardless of this flag, values from
+    /// `openjd_redacted_env` directives are added to the session's redaction
+    /// set *before* the originating line would be passed through, so when
+    /// `echo_openjd_directives = true` the directive line that introduces a
+    /// secret is still redacted (`NAME=********`) before reaching the log.
+    /// Subsequent occurrences of the secret in any log line are also
+    /// redacted. Setting this flag to `false` does not improve security —
+    /// it just removes the directive lines from operator-facing output.
+    pub echo_openjd_directives: bool,
 }
 
 fn format_exit_code(code: Option<i32>) -> String {
@@ -281,6 +300,9 @@ pub struct Session {
     redacted_values: HashSet<String>,
     profile: Option<openjd_model::ModelProfile>,
     debug_collect_stdout: bool,
+    /// Whether to echo `openjd_*` directive lines to the log. See
+    /// [`SessionConfig::echo_openjd_directives`].
+    echo_openjd_directives: bool,
 }
 
 impl Session {
@@ -320,6 +342,7 @@ impl Session {
             redacted_values: HashSet::new(),
             profile: None,
             debug_collect_stdout: true, // test constructor — tests need captured stdout
+            echo_openjd_directives: true, // matches default in production config
         }
     }
 
@@ -522,6 +545,7 @@ impl Session {
             redacted_values: HashSet::new(),
             profile,
             debug_collect_stdout: config.debug_collect_stdout,
+            echo_openjd_directives: config.echo_openjd_directives,
         })
     }
 
@@ -895,6 +919,7 @@ impl Session {
             )
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
+            .with_echo_openjd_directives(self.echo_openjd_directives)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1058,6 +1083,7 @@ impl Session {
             )
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
+            .with_echo_openjd_directives(self.echo_openjd_directives)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1179,6 +1205,7 @@ impl Session {
         )
         .with_redactions(self.redactions_enabled())
         .with_debug_collect_stdout(self.debug_collect_stdout)
+        .with_echo_openjd_directives(self.echo_openjd_directives)
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
@@ -1303,7 +1330,11 @@ impl Session {
             cancel_request_rx: Some(cancel_rx),
             debug_collect_stdout: self.debug_collect_stdout,
         };
-        let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
+        let mut filter = crate::action_filter::ActionFilter::new(
+            &self.session_id,
+            self.echo_openjd_directives,
+            false,
+        );
         let subprocess_identifier = format!(
             "{}:subprocess:{}",
             self.session_id,
@@ -1335,7 +1366,11 @@ impl Session {
         env_vars: std::collections::HashMap<String, Option<String>>,
         _timeout: Option<Duration>,
     ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
-        let mut filter = crate::action_filter::ActionFilter::new(&self.session_id, true, false);
+        let mut filter = crate::action_filter::ActionFilter::new(
+            &self.session_id,
+            self.echo_openjd_directives,
+            false,
+        );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let subprocess_identifier = format!(
             "{}:subprocess:{}",

@@ -26,7 +26,7 @@ the runtime. Each directive is a single line matching `^openjd_<kind>: <payload>
 ```rust
 pub struct ActionFilter {
     session_id: String,
-    suppress_filtered: bool,
+    echo_openjd_directives: bool,
     redactions_enabled: bool,
     redacted_values: HashSet<String>,
     redacted_lines: HashSet<String>,
@@ -34,7 +34,7 @@ pub struct ActionFilter {
 }
 
 impl ActionFilter {
-    pub fn new(session_id: &str, suppress_filtered: bool, redactions_enabled: bool) -> Self;
+    pub fn new(session_id: &str, echo_openjd_directives: bool, redactions_enabled: bool) -> Self;
 
     pub fn filter_message(&mut self, line: &str, session_id: &str)
         -> (Vec<FilterCallback>, bool, String);
@@ -73,12 +73,26 @@ unmodified. This supports shared log streams where multiple sessions interleave 
 The return value `(Vec<FilterCallback>, bool, String)` contains:
 
 1. `Vec<FilterCallback>` — Zero or more parsed callbacks (usually 0 or 1)
-2. `bool` — Whether the line should be passed through to logging (false for directives
-   that are fully consumed when `suppress_filtered` is true)
+2. `bool` — Whether the line should be passed through to logging (`true` when
+   `echo_openjd_directives` is true for recognised directives; always `true`
+   for non-directive lines)
 3. `String` — The (possibly redacted) line for logging
 
 This three-part return avoids the Python pattern of mutating shared state from a logging
 filter callback. The caller decides what to do with each part.
+
+`echo_openjd_directives` is the same flag that appears on
+[`SessionConfig::echo_openjd_directives`] — it flows all the way down from
+the public API to the filter without inversion. When `true` (the default),
+every recognised directive line passes through to the log
+(`pass_through = true`). When `false`, recognised directives are still
+parsed and acted on (progress, status, env-var changes, redacted-value
+registration, …) but the lines themselves are filtered out
+(`pass_through = false`). This applies uniformly to **every** directive,
+including `openjd_redacted_env`. Earlier revisions of this code special-cased
+`RedactedEnv` to always pass through, but that diverged from Python's
+`_action_filter.py`, which routes every recognised directive through
+`return not self._suppress_filtered`. The behaviour is now unified.
 
 ### Why Vec instead of Option for callbacks
 
@@ -171,6 +185,19 @@ When `openjd_redacted_env: NAME=VALUE` is processed:
 Variable-length replacement (matching the original value's length) would leak information
 about the value's size. Fixed-length replacement is a security best practice for
 credential redaction.
+
+### Redaction ordering and the `echo_openjd_directives` flag
+
+When `openjd_redacted_env: NAME=VALUE` is processed, the secret is added to
+`redacted_values` *before* the originating line is considered for pass-through.
+The line that the filter returns has `NAME=VALUE` rewritten to `NAME=********`
+already, so it is safe to log when `echo_openjd_directives = true` (the
+default). Any
+later log line that happens to contain the secret value verbatim is also
+redacted on the way through `apply_redaction`. This means
+`echo_openjd_directives = false` is *not* a security feature — it just removes
+directive lines from operator-facing output. Redaction is what protects the
+secret, and it is in effect regardless of the echo flag.
 
 ### JSON-encoded env var format
 

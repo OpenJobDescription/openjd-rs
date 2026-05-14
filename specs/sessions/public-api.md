@@ -335,6 +335,29 @@ pub struct SessionConfig {
     /// Production callers should leave this false and observe
     /// output via the real-time callback instead.
     pub debug_collect_stdout: bool,
+
+    /// Whether to echo `openjd_*` directive lines (e.g.
+    /// `openjd_progress`, `openjd_status`, `openjd_env`,
+    /// `openjd_redacted_env`, …) from subprocess stdout to the
+    /// session log. Default: `true`, matching the Python
+    /// `openjd-sessions` reference implementation.
+    ///
+    /// When `false`, recognised directives are still parsed and
+    /// acted on (progress updates, env-var changes, redacted-value
+    /// registration, …) but the directive lines themselves are
+    /// filtered out of the log stream.
+    ///
+    /// **Redaction interaction**: regardless of this flag, values
+    /// from `openjd_redacted_env` directives are added to the
+    /// session's redaction set *before* the originating line is
+    /// considered for pass-through. So when
+    /// `echo_openjd_directives = true`, the directive line that
+    /// introduces a secret is logged in its already-redacted form
+    /// (`NAME=********`); subsequent occurrences of the secret in
+    /// any log line are also redacted. Setting this flag to
+    /// `false` does not improve security — it just removes the
+    /// directive lines from operator-facing output.
+    pub echo_openjd_directives: bool,
 }
 ```
 

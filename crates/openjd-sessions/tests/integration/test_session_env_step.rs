@@ -446,6 +446,7 @@ async fn test_env_with_resolved_variables() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut session = Session::with_config(session_config).unwrap();

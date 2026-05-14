@@ -49,6 +49,14 @@ impl StepScriptRunner {
         self
     }
 
+    /// Whether to echo `openjd_*` directive lines (e.g. `openjd_progress`,
+    /// `openjd_status`, `openjd_env`, …) to the log. Defaults to `true`.
+    /// See [`crate::session::SessionConfig::echo_openjd_directives`].
+    pub fn with_echo_openjd_directives(mut self, echo: bool) -> Self {
+        self.base.echo_openjd_directives = echo;
+        self
+    }
+
     pub fn with_initial_redacted_values(mut self, values: Vec<String>) -> Self {
         self.base.initial_redacted_values = values;
         self

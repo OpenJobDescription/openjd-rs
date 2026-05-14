@@ -845,7 +845,7 @@ mod tests {
             t.cancel();
         });
 
-        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let mut filter = crate::action_filter::ActionFilter::new("test", true, false);
         let start = std::time::Instant::now();
         let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
             .await
@@ -911,7 +911,7 @@ mod tests {
             t.cancel();
         });
 
-        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let mut filter = crate::action_filter::ActionFilter::new("test", true, false);
         let start = std::time::Instant::now();
         let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
             .await
@@ -959,7 +959,7 @@ mod tests {
             t.cancel();
         });
 
-        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let mut filter = crate::action_filter::ActionFilter::new("test", true, false);
         let start = std::time::Instant::now();
         let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
             .await
@@ -1005,7 +1005,7 @@ mod tests {
             t.cancel();
         });
 
-        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let mut filter = crate::action_filter::ActionFilter::new("test", true, false);
         let start = std::time::Instant::now();
         let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
             .await
@@ -1110,7 +1110,7 @@ mod tests {
     #[test]
     fn test_process_line_plain_text() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         let (display, pass_through) =
             process_line("hello world", &mut filter, "test", &tx, &mut saw_fail);
@@ -1122,7 +1122,7 @@ mod tests {
     #[test]
     fn test_process_line_progress() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         let (_display, _pass_through) = process_line(
             "openjd_progress: 0.5",
@@ -1141,7 +1141,7 @@ mod tests {
     #[test]
     fn test_process_line_status() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         process_line(
             "openjd_status: rendering frame 42",
@@ -1160,7 +1160,7 @@ mod tests {
     #[test]
     fn test_process_line_fail() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         process_line(
             "openjd_fail: out of memory",
@@ -1179,7 +1179,7 @@ mod tests {
     #[test]
     fn test_process_line_env() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         process_line(
             "openjd_env: MY_VAR=my_value",
@@ -1200,7 +1200,7 @@ mod tests {
     #[test]
     fn test_process_line_unset_env() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         process_line(
             "openjd_unset_env: MY_VAR",
@@ -1218,7 +1218,7 @@ mod tests {
     #[test]
     fn test_process_line_redacted_env() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut filter = ActionFilter::new("test", false, false);
+        let mut filter = ActionFilter::new("test", true, false);
         let mut saw_fail = false;
         process_line(
             "openjd_redacted_env: SECRET=hunter2",
@@ -1260,7 +1260,7 @@ mod tests {
             .unwrap();
         rt.block_on(async {
             let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
                 .await
@@ -1299,7 +1299,7 @@ mod tests {
             .unwrap();
         let err = rt.block_on(async {
             let (msg_tx, _) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let config = SubprocessConfig {
                 args: vec!["/nonexistent/binary_xyz".into()],
@@ -1327,7 +1327,7 @@ mod tests {
             .unwrap();
         let err = rt.block_on(async {
             let (msg_tx, _) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let config = SubprocessConfig {
                 args: vec![],
@@ -1357,7 +1357,7 @@ mod tests {
             .unwrap();
         let (r, _) = rt.block_on(async {
             let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let config = SubprocessConfig {
                 args: vec!["sleep".into(), "30".into()],
@@ -1390,7 +1390,7 @@ mod tests {
             .unwrap();
         let (r, _) = rt.block_on(async {
             let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let config = SubprocessConfig {
                 args: vec![
@@ -1600,7 +1600,7 @@ mod tests {
             .unwrap();
         let r = rt.block_on(async {
             let (msg_tx, _) = mpsc::unbounded_channel();
-            let mut filter = ActionFilter::new("test", false, false);
+            let mut filter = ActionFilter::new("test", true, false);
             let token = CancellationToken::new();
             let config = SubprocessConfig {
                 args: vec!["echo".into(), "hello".into()],
@@ -1716,7 +1716,7 @@ mod tests {
         // Small yield to let the OS thread run
         tokio::time::sleep(Duration::from_millis(1)).await;
 
-        let mut filter = crate::action_filter::ActionFilter::new("test", false, false);
+        let mut filter = crate::action_filter::ActionFilter::new("test", true, false);
         let result = run_subprocess(config, &mut filter, "test", msg_tx, token)
             .await
             .unwrap();

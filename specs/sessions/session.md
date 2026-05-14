@@ -64,6 +64,11 @@ pub struct SessionConfig {
     /// Whether to accumulate subprocess stdout into result strings.
     /// Intended for debugging only. Default is `false`.
     pub debug_collect_stdout: bool,
+    /// Whether to echo `openjd_*` directive lines (e.g. `openjd_progress`,
+    /// `openjd_status`, `openjd_env`, `openjd_redacted_env`, …) from
+    /// subprocess stdout to the session log. Default: `true`, matching
+    /// the Python reference implementation. See [`echo_openjd_directives`](#echo_openjd_directives).
+    pub echo_openjd_directives: bool,
 }
 ```
 
@@ -520,3 +525,51 @@ but the collected `String` stays empty — preventing unbounded memory growth.
 
 Intended for debugging only. Production callers should leave this `false` and observe
 output through the real-time callback.
+
+## echo_openjd_directives
+
+`SessionConfig.echo_openjd_directives: bool` (default `true`) controls whether
+recognised `openjd_*` directive lines from subprocess stdout are echoed to the
+session log. The default matches the Python reference implementation
+(`openjd-sessions-for-python`'s `ActionMonitoringFilter` defaults to echoing
+directives). Recognised directives are:
+
+| Directive | Effect |
+|-----------|--------|
+| `openjd_progress: <float>` | Update action progress percentage |
+| `openjd_status: <string>` | Update human-readable status |
+| `openjd_fail: <string>` | Set failure reason and cancel |
+| `openjd_env: NAME=VALUE` | Set environment variable for subsequent actions |
+| `openjd_redacted_env: NAME=VALUE` | Set env var and redact value in logs |
+| `openjd_unset_env: NAME` | Unset environment variable |
+| `openjd_session_runtime_loglevel: LEVEL` | Change runtime log level |
+
+When `true`, the directive line is logged after redaction is applied (so the
+secret value in `openjd_redacted_env` is replaced with `********` before reach
+the log). When `false`, recognised directives are still parsed and acted on
+(progress/status updates, env-var changes, redacted-value registration, …) but
+the directive lines themselves are filtered out of the log stream — only
+non-directive command output reaches the log.
+
+Implementation: the flag is forwarded down to `ScriptRunnerBase` via
+`with_echo_openjd_directives` and passed directly as
+`ActionFilter::new`'s `echo_openjd_directives` argument.
+
+### Redaction interaction
+
+Setting `echo_openjd_directives = false` is **not** a security feature. Values
+from `openjd_redacted_env` directives are added to the session's redaction set
+*before* the originating line is considered for pass-through, so:
+
+* When echoing is on (the default), the directive line itself is rewritten to
+  `NAME=********` before it ever reaches the log handler.
+* Subsequent occurrences of the secret value in any log line — directive or
+  not — are also redacted on the way through `apply_redaction`, regardless of
+  this flag.
+
+The flag's purpose is operator UX: removing the noisy directive lines from the
+log when a job emits many `openjd_progress` updates per second, for example,
+or when an operator wants the log to reflect only the underlying tool's output
+and not the OpenJD orchestration metadata. Use redaction (the
+`REDACTED_ENV_VARS` extension) to keep secrets out of logs; use this flag to
+keep the log readable.

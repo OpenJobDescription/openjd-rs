@@ -267,6 +267,7 @@ async fn run_scenario(scenario_path: &Path) {
         profile,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut session = Session::with_config(config).unwrap();

@@ -101,6 +101,10 @@ pub(crate) struct ScriptRunnerBase {
     pub redactions_enabled: bool,
     pub initial_redacted_values: Vec<String>,
     pub debug_collect_stdout: bool,
+    /// Whether to echo `openjd_*` directive lines to the log. See
+    /// [`crate::session::SessionConfig::echo_openjd_directives`]. Defaults
+    /// to `true` to match the Python reference implementation.
+    pub echo_openjd_directives: bool,
     #[cfg(unix)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
@@ -127,6 +131,7 @@ impl ScriptRunnerBase {
             redactions_enabled: false,
             initial_redacted_values: Vec::new(),
             debug_collect_stdout: false,
+            echo_openjd_directives: true,
             helper: None,
             cancel_writer: None,
         }
@@ -159,7 +164,11 @@ impl ScriptRunnerBase {
             cancel_request_rx: self.cancel_request_rx.clone(),
             debug_collect_stdout: self.debug_collect_stdout,
         };
-        let mut filter = ActionFilter::new(&self.session_id, true, self.redactions_enabled);
+        let mut filter = ActionFilter::new(
+            &self.session_id,
+            self.echo_openjd_directives,
+            self.redactions_enabled,
+        );
         filter.add_redacted_values(&self.initial_redacted_values);
 
         if let Some(ref mut helper) = self.helper {

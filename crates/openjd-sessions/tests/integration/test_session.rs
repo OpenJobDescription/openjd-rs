@@ -99,6 +99,7 @@ async fn test_root_dir_permissions_posix() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let session = Session::with_config(config).unwrap();
@@ -140,6 +141,7 @@ async fn test_sticky_bit_policy_strict_rejects_unsafe_dir() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
     };
     let result = Session::with_config(config);
@@ -172,6 +174,7 @@ async fn test_sticky_bit_policy_strict_allows_safe_dir() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Strict,
     };
     let session = Session::with_config(config).unwrap();
@@ -203,6 +206,7 @@ async fn test_sticky_bit_policy_warn_allows_unsafe_dir() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Warn,
     };
     let session = Session::with_config(config).unwrap();
@@ -244,6 +248,7 @@ async fn test_sticky_bit_policy_disabled_skips_check() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let session = Session::with_config(config).unwrap();
@@ -508,6 +513,7 @@ async fn test_enter_environment_with_resolved_variables() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(session_config).unwrap();
@@ -1039,6 +1045,7 @@ async fn test_run_subprocess_basic() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1073,6 +1080,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1113,6 +1121,7 @@ async fn test_run_subprocess_with_os_env_vars() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1150,6 +1159,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1182,6 +1192,7 @@ async fn test_run_subprocess_empty_command_fails() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1206,6 +1217,7 @@ async fn test_run_subprocess_whitespace_command_fails() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1335,6 +1347,7 @@ fn realtime_test_config(
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     }
 }
@@ -1568,6 +1581,7 @@ async fn test_cancel_action_mark_failed() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -1881,6 +1895,7 @@ fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionCon
         profile: None,
         cancel_token: None,
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     }
 }
@@ -2275,6 +2290,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
         profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -2329,6 +2345,7 @@ async fn test_cancel_action_with_mark_failed() {
         profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: true,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -2702,6 +2719,7 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
         profile: None,
         cancel_token: Some(parent_token.clone()),
         debug_collect_stdout: false,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -2753,6 +2771,7 @@ async fn test_callback_reports_intermediate_progress() {
         profile: None,
         cancel_token: None,
         debug_collect_stdout: false,
+        echo_openjd_directives: true,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
     };
     let mut s = Session::with_config(config).unwrap();
@@ -2805,4 +2824,187 @@ async fn test_callback_reports_intermediate_progress() {
         "Expected progress 75.0 in callbacks, got: {:?}",
         progress_values
     );
+}
+
+// === Tests for SessionConfig::echo_openjd_directives ===
+//
+// Mirrors the Python reference implementation, where the equivalent
+// ActionMonitoringFilter `suppress_filtered` parameter defaults to False
+// (i.e. directives are echoed to the log). These tests verify that:
+//   * `echo_openjd_directives = true` (the default) lets directive lines
+//     reach the session log, and
+//   * `echo_openjd_directives = false` filters them out.
+// `openjd_redacted_env` follows the same rule, with the secret value
+// replaced by `********` before the line reaches the log.
+
+#[cfg(unix)]
+fn echo_directives_test_config(
+    tmp: &TempDir,
+    session_id: &str,
+    echo: bool,
+) -> openjd_sessions::session::SessionConfig {
+    openjd_sessions::session::SessionConfig {
+        session_id: session_id.into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        profile: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        echo_openjd_directives: echo,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_echo_openjd_directives_true_passes_directive_lines_to_log() {
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::with_config(echo_directives_test_config(&tmp, "echo-on", true)).unwrap();
+
+    // Construct the directive at runtime from environment variables so the
+    // literal text `openjd_progress: 42.0` does not appear in the script
+    // command (the command itself is logged via `format_command_for_log`,
+    // and we want to assert specifically that the *output* line was echoed).
+    let script = step(
+        "sh",
+        vec![
+            "-c",
+            r#"K=op; J=enjd; printf '%s%s_progress: %s\n' "$K" "$J" 42.0; echo 'echo-on-plain-output'"#,
+        ],
+    );
+    let r = s.run_task(&script, None, None, None).await.unwrap();
+    assert_eq!(r.state, ActionState::Success);
+
+    testing_logger::validate(|captured| {
+        let directive_logged = captured
+            .iter()
+            .any(|log| log.body.contains("openjd_progress: 42.0"));
+        assert!(
+            directive_logged,
+            "expected the openjd_progress directive to appear in the log when echo=true"
+        );
+        let plain_logged = captured
+            .iter()
+            .any(|log| log.body.contains("echo-on-plain-output"));
+        assert!(
+            plain_logged,
+            "non-directive output must always reach the log"
+        );
+    });
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_echo_openjd_directives_false_suppresses_directive_lines_from_log() {
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::with_config(echo_directives_test_config(&tmp, "echo-off", false)).unwrap();
+
+    // See the sister `..._true_..._to_log` test — the literal directive
+    // string must not appear in the script command itself, so we synthesize
+    // it at runtime. Use a different progress value (43.0) so this test's
+    // assertion is robust against testing_logger's process-global state.
+    let script = step(
+        "sh",
+        vec![
+            "-c",
+            r#"K=op; J=enjd; printf '%s%s_progress: %s\n' "$K" "$J" 43.0; echo 'echo-off-plain-output'"#,
+        ],
+    );
+    let r = s.run_task(&script, None, None, None).await.unwrap();
+    assert_eq!(r.state, ActionState::Success);
+
+    testing_logger::validate(|captured| {
+        let directive_logged = captured
+            .iter()
+            .any(|log| log.body.contains("openjd_progress: 43.0"));
+        assert!(
+            !directive_logged,
+            "expected the openjd_progress directive to be suppressed from the log when echo=false"
+        );
+        let plain_logged = captured
+            .iter()
+            .any(|log| log.body.contains("echo-off-plain-output"));
+        assert!(
+            plain_logged,
+            "non-directive output must still reach the log even when directives are suppressed"
+        );
+    });
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_echo_openjd_directives_true_redacts_redacted_env_in_log() {
+    use openjd_model::types::{ModelExtension, SpecificationRevision};
+    use openjd_model::ModelProfile;
+
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    // REDACTED_ENV_VARS extension must be enabled for redaction semantics to
+    // engage; the directive is parsed regardless, but redactions_enabled() drives
+    // whether the value is added to the redaction set with full effect.
+    let profile = ModelProfile::new(SpecificationRevision::V2023_09)
+        .with_extensions([ModelExtension::RedactedEnvVars].into_iter().collect());
+
+    let config = openjd_sessions::session::SessionConfig {
+        session_id: "redacted-echo".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        profile: Some(profile),
+        cancel_token: None,
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    // Synthesize the directive AND the secret value at runtime so neither
+    // the literal `openjd_redacted_env:` token nor the secret bytes appear
+    // verbatim in the script command (the command is logged via
+    // `format_command_for_log`, which would otherwise leak both into the
+    // log before the action filter has a chance to redact them).
+    let script = step(
+        "sh",
+        vec![
+            "-c",
+            r#"K=op; J=enjd; A=tops; B=ecret; C=123; printf '%s%s_redacted_env: TOKEN=%s%s%s\n' "$K" "$J" "$A" "$B" "$C""#,
+        ],
+    );
+    let r = s.run_task(&script, None, None, None).await.unwrap();
+    assert_eq!(r.state, ActionState::Success);
+
+    testing_logger::validate(|captured| {
+        // The directive line itself must be present (echo=true)…
+        let directive_logged = captured
+            .iter()
+            .any(|log| log.body.contains("openjd_redacted_env: TOKEN="));
+        assert!(
+            directive_logged,
+            "expected the redacted_env directive to appear in the log when echo=true"
+        );
+        // …but the secret value must NOT appear in any log record.
+        let secret_leaked = captured.iter().any(|log| log.body.contains("topsecret123"));
+        assert!(
+            !secret_leaked,
+            "secret value must never reach the log; expected redaction to fixed-length asterisks"
+        );
+        let redacted_form = captured
+            .iter()
+            .any(|log| log.body.contains("TOKEN=********"));
+        assert!(
+            redacted_form,
+            "expected the redacted_env line to show NAME=******** in the log"
+        );
+    });
 }
