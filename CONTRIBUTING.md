@@ -58,7 +58,7 @@ would also find it useful.
 
 Contributions via pull requests are much appreciated. Before sending us a pull request, please ensure that:
 
-1. You are working against the latest source on the *mainline* branch.
+1. You are working against the latest source on the *main* branch.
 2. You check existing open, and recently merged, pull requests to make sure someone else hasn't addressed the problem already.
 3. You open an issue to discuss any significant work - we would hate for your time to be wasted.
 4. Your pull request will be focused on a single change - it is easier for us to understand when a change is focused rather
@@ -83,7 +83,7 @@ GitHub provides additional documentation on [forking a repository](https://help.
 
 The commits in this repository are all required to use [conventional commit syntax](https://www.conventionalcommits.org/en/v1.0.0/)
 in their title to help us identify the kind of change that is being made, automatically generate the changelog, and 
-automatically identify next release version number. Only the first commit that deviates from mainline in your pull request
+automatically identify next release version number. Only the first commit that deviates from main in your pull request
 must adhere to this requirement.
 
 We ask that you use these commit types in your commit titles:

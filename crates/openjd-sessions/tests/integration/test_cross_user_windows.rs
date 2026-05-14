@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use openjd_sessions::action::ActionState;
 use openjd_sessions::session::{Session, SessionConfig};
-use openjd_sessions::session_user::WindowsSessionUser;
+use openjd_sessions::session_user::{BadCredentialsError, WindowsSessionUser};
 use openjd_sessions::SessionUser;
 
 // ---------------------------------------------------------------------------
@@ -1035,4 +1035,89 @@ async fn test_cross_user_session_user_cannot_overwrite_helper_binary() {
     );
 
     session.cleanup();
+}
+
+// === Credential validation: error-mapping ===
+//
+// These tests exercise `WindowsSessionUser::with_password`'s mapping from
+// `LogonUserW` failure codes to `BadCredentialsError` variants. The mapping
+// is observable downstream — the Python binding layer surfaces
+// `BadCredentialsError::LogonFailure` as the user-facing
+// `BadCredentialsException` (typed authentication-failed signal) and
+// `BadCredentialsError::Other` as a generic `RuntimeError`. Tests asserting
+// on the variant rather than just `is_err()` lock that contract in.
+//
+// `with_password` calls `LogonUserW` and is therefore Windows-only; both
+// tests use the same `OPENJD_TEST_WIN_USER_NAME` / `..._PASSWORD` env vars
+// the rest of this file relies on.
+
+/// A valid local user with a deliberately wrong password must produce
+/// `BadCredentialsError::LogonFailure` — the typed
+/// "credentials-don't-match-an-account" signal — not the catch-all `Other`
+/// variant.
+#[test]
+#[ignore]
+fn test_with_password_wrong_password_returns_logon_failure() {
+    // GIVEN the configured test username (a real, valid Windows account)
+    let user =
+        std::env::var("OPENJD_TEST_WIN_USER_NAME").expect("OPENJD_TEST_WIN_USER_NAME must be set");
+
+    // WHEN with_password is called with a deliberately wrong password
+    let result = WindowsSessionUser::with_password(&user, "definitely_not_the_right_password_x9q3");
+
+    // THEN we get the LogonFailure variant — the user-facing
+    // BadCredentialsException-equivalent signal — not Other.
+    match result {
+        Err(BadCredentialsError::LogonFailure) => {
+            // Pass: variant is the typed "credentials are wrong" signal.
+        }
+        Err(BadCredentialsError::Other(msg)) => panic!(
+            "wrong-password rejection should map to LogonFailure (typed \
+             credentials-mismatch signal), not Other (generic runtime error). \
+             got Other({msg:?}). \
+             Check `WindowsSessionUser::validate_credentials` — the \
+             ERROR_LOGON_FAILURE (0x8007052E) branch must remain reachable."
+        ),
+        Ok(_) => panic!(
+            "with_password({user:?}, wrong_password) must reject. \
+             Did the test password accidentally match?"
+        ),
+    }
+}
+
+/// A non-existent user must also map to `LogonFailure`, not `Other`.
+/// `LogonUserW` returns `ERROR_LOGON_FAILURE` (0x8007052E) for both
+/// "no such account" and "wrong password" cases — the API does not
+/// distinguish between them, deliberately, to avoid leaking account
+/// existence to attackers. Lock this in so a future change to the
+/// mapping (e.g. a check that branches on `ERROR_NO_SUCH_USER`) doesn't
+/// silently re-route this case to `Other`.
+///
+/// Unlike the wrong-password test above this one does not require a real
+/// test user account, so it runs unconditionally on Windows CI rather than
+/// gated behind `#[ignore]`.
+#[test]
+fn test_with_password_nonexistent_user_returns_logon_failure() {
+    // GIVEN a username that almost certainly does not exist on the host
+    let nonexistent_user = "openjd_nonexistent_user_4f1c2a8e";
+
+    // WHEN with_password is called for that user
+    let result = WindowsSessionUser::with_password(nonexistent_user, "irrelevant");
+
+    // THEN we get LogonFailure (LogonUserW returns ERROR_LOGON_FAILURE
+    // for non-existent users — same code as wrong-password)
+    match result {
+        Err(BadCredentialsError::LogonFailure) => {
+            // Pass.
+        }
+        Err(BadCredentialsError::Other(msg)) => panic!(
+            "non-existent-user rejection should map to LogonFailure \
+             (LogonUserW returns ERROR_LOGON_FAILURE for unknown accounts \
+             to avoid leaking account existence). got Other({msg:?})."
+        ),
+        Ok(_) => panic!(
+            "with_password({nonexistent_user:?}, ...) must reject — \
+             did the test pick a username that happens to exist?"
+        ),
+    }
 }

@@ -460,6 +460,24 @@ Grouped by category and prioritized within each group.
     `openjd-expr`. Assert on full error strings to lock down quality.
 24. **Expand Windows behaviour tests** as Windows support matures — behavioural
     tests for CTRL_BREAK_EVENT, process-tree kill, and cross-user launch.
+25. ~~**Cover the `WindowsSessionUser::with_password` error mapping in unit tests.**
+    The current Windows integration test (`test_windows_permissions.rs`) asserts
+    that a non-existent user produces *some* error, but does not assert that
+    `ERROR_LOGON_FAILURE` maps to `BadCredentialsError::LogonFailure` (vs the
+    catch-all `BadCredentialsError::Other`). The Python binding layer maps
+    `LogonFailure` to the user-facing `BadCredentialsException` and `Other` to
+    `RuntimeError`, so that distinction is observable to consumers. Add a
+    small Windows-only unit test (or extend the existing integration test) that
+    pattern-matches on the error variant.~~ **Resolved.** Added a Windows
+    unit test in `session_user.rs` covering the process-owner → `Other`
+    rejection path; added two integration tests in
+    `test_cross_user_windows.rs` covering wrong-password → `LogonFailure`
+    (requires the standard `OPENJD_TEST_WIN_USER_NAME` / `_PASSWORD`
+    fixtures, gated `#[ignore]`) and nonexistent-user → `LogonFailure`
+    (runs in Windows CI without external fixtures). Also tightened the
+    existing `test_tempdir_windows_nonvalid_principal_raises_error` in
+    `test_windows_permissions.rs` to assert the variant rather than just
+    `is_err()`.
 
 ---
 

@@ -9,11 +9,11 @@
 #   See RELEASING.md for the one-time setup that must be completed first.
 #
 # Overview (once dry-run is removed):
-#   On every push to `mainline`, release-plz does two things:
+#   On every push to `main`, release-plz does two things:
 #     1. `release-pr` — opens (or updates) a single PR titled "chore: release"
 #        that bumps versions, updates Cargo.lock, and regenerates CHANGELOG.md
 #        for every crate with unreleased conventional-commit changes.
-#     2. `release` — for any commit on `mainline` that matches a published
+#     2. `release` — for any commit on `main` that matches a published
 #        version (i.e. the Release PR was just merged), creates git tags,
 #        GitHub Releases, and publishes the crates to crates.io in dependency
 #        order.
@@ -38,7 +38,7 @@ name: Release-plz
 on:
   push:
     branches:
-      - mainline
+      - main
 
 # Only one release workflow runs at a time. We do NOT cancel in-progress runs
 # because that could abandon an in-flight publish partway through the dependency
@@ -86,7 +86,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Open or update the Release PR. This runs on every push to mainline.
+  # Open or update the Release PR. This runs on every push to main.
   # The `release-pr` command is not affected by `dry_run`, so the PR will
   # appear normally; it just won't be acted upon by the release job above
   # until `dry_run: true` is removed.

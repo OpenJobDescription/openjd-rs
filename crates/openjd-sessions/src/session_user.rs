@@ -230,3 +230,57 @@ impl SessionUser for WindowsSessionUser {
             .unwrap_or(false)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, windows))]
+mod tests_windows {
+    use super::*;
+
+    /// `WindowsSessionUser::with_password` must reject the process user with
+    /// `BadCredentialsError::Other` (a structural rejection — credentials are
+    /// not validated against `LogonUserW` in this case). Callers that supply
+    /// the process user should use `WindowsSessionUser::for_process_user()`
+    /// instead.
+    ///
+    /// This exercises the `Other` branch of the error mapping that the Python
+    /// binding layer surfaces as `RuntimeError`. Pairs with
+    /// `tests/integration/test_cross_user_windows.rs::test_with_password_logon_failure_*`
+    /// which exercises the `LogonFailure` branch.
+    #[test]
+    fn with_password_process_owner_returns_other_variant() {
+        // GIVEN the user name of the current process
+        let proc_user = match crate::win32::get_process_user() {
+            Ok(u) => u,
+            // If we can't determine the process user we cannot drive this
+            // test — but that's a separate failure mode; bail out cleanly so
+            // CI doesn't false-fail on unrelated configuration issues.
+            Err(_) => return,
+        };
+
+        // WHEN with_password is called for that user
+        let result = WindowsSessionUser::with_password(&proc_user, "irrelevant");
+
+        // THEN we get Other, not LogonFailure — and the message clearly
+        // names the reason so callers can route it to a useful error path.
+        match result {
+            Err(BadCredentialsError::Other(msg)) => {
+                assert!(
+                    msg.contains("process owner"),
+                    "expected 'process owner' in message, got: {msg}",
+                );
+            }
+            Err(BadCredentialsError::LogonFailure) => {
+                panic!(
+                    "process-owner rejection should be Other, not LogonFailure. \
+                     The `Other` variant carries the structural-rejection message \
+                     that callers depend on to distinguish this case from a real \
+                     credential mismatch."
+                );
+            }
+            Ok(_) => panic!("with_password(process_user, ...) must reject"),
+        }
+    }
+}

@@ -5,14 +5,14 @@ This document describes how openjd-rs crates are released to [crates.io](https:/
 ## Overview
 
 Releases are automated with [release-plz](https://release-plz.dev/). Every push
-to `mainline` runs the [Release-plz workflow](./.github/workflows/release-plz.yml),
+to `main` runs the [Release-plz workflow](./.github/workflows/release-plz.yml),
 which opens (or updates) a **Release PR** titled "chore: release". When the
 Release PR is merged, the same workflow publishes the updated crates to
 crates.io, tags the release commit, and creates a GitHub Release for each
 crate that was published.
 
 Version bumps are determined from [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/)
-messages on the `mainline` branch:
+messages on the `main` branch:
 
 | Commit prefix | Bump |
 |---------------|------|
@@ -44,7 +44,7 @@ dependents when an intra-workspace dependency's version changes.
 - [`release-plz.toml`](./release-plz.toml) — release-plz configuration: which
   crates are published, changelog template, conventional-commit → section map.
 - [`.github/workflows/release-plz.yml`](./.github/workflows/release-plz.yml) —
-  the automation workflow (runs on push to `mainline`).
+  the automation workflow (runs on push to `main`).
 
 ## Authentication: crates.io Trusted Publishing
 
@@ -78,7 +78,7 @@ release-plz documentation for the one-time setup steps.)
 
 The process is:
 
-1. Land regular PRs on `mainline` using conventional commits.
+1. Land regular PRs on `main` using conventional commits.
 2. Release-plz automatically opens/updates a single **Release PR** per
    workspace. The PR shows the proposed version bumps and CHANGELOG entries.
 3. A maintainer reviews the Release PR, edits the CHANGELOG entries if

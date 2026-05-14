@@ -263,7 +263,7 @@ cargo test --workspace
 
 ## Releasing
 
-Releases are automated via [release-plz](https://release-plz.dev/). Every push to `mainline` runs `.github/workflows/release-plz.yml`, which maintains a single "chore: release" PR. Merging that PR publishes the changed crates to crates.io via OIDC Trusted Publishing.
+Releases are automated via [release-plz](https://release-plz.dev/). Every push to `main` runs `.github/workflows/release-plz.yml`, which maintains a single "chore: release" PR. Merging that PR publishes the changed crates to crates.io via OIDC Trusted Publishing.
 
 - Published crates: `openjd-expr`, `openjd-model`, `openjd-sessions`, `openjd-cli`, `openjd-snapshots` — independent versions, conventional-commit-driven bumps.
 - Non-published crate: `openjd-for-js` — marked `publish = false`.

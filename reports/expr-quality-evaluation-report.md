@@ -406,7 +406,7 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   binary is fast for a test suite this size.
 - **Documentation build** (not run here, but per AGENTS.md CI
   requirement `cargo doc --no-deps --workspace` with `-D warnings` is
-  clean on mainline).
+  clean on main).
 
 ## 7. Exploratory Findings
 

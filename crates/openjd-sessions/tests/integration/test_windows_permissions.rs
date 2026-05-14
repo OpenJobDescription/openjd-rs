@@ -16,7 +16,7 @@
 #![cfg(windows)]
 
 use openjd_sessions::embedded_files::*;
-use openjd_sessions::session_user::WindowsSessionUser;
+use openjd_sessions::session_user::{BadCredentialsError, WindowsSessionUser};
 use openjd_sessions::tempdir::TempDir;
 use openjd_sessions::SessionUser;
 use std::sync::Arc;
@@ -266,12 +266,25 @@ fn test_tempdir_windows_nonvalid_principal_raises_error() {
     //
     // Since we can't easily construct a WindowsSessionUser for a non-existent user
     // (the constructor validates credentials), we verify the error path by checking
-    // that WindowsSessionUser::with_password rejects a non-existent user.
+    // that WindowsSessionUser::with_password rejects a non-existent user and
+    // surfaces it as `BadCredentialsError::LogonFailure` — the typed
+    // "credentials don't match an account" signal that the Python binding maps
+    // to `BadCredentialsException`. The companion test
+    // `test_with_password_wrong_password_returns_logon_failure` in
+    // `test_cross_user_windows.rs` covers the wrong-password case for a
+    // valid user.
     let result = WindowsSessionUser::with_password("non_existent_user_12345", "bad_password");
-    assert!(
-        result.is_err(),
-        "Non-existent user should fail credential validation"
-    );
+    match result {
+        Err(BadCredentialsError::LogonFailure) => {
+            // Pass: variant is the typed credentials-don't-match signal.
+        }
+        Err(BadCredentialsError::Other(msg)) => panic!(
+            "non-existent user should map to LogonFailure (LogonUserW \
+             returns ERROR_LOGON_FAILURE for unknown accounts to avoid \
+             leaking account existence). got Other({msg:?})."
+        ),
+        Ok(_) => panic!("Non-existent user should fail credential validation, but got Ok"),
+    }
 }
 
 // === Embedded files Windows tests ===

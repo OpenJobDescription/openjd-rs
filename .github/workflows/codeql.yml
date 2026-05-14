@@ -2,22 +2,38 @@ name: "CodeQL"
 
 on:
   push:
-    branches: ["mainline"]
+    branches: ["main"]
   pull_request:
-    branches: ["mainline"]
+    branches: ["main"]
   schedule:
     - cron: "0 8 * * MON"
 
-# Workflow-root default: deny everything. This caller has no steps of its
-# own; the job below forwards `security-events: write` to the reusable
-# workflow, which declares its own per-job permissions (including the
-# `contents: read` needed by `actions/checkout` and `codeql-action/init`).
+# Workflow-root default: deny everything. Per-job permissions are declared
+# below for the steps that need them.
 permissions: {}
 
 jobs:
-  Analysis:
-    name: Analysis
-    uses: OpenJobDescription/.github/.github/workflows/reusable_codeql.yml@mainline
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
     permissions:
+      # Required for github/codeql-action/init + codeql-action/analyze.
       contents: read
       security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          # Rust's CodeQL extractor does not support `autobuild` (it errors
+          # out with "Rust does not support the autobuild build mode"). The
+          # extractor reads source files directly via the rust-analyzer-style
+          # frontend; no cargo invocation is needed for the database build.
+          build-mode: none
+          queries: +security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
