@@ -50,6 +50,8 @@ generated="$(mktemp)"
 trap 'rm -f "$generated"' EXIT
 
 cargo about generate about.hbs > "$generated"
+# Ensure consistent EOL.
+sed -i 's/\r//' "$generated"
 
 if [[ "$mode" == "update" ]]; then
     cp "$generated" THIRD-PARTY-LICENSES

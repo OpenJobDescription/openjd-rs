@@ -5877,11 +5877,11 @@ limitations under the License.
 
 
 ------
-** openjd-cli; version 0.1.0 -- https://crates.io/crates/openjd-cli
+** openjd-cli; version 0.1.1 -- https://crates.io/crates/openjd-cli
 ** openjd-expr; version 0.1.0 -- https://crates.io/crates/openjd-expr
 ** openjd-for-js; version 0.1.0 -- https://crates.io/crates/openjd-for-js
 ** openjd-model; version 0.1.0 -- https://crates.io/crates/openjd-model
-** openjd-sessions; version 0.1.0 -- https://crates.io/crates/openjd-sessions
+** openjd-sessions; version 0.2.0 -- https://crates.io/crates/openjd-sessions
 ** openjd-snapshots; version 0.1.0 -- https://crates.io/crates/openjd-snapshots
 ** allocator-api2; version 0.2.21 -- https://crates.io/crates/allocator-api2
 ** android_system_properties; version 0.1.5 -- https://crates.io/crates/android_system_properties
