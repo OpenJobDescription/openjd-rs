@@ -1,14 +1,6 @@
 # Release-plz: automated versioning, changelog, and crates.io publishing.
 #
-# ⚠️ DRY-RUN MODE: this workflow is currently configured to dry-run only.
-#   The `release-pr` job still opens/updates the Release PR so we can see what
-#   it proposes, but the `release` job runs `cargo publish --dry-run` and does
-#   NOT create git tags, GitHub Releases, or publish to crates.io.
-#
-#   To go live, remove `dry_run: true` from the `release-plz-release` job.
-#   See RELEASING.md for the one-time setup that must be completed first.
-#
-# Overview (once dry-run is removed):
+# Overview:
 #   On every push to `main`, release-plz does two things:
 #     1. `release-pr` — opens (or updates) a single PR titled "chore: release"
 #        that bumps versions, updates Cargo.lock, and regenerates CHANGELOG.md
@@ -81,15 +73,10 @@ jobs:
         uses: release-plz/action@v0.5
         with:
           command: release
-          # ⚠️ Remove this line to actually publish. See the header comment.
-          dry_run: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Open or update the Release PR. This runs on every push to main.
-  # The `release-pr` command is not affected by `dry_run`, so the PR will
-  # appear normally; it just won't be acted upon by the release job above
-  # until `dry_run: true` is removed.
   release-plz-pr:
     name: Release-plz PR
     if: ${{ github.repository == 'OpenJobDescription/openjd-rs' }}

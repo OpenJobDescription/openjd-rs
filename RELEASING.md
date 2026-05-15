@@ -55,25 +55,6 @@ secret is stored in the repo.
 
 ---
 
-## Current state: dry-run
-
-The workflow ships in **dry-run mode**: the `release` job runs
-`cargo publish --dry-run` and does not create tags, GitHub Releases, or
-publish to crates.io. The `release-pr` job is unaffected — it will still open
-a Release PR so we can see what the automation proposes.
-
-This lets us validate the configuration, watch a Release PR update itself
-across several merges, and confirm OIDC is wired up correctly before the first
-real publish happens.
-
-To go live, remove the `dry_run: true` line from the `release-plz-release`
-job in [`.github/workflows/release-plz.yml`](./.github/workflows/release-plz.yml).
-Do this only after the initial manual-publish and Trusted-Publishing setup has
-been completed for each crate. (See the crates.io Trusted Publishing docs and
-release-plz documentation for the one-time setup steps.)
-
----
-
 ## Normal release process
 
 The process is:
