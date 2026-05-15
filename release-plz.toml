@@ -49,10 +49,10 @@ body = """
 
 {% if version -%}
     ## [{{ version | trim_start_matches(pat="v") }}]\
-    {%- if previous.version -%}
-      ({{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }})\
+    {%- if release_link -%}
+      ({{ release_link }})\
     {%- else -%}
-      ({{ self::remote_url() }}/releases/tag/{{ version }})\
+      ({{ self::remote_url() }}/releases/tag/{{ package }}-v{{ version }})\
     {%- endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else -%}
     ## [Unreleased]
