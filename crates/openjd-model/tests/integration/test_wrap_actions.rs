@@ -7,8 +7,7 @@
 //! These tests cover the three layers of validation added for RFC 0008:
 //!
 //! 1. **Schema parse**: `onWrapEnter`, `onWrapTaskRun`, `onWrapExit` on
-//!    `<EnvironmentActions>` and `runOnHost` on `<Action>` decode from YAML
-//!    without error.
+//!    `<EnvironmentActions>` decode from YAML without error.
 //! 2. **Extension gating**: using any of those fields without declaring
 //!    `WRAP_ACTIONS` in `extensions` produces a specific, path-annotated
 //!    validation error.

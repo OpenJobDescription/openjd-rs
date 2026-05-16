@@ -378,11 +378,6 @@ pub struct job::Action {
     pub args: Option<Vec<FormatString>>,
     pub timeout: Option<FormatString>,
     pub cancelation: Option<CancelationMode>,
-    /// RFC 0008 — if `Some(true)`, this action runs directly on the host
-    /// and is not intercepted by any active wrap hook. Requires the
-    /// `WRAP_ACTIONS` extension at template-validation time. Serialized
-    /// only when non-`None`.
-    pub run_on_host: Option<bool>,
 }
 
 pub struct job::Environment {
