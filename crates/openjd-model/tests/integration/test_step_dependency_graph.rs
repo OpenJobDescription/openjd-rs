@@ -29,7 +29,6 @@ fn make_job(steps: Vec<(&str, Vec<&str>)>) -> Job {
                             args: None,
                             timeout: None,
                             cancelation: None,
-                            run_on_host: None,
                         },
                     },
                     embedded_files: None,

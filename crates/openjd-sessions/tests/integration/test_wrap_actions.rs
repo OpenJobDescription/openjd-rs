@@ -37,14 +37,7 @@ fn action_with_command(command: &str, args: Vec<&str>) -> Action {
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     }
-}
-
-fn action_run_on_host(command: &str, args: Vec<&str>) -> Action {
-    let mut a = action_with_command(command, args);
-    a.run_on_host = Some(true);
-    a
 }
 
 fn plain_env(name: &str, on_enter: Option<Action>, on_exit: Option<Action>) -> Environment {
@@ -107,16 +100,6 @@ fn step(command: &str, args: Vec<&str>) -> StepScript {
     }
 }
 
-fn step_run_on_host(command: &str, args: Vec<&str>) -> StepScript {
-    StepScript {
-        let_bindings: None,
-        actions: StepActions {
-            on_run: action_run_on_host(command, args),
-        },
-        embedded_files: None,
-    }
-}
-
 fn read_trace(path: &PathBuf) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
@@ -143,8 +126,8 @@ async fn baseline_task_runs_unwrapped_when_no_wrap_env() {
 }
 
 /// When a wrap env with `onWrapTaskRun` is active, the task's `onRun`
-/// is replaced. `Task.Command` / `Task.Args` carry the original command
-/// forward so the wrap script can re-invoke it.
+/// is replaced. `Task.Action.Command` / `Task.Action.Args` carry the
+/// original command forward so the wrap script can re-invoke it.
 #[tokio::test]
 async fn task_run_wrapped_by_active_wrap_env() {
     let tmp = TempDir::new().unwrap();
@@ -153,19 +136,19 @@ async fn task_run_wrapped_by_active_wrap_env() {
 
     // Wrap script:
     //   1. Write a [WRAPPED] marker line so we can prove interception.
-    //   2. Re-invoke the wrapped command via Task.Command / Task.Args,
-    //      which demonstrates the template variable registration works
-    //      all the way through to subprocess spawn.
+    //   2. Re-invoke the wrapped command via Task.Action.Command /
+    //      Task.Action.Args, which demonstrates the template variable
+    //      registration works all the way through to subprocess spawn.
     let wrap_script = format!(
         r#"
-        echo "[WRAPPED] cmd={{{{Task.Command}}}}" >> '{path}'
-        {{{{Task.Command}}}} "${{@}}"
+        echo "[WRAPPED] cmd={{{{Task.Action.Command}}}}" >> '{path}'
+        {{{{Task.Action.Command}}}} "${{@}}"
         "#,
         path = trace.display(),
     );
     // The wrap action uses `bash -c SCRIPT --` so positional args start
     // at $1 and can be forwarded via "$@". We pass the wrapped command's
-    // args with Task.Args (a list), which the session expands into
+    // args with Task.Action.Args (a list), which the session expands into
     // separate argv entries when resolving `args:`.
     let wrap = Action {
         command: fs("bash"),
@@ -173,11 +156,10 @@ async fn task_run_wrapped_by_active_wrap_env() {
             fs("-c"),
             fs(&wrap_script),
             fs("--"),
-            fs("{{Task.Args}}"),
+            fs("{{Task.Action.Args}}"),
         ]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let env = wrap_env(
         "Wrapper",
@@ -208,54 +190,6 @@ async fn task_run_wrapped_by_active_wrap_env() {
     );
 }
 
-/// `runOnHost: true` on a task's `onRun` action bypasses any active
-/// wrap hook. The task runs directly on the host even though an
-/// `onWrapTaskRun` is present.
-#[tokio::test]
-async fn task_run_on_host_bypasses_wrap_task_run() {
-    let tmp = TempDir::new().unwrap();
-    let trace = tmp.path().join("trace.log");
-    let mut session = Session::new_for_test(tmp.path().to_path_buf());
-
-    let wrap_script = format!(
-        r#"echo "[WRAPPED] should not appear" >> '{path}'"#,
-        path = trace.display(),
-    );
-    let wrap = Action {
-        command: fs("bash"),
-        args: Some(vec![fs("-c"), fs(&wrap_script)]),
-        timeout: None,
-        cancelation: None,
-        run_on_host: None,
-    };
-    let env = wrap_env(
-        "Wrapper",
-        action_with_command("true", vec![]),
-        None,
-        Some(wrap),
-        None,
-    );
-    session
-        .enter_environment(&env, None, None, None)
-        .await
-        .unwrap();
-
-    let task_cmd = format!("echo host-task >> '{}'", trace.display());
-    let s = step_run_on_host("sh", vec!["-c", &task_cmd]);
-    let result = session.run_task(&s, None, None, None).await.unwrap();
-    assert_eq!(result.state, ActionState::Success);
-
-    let contents = read_trace(&trace);
-    assert!(
-        contents.contains("host-task"),
-        "expected host task line; got:\n{contents}"
-    );
-    assert!(
-        !contents.contains("[WRAPPED]"),
-        "runOnHost:true must bypass wrap; got:\n{contents}"
-    );
-}
-
 // ────────────────────────────────────────────────────────────────────
 // onWrapEnter / onWrapExit
 // ────────────────────────────────────────────────────────────────────
@@ -278,7 +212,6 @@ async fn wrap_enter_intercepts_inner_on_enter() {
         args: Some(vec![fs("-c"), fs(&wrap_enter_script)]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let outer = wrap_env(
         "Outer",
@@ -337,7 +270,6 @@ async fn wrap_enter_does_not_wrap_outer_env_itself() {
         args: Some(vec![fs("-c"), fs(&wrap_enter_script)]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let outer = wrap_env(
         "Outer",
@@ -380,7 +312,6 @@ async fn wrap_exit_intercepts_inner_on_exit() {
         args: Some(vec![fs("-c"), fs(&wrap_exit_script)]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let outer = wrap_env(
         "Outer",
@@ -421,60 +352,11 @@ async fn wrap_exit_intercepts_inner_on_exit() {
     );
 }
 
-/// `runOnHost: true` on an inner env's `onEnter` bypasses `onWrapEnter`.
+/// Full-cycle integration: outer wrap env + one wrapped inner env + a
+/// wrapped task. The final trace shows the expected routing for every
+/// lifecycle phase under the all-three wrap hooks.
 #[tokio::test]
-async fn run_on_host_bypasses_wrap_enter() {
-    let tmp = TempDir::new().unwrap();
-    let trace = tmp.path().join("trace.log");
-    let mut session = Session::new_for_test(tmp.path().to_path_buf());
-
-    let wrap_enter_script = format!(
-        r#"echo "[WRAPPED-ENTER]" >> '{path}'"#,
-        path = trace.display(),
-    );
-    let wrap_enter = Action {
-        command: fs("bash"),
-        args: Some(vec![fs("-c"), fs(&wrap_enter_script)]),
-        timeout: None,
-        cancelation: None,
-        run_on_host: None,
-    };
-    let outer = wrap_env(
-        "Outer",
-        action_with_command("true", vec![]),
-        Some(wrap_enter),
-        None,
-        None,
-    );
-    session
-        .enter_environment(&outer, None, None, None)
-        .await
-        .unwrap();
-
-    let inner_cmd = format!("echo host-enter >> '{}'", trace.display());
-    let inner_action = action_run_on_host("sh", vec!["-c", &inner_cmd]);
-    let inner = plain_env("Inner", Some(inner_action), None);
-    session
-        .enter_environment(&inner, None, None, None)
-        .await
-        .unwrap();
-
-    let contents = read_trace(&trace);
-    assert!(
-        contents.contains("host-enter"),
-        "runOnHost onEnter must run on host; got:\n{contents}"
-    );
-    assert!(
-        !contents.contains("[WRAPPED-ENTER]"),
-        "runOnHost onEnter must not be wrapped; got:\n{contents}"
-    );
-}
-
-/// Full-cycle integration: outer wrap env + one `runOnHost` inner env
-/// + one wrapped inner env + a wrapped task. The final trace shows the
-/// expected ordering and routing for every lifecycle phase.
-#[tokio::test]
-async fn full_cycle_with_mixed_wrap_and_host_actions() {
+async fn full_cycle_wraps_every_inner_action() {
     let tmp = TempDir::new().unwrap();
     let trace = tmp.path().join("trace.log");
     let mut session = Session::new_for_test(tmp.path().to_path_buf());
@@ -489,17 +371,15 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
         ]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let wrap_task_run = Action {
         command: fs("bash"),
         args: Some(vec![
             fs("-c"),
-            fs(&mark("[wrap-task] cmd={{Task.Command}}")),
+            fs(&mark("[wrap-task] cmd={{Task.Action.Command}}")),
         ]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let wrap_exit = Action {
         command: fs("bash"),
@@ -509,7 +389,6 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
         ]),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     };
     let outer = wrap_env(
         "Outer",
@@ -518,7 +397,6 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
             args: Some(vec![fs("-c"), fs(&mark("outer-enter-host"))]),
             timeout: None,
             cancelation: None,
-            run_on_host: None,
         },
         Some(wrap_enter),
         Some(wrap_task_run),
@@ -529,25 +407,8 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
         .await
         .unwrap();
 
-    // Inner A: runOnHost, bypasses wrap hooks.
-    let inner_a = plain_env(
-        "HostInner",
-        Some(action_run_on_host(
-            "bash",
-            vec!["-c", &mark("HostInner-enter-host")],
-        )),
-        Some(action_run_on_host(
-            "bash",
-            vec!["-c", &mark("HostInner-exit-host")],
-        )),
-    );
-    let id_a = session
-        .enter_environment(&inner_a, None, None, None)
-        .await
-        .unwrap();
-
-    // Inner B: no runOnHost, wrapped by Outer.
-    let inner_b = plain_env(
+    // Inner: wrapped by Outer through all three hooks.
+    let inner = plain_env(
         "WrappedInner",
         Some(action_with_command(
             "bash",
@@ -558,8 +419,8 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
             vec!["-c", &mark("WrappedInner-exit-body")],
         )),
     );
-    let id_b = session
-        .enter_environment(&inner_b, None, None, None)
+    let id = session
+        .enter_environment(&inner, None, None, None)
         .await
         .unwrap();
 
@@ -570,26 +431,13 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
         .await
         .unwrap();
 
-    // Exit in LIFO: Inner B first (wrapped), then Inner A (runOnHost).
-    session
-        .exit_environment(&id_b, None, true, None)
-        .await
-        .unwrap();
-    session
-        .exit_environment(&id_a, None, true, None)
-        .await
-        .unwrap();
+    session.exit_environment(&id, None, true, None).await.unwrap();
 
     let contents = read_trace(&trace);
     // The outer env's own enter runs on the host (its own action was NOT
     // wrapped — it has no outer wrap env).
     assert!(contents.contains("outer-enter-host"), "trace:\n{contents}");
-    // HostInner.onEnter runs on host because runOnHost: true.
-    assert!(
-        contents.contains("HostInner-enter-host"),
-        "trace:\n{contents}"
-    );
-    // WrappedInner.onEnter is wrapped — body does not appear, wrap does.
+    // Inner.onEnter is wrapped — body does not appear, wrap does.
     assert!(
         contents.contains("[wrap-enter] WrappedInner"),
         "trace:\n{contents}"
@@ -607,13 +455,9 @@ async fn full_cycle_with_mixed_wrap_and_host_actions() {
         !contents.contains("task-body"),
         "wrapped task body must not run: {contents}"
     );
-    // WrappedInner.onExit wrapped; HostInner.onExit on host.
+    // Inner.onExit wrapped.
     assert!(
         contents.contains("[wrap-exit] WrappedInner"),
-        "trace:\n{contents}"
-    );
-    assert!(
-        contents.contains("HostInner-exit-host"),
         "trace:\n{contents}"
     );
     assert!(

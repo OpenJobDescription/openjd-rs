@@ -908,32 +908,24 @@ impl Session {
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)?;
 
-            // RFC 0008: does an outer active wrap env want to wrap this
-            // environment's onEnter? The rules are:
-            //   - The inner onEnter's runOnHost flag bypasses wrapping.
-            //   - Otherwise, if an outer active wrap env (not including
-            //     this one — which isn't on the stack yet but the helper
-            //     guards against it anyway) defines onWrapEnter, we
-            //     substitute that action and seed Env.Wrapped.* with the
-            //     inner onEnter's resolved command/args/timeout.
+            // RFC 0008: if an outer active wrap env (not including this
+            // one — which isn't on the stack yet but the helper guards
+            // against it anyway) defines onWrapEnter, substitute that
+            // action and seed Env.Wrapped.* with the inner onEnter's
+            // resolved command/args/timeout.
             let inner_on_enter = env
                 .script
                 .as_ref()
                 .and_then(|s| s.actions.on_enter.as_ref())
                 .expect("outer branch guard");
-            let run_on_host = inner_on_enter.run_on_host.unwrap_or(false);
-            let wrap_action = if run_on_host {
-                None
-            } else {
-                self.wrap_env_excluding(&identifier).and_then(|outer| {
-                    outer
-                        .script
-                        .as_ref()
-                        .and_then(|s| s.actions.on_wrap_enter.as_ref())
-                        .cloned()
-                        .map(|action| (outer.resolved_symtab.clone(), action))
-                })
-            };
+            let wrap_action = self.wrap_env_excluding(&identifier).and_then(|outer| {
+                outer
+                    .script
+                    .as_ref()
+                    .and_then(|s| s.actions.on_wrap_enter.as_ref())
+                    .cloned()
+                    .map(|action| (outer.resolved_symtab.clone(), action))
+            });
 
             let lib = self.library.clone();
             if let Some((wrap_symtab, _)) = wrap_action.as_ref() {
@@ -1174,19 +1166,14 @@ impl Session {
                 .as_ref()
                 .and_then(|s| s.actions.on_exit.as_ref())
                 .expect("outer branch guard");
-            let run_on_host = inner_on_exit.run_on_host.unwrap_or(false);
-            let wrap_action = if run_on_host {
-                None
-            } else {
-                self.active_wrap_env().and_then(|outer| {
-                    outer
-                        .script
-                        .as_ref()
-                        .and_then(|s| s.actions.on_wrap_exit.as_ref())
-                        .cloned()
-                        .map(|action| (outer.resolved_symtab.clone(), action))
-                })
-            };
+            let wrap_action = self.active_wrap_env().and_then(|outer| {
+                outer
+                    .script
+                    .as_ref()
+                    .and_then(|s| s.actions.on_wrap_exit.as_ref())
+                    .cloned()
+                    .map(|action| (outer.resolved_symtab.clone(), action))
+            });
 
             let lib = self.library.clone();
             if let Some((wrap_symtab, _)) = wrap_action.as_ref() {
@@ -1370,11 +1357,9 @@ impl Session {
 
         // RFC 0008: decide whether this task's onRun should be wrapped by
         // an active environment's onWrapTaskRun. The decision is:
-        //   - The step onRun's runOnHost flag bypasses wrapping.
-        //   - Otherwise, if an active wrap env defines onWrapTaskRun, we
-        //     substitute the wrap action and seed Task.*/Env.Action.Timeout
-        //     into the symbol table so the wrap script can forward the
-        //     original command and args.
+        //   - If an active wrap env defines onWrapTaskRun, we substitute
+        //     the wrap action and seed Task.Action.* into the symbol table
+        //     so the wrap script can forward the original command and args.
         //
         // If neither condition routes us into the wrap path, the original
         // step script runs exactly as before — this keeps the non-WRAP_ACTIONS
@@ -1388,50 +1373,45 @@ impl Session {
         // `allocate_file_paths` against the wrap env's embedded_files at task
         // dispatch time is the follow-up to enable `Env.File.*` inside wrap
         // hooks end-to-end.
-        let original_onrun_run_on_host = script.actions.on_run.run_on_host.unwrap_or(false);
-        let wrap_action: Option<openjd_model::job::Action> = if original_onrun_run_on_host {
-            None
-        } else {
-            self.active_wrap_env()
-                .and_then(|wrap_env| {
-                    wrap_env
-                        .script
-                        .as_ref()
-                        .and_then(|s| s.actions.on_wrap_task_run.clone())
-                        .map(|action| (wrap_env, action))
-                })
-                .map(|(wrap_env, action)| (wrap_env.resolved_symtab.clone(), action))
-                .map(|(wrap_symtab, action)| {
-                    // Layer the wrap env's symtab on top of the task symtab so
-                    // the wrap action can reference symbols only it knows
-                    // about (Param.* for its own parameters, let bindings).
-                    // The wrap env's resolved_symtab was frozen at create_job
-                    // time with the filtered set of symbols the env uses.
-                    if let Some(ser) = wrap_symtab.as_ref() {
-                        match ser.to_symtab(openjd_expr::path_mapping::PathFormat::host()) {
-                            Ok(st) => action_symtab.merge_from(&st),
-                            Err(e) => {
-                                // Don't fail the task here — surface later if
-                                // resolution actually needs one of the missing
-                                // symbols. The error is worth a log line.
-                                log::warn!(
-                                    target: "openjd.sessions",
-                                    "wrap env resolved_symtab deserialize failed: {e}; \
-                                     Task.Command continues without it"
-                                );
-                            }
+        let wrap_action: Option<openjd_model::job::Action> = self
+            .active_wrap_env()
+            .and_then(|wrap_env| {
+                wrap_env
+                    .script
+                    .as_ref()
+                    .and_then(|s| s.actions.on_wrap_task_run.clone())
+                    .map(|action| (wrap_env, action))
+            })
+            .map(|(wrap_env, action)| (wrap_env.resolved_symtab.clone(), action))
+            .map(|(wrap_symtab, action)| {
+                // Layer the wrap env's symtab on top of the task symtab so
+                // the wrap action can reference symbols only it knows
+                // about (Param.* for its own parameters, let bindings).
+                // The wrap env's resolved_symtab was frozen at create_job
+                // time with the filtered set of symbols the env uses.
+                if let Some(ser) = wrap_symtab.as_ref() {
+                    match ser.to_symtab(openjd_expr::path_mapping::PathFormat::host()) {
+                        Ok(st) => action_symtab.merge_from(&st),
+                        Err(e) => {
+                            // Don't fail the task here — surface later if
+                            // resolution actually needs one of the missing
+                            // symbols. The error is worth a log line.
+                            log::warn!(
+                                target: "openjd.sessions",
+                                "wrap env resolved_symtab deserialize failed: {e}; \
+                                 Task.Action.Command continues without it"
+                            );
                         }
                     }
-                    action
-                })
-        };
+                }
+                action
+            });
 
         // Resolve the step's onRun to concrete command/args/timeout first.
-        // These seed Task.Command / Task.Args / Env.Action.Timeout when
-        // wrapping is in effect. The seed values are always computed
-        // because they're cheap and the model validator already forbids
-        // referencing them outside the wrap hook, so seeding even when
-        // unused is harmless.
+        // These seed Task.Action.* when wrapping is in effect. The seed
+        // values are always computed because they're cheap and the model
+        // validator already forbids referencing them outside the wrap hook,
+        // so seeding even when unused is harmless.
         let lib = self.library.clone();
         if wrap_action.is_some() {
             let resolved_cmd = crate::runner::resolve_action_args(
@@ -1453,7 +1433,7 @@ impl Session {
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect();
             let default_timeout_secs: i64 = 0; // 0 ⇒ unset; action's timeout governs
-            // Env.Action.Timeout carries the ORIGINAL wrapped action's timeout
+            // Task.Action.Timeout carries the ORIGINAL wrapped action's timeout
             // (RFC 0008), not the wrap action's timeout. Container wrap scripts
             // use this to propagate `docker container stop --timeout N` with N
             // matching the task's own configured timeout.
@@ -2236,18 +2216,18 @@ fn env_has_any_wrap_hook(env: &Environment) -> bool {
         .unwrap_or(false)
 }
 
-/// Overlay the `Task.*` variables defined in RFC 0008 for `onWrapTaskRun`
-/// onto an existing symbol table in place:
+/// Overlay the `Task.Action.*` variables defined in RFC 0008 for
+/// `onWrapTaskRun` onto an existing symbol table in place:
 ///
-/// - `Task.Command` — the wrapped action's resolved command string.
-/// - `Task.Args` — the wrapped action's resolved argument list (as a
+/// - `Task.Action.Command` — the wrapped action's resolved command string.
+/// - `Task.Action.Args` — the wrapped action's resolved argument list (as a
 ///   list[string]); `None` is translated to an empty list.
-/// - `Task.Environment` — `"KEY=value"` entries for every `openjd_env`
+/// - `Task.Action.Environment` — `"KEY=value"` entries for every `openjd_env`
 ///   export captured so far in the session. Passed in by the caller.
-/// - `Env.Action.Timeout` — the timeout in seconds of the WRAPPED action
-///   (the original task's `onRun` timeout). This is what wrap scripts
-///   propagate when stopping the wrapped execution context — e.g.
-///   `docker container stop --timeout {{Env.Action.Timeout}}`.
+/// - `Task.Action.Timeout` — the timeout in seconds of the wrapped task's
+///   `onRun`, or `0` when the wrapped action specified no timeout. Wrap
+///   scripts propagate this to the wrapped execution context (for example,
+///   `docker container stop --timeout {{Task.Action.Timeout}}`).
 ///
 /// Errors from `SymbolTable::set` are reported as `SessionError::Runtime`.
 fn overlay_task_wrap_symbols(
@@ -2255,41 +2235,44 @@ fn overlay_task_wrap_symbols(
     wrapped_command: &str,
     wrapped_args: &[String],
     task_environment: &[String],
-    env_action_timeout_secs: i64,
+    task_action_timeout_secs: i64,
 ) -> Result<(), SessionError> {
     use openjd_expr::ExprType;
     use openjd_expr::ExprValue;
     symtab
-        .set("Task.Command", ExprValue::String(wrapped_command.into()))
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Command: {e}")))?;
+        .set(
+            "Task.Action.Command",
+            ExprValue::String(wrapped_command.into()),
+        )
+        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Command: {e}")))?;
     let args_list: Vec<ExprValue> = wrapped_args
         .iter()
         .map(|s| ExprValue::String(s.clone()))
         .collect();
     symtab
         .set(
-            "Task.Args",
+            "Task.Action.Args",
             ExprValue::make_list(args_list, ExprType::STRING)
-                .map_err(|e| SessionError::Runtime(format!("make_list(Task.Args): {e}")))?,
+                .map_err(|e| SessionError::Runtime(format!("make_list(Task.Action.Args): {e}")))?,
         )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Args: {e}")))?;
+        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Args: {e}")))?;
     let env_list: Vec<ExprValue> = task_environment
         .iter()
         .map(|s| ExprValue::String(s.clone()))
         .collect();
     symtab
         .set(
-            "Task.Environment",
-            ExprValue::make_list(env_list, ExprType::STRING)
-                .map_err(|e| SessionError::Runtime(format!("make_list(Task.Environment): {e}")))?,
+            "Task.Action.Environment",
+            ExprValue::make_list(env_list, ExprType::STRING).map_err(|e| {
+                SessionError::Runtime(format!("make_list(Task.Action.Environment): {e}"))
+            })?,
         )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Environment: {e}")))?;
+        .map_err(|e| {
+            SessionError::Runtime(format!("Failed to set Task.Action.Environment: {e}"))
+        })?;
     symtab
-        .set(
-            "Env.Action.Timeout",
-            ExprValue::Int(env_action_timeout_secs),
-        )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Action.Timeout: {e}")))?;
+        .set("Task.Action.Timeout", ExprValue::Int(task_action_timeout_secs))
+        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Timeout: {e}")))?;
     Ok(())
 }
 
@@ -2310,38 +2293,46 @@ fn overlay_env_wrapped_symbols(
         .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Name: {e}")))?;
     symtab
         .set(
-            "Env.Wrapped.Command",
+            "Env.Wrapped.Action.Command",
             ExprValue::String(wrapped_command.into()),
         )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Command: {e}")))?;
+        .map_err(|e| {
+            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Command: {e}"))
+        })?;
     let args_list: Vec<ExprValue> = wrapped_args
         .iter()
         .map(|s| ExprValue::String(s.clone()))
         .collect();
     symtab
         .set(
-            "Env.Wrapped.Args",
-            ExprValue::make_list(args_list, ExprType::STRING)
-                .map_err(|e| SessionError::Runtime(format!("make_list(Env.Wrapped.Args): {e}")))?,
+            "Env.Wrapped.Action.Args",
+            ExprValue::make_list(args_list, ExprType::STRING).map_err(|e| {
+                SessionError::Runtime(format!("make_list(Env.Wrapped.Action.Args): {e}"))
+            })?,
         )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Args: {e}")))?;
+        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Args: {e}")))?;
     let env_list: Vec<ExprValue> = wrapped_environment
         .iter()
         .map(|s| ExprValue::String(s.clone()))
         .collect();
     symtab
         .set(
-            "Env.Wrapped.Environment",
+            "Env.Wrapped.Action.Environment",
             ExprValue::make_list(env_list, ExprType::STRING).map_err(|e| {
-                SessionError::Runtime(format!("make_list(Env.Wrapped.Environment): {e}"))
+                SessionError::Runtime(format!("make_list(Env.Wrapped.Action.Environment): {e}"))
             })?,
         )
         .map_err(|e| {
-            SessionError::Runtime(format!("Failed to set Env.Wrapped.Environment: {e}"))
+            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Environment: {e}"))
         })?;
     symtab
-        .set("Env.Wrapped.Timeout", ExprValue::Int(wrapped_timeout_secs))
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Timeout: {e}")))?;
+        .set(
+            "Env.Wrapped.Action.Timeout",
+            ExprValue::Int(wrapped_timeout_secs),
+        )
+        .map_err(|e| {
+            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Timeout: {e}"))
+        })?;
     Ok(())
 }
 

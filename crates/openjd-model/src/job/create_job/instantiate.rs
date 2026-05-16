@@ -265,7 +265,6 @@ fn convert_action(a: &template::Action) -> job::Action {
                 notify_period_in_seconds: notify_period_in_seconds.clone(),
             },
         }),
-        run_on_host: a.run_on_host,
     }
 }
 

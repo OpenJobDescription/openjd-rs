@@ -959,8 +959,8 @@ fn validate_env_format_strings(
                 errors,
             );
         }
-        // RFC 0008: onWrapTaskRun sees `Task.Command`, `Task.Args`,
-        // `Task.Environment`, and `Env.Action.Timeout`. `Env.Wrapped.*`
+        // RFC 0008: onWrapTaskRun sees `Task.Action.Command`, `Task.Action.Args`,
+        // `Task.Action.Environment`, and `Task.Action.Timeout`. `Env.Wrapped.*`
         // is NOT in scope — the task-run hook wraps a task's onRun, not
         // an environment action.
         if let Some(action) = &script.actions.on_wrap_task_run {
@@ -1018,30 +1018,31 @@ fn validate_env_format_strings(
 /// Augment a session-scope symtab with the variables that are only
 /// defined inside the `onWrapTaskRun` hook (RFC 0008):
 ///
-/// - `Task.Command` — string
-/// - `Task.Args` — list[string]
-/// - `Task.Environment` — list[string] (entries of the form `"KEY=value"`)
-/// - `Env.Action.Timeout` — int (seconds, or the default when unset)
+/// - `Task.Action.Command` — string
+/// - `Task.Action.Args` — list[string]
+/// - `Task.Action.Environment` — list[string] (entries of the form `"KEY=value"`)
+/// - `Task.Action.Timeout` — int (seconds, or `0` when the wrapped action
+///   specified no timeout)
 ///
 /// The caller has already cloned the session symtab, so we mutate in place.
 fn add_task_wrap_scope(symtab: &mut SymbolTable) {
     symtab
-        .set("Task.Command", ExprValue::unresolved(ExprType::STRING))
+        .set("Task.Action.Command", ExprValue::unresolved(ExprType::STRING))
         .expect("symtab");
     symtab
         .set(
-            "Task.Args",
+            "Task.Action.Args",
             ExprValue::unresolved(ExprType::list(ExprType::STRING)),
         )
         .expect("symtab");
     symtab
         .set(
-            "Task.Environment",
+            "Task.Action.Environment",
             ExprValue::unresolved(ExprType::list(ExprType::STRING)),
         )
         .expect("symtab");
     symtab
-        .set("Env.Action.Timeout", ExprValue::unresolved(ExprType::INT))
+        .set("Task.Action.Timeout", ExprValue::unresolved(ExprType::INT))
         .expect("symtab");
 }
 
@@ -1049,34 +1050,37 @@ fn add_task_wrap_scope(symtab: &mut SymbolTable) {
 /// defined inside `onWrapEnter` and `onWrapExit` (RFC 0008):
 ///
 /// - `Env.Wrapped.Name` — string
-/// - `Env.Wrapped.Command` — string
-/// - `Env.Wrapped.Args` — list[string]
-/// - `Env.Wrapped.Environment` — list[string]
-/// - `Env.Wrapped.Timeout` — int
+/// - `Env.Wrapped.Action.Command` — string
+/// - `Env.Wrapped.Action.Args` — list[string]
+/// - `Env.Wrapped.Action.Environment` — list[string]
+/// - `Env.Wrapped.Action.Timeout` — int
 fn add_env_wrapped_scope(symtab: &mut SymbolTable) {
     symtab
         .set("Env.Wrapped.Name", ExprValue::unresolved(ExprType::STRING))
         .expect("symtab");
     symtab
         .set(
-            "Env.Wrapped.Command",
+            "Env.Wrapped.Action.Command",
             ExprValue::unresolved(ExprType::STRING),
         )
         .expect("symtab");
     symtab
         .set(
-            "Env.Wrapped.Args",
+            "Env.Wrapped.Action.Args",
             ExprValue::unresolved(ExprType::list(ExprType::STRING)),
         )
         .expect("symtab");
     symtab
         .set(
-            "Env.Wrapped.Environment",
+            "Env.Wrapped.Action.Environment",
             ExprValue::unresolved(ExprType::list(ExprType::STRING)),
         )
         .expect("symtab");
     symtab
-        .set("Env.Wrapped.Timeout", ExprValue::unresolved(ExprType::INT))
+        .set(
+            "Env.Wrapped.Action.Timeout",
+            ExprValue::unresolved(ExprType::INT),
+        )
         .expect("symtab");
 }
 

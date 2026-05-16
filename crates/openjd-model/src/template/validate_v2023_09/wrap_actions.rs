@@ -8,38 +8,29 @@
 //! - `onWrapEnter` on `<EnvironmentActions>`
 //! - `onWrapTaskRun` on `<EnvironmentActions>`
 //! - `onWrapExit` on `<EnvironmentActions>`
-//! - `runOnHost` on `<Action>` (any action, including task `onRun`)
 //!
 //! When the extension is not enabled, using any of these fields is a
 //! validation error. When it is enabled, we additionally enforce the
-//! single-wrap-layer rule from RFC 0008: at most one environment in the
-//! session stack (job environments + each step's step environments) may
-//! define any wrap hook.
+//! constraints from RFC 0008:
+//!
+//! - **All-or-nothing.** An environment that defines any of the three
+//!   wrap hooks must define all three.
+//! - **Single-layer.** At most one environment in the session stack
+//!   (job environments + each step's step environments) may define any
+//!   wrap hook.
+//! - **EXPR prerequisite.** A template that lists `WRAP_ACTIONS` in
+//!   `extensions:` must also list `EXPR`.
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::actions::EnvironmentActions;
 use crate::template::{Action, Environment, EnvironmentTemplate, JobTemplate};
 use crate::types::{ModelExtension, ValidationContext};
 
-/// Check a single `Action` for `runOnHost` usage. The caller provides the
-/// path down to the action's own field (e.g. `steps[0] -> script -> actions -> onRun`),
-/// and we append `runOnHost` ourselves.
-fn check_action_run_on_host(
-    action: &Action,
-    action_path: &[PathElement],
-    active: bool,
-    errors: &mut ValidationErrors,
-) {
-    if action.run_on_host.is_some() && !active {
-        let p = path_field(action_path, "runOnHost");
-        errors.add(&p, "runOnHost requires the WRAP_ACTIONS extension.");
-    }
-}
-
 /// Check one environment's `<EnvironmentActions>` for wrap hook usage.
 ///
 /// Reports every offending field individually so users see a complete list
-/// rather than having to fix them one at a time.
+/// rather than having to fix them one at a time. Also enforces the
+/// all-or-nothing rule when the extension is enabled.
 fn check_environment_actions(
     actions: &EnvironmentActions,
     actions_path: &[PathElement],
@@ -59,25 +50,20 @@ fn check_environment_actions(
             );
         }
     }
-}
 
-/// Check every action under an environment for `runOnHost` usage.
-fn check_environment_actions_run_on_host(
-    actions: &EnvironmentActions,
-    actions_path: &[PathElement],
-    active: bool,
-    errors: &mut ValidationErrors,
-) {
-    let every: [(&str, &Option<Action>); 5] = [
-        ("onEnter", &actions.on_enter),
-        ("onWrapEnter", &actions.on_wrap_enter),
-        ("onWrapTaskRun", &actions.on_wrap_task_run),
-        ("onWrapExit", &actions.on_wrap_exit),
-        ("onExit", &actions.on_exit),
-    ];
-    for (name, slot) in every {
-        if let Some(action) = slot {
-            check_action_run_on_host(action, &path_field(actions_path, name), active, errors);
+    // All-or-nothing rule (RFC 0008): an env that defines any wrap hook
+    // must define all three. Only enforced when the extension is active —
+    // otherwise the per-hook errors above already cover it.
+    if active {
+        let defined: Vec<&str> = wrap_hooks
+            .iter()
+            .filter_map(|(name, slot)| slot.as_ref().map(|_| *name))
+            .collect();
+        if !defined.is_empty() && defined.len() < 3 {
+            errors.add(
+                actions_path,
+                "an environment that defines any of onWrapEnter, onWrapTaskRun, or onWrapExit must define all three (RFC 0008).",
+            );
         }
     }
 }
@@ -96,10 +82,22 @@ fn check_env(
     let script_path = path_field(path, "script");
     let actions_path = path_field(&script_path, "actions");
     check_environment_actions(&script.actions, &actions_path, active, errors);
-    check_environment_actions_run_on_host(&script.actions, &actions_path, active, errors);
     script.actions.on_wrap_enter.is_some()
         || script.actions.on_wrap_task_run.is_some()
         || script.actions.on_wrap_exit.is_some()
+}
+
+/// Enforce the EXPR prerequisite: when `WRAP_ACTIONS` is listed in a
+/// template's `extensions:`, `EXPR` must also be listed (RFC 0008).
+fn check_expr_prerequisite(ctx: &ValidationContext, errors: &mut ValidationErrors) {
+    let has_wrap = ctx.profile.has_extension(ModelExtension::WrapActions);
+    let has_expr = ctx.profile.has_extension(ModelExtension::Expr);
+    if has_wrap && !has_expr {
+        errors.add(
+            &path_field(&[], "extensions"),
+            "WRAP_ACTIONS requires EXPR; both must be listed in the template's `extensions` (RFC 0008).",
+        );
+    }
 }
 
 /// Validate RFC 0008 constraints for a job template.
@@ -107,9 +105,8 @@ fn check_env(
 /// This runs regardless of whether `WRAP_ACTIONS` is enabled:
 /// - When disabled, it rejects templates that attempt to use any of the
 ///   new fields.
-/// - When enabled, it additionally enforces the single-wrap-layer rule
-///   per session: every (job-envs + one step's step-envs) combination
-///   contains at most one environment with any wrap hook.
+/// - When enabled, it additionally enforces the EXPR prerequisite, the
+///   all-or-nothing rule, and the single-wrap-layer rule per session.
 pub fn validate_wrap_actions_job_template(
     jt: &JobTemplate,
     ctx: &ValidationContext,
@@ -117,21 +114,7 @@ pub fn validate_wrap_actions_job_template(
 ) {
     let active = ctx.profile.has_extension(ModelExtension::WrapActions);
 
-    // Walk the step script's onRun too — runOnHost is valid there.
-    for (i, step) in jt.steps.iter().enumerate() {
-        let Some(script) = &step.script else {
-            continue;
-        };
-        let step_path = path_index(&path_field(&[], "steps"), i);
-        let script_path = path_field(&step_path, "script");
-        let actions_path = path_field(&script_path, "actions");
-        check_action_run_on_host(
-            &script.actions.on_run,
-            &path_field(&actions_path, "onRun"),
-            active,
-            errors,
-        );
-    }
+    check_expr_prerequisite(ctx, errors);
 
     // Count job-envs with wrap hooks (for the single-layer rule).
     // Also record their indices for precise error paths.
@@ -191,14 +174,16 @@ pub fn validate_wrap_actions_job_template(
 /// Validate RFC 0008 constraints for an environment template.
 ///
 /// An environment template defines one environment, so the single-layer
-/// rule is trivially satisfied. We only gate the new fields on the
-/// extension being enabled.
+/// rule is trivially satisfied. We gate the new fields on the extension
+/// being enabled, enforce the EXPR prerequisite, and enforce the
+/// all-or-nothing rule via `check_env`.
 pub fn validate_wrap_actions_environment_template(
     et: &EnvironmentTemplate,
     ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
     let active = ctx.profile.has_extension(ModelExtension::WrapActions);
+    check_expr_prerequisite(ctx, errors);
     let env_path = path_field(&[], "environment");
     check_env(&et.environment, &env_path, active, errors);
 }

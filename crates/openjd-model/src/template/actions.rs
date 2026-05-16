@@ -15,11 +15,6 @@ pub struct Action {
     pub args: Option<Vec<FormatString>>,
     pub cancelation: Option<CancelationMode>,
     pub timeout: Option<FormatString>,
-    /// §5 Action — if `true`, this action always runs directly on the host
-    /// and is not intercepted by any active wrap hook. Requires the
-    /// `WRAP_ACTIONS` extension. See RFC 0008.
-    #[serde(default)]
-    pub run_on_host: Option<bool>,
 }
 
 /// §5.3 CancelationMethod — discriminated union on `mode`.

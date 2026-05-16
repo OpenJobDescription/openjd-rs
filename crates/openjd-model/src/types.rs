@@ -347,8 +347,8 @@ pub enum ModelExtension {
     RedactedEnvVars,
     FeatureBundle1,
     Expr,
-    /// `WRAP_ACTIONS` — enables `onWrapEnter`, `onWrapTaskRun`, `onWrapExit`
-    /// on `<EnvironmentActions>` and `runOnHost` on `<Action>`. See RFC 0008.
+    /// `WRAP_ACTIONS` — enables `onWrapEnter`, `onWrapTaskRun`, and
+    /// `onWrapExit` on `<EnvironmentActions>`. See RFC 0008.
     WrapActions,
 }
 

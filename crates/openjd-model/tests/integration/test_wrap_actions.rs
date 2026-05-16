@@ -81,7 +81,7 @@ fn wrap_hooks_accepted_with_extension() {
     expect_env_ok(
         r#"{
             "specificationVersion": "environment-2023-09",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "environment": {
                 "name": "Wrapper",
                 "script": {
@@ -91,46 +91,6 @@ fn wrap_hooks_accepted_with_extension() {
                         "onWrapTaskRun": {"command": "echo", "args": ["wrap-task"]},
                         "onWrapExit": {"command": "echo", "args": ["wrap-exit"]},
                         "onExit": {"command": "echo", "args": ["exit"]}
-                    }
-                }
-            }
-        }"#,
-        ALL_EXTS,
-    );
-}
-
-#[test]
-fn run_on_host_accepted_on_step_onrun_with_extension() {
-    expect_job_ok(
-        r#"{
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "Test",
-            "extensions": ["WRAP_ACTIONS"],
-            "steps": [{
-                "name": "S",
-                "script": {
-                    "actions": {
-                        "onRun": {"command": "echo", "runOnHost": true}
-                    }
-                }
-            }]
-        }"#,
-        ALL_EXTS,
-    );
-}
-
-#[test]
-fn run_on_host_accepted_on_env_actions_with_extension() {
-    expect_env_ok(
-        r#"{
-            "specificationVersion": "environment-2023-09",
-            "extensions": ["WRAP_ACTIONS"],
-            "environment": {
-                "name": "HostOnly",
-                "script": {
-                    "actions": {
-                        "onEnter": {"command": "mount", "args": ["/mnt"], "runOnHost": true},
-                        "onExit": {"command": "umount", "args": ["/mnt"], "runOnHost": true}
                     }
                 }
             }
@@ -209,69 +169,30 @@ fn on_wrap_exit_rejected_without_extension() {
     );
 }
 
-#[test]
-fn run_on_host_on_step_onrun_rejected_without_extension() {
-    expect_job_err(
-        r#"{
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "Test",
-            "steps": [{
-                "name": "S",
-                "script": {
-                    "actions": {
-                        "onRun": {"command": "echo", "runOnHost": true}
-                    }
-                }
-            }]
-        }"#,
-        NO_WRAP_EXTS,
-        &[
-            "steps[0] -> script -> actions -> onRun -> runOnHost:\n\trunOnHost requires the WRAP_ACTIONS extension.",
-        ],
-    );
-}
-
-#[test]
-fn run_on_host_on_env_onenter_rejected_without_extension() {
-    expect_env_err(
-        r#"{
-            "specificationVersion": "environment-2023-09",
-            "environment": {
-                "name": "E",
-                "script": {
-                    "actions": {
-                        "onEnter": {"command": "echo", "runOnHost": true}
-                    }
-                }
-            }
-        }"#,
-        NO_WRAP_EXTS,
-        &[
-            "environment -> script -> actions -> onEnter -> runOnHost:\n\trunOnHost requires the WRAP_ACTIONS extension.",
-        ],
-    );
-}
-
 // ════════════════════════════════════════════════════════════════════
 // Single-wrap-layer rule
 // ════════════════════════════════════════════════════════════════════
 
 #[test]
 fn two_job_envs_with_wrap_hooks_rejected() {
-    // Two job environments both defining a wrap hook — invalid.
+    // Two job environments both defining wrap hooks — invalid.
     expect_job_err(
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "jobEnvironments": [
                 {"name": "A", "script": {"actions": {
                     "onEnter": {"command": "echo"},
-                    "onWrapTaskRun": {"command": "echo"}
+                    "onWrapEnter": {"command": "echo"},
+                    "onWrapTaskRun": {"command": "echo"},
+                    "onWrapExit": {"command": "echo"}
                 }}},
                 {"name": "B", "script": {"actions": {
                     "onEnter": {"command": "echo"},
-                    "onWrapTaskRun": {"command": "echo"}
+                    "onWrapEnter": {"command": "echo"},
+                    "onWrapTaskRun": {"command": "echo"},
+                    "onWrapExit": {"command": "echo"}
                 }}}
             ],
             "steps": [{
@@ -294,12 +215,14 @@ fn job_env_and_step_env_with_wrap_hooks_rejected() {
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "jobEnvironments": [{
                 "name": "Outer",
                 "script": {"actions": {
                     "onEnter": {"command": "echo"},
-                    "onWrapTaskRun": {"command": "echo"}
+                    "onWrapEnter": {"command": "echo"},
+                    "onWrapTaskRun": {"command": "echo"},
+                    "onWrapExit": {"command": "echo"}
                 }}
             }],
             "steps": [{
@@ -308,7 +231,9 @@ fn job_env_and_step_env_with_wrap_hooks_rejected() {
                     "name": "Inner",
                     "script": {"actions": {
                         "onEnter": {"command": "echo"},
-                        "onWrapTaskRun": {"command": "echo"}
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapExit": {"command": "echo"}
                     }}
                 }],
                 "script": {"actions": {"onRun": {"command": "echo"}}}
@@ -328,12 +253,14 @@ fn single_wrap_layer_in_job_env_ok() {
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "jobEnvironments": [{
                 "name": "Outer",
                 "script": {"actions": {
                     "onEnter": {"command": "echo"},
+                    "onWrapEnter": {"command": "echo"},
                     "onWrapTaskRun": {"command": "echo"},
+                    "onWrapExit": {"command": "echo"},
                     "onExit": {"command": "echo"}
                 }}
             }],
@@ -360,7 +287,7 @@ fn single_wrap_layer_in_step_env_ok() {
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "steps": [{
                 "name": "S",
                 "stepEnvironments": [{
@@ -381,18 +308,18 @@ fn single_wrap_layer_in_step_env_ok() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// runOnHost + wrap hooks combined happy path
+// Wrap hooks + plain inner step environments happy path
 // ════════════════════════════════════════════════════════════════════
 
 #[test]
-fn wrap_hooks_and_run_on_host_together_ok() {
-    // The RFC's canonical scenario: one wrapping queue env, two step envs
-    // (one `runOnHost: true`, one wrapped), and a task.
+fn wrap_hooks_with_plain_inner_step_envs_ok() {
+    // Canonical scenario: one wrapping queue env and one plain step env
+    // (which the wrap hooks intercept) plus a task.
     expect_job_ok(
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Render",
-            "extensions": ["WRAP_ACTIONS"],
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
             "jobEnvironments": [{
                 "name": "Docker",
                 "script": {"actions": {
@@ -406,13 +333,6 @@ fn wrap_hooks_and_run_on_host_together_ok() {
             "steps": [{
                 "name": "Render",
                 "stepEnvironments": [
-                    {
-                        "name": "NFSMount",
-                        "script": {"actions": {
-                            "onEnter": {"command": "mount", "args": ["/mnt"], "runOnHost": true},
-                            "onExit": {"command": "umount", "args": ["/mnt"], "runOnHost": true}
-                        }}
-                    },
                     {
                         "name": "BlenderSetup",
                         "script": {"actions": {
@@ -433,11 +353,10 @@ fn wrap_hooks_and_run_on_host_together_ok() {
 //
 // These tests exercise the per-hook symbol scopes that
 // `validate_env_format_strings` sets up:
-// - `onWrapTaskRun` sees `Task.Command`, `Task.Args`, `Task.Environment`,
-//   `Env.Action.Timeout`
-// - `onWrapEnter` / `onWrapExit` see `Env.Wrapped.{Name,Command,Args,
-//   Environment,Timeout}`
-// - Cross-scope references (Task.* in onWrapEnter, Env.Wrapped.* in
+// - `onWrapTaskRun` sees `Task.Action.{Command,Args,Environment,Timeout}`
+// - `onWrapEnter` / `onWrapExit` see `Env.Wrapped.Name` and
+//   `Env.Wrapped.Action.{Command,Args,Environment,Timeout}`
+// - Cross-scope references (Task.Action.* in onWrapEnter, Env.Wrapped.* in
 //   onWrapTaskRun, Env.Wrapped.* in onEnter) must be rejected with a
 //   clear "Undefined variable" error.
 // ════════════════════════════════════════════════════════════════════
@@ -453,13 +372,15 @@ fn wrap_task_run_can_reference_task_scope_symbols() {
                 "script": {
                     "actions": {
                         "onEnter": {"command": "echo"},
+                        "onWrapEnter": {"command": "echo"},
                         "onWrapTaskRun": {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo cmd={{Task.Command}} args={{ repr_sh(Task.Args) }} env={{ repr_sh(Task.Environment) }} t={{Env.Action.Timeout}}"
+                                "echo cmd={{Task.Action.Command}} args={{ repr_sh(Task.Action.Args) }} env={{ repr_sh(Task.Action.Environment) }} t={{Task.Action.Timeout}}"
                             ]
-                        }
+                        },
+                        "onWrapExit": {"command": "echo"}
                     }
                 }
             }
@@ -483,9 +404,11 @@ fn wrap_enter_can_reference_env_wrapped_scope_symbols() {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo name={{Env.Wrapped.Name}} cmd={{Env.Wrapped.Command}} args={{ repr_sh(Env.Wrapped.Args) }} t={{Env.Wrapped.Timeout}}"
+                                "echo name={{Env.Wrapped.Name}} cmd={{Env.Wrapped.Action.Command}} args={{ repr_sh(Env.Wrapped.Action.Args) }} t={{Env.Wrapped.Action.Timeout}}"
                             ]
-                        }
+                        },
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapExit": {"command": "echo"}
                     }
                 }
             }
@@ -505,11 +428,13 @@ fn wrap_exit_can_reference_env_wrapped_scope_symbols() {
                 "script": {
                     "actions": {
                         "onEnter": {"command": "echo"},
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
                         "onWrapExit": {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo name={{Env.Wrapped.Name}} env={{ repr_sh(Env.Wrapped.Environment) }}"
+                                "echo name={{Env.Wrapped.Name}} env={{ repr_sh(Env.Wrapped.Action.Environment) }}"
                             ]
                         }
                     }
@@ -522,7 +447,7 @@ fn wrap_exit_can_reference_env_wrapped_scope_symbols() {
 
 #[test]
 fn task_scope_not_available_in_wrap_enter() {
-    // `Task.Command` is specific to onWrapTaskRun; referencing it in
+    // `Task.Action.Command` is specific to onWrapTaskRun; referencing it in
     // onWrapEnter surfaces as a plain undefined-variable error.
     // Embedded in a job template so the format-string validation pass runs.
     expect_job_err(
@@ -537,7 +462,7 @@ fn task_scope_not_available_in_wrap_enter() {
                         "onEnter": {"command": "echo"},
                         "onWrapEnter": {
                             "command": "bash",
-                            "args": ["-c", "echo {{Task.Command}}"]
+                            "args": ["-c", "echo {{Task.Action.Command}}"]
                         }
                     }
                 }
@@ -545,7 +470,7 @@ fn task_scope_not_available_in_wrap_enter() {
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
         ALL_EXTS,
-        &["Undefined variable: 'Task.Command'"],
+        &["Undefined variable: 'Task.Action.Command'"],
     );
 }
 
@@ -578,7 +503,7 @@ fn env_wrapped_scope_not_available_in_wrap_task_run() {
 
 #[test]
 fn task_scope_not_available_in_plain_on_enter() {
-    // `Task.Command` must not leak into the plain onEnter scope just
+    // `Task.Action.Command` must not leak into the plain onEnter scope just
     // because the environment also defines onWrapTaskRun.
     expect_job_err(
         r#"{
@@ -591,7 +516,7 @@ fn task_scope_not_available_in_plain_on_enter() {
                     "actions": {
                         "onEnter": {
                             "command": "bash",
-                            "args": ["-c", "echo {{Task.Command}}"]
+                            "args": ["-c", "echo {{Task.Action.Command}}"]
                         },
                         "onWrapTaskRun": {"command": "echo"}
                     }
@@ -600,7 +525,7 @@ fn task_scope_not_available_in_plain_on_enter() {
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
         ALL_EXTS,
-        &["Undefined variable: 'Task.Command'"],
+        &["Undefined variable: 'Task.Action.Command'"],
     );
 }
 

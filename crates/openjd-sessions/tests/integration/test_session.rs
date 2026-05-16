@@ -24,7 +24,6 @@ fn action(cmd: &str, args: Vec<&str>) -> Action {
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     }
 }
 
@@ -372,7 +371,6 @@ async fn test_run_task_with_variables() {
                 args: Some(vec![fs("-c"), fs("echo {{ Task.Param.Greeting }}")]),
                 timeout: None,
                 cancelation: None,
-                run_on_host: None,
             },
         },
         embedded_files: None,
@@ -1776,7 +1774,6 @@ fn action_with_timeout(cmd: &str, args: Vec<&str>, timeout_secs: &str) -> Action
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: Some(fs(timeout_secs)),
         cancelation: None,
-        run_on_host: None,
     }
 }
 

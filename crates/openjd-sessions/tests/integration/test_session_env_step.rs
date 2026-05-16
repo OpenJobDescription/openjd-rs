@@ -45,7 +45,6 @@ fn make_action(command: &str, args: Vec<&str>) -> Action {
         args: Some(args.iter().map(|a| fs(a)).collect()),
         timeout: None,
         cancelation: None,
-        run_on_host: None,
     }
 }
 
@@ -166,7 +165,6 @@ async fn test_env_with_embedded_files() {
                     args: Some(vec![fs("{{ Env.File.Script }}")]),
                     timeout: None,
                     cancelation: None,
-                    run_on_host: None,
                 }),
                 on_wrap_enter: None,
                 on_wrap_task_run: None,
@@ -506,7 +504,6 @@ async fn test_env_with_let_bindings_and_embedded_files() {
                     args: Some(vec![fs("-c"), fs("echo {{ configPath }}")]),
                     timeout: None,
                     cancelation: None,
-                    run_on_host: None,
                 }),
                 on_wrap_enter: None,
                 on_wrap_task_run: None,
@@ -552,7 +549,6 @@ async fn test_step_with_let_bindings_and_embedded_files() {
                 args: Some(vec![fs("{{ Task.File.Data }}")]),
                 timeout: None,
                 cancelation: None,
-                run_on_host: None,
             },
         },
         embedded_files: Some(vec![EmbeddedFile {
