@@ -27,7 +27,7 @@ keywords = ["openjd", "openjobdescription", "render-farm", "job-template", "rend
 categories = ["command-line-utilities", "parser-implementations"]
 
 [workspace.dependencies]
-shlex = "1"
+shlex = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-saphyr = "0.0.26"

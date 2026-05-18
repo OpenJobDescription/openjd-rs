@@ -5925,7 +5925,7 @@ limitations under the License.
 ** serde_core; version 1.0.228 -- https://crates.io/crates/serde_core
 ** serde_derive; version 1.0.228 -- https://crates.io/crates/serde_derive
 ** serde_json; version 1.0.149 -- https://crates.io/crates/serde_json
-** shlex; version 1.3.0 -- https://crates.io/crates/shlex
+** shlex; version 2.0.1 -- https://crates.io/crates/shlex
 ** siphasher; version 1.0.3 -- https://crates.io/crates/siphasher
 ** syn; version 2.0.117 -- https://crates.io/crates/syn
 ** thiserror-impl; version 2.0.18 -- https://crates.io/crates/thiserror-impl
