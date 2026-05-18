@@ -62,7 +62,7 @@ methods on `ParsedExpression`):
 | `with_memory_limit(usize)` | 100,000,000 (100 MB) | Memory bound | Tracks all intermediate values; returns `MemoryLimitExceeded` |
 | `with_operation_limit(usize)` | 10,000,000 (10M) | Operation bound | Each call=1, list iteration=N, string ops=ceil(len/256) |
 | `with_path_format(PathFormat)` | Host native | Path normalization format | Also validates that `Path` values in symbol table match |
-| `with_target_type(&ExprType)` | None | Context-dependent coercion | Influences empty list element type and mixed-type coercion |
+| `with_target_type(&ExprType)` | None | Final-result coercion + per-node hint | Operators evaluate operands unconstrained per RFC 0005 (see [Target Type Propagation](#target-type-propagation)) |
 
 The underlying `Evaluator` struct is crate-private. Keyword renames and
 expression source text for error messages are wired up automatically by
@@ -123,6 +123,57 @@ each having a fresh 64-level allowance.
 See also [parser.md § Depth Limit](parser.md#depth-limit) for the source-level
 and AST-walker checks that complement this evaluator-side guard.
 
+## Target Type Propagation
+
+The optional `target_type` set via `EvalBuilder::with_target_type` shapes
+**two** things:
+
+1. **Per-node hints** — selected nodes use the live target type to choose
+   between equally-valid behaviors (e.g., `eval_list` infers the element
+   type for an empty list literal `[]` from a `list[T]` target).
+2. **Final-result coercion** — after the root node evaluates, the
+   `evaluate()` wrapper coerces the value toward the target type via
+   [`ExprValue::coerce`](values.md#coerce). With no target type set, this
+   step is a no-op.
+
+The propagation rules below come from [RFC 0005 §"Target Type Propagation
+Rules"](https://github.com/OpenJobDescription/openjd-specifications/blob/main/rfcs/0005-expression-language.md#expression-evaluation):
+
+| Node | Target type seen by children |
+|------|------------------------------|
+| `BinOp` (`+`, `-`, `*`, `/`, `//`, `%`, `**`) | Both operands: `None` (unconstrained) |
+| `UnaryOp` (`-x`, `+x`, `not x`) | Operand: `None` (unconstrained) |
+| `Compare` (`<`, `>`, `==`, `in`, …) | All operands: `None` (unconstrained) |
+| `IfExp` (`x if c else y`) | `test`: `None`; `body` / `orelse`: parent target |
+| `BoolOp` (`and`, `or`) | All operands: parent target (value-returning, see RFC 0006) |
+| `Call` | Arguments: parent target (signature-driven coercion happens inside `dispatch`) |
+| `List` | Elements: element type extracted from `list[T]` parent target |
+| `ListComp` | Element expr: element type from parent; iter: parent; conditions: parent |
+| `Subscript` | Value: parent; index/slice: parent |
+| `Attribute` / `Name` / `Constant` | N/A (leaf) |
+
+The "unconstrained" rule for `BinOp` / `UnaryOp` / `Compare` is the load-bearing
+piece: it stops a `target_type=string` request from collapsing
+`Param.Count - 1` into `"100" - "1"` and erroring out — instead, both
+operands evaluate as integers, `__sub__` runs in integer land, and the
+final coercion converts the resulting `Int(99)` into `String("99")`.
+RFC 0005 calls this out by name in its rationale, with the exact same
+example.
+
+This is currently realized via a single
+`Evaluator::evaluate_with_target(node, target)` helper that swaps the
+field for the duration of one recursive call, then restores the saved
+value. Operators that need to clear the target call it with `None`;
+`eval_list` uses the same primitive (open-coded) to push the element
+type down.
+
+The `IfExp.test` slot is a per-node `None` rather than `Some(BOOL)`.
+Pushing `BOOL` would invoke `coerce` on the test result, and that path
+loses the friendlier "Condition must be a boolean, got X" message
+that `eval_ifexp` produces from its explicit type check. Because the
+explicit check enforces bool-ness, the unconstrained recursion is
+strictly better for diagnostics.
+
 ## AST Node Evaluation
 
 The evaluator dispatches on AST node type:
@@ -160,10 +211,13 @@ a % b  → __mod__(a, b)
 a ** b → __pow__(a, b)
 ```
 
-Both operands are evaluated, then `dispatch` handles memory release/track.
+Both operands are evaluated **unconstrained** (per [Target Type
+Propagation](#target-type-propagation)), then `dispatch` handles memory
+release/track.
 
 ### UnaryOp (`eval_unaryop`)
-Maps to `__neg__`, `__pos__`, `__not__`.
+Maps to `__neg__`, `__pos__`, `__not__`. The single operand is evaluated
+unconstrained.
 
 Special case: `-<int literal>` is folded into a single negative integer to handle
 `INT64_MIN` (-2^63), which cannot be represented as a negated positive literal.
@@ -180,7 +234,9 @@ not in → __not_contains__(container, item)
 ```
 
 Chained comparisons short-circuit: `a < b < c` evaluates `a < b`, and only if true,
-evaluates `b < c`. The intermediate value `b` is reused.
+evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
+are evaluated unconstrained (see [Target Type
+Propagation](#target-type-propagation)).
 
 Comparison stays in the evaluator (not fully delegated to the library) because the
 chaining logic requires control flow that doesn't fit the simple dispatch model.
@@ -237,9 +293,11 @@ subsequent concrete operand proves the result by short-circuiting (e.g.,
 are suppressed, since a runtime short-circuit could make them unreachable.
 
 ### IfExp (`eval_ifexp`)
-Ternary: `x if condition else y`. Evaluates the condition first, then only the
-selected branch. When the condition is unresolved, both branches are evaluated and
-the result type is the union.
+Ternary: `x if condition else y`. Evaluates the condition unconstrained
+(see [Target Type Propagation](#target-type-propagation)) and asserts it
+is bool-compatible, then evaluates only the selected branch with the
+parent target type. When the condition is unresolved, both branches are
+evaluated and the result type is the union.
 
 ### Call (`eval_call`)
 Handles both function calls (`len(x)`) and method calls (`x.upper()`).

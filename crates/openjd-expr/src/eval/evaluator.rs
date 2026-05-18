@@ -221,6 +221,35 @@ impl<'a> Evaluator<'a> {
         self.operation_count
     }
 
+    /// Evaluate `node` with `target` temporarily replacing
+    /// `self.target_type`, restoring the previous value afterward.
+    ///
+    /// This is the per-node target-type propagation primitive defined by
+    /// RFC 0005 §"Target Type Propagation Rules". Operators like `BinOp`,
+    /// `UnaryOp`, `Compare`, and the `test` slot of `IfExp` evaluate
+    /// their operands with `target = None` so that a
+    /// `target_type=string` request from the caller does not leak into
+    /// operand evaluation. `IfExp.body` and `IfExp.orelse` keep using
+    /// [`evaluate`] because they inherit the parent target type.
+    ///
+    /// `target_type` coercion is applied uniformly inside
+    /// [`evaluate`]; this helper just controls what coercion sees when
+    /// the recursive call returns. RFC 0005 nominally says
+    /// `IfExp.test` should be evaluated with `{BOOL}`, but the
+    /// evaluator already enforces bool-ness via an explicit type check
+    /// in `eval_ifexp` whose error message is friendlier than the
+    /// equivalent coercion failure, so we use `None` for that slot.
+    fn evaluate_with_target(
+        &mut self,
+        node: &ast::Expr,
+        target: Option<crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
+        let saved = std::mem::replace(&mut self.target_type, target);
+        let result = self.evaluate(node);
+        self.target_type = saved;
+        result
+    }
+
     /// Evaluate an AST expression node.
     pub fn evaluate(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
         // Bound recursion depth so deep ASTs (e.g., left-associative
@@ -670,8 +699,8 @@ impl<'a> Evaluator<'a> {
             }
         };
 
-        let left = self.evaluate(&b.left)?;
-        let right = self.evaluate(&b.right)?;
+        let left = self.evaluate_with_target(&b.left, None)?;
+        let right = self.evaluate_with_target(&b.right, None)?;
         self.dispatch_with_node(
             op_name,
             vec![left, right],
@@ -708,7 +737,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
         }
-        let operand = self.evaluate(&u.operand)?;
+        let operand = self.evaluate_with_target(&u.operand, None)?;
         let op_name = match u.op {
             ast::UnaryOp::USub => "__neg__",
             ast::UnaryOp::UAdd => "__pos__",
@@ -790,9 +819,9 @@ impl<'a> Evaluator<'a> {
                 _ => {}
             }
         }
-        let mut left = self.evaluate(&c.left)?;
+        let mut left = self.evaluate_with_target(&c.left, None)?;
         for (op, right_node) in c.ops.iter().zip(c.comparators.iter()) {
-            let right = self.evaluate(right_node)?;
+            let right = self.evaluate_with_target(right_node, None)?;
             if left.is_unresolved() || right.is_unresolved() {
                 self.release(&left);
                 self.release(&right);
@@ -844,7 +873,11 @@ impl<'a> Evaluator<'a> {
 
     fn eval_ifexp(&mut self, i: &ast::ExprIf) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        let test = self.evaluate(&i.test)?;
+        // Per RFC 0005, the test of an IfExp is evaluated unconstrained.
+        // The explicit bool-compatibility check below validates the type
+        // and produces a friendlier "Condition must be a boolean, got X"
+        // error than a generic coercion failure would.
+        let test = self.evaluate_with_target(&i.test, None)?;
         if test.is_unresolved() {
             // Check that the unresolved type is compatible with bool
             let inner = unwrap_unresolved(&test.expr_type());
