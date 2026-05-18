@@ -943,47 +943,29 @@ fn validate_env_format_strings(
                 errors,
             );
         }
-        // RFC 0008: onWrapEnter and onWrapExit see `Env.Wrapped.*` in addition
-        // to the session-scope symbols. `Task.*` (from onWrapTaskRun) is NOT
-        // in scope here — the wrap-enter/exit hooks wrap inner environments'
-        // lifecycle actions, not tasks. Referencing `Task.*` inside these
-        // hooks surfaces as a normal "Undefined variable" error.
-        if let Some(action) = &script.actions.on_wrap_enter {
-            let mut st = symtab.clone();
-            add_env_wrapped_scope(&mut st);
-            validate_action_fs(
-                action,
-                &st,
-                lib,
-                &path_field(&actions_path, "onWrapEnter"),
-                errors,
-            );
-        }
-        // RFC 0008: onWrapTaskRun sees `Task.Action.Command`, `Task.Action.Args`,
-        // `Task.Action.Environment`, and `Task.Action.Timeout`. `Env.Wrapped.*`
-        // is NOT in scope — the task-run hook wraps a task's onRun, not
-        // an environment action.
-        if let Some(action) = &script.actions.on_wrap_task_run {
-            let mut st = symtab.clone();
-            add_task_wrap_scope(&mut st);
-            validate_action_fs(
-                action,
-                &st,
-                lib,
-                &path_field(&actions_path, "onWrapTaskRun"),
-                errors,
-            );
-        }
-        if let Some(action) = &script.actions.on_wrap_exit {
-            let mut st = symtab.clone();
-            add_env_wrapped_scope(&mut st);
-            validate_action_fs(
-                action,
-                &st,
-                lib,
-                &path_field(&actions_path, "onWrapExit"),
-                errors,
-            );
+        // RFC 0008: all three wrap hooks see `WrappedAction.*` with identical
+        // shape. `onWrapEnter` and `onWrapExit` additionally see `Env.Wrapped.Name`
+        // (tasks have no equivalent). Referencing these outside a wrap hook
+        // surfaces as a normal "Undefined variable" error.
+        for (action_opt, hook_name, has_env_wrapped_name) in [
+            (&script.actions.on_wrap_enter, "onWrapEnter", true),
+            (&script.actions.on_wrap_task_run, "onWrapTaskRun", false),
+            (&script.actions.on_wrap_exit, "onWrapExit", true),
+        ] {
+            if let Some(action) = action_opt {
+                let mut st = symtab.clone();
+                add_wrapped_action_scope(&mut st);
+                if has_env_wrapped_name {
+                    add_env_wrapped_name_scope(&mut st);
+                }
+                validate_action_fs(
+                    action,
+                    &st,
+                    lib,
+                    &path_field(&actions_path, hook_name),
+                    errors,
+                );
+            }
         }
         if let Some(action) = &script.actions.on_exit {
             validate_action_fs(
@@ -1015,72 +997,34 @@ fn validate_env_format_strings(
     }
 }
 
-/// Augment a session-scope symtab with the variables that are only
-/// defined inside the `onWrapTaskRun` hook (RFC 0008):
+/// Augment a session-scope symtab with `WrappedAction.*`, available in
+/// all three wrap hooks (RFC 0008):
 ///
-/// - `Task.Action.Command` — string
-/// - `Task.Action.Args` — list[string]
-/// - `Task.Action.Environment` — list[string] (entries of the form `"KEY=value"`)
-/// - `Task.Action.Timeout` — int (seconds, or `0` when the wrapped action
+/// - `WrappedAction.Command` — string
+/// - `WrappedAction.Args` — list[string]
+/// - `WrappedAction.Environment` — list[string] (entries of the form `"KEY=value"`)
+/// - `WrappedAction.Timeout` — int (seconds, or `0` when the wrapped action
 ///   specified no timeout)
 ///
 /// The caller has already cloned the session symtab, so we mutate in place.
-fn add_task_wrap_scope(symtab: &mut SymbolTable) {
-    symtab
-        .set("Task.Action.Command", ExprValue::unresolved(ExprType::STRING))
-        .expect("symtab");
-    symtab
-        .set(
-            "Task.Action.Args",
-            ExprValue::unresolved(ExprType::list(ExprType::STRING)),
-        )
-        .expect("symtab");
-    symtab
-        .set(
-            "Task.Action.Environment",
-            ExprValue::unresolved(ExprType::list(ExprType::STRING)),
-        )
-        .expect("symtab");
-    symtab
-        .set("Task.Action.Timeout", ExprValue::unresolved(ExprType::INT))
-        .expect("symtab");
+fn add_wrapped_action_scope(symtab: &mut SymbolTable) {
+    let list_string = || ExprType::list(ExprType::STRING);
+    let unresolved = ExprValue::unresolved;
+    for (name, ty) in [
+        ("WrappedAction.Command", ExprType::STRING),
+        ("WrappedAction.Args", list_string()),
+        ("WrappedAction.Environment", list_string()),
+        ("WrappedAction.Timeout", ExprType::INT),
+    ] {
+        symtab.set(name, unresolved(ty)).expect("symtab");
+    }
 }
 
-/// Augment a session-scope symtab with the variables that are only
-/// defined inside `onWrapEnter` and `onWrapExit` (RFC 0008):
-///
-/// - `Env.Wrapped.Name` — string
-/// - `Env.Wrapped.Action.Command` — string
-/// - `Env.Wrapped.Action.Args` — list[string]
-/// - `Env.Wrapped.Action.Environment` — list[string]
-/// - `Env.Wrapped.Action.Timeout` — int
-fn add_env_wrapped_scope(symtab: &mut SymbolTable) {
+/// Augment with `Env.Wrapped.Name`, available only in `onWrapEnter` and
+/// `onWrapExit` (RFC 0008). Tasks have no equivalent.
+fn add_env_wrapped_name_scope(symtab: &mut SymbolTable) {
     symtab
         .set("Env.Wrapped.Name", ExprValue::unresolved(ExprType::STRING))
-        .expect("symtab");
-    symtab
-        .set(
-            "Env.Wrapped.Action.Command",
-            ExprValue::unresolved(ExprType::STRING),
-        )
-        .expect("symtab");
-    symtab
-        .set(
-            "Env.Wrapped.Action.Args",
-            ExprValue::unresolved(ExprType::list(ExprType::STRING)),
-        )
-        .expect("symtab");
-    symtab
-        .set(
-            "Env.Wrapped.Action.Environment",
-            ExprValue::unresolved(ExprType::list(ExprType::STRING)),
-        )
-        .expect("symtab");
-    symtab
-        .set(
-            "Env.Wrapped.Action.Timeout",
-            ExprValue::unresolved(ExprType::INT),
-        )
         .expect("symtab");
 }
 

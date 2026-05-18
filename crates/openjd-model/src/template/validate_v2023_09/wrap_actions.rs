@@ -113,63 +113,50 @@ pub fn validate_wrap_actions_job_template(
     errors: &mut ValidationErrors,
 ) {
     let active = ctx.profile.has_extension(ModelExtension::WrapActions);
-
     check_expr_prerequisite(ctx, errors);
 
-    // Count job-envs with wrap hooks (for the single-layer rule).
-    // Also record their indices for precise error paths.
-    let mut job_env_wrap_indices: Vec<usize> = Vec::new();
+    // Walk every environment, gating new fields and counting wrap layers.
+    let mut job_env_wrap_count = 0usize;
     if let Some(envs) = &jt.job_environments {
         let envs_path = path_field(&[], "jobEnvironments");
         for (i, env) in envs.iter().enumerate() {
-            let p = path_index(&envs_path, i);
-            if check_env(env, &p, active, errors) {
-                job_env_wrap_indices.push(i);
+            if check_env(env, &path_index(&envs_path, i), active, errors) {
+                job_env_wrap_count += 1;
             }
         }
     }
-
-    // Walk each step's step environments.
+    let mut any_step_env_violation = false;
     for (i, step) in jt.steps.iter().enumerate() {
-        if let Some(envs) = &step.step_environments {
-            let base = path_index(&path_field(&[], "steps"), i);
-            let envs_path = path_field(&base, "stepEnvironments");
-            let mut step_env_wrap_indices: Vec<usize> = Vec::new();
-            for (j, env) in envs.iter().enumerate() {
-                let p = path_index(&envs_path, j);
-                if check_env(env, &p, active, errors) {
-                    step_env_wrap_indices.push(j);
-                }
-            }
-            // Single-wrap-layer rule: across job-envs and this step's
-            // step-envs, at most one environment may define any wrap hook.
-            if active {
-                let total = job_env_wrap_indices.len() + step_env_wrap_indices.len();
-                if total > 1 {
-                    errors.add(
-                        &envs_path,
-                        "only one environment in the session stack may define any of onWrapEnter, onWrapTaskRun, onWrapExit (RFC 0008).",
-                    );
-                }
-            }
-        } else if active && job_env_wrap_indices.len() > 1 {
-            // Job-envs-only case: even with no step envs, two wrap layers
-            // in job envs alone is still invalid. Reported once per step
-            // walk to keep the error path at a step boundary; dedupe by
-            // only emitting on the first step to avoid N copies.
-            if i == 0 {
-                errors.add(
-                    &path_field(&[], "jobEnvironments"),
-                    "only one environment in the session stack may define any of onWrapEnter, onWrapTaskRun, onWrapExit (RFC 0008).",
-                );
+        let Some(envs) = &step.step_environments else {
+            continue;
+        };
+        let base = path_index(&path_field(&[], "steps"), i);
+        let envs_path = path_field(&base, "stepEnvironments");
+        let mut step_env_wrap_count = 0usize;
+        for (j, env) in envs.iter().enumerate() {
+            if check_env(env, &path_index(&envs_path, j), active, errors) {
+                step_env_wrap_count += 1;
             }
         }
+        // Single-wrap-layer rule: a session is built from the job's
+        // jobEnvironments plus one step's stepEnvironments, so checking
+        // each step's combined total catches every reachable session.
+        if active && job_env_wrap_count + step_env_wrap_count > 1 {
+            errors.add(&envs_path, SINGLE_WRAP_LAYER_MSG);
+            any_step_env_violation = true;
+        }
     }
-
-    // Degenerate case: multiple job-envs with wrap hooks but no steps would
-    // have failed structural validation earlier (a job template needs at
-    // least one step), so the above loop always emits the error if needed.
+    // Job-envs-only violation: multiple wrap envs in jobEnvironments
+    // would be reachable from every session, but the per-step loop above
+    // only fires for steps that have stepEnvironments. Emit once at the
+    // jobEnvironments path when no step-env loop would have caught it.
+    if active && job_env_wrap_count > 1 && !any_step_env_violation {
+        errors.add(&path_field(&[], "jobEnvironments"), SINGLE_WRAP_LAYER_MSG);
+    }
 }
+
+const SINGLE_WRAP_LAYER_MSG: &str =
+    "only one environment in the session stack may define any of onWrapEnter, onWrapTaskRun, onWrapExit (RFC 0008).";
 
 /// Validate RFC 0008 constraints for an environment template.
 ///

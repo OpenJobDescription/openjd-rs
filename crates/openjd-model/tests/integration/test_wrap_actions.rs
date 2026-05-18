@@ -352,16 +352,17 @@ fn wrap_hooks_with_plain_inner_step_envs_ok() {
 //
 // These tests exercise the per-hook symbol scopes that
 // `validate_env_format_strings` sets up:
-// - `onWrapTaskRun` sees `Task.Action.{Command,Args,Environment,Timeout}`
-// - `onWrapEnter` / `onWrapExit` see `Env.Wrapped.Name` and
-//   `Env.Wrapped.Action.{Command,Args,Environment,Timeout}`
-// - Cross-scope references (Task.Action.* in onWrapEnter, Env.Wrapped.* in
-//   onWrapTaskRun, Env.Wrapped.* in onEnter) must be rejected with a
-//   clear "Undefined variable" error.
+// - All three wrap hooks see `WrappedAction.{Command,Args,Environment,Timeout}`
+//   with identical shape.
+// - `onWrapEnter` / `onWrapExit` additionally see `Env.Wrapped.Name`.
+//   Tasks have no equivalent.
+// - References to `WrappedAction.*` outside any wrap hook, or to
+//   `Env.Wrapped.Name` outside `onWrapEnter`/`onWrapExit`, must be
+//   rejected with a clear "Undefined variable" error.
 // ════════════════════════════════════════════════════════════════════
 
 #[test]
-fn wrap_task_run_can_reference_task_scope_symbols() {
+fn wrap_task_run_can_reference_wrapped_action_symbols() {
     expect_env_ok(
         r#"{
             "specificationVersion": "environment-2023-09",
@@ -376,7 +377,7 @@ fn wrap_task_run_can_reference_task_scope_symbols() {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo cmd={{Task.Action.Command}} args={{ repr_sh(Task.Action.Args) }} env={{ repr_sh(Task.Action.Environment) }} t={{Task.Action.Timeout}}"
+                                "echo cmd={{WrappedAction.Command}} args={{ repr_sh(WrappedAction.Args) }} env={{ repr_sh(WrappedAction.Environment) }} t={{WrappedAction.Timeout}}"
                             ]
                         },
                         "onWrapExit": {"command": "echo"}
@@ -389,7 +390,7 @@ fn wrap_task_run_can_reference_task_scope_symbols() {
 }
 
 #[test]
-fn wrap_enter_can_reference_env_wrapped_scope_symbols() {
+fn wrap_enter_can_reference_wrapped_action_and_env_wrapped_name() {
     expect_env_ok(
         r#"{
             "specificationVersion": "environment-2023-09",
@@ -403,7 +404,7 @@ fn wrap_enter_can_reference_env_wrapped_scope_symbols() {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo name={{Env.Wrapped.Name}} cmd={{Env.Wrapped.Action.Command}} args={{ repr_sh(Env.Wrapped.Action.Args) }} t={{Env.Wrapped.Action.Timeout}}"
+                                "echo name={{Env.Wrapped.Name}} cmd={{WrappedAction.Command}} args={{ repr_sh(WrappedAction.Args) }} t={{WrappedAction.Timeout}}"
                             ]
                         },
                         "onWrapTaskRun": {"command": "echo"},
@@ -417,7 +418,7 @@ fn wrap_enter_can_reference_env_wrapped_scope_symbols() {
 }
 
 #[test]
-fn wrap_exit_can_reference_env_wrapped_scope_symbols() {
+fn wrap_exit_can_reference_wrapped_action_and_env_wrapped_name() {
     expect_env_ok(
         r#"{
             "specificationVersion": "environment-2023-09",
@@ -433,7 +434,7 @@ fn wrap_exit_can_reference_env_wrapped_scope_symbols() {
                             "command": "bash",
                             "args": [
                                 "-c",
-                                "echo name={{Env.Wrapped.Name}} env={{ repr_sh(Env.Wrapped.Action.Environment) }}"
+                                "echo name={{Env.Wrapped.Name}} env={{ repr_sh(WrappedAction.Environment) }}"
                             ]
                         }
                     }
@@ -445,10 +446,9 @@ fn wrap_exit_can_reference_env_wrapped_scope_symbols() {
 }
 
 #[test]
-fn task_scope_not_available_in_wrap_enter() {
-    // `Task.Action.Command` is specific to onWrapTaskRun; referencing it in
-    // onWrapEnter surfaces as a plain undefined-variable error.
-    // Embedded in a job template so the format-string validation pass runs.
+fn env_wrapped_name_not_available_in_wrap_task_run() {
+    // `Env.Wrapped.Name` is specific to onWrapEnter/onWrapExit; tasks have
+    // no equivalent.
     expect_job_err(
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
@@ -459,37 +459,12 @@ fn task_scope_not_available_in_wrap_enter() {
                 "script": {
                     "actions": {
                         "onEnter": {"command": "echo"},
-                        "onWrapEnter": {
-                            "command": "bash",
-                            "args": ["-c", "echo {{Task.Action.Command}}"]
-                        }
-                    }
-                }
-            }],
-            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-        }"#,
-        ALL_EXTS,
-        &["Undefined variable: 'Task.Action.Command'"],
-    );
-}
-
-#[test]
-fn env_wrapped_scope_not_available_in_wrap_task_run() {
-    // `Env.Wrapped.Name` is specific to onWrapEnter/onWrapExit.
-    expect_job_err(
-        r#"{
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "Test",
-            "extensions": ["WRAP_ACTIONS", "EXPR"],
-            "jobEnvironments": [{
-                "name": "Wrapper",
-                "script": {
-                    "actions": {
-                        "onEnter": {"command": "echo"},
+                        "onWrapEnter": {"command": "echo"},
                         "onWrapTaskRun": {
                             "command": "bash",
                             "args": ["-c", "echo {{Env.Wrapped.Name}}"]
-                        }
+                        },
+                        "onWrapExit": {"command": "echo"}
                     }
                 }
             }],
@@ -501,9 +476,9 @@ fn env_wrapped_scope_not_available_in_wrap_task_run() {
 }
 
 #[test]
-fn task_scope_not_available_in_plain_on_enter() {
-    // `Task.Action.Command` must not leak into the plain onEnter scope just
-    // because the environment also defines onWrapTaskRun.
+fn wrapped_action_not_available_in_plain_on_enter() {
+    // `WrappedAction.Command` must not leak into the plain onEnter scope
+    // just because the environment also defines wrap hooks.
     expect_job_err(
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
@@ -515,22 +490,24 @@ fn task_scope_not_available_in_plain_on_enter() {
                     "actions": {
                         "onEnter": {
                             "command": "bash",
-                            "args": ["-c", "echo {{Task.Action.Command}}"]
+                            "args": ["-c", "echo {{WrappedAction.Command}}"]
                         },
-                        "onWrapTaskRun": {"command": "echo"}
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapExit": {"command": "echo"}
                     }
                 }
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
         ALL_EXTS,
-        &["Undefined variable: 'Task.Action.Command'"],
+        &["Undefined variable: 'WrappedAction.Command'"],
     );
 }
 
 #[test]
-fn env_wrapped_scope_not_available_in_plain_on_exit() {
-    // Symmetric check: onExit does not see Env.Wrapped.*.
+fn env_wrapped_name_not_available_in_plain_on_exit() {
+    // Symmetric check: onExit does not see Env.Wrapped.Name.
     expect_job_err(
         r#"{
             "specificationVersion": "jobtemplate-2023-09",
@@ -545,6 +522,8 @@ fn env_wrapped_scope_not_available_in_plain_on_exit() {
                             "command": "bash",
                             "args": ["-c", "echo {{Env.Wrapped.Name}}"]
                         },
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
                         "onWrapExit": {"command": "echo"}
                     }
                 }
@@ -553,5 +532,147 @@ fn env_wrapped_scope_not_available_in_plain_on_exit() {
         }"#,
         ALL_EXTS,
         &["Undefined variable: 'Env.Wrapped.Name'"],
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// All-or-nothing rule (RFC 0008)
+//
+// An environment that defines any wrap hook must define all three.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn defining_only_on_wrap_task_run_rejected() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Partial",
+                "script": {
+                    "actions": {
+                        "onWrapTaskRun": {"command": "echo"}
+                    }
+                }
+            }
+        }"#,
+        ALL_EXTS,
+        &["must define all three"],
+    );
+}
+
+#[test]
+fn defining_only_on_wrap_enter_rejected() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Partial",
+                "script": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                        "onWrapEnter": {"command": "echo"}
+                    }
+                }
+            }
+        }"#,
+        ALL_EXTS,
+        &["must define all three"],
+    );
+}
+
+#[test]
+fn defining_two_of_three_wrap_hooks_rejected() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Partial",
+                "script": {
+                    "actions": {
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"}
+                    }
+                }
+            }
+        }"#,
+        ALL_EXTS,
+        &["must define all three"],
+    );
+}
+
+#[test]
+fn defining_zero_wrap_hooks_accepted() {
+    // The rule is "any → all three"; zero wrap hooks is valid.
+    expect_env_ok(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Plain",
+                "script": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                        "onExit": {"command": "echo"}
+                    }
+                }
+            }
+        }"#,
+        ALL_EXTS,
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// EXPR prerequisite (RFC 0008)
+//
+// A template that lists WRAP_ACTIONS must also list EXPR.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn wrap_actions_without_expr_extension_rejected_in_env_template() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS"],
+            "environment": {
+                "name": "Wrapper",
+                "script": {
+                    "actions": {
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapExit": {"command": "echo"}
+                    }
+                }
+            }
+        }"#,
+        ALL_EXTS,
+        &["WRAP_ACTIONS requires EXPR"],
+    );
+}
+
+#[test]
+fn wrap_actions_without_expr_extension_rejected_in_job_template() {
+    expect_job_err(
+        r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "extensions": ["WRAP_ACTIONS"],
+            "jobEnvironments": [{
+                "name": "Wrapper",
+                "script": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                        "onWrapEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapExit": {"command": "echo"}
+                    }
+                }
+            }],
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+        }"#,
+        ALL_EXTS,
+        &["WRAP_ACTIONS requires EXPR"],
     );
 }

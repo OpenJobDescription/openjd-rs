@@ -126,7 +126,7 @@ async fn baseline_task_runs_unwrapped_when_no_wrap_env() {
 }
 
 /// When a wrap env with `onWrapTaskRun` is active, the task's `onRun`
-/// is replaced. `Task.Action.Command` / `Task.Action.Args` carry the
+/// is replaced. `WrappedAction.Command` / `WrappedAction.Args` carry the
 /// original command forward so the wrap script can re-invoke it.
 #[tokio::test]
 async fn task_run_wrapped_by_active_wrap_env() {
@@ -136,27 +136,27 @@ async fn task_run_wrapped_by_active_wrap_env() {
 
     // Wrap script:
     //   1. Write a [WRAPPED] marker line so we can prove interception.
-    //   2. Re-invoke the wrapped command via Task.Action.Command /
-    //      Task.Action.Args, which demonstrates the template variable
+    //   2. Re-invoke the wrapped command via WrappedAction.Command /
+    //      WrappedAction.Args, which demonstrates the template variable
     //      registration works all the way through to subprocess spawn.
     let wrap_script = format!(
         r#"
-        echo "[WRAPPED] cmd={{{{Task.Action.Command}}}}" >> '{path}'
-        {{{{Task.Action.Command}}}} "${{@}}"
+        echo "[WRAPPED] cmd={{{{WrappedAction.Command}}}}" >> '{path}'
+        {{{{WrappedAction.Command}}}} "${{@}}"
         "#,
         path = trace.display(),
     );
     // The wrap action uses `bash -c SCRIPT --` so positional args start
     // at $1 and can be forwarded via "$@". We pass the wrapped command's
-    // args with Task.Action.Args (a list), which the session expands into
-    // separate argv entries when resolving `args:`.
+    // args with WrappedAction.Args (a list), which the session expands
+    // into separate argv entries when resolving `args:`.
     let wrap = Action {
         command: fs("bash"),
         args: Some(vec![
             fs("-c"),
             fs(&wrap_script),
             fs("--"),
-            fs("{{Task.Action.Args}}"),
+            fs("{{WrappedAction.Args}}"),
         ]),
         timeout: None,
         cancelation: None,
@@ -376,7 +376,7 @@ async fn full_cycle_wraps_every_inner_action() {
         command: fs("bash"),
         args: Some(vec![
             fs("-c"),
-            fs(&mark("[wrap-task] cmd={{Task.Action.Command}}")),
+            fs(&mark("[wrap-task] cmd={{WrappedAction.Command}}")),
         ]),
         timeout: None,
         cancelation: None,
@@ -463,5 +463,72 @@ async fn full_cycle_wraps_every_inner_action() {
     assert!(
         !contents.contains("WrappedInner-exit-body"),
         "wrapped onExit body must not run: {contents}"
+    );
+}
+
+/// RFC 0008: `WrappedAction.*` is in scope inside all three wrap hooks
+/// (not just `onWrapTaskRun`). Verify that `onWrapEnter` and `onWrapExit`
+/// see the inner environment's `onEnter`/`onExit` command and args via
+/// `WrappedAction.Command` and `WrappedAction.Args`.
+#[tokio::test]
+async fn wrapped_action_visible_in_wrap_enter_and_wrap_exit() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let mark = |label: &str| -> String { format!(r#"echo "{label}" >> '{}'"#, trace.display()) };
+
+    let wrap_enter = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs(&mark("[wrap-enter] cmd={{WrappedAction.Command}}")),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrap_exit = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs(&mark("[wrap-exit] cmd={{WrappedAction.Command}}")),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env(
+        "Outer",
+        action_with_command("true", vec![]),
+        Some(wrap_enter),
+        None,
+        Some(wrap_exit),
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env with distinct enter/exit commands so the trace can tell
+    // them apart. The wrapped commands themselves never run; only their
+    // names should appear in the trace via WrappedAction.Command.
+    let inner = plain_env(
+        "Inner",
+        Some(action_with_command("inner-enter-cmd", vec![])),
+        Some(action_with_command("inner-exit-cmd", vec![])),
+    );
+    let id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+    session.exit_environment(&id, None, true, None).await.unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[wrap-enter] cmd=inner-enter-cmd"),
+        "WrappedAction.Command should resolve in onWrapEnter; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("[wrap-exit] cmd=inner-exit-cmd"),
+        "WrappedAction.Command should resolve in onWrapExit; got:\n{contents}"
     );
 }

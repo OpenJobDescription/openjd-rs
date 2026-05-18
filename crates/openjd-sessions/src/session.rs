@@ -971,9 +971,9 @@ impl Session {
                 })?
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-                overlay_env_wrapped_symbols(
+                overlay_wrapped_action_symbols(
                     &mut action_symtab,
-                    &env.name,
+                    Some(&env.name),
                     &cmd,
                     &args,
                     &wrapped_env,
@@ -1216,9 +1216,9 @@ impl Session {
                 })?
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-                overlay_env_wrapped_symbols(
+                overlay_wrapped_action_symbols(
                     &mut action_symtab,
-                    &env.name,
+                    Some(&env.name),
                     &cmd,
                     &args,
                     &wrapped_env,
@@ -1358,8 +1358,9 @@ impl Session {
         // RFC 0008: decide whether this task's onRun should be wrapped by
         // an active environment's onWrapTaskRun. The decision is:
         //   - If an active wrap env defines onWrapTaskRun, we substitute
-        //     the wrap action and seed Task.Action.* into the symbol table
-        //     so the wrap script can forward the original command and args.
+        //     the wrap action and seed WrappedAction.* into the symbol
+        //     table so the wrap script can forward the original command
+        //     and args.
         //
         // If neither condition routes us into the wrap path, the original
         // step script runs exactly as before — this keeps the non-WRAP_ACTIONS
@@ -1399,7 +1400,7 @@ impl Session {
                             log::warn!(
                                 target: "openjd.sessions",
                                 "wrap env resolved_symtab deserialize failed: {e}; \
-                                 Task.Action.Command continues without it"
+                                 WrappedAction.Command continues without it"
                             );
                         }
                     }
@@ -1408,7 +1409,7 @@ impl Session {
             });
 
         // Resolve the step's onRun to concrete command/args/timeout first.
-        // These seed Task.Action.* when wrapping is in effect. The seed
+        // These seed WrappedAction.* when wrapping is in effect. The seed
         // values are always computed because they're cheap and the model
         // validator already forbids referencing them outside the wrap hook,
         // so seeding even when unused is harmless.
@@ -1433,7 +1434,7 @@ impl Session {
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect();
             let default_timeout_secs: i64 = 0; // 0 ⇒ unset; action's timeout governs
-            // Task.Action.Timeout carries the ORIGINAL wrapped action's timeout
+            // WrappedAction.Timeout carries the ORIGINAL wrapped action's timeout
             // (RFC 0008), not the wrap action's timeout. Container wrap scripts
             // use this to propagate `docker container stop --timeout N` with N
             // matching the task's own configured timeout.
@@ -1447,15 +1448,16 @@ impl Session {
                 context: "wrapped task timeout".into(),
                 reason: e.to_string(),
             })?;
-            let env_action_timeout_secs = wrapped_timeout
+            let wrapped_timeout_secs = wrapped_timeout
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(default_timeout_secs);
-            overlay_task_wrap_symbols(
+            overlay_wrapped_action_symbols(
                 &mut action_symtab,
+                None,
                 &cmd,
                 &args,
                 &task_env,
-                env_action_timeout_secs,
+                wrapped_timeout_secs,
             )?;
         }
 
@@ -2216,124 +2218,69 @@ fn env_has_any_wrap_hook(env: &Environment) -> bool {
         .unwrap_or(false)
 }
 
-/// Overlay the `Task.Action.*` variables defined in RFC 0008 for
-/// `onWrapTaskRun` onto an existing symbol table in place:
+/// Overlay the `WrappedAction.*` variables defined in RFC 0008 onto a
+/// symbol table in place. Used by all three wrap hooks:
 ///
-/// - `Task.Action.Command` — the wrapped action's resolved command string.
-/// - `Task.Action.Args` — the wrapped action's resolved argument list (as a
-///   list[string]); `None` is translated to an empty list.
-/// - `Task.Action.Environment` — `"KEY=value"` entries for every `openjd_env`
-///   export captured so far in the session. Passed in by the caller.
-/// - `Task.Action.Timeout` — the timeout in seconds of the wrapped task's
-///   `onRun`, or `0` when the wrapped action specified no timeout. Wrap
-///   scripts propagate this to the wrapped execution context (for example,
-///   `docker container stop --timeout {{Task.Action.Timeout}}`).
+/// - `WrappedAction.Command` — the wrapped action's resolved command string.
+/// - `WrappedAction.Args` — the wrapped action's resolved argument list.
+/// - `WrappedAction.Environment` — `"KEY=value"` entries for every
+///   `openjd_env` export captured so far in the session.
+/// - `WrappedAction.Timeout` — the timeout in seconds of the wrapped
+///   action, or `0` when the wrapped action specified no timeout.
+///
+/// When `wrapped_env_name` is `Some`, additionally sets `Env.Wrapped.Name`
+/// (only meaningful in `onWrapEnter` / `onWrapExit`; tasks have no
+/// equivalent).
 ///
 /// Errors from `SymbolTable::set` are reported as `SessionError::Runtime`.
-fn overlay_task_wrap_symbols(
+fn overlay_wrapped_action_symbols(
     symtab: &mut SymbolTable,
-    wrapped_command: &str,
-    wrapped_args: &[String],
-    task_environment: &[String],
-    task_action_timeout_secs: i64,
-) -> Result<(), SessionError> {
-    use openjd_expr::ExprType;
-    use openjd_expr::ExprValue;
-    symtab
-        .set(
-            "Task.Action.Command",
-            ExprValue::String(wrapped_command.into()),
-        )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Command: {e}")))?;
-    let args_list: Vec<ExprValue> = wrapped_args
-        .iter()
-        .map(|s| ExprValue::String(s.clone()))
-        .collect();
-    symtab
-        .set(
-            "Task.Action.Args",
-            ExprValue::make_list(args_list, ExprType::STRING)
-                .map_err(|e| SessionError::Runtime(format!("make_list(Task.Action.Args): {e}")))?,
-        )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Args: {e}")))?;
-    let env_list: Vec<ExprValue> = task_environment
-        .iter()
-        .map(|s| ExprValue::String(s.clone()))
-        .collect();
-    symtab
-        .set(
-            "Task.Action.Environment",
-            ExprValue::make_list(env_list, ExprType::STRING).map_err(|e| {
-                SessionError::Runtime(format!("make_list(Task.Action.Environment): {e}"))
-            })?,
-        )
-        .map_err(|e| {
-            SessionError::Runtime(format!("Failed to set Task.Action.Environment: {e}"))
-        })?;
-    symtab
-        .set("Task.Action.Timeout", ExprValue::Int(task_action_timeout_secs))
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Task.Action.Timeout: {e}")))?;
-    Ok(())
-}
-
-/// Overlay the `Env.Wrapped.*` variables defined in RFC 0008 for
-/// `onWrapEnter` / `onWrapExit` onto an existing symbol table in place.
-fn overlay_env_wrapped_symbols(
-    symtab: &mut SymbolTable,
-    wrapped_name: &str,
+    wrapped_env_name: Option<&str>,
     wrapped_command: &str,
     wrapped_args: &[String],
     wrapped_environment: &[String],
     wrapped_timeout_secs: i64,
 ) -> Result<(), SessionError> {
-    use openjd_expr::ExprType;
-    use openjd_expr::ExprValue;
-    symtab
-        .set("Env.Wrapped.Name", ExprValue::String(wrapped_name.into()))
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Name: {e}")))?;
-    symtab
-        .set(
-            "Env.Wrapped.Action.Command",
-            ExprValue::String(wrapped_command.into()),
-        )
-        .map_err(|e| {
-            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Command: {e}"))
-        })?;
-    let args_list: Vec<ExprValue> = wrapped_args
-        .iter()
-        .map(|s| ExprValue::String(s.clone()))
-        .collect();
-    symtab
-        .set(
-            "Env.Wrapped.Action.Args",
-            ExprValue::make_list(args_list, ExprType::STRING).map_err(|e| {
-                SessionError::Runtime(format!("make_list(Env.Wrapped.Action.Args): {e}"))
-            })?,
-        )
-        .map_err(|e| SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Args: {e}")))?;
-    let env_list: Vec<ExprValue> = wrapped_environment
-        .iter()
-        .map(|s| ExprValue::String(s.clone()))
-        .collect();
-    symtab
-        .set(
-            "Env.Wrapped.Action.Environment",
-            ExprValue::make_list(env_list, ExprType::STRING).map_err(|e| {
-                SessionError::Runtime(format!("make_list(Env.Wrapped.Action.Environment): {e}"))
-            })?,
-        )
-        .map_err(|e| {
-            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Environment: {e}"))
-        })?;
-    symtab
-        .set(
-            "Env.Wrapped.Action.Timeout",
-            ExprValue::Int(wrapped_timeout_secs),
-        )
-        .map_err(|e| {
-            SessionError::Runtime(format!("Failed to set Env.Wrapped.Action.Timeout: {e}"))
-        })?;
+    if let Some(name) = wrapped_env_name {
+        set_string_symbol(symtab, "Env.Wrapped.Name", name)?;
+    }
+    set_string_symbol(symtab, "WrappedAction.Command", wrapped_command)?;
+    set_string_list_symbol(symtab, "WrappedAction.Args", wrapped_args)?;
+    set_string_list_symbol(symtab, "WrappedAction.Environment", wrapped_environment)?;
+    set_int_symbol(symtab, "WrappedAction.Timeout", wrapped_timeout_secs)?;
     Ok(())
+}
+
+fn set_string_symbol(
+    symtab: &mut SymbolTable,
+    name: &str,
+    value: &str,
+) -> Result<(), SessionError> {
+    symtab
+        .set(name, openjd_expr::ExprValue::String(value.into()))
+        .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
+}
+
+fn set_string_list_symbol(
+    symtab: &mut SymbolTable,
+    name: &str,
+    values: &[String],
+) -> Result<(), SessionError> {
+    let list: Vec<openjd_expr::ExprValue> = values
+        .iter()
+        .map(|s| openjd_expr::ExprValue::String(s.clone()))
+        .collect();
+    let value = openjd_expr::ExprValue::make_list(list, openjd_expr::ExprType::STRING)
+        .map_err(|e| SessionError::Runtime(format!("make_list({name}): {e}")))?;
+    symtab
+        .set(name, value)
+        .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
+}
+
+fn set_int_symbol(symtab: &mut SymbolTable, name: &str, value: i64) -> Result<(), SessionError> {
+    symtab
+        .set(name, openjd_expr::ExprValue::Int(value))
+        .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
 }
 
 impl Drop for Session {
@@ -2353,5 +2300,152 @@ impl Drop for Session {
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod wrap_actions_tests {
+    //! Unit tests for the small pure helpers that back RFC 0008 wrap-hook
+    //! dispatch. Behavioral end-to-end coverage lives in
+    //! `tests/integration/test_wrap_actions.rs`.
+    use super::*;
+    use openjd_expr::ExprValue;
+    use openjd_model::format_string::FormatString;
+    use openjd_model::job::{Action, EnvironmentActions, EnvironmentScript};
+
+    fn fs(s: &str) -> FormatString {
+        FormatString::new(s).unwrap()
+    }
+
+    fn echo() -> Action {
+        Action {
+            command: fs("echo"),
+            args: None,
+            timeout: None,
+            cancelation: None,
+        }
+    }
+
+    fn env_with_actions(name: &str, actions: EnvironmentActions) -> Environment {
+        Environment {
+            name: name.to_string(),
+            description: None,
+            script: Some(EnvironmentScript {
+                let_bindings: None,
+                actions,
+                embedded_files: None,
+            }),
+            variables: None,
+            resolved_symtab: None,
+        }
+    }
+
+    fn empty_actions() -> EnvironmentActions {
+        EnvironmentActions {
+            on_enter: None,
+            on_wrap_enter: None,
+            on_wrap_task_run: None,
+            on_wrap_exit: None,
+            on_exit: None,
+        }
+    }
+
+    #[test]
+    fn env_has_any_wrap_hook_returns_false_for_plain_env() {
+        let env = env_with_actions(
+            "Plain",
+            EnvironmentActions {
+                on_enter: Some(echo()),
+                on_exit: Some(echo()),
+                ..empty_actions()
+            },
+        );
+        assert!(!env_has_any_wrap_hook(&env));
+    }
+
+    #[test]
+    fn env_has_any_wrap_hook_returns_true_for_each_hook() {
+        for actions in [
+            EnvironmentActions {
+                on_wrap_enter: Some(echo()),
+                ..empty_actions()
+            },
+            EnvironmentActions {
+                on_wrap_task_run: Some(echo()),
+                ..empty_actions()
+            },
+            EnvironmentActions {
+                on_wrap_exit: Some(echo()),
+                ..empty_actions()
+            },
+        ] {
+            let env = env_with_actions("Wrap", actions);
+            assert!(env_has_any_wrap_hook(&env));
+        }
+    }
+
+    #[test]
+    fn env_has_any_wrap_hook_returns_false_when_script_missing() {
+        let env = Environment {
+            name: "NoScript".into(),
+            description: None,
+            script: None,
+            variables: None,
+            resolved_symtab: None,
+        };
+        assert!(!env_has_any_wrap_hook(&env));
+    }
+
+    #[test]
+    fn overlay_sets_wrapped_action_symbols_for_task_hook() {
+        let mut symtab = SymbolTable::default();
+        overlay_wrapped_action_symbols(
+            &mut symtab,
+            None,
+            "echo",
+            &["a".into(), "b c".into()],
+            &["FOO=bar".into()],
+            42,
+        )
+        .unwrap();
+
+        assert_eq!(
+            symtab.get_value("WrappedAction.Command"),
+            Some(&ExprValue::String("echo".into()))
+        );
+        assert_eq!(
+            symtab.get_value("WrappedAction.Timeout"),
+            Some(&ExprValue::Int(42))
+        );
+        // Env.Wrapped.Name is NOT set when wrapped_env_name is None — tasks
+        // have no equivalent.
+        assert!(symtab.get_value("Env.Wrapped.Name").is_none());
+    }
+
+    #[test]
+    fn overlay_sets_env_wrapped_name_when_provided() {
+        let mut symtab = SymbolTable::default();
+        overlay_wrapped_action_symbols(&mut symtab, Some("InnerEnv"), "true", &[], &[], 0)
+            .unwrap();
+
+        assert_eq!(
+            symtab.get_value("Env.Wrapped.Name"),
+            Some(&ExprValue::String("InnerEnv".into()))
+        );
+    }
+
+    #[test]
+    fn overlay_handles_empty_args_and_environment() {
+        let mut symtab = SymbolTable::default();
+        overlay_wrapped_action_symbols(&mut symtab, None, "true", &[], &[], 0).unwrap();
+        // Both lists must be set as empty list[string] so iteration in wrap
+        // scripts (`for a in {{ ... }}`) sees zero iterations rather than
+        // "Undefined variable".
+        assert!(symtab.get_value("WrappedAction.Args").is_some());
+        assert!(symtab.get_value("WrappedAction.Environment").is_some());
+        assert_eq!(
+            symtab.get_value("WrappedAction.Timeout"),
+            Some(&ExprValue::Int(0))
+        );
     }
 }
