@@ -46,10 +46,47 @@ fi
 # `cargo about` reads the workspace Cargo.toml, the `about.toml` config
 # (which excludes build- and dev-dependencies), and renders every unique
 # (crate, license) pair through `about.hbs`.
+#
+# cargo-about's `private.ignore` flag only excludes workspace members marked
+# `publish = false`, so first-party crates that publish to crates.io still
+# appear in the rendered list. We strip them out by filtering the workspace
+# member names (from `cargo metadata`) out of the generated file. If a license
+# block is left with no remaining crates, the whole block is dropped.
+raw="$(mktemp)"
 generated="$(mktemp)"
-trap 'rm -f "$generated"' EXIT
+trap 'rm -f "$raw" "$generated"' EXIT
 
-cargo about generate about.hbs > "$generated"
+cargo about generate about.hbs > "$raw"
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq not found on PATH (needed to extract workspace member names)." >&2
+    exit 2
+fi
+
+workspace_pattern="$(
+    cargo metadata --no-deps --format-version=1 \
+        | jq -r '.packages[].name' \
+        | tr -d '\r' \
+        | paste -sd'|' -
+)"
+if [[ -z "$workspace_pattern" ]]; then
+    echo "error: cargo metadata returned no workspace members." >&2
+    exit 2
+fi
+
+awk -v re="^[*][*] ($workspace_pattern); version " '
+    /^------$/ {
+        if (kept > 0) { printf "%s", block; print "------" }
+        block = ""; kept = 0; next
+    }
+    /^[*][*] / && $0 ~ re { next }
+    /^[*][*] /            { block = block $0 "\n"; kept++; next }
+                          { block = block $0 "\n" }
+    END {
+        if (kept > 0) printf "%s", block
+    }
+' "$raw" > "$generated"
+
 # Ensure consistent EOL.
 sed -i 's/\r//' "$generated"
 
@@ -64,8 +101,6 @@ if ! diff -u THIRD-PARTY-LICENSES "$generated"; then
     echo "THIRD-PARTY-LICENSES is out of date with respect to Cargo.lock." >&2
     echo "Regenerate it with:" >&2
     echo "  scripts/check_third_party_licenses.sh --update" >&2
-    echo "or equivalently:" >&2
-    echo "  cargo about generate about.hbs > THIRD-PARTY-LICENSES" >&2
     exit 1
 fi
 

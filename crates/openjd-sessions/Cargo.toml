@@ -32,7 +32,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde-saphyr = { workspace = true }
 thiserror = { workspace = true }
-shlex = "1"
+shlex = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "time", "sync", "macros", "fs"] }
 tokio-util = "0.7"
 log = { version = "0.4", features = ["kv", "kv_std"] }
