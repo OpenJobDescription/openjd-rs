@@ -312,6 +312,9 @@ pub fn convert_environment_with_symtab(
             let_bindings: s.let_bindings.clone(),
             actions: job::EnvironmentActions {
                 on_enter: s.actions.on_enter.as_ref().map(convert_action),
+                on_wrap_enter: s.actions.on_wrap_enter.as_ref().map(convert_action),
+                on_wrap_task_run: s.actions.on_wrap_task_run.as_ref().map(convert_action),
+                on_wrap_exit: s.actions.on_wrap_exit.as_ref().map(convert_action),
                 on_exit: s.actions.on_exit.as_ref().map(convert_action),
             },
             embedded_files: s
@@ -636,9 +639,15 @@ fn collect_all_accessed_symbols(
                 }
             }
             if let Some(es) = &env.script {
-                for action in [&es.actions.on_enter, &es.actions.on_exit]
-                    .into_iter()
-                    .flatten()
+                for action in [
+                    &es.actions.on_enter,
+                    &es.actions.on_wrap_enter,
+                    &es.actions.on_wrap_task_run,
+                    &es.actions.on_wrap_exit,
+                    &es.actions.on_exit,
+                ]
+                .into_iter()
+                .flatten()
                 {
                     collect_from_action(action, &mut symbols);
                 }
@@ -681,7 +690,16 @@ fn collect_env_action_refs(
     full: &SymbolTable,
     filtered: &mut SymbolTable,
 ) {
-    for action in [&actions.on_enter, &actions.on_exit].into_iter().flatten() {
+    for action in [
+        &actions.on_enter,
+        &actions.on_wrap_enter,
+        &actions.on_wrap_task_run,
+        &actions.on_wrap_exit,
+        &actions.on_exit,
+    ]
+    .into_iter()
+    .flatten()
+    {
         action.command.copy_used_symtab_values(full, filtered);
         if let Some(args) = &action.args {
             for a in args {
@@ -731,9 +749,15 @@ fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::Has
         }
     }
     if let Some(es) = &env.script {
-        for action in [&es.actions.on_enter, &es.actions.on_exit]
-            .into_iter()
-            .flatten()
+        for action in [
+            &es.actions.on_enter,
+            &es.actions.on_wrap_enter,
+            &es.actions.on_wrap_task_run,
+            &es.actions.on_wrap_exit,
+            &es.actions.on_exit,
+        ]
+        .into_iter()
+        .flatten()
         {
             symbols.extend(action.command.accessed_symbols());
             if let Some(args) = &action.args {

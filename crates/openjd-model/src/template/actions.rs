@@ -86,5 +86,14 @@ pub struct StepActions {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }

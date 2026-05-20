@@ -25,7 +25,13 @@ fn make_env(name: &str, on_enter: Option<Action>, on_exit: Option<Action>) -> En
         description: None,
         script: Some(EnvironmentScript {
             let_bindings: None,
-            actions: EnvironmentActions { on_enter, on_exit },
+            actions: EnvironmentActions {
+                on_enter,
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
+                on_exit,
+            },
             embedded_files: None,
         }),
         variables: None,
@@ -160,6 +166,9 @@ async fn test_env_with_embedded_files() {
                     timeout: None,
                     cancelation: None,
                 }),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {
@@ -193,6 +202,9 @@ async fn test_env_with_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo MY_VAR=$MY_VAR"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -459,6 +471,9 @@ async fn test_env_with_resolved_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo RESOLVED=$RESOLVED"])),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -490,6 +505,9 @@ async fn test_env_with_let_bindings_and_embedded_files() {
                     timeout: None,
                     cancelation: None,
                 }),
+                on_wrap_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {

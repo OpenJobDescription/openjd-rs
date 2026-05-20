@@ -66,3 +66,8 @@ Currently implements `2023-09` with extensions:
 - `REDACTED_ENV_VARS` (RFC 0003)
 - `FEATURE_BUNDLE_1` (RFC 0004)
 - `EXPR` (RFC 0005)
+- `WRAP_ACTIONS` (RFC 0008) — full schema and runtime support. Wrap-action
+  routing tests live in `crates/openjd-sessions/tests/integration/test_wrap_actions.rs`.
+  Re-materialization of the wrap environment's embedded files on each task
+  run (needed to resolve `Env.File.*` inside `onWrapTaskRun` scripts) is a
+  follow-up.

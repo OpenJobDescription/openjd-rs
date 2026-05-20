@@ -67,3 +67,5 @@ mod test_template_posix_paths;
 mod test_template_variables;
 #[path = "integration/test_template_windows_paths.rs"]
 mod test_template_windows_paths;
+#[path = "integration/test_wrap_actions.rs"]
+mod test_wrap_actions;
