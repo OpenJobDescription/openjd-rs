@@ -63,6 +63,8 @@ mod test_step_dependency_graph;
 mod test_step_param_space_iter;
 #[path = "integration/test_template_posix_paths.rs"]
 mod test_template_posix_paths;
+#[path = "integration/test_template_public_api.rs"]
+mod test_template_public_api;
 #[path = "integration/test_template_variables.rs"]
 mod test_template_variables;
 #[path = "integration/test_template_windows_paths.rs"]

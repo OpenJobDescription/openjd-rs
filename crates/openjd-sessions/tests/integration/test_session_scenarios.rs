@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use openjd_model::create_job::{create_job, preprocess_job_parameters};
-use openjd_model::parse::decode_job_template;
 use openjd_model::step_param_space::StepParameterSpaceIterator;
+use openjd_model::template::parse::decode_job_template;
 use openjd_model::types::JobParameterInputValues;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
 use openjd_sessions::PathMappingRule;
