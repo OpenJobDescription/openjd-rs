@@ -6,7 +6,7 @@
 //!
 //! Gold standard: failure tests assert the full error message including path.
 
-use openjd_model::parse::{document_string_to_object, DocumentType};
+use openjd_model::template::parse::{document_string_to_object, DocumentType};
 use openjd_model::CallerLimits;
 use openjd_model::{decode_environment_template, decode_job_template};
 

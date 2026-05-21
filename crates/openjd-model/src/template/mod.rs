@@ -24,17 +24,32 @@ pub use job_template::JobTemplate;
 // environment_template
 pub use environment_template::EnvironmentTemplate;
 // parameters
-pub use parameters::JobParameterDefinition;
 #[cfg(test)]
 pub use parameters::{FlexFloat, FlexInt};
+pub use parameters::{
+    JobFloatParameterDefinition, JobIntParameterDefinition, JobParameterDefinition,
+    JobPathParameterDefinition, JobStringParameterDefinition,
+};
+// expr_parameters (EXPR-extension job parameter types)
+pub use expr_parameters::{
+    JobBoolParameterDefinition, JobListBoolParameterDefinition, JobListFloatParameterDefinition,
+    JobListIntParameterDefinition, JobListListIntParameterDefinition,
+    JobListPathParameterDefinition, JobListStringParameterDefinition,
+    JobRangeExprParameterDefinition,
+};
+#[cfg(test)]
+pub use expr_parameters::{
+    ListFloatItemConstraints, ListIntItemConstraints, ListListIntItemConstraints,
+    ListStringItemConstraints,
+};
 // step
-pub use step::{SimpleAction, StepScript, StepTemplate};
+pub use step::{SimpleAction, StepDependency, StepScript, StepTemplate};
 // environment
-pub use environment::{EmbeddedFile, Environment};
+pub use environment::{EmbeddedFile, Environment, EnvironmentScript};
 // actions
-pub use actions::{Action, CancelationMode};
+pub use actions::{Action, CancelationMode, EnvironmentActions, StepActions};
 // host_requirements
-pub use host_requirements::HostRequirements;
+pub use host_requirements::{AmountRequirement, AttributeRequirement, HostRequirements};
 // task_parameters
 pub use task_parameters::{
     FloatRange, FloatRangeItem, IntOrFormatString, IntRange, RangeConstraint,
@@ -43,12 +58,4 @@ pub use task_parameters::{
 // constrained_strings
 #[cfg(test)]
 pub use constrained_strings::Identifier;
-// expr_parameters
-#[cfg(test)]
-pub use expr_parameters::{
-    JobBoolParameterDefinition, JobListBoolParameterDefinition, JobListFloatParameterDefinition,
-    JobListIntParameterDefinition, JobListListIntParameterDefinition,
-    JobListPathParameterDefinition, JobListStringParameterDefinition,
-    JobRangeExprParameterDefinition, ListFloatItemConstraints, ListIntItemConstraints,
-    ListListIntItemConstraints, ListStringItemConstraints,
-};
+pub use constrained_strings::{Description, ExtensionName};

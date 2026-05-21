@@ -39,26 +39,45 @@ openjd_model              — crate root re-exports, the main public surface
 │   ├── create_job        — pipeline functions + MergedParameterDefinition
 │   ├── step_param_space  — StepParameterSpaceIterator
 │   └── step_dependency_graph — StepDependencyGraph + friends
-├── parse                 — re-exported from the (private) template module
 ├── symbol_table          — re-exported from openjd_expr
+├── template              — unresolved/parsed template types (public module)
+│   └── parse             — decode_*_template + DocumentType + DecodedTemplate
 └── types                 — enums, profile, validation context, parameter values
 ```
 
-The `template::*` types (unresolved/parsed template structs) are *not* re-exported
-at the crate root beyond [`JobTemplate`], [`EnvironmentTemplate`],
-[`JobParameterDefinition`], and [`TaskParameterDefinition`]. The `template`
-module itself is crate-private; consequently, `template::StepTemplate`,
-`template::Environment`, and the other nested template types are not
-nameable in external code — callers can **read** `JobTemplate.steps[i].name`,
-`JobTemplate.job_environments.unwrap()[i].variables`, etc. through the
-field accessors on those types, but cannot write function signatures or
-`impl` blocks that take a `&StepTemplate`. This is a deliberate
-decision: the resolved `job::*` types are what most consumers need
-(format strings evaluated, parameters bound), and restricting the
-template-side surface keeps the template/job boundary explicit. When a
-legitimate use case arises for direct access to `template::StepTemplate`
-or `template::Environment`, additional re-exports can be added
-SemVer-compatibly.
+The decode entry points
+(`decode_job_template`/`decode_environment_template`/`decode_template`/
+`DecodedTemplate`/`DocumentType`) are also re-exported at the crate
+root for convenience — they're the primary API and consistent with
+the flat re-exports of `error::*` and `types::*`.
+
+The structural template types — `template::JobTemplate`,
+`template::EnvironmentTemplate`, `template::StepTemplate`,
+`template::Environment`, `template::EnvironmentScript`,
+`template::EnvironmentActions`, `template::Action`,
+`template::EmbeddedFile`, `template::StepScript`,
+`template::StepActions`, `template::CancelationMode`,
+`template::HostRequirements`, `template::AmountRequirement`,
+`template::AttributeRequirement`, `template::StepDependency`,
+`template::SimpleAction`, `template::Description`,
+`template::ExtensionName`, `template::TaskParameterDefinition`,
+`template::JobParameterDefinition` and its 12 per-variant inner
+struct types (`JobStringParameterDefinition`, …,
+`JobListListIntParameterDefinition`), `template::RangeConstraint`,
+`template::IntRange`, `template::FloatRange`, `template::StringRange`,
+`template::FloatRangeItem`, `template::IntOrFormatString`,
+`template::StepParameterSpaceDefinition` — are all reachable as
+`openjd_model::template::*`. Callers can read fields, write
+function signatures that take `&template::StepTemplate`, and
+pattern-match on `template::JobParameterDefinition` variants to
+access per-variant fields.
+
+The resolved `job::*` types are what most consumers need (format
+strings evaluated, parameters bound). The `template::*` types are
+useful for callers that want to inspect a template before
+instantiation — for example, the `openjd-python` bindings expose
+typed `template::*` pyclasses so Python tools can introspect job
+templates.
 
 ## Entry Points at the Crate Root
 
@@ -208,9 +227,11 @@ impl EnvironmentTemplate {
 ```
 
 `ExtensionName` and `Description` are constrained string newtypes
-defined in the (crate-private) `template::constrained_strings` module.
-They reach the public surface only as field types on these structs;
-callers observe them as `AsRef<str>`-style wrappers.
+defined in the `template::constrained_strings` submodule (which is
+crate-private as a path) but re-exported as `template::ExtensionName`
+and `template::Description`. They reach the public surface as field
+types on these structs and are nameable directly through the
+`template::*` path.
 
 ### Job Parameter Definitions
 
@@ -234,9 +255,25 @@ pub enum JobParameterDefinition {
 }
 ```
 
-The inner struct types are **not** re-exported from the crate root
-(they live inside the private `template` module). Callers access
-parameter fields through the API below:
+The inner struct types are reachable via the `template::*` path
+(e.g. `openjd_model::template::JobStringParameterDefinition`).
+Callers can pattern-match on the enum variants to read
+per-variant fields directly:
+
+```rust
+use openjd_model::template::JobParameterDefinition;
+match def {
+    JobParameterDefinition::INT(p) => {
+        let _name: &str = p.name.as_str();
+        let _default: Option<i64> = p.default.as_ref().map(|f| f.0);
+        let _min: Option<i64> = p.min_value.as_ref().map(|f| f.0);
+    }
+    _ => {}
+}
+```
+
+Convenience accessors on the enum itself (used by the resolver
+and by callers that don't need per-variant fields):
 
 ```rust
 impl JobParameterDefinition {

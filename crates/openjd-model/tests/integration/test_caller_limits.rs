@@ -429,7 +429,7 @@ fn max_task_count_counts_tasks_not_chunks() {
 
 #[test]
 fn max_template_size_within_limit() {
-    use openjd_model::parse::{document_string_to_object, DocumentType};
+    use openjd_model::template::parse::{document_string_to_object, DocumentType};
     let doc = r#"{"specificationVersion": "jobtemplate-2023-09", "name": "T", "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#;
     let limits = CallerLimits {
         max_template_size: Some(10000),
@@ -441,7 +441,7 @@ fn max_template_size_within_limit() {
 
 #[test]
 fn max_template_size_exceeded() {
-    use openjd_model::parse::{document_string_to_object, DocumentType};
+    use openjd_model::template::parse::{document_string_to_object, DocumentType};
     let doc = r#"{"specificationVersion": "jobtemplate-2023-09", "name": "T", "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#;
     let limits = CallerLimits {
         max_template_size: Some(10),

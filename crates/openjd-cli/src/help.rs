@@ -4,8 +4,8 @@
 
 //! Context-aware help for `openjd run <template> --help`.
 
-use openjd_model::parse::{self, DocumentType};
-use openjd_model::{JobParameterDefinition, JobTemplate};
+use openjd_model::template::parse::{self, DocumentType};
+use openjd_model::template::{JobParameterDefinition, JobTemplate};
 use std::path::Path;
 
 /// Check if the CLI args are `run <path> -h/--help` and if so, print

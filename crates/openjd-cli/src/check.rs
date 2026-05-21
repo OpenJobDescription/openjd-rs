@@ -5,7 +5,7 @@
 //! `openjd check` command — validate a template file.
 
 use clap::Args;
-use openjd_model::parse::{self, DocumentType};
+use openjd_model::template::parse::{self, DocumentType};
 use std::path::PathBuf;
 
 #[derive(Args)]

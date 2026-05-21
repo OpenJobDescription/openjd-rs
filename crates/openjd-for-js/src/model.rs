@@ -15,7 +15,7 @@ use wasm_bindgen::prelude::*;
 /// A decoded job template.
 #[wasm_bindgen(js_name = "JobTemplate")]
 pub struct JsJobTemplate {
-    pub(crate) inner: openjd_model::JobTemplate,
+    pub(crate) inner: openjd_model::template::JobTemplate,
 }
 
 #[wasm_bindgen(js_class = "JobTemplate")]
@@ -46,7 +46,7 @@ impl JsJobTemplate {
 /// A decoded environment template.
 #[wasm_bindgen(js_name = "EnvironmentTemplate")]
 pub struct JsEnvironmentTemplate {
-    pub(crate) inner: openjd_model::EnvironmentTemplate,
+    pub(crate) inner: openjd_model::template::EnvironmentTemplate,
 }
 
 #[wasm_bindgen(js_class = "EnvironmentTemplate")]
@@ -391,7 +391,7 @@ pub fn get_supported_extensions() -> Vec<String> {
 
 /// Document format for template string input.
 ///
-/// Mirrors [`openjd_model::parse::DocumentType`] and the `DocumentType`
+/// Mirrors [`openjd_model::template::parse::DocumentType`] and the `DocumentType`
 /// enum exported by the Python bindings (`openjd._openjd_rs.DocumentType`).
 /// `Yaml` is the safe default for untrusted input because YAML is a
 /// strict superset of JSON — a caller that doesn't know which format
@@ -406,10 +406,10 @@ pub enum JsDocumentType {
 impl JsDocumentType {
     /// Convert to the Rust-side enum. Public so the rlib tests can
     /// verify the mapping.
-    pub fn into_inner(self) -> openjd_model::parse::DocumentType {
+    pub fn into_inner(self) -> openjd_model::template::parse::DocumentType {
         match self {
-            JsDocumentType::Yaml => openjd_model::parse::DocumentType::Yaml,
-            JsDocumentType::Json => openjd_model::parse::DocumentType::Json,
+            JsDocumentType::Yaml => openjd_model::template::parse::DocumentType::Yaml,
+            JsDocumentType::Json => openjd_model::template::parse::DocumentType::Json,
         }
     }
 }
@@ -463,8 +463,9 @@ pub fn decode_job_template_str(
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
     let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
     let exts = resolve_supported_extensions(supported_extensions);
-    let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
-        .map_err(|e| e.to_string())?;
+    let value =
+        openjd_model::template::parse::document_string_to_object(input, doc_type, &rust_limits)
+            .map_err(|e| e.to_string())?;
     let template = openjd_model::decode_job_template(value, Some(&exts), &rust_limits)
         .map_err(|e| e.to_string())?;
     Ok(JsJobTemplate { inner: template })
@@ -549,8 +550,9 @@ pub fn decode_environment_template_str(
     let doc_type = format.unwrap_or(JsDocumentType::Yaml).into_inner();
     let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
     let exts = resolve_supported_extensions(supported_extensions);
-    let value = openjd_model::parse::document_string_to_object(input, doc_type, &rust_limits)
-        .map_err(|e| e.to_string())?;
+    let value =
+        openjd_model::template::parse::document_string_to_object(input, doc_type, &rust_limits)
+            .map_err(|e| e.to_string())?;
     let template =
         openjd_model::decode_environment_template(value, Some(&exts)).map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })

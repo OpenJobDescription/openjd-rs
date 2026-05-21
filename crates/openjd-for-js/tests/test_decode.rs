@@ -8,7 +8,7 @@
 //! (`openjd_model_for_python/rust/src/model/decode.rs`):
 //!
 //! * The `decode*_str` path takes a `DocumentType` enum (default `YAML`)
-//!   and routes through `openjd_model::parse::document_string_to_object`,
+//!   and routes through `openjd_model::template::parse::document_string_to_object`,
 //!   which enforces a max-depth budget via `serde-saphyr` for YAML and
 //!   the built-in `serde_json` recursion limit for JSON.
 //!
@@ -54,16 +54,16 @@ environment:
 // ── DocumentType ───────────────────────────────────────────────────
 
 /// The JS-visible `DocumentType` must round-trip cleanly to the
-/// Rust-side `openjd_model::parse::DocumentType`.
+/// Rust-side `openjd_model::template::parse::DocumentType`.
 #[test]
 fn document_type_round_trips() {
     assert_eq!(
         JsDocumentType::Yaml.into_inner(),
-        openjd_model::parse::DocumentType::Yaml
+        openjd_model::template::parse::DocumentType::Yaml
     );
     assert_eq!(
         JsDocumentType::Json.into_inner(),
-        openjd_model::parse::DocumentType::Json
+        openjd_model::template::parse::DocumentType::Json
     );
 }
 

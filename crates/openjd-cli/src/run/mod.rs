@@ -10,7 +10,7 @@ mod result;
 pub use params::parse_cli_parameters;
 
 use clap::Args;
-use openjd_model::parse::{self, DocumentType};
+use openjd_model::template::parse::{self, DocumentType};
 use openjd_model::StepDependencyGraph;
 use openjd_sessions::action::ActionState;
 use openjd_sessions::session::Session;

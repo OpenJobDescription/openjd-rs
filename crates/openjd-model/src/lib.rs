@@ -9,12 +9,10 @@
 
 pub mod error;
 pub mod job;
-pub(crate) mod template;
+pub mod template;
 pub use job::create_job;
 pub use job::step_dependency_graph;
 pub use job::step_param_space;
-pub use template::parse;
-pub use template::{EnvironmentTemplate, JobParameterDefinition, JobTemplate};
 pub mod capabilities;
 pub mod types;
 
@@ -35,13 +33,12 @@ pub use job::create_job::{
     merge_job_parameter_definitions, preprocess_job_parameters, MergedParameterDefinition,
     PathParameterOptions,
 };
-pub use parse::{
+pub use step_dependency_graph::StepDependencyGraph;
+pub use step_param_space::StepParameterSpaceIterator;
+pub use template::parse::{
     decode_environment_template, decode_job_template, decode_template, DecodedTemplate,
     DocumentType,
 };
-pub use step_dependency_graph::StepDependencyGraph;
-pub use step_param_space::StepParameterSpaceIterator;
-pub use template::TaskParameterDefinition;
 pub use types::{
     CallerLimits, DataFlow, EndOfLine, Extensions, FileType, JobParameterInputValues,
     JobParameterType, JobParameterValue, JobParameterValues, ModelExtension, ModelProfile,

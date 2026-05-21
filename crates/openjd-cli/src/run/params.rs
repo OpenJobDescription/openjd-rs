@@ -32,11 +32,11 @@ pub fn parse_cli_parameters(
                 || format!("Cannot read parameter file '{}'", path.display()),
             )?;
             let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                openjd_model::parse::DocumentType::Json
+                openjd_model::template::parse::DocumentType::Json
             } else {
-                openjd_model::parse::DocumentType::Yaml
+                openjd_model::template::parse::DocumentType::Yaml
             };
-            let value = openjd_model::parse::document_string_to_object(
+            let value = openjd_model::template::parse::document_string_to_object(
                 &content,
                 doc_type,
                 &openjd_model::CallerLimits::default(),
