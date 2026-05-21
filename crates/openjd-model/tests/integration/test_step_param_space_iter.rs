@@ -501,7 +501,7 @@ fn test_contains_check() {
     );
     assert!(iter.contains(&in_set));
 
-    // Build one that should NOT be in the space
+    // Build one that should NOT be in the space — value out of range.
     let mut not_in_set = openjd_model::types::TaskParameterSet::new();
     not_in_set.insert(
         "Param1".to_string(),
@@ -511,6 +511,87 @@ fn test_contains_check() {
         },
     );
     assert!(!iter.contains(&not_in_set));
+    let err = iter.validate_containment(&not_in_set).unwrap_err();
+    assert_eq!(
+        err,
+        "Parameter 'Param1' value '9' is not in the parameter space range."
+    );
+
+    // Wrong type for the parameter — INT space, but we pass a String.
+    // The leaf node compares values structurally, so a String value is
+    // not equal to any Int value in the space and gets rejected with
+    // the same out-of-range message (using the value's display form).
+    let mut wrong_type = openjd_model::types::TaskParameterSet::new();
+    wrong_type.insert(
+        "Param1".to_string(),
+        openjd_model::types::TaskParameterValue {
+            param_type: openjd_model::types::TaskParameterType::String,
+            value: openjd_expr::ExprValue::String("hello".to_string()),
+        },
+    );
+    assert!(!iter.contains(&wrong_type));
+    let err = iter.validate_containment(&wrong_type).unwrap_err();
+    assert_eq!(
+        err,
+        "Parameter 'Param1' value 'hello' is not in the parameter space range."
+    );
+
+    // Missing key — the param set is empty. The top-level
+    // `validate_containment` rejects on a name-set mismatch before any
+    // node-level traversal happens.
+    let empty = openjd_model::types::TaskParameterSet::new();
+    assert!(!iter.contains(&empty));
+    let err = iter.validate_containment(&empty).unwrap_err();
+    assert_eq!(
+        err,
+        "Task parameter names [] do not match the parameter space names [\"Param1\"]."
+    );
+
+    // Extra key — the param set has Param1 plus a key not in the
+    // space. Same name-set mismatch rejection.
+    let mut extra_key = openjd_model::types::TaskParameterSet::new();
+    extra_key.insert(
+        "Param1".to_string(),
+        openjd_model::types::TaskParameterValue {
+            param_type: openjd_model::types::TaskParameterType::Int,
+            value: openjd_expr::ExprValue::Int(10),
+        },
+    );
+    extra_key.insert(
+        "Bogus".to_string(),
+        openjd_model::types::TaskParameterValue {
+            param_type: openjd_model::types::TaskParameterType::Int,
+            value: openjd_expr::ExprValue::Int(0),
+        },
+    );
+    assert!(!iter.contains(&extra_key));
+    let err = iter.validate_containment(&extra_key).unwrap_err();
+    assert_eq!(
+        err,
+        "Task parameter names [\"Bogus\", \"Param1\"] do not match the parameter space names [\"Param1\"]."
+    );
+
+    // Same key count as the space (1) but a different name. The
+    // top-level name-set check rejects this before any node-level
+    // value check sees it — even though `Param1` would be a valid
+    // value, replacing the key with `Bogus` makes the keyset
+    // mismatch.
+    let mut wrong_name_same_count = openjd_model::types::TaskParameterSet::new();
+    wrong_name_same_count.insert(
+        "Bogus".to_string(),
+        openjd_model::types::TaskParameterValue {
+            param_type: openjd_model::types::TaskParameterType::Int,
+            value: openjd_expr::ExprValue::Int(10),
+        },
+    );
+    assert!(!iter.contains(&wrong_name_same_count));
+    let err = iter
+        .validate_containment(&wrong_name_same_count)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "Task parameter names [\"Bogus\"] do not match the parameter space names [\"Param1\"]."
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1084,4 +1165,192 @@ fn test_reset_preserves_adaptive_chunk_size_override() {
     iter.reset();
     let walk_at_5_again = collect_walk(&mut iter);
     assert_eq!(walk_at_5, walk_at_5_again);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Regression: contains() on nested combination expressions
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `contains()` must accept values yielded by an iterator over a nested
+/// combination expression — e.g. `A * (B, C * D)` — where an
+/// association sits inside a product. The recursive
+/// `validate_containment` traversal must correctly project the input
+/// `params` onto each association's own keys before testing
+/// containment, otherwise the association sees keys from its product
+/// peers and reports them as a length mismatch.
+///
+/// Regression test for the bug noted in
+/// `openjd-model-for-python/reports/model-bindings-quality-evaluation-report.md`
+/// finding #2 ("Remaining issue (nested combination expressions)").
+#[test]
+fn test_contains_nested_association_in_product() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{
+            "name": "step",
+            "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": [1, 2]},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b", "c", "d"]},
+                    {"name": "Param3", "type": "INT", "range": [10, 11]},
+                    {"name": "Param4", "type": "INT", "range": [20, 21]}
+                ],
+                "combination": "Param1 * ( Param2, Param3 * Param4 )"
+            }
+        }]
+    }"#,
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let mut iter = StepParameterSpaceIterator::new(ps).unwrap();
+
+    // Collect every yielded value, then assert each is recognized by
+    // `contains`. The association `(Param2, Param3 * Param4)` pairs
+    // its iteration index against `(Param2[i], Param3*Param4[i])`, so
+    // the yielded values exercise both the outer product and the
+    // nested association branches of the validate_containment
+    // traversal.
+    let all_yielded: Vec<openjd_model::types::TaskParameterSet> = iter.by_ref().collect();
+
+    // Sanity: nesting expands to 2 (Param1) * 4 (the association: 4
+    // entries because Param2 has 4 elements and the inner Product
+    // Param3*Param4 has 2*2=4 elements).
+    assert_eq!(all_yielded.len(), 8, "yielded wrong number of values");
+
+    for (i, value) in all_yielded.iter().enumerate() {
+        assert!(
+            iter.contains(value),
+            "iter.contains() returned false for yielded value #{i}: {value:?}\n\
+             validate_containment: {:?}",
+            iter.validate_containment(value),
+        );
+    }
+}
+
+/// Companion of [`test_contains_nested_association_in_product`] for
+/// the rejection direction — values that should NOT be in the space
+/// are correctly rejected.
+#[test]
+fn test_contains_rejects_invalid_nested_values() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{
+            "name": "step",
+            "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Param1", "type": "INT", "range": [1, 2]},
+                    {"name": "Param2", "type": "STRING", "range": ["a", "b"]},
+                    {"name": "Param3", "type": "INT", "range": [10, 11]}
+                ],
+                "combination": "Param1 * ( Param2, Param3 )"
+            }
+        }]
+    }"#,
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp",
+            current_working_dir: "/tmp",
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let iter = StepParameterSpaceIterator::new(ps).unwrap();
+
+    // Values in the space (the association pairs ("a", 10) and ("b", 11)):
+    //   Param1=1 ⨯ ("a", 10), Param1=1 ⨯ ("b", 11),
+    //   Param1=2 ⨯ ("a", 10), Param1=2 ⨯ ("b", 11)
+    let make_set = |p1: i64, p2: &str, p3: i64| {
+        let mut s = openjd_model::types::TaskParameterSet::new();
+        s.insert(
+            "Param1".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type: openjd_model::types::TaskParameterType::Int,
+                value: openjd_expr::ExprValue::Int(p1),
+            },
+        );
+        s.insert(
+            "Param2".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type: openjd_model::types::TaskParameterType::String,
+                value: openjd_expr::ExprValue::String(p2.to_string()),
+            },
+        );
+        s.insert(
+            "Param3".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type: openjd_model::types::TaskParameterType::Int,
+                value: openjd_expr::ExprValue::Int(p3),
+            },
+        );
+        s
+    };
+
+    // In the space.
+    assert!(iter.contains(&make_set(1, "a", 10)));
+    assert!(iter.contains(&make_set(2, "b", 11)));
+
+    // The association pair ("a", 11) is NOT in the space — Param2/Param3
+    // are tied lockstep to ("a", 10) or ("b", 11). Even though Param1=1
+    // is valid, the cross is rejected. Critically, the diagnostic
+    // message reports only the failing association's keys
+    // (`Param2`/`Param3`), not the sibling-product key (`Param1`).
+    assert!(!iter.contains(&make_set(1, "a", 11)));
+    let err = iter
+        .validate_containment(&make_set(1, "a", 11))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "The values {Param2=a, Param3=11}, of an association expression in the combination expression, do not appear in the parameter space.",
+        "diagnostic must report only the association's own keys"
+    );
+
+    assert!(!iter.contains(&make_set(2, "b", 10)));
+    let err = iter
+        .validate_containment(&make_set(2, "b", 10))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "The values {Param2=b, Param3=10}, of an association expression in the combination expression, do not appear in the parameter space."
+    );
+
+    // Param1 outside its range — still rejected. The diagnostic comes
+    // from the leaf node's `validate_containment` (not the
+    // association's), and reports the offending parameter and value.
+    assert!(!iter.contains(&make_set(3, "a", 10)));
+    let err = iter
+        .validate_containment(&make_set(3, "a", 10))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "Parameter 'Param1' value '3' is not in the parameter space range."
+    );
 }

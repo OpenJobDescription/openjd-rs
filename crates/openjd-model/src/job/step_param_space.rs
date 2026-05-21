@@ -1008,26 +1008,44 @@ impl Node for AssociationNode {
         }
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
+        // Project `params` onto just this association's keys, so that
+        // when this association is nested inside a parent (e.g. as a
+        // child of a Product) the comparison ignores keys belonging to
+        // sibling branches of the parent expression. Without this
+        // projection, `params_equal` rejects every candidate on the
+        // very first length check, since `params` carries the full
+        // parameter set while `candidate` carries only this
+        // association's children's keys.
+        let assoc_keys: std::collections::HashSet<String> = {
+            let mut ks = std::collections::HashSet::new();
+            for child in &self.children {
+                let mut sample = TaskParameterSet::new();
+                child.get(0, &mut sample);
+                for k in sample.keys() {
+                    ks.insert(k.clone());
+                }
+            }
+            ks
+        };
+        let projected: TaskParameterSet = params
+            .iter()
+            .filter(|(k, _)| assoc_keys.contains(*k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
         // Linear scan: at least one index must match all children simultaneously
         for i in 0..self.length {
             let mut candidate = TaskParameterSet::new();
             for child in &self.children {
                 child.get(i, &mut candidate);
             }
-            if params_equal(&candidate, params) {
+            if params_equal(&candidate, &projected) {
                 return Ok(());
             }
         }
         // Build a display of the mismatched values
-        let values: Vec<String> = params
+        let values: Vec<String> = projected
             .iter()
-            .filter(|(k, _)| {
-                self.children.iter().any(|c| {
-                    let mut ps = TaskParameterSet::new();
-                    c.get(0, &mut ps);
-                    ps.contains_key(*k)
-                })
-            })
             .map(|(k, v)| format!("{}={}", k, v.value.to_display_string()))
             .collect();
         Err(format!(
