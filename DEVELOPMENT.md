@@ -5,8 +5,10 @@ AI coding agent — we use this approach for almost all changes. The workflows h
 tool-agnostic; any capable agent (Kiro, Claude Code, Codex, etc.) can follow them.
 
 For the mechanical quick reference (commands, crate map, CI jobs, release process) see
-[AGENTS.md](AGENTS.md). For a historical record of how the project was originally ported
-from Python and the prompts used, see [specs/rust-port-agent-method.md](specs/rust-port-agent-method.md).
+[AGENTS.md](AGENTS.md). For deeper guides on individual procedures (regenerating quality
+reports, etc.) see [docs/dev/](docs/dev/README.md). For a historical record of how the
+project was originally ported from Python and the prompts used, see
+[specs/rust-port-agent-method.md](specs/rust-port-agent-method.md).
 
 ## Environment
 
@@ -95,7 +97,9 @@ important workflow in the project.
    one against the other.
 5. **Repeat, then retire.** When remaining items are stale, low-value, or the report no
    longer reflects the code, delete it and regenerate from scratch. Knowing when to
-   retire a report is a judgment call.
+   retire a report is a judgment call. See
+   [docs/dev/regenerating-quality-reports.md](docs/dev/regenerating-quality-reports.md)
+   for the full procedure.
 
 ### Reviewing a PR
 

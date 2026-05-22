@@ -12,3 +12,5 @@ crates/openjd-sessions/src/helper/Cargo.toml
 crates/openjd-for-js/node_modules/
 pkg-nomod
 pkg/
+
+.claude/settings.local.json
