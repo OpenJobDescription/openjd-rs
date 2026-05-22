@@ -13,3 +13,6 @@ process) see [AGENTS.md](../../AGENTS.md).
 - [Regenerating quality reports](regenerating-quality-reports.md) — when and
   how to produce a fresh `reports/<crate>-quality-evaluation-report.md` with
   the `eval-crate` skill, and how to land it as a baseline PR.
+- [Working through quality-report findings](working-through-findings.md) —
+  how to choose findings to focus on, scope each PR, and drive an agent
+  through addressing them between baseline and the next regeneration.

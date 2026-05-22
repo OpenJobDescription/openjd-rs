@@ -94,7 +94,10 @@ important workflow in the project.
    ```
 
    Reviewers see both the code change and the claim in the report diff, and can verify
-   one against the other.
+   one against the other. See
+   [docs/dev/working-through-findings.md](docs/dev/working-through-findings.md) for
+   how to choose which findings to focus on, how to scope a PR, and example prompts
+   for driving the agent through the work.
 5. **Repeat, then retire.** When remaining items are stale, low-value, or the report no
    longer reflects the code, delete it and regenerate from scratch. Knowing when to
    retire a report is a judgment call. See
