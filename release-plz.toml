@@ -17,7 +17,7 @@
 #     trusted publishing in its crates.io settings. See RELEASING.md.
 #
 # The non-publishable crate (openjd-for-js) is excluded below
-# (belt-and-suspenders; its Cargo.toml also has `publish = false`).
+# (defence in depth; its Cargo.toml also has `publish = false`).
 
 [workspace]
 # Always create a GitHub Release when a version is published.

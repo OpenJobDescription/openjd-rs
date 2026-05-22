@@ -2,6 +2,8 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+#[cfg(windows)]
+mod job_object;
 mod protocol;
 #[cfg(unix)]
 mod runner;
@@ -146,9 +148,23 @@ fn run_unix(expected_token: &str) {
 /// Windows: stdin is read on a background thread because we can't poll()
 /// pipes. Commands are dispatched via channels — Run/Shutdown to the main
 /// loop, Cancel to the runner.
+///
+/// Before processing any commands, the helper places itself inside a
+/// Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Any
+/// workload the runner subsequently spawns is automatically a member of
+/// the job (Windows propagates job membership to children), so when the
+/// helper exits — even via `TerminateProcess` from the parent — the kernel
+/// closes the job and terminates every workload. This prevents orphaned
+/// grandchildren from holding inherited handles open and stalling the
+/// session (or, in CI, the test runner).
 #[cfg(windows)]
 fn run_windows(expected_token: &str) {
     use std::sync::mpsc;
+
+    // Best-effort: if the job object can't be created, log a warning and
+    // continue. The helper still functions; it just loses the descendant-
+    // cleanup guarantee on crash.
+    let job = job_object::JobObject::setup_for_current_process();
 
     enum MainCmd {
         Run(protocol::RunCommand),
@@ -216,7 +232,7 @@ fn run_windows(expected_token: &str) {
     // Main loop: wait for Run or Shutdown commands
     for cmd in main_rx {
         match cmd {
-            MainCmd::Run(run) => match runner_win::run_command(&run, &cancel_rx) {
+            MainCmd::Run(run) => match runner_win::run_command(&run, &cancel_rx, job.as_ref()) {
                 Ok(code) => send(&Response::Exited { exited: code }),
                 Err(e) => send(&Response::Error { error: e }),
             },

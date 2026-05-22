@@ -347,6 +347,48 @@ Key details:
   over its `mpsc::Receiver`, so token validation for it stays in
   `main.rs` where stdin is actually read.
 
+### Windows runner: Job Object kill-on-close
+
+The Windows path uses a different mechanism for descendant cleanup
+because `TerminateProcess` does not propagate to children, and POSIX-
+style `killpg` has no direct equivalent.
+
+At startup, `run_windows()` in `main.rs` creates a Windows
+[Job Object][win-job] with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and
+assigns the **helper itself** to it. Since Windows 8, every process
+spawned by a job member is automatically associated with the job
+(jobs can nest and a child inherits all of its parent's jobs by
+default). This means every workload subsequently spawned by
+`runner_win::run_command` is in the helper's job.
+
+[win-job]: https://learn.microsoft.com/windows/win32/procthread/job-objects
+
+When the helper exits — cleanly via `Shutdown`, abnormally via
+`TerminateProcess`, or because the OS killed it for a memory limit —
+the kernel closes the helper's last handle to the job, which fires
+`KILL_ON_JOB_CLOSE` and terminates every workload still in the job.
+
+This is the cleanup path on Windows. The
+`kill_process_tree(child_pid)` walk in `runner_win::handle_cancel`
+handles the *cooperative* cancel case (`Cancel::Terminate` /
+`NotifyThenTerminate`) and exists primarily so the runner can return a
+prompt `exited` response to the session; the Job Object is what
+guarantees no leaks on the *abnormal-exit* path.
+
+`runner_win::run_command` also explicitly calls
+`AssignProcessToJobObject(job, workload_handle)` after spawn. This is
+redundant given the inheritance rule above, but provides defence in
+depth: any future change that adds `CREATE_BREAKAWAY_FROM_JOB` to the
+workload spawn flags would otherwise silently re-introduce the
+descendant-leak failure mode. Re-assigning surfaces a clear
+`AssignProcessToJobObject failed` error instead.
+
+If `CreateJobObjectW` or `SetInformationJobObject` fails (e.g. in a
+sandbox that forbids job-object operations), the helper logs a one-
+line warning to stderr and continues without the guard. The helper
+remains functional; it just loses the descendant-cleanup guarantee on
+crash, matching the pre-Job-Object behaviour.
+
 ## Session Integration
 
 ### CrossUserHelper struct

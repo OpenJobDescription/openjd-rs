@@ -451,19 +451,47 @@ fn test_helper_ctrl_break_falls_back_to_terminate_windows() {
 #[test]
 fn test_helper_crash_during_execution_windows() {
     // If the helper itself dies mid-command, reading should return EOF/error
-    // rather than hang.
+    // rather than hang. Additionally: the workload it spawned must die too.
+    //
+    // The helper places itself in a Job Object with KILL_ON_JOB_CLOSE at
+    // startup, so when we TerminateProcess() it here, the kernel closes the
+    // job and terminates every workload that inherited the job. Without this
+    // guarantee, an orphaned workload would keep inherited handles alive and
+    // can stall the cargo-test runner long enough for GitHub Actions'
+    // watchdog to declare the runner lost.
     let mut h = Helper::spawn();
     let helper_pid = h.child.id();
 
     h.send(&long_running_run_json());
     let pid_resp = h.read_line();
-    assert!(pid_resp.get("pid").is_some());
+    let workload_pid = pid_resp["pid"].as_u64().expect("pid in response") as u32;
 
     terminate_process(helper_pid);
 
     let mut line = String::new();
     let _ = h.reader.read_line(&mut line);
-    // The key assertion: we got here without hanging.
+    // The helper's stdout pipe should be at EOF — got here without hanging.
+
+    // Wait briefly for the kernel to tear down the job. KILL_ON_JOB_CLOSE
+    // is synchronous with the last handle close, but the helper's pending
+    // cleanup (and any time it takes for `ping` to actually exit after
+    // being signalled) means we should give it a small grace window.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while process_is_alive(workload_pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    if process_is_alive(workload_pid) {
+        // Defensive cleanup so we don't leak a `ping` into the next test —
+        // an orphan here would do exactly what we're trying to prevent.
+        terminate_process(workload_pid);
+        panic!(
+            "workload pid {workload_pid} survived helper crash; \
+             Job Object KILL_ON_JOB_CLOSE not enforced — \
+             this indicates the helper is leaking grandchildren \
+             on abnormal exit, which can stall CI."
+        );
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────

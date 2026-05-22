@@ -1,0 +1,38 @@
+# cargo-nextest configuration.
+#
+# https://nexte.st/book/configuration.html
+#
+# This file is consulted by `cargo nextest run` for the workspace. The
+# helper sub-crate (crates/openjd-sessions/src/helper/) is built with a
+# separate manifest and currently runs via `cargo test`, not nextest, so
+# it doesn't see this configuration.
+
+[profile.default]
+# Mark a test as slow if it doesn't finish within `period`. After
+# `terminate-after` consecutive slow periods (5 × 30 s = 2 min 30 s) the
+# test is killed and reported as failed. Subprocess-heavy tests in
+# openjd-sessions (long_running_cmd uses `ping -n 31`) run for ~30 s, so
+# `period = "60s"` gives them headroom; the cap stops a hung helper
+# subprocess from holding the runner indefinitely.
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# After a test's main function returns, nextest waits up to this long for
+# the test process to actually exit. A test that returns successfully but
+# leaves descendants holding inherited stdio handles will hit this and be
+# reported as a leak. This is exactly the failure mode that caused the
+# 50-minute "runner lost communication" stall on Windows in CI.
+leak-timeout = "10s"
+
+# Keep status output flowing so a long-running test's progress is visible
+# in CI logs (default is "immediate-final"; "immediate" prints status
+# events as they happen for both passing and failing tests).
+status-level = "pass"
+
+[profile.ci]
+# A stricter profile suitable for CI; opted into via
+# `cargo nextest run --profile ci` if we ever want it.
+slow-timeout = { period = "60s", terminate-after = 5 }
+leak-timeout = "10s"
+fail-fast = false
+status-level = "all"
+final-status-level = "slow"

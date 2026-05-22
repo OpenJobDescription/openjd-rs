@@ -6,7 +6,15 @@
 //!
 //! Spawns a child process with CREATE_NEW_PROCESS_GROUP, reads its stdout
 //! on background threads, and handles cancel commands via a channel from main.
+//!
+//! When the helper is configured with a [`JobObject`], every workload is
+//! also assigned to the job. This is technically redundant — Windows
+//! already associates new child processes with every Job Object their
+//! parent belongs to — but keeping the explicit `assign_process` call
+//! gives us a clear failure signal if the workload was launched with
+//! `CREATE_BREAKAWAY_FROM_JOB` for any reason in the future.
 
+use super::job_object::JobObject;
 use super::protocol::{send, CancelMethod, Response, RunCommand};
 use std::io::BufRead;
 use std::process::{Command, Stdio};
@@ -18,11 +26,18 @@ use std::sync::mpsc;
 /// - Background threads read child stdout + stderr, send lines via channel
 /// - Main thread drains output lines
 /// - Cancel signals arrive via `cancel_rx` from the stdin reader in main.rs
+///
+/// If `job` is `Some`, the spawned workload is explicitly assigned to it.
+/// In practice the workload would already inherit the helper's job, but
+/// the explicit assignment makes the invariant testable.
 pub fn run_command(
     cmd: &RunCommand,
     cancel_rx: &mpsc::Receiver<CancelMethod>,
+    job: Option<&JobObject>,
 ) -> Result<i32, String> {
+    use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
+    use windows::Win32::Foundation::HANDLE;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
     let mut child = Command::new(&cmd.command)
@@ -37,6 +52,22 @@ pub fn run_command(
         .map_err(|e| e.to_string())?;
 
     let child_pid = child.id();
+
+    // Defence in depth: ensure the workload is in the helper's job
+    // object. New processes inherit job membership from their parent on
+    // Windows 8+, so this is normally already true. We re-assert it to
+    // surface a clear error if anything ever flips that default (e.g. a
+    // future `CREATE_BREAKAWAY_FROM_JOB` flag) and to make the test
+    // `test_helper_crash_during_execution_windows` deterministic.
+    if let Some(job) = job {
+        let raw: HANDLE = HANDLE(child.as_raw_handle() as *mut _);
+        if let Err(e) = job.assign_process(raw) {
+            // Don't fail the run on this — log and continue. The workload
+            // is still functional; we just lose the cleanup guarantee.
+            eprintln!("openjd_helper: {e}");
+        }
+    }
+
     send(&Response::Pid { pid: child_pid });
 
     let child_stdout = child.stdout.take().unwrap();

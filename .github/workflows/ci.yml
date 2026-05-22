@@ -151,10 +151,66 @@ jobs:
         run: cargo clippy --release --all-targets --workspace --exclude openjd-for-js -- -D warnings
       - name: Run helper clippy
         run: cargo clippy --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
-      - name: Run tests
-        run: cargo test --release --workspace --exclude openjd-for-js
+      # Use cargo-nextest for the workspace test step. Nextest runs each
+      # `#[test]` in its own process, which means a leaked grandchild that
+      # holds an inherited stdio pipe open only stalls *that* test process
+      # rather than the whole binary — and nextest's leak-timeout
+      # (configured in `.config/nextest.toml`) actively detects that case
+      # and reports it as a failed test instead of hanging the runner. The
+      # `timeout-minutes` job-step guard converts a worst-case stall into a
+      # clean step failure with full logs preserved, rather than a
+      # "runner lost communication" abort whose logs are truncated.
+      # Install cargo-nextest from crates.io. We avoid third-party
+      # marketplace actions for this repo; `cargo install --locked` adds
+      # ~3-5 min on a cold cache but is fully reproducible from the
+      # registry and doesn't introduce a new supply-chain dependency.
+      # The cargo cache (set up earlier in this job) carries the binary
+      # across runs so steady-state cost is negligible.
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked --version ^0.9
+      - name: Run tests (nextest)
+        timeout-minutes: 20
+        run: cargo nextest run --release --workspace --exclude openjd-for-js --no-fail-fast
+      # Nextest does not run doctests; run them separately so we don't lose
+      # coverage. Doctests are quick (~6 across the workspace today) and
+      # don't have any subprocess paths that could stall.
+      - name: Run doctests
+        timeout-minutes: 5
+        run: cargo test --release --workspace --exclude openjd-for-js --doc
       - name: Run helper integration tests
+        timeout-minutes: 5
         run: cargo test --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml
+      # On any failure (including timeout-minutes expiry), dump the process
+      # tree so we can see which workload subprocesses, if any, are still
+      # alive when the runner gives up. The previous "runner lost
+      # communication" failure (50 min silence on windows-latest) gave us
+      # zero info about what was holding the runner alive — this step
+      # closes that gap cheaply.
+      - name: Capture diagnostics on failure (Unix)
+        if: failure() && runner.os != 'Windows'
+        shell: bash
+        continue-on-error: true
+        run: |
+          echo "=== ps aux (top 50 by RSS) ==="
+          ps aux --sort=-%mem | head -n 50
+          echo "=== process tree ==="
+          ps -ef -H || ps -ejH
+      - name: Capture diagnostics on failure (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Write-Host "=== Top processes by working set ==="
+          Get-Process | Sort-Object WorkingSet -Descending | Select-Object -First 30 |
+            Format-Table Id, ProcessName, WorkingSet, StartTime, CPU -AutoSize
+          Write-Host "=== Suspect leaked workloads (ping/cmd/openjd_helper/openjd) ==="
+          Get-Process -ErrorAction SilentlyContinue ping, cmd, openjd_helper, openjd |
+            Format-List Id, ProcessName, StartTime, Path
+          Write-Host "=== Process tree (PID, ParentPID, Name, CommandLine) ==="
+          Get-CimInstance Win32_Process |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine |
+            Sort-Object ParentProcessId, ProcessId |
+            Format-Table -AutoSize
       - name: Upload CLI binary
         uses: actions/upload-artifact@v7
         with:

@@ -54,14 +54,35 @@ fn main() {
         // Copy the helper source tree into OUT_DIR so we never write into the
         // source tree. The manifest is stored as `Cargo.bundled.toml` so that
         // cargo doesn't treat src/helper/ as a separate crate during packaging
-        // (its check matches the literal filename `Cargo.toml`), while keeping
-        // the `.toml` extension so editor TOML tooling still works.
-        // If `Cargo.toml` exists (local dev before rename), use it as-is.
+        // (its check matches the literal filename `Cargo.toml`).
         let build_src = out_dir.join("helper_src");
         copy_dir_recursive(&helper_dir, &build_src);
 
+        // Derive OUT_DIR's `Cargo.toml` from whichever manifest the *current*
+        // source tree treats as canonical. The source convention is exactly
+        // one of:
+        //   (a) `Cargo.bundled.toml` only — the default (`Cargo.toml` is in
+        //       `.gitignore`); this is what release builds and CI use.
+        //   (b) `Cargo.toml` only or both — local dev where someone copied
+        //       `Cargo.bundled.toml` to `Cargo.toml` for IDE tooling.
+        //
+        // `copy_dir_recursive` is additive: it does not delete files in the
+        // destination that are absent from the source. When `target/` is
+        // restored from a CI cache, OUT_DIR may contain a `Cargo.toml` left
+        // over from a previous build whose `Cargo.bundled.toml` had a
+        // different feature set. To prevent that stale file from being used
+        // (which produced E0432 "could not find … in System" for new
+        // `windows` crate features in the Cross-User Windows job), we
+        // unconditionally reset OUT_DIR's `Cargo.toml` here:
+        //   - If the source has its own `Cargo.toml`, OUT_DIR's copy is
+        //     already current via the recursive copy above; nothing to do.
+        //   - Otherwise, drop any stale OUT_DIR `Cargo.toml` and rename
+        //     `Cargo.bundled.toml` into place.
         let manifest_in_build = build_src.join("Cargo.toml");
-        if !manifest_in_build.exists() {
+        let source_has_cargo_toml = helper_dir.join("Cargo.toml").exists();
+        if !source_has_cargo_toml {
+            // Remove any stale OUT_DIR Cargo.toml from a previous build's cache.
+            let _ = std::fs::remove_file(&manifest_in_build);
             let bundled = build_src.join("Cargo.bundled.toml");
             std::fs::rename(&bundled, &manifest_in_build)
                 .expect("Failed to rename Cargo.bundled.toml to Cargo.toml");
