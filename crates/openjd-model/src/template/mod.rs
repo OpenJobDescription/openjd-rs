@@ -24,18 +24,19 @@ pub use job_template::JobTemplate;
 // environment_template
 pub use environment_template::EnvironmentTemplate;
 // parameters
-#[cfg(test)]
-pub use parameters::{FlexFloat, FlexInt};
 pub use parameters::{
-    JobFloatParameterDefinition, JobIntParameterDefinition, JobParameterDefinition,
-    JobPathParameterDefinition, JobStringParameterDefinition,
+    FileFilter, FloatUserInterface, IntUserInterface, JobFloatParameterDefinition,
+    JobIntParameterDefinition, JobParameterDefinition, JobPathParameterDefinition,
+    JobStringParameterDefinition, PathUserInterface, StringUserInterface,
 };
+pub use parameters::{FlexFloat, FlexInt};
 // expr_parameters (EXPR-extension job parameter types)
 pub use expr_parameters::{
-    JobBoolParameterDefinition, JobListBoolParameterDefinition, JobListFloatParameterDefinition,
-    JobListIntParameterDefinition, JobListListIntParameterDefinition,
-    JobListPathParameterDefinition, JobListStringParameterDefinition,
-    JobRangeExprParameterDefinition,
+    BoolUserInterface, HiddenOnlyUserInterface, JobBoolParameterDefinition,
+    JobListBoolParameterDefinition, JobListFloatParameterDefinition, JobListIntParameterDefinition,
+    JobListListIntParameterDefinition, JobListPathParameterDefinition,
+    JobListStringParameterDefinition, JobRangeExprParameterDefinition, ListFloatUserInterface,
+    ListIntUserInterface, ListPathUserInterface, ListSimpleUserInterface, RangeExprUserInterface,
 };
 #[cfg(test)]
 pub use expr_parameters::{
@@ -52,8 +53,10 @@ pub use actions::{Action, CancelationMode, EnvironmentActions, StepActions};
 pub use host_requirements::{AmountRequirement, AttributeRequirement, HostRequirements};
 // task_parameters
 pub use task_parameters::{
-    FloatRange, FloatRangeItem, IntOrFormatString, IntRange, RangeConstraint,
-    StepParameterSpaceDefinition, StringRange, TaskParameterDefinition,
+    ChunkIntTaskParameterDefinition, ChunksDefinition, FloatRange, FloatRangeItem,
+    FloatTaskParameterDefinition, IntOrFormatString, IntRange, IntTaskParameterDefinition,
+    PathTaskParameterDefinition, RangeConstraint, StepParameterSpaceDefinition, StringRange,
+    StringTaskParameterDefinition, TaskParameterDefinition,
 };
 // constrained_strings
 #[cfg(test)]

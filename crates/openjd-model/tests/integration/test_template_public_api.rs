@@ -17,15 +17,22 @@
 use openjd_model::decode_environment_template;
 use openjd_model::decode_job_template;
 use openjd_model::template::{
-    Action, AmountRequirement, AttributeRequirement, CancelationMode, Description, EmbeddedFile,
-    Environment, EnvironmentActions, EnvironmentScript, EnvironmentTemplate, ExtensionName,
-    HostRequirements, JobBoolParameterDefinition, JobFloatParameterDefinition,
-    JobIntParameterDefinition, JobListBoolParameterDefinition, JobListFloatParameterDefinition,
-    JobListIntParameterDefinition, JobListListIntParameterDefinition,
-    JobListPathParameterDefinition, JobListStringParameterDefinition, JobParameterDefinition,
-    JobPathParameterDefinition, JobRangeExprParameterDefinition, JobStringParameterDefinition,
-    JobTemplate, RangeConstraint, SimpleAction, StepActions, StepDependency, StepScript,
-    StepTemplate, TaskParameterDefinition,
+    Action, AmountRequirement, AttributeRequirement, BoolUserInterface, CancelationMode,
+    ChunkIntTaskParameterDefinition, ChunksDefinition, Description, EmbeddedFile, Environment,
+    EnvironmentActions, EnvironmentScript, EnvironmentTemplate, ExtensionName, FileFilter,
+    FlexFloat, FlexInt, FloatRange, FloatRangeItem, FloatTaskParameterDefinition,
+    FloatUserInterface, HiddenOnlyUserInterface, HostRequirements, IntOrFormatString, IntRange,
+    IntTaskParameterDefinition, IntUserInterface, JobBoolParameterDefinition,
+    JobFloatParameterDefinition, JobIntParameterDefinition, JobListBoolParameterDefinition,
+    JobListFloatParameterDefinition, JobListIntParameterDefinition,
+    JobListListIntParameterDefinition, JobListPathParameterDefinition,
+    JobListStringParameterDefinition, JobParameterDefinition, JobPathParameterDefinition,
+    JobRangeExprParameterDefinition, JobStringParameterDefinition, JobTemplate,
+    ListFloatUserInterface, ListIntUserInterface, ListPathUserInterface, ListSimpleUserInterface,
+    PathTaskParameterDefinition, PathUserInterface, RangeConstraint, RangeExprUserInterface,
+    SimpleAction, StepActions, StepDependency, StepParameterSpaceDefinition, StepScript,
+    StepTemplate, StringRange, StringTaskParameterDefinition, StringUserInterface,
+    TaskParameterDefinition,
 };
 use openjd_model::CallerLimits;
 
@@ -75,6 +82,35 @@ fn template_namespace_is_public() {
     fn _take_jpd(_: &JobParameterDefinition) {}
     fn _take_tpd(_: &TaskParameterDefinition) {}
     fn _take_rc(_: &RangeConstraint) {}
+    // Per-variant TaskParameterDefinition struct types
+    fn _take_int_tpd(_: &IntTaskParameterDefinition) {}
+    fn _take_float_tpd(_: &FloatTaskParameterDefinition) {}
+    fn _take_string_tpd(_: &StringTaskParameterDefinition) {}
+    fn _take_path_tpd(_: &PathTaskParameterDefinition) {}
+    fn _take_chunk_int_tpd(_: &ChunkIntTaskParameterDefinition) {}
+    fn _take_chunks_def(_: &ChunksDefinition) {}
+    fn _take_step_param_space_def(_: &StepParameterSpaceDefinition) {}
+    // Range types
+    fn _take_int_range(_: &IntRange) {}
+    fn _take_string_range(_: &StringRange) {}
+    fn _take_float_range(_: &FloatRange) {}
+    fn _take_float_range_item(_: &FloatRangeItem) {}
+    fn _take_int_or_fs(_: &IntOrFormatString) {}
+    fn _take_flex_int(_: &FlexInt) {}
+    fn _take_flex_float(_: &FlexFloat) {}
+    // userInterface types
+    fn _take_string_ui(_: &StringUserInterface) {}
+    fn _take_int_ui(_: &IntUserInterface) {}
+    fn _take_float_ui(_: &FloatUserInterface) {}
+    fn _take_path_ui(_: &PathUserInterface) {}
+    fn _take_bool_ui(_: &BoolUserInterface) {}
+    fn _take_range_expr_ui(_: &RangeExprUserInterface) {}
+    fn _take_list_simple_ui(_: &ListSimpleUserInterface) {}
+    fn _take_list_path_ui(_: &ListPathUserInterface) {}
+    fn _take_list_int_ui(_: &ListIntUserInterface) {}
+    fn _take_list_float_ui(_: &ListFloatUserInterface) {}
+    fn _take_hidden_only_ui(_: &HiddenOnlyUserInterface) {}
+    fn _take_file_filter(_: &FileFilter) {}
 }
 
 #[test]
@@ -534,4 +570,374 @@ fn function_signature_takes_template_types_by_reference() {
     assert_eq!(step_name(&jt.steps[0]), "Hello");
     let on_run = &jt.steps[0].script.as_ref().unwrap().actions.on_run;
     assert_eq!(count_args(on_run), 3);
+}
+
+// ─── TaskParameterDefinition variants — field access ──────────────────
+
+#[test]
+fn task_parameter_definition_int_variant_field_access() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": [1, 2, 3]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    let ps: &StepParameterSpaceDefinition = jt.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(ps.task_parameter_definitions.len(), 1);
+    match &ps.task_parameter_definitions[0] {
+        TaskParameterDefinition::INT(p) => {
+            let _: &IntTaskParameterDefinition = p;
+            assert_eq!(p.name.as_str(), "Frame");
+            match &p.range {
+                IntRange::List(items) => {
+                    let nums: Vec<i64> = items.iter().map(|f| f.0).collect();
+                    assert_eq!(nums, vec![1, 2, 3]);
+                }
+                IntRange::Expression(_) => panic!("expected List, got Expression"),
+            }
+        }
+        other => panic!("expected INT, got {other:?}"),
+    }
+}
+
+#[test]
+fn task_parameter_definition_int_range_expression() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": "1-10:2"}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    match &jt.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions[0]
+    {
+        TaskParameterDefinition::INT(p) => match &p.range {
+            IntRange::Expression(fs) => {
+                assert_eq!(fs.raw(), "1-10:2");
+            }
+            IntRange::List(_) => panic!("expected Expression, got List"),
+        },
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn task_parameter_definition_float_variant_field_access() {
+    let jt = decode_jt_with_extensions(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "FLOAT", "range": [1.5, "{{Param.X}}", 3.5]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &["EXPR"],
+    );
+    match &jt.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions[0]
+    {
+        TaskParameterDefinition::FLOAT(p) => {
+            let _: &FloatTaskParameterDefinition = p;
+            match &p.range {
+                FloatRange::List(items) => {
+                    assert_eq!(items.len(), 3);
+                    assert!(matches!(items[0], FloatRangeItem::Float(f) if f == 1.5));
+                    assert!(matches!(&items[1], FloatRangeItem::FormatString(_)));
+                    assert!(matches!(items[2], FloatRangeItem::Float(f) if f == 3.5));
+                }
+                FloatRange::Expression(_) => panic!("expected List"),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn task_parameter_definition_string_path_variants() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Color", "type": "STRING", "range": ["red", "blue"]},
+                    {"name": "OutDir", "type": "PATH", "range": ["/tmp/a", "/tmp/b"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    let defs = &jt.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions;
+    match &defs[0] {
+        TaskParameterDefinition::STRING(p) => {
+            let _: &StringTaskParameterDefinition = p;
+            match &p.range {
+                StringRange::List(items) => {
+                    let strs: Vec<&str> = items.iter().map(|fs| fs.raw()).collect();
+                    assert_eq!(strs, vec!["red", "blue"]);
+                }
+                StringRange::Expression(_) => panic!("expected List"),
+            }
+        }
+        _ => unreachable!(),
+    }
+    match &defs[1] {
+        TaskParameterDefinition::PATH(p) => {
+            let _: &PathTaskParameterDefinition = p;
+            match &p.range {
+                StringRange::List(items) => {
+                    let strs: Vec<&str> = items.iter().map(|fs| fs.raw()).collect();
+                    assert_eq!(strs, vec!["/tmp/a", "/tmp/b"]);
+                }
+                StringRange::Expression(_) => panic!("expected List"),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn task_parameter_definition_chunk_int_with_chunks_definition() {
+    let jt = decode_jt_with_extensions(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "extensions": ["TASK_CHUNKING"],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {
+                        "name": "F",
+                        "type": "CHUNK[INT]",
+                        "range": "1-100",
+                        "chunks": {
+                            "defaultTaskCount": 4,
+                            "targetRuntimeSeconds": 60,
+                            "rangeConstraint": "CONTIGUOUS"
+                        }
+                    }
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &["TASK_CHUNKING"],
+    );
+    match &jt.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions[0]
+    {
+        TaskParameterDefinition::CHUNK_INT(p) => {
+            let _: &ChunkIntTaskParameterDefinition = p;
+            assert!(matches!(&p.range, IntRange::Expression(_)));
+            let chunks: &ChunksDefinition = &p.chunks;
+            // default_task_count: literal int → IntOrFormatString::Int
+            match &chunks.default_task_count {
+                IntOrFormatString::Int(n) => assert_eq!(*n, 4),
+                IntOrFormatString::FormatString(_) => panic!("expected Int"),
+            }
+            // target_runtime_seconds: Some(literal int)
+            match chunks.target_runtime_seconds.as_ref().unwrap() {
+                IntOrFormatString::Int(n) => assert_eq!(*n, 60),
+                IntOrFormatString::FormatString(_) => panic!("expected Int"),
+            }
+            assert_eq!(chunks.range_constraint, RangeConstraint::Contiguous);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn chunks_definition_format_string_default_task_count() {
+    let jt = decode_jt_with_extensions(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "extensions": ["TASK_CHUNKING", "EXPR"],
+        "parameterDefinitions": [
+            {"name": "ChunkSize", "type": "INT", "default": 10}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {
+                        "name": "F",
+                        "type": "CHUNK[INT]",
+                        "range": "1-100",
+                        "chunks": {
+                            "defaultTaskCount": "{{Param.ChunkSize}}",
+                            "rangeConstraint": "NONCONTIGUOUS"
+                        }
+                    }
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &["TASK_CHUNKING", "EXPR"],
+    );
+    match &jt.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions[0]
+    {
+        TaskParameterDefinition::CHUNK_INT(p) => {
+            match &p.chunks.default_task_count {
+                IntOrFormatString::FormatString(fs) => {
+                    assert_eq!(fs.raw(), "{{Param.ChunkSize}}");
+                }
+                IntOrFormatString::Int(_) => panic!("expected FormatString"),
+            }
+            assert!(p.chunks.target_runtime_seconds.is_none());
+            assert_eq!(p.chunks.range_constraint, RangeConstraint::Noncontiguous);
+        }
+        _ => unreachable!(),
+    }
+}
+
+// ─── *UserInterface — field access ────────────────────────────────────
+
+#[test]
+fn job_int_parameter_definition_user_interface_field_access() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "parameterDefinitions": [{
+            "name": "Frame",
+            "type": "INT",
+            "default": 1,
+            "userInterface": {
+                "control": "SPIN_BOX",
+                "label": "Frame",
+                "groupLabel": "Animation",
+                "singleStepDelta": 5
+            }
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+    );
+    let defs = jt.parameter_definitions.as_ref().unwrap();
+    match &defs[0] {
+        JobParameterDefinition::INT(p) => {
+            let ui: &IntUserInterface = p.user_interface.as_ref().unwrap();
+            assert_eq!(ui.control.as_deref(), Some("SPIN_BOX"));
+            assert_eq!(ui.label.as_deref(), Some("Frame"));
+            assert_eq!(ui.group_label.as_deref(), Some("Animation"));
+            assert_eq!(ui.single_step_delta.as_ref().map(|f| f.0), Some(5));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn job_path_parameter_definition_user_interface_with_file_filters() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "parameterDefinitions": [{
+            "name": "InputFile",
+            "type": "PATH",
+            "objectType": "FILE",
+            "dataFlow": "IN",
+            "userInterface": {
+                "control": "CHOOSE_INPUT_FILE",
+                "label": "Input file",
+                "fileFilters": [
+                    {"label": "Images", "patterns": ["*.png", "*.jpg"]}
+                ],
+                "fileFilterDefault": {"label": "Images", "patterns": ["*.png", "*.jpg"]}
+            }
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+    );
+    let defs = jt.parameter_definitions.as_ref().unwrap();
+    match &defs[0] {
+        JobParameterDefinition::PATH(p) => {
+            let ui: &PathUserInterface = p.user_interface.as_ref().unwrap();
+            assert_eq!(ui.control.as_deref(), Some("CHOOSE_INPUT_FILE"));
+            let filters = ui.file_filters.as_ref().unwrap();
+            assert_eq!(filters.len(), 1);
+            let f0: &FileFilter = &filters[0];
+            assert_eq!(f0.label, "Images");
+            assert_eq!(f0.patterns, vec!["*.png".to_string(), "*.jpg".to_string()]);
+            // Default filter is also exposed.
+            let default: &FileFilter = ui.file_filter_default.as_ref().unwrap();
+            assert_eq!(default.label, "Images");
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn job_float_parameter_definition_user_interface_with_decimals() {
+    let jt = decode_jt(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "parameterDefinitions": [{
+            "name": "X",
+            "type": "FLOAT",
+            "userInterface": {
+                "control": "SPIN_BOX",
+                "decimals": 3,
+                "singleStepDelta": 0.25
+            }
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+    );
+    match &jt.parameter_definitions.as_ref().unwrap()[0] {
+        JobParameterDefinition::FLOAT(p) => {
+            let ui: &FloatUserInterface = p.user_interface.as_ref().unwrap();
+            assert_eq!(ui.decimals.as_ref().map(|f| f.0), Some(3));
+            assert_eq!(ui.single_step_delta.as_ref().map(|f| f.0), Some(0.25));
+        }
+        _ => unreachable!(),
+    }
 }

@@ -60,12 +60,23 @@ The structural template types — `template::JobTemplate`,
 `template::HostRequirements`, `template::AmountRequirement`,
 `template::AttributeRequirement`, `template::StepDependency`,
 `template::SimpleAction`, `template::Description`,
-`template::ExtensionName`, `template::TaskParameterDefinition`,
+`template::ExtensionName`, `template::TaskParameterDefinition`
+and its 5 per-variant inner struct types
+(`IntTaskParameterDefinition`, `FloatTaskParameterDefinition`,
+`StringTaskParameterDefinition`, `PathTaskParameterDefinition`,
+`ChunkIntTaskParameterDefinition`),
 `template::JobParameterDefinition` and its 12 per-variant inner
 struct types (`JobStringParameterDefinition`, …,
 `JobListListIntParameterDefinition`), `template::RangeConstraint`,
 `template::IntRange`, `template::FloatRange`, `template::StringRange`,
 `template::FloatRangeItem`, `template::IntOrFormatString`,
+`template::ChunksDefinition`, `template::FlexInt`, `template::FlexFloat`,
+the 11 `*UserInterface` struct types (`StringUserInterface`,
+`IntUserInterface`, `FloatUserInterface`, `PathUserInterface`,
+`BoolUserInterface`, `RangeExprUserInterface`,
+`ListSimpleUserInterface`, `ListPathUserInterface`,
+`ListIntUserInterface`, `ListFloatUserInterface`,
+`HiddenOnlyUserInterface`), `template::FileFilter`, and
 `template::StepParameterSpaceDefinition` — are all reachable as
 `openjd_model::template::*`. Callers can read fields, write
 function signatures that take `&template::StepTemplate`, and
@@ -325,9 +336,37 @@ impl TaskParameterDefinition {
 }
 ```
 
+### Per-variant `TaskParameterDefinition` types
+
+Each `TaskParameterDefinition` variant wraps a struct with a `name`
+and a typed `range` (and, for `CHUNK_INT`, a `chunks` payload):
+
+```rust
+pub struct IntTaskParameterDefinition {
+    pub name: Identifier,
+    pub range: IntRange,
+}
+pub struct FloatTaskParameterDefinition {
+    pub name: Identifier,
+    pub range: FloatRange,
+}
+pub struct StringTaskParameterDefinition {
+    pub name: Identifier,
+    pub range: StringRange,
+}
+pub struct PathTaskParameterDefinition {
+    pub name: Identifier,
+    pub range: StringRange,
+}
+pub struct ChunkIntTaskParameterDefinition {
+    pub name: Identifier,
+    pub range: IntRange,
+    pub chunks: ChunksDefinition,
+}
+```
+
 ### Range + Parameter-Space Shape Types
 
-Available via the `template::*` path when needed (e.g. `openjd_model::template::IntRange`).
 These appear as fields on the `TaskParameterDefinition::*` variants:
 
 ```rust
@@ -341,17 +380,30 @@ pub enum StringRange {
     Expression(FormatString),
 }
 
-pub struct FloatRange(pub Vec<FloatRangeItem>);
-pub struct FloatRangeItem(pub FormatString);
+pub enum FloatRange {
+    List(Vec<FloatRangeItem>),
+    Expression(FormatString),
+}
 
-pub enum IntOrFormatString {
-    Int(FlexInt),
+pub enum FloatRangeItem {
+    Float(f64),
     FormatString(FormatString),
 }
 
-pub struct RangeConstraint {
-    pub min: Option<IntOrFormatString>,
-    pub max: Option<IntOrFormatString>,
+pub enum IntOrFormatString {
+    Int(i64),
+    FormatString(FormatString),
+}
+
+pub struct ChunksDefinition {
+    pub default_task_count: IntOrFormatString,
+    pub target_runtime_seconds: Option<IntOrFormatString>,
+    pub range_constraint: RangeConstraint,
+}
+
+pub enum RangeConstraint {
+    Contiguous,
+    Noncontiguous,
 }
 
 pub struct StepParameterSpaceDefinition {
@@ -359,6 +411,48 @@ pub struct StepParameterSpaceDefinition {
     pub combination: Option<String>,
 }
 ```
+
+`FlexInt` and `FlexFloat` are coercion-permissive newtypes around
+`i64` and `f64` respectively — they accept either a JSON number or
+a JSON string that parses as a number. Each has a `.0` field
+holding the inner primitive value:
+
+```rust
+pub struct FlexInt(pub i64);
+pub struct FlexFloat(pub f64);
+```
+
+### `userInterface` types
+
+Each `JobParameterDefinition` variant exposes an optional
+`user_interface` field carrying a typed UI hint struct. All variants
+share three common fields (`control: Option<String>`,
+`label: Option<String>`, `group_label: Option<String>`); some
+variants add type-specific extras:
+
+```rust
+pub struct StringUserInterface {       /* common only */ }
+pub struct IntUserInterface {          /* + single_step_delta: Option<FlexInt> */ }
+pub struct FloatUserInterface {        /* + decimals: Option<FlexInt>, single_step_delta: Option<FlexFloat> */ }
+pub struct PathUserInterface {         /* + file_filters: Option<Vec<FileFilter>>, file_filter_default: Option<FileFilter> */ }
+pub struct BoolUserInterface {         /* common only */ }
+pub struct RangeExprUserInterface {    /* common only */ }
+pub struct ListSimpleUserInterface {   /* common only — used by LIST[STRING], LIST[BOOL] */ }
+pub struct ListPathUserInterface {     /* + file_filters, file_filter_default (same as PathUserInterface) */ }
+pub struct ListIntUserInterface {      /* + single_step_delta: Option<FlexInt> */ }
+pub struct ListFloatUserInterface {    /* + decimals, single_step_delta (same as FloatUserInterface) */ }
+pub struct HiddenOnlyUserInterface {   /* common only — used by LIST[LIST[INT]] */ }
+
+pub struct FileFilter {
+    pub label: String,
+    pub patterns: Vec<String>,
+}
+```
+
+The `control` field, when present, is one of `LINE_EDIT`,
+`MULTILINE_EDIT`, `DROPDOWN_LIST`, `CHECK_BOX`, `HIDDEN`, or other
+string values per the spec; the model preserves it as a free-form
+`Option<String>` and leaves enforcement to consumers.
 
 ## Instantiated Job Types
 
