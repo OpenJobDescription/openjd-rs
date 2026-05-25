@@ -1,6 +1,6 @@
 [package]
 name = "openjd-sessions"
-version = "0.2.1"
+version = "0.2.2"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -26,7 +26,7 @@ test-utils = []
 
 [dependencies]
 openjd-expr = { path = "../openjd-expr", version = "0.1.1" }
-openjd-model = { path = "../openjd-model", version = "0.1.1" }
+openjd-model = { path = "../openjd-model", version = "0.2.0" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
