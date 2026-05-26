@@ -553,3 +553,247 @@ fn large_string_rsplit_whitespace_exceeds() {
     let expr = format!("'{}'.rsplit()", big);
     assert_op_limit_err_long(&expr, 100_000_000, 1, &[".rsplit()", "^~~~~~~~"]);
 }
+
+// === Path with_* operators count input length ===
+//
+// `with_name`, `with_stem`, and `with_number` allocate a new
+// string proportional to the input path length. They must charge
+// `count_string_ops(path_str.len())` so a sufficiently long input
+// trips the operation limit before the allocation, matching the
+// established convention in `with_suffix_fn` and the path-property
+// helpers (`prop_name`, `prop_stem`, etc.). Pinned here so future
+// refactors of those functions don't quietly drop the budget call.
+
+#[test]
+fn path_with_name_counts() {
+    let r = eval_bounded(
+        "path('/a/b/file.txt').with_name('other.png')",
+        100_000_000,
+        10_000_000,
+    )
+    .unwrap();
+    assert!(r.operation_count >= 1);
+}
+#[test]
+fn path_with_stem_counts() {
+    let r = eval_bounded(
+        "path('/a/b/file.txt').with_stem('final')",
+        100_000_000,
+        10_000_000,
+    )
+    .unwrap();
+    assert!(r.operation_count >= 1);
+}
+#[test]
+fn path_with_number_counts() {
+    let r = eval_bounded(
+        "path('/a/b/file_####.exr').with_number(42)",
+        100_000_000,
+        10_000_000,
+    )
+    .unwrap();
+    assert!(r.operation_count >= 1);
+}
+
+#[test]
+fn large_path_with_name_exceeds() {
+    // Pass the path via a symbol table so the test exercises
+    // ONLY `with_name_fn`'s budget call. Going through
+    // `path('big string')` would also charge the input length
+    // via `path_fn`'s own `count_string_ops`, which would mask
+    // a regression in `with_name_fn`.
+    //
+    // With the budget call: a ~2000-char path charges 8 ops via
+    // `count_string_ops(path_str.len())`, exceeding the limit
+    // of 2 (which permits the 1 op for the method call itself).
+    // Without it: only the 1 method-call op accrues and the
+    // test would fail to fire the limit.
+    //
+    // The symtab entry is `PathFormat::Posix`; pin the evaluator
+    // to the same format so the test runs identically on every
+    // host. Without this, a Windows runner trips the
+    // path-format mismatch check before the budget call ever
+    // fires.
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file.txt"));
+    let r = ParsedExpression::new("P.with_name('other.png')")
+        .unwrap()
+        .with_path_format(PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(r.contains(".with_name("), "wanted .with_name in error: {r}");
+}
+
+#[test]
+fn large_path_with_stem_exceeds() {
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file.txt"));
+    let r = ParsedExpression::new("P.with_stem('final')")
+        .unwrap()
+        .with_path_format(PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(r.contains(".with_stem("), "wanted .with_stem in error: {r}");
+}
+
+#[test]
+fn large_path_with_number_exceeds() {
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file_####.exr"));
+    let r = ParsedExpression::new("P.with_number(42)")
+        .unwrap()
+        .with_path_format(PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(
+        r.contains(".with_number("),
+        "wanted .with_number in error: {r}"
+    );
+}
+
+fn symtab_path(key: &str, p: &str) -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(key, ExprValue::new_path(p.to_string(), PathFormat::Posix))
+        .unwrap();
+    st
+}
+
+// === Memory-bound regression tests for newly-instrumented functions ===
+//
+// These tests pin the `count_string_ops` calls that were added to
+// `as_posix_fn`, `is_relative_to_fn`, `relative_to_fn`, and the
+// closure produced by `make_apply_path_mapping_fn`. Without those
+// calls a sufficiently long input would force unbounded compute.
+// The pattern mirrors `large_path_with_*_exceeds`: pass the input
+// via a symbol table so the test exercises ONLY the function under
+// test (not `path()`'s own `count_string_ops`), pin the evaluator
+// to `PathFormat::Posix` to match the symtab entry, and set the
+// operation limit just above the bare `count_op()` calls so the
+// only thing that can push the count over the limit is the
+// `count_string_ops(input.len())` call inside the function under
+// test.
+
+#[test]
+fn large_as_posix_exceeds() {
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file.txt"));
+    let r = openjd_expr::ParsedExpression::new("P.as_posix()")
+        .unwrap()
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(r.contains(".as_posix("), "wanted .as_posix in error: {r}");
+}
+
+#[test]
+fn large_is_relative_to_exceeds() {
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file.txt"));
+    // `is_relative_to(base)` does an `O(min(path,base))` prefix
+    // check. We want the budget for the path side to fire, so
+    // pass a short base — the function still walks the full
+    // path string before comparing, and `count_string_ops`
+    // charges proportionally to `path_str.len().max(base.len())`.
+    let r = openjd_expr::ParsedExpression::new("P.is_relative_to('/')")
+        .unwrap()
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(
+        r.contains(".is_relative_to("),
+        "wanted .is_relative_to in error: {r}"
+    );
+}
+
+#[test]
+fn large_relative_to_exceeds() {
+    let big = "a/".repeat(1000);
+    let st = symtab_path("P", &format!("/{big}file.txt"));
+    let r = openjd_expr::ParsedExpression::new("P.relative_to('/')")
+        .unwrap()
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(
+        r.contains(".relative_to("),
+        "wanted .relative_to in error: {r}"
+    );
+}
+
+#[test]
+fn large_apply_path_mapping_exceeds() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathMappingRule};
+    // `apply_path_mapping` is host-context-only and takes a
+    // string (not a path) — register an empty rule list so it
+    // dispatches but the budget call in the closure is what
+    // trips the limit. Pass the input as a String via the
+    // symbol table so the test exercises ONLY the closure's
+    // budget call, not `path()`'s.
+    let big = "a/".repeat(1000);
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::String(format!("/{big}file.txt")))
+        .unwrap();
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current()
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new())),
+    );
+    let r = openjd_expr::ParsedExpression::new("S.apply_path_mapping()")
+        .unwrap()
+        .with_library(&lib)
+        .with_path_format(openjd_expr::PathFormat::Posix)
+        .with_memory_limit(100_000_000)
+        .with_operation_limit(2)
+        .evaluate_with_metrics(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (2)"),
+        "expected operation-limit error, got: {r}"
+    );
+    assert!(
+        r.contains(".apply_path_mapping("),
+        "wanted .apply_path_mapping in error: {r}"
+    );
+}

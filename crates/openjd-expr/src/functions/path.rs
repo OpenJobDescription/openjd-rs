@@ -40,58 +40,316 @@ fn get_str_arg(a: &[ExprValue], idx: usize) -> String {
 
 pub fn as_posix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, _) = get_path(&a[0], ctx)?;
+    // `replace` walks the input and allocates a new string
+    // proportional to it. Budget the work so a sufficiently
+    // long input can't force unbounded compute or allocation.
+    ctx.count_string_ops(path_str.len())?;
     Ok(ExprValue::String(path_str.replace('\\', "/")))
+}
+
+/// Return `true` if the input has no final component to operate
+/// on with `with_name` / `with_stem` / `with_suffix` / `with_number`.
+///
+/// For URI inputs, that's a bare authority (`s3://bucket`) or an
+/// authority with a trailing slash (`s3://bucket/`) — in both cases
+/// `uri_path::name` returns the empty string. For filesystem paths
+/// it's the same: a path whose `pp::file_name` is empty (the root
+/// `/` on POSIX, `C:\` or `\\server\share` on Windows). Without
+/// this guard, the `with_*` operators silently invent a filename
+/// against an empty stem and emit nonsensical results like
+/// `s3://bucket/.png` (a URI for a hidden file in the bucket root)
+/// or `//x` (a UNC-shaped path) — see `with_name_fn` etc. for the
+/// per-operator details.
+///
+/// Matches Python pathlib's behaviour:
+/// `PurePosixPath('/').with_name('x')` raises
+/// `ValueError: PurePosixPath('/') has an empty name`.
+fn has_empty_name(path_str: &str, fmt: PathFormat) -> bool {
+    if crate::uri_path::is_uri(path_str) {
+        crate::uri_path::name(path_str).is_empty()
+    } else {
+        pp::file_name(path_str, fmt).is_empty()
+    }
+}
+
+/// Return `true` if `name` is a valid replacement filename for
+/// `with_name` / `with_stem`.
+///
+/// Matches Python pathlib's `with_name` validation: rejects the
+/// empty string, the `.` sentinel, and any string containing a
+/// path separator. `..` is *accepted* — pathlib treats it as a
+/// valid name (it's a filename that happens to look like the
+/// parent-dir indicator). On Windows both `/` and `\` are
+/// separators; on POSIX only `/`.
+fn is_valid_name(name: &str, fmt: PathFormat) -> bool {
+    if name.is_empty() || name == "." {
+        return false;
+    }
+    if name.contains('/') {
+        return false;
+    }
+    if fmt == PathFormat::Windows && name.contains('\\') {
+        return false;
+    }
+    true
+}
+
+/// Return `true` if `suffix` is a valid replacement suffix for
+/// `with_suffix`.
+///
+/// Matches Python pathlib's `with_suffix` validation:
+/// - Empty string is OK (strips the suffix).
+/// - Otherwise the suffix MUST start with `.` AND not be just
+///   `.` (so `.x` is OK, `.` alone is rejected).
+/// - The suffix MUST NOT contain a separator (`/` always; `\\`
+///   on Windows).
+fn is_valid_suffix(suffix: &str, fmt: PathFormat) -> bool {
+    if suffix.is_empty() {
+        return true;
+    }
+    if !suffix.starts_with('.') || suffix == "." {
+        return false;
+    }
+    if suffix.contains('/') {
+        return false;
+    }
+    if fmt == PathFormat::Windows && suffix.contains('\\') {
+        return false;
+    }
+    true
+}
+
+/// Join `parent` and `name` with the format's separator, but
+/// elide the separator when `parent` is empty (relative
+/// single-component path) or already ends with a separator
+/// (filesystem anchor like `/`, `C:\`, or `\\server\share\`).
+/// Without this, a single-component relative path
+/// (`pp::parent("foo") == ""`) would produce `"/x"` instead of
+/// `"x"`, and a drive-rooted path (`pp::parent("C:\\foo") ==
+/// "C:\\"`) would produce `"C:\\\\x"` instead of `"C:\\x"`.
+///
+/// Matches Python pathlib: `PurePosixPath("foo").with_name("x")
+/// == PurePosixPath("x")`, `PurePosixPath("/foo").with_name("x")
+/// == PurePosixPath("/x")`.
+fn join_parent_and_name(parent: &str, name: &str, fmt: PathFormat) -> String {
+    if parent.is_empty() || parent == "." {
+        // Pathlib's `with_*` operators treat a relative
+        // single-component parent (rendered as `.`) as having
+        // no parent for join purposes:
+        //   PurePosixPath("foo").with_name("x") == "x", not "./x".
+        // The `parent` *property* still renders as `.` per
+        // pathlib (see `pp::parent`), but the join here drops
+        // the leading dot to match pathlib's `_from_parsed_parts`
+        // semantics.
+        //
+        // Pathlib prepends `.\` on Windows when the resulting
+        // name would otherwise parse as a drive-relative anchor
+        // (`X:y`, `X:`). The pattern: at least 2 chars, first
+        // char ASCII alphabetic, second char `:`. Without this
+        // adjustment, `with_name('x:y')` on a relative path
+        // would produce `'x:y'`, which when re-parsed as a
+        // Windows path looks like the drive-relative path
+        // `x:` + `y`. Pathlib disambiguates by emitting
+        // `.\x:y`. POSIX has no such ambiguity.
+        if fmt == PathFormat::Windows {
+            let nb = name.as_bytes();
+            if nb.len() >= 2 && nb[0].is_ascii_alphabetic() && nb[1] == b':' {
+                return format!(".\\{name}");
+            }
+        }
+        return name.to_string();
+    }
+    let last = parent.as_bytes().last().copied();
+    let already_terminated = match fmt {
+        PathFormat::Windows => {
+            // Trailing separator (`C:\`, `\\srv\share\`, `\foo\`,
+            // etc.) — no extra separator needed.
+            if last == Some(b'/') || last == Some(b'\\') {
+                true
+            } else {
+                // Drive-relative anchor (`C:`, `D:`) with no
+                // following separator. Pathlib joins this without
+                // a separator: `PureWindowsPath('C:foo').with_name('x')`
+                // produces `'C:x'`, not `'C:\\x'`. Detect by:
+                // length == 2, byte 0 alphabetic, byte 1 == ':'.
+                let bytes = parent.as_bytes();
+                bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+            }
+        }
+        PathFormat::Posix | PathFormat::Uri => last == Some(b'/'),
+    };
+    if already_terminated {
+        format!("{parent}{name}")
+    } else {
+        format!("{parent}{sep}{name}", sep = pp::sep(fmt))
+    }
 }
 
 pub fn with_name_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_name = get_str_arg(a, 1);
-    if new_name.contains('/') || (fmt == PathFormat::Windows && new_name.contains('\\')) {
+    if !is_valid_name(&new_name, fmt) {
         return Err(ExpressionError::new(format!(
-            "with_name: name must not contain path separators, got '{new_name}'"
+            "with_name: Invalid name '{new_name}'"
         )));
     }
+    // Charge an operation budget proportional to the input
+    // length so an attacker cannot construct an input that
+    // forces unbounded string work. Matches the convention used
+    // by `with_suffix_fn` and the path-property helpers
+    // (`prop_name`, `prop_stem`, etc.) — see
+    // `EvalContext::count_string_ops`.
+    ctx.count_string_ops(path_str.len())?;
+    if has_empty_name(&path_str, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_name: '{path_str}' has an empty name"
+        )));
+    }
+    // URI paths have their own segment grammar that's independent
+    // of the host's path format. Without this branch, on a Windows
+    // host `with_name(...)` on a URI value would emit
+    // `s3:\\bucket\dir\file.ext` because `pp::parent` /
+    // `pp::sep` use the host separator. See `with_suffix_fn`,
+    // which already handled this; this branch is the same idea
+    // for `with_name`.
+    if crate::uri_path::is_uri(&path_str) {
+        let parent = crate::uri_path::parent(&path_str);
+        return Ok(ExprValue::new_path(format!("{parent}/{new_name}"), fmt));
+    }
     let parent = pp::parent(&path_str, fmt);
-    let sep = pp::sep(fmt);
-    Ok(ExprValue::new_path(format!("{parent}{sep}{new_name}"), fmt))
+    Ok(ExprValue::new_path(
+        join_parent_and_name(&parent, &new_name, fmt),
+        fmt,
+    ))
 }
 
 pub fn with_stem_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_stem = get_str_arg(a, 1);
-    if new_stem.contains('/') || (fmt == PathFormat::Windows && new_stem.contains('\\')) {
+    // pathlib's `with_stem` is implemented as
+    // `self.with_name(stem + self.suffix)`. We mirror that — the
+    // separator-containing and empty-stem-with-no-suffix cases
+    // turn into `Invalid name` errors after the filename is
+    // constructed, and the empty-stem-on-path-with-suffix case
+    // becomes `has a non-empty suffix`. Special-case the latter
+    // because pathlib uses a more specific diagnostic for it.
+    //
+    // Note: a stem of `.` is NOT rejected up front. When the
+    // path has a non-empty suffix, the resulting filename is
+    // `.{suffix}` (e.g., `..txt` for `'foo.txt'.with_stem('.')`),
+    // which is a valid name. When there's no suffix, the
+    // resulting filename is just `.` and the post-construction
+    // `is_valid_name` check catches it as `Invalid name '.'`.
+    // Only reject up front the cases pathlib's `with_name`
+    // rejects on the stem alone — separator-containing names.
+    if !new_stem.is_empty() && new_stem != "." {
+        // Cheap up-front separator check; the post-construction
+        // check still catches the stem-equals-dot case.
+        if new_stem.contains('/') || (fmt == PathFormat::Windows && new_stem.contains('\\')) {
+            return Err(ExpressionError::new(format!(
+                "with_stem: Invalid name '{new_stem}'"
+            )));
+        }
+    }
+    ctx.count_string_ops(path_str.len())?;
+    if has_empty_name(&path_str, fmt) {
         return Err(ExpressionError::new(format!(
-            "with_stem: name must not contain path separators, got '{new_stem}'"
+            "with_stem: '{path_str}' has an empty name"
         )));
     }
-    let ext = pp::extension(&path_str, fmt);
-    let parent = pp::parent(&path_str, fmt);
-    let sep = pp::sep(fmt);
-    Ok(ExprValue::new_path(
-        format!("{parent}{sep}{new_stem}{ext}"),
-        fmt,
-    ))
+    // URI paths use `/` regardless of host. See `with_name_fn`
+    // for the rationale; this branch is the same idea for
+    // `with_stem`. Suffix is taken from the URI grammar
+    // (`uri_path::suffix`), not from `pp::extension`, so the
+    // result is host-format-independent end-to-end.
+    let is_uri = crate::uri_path::is_uri(&path_str);
+    let (parent, ext) = if is_uri {
+        (
+            crate::uri_path::parent(&path_str),
+            crate::uri_path::suffix(&path_str),
+        )
+    } else {
+        (
+            pp::parent(&path_str, fmt),
+            pp::extension(&path_str, fmt).to_string(),
+        )
+    };
+    if new_stem.is_empty() && !ext.is_empty() {
+        // Specific pathlib diagnostic for this case.
+        return Err(ExpressionError::new(format!(
+            "with_stem: '{path_str}' has a non-empty suffix"
+        )));
+    }
+    let new_filename = format!("{new_stem}{ext}");
+    if !is_valid_name(&new_filename, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_stem: Invalid name '{new_filename}'"
+        )));
+    }
+    let result = if is_uri {
+        format!("{parent}/{new_filename}")
+    } else {
+        join_parent_and_name(&parent, &new_filename, fmt)
+    };
+    Ok(ExprValue::new_path(result, fmt))
 }
 
 pub fn with_suffix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_suffix = get_str_arg(a, 1);
-    ctx.count_string_ops(path_str.len())?;
-    if crate::uri_path::is_uri(&path_str) {
-        let stem = crate::uri_path::stem(&path_str);
-        let parent = crate::uri_path::parent(&path_str);
-        return Ok(ExprValue::new_path(
-            format!("{parent}/{stem}{new_suffix}"),
-            fmt,
-        ));
+    if !is_valid_suffix(&new_suffix, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_suffix: Invalid suffix '{new_suffix}'"
+        )));
     }
-    let stem = pp::file_stem(&path_str, fmt);
-    let parent = pp::parent(&path_str, fmt);
-    let sep = pp::sep(fmt);
-    Ok(ExprValue::new_path(
-        format!("{parent}{sep}{stem}{new_suffix}"),
-        fmt,
-    ))
+    ctx.count_string_ops(path_str.len())?;
+    if has_empty_name(&path_str, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_suffix: '{path_str}' has an empty name"
+        )));
+    }
+    let is_uri = crate::uri_path::is_uri(&path_str);
+    let (parent, stem) = if is_uri {
+        (
+            crate::uri_path::parent(&path_str),
+            crate::uri_path::stem(&path_str),
+        )
+    } else {
+        (
+            pp::parent(&path_str, fmt),
+            pp::file_stem(&path_str, fmt).to_string(),
+        )
+    };
+    let new_filename = format!("{stem}{new_suffix}");
+    // Pathlib also validates the constructed filename and raises
+    // if it's invalid. Concretely: `'..foo'.with_suffix('')`
+    // would produce the filename `.` (because `'..foo'.stem` is
+    // `.` per pathlib's rule), and pathlib catches that with
+    // `Invalid name '.'`. Re-running our `is_valid_name` against
+    // the constructed filename catches the same case.
+    if !is_valid_name(&new_filename, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_suffix: Invalid name '{new_filename}'"
+        )));
+    }
+    let result = if is_uri {
+        format!("{parent}/{new_filename}")
+    } else {
+        join_parent_and_name(&parent, &new_filename, fmt)
+    };
+    Ok(ExprValue::new_path(result, fmt))
+}
+
+/// Split a filename into `(stem, suffix)` per Python pathlib's
+/// rule: the suffix exists only when the rightmost `.` is neither
+/// at the start of the name nor at the end. Used by
+/// `with_number_fn` to preserve the suffix verbatim while
+/// substituting the stem.
+fn split_name_at_suffix(filename: &str) -> (&str, &str) {
+    match filename.rfind('.') {
+        Some(i) if i > 0 && i + 1 < filename.len() => (&filename[..i], &filename[i..]),
+        _ => (filename, ""),
+    }
 }
 
 pub fn with_number_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -100,19 +358,32 @@ pub fn with_number_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         ExprValue::Int(n) => *n,
         _ => return Err(ExpressionError::new("with_number() requires int argument")),
     };
+    ctx.count_string_ops(path_str.len())?;
+    if has_empty_name(&path_str, fmt) {
+        return Err(ExpressionError::new(format!(
+            "with_number: '{path_str}' has an empty name"
+        )));
+    }
     let is_string = matches!(&a[0], ExprValue::String(_));
-    let (dir_part, filename) = pp::split(&path_str, fmt);
-    let prefix = if dir_part.is_empty() {
-        String::new()
+    // URI paths use `/` regardless of host. Without this branch,
+    // on a Windows host `with_number(...)` on a URI value would
+    // emit `s3://bucket/renders\shot_0042.exr` because
+    // `pp::split` and `pp::sep` use the host separator. See
+    // `with_name_fn` / `with_stem_fn` for the analogous fix.
+    let result = if crate::uri_path::is_uri(&path_str) {
+        let parent = crate::uri_path::parent(&path_str);
+        let filename = crate::uri_path::name(&path_str);
+        let (stem, suffix) = split_name_at_suffix(&filename);
+        let new_stem = with_number_replace(stem, num)?;
+        // `parent` is the URI authority + leading path segments.
+        format!("{parent}/{new_stem}{suffix}")
     } else {
-        format!("{}{}", dir_part, pp::sep(fmt))
+        let (dir_part, filename) = pp::split(&path_str, fmt);
+        let (stem, suffix) = split_name_at_suffix(filename);
+        let new_stem = with_number_replace(stem, num)?;
+        let new_filename = format!("{new_stem}{suffix}");
+        join_parent_and_name(dir_part, &new_filename, fmt)
     };
-    let (stem, suffix) = match filename.rfind('.') {
-        Some(i) if i > 0 => (&filename[..i], &filename[i..]),
-        _ => (filename, ""),
-    };
-    let new_stem = with_number_replace(stem, num)?;
-    let result = format!("{prefix}{new_stem}{suffix}");
     if is_string {
         Ok(ExprValue::String(result))
     } else {
@@ -261,6 +532,12 @@ fn path_starts_with(path: &str, base: &str, fmt: PathFormat) -> bool {
 pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
+    // The prefix comparison below is `O(min(path_str.len(),
+    // base.len()))` in the worst case (especially on Windows where
+    // it does a case-insensitive compare). Budget the work
+    // proportionally to the larger input so a long pair can't
+    // force unbounded compute.
+    ctx.count_string_ops(path_str.len().max(base.len()))?;
     let is_rel = path_starts_with(&path_str, &base, fmt)
         && (path_str.len() == base.len()
             || base.ends_with('/')
@@ -272,6 +549,11 @@ pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
+    // Same rationale as `is_relative_to_fn`. This function also
+    // clones the tail of `path_str` into a fresh String, so the
+    // allocation is `O(path_str.len() - base.len())`, but the
+    // input-length bound here is the safer upper bound.
+    ctx.count_string_ops(path_str.len().max(base.len()))?;
     let is_rel = path_starts_with(&path_str, &base, fmt)
         && (path_str.len() == base.len()
             || base.ends_with('/')
@@ -307,6 +589,13 @@ pub fn make_apply_path_mapping_fn(
 ) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> R + Send + Sync + 'static {
     move |ctx, a| {
         let (path_str, fmt) = get_path(&a[0], ctx)?;
+        // `apply_rules_with_format` walks the rules and does an
+        // `O(rules × path_len)` prefix comparison + a string
+        // substitution. Budget the work proportionally to the
+        // input length — the rule count is bounded by the
+        // session profile, but the path length is caller-
+        // controlled.
+        ctx.count_string_ops(path_str.len())?;
         let mapped =
             crate::path_mapping::apply_rules_with_format(&rules, &path_str, ctx.path_format());
         if mapped == path_str {

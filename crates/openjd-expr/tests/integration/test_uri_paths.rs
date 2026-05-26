@@ -978,3 +978,306 @@ fn roundtrip_double_slash() {
         "s3://bucket/a//b/file.txt"
     );
 }
+
+// === Regression tests: URI operators on a Windows-format host ===
+//
+// The path operators `with_name`, `with_stem`, `with_number`, and
+// `with_suffix` must keep URI separators (`/`) regardless of what
+// `PathFormat` the evaluator is configured for. Without the
+// URI-detection branches in those functions, a Windows-format host
+// re-emits URIs with backslashes — so `s3://bucket/dir/file.exr`
+// becomes `s3:\\bucket\dir\file.exr` after `.with_name(...)`.
+//
+// Pinned to catch regressions: the binding crate's Python tests
+// run with `PathFormat::host()` (Windows on Windows runners), so
+// without these the only place the bug could be caught was the
+// downstream Python suite on Windows.
+
+fn uri_windows_st(key: &str, uri: &str) -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(
+        key,
+        ExprValue::new_path(uri.to_string(), PathFormat::Windows),
+    )
+    .unwrap();
+    st
+}
+
+fn eval_windows_with(expr: &str, st: &SymbolTable) -> ExprValue {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    parsed
+        .with_path_format(PathFormat::Windows)
+        .evaluate(&symtabs)
+        .unwrap()
+}
+
+#[test]
+fn with_name_on_windows_host_preserves_uri_separators() {
+    assert_eq!(
+        eval_windows_with(
+            "P.with_name('other.obj')",
+            &uri_windows_st("P", "s3://bucket/renders/scene.exr"),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/other.obj"
+    );
+}
+
+#[test]
+fn with_stem_on_windows_host_preserves_uri_separators() {
+    assert_eq!(
+        eval_windows_with(
+            "P.with_stem('final')",
+            &uri_windows_st("P", "s3://bucket/renders/scene.exr"),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/final.exr"
+    );
+}
+
+#[test]
+fn with_number_on_windows_host_preserves_uri_separators() {
+    assert_eq!(
+        eval_windows_with(
+            "P.with_number(42)",
+            &uri_windows_st("P", "s3://bucket/renders/shot_####.exr"),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/shot_0042.exr"
+    );
+}
+
+#[test]
+fn with_suffix_on_windows_host_preserves_uri_separators() {
+    // Already covered by `with_suffix_fn`'s URI branch, but pin
+    // a Windows-format-host case here too so future refactors of
+    // `path::with_suffix_fn` don't regress.
+    assert_eq!(
+        eval_windows_with(
+            "P.with_suffix('.png')",
+            &uri_windows_st("P", "s3://bucket/renders/scene.exr"),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/scene.png"
+    );
+}
+
+#[test]
+fn with_number_string_overload_on_windows_host_preserves_uri_separators() {
+    // `with_number` has a string-input overload
+    // (`with_number(s: string, num: int) -> string`) per the
+    // expression-language spec. The function preserves the
+    // input value's type — a string in, a string out — but the
+    // URI-detection branch in `with_number_fn` must still apply
+    // so the URI is not mangled with backslashes. Use
+    // ``with_number(...)`` as a free function so the first
+    // argument is dispatched as a string, not a path.
+    assert_eq!(
+        eval_windows_with(
+            "with_number('s3://bucket/renders/shot_####.exr', 42)",
+            &SymbolTable::new(),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/shot_0042.exr"
+    );
+}
+
+#[test]
+fn with_name_on_windows_host_uri_with_single_segment() {
+    // Bare URI with one path segment — `parent` is the
+    // authority alone, result joins back with a single `/`.
+    assert_eq!(
+        eval_windows_with(
+            "P.with_name('other.obj')",
+            &uri_windows_st("P", "s3://bucket/file.exr"),
+        )
+        .to_display_string(),
+        "s3://bucket/other.obj"
+    );
+}
+
+#[test]
+fn with_name_on_windows_host_https_scheme() {
+    // The fix must apply to every URI scheme, not just `s3://`.
+    // `https://` exercises a different authority shape (host +
+    // optional port + path) but goes through the same
+    // `uri_path::is_uri` detection.
+    assert_eq!(
+        eval_windows_with(
+            "P.with_name('index.html')",
+            &uri_windows_st("P", "https://example.com/docs/page.html"),
+        )
+        .to_display_string(),
+        "https://example.com/docs/index.html"
+    );
+}
+
+#[test]
+fn with_stem_on_windows_host_uri_no_extension() {
+    // Stem replacement when the input has no extension —
+    // `uri_path::suffix` returns "", so the result is just the
+    // parent + new stem with a single `/` separator.
+    assert_eq!(
+        eval_windows_with(
+            "P.with_stem('final')",
+            &uri_windows_st("P", "s3://bucket/renders/scene"),
+        )
+        .to_display_string(),
+        "s3://bucket/renders/final"
+    );
+}
+
+// ── Empty-name guard: bare-authority URIs ────────────────────────
+//
+// A URI with no path part (bare authority `s3://bucket` or
+// authority + trailing slash `s3://bucket/`) has an empty `name`
+// per `uri_path::name`. The `with_name` / `with_stem` /
+// `with_suffix` / `with_number` operators must raise
+// `ExpressionError` in this case rather than inventing a filename
+// against an empty stem. Matches Python pathlib's behaviour for
+// the analogous filesystem case (`PurePosixPath('/').with_name`
+// raises `ValueError`). Diagnostic format:
+// `with_<op>: '<path>' has an empty name`.
+
+fn assert_uri_empty_name_err(expr: &str, st: &SymbolTable, op: &str, path: &str) {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let e = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
+    let needle = format!("{op}: '{path}' has an empty name");
+    assert!(
+        e.contains(&needle),
+        "expected substring {needle:?} in:\n{e}"
+    );
+}
+
+// ── Bare authority: s3://bucket ──
+#[test]
+fn with_name_on_bare_uri_authority_errors() {
+    assert_uri_empty_name_err(
+        "P.with_name('x.png')",
+        &uri_st("P", "s3://bucket"),
+        "with_name",
+        "s3://bucket",
+    );
+}
+#[test]
+fn with_stem_on_bare_uri_authority_errors() {
+    assert_uri_empty_name_err(
+        "P.with_stem('final')",
+        &uri_st("P", "s3://bucket"),
+        "with_stem",
+        "s3://bucket",
+    );
+}
+#[test]
+fn with_suffix_on_bare_uri_authority_errors() {
+    assert_uri_empty_name_err(
+        "P.with_suffix('.png')",
+        &uri_st("P", "s3://bucket"),
+        "with_suffix",
+        "s3://bucket",
+    );
+}
+#[test]
+fn with_number_on_bare_uri_authority_errors() {
+    assert_uri_empty_name_err(
+        "P.with_number(42)",
+        &uri_st("P", "s3://bucket"),
+        "with_number",
+        "s3://bucket",
+    );
+}
+
+// ── Authority with trailing slash: s3://bucket/ ──
+#[test]
+fn with_name_on_bare_uri_authority_trailing_slash_errors() {
+    assert_uri_empty_name_err(
+        "P.with_name('x.png')",
+        &uri_st("P", "s3://bucket/"),
+        "with_name",
+        "s3://bucket/",
+    );
+}
+#[test]
+fn with_stem_on_bare_uri_authority_trailing_slash_errors() {
+    assert_uri_empty_name_err(
+        "P.with_stem('final')",
+        &uri_st("P", "s3://bucket/"),
+        "with_stem",
+        "s3://bucket/",
+    );
+}
+#[test]
+fn with_suffix_on_bare_uri_authority_trailing_slash_errors() {
+    assert_uri_empty_name_err(
+        "P.with_suffix('.png')",
+        &uri_st("P", "s3://bucket/"),
+        "with_suffix",
+        "s3://bucket/",
+    );
+}
+#[test]
+fn with_number_on_bare_uri_authority_trailing_slash_errors() {
+    assert_uri_empty_name_err(
+        "P.with_number(42)",
+        &uri_st("P", "s3://bucket/"),
+        "with_number",
+        "s3://bucket/",
+    );
+}
+
+// ── Authority + filename: s3://bucket/file.jpg ──
+//
+// Sanity check: a URI with a non-empty `name` does NOT trigger
+// the empty-name guard; the operators succeed normally. Pinned
+// alongside the empty-name cases so a single test file documents
+// both sides of the contract.
+#[test]
+fn with_name_on_uri_with_filename_succeeds() {
+    let st = uri_st("P", "s3://bucket/file.jpg");
+    let parsed = ParsedExpression::new("P.with_name('other.png')").unwrap();
+    let symtabs = [&st];
+    let v = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "s3://bucket/other.png");
+}
+#[test]
+fn with_stem_on_uri_with_filename_succeeds() {
+    let st = uri_st("P", "s3://bucket/file.jpg");
+    let parsed = ParsedExpression::new("P.with_stem('final')").unwrap();
+    let symtabs = [&st];
+    let v = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "s3://bucket/final.jpg");
+}
+#[test]
+fn with_suffix_on_uri_with_filename_succeeds() {
+    let st = uri_st("P", "s3://bucket/file.jpg");
+    let parsed = ParsedExpression::new("P.with_suffix('.png')").unwrap();
+    let symtabs = [&st];
+    let v = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "s3://bucket/file.png");
+}
+#[test]
+fn with_number_on_uri_with_filename_succeeds() {
+    let st = uri_st("P", "s3://bucket/file_####.jpg");
+    let parsed = ParsedExpression::new("P.with_number(42)").unwrap();
+    let symtabs = [&st];
+    let v = parsed
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "s3://bucket/file_0042.jpg");
+}

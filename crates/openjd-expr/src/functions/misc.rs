@@ -164,7 +164,20 @@ pub fn path_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         }
     };
     ctx.count_string_ops(s.len())?;
-    Ok(ExprValue::new_path(s, ctx.path_format()))
+    // Pathlib normalizes filesystem paths on construction:
+    // strips leading `./`, internal `/./`, trailing separators,
+    // collapses runs of separators (POSIX `//` is a special
+    // double-slash root), and on Windows converts `/` to `\`.
+    // URI inputs (`scheme://...`) are NOT normalized — the spec
+    // explicitly preserves URI path components verbatim because
+    // `a//b` and `a/b` may refer to different resources for
+    // schemes like S3. See specifications wiki §1.2.1.
+    let normalized = if crate::uri_path::is_uri(&s) {
+        s
+    } else {
+        super::path_parse::pathlib_normalize(&s, ctx.path_format())
+    };
+    Ok(ExprValue::new_path(normalized, ctx.path_format()))
 }
 
 pub fn path_join_fn(ctx: Ctx, a: &[ExprValue]) -> R {

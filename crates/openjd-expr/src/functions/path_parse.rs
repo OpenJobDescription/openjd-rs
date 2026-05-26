@@ -40,6 +40,165 @@ fn normalize(path: &str, fmt: PathFormat) -> &str {
     &path[..end]
 }
 
+/// Canonicalize a filesystem path the same way Python's `pathlib`
+/// does on construction.
+///
+/// Mirrors `pathlib.PurePath`'s `_format_parsed_parts` /
+/// `_load_parts` machinery for filesystem inputs (POSIX and
+/// Windows). The transformation is intentionally distinct from
+/// `normalize` (the private trailing-separator stripper above) —
+/// `pathlib_normalize` is what the public `path()` constructor
+/// runs on its argument so that downstream operations see a
+/// canonical form, exactly as pathlib does.
+///
+/// Rules (POSIX):
+/// - empty input → `"."`
+/// - exactly two leading `/` → preserved (POSIX double-slash root)
+/// - 1 or 3+ leading `/` → collapsed to a single `/`
+/// - drop interior `.` segments (a/./b → a/b)
+/// - drop empty segments from runs of separators (a//b → a/b)
+/// - strip trailing separators (a/b/ → a/b)
+/// - `..` segments are kept verbatim (a/../b is NOT simplified;
+///   pathlib does not resolve `..` because it cannot do so safely
+///   without filesystem access)
+/// - dot path `.` and empty input both render as `"."`
+///
+/// Rules (Windows):
+/// - same dot/empty rules as POSIX
+/// - all `/` are converted to `\`
+/// - drive-relative anchors `C:` (no separator) are preserved as
+///   `C:`, drive-absolute anchors `C:\` keep their trailing `\`
+/// - UNC anchors `\\server\share` always end with `\`
+/// - a single leading `\` (rooted-no-drive) is preserved
+///
+/// URIs are NOT handled here — the caller routes URI inputs
+/// (`uri_path::is_uri`) to the URI codepath which preserves
+/// every byte verbatim. URIs are opaque per the OpenJD spec
+/// (see specifications wiki §1.2.1 path types).
+pub fn pathlib_normalize(path: &str, fmt: PathFormat) -> String {
+    if path.is_empty() {
+        return ".".to_string();
+    }
+    if fmt == PathFormat::Uri {
+        // URIs are opaque — never normalize. The caller is
+        // expected to keep URI inputs out of this function, but
+        // guard defensively in case PathFormat::Uri sneaks in.
+        return path.to_string();
+    }
+
+    // On Windows, normalize forward slashes to backslashes
+    // before processing. Pathlib treats `/` and `\` as
+    // equivalent separators on Windows but emits `\`.
+    let buf;
+    let working: &str = if fmt == PathFormat::Windows {
+        buf = path.replace('/', "\\");
+        &buf
+    } else {
+        path
+    };
+
+    // Compute the anchor and the remainder.
+    let anchor = anchor_len(working, fmt).min(working.len());
+    let mut anchor_str = working[..anchor].to_string();
+
+    // Normalize the anchor:
+    //
+    // POSIX:
+    //   - collapse 3+ leading `/` to a single `/` (anchor was
+    //     already detected as the leading `/`-run; adjust).
+    //   - exactly 2 leading slashes → preserve as `//`.
+    //
+    // Windows:
+    //   - UNC anchors must end with `\` (already enforced by
+    //     `anchor_len`, but a UNC-without-separator-after-share
+    //     like `\\srv\share` returns anchor_len equal to the
+    //     full string; we add the trailing `\` here for parity
+    //     with pathlib which always renders UNC anchors with a
+    //     trailing separator).
+    //   - drive anchors `C:` and `C:\` unchanged.
+    if fmt != PathFormat::Windows {
+        // POSIX: collapse the leading slash run.
+        let leading_slashes = working
+            .as_bytes()
+            .iter()
+            .take_while(|&&b| b == b'/')
+            .count();
+        if leading_slashes >= 3 {
+            anchor_str = "/".to_string();
+        } else if leading_slashes == 2 {
+            anchor_str = "//".to_string();
+        } else if leading_slashes == 1 {
+            anchor_str = "/".to_string();
+        } else {
+            anchor_str = String::new();
+        }
+    } else {
+        // Windows: ensure UNC anchors end with `\`.
+        if anchor_str.starts_with("\\\\")
+            && anchor_str.matches('\\').count() >= 3
+            && !anchor_str.ends_with('\\')
+        {
+            anchor_str.push('\\');
+        }
+    }
+
+    // Re-derive the leading-anchor offset in `working` so we know
+    // where the remainder starts. For POSIX, the anchor always
+    // covers exactly the leading slash run.
+    let remainder_start = if fmt == PathFormat::Windows {
+        anchor
+    } else {
+        working
+            .as_bytes()
+            .iter()
+            .take_while(|&&b| b == b'/')
+            .count()
+    };
+    let remainder = &working[remainder_start..];
+
+    // Split, drop empty and `.` segments. `..` is kept.
+    let segments: Vec<&str> = remainder
+        .split(|c: char| is_sep(c, fmt))
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect();
+
+    if anchor_str.is_empty() && segments.is_empty() {
+        return ".".to_string();
+    }
+
+    let sep = match fmt {
+        PathFormat::Windows => "\\",
+        PathFormat::Posix | PathFormat::Uri => "/",
+    };
+    if segments.is_empty() {
+        return anchor_str;
+    }
+    if anchor_str.is_empty() {
+        return segments.join(sep);
+    }
+    // If anchor already ends with the separator (filesystem
+    // root, drive-absolute, UNC), join directly. Otherwise
+    // (drive-relative `C:`), join directly too — pathlib does
+    // not insert an extra separator after `C:`.
+    let anchor_terminated = match fmt {
+        PathFormat::Windows => {
+            anchor_str.ends_with('\\') || anchor_str.ends_with('/') || {
+                // Drive-relative anchor like `C:` (no separator
+                // after the colon). Pathlib joins these without
+                // inserting a separator: `C:` + `foo` → `C:foo`.
+                let b = anchor_str.as_bytes();
+                b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+            }
+        }
+        PathFormat::Posix | PathFormat::Uri => anchor_str.ends_with('/'),
+    };
+    if anchor_terminated {
+        format!("{anchor_str}{}", segments.join(sep))
+    } else {
+        format!("{anchor_str}{sep}{}", segments.join(sep))
+    }
+}
+
 /// Return the byte length of the anchor (root/drive/UNC prefix) in a path.
 fn anchor_len(path: &str, fmt: PathFormat) -> usize {
     let bytes = path.as_bytes();
@@ -152,25 +311,52 @@ pub fn parent(path: &str, fmt: PathFormat) -> String {
         if s.starts_with("\\\\") && s.matches('\\').count() >= 3 && !s.ends_with('\\') {
             return format!("{}\\", s);
         }
+        // Pathlib parent of a relative single-component path is
+        // `.` (not the empty string). E.g.
+        // `PureWindowsPath("foo").parent == "."`. Apply the same
+        // here when the parent is empty AND the original path is
+        // non-empty (we still preserve the empty-parent contract
+        // when the input itself was empty / `.`).
+        if s.is_empty() && !path.is_empty() && path != "." {
+            return ".".to_string();
+        }
         return s;
+    }
+    if base.is_empty() && !path.is_empty() && path != "." {
+        return ".".to_string();
     }
     base.to_string()
 }
 
 /// Get the file stem (file_name without the last extension).
+///
+/// Matches Python pathlib's rule: a suffix exists only when the
+/// rightmost `.` is neither at the start of the name (which marks
+/// a hidden-file name like `.hidden`) nor at the end (which is a
+/// trailing dot that does not delimit a real extension — `foo.`
+/// has stem `foo.` and no suffix).
 pub fn file_stem(path: &str, fmt: PathFormat) -> &str {
     let name = file_name(path, fmt);
     match name.rfind('.') {
-        Some(0) | None => name, // ".hidden" or no dot → whole name is stem
+        // No dot, dot at start (`.hidden`), or dot at end (`foo.`)
+        // → the whole name is the stem.
+        Some(0) | None => name,
+        Some(i) if i + 1 == name.len() => name,
         Some(i) => &name[..i],
     }
 }
 
 /// Get the extension (last ".ext" including the dot).
+///
+/// Matches Python pathlib's rule: see `file_stem` for the
+/// detailed criteria. The extension is empty for names with no
+/// dot, names starting with a dot (`.hidden`), and names ending
+/// with a dot (`foo.`).
 pub fn extension(path: &str, fmt: PathFormat) -> &str {
     let name = file_name(path, fmt);
     match name.rfind('.') {
-        Some(0) | None => "", // ".hidden" or no dot → no extension
+        Some(0) | None => "",
+        Some(i) if i + 1 == name.len() => "",
         Some(i) => &name[i..],
     }
 }
@@ -223,31 +409,39 @@ pub fn parts(path: &str, fmt: PathFormat) -> Vec<String> {
 
 /// Get all suffixes (like Python's PurePath.suffixes).
 /// "file.tar.gz" → [".tar", ".gz"]
+/// Get all suffixes (extensions) of the file name.
+///
+/// Matches Python pathlib's algorithm:
+/// ```text
+///   name = self.name
+///   if name.endswith('.'):
+///       return []
+///   name = name.lstrip('.')
+///   return ['.' + suffix for suffix in name.split('.')[1:]]
+/// ```
+///
+/// Notable corollaries:
+/// - Trailing-dot names have no suffixes (`foo.` → `[]`).
+/// - Names that consist entirely of leading dots (`.`, `..`,
+///   `...`) yield `[]` because `lstrip('.')` produces the empty
+///   string.
+/// - `.tar.gz` (a name that is itself a suffix-looking
+///   filename) yields `['.gz']`, not `['.tar', '.gz']` —
+///   the leading-dot prefix is stripped before splitting.
+/// - `..foo` yields `[]` even though `suffix` returns `.foo`,
+///   because `lstrip('.')` produces `'foo'` which has no inner
+///   dot. This is a pathlib quirk we preserve for parity.
 pub fn suffixes(path: &str, fmt: PathFormat) -> Vec<String> {
     let name = file_name(path, fmt);
-    let mut result = Vec::new();
-    if let Some(first_dot) = name.find('.') {
-        if first_dot == 0 {
-            // Dotfile like ".hidden" — check for more dots
-            if let Some(second_dot) = name[1..].find('.') {
-                let mut remaining = &name[1 + second_dot..];
-                while let Some(dot_pos) = remaining[1..].find('.') {
-                    result.push(remaining[..dot_pos + 1].to_string());
-                    remaining = &remaining[dot_pos + 1..];
-                }
-                result.push(remaining.to_string());
-            }
-            // else: just ".hidden" with no further dots → no suffixes
-        } else {
-            let mut remaining = &name[first_dot..];
-            while let Some(dot_pos) = remaining[1..].find('.') {
-                result.push(remaining[..dot_pos + 1].to_string());
-                remaining = &remaining[dot_pos + 1..];
-            }
-            result.push(remaining.to_string());
-        }
+    if name.ends_with('.') {
+        return Vec::new();
     }
-    result
+    let trimmed = name.trim_start_matches('.');
+    let parts: Vec<&str> = trimmed.split('.').collect();
+    if parts.len() <= 1 {
+        return Vec::new();
+    }
+    parts[1..].iter().map(|s| format!(".{s}")).collect()
 }
 
 /// Join path parts using Python pathlib constructor semantics.

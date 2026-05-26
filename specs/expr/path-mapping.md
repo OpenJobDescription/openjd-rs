@@ -133,6 +133,86 @@ Path-related operations in the expression language:
 | `is_relative_to(other)` | `(path, path) -> bool` | Check prefix relationship |
 | `relative_to(other)` | `(path, path) -> path` | Compute relative path |
 
+> **URI paths in path methods.** The path properties and the
+> `with_*` methods all detect URI inputs (`uri_path::is_uri`) and
+> route to `uri_path::*` so the result preserves URI grammar —
+> `/` separator, opaque authority, no normalization — regardless
+> of the evaluator's `PathFormat`. A URI value passed through any
+> of these methods stays a URI; it does not pick up the host's
+> backslashes when the evaluator is in `PathFormat::Windows`. See
+> the conformance test
+> `2023-09/EXPR/jobs/expr2.3.2--uri-path-ops.test.yaml` for the
+> end-to-end pin.
+
+> **Empty-name guard.** `with_name`, `with_stem`, `with_suffix`,
+> and `with_number` raise `ExpressionError` with the message
+> `with_<op>: '<path>' has an empty name` when the input has no
+> final component to operate on. That covers filesystem roots
+> (`/` on POSIX, `C:\` and `\\server\share` on Windows) and bare
+> URI authorities (`s3://bucket`, `s3://bucket/`). Without this
+> guard the operators silently invent a filename against an
+> empty stem and emit nonsensical results
+> (`path("/").with_name("x")` → `"//x"`,
+> `path("s3://bucket").with_suffix(".png")` → `"s3://bucket/.png"`).
+> Matches Python pathlib's behaviour:
+> `PurePosixPath('/').with_name('x')` raises
+> `ValueError: PurePosixPath('/') has an empty name`.
+
+> **Replacement-argument validation.** `with_name` and
+> `with_stem` raise with `Invalid name '<arg>'` if the supplied
+> name is empty, equal to `.`, or contains a path separator
+> (`/` always; `\` on Windows). `..` is *accepted* (matches
+> pathlib — it's a filename that happens to look like the
+> parent-dir indicator). `with_suffix` raises with
+> `Invalid suffix '<arg>'` unless the suffix is empty (which
+> strips the existing suffix) or starts with `.` and is not
+> just `.` and contains no separator. Multi-dot suffixes like
+> `.tar.gz` are accepted. `with_stem('')` raises one of two
+> messages depending on whether the path has a suffix:
+> `Invalid name ''` if there's no suffix to keep, or
+> `'<path>' has a non-empty suffix` if there is — both align
+> with pathlib's diagnostics.
+
+> **Relative paths stay relative.** `with_name`, `with_stem`,
+> `with_suffix`, and `with_number` preserve the input's
+> absoluteness. A single-component relative path
+> (`path("foo").with_name("x")`) produces `"x"`, not `"/x"`,
+> matching pathlib. Filesystem anchors (`/`, `C:\`, UNC
+> `\\server\share\`) are preserved without doubling the
+> separator (`path("/foo").with_name("x")` → `"/x"`,
+> `path("C:\\foo").with_name("x")` → `"C:\\x"`).
+
+> **Filesystem path normalization on construction.** The
+> `path()` constructor canonicalizes filesystem inputs the
+> same way Python pathlib does on construction:
+>
+> - leading `./` is stripped (`path("./foo")` → `"foo"`)
+> - interior `/./` segments are stripped (`path("a/./b")` → `"a/b"`)
+> - trailing separators are stripped (`path("a/b/")` → `"a/b"`)
+> - runs of separators are collapsed (`path("a//b")` → `"a/b"`)
+> - 3+ leading slashes collapse to 1 (`path("///foo")` → `"/foo"`)
+> - exactly 2 leading POSIX slashes are preserved (`path("//foo")` → `"//foo"`)
+>   per IEEE Std 1003.1-2017 §3.271 (POSIX double-slash root)
+> - on Windows, all `/` become `\` (`path("foo/bar")` → `"foo\\bar"`)
+> - UNC anchors always end with `\` (`path("\\\\srv\\share")` → `"\\\\srv\\share\\"`)
+> - empty input becomes `"."` (`path("")` → `"."`)
+> - `..` segments are NOT resolved (pathlib doesn't simplify
+>   `..` because it can't safely do so without filesystem access
+>   to detect symbolic links)
+>
+> URI inputs are explicitly NOT normalized — see the URI-paths
+> note above. The OpenJD specification (wiki §1.2.1) preserves
+> URI path components verbatim because schemes like S3 treat
+> `a//b` and `a/b` as distinct keys.
+
+> **Drive-relative path disambiguation on Windows.** When
+> `with_name` produces a name on a relative-path parent and the
+> name itself begins with `<letter>:`
+> (e.g., `path("foo").with_name("x:y")`), pathlib prepends `.\`
+> to disambiguate from a drive-relative path: the result is
+> `".\\x:y"`, not `"x:y"`. We follow the same convention. POSIX
+> has no analogous ambiguity.
+
 ### Path Operators
 
 | Operator | Signature | Description |

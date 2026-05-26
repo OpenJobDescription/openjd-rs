@@ -74,18 +74,32 @@ pub fn parent(path: &str) -> String {
 }
 
 /// File extension of the final component (including the dot), or empty string.
+///
+/// Matches Python pathlib's rule (see
+/// `crate::functions::path_parse::extension`): the suffix is empty
+/// when the rightmost `.` is at the start of the name (`.hidden`)
+/// or at the end (`foo.`).
 pub fn suffix(path: &str) -> String {
     let n = name(path);
     n.rfind('.')
-        .filter(|&i| i > 0)
+        .filter(|&i| i > 0 && i + 1 < n.len())
         .map(|i| n[i..].to_string())
         .unwrap_or_default()
 }
 
 /// All file extensions of the final component.
+///
+/// Matches Python pathlib's algorithm exactly — see the doc on
+/// `crate::functions::path_parse::suffixes` for the algorithm and
+/// its corollaries (trailing-dot names, leading-dot names, the
+/// `..foo` quirk).
 pub fn suffixes(path: &str) -> Vec<String> {
     let n = name(path);
-    let parts: Vec<&str> = n.split('.').collect();
+    if n.ends_with('.') {
+        return Vec::new();
+    }
+    let trimmed = n.trim_start_matches('.');
+    let parts: Vec<&str> = trimmed.split('.').collect();
     if parts.len() <= 1 {
         return Vec::new();
     }
@@ -93,10 +107,12 @@ pub fn suffixes(path: &str) -> Vec<String> {
 }
 
 /// Final component without the last extension.
+///
+/// Same trailing-dot rule as `suffix` — see that function.
 pub fn stem(path: &str) -> String {
     let n = name(path);
     n.rfind('.')
-        .filter(|&i| i > 0)
+        .filter(|&i| i > 0 && i + 1 < n.len())
         .map(|i| n[..i].to_string())
         .unwrap_or(n)
 }

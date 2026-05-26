@@ -2240,3 +2240,912 @@ fn windows_is_relative_to_partial_component_case_insensitive_false() {
         "false"
     );
 }
+
+// ── Empty-name guard: filesystem root paths ──────────────────────
+//
+// `with_name`, `with_stem`, `with_suffix`, and `with_number` raise
+// `ExpressionError` when the input has no final component to operate
+// on. Without this guard the operators silently invent a filename
+// against an empty stem and emit nonsensical results
+// (e.g., `path("/").with_name("x")` → `"//x"`). Matches Python
+// pathlib's behaviour:
+// `PurePosixPath('/').with_name('x')` raises
+// `ValueError: PurePosixPath('/') has an empty name`.
+//
+// The error message format is
+// `with_<op>: '<path>' has an empty name` so the path that was
+// rejected appears verbatim in the diagnostic.
+
+fn assert_empty_name_err(expr: &str, st: &SymbolTable, fmt: PathFormat, op: &str, path: &str) {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let e = parsed
+        .with_path_format(fmt)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
+    let needle = format!("{op}: '{path}' has an empty name");
+    assert!(
+        e.contains(&needle),
+        "expected substring {needle:?} in:\n{e}"
+    );
+}
+
+#[test]
+fn with_name_on_posix_root_errors() {
+    assert_empty_name_err(
+        "P.with_name('x.png')",
+        &posix_st("P", "/"),
+        PathFormat::Posix,
+        "with_name",
+        "/",
+    );
+}
+
+#[test]
+fn with_stem_on_posix_root_errors() {
+    assert_empty_name_err(
+        "P.with_stem('final')",
+        &posix_st("P", "/"),
+        PathFormat::Posix,
+        "with_stem",
+        "/",
+    );
+}
+
+#[test]
+fn with_suffix_on_posix_root_errors() {
+    assert_empty_name_err(
+        "P.with_suffix('.png')",
+        &posix_st("P", "/"),
+        PathFormat::Posix,
+        "with_suffix",
+        "/",
+    );
+}
+
+#[test]
+fn with_number_on_posix_root_errors() {
+    assert_empty_name_err(
+        "P.with_number(42)",
+        &posix_st("P", "/"),
+        PathFormat::Posix,
+        "with_number",
+        "/",
+    );
+}
+
+#[test]
+fn with_name_on_windows_drive_root_errors() {
+    assert_empty_name_err(
+        "P.with_name('x.png')",
+        &windows_st("P", "C:\\"),
+        PathFormat::Windows,
+        "with_name",
+        "C:\\",
+    );
+}
+
+#[test]
+fn with_stem_on_windows_drive_root_errors() {
+    assert_empty_name_err(
+        "P.with_stem('final')",
+        &windows_st("P", "C:\\"),
+        PathFormat::Windows,
+        "with_stem",
+        "C:\\",
+    );
+}
+
+#[test]
+fn with_suffix_on_windows_drive_root_errors() {
+    assert_empty_name_err(
+        "P.with_suffix('.png')",
+        &windows_st("P", "C:\\"),
+        PathFormat::Windows,
+        "with_suffix",
+        "C:\\",
+    );
+}
+
+#[test]
+fn with_number_on_windows_drive_root_errors() {
+    assert_empty_name_err(
+        "P.with_number(42)",
+        &windows_st("P", "C:\\"),
+        PathFormat::Windows,
+        "with_number",
+        "C:\\",
+    );
+}
+
+// Sanity: a normal path passes through without raising.
+#[test]
+fn with_name_non_empty_does_not_error() {
+    assert_eq!(
+        eval_posix("P.with_name('y.png')", &posix_st("P", "/a/b/x.txt")).to_display_string(),
+        "/a/b/y.png"
+    );
+}
+
+// =====================================================================
+// Pathlib-parity tests: with_name / with_stem / with_suffix / with_number
+// =====================================================================
+//
+// These tests pin the contract for the four `with_*` operators in
+// alignment with Python pathlib. Specifically they cover:
+//
+//   1. **Relative paths stay relative.** A single-component
+//      relative path like `path("foo").with_name("x")` produces
+//      `"x"`, not `"/x"`. Drive- and UNC-rooted paths produce the
+//      correct anchor (`C:\x`, `\\srv\share\x`) without a doubled
+//      separator.
+//
+//   2. **`Invalid name` validation.** `with_name`/`with_stem`
+//      reject `""`, `"."`, and separator-containing strings.
+//      `".."` is accepted (matches pathlib).
+//
+//   3. **`Invalid suffix` validation.** `with_suffix` rejects
+//      strings that are non-empty and either don't start with `.`
+//      or are just `.`. `.tar.gz` (multi-dot) is accepted.
+//
+//   4. **Empty stem.** `with_stem("")` raises with two distinct
+//      messages depending on whether the path has a suffix
+//      (`Invalid name ''` vs `'<path>' has a non-empty suffix`),
+//      matching pathlib's behaviour.
+//
+// The empty-name guard for paths-with-no-final-component
+// (filesystem roots, bare URI authorities) is covered by the
+// existing `with_*_on_*_root_errors` tests above.
+
+fn windows_eval(expr: &str, st: &SymbolTable) -> ExprValue {
+    eval_with_fmt(expr, st, PathFormat::Windows)
+}
+
+fn assert_err_windows(expr: &str, st: &SymbolTable, expected: &[&str]) {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    let e = parsed
+        .with_path_format(PathFormat::Windows)
+        .evaluate(&symtabs)
+        .unwrap_err()
+        .to_string();
+    let joined = expected.concat();
+    assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
+}
+
+// ── Relative paths stay relative (the parent-join fix) ─────────────
+
+#[test]
+fn with_name_relative_single_component_stays_relative() {
+    // pathlib: PurePosixPath("foo").with_name("x") == PurePosixPath("x")
+    assert_eq!(
+        eval_posix("P.with_name('x')", &posix_st("P", "foo")).to_display_string(),
+        "x"
+    );
+}
+
+#[test]
+fn with_name_relative_multi_component_stays_relative() {
+    // pathlib: PurePosixPath("foo/bar").with_name("x") == PurePosixPath("foo/x")
+    assert_eq!(
+        eval_posix("P.with_name('x')", &posix_st("P", "foo/bar")).to_display_string(),
+        "foo/x"
+    );
+}
+
+#[test]
+fn with_name_absolute_single_component_keeps_root() {
+    // pathlib: PurePosixPath("/foo").with_name("x") == PurePosixPath("/x")
+    assert_eq!(
+        eval_posix("P.with_name('x')", &posix_st("P", "/foo")).to_display_string(),
+        "/x"
+    );
+}
+
+#[test]
+fn with_name_absolute_multi_component_keeps_root() {
+    assert_eq!(
+        eval_posix("P.with_name('x')", &posix_st("P", "/a/b/c")).to_display_string(),
+        "/a/b/x"
+    );
+}
+
+#[test]
+fn with_stem_relative_keeps_relative() {
+    assert_eq!(
+        eval_posix("P.with_stem('x')", &posix_st("P", "foo.txt")).to_display_string(),
+        "x.txt"
+    );
+}
+
+#[test]
+fn with_suffix_relative_keeps_relative() {
+    assert_eq!(
+        eval_posix("P.with_suffix('.x')", &posix_st("P", "foo")).to_display_string(),
+        "foo.x"
+    );
+}
+
+#[test]
+fn with_number_relative_keeps_relative() {
+    assert_eq!(
+        eval_posix("P.with_number(42)", &posix_st("P", "shot_####.exr")).to_display_string(),
+        "shot_0042.exr"
+    );
+}
+
+#[test]
+fn with_number_absolute_keeps_root() {
+    // Pre-fix this produced "//shot_0042.exr" (doubled leading
+    // slash) because the prefix was constructed as
+    // `dir_part + sep`.
+    assert_eq!(
+        eval_posix("P.with_number(42)", &posix_st("P", "/shot_####.exr")).to_display_string(),
+        "/shot_0042.exr"
+    );
+}
+
+#[test]
+fn with_name_windows_drive_root_keeps_root() {
+    // pathlib: PureWindowsPath("C:\\foo").with_name("x")
+    // produces PureWindowsPath("C:/x") — single backslash, not
+    // doubled.
+    assert_eq!(
+        windows_eval("P.with_name('x')", &windows_st("P", "C:\\foo")).to_display_string(),
+        "C:\\x"
+    );
+}
+
+#[test]
+fn with_name_windows_unc_root_keeps_root() {
+    // pathlib: PureWindowsPath("\\\\srv\\share\\foo").with_name("x")
+    // produces PureWindowsPath("//srv/share/x").
+    assert_eq!(
+        windows_eval("P.with_name('x')", &windows_st("P", "\\\\srv\\share\\foo"),)
+            .to_display_string(),
+        "\\\\srv\\share\\x"
+    );
+}
+
+#[test]
+fn with_name_windows_relative_stays_relative() {
+    assert_eq!(
+        windows_eval("P.with_name('x')", &windows_st("P", "foo")).to_display_string(),
+        "x"
+    );
+}
+
+#[test]
+fn with_name_windows_relative_multi_component() {
+    assert_eq!(
+        windows_eval("P.with_name('x')", &windows_st("P", "foo\\bar")).to_display_string(),
+        "foo\\x"
+    );
+}
+
+// ── `Invalid name` validation (with_name, with_stem) ───────────────
+
+#[test]
+fn with_name_empty_string_errors() {
+    // pathlib: ValueError: Invalid name ''
+    assert_err_posix(
+        "P.with_name('')",
+        &posix_st("P", "/a/b"),
+        &["with_name: Invalid name ''"],
+    );
+}
+
+#[test]
+fn with_name_dot_errors() {
+    // pathlib: ValueError: Invalid name '.'
+    assert_err_posix(
+        "P.with_name('.')",
+        &posix_st("P", "/a/b"),
+        &["with_name: Invalid name '.'"],
+    );
+}
+
+#[test]
+fn with_name_double_dot_accepted() {
+    // pathlib accepts '..' as a name — it's a filename that
+    // happens to look like the parent-dir indicator.
+    assert_eq!(
+        eval_posix("P.with_name('..')", &posix_st("P", "a/b")).to_display_string(),
+        "a/.."
+    );
+}
+
+#[test]
+fn with_name_with_separator_errors() {
+    // pathlib: ValueError: Invalid name 'a/b'
+    assert_err_posix(
+        "P.with_name('new/name')",
+        &posix_st("P", "/a/b"),
+        &["with_name: Invalid name 'new/name'"],
+    );
+}
+
+#[test]
+fn with_name_windows_with_backslash_errors() {
+    // On Windows both '/' and '\\' are separators; pathlib
+    // rejects either.
+    assert_err_windows(
+        "P.with_name('x\\\\y')",
+        &windows_st("P", "C:\\a\\b"),
+        &["with_name: Invalid name 'x\\y'"],
+    );
+}
+
+#[test]
+fn with_stem_empty_on_no_suffix_errors() {
+    // pathlib: ValueError: Invalid name '' (the resulting
+    // filename would be empty).
+    assert_err_posix(
+        "P.with_stem('')",
+        &posix_st("P", "foo"),
+        &["with_stem: Invalid name ''"],
+    );
+}
+
+#[test]
+fn with_stem_empty_on_path_with_suffix_errors() {
+    // pathlib: ValueError: PurePosixPath('foo.txt') has a
+    // non-empty suffix. The resulting filename `.txt` would
+    // parse as a hidden-file name.
+    assert_err_posix(
+        "P.with_stem('')",
+        &posix_st("P", "foo.txt"),
+        &["with_stem: 'foo.txt' has a non-empty suffix"],
+    );
+}
+
+#[test]
+fn with_stem_with_separator_errors() {
+    assert_err_posix(
+        "P.with_stem('a/b')",
+        &posix_st("P", "/file.txt"),
+        &["with_stem: Invalid name 'a/b'"],
+    );
+}
+
+// ── `Invalid suffix` validation (with_suffix) ──────────────────────
+
+#[test]
+fn with_suffix_empty_strips() {
+    // pathlib: PurePosixPath("file.txt").with_suffix("")
+    //   == PurePosixPath("file")
+    assert_eq!(
+        eval_posix("P.with_suffix('')", &posix_st("P", "file.txt")).to_display_string(),
+        "file"
+    );
+}
+
+#[test]
+fn with_suffix_dot_alone_errors() {
+    // pathlib: ValueError: Invalid suffix '.'
+    assert_err_posix(
+        "P.with_suffix('.')",
+        &posix_st("P", "file"),
+        &["with_suffix: Invalid suffix '.'"],
+    );
+}
+
+#[test]
+fn with_suffix_no_leading_dot_errors() {
+    // pathlib: ValueError: Invalid suffix 'foo'
+    assert_err_posix(
+        "P.with_suffix('foo')",
+        &posix_st("P", "file"),
+        &["with_suffix: Invalid suffix 'foo'"],
+    );
+}
+
+#[test]
+fn with_suffix_with_separator_errors() {
+    // pathlib raises 'Invalid name "<resulting filename>"' for
+    // a suffix containing a separator. We keep the diagnostic
+    // localised to the suffix argument since it's clearer about
+    // what the caller did wrong.
+    assert_err_posix(
+        "P.with_suffix('.x/y')",
+        &posix_st("P", "file"),
+        &["with_suffix: Invalid suffix '.x/y'"],
+    );
+}
+
+#[test]
+fn with_suffix_multi_dot_accepted() {
+    // pathlib: PurePosixPath("a").with_suffix(".tar.gz")
+    //   == PurePosixPath("a.tar.gz")
+    assert_eq!(
+        eval_posix("P.with_suffix('.tar.gz')", &posix_st("P", "a")).to_display_string(),
+        "a.tar.gz"
+    );
+}
+
+#[test]
+fn with_suffix_dot_space_accepted() {
+    // pathlib: PurePosixPath("a").with_suffix(". ")
+    //   == PurePosixPath("a. ") — only the leading dot is
+    // checked; trailing whitespace inside the suffix is fine.
+    assert_eq!(
+        eval_posix("P.with_suffix('. ')", &posix_st("P", "a")).to_display_string(),
+        "a. "
+    );
+}
+
+// =====================================================================
+// Pathlib-parity tests (round 2): trailing-dot suffix parsing,
+// drive-relative joining, with_stem('.'), and post-construction
+// filename validation.
+// =====================================================================
+//
+// Generated by running an exhaustive 1120-case pathlib-vs-ours diff
+// (see PR description) and pinning the corner cases that exposed
+// real divergences. These cover four categories:
+//
+//   B. Trailing-dot suffix parsing. Per pathlib, `'foo.'.suffix
+//      == ''` and `'foo.'.stem == 'foo.'`. The trailing dot is not
+//      a real extension because there's no character after it.
+//      Our `.stem`/`.suffix`/`.suffixes` (and the with_* operators
+//      that derive from them) now follow the same rule.
+//
+//   D. Windows drive-relative anchor joining. Per pathlib,
+//      `PureWindowsPath('C:foo').with_name('x')` produces `'C:x'`
+//      (no separator inserted between drive and name) because
+//      `C:` is itself an anchor. Our `join_parent_and_name` now
+//      treats a length-2 `[a-z]:` parent as already-terminated.
+//
+//   C. Post-construction filename validation in with_suffix.
+//      `'..foo'.with_suffix('')` per pathlib produces a filename
+//      `'.'` (because `'..foo'.stem == '.'` and we strip the
+//      suffix), then pathlib catches the `.` as `Invalid name`.
+//      We now do the same.
+//
+//   E. with_stem('.') accepted when path has a non-empty suffix.
+//      Per pathlib, `'foo.txt'.with_stem('.')` produces `'..txt'`
+//      (a hidden-file with extension `.txt`). We previously
+//      rejected `.` as the stem unconditionally; now we route
+//      through the post-construction `is_valid_name` check, which
+//      accepts `.{ext}` while still rejecting bare `.`.
+
+// ── Category B: trailing-dot suffix parsing ────────────────────
+
+#[test]
+fn stem_of_trailing_dot_includes_dot() {
+    assert_eq!(
+        eval_posix("P.stem", &posix_st("P", "foo.")).to_display_string(),
+        "foo."
+    );
+}
+#[test]
+fn suffix_of_trailing_dot_is_empty() {
+    assert_eq!(
+        eval_posix("P.suffix", &posix_st("P", "foo.")).to_display_string(),
+        ""
+    );
+}
+#[test]
+fn stem_of_double_dot_includes_both_dots() {
+    assert_eq!(
+        eval_posix("P.stem", &posix_st("P", "..")).to_display_string(),
+        ".."
+    );
+}
+#[test]
+fn suffix_of_double_dot_is_empty() {
+    assert_eq!(
+        eval_posix("P.suffix", &posix_st("P", "..")).to_display_string(),
+        ""
+    );
+}
+#[test]
+fn stem_of_a_b_dot_includes_dot() {
+    assert_eq!(
+        eval_posix("P.stem", &posix_st("P", "a.b.")).to_display_string(),
+        "a.b."
+    );
+}
+#[test]
+fn with_stem_on_trailing_dot_path_replaces_correctly() {
+    // pathlib: `'foo.'.with_stem('x') == 'x'` (the trailing dot
+    // is part of the stem, so replacing the stem replaces
+    // everything).
+    assert_eq!(
+        eval_posix("P.with_stem('x')", &posix_st("P", "foo.")).to_display_string(),
+        "x"
+    );
+}
+#[test]
+fn with_suffix_empty_on_trailing_dot_keeps_dot() {
+    // pathlib: `'foo.'.with_suffix('')` returns `'foo.'` because
+    // there's no real suffix to strip — the trailing dot is part
+    // of the stem.
+    assert_eq!(
+        eval_posix("P.with_suffix('')", &posix_st("P", "foo.")).to_display_string(),
+        "foo."
+    );
+}
+#[test]
+fn suffixes_of_dotted_basename_strips_leading_dots() {
+    // pathlib: `'.tar.gz'.suffixes == ['.gz']` — leading dots
+    // are stripped before splitting, so a name that LOOKS like
+    // a multi-suffix is parsed differently when it leads with a
+    // dot. Our `to_display_string` of a string list uses
+    // double-quoted strings (`["..."`]); the underlying value
+    // matches pathlib's `['.gz']`.
+    assert_eq!(
+        eval_posix("string(P.suffixes)", &posix_st("P", ".tar.gz")).to_display_string(),
+        "[\".gz\"]"
+    );
+}
+#[test]
+fn suffixes_of_trailing_dot_is_empty_list() {
+    assert_eq!(
+        eval_posix("string(P.suffixes)", &posix_st("P", "foo.tar.")).to_display_string(),
+        "[]"
+    );
+}
+
+// ── Category D: Windows drive-relative anchor joining ──────────
+
+#[test]
+fn with_name_on_drive_relative_no_extra_separator() {
+    // pathlib: `PureWindowsPath('C:foo').with_name('x') == 'C:x'`
+    assert_eq!(
+        windows_eval("P.with_name('x')", &windows_st("P", "C:foo")).to_display_string(),
+        "C:x"
+    );
+}
+#[test]
+fn with_stem_on_drive_relative_no_extra_separator() {
+    assert_eq!(
+        windows_eval("P.with_stem('x')", &windows_st("P", "C:foo.txt")).to_display_string(),
+        "C:x.txt"
+    );
+}
+#[test]
+fn with_suffix_on_drive_relative_no_extra_separator() {
+    assert_eq!(
+        windows_eval("P.with_suffix('.png')", &windows_st("P", "C:foo.txt")).to_display_string(),
+        "C:foo.png"
+    );
+}
+
+// ── Category C: post-construction filename validation in with_suffix ──
+
+#[test]
+fn with_suffix_empty_on_dot_dot_foo_errors() {
+    // pathlib: `'..foo'.suffix == '.foo'`; `'..foo'.stem == '.'`
+    //   `'..foo'.with_suffix('')` would produce filename '.'
+    //   which pathlib rejects with `Invalid name '.'`.
+    assert_err_posix(
+        "P.with_suffix('')",
+        &posix_st("P", "..foo"),
+        &["with_suffix: Invalid name '.'"],
+    );
+}
+
+// ── Category E: with_stem('.') with non-empty suffix is accepted ──
+
+#[test]
+fn with_stem_dot_on_path_with_suffix_accepted() {
+    // pathlib: `'foo.txt'.with_stem('.')` produces `'..txt'`
+    // (a hidden file with extension `.txt`). We accept this
+    // matching pathlib — the resulting filename `..txt` is a
+    // valid name.
+    assert_eq!(
+        eval_posix("P.with_stem('.')", &posix_st("P", "foo.txt")).to_display_string(),
+        "..txt"
+    );
+}
+#[test]
+fn with_stem_dot_on_path_without_suffix_rejected() {
+    // pathlib: `'foo'.with_stem('.')` raises `Invalid name '.'`
+    // because the resulting filename would be just `.`.
+    assert_err_posix(
+        "P.with_stem('.')",
+        &posix_st("P", "foo"),
+        &["with_stem: Invalid name '.'"],
+    );
+}
+
+// =====================================================================
+// Pathlib-parity tests (round 3): path normalization on construction
+// =====================================================================
+//
+// Category A from the pathlib parity probe: the `path()`
+// constructor canonicalizes filesystem inputs the same way
+// pathlib does. This means redundant components are eliminated
+// at construction time and never leak into downstream operations
+// (`string`, `parent`, `with_*`, etc.).
+//
+// URI inputs are NOT normalized — the spec preserves them
+// verbatim because URI path components are opaque (an S3 key
+// `a//b` may be a different resource than `a/b`).
+
+// ── Stripping redundant components on construction ─────────────
+
+// ── Stripping redundant components on construction ─────────────
+//
+// These tests pin POSIX-specific normalization rules so they're
+// host-independent: `eval_with_fmt(..., PathFormat::Posix)`
+// rather than the bare `eval` helper, which uses
+// `PathFormat::host()` and would normalize paths to backslashes
+// on Windows runners.
+
+#[test]
+fn path_strips_leading_dot_slash() {
+    // pathlib: PurePosixPath("./foo") -> "foo"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('./foo'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "foo"
+    );
+}
+
+#[test]
+fn path_strips_internal_dot_segments() {
+    // pathlib: PurePosixPath("a/./b") -> "a/b"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('a/./b'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_strips_trailing_separator() {
+    // pathlib: PurePosixPath("a/b/") -> "a/b"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('a/b/'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_collapses_runs_of_separators() {
+    // pathlib: PurePosixPath("a//b") -> "a/b"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('a//b'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/b"
+    );
+}
+
+#[test]
+fn path_collapses_three_or_more_leading_slashes() {
+    // pathlib: PurePosixPath("///foo") -> "/foo"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('///foo'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "/foo"
+    );
+}
+
+#[test]
+fn path_preserves_double_slash_root() {
+    // pathlib special case: PurePosixPath("//foo") -> "//foo"
+    // (POSIX double-slash root is preserved per IEEE Std
+    // 1003.1-2017 §3.271).
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('//foo'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "//foo"
+    );
+}
+
+#[test]
+fn path_preserves_dot_dot_segments() {
+    // pathlib: PurePosixPath("a/../b") -> "a/../b" (.. is NOT
+    // resolved; pathlib doesn't touch the filesystem so it
+    // can't safely simplify symbolic-link-bearing paths).
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('a/../b'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "a/../b"
+    );
+}
+
+#[test]
+fn path_empty_string_becomes_dot() {
+    // pathlib: PurePosixPath("") -> "."
+    assert_eq!(
+        eval_with_fmt("string(path(''))", &SymbolTable::new(), PathFormat::Posix)
+            .to_display_string(),
+        "."
+    );
+}
+
+// ── Windows normalization ──────────────────────────────────────
+
+#[test]
+fn path_windows_normalizes_forward_slash_to_backslash() {
+    // pathlib: PureWindowsPath("foo/bar") -> "foo\\bar"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('foo/bar'))",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "foo\\bar"
+    );
+}
+
+#[test]
+fn path_windows_collapses_double_backslash_after_drive() {
+    // pathlib: PureWindowsPath("C:\\\\foo") -> "C:\\foo"
+    // (input is `C:\\foo` source-encoded as `C:\\\\foo`)
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('C:\\\\\\\\foo'))",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "C:\\foo"
+    );
+}
+
+// ── parent property reflects normalization ─────────────────────
+
+#[test]
+fn parent_of_dot_slash_path_is_dot() {
+    // pathlib: PurePosixPath("./foo").parent -> "."
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('./foo').parent)",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "."
+    );
+}
+
+#[test]
+fn parent_of_three_slash_path_is_single_slash() {
+    // pathlib: PurePosixPath("///foo").parent -> "/"
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('///foo').parent)",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "/"
+    );
+}
+
+// ── URI paths are NOT normalized ───────────────────────────────
+//
+// URIs must short-circuit format-aware processing in `path_fn`,
+// so the constructor preserves URI grammar (forward slashes,
+// opaque authority, no normalization) regardless of the
+// evaluator's `PathFormat`. Run each case under BOTH formats:
+// passing under POSIX alone wouldn't catch a regression where
+// URI inputs leak into host-format normalization on a
+// Windows-format evaluator. Per spec wiki §1.2.1, URI components
+// are opaque (S3 keys `a//b` and `a/b` may be different
+// resources).
+
+#[test]
+fn uri_path_preserves_double_slash_segments_posix() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/a//b'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "s3://bucket/a//b"
+    );
+}
+
+#[test]
+fn uri_path_preserves_double_slash_segments_windows() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/a//b'))",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "s3://bucket/a//b"
+    );
+}
+
+#[test]
+fn uri_path_preserves_dot_segments_posix() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/a/./b'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "s3://bucket/a/./b"
+    );
+}
+
+#[test]
+fn uri_path_preserves_dot_segments_windows() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/a/./b'))",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "s3://bucket/a/./b"
+    );
+}
+
+#[test]
+fn uri_path_preserves_trailing_slash_posix() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/dir/'))",
+            &SymbolTable::new(),
+            PathFormat::Posix
+        )
+        .to_display_string(),
+        "s3://bucket/dir/"
+    );
+}
+
+#[test]
+fn uri_path_preserves_trailing_slash_windows() {
+    assert_eq!(
+        eval_with_fmt(
+            "string(path('s3://bucket/dir/'))",
+            &SymbolTable::new(),
+            PathFormat::Windows
+        )
+        .to_display_string(),
+        "s3://bucket/dir/"
+    );
+}
+
+// ── Windows drive-relative `x:y` disambiguation in with_name ───
+
+#[test]
+fn with_name_drive_letter_pattern_prepended_with_dot_slash() {
+    // pathlib: PureWindowsPath("foo").with_name("x:y") -> ".\\x:y"
+    // (prepends `.\` to disambiguate from drive-relative path)
+    assert_eq!(
+        windows_eval("P.with_name('x:y')", &windows_st("P", "foo")).to_display_string(),
+        ".\\x:y"
+    );
+}
