@@ -3338,7 +3338,7 @@ limitations under the License.
 
 ------
 ** http; version 0.2.12 -- https://crates.io/crates/http
-** http; version 1.4.0 -- https://crates.io/crates/http
+** http; version 1.4.1 -- https://crates.io/crates/http
                               Apache License
                         Version 2.0, January 2004
                      http://www.apache.org/licenses/
@@ -4575,7 +4575,7 @@ limitations under the License.
 ** base64; version 0.22.1 -- https://crates.io/crates/base64
 ** bitflags; version 2.11.1 -- https://crates.io/crates/bitflags
 ** bstr; version 1.12.1 -- https://crates.io/crates/bstr
-** bumpalo; version 3.20.2 -- https://crates.io/crates/bumpalo
+** bumpalo; version 3.20.3 -- https://crates.io/crates/bumpalo
 ** bytes-utils; version 0.1.4 -- https://crates.io/crates/bytes-utils
 ** cfg-if; version 1.0.4 -- https://crates.io/crates/cfg-if
 ** core-foundation-sys; version 0.8.7 -- https://crates.io/crates/core-foundation-sys
@@ -4584,7 +4584,7 @@ limitations under the License.
 ** crossbeam-epoch; version 0.9.18 -- https://crates.io/crates/crossbeam-epoch
 ** crossbeam-utils; version 0.8.21 -- https://crates.io/crates/crossbeam-utils
 ** displaydoc; version 0.2.5 -- https://crates.io/crates/displaydoc
-** either; version 1.15.0 -- https://crates.io/crates/either
+** either; version 1.16.0 -- https://crates.io/crates/either
 ** encoding_rs_io; version 0.1.7 -- https://crates.io/crates/encoding_rs_io
 ** equivalent; version 1.0.2 -- https://crates.io/crates/equivalent
 ** errno; version 0.3.14 -- https://crates.io/crates/errno
@@ -4602,8 +4602,8 @@ limitations under the License.
 ** idna_adapter; version 1.2.2 -- https://crates.io/crates/idna_adapter
 ** indexmap; version 2.14.0 -- https://crates.io/crates/indexmap
 ** itertools; version 0.14.0 -- https://crates.io/crates/itertools
-** js-sys; version 0.3.98 -- https://crates.io/crates/js-sys
-** log; version 0.4.29 -- https://crates.io/crates/log
+** js-sys; version 0.3.99 -- https://crates.io/crates/js-sys
+** log; version 0.4.30 -- https://crates.io/crates/log
 ** num-integer; version 0.1.46 -- https://crates.io/crates/num-integer
 ** num-traits; version 0.2.19 -- https://crates.io/crates/num-traits
 ** once_cell; version 1.21.4 -- https://crates.io/crates/once_cell
@@ -4633,11 +4633,11 @@ limitations under the License.
 ** value-bag; version 1.12.0 -- https://crates.io/crates/value-bag
 ** wasi; version 0.11.1+wasi-snapshot-preview1 -- https://crates.io/crates/wasi
 ** wasip2; version 1.0.3+wasi-0.2.9 -- https://crates.io/crates/wasip2
-** wasm-bindgen-macro-support; version 0.2.121 -- https://crates.io/crates/wasm-bindgen-macro-support
-** wasm-bindgen-macro; version 0.2.121 -- https://crates.io/crates/wasm-bindgen-macro
-** wasm-bindgen-shared; version 0.2.121 -- https://crates.io/crates/wasm-bindgen-shared
-** wasm-bindgen; version 0.2.121 -- https://crates.io/crates/wasm-bindgen
-** web-sys; version 0.3.98 -- https://crates.io/crates/web-sys
+** wasm-bindgen-macro-support; version 0.2.122 -- https://crates.io/crates/wasm-bindgen-macro-support
+** wasm-bindgen-macro; version 0.2.122 -- https://crates.io/crates/wasm-bindgen-macro
+** wasm-bindgen-shared; version 0.2.122 -- https://crates.io/crates/wasm-bindgen-shared
+** wasm-bindgen; version 0.2.122 -- https://crates.io/crates/wasm-bindgen
+** web-sys; version 0.3.99 -- https://crates.io/crates/web-sys
 ** wit-bindgen; version 0.51.0 -- https://crates.io/crates/wit-bindgen
 ** wit-bindgen; version 0.57.1 -- https://crates.io/crates/wit-bindgen
 ** xmlparser; version 0.13.6 -- https://crates.io/crates/xmlparser
@@ -5899,7 +5899,7 @@ limitations under the License.
 ** aws-smithy-schema; version 0.1.0 -- https://crates.io/crates/aws-smithy-schema
 ** aws-smithy-types; version 1.4.8 -- https://crates.io/crates/aws-smithy-types
 ** aws-smithy-xml; version 0.60.15 -- https://crates.io/crates/aws-smithy-xml
-** aws-types; version 1.3.15 -- https://crates.io/crates/aws-types
+** aws-types; version 1.3.16 -- https://crates.io/crates/aws-types
 ** get-size-derive2; version 0.7.4 -- https://crates.io/crates/get-size-derive2
 ** get-size2; version 0.7.4 -- https://crates.io/crates/get-size2
 ** granit-parser; version 0.0.2 -- https://crates.io/crates/granit-parser
@@ -5919,7 +5919,7 @@ limitations under the License.
 ** serde; version 1.0.228 -- https://crates.io/crates/serde
 ** serde_core; version 1.0.228 -- https://crates.io/crates/serde_core
 ** serde_derive; version 1.0.228 -- https://crates.io/crates/serde_derive
-** serde_json; version 1.0.149 -- https://crates.io/crates/serde_json
+** serde_json; version 1.0.150 -- https://crates.io/crates/serde_json
 ** shlex; version 2.0.1 -- https://crates.io/crates/shlex
 ** siphasher; version 1.0.3 -- https://crates.io/crates/siphasher
 ** syn; version 2.0.117 -- https://crates.io/crates/syn
@@ -7026,7 +7026,7 @@ SOFTWARE.
 
 
 ------
-** sqlite-wasm-rs; version 0.5.4 -- https://crates.io/crates/sqlite-wasm-rs
+** sqlite-wasm-rs; version 0.5.5 -- https://crates.io/crates/sqlite-wasm-rs
 MIT License
 
 Copyright (c) 2024 Spxg

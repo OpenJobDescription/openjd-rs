@@ -456,7 +456,7 @@ jobs:
             target
           key: wasm-${{ hashFiles('Cargo.lock') }}
       - name: Install wasm-bindgen-cli
-        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.121
+        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.122
       - name: Install JS deps
         run: cd crates/openjd-for-js && npm install
       - name: Build WASM + generate JS bindings
