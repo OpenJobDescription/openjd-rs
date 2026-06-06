@@ -25,7 +25,13 @@ fn make_env(name: &str, on_enter: Option<Action>, on_exit: Option<Action>) -> En
         description: None,
         script: Some(EnvironmentScript {
             let_bindings: None,
-            actions: EnvironmentActions { on_enter, on_exit },
+            actions: EnvironmentActions {
+                on_enter,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit,
+            },
             embedded_files: None,
         }),
         variables: None,
@@ -160,6 +166,9 @@ async fn test_env_with_embedded_files() {
                     timeout: None,
                     cancelation: None,
                 }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {
@@ -193,6 +202,9 @@ async fn test_env_with_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo MY_VAR=$MY_VAR"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -230,7 +242,10 @@ async fn test_env_exit_removes_variables() {
         .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo MY_VAR=${MY_VAR:-unset}"]);
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("MY_VAR=unset"));
 }
 
@@ -241,7 +256,9 @@ async fn test_step_run_basic() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "echo Hello from step"]);
-    let result = session.run_task(&script, None, None, None).await;
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await;
     assert!(result.is_ok());
     let r = result.unwrap();
     assert_eq!(r.state, ActionState::Success);
@@ -255,7 +272,9 @@ async fn test_step_run_failing() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "exit 1"]);
-    let result = session.run_task(&script, None, None, None).await;
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await;
     assert!(result.is_ok());
     let r = result.unwrap();
     assert_eq!(r.state, ActionState::Failed);
@@ -321,7 +340,10 @@ async fn test_env_sets_env_vars_via_stdout() {
         .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo DYNAMIC_VAR=$DYNAMIC_VAR"]);
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("DYNAMIC_VAR=dynamic_value"));
 }
 
@@ -359,7 +381,10 @@ async fn test_env_unsets_env_vars_via_stdout() {
         .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo TO_UNSET=${TO_UNSET:-unset}"]);
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("TO_UNSET=unset"));
 }
 
@@ -372,7 +397,10 @@ async fn test_session_state_ready_after_success() {
     assert_eq!(session.state(), SessionState::Ready);
 
     let script = make_step_script("echo", vec!["ok"]);
-    session.run_task(&script, None, None, None).await.unwrap();
+    session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(session.state(), SessionState::Ready);
 }
 
@@ -381,7 +409,10 @@ async fn test_session_state_ended_after_failure() {
     let tmp = TempDir::new().unwrap();
     let mut session = Session::new_for_test(tmp.path().to_path_buf());
     let script = make_step_script("sh", vec!["-c", "exit 1"]);
-    session.run_task(&script, None, None, None).await.unwrap();
+    session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(session.state(), SessionState::ReadyEnding);
 }
 
@@ -412,7 +443,10 @@ async fn test_redacted_env_via_stdout() {
         .unwrap();
 
     let script = make_step_script("sh", vec!["-c", "echo SECRET=$SECRET"]);
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("SECRET=********"));
 
     let redacted = session.redact("The secret is mysecret");
@@ -459,6 +493,9 @@ async fn test_env_with_resolved_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(make_action("sh", vec!["-c", "echo RESOLVED=$RESOLVED"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -490,6 +527,9 @@ async fn test_env_with_let_bindings_and_embedded_files() {
                     timeout: None,
                     cancelation: None,
                 }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: Some(vec![EmbeddedFile {
@@ -542,7 +582,9 @@ async fn test_step_with_let_bindings_and_embedded_files() {
             end_of_line: None,
         }]),
     };
-    let result = session.run_task(&script, None, None, None).await;
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await;
     assert!(result.is_ok());
     let data_path = files_dir.join("data.txt");
     assert!(data_path.exists());

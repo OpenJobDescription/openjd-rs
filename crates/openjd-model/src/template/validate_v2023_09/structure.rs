@@ -381,22 +381,29 @@ pub fn validate_single_environment(
     if let Some(script) = &env.script {
         let script_path = path_field(path, "script");
         let actions_path = path_field(&script_path, "actions");
-        if script.actions.on_enter.is_none() {
+        // Base 2023-09 requires `onEnter` whenever a `script` is present.
+        // RFC 0008 relaxes this: when `WRAP_ACTIONS` is enabled, an env may
+        // define only wrap hooks (or any single action) without a standalone
+        // `onEnter`. Concretely, require at least one of the five known
+        // actions to be present so we don't accept an empty `actions: {}`.
+        if !script.actions.has_any_action() {
+            if rules.wrap_actions_enabled {
+                errors.add(
+                    &actions_path,
+                    "must define at least one of onEnter, onWrapEnvEnter, onWrapTaskRun, onWrapEnvExit, or onExit.",
+                );
+            } else {
+                // Preserve the original wording when the extension is not
+                // enabled so pre-RFC error messages don't change.
+                errors.add(&actions_path, "onEnter is required.");
+            }
+        } else if !rules.wrap_actions_enabled && script.actions.on_enter.is_none() {
             errors.add(&actions_path, "onEnter is required.");
         }
-        if let Some(action) = &script.actions.on_enter {
+        for (name, action) in script.actions.iter_named() {
             validate_action(
                 action,
-                &path_field(&actions_path, "onEnter"),
-                limits,
-                rules,
-                errors,
-            );
-        }
-        if let Some(action) = &script.actions.on_exit {
-            validate_action(
-                action,
-                &path_field(&actions_path, "onExit"),
+                &path_field(&actions_path, name),
                 limits,
                 rules,
                 errors,
