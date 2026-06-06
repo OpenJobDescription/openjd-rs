@@ -465,7 +465,7 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
                 fmt_elapsed(&session_start)
             );
             let result = session
-                .run_task(&step.script, None, step_symtab, None)
+                .run_task(&step.name, &step.script, None, step_symtab, None)
                 .await
                 .map_err(|e| format!("Step '{}': {e}", step.name))?;
             println!(
@@ -541,7 +541,13 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
                         println!("{}\t{} = {}", fmt_elapsed(&session_start), name, value);
                     }
                     let result = session
-                        .run_task(&step.script, Some(task_values), step_symtab, None)
+                        .run_task(
+                            &step.name,
+                            &step.script,
+                            Some(task_values),
+                            step_symtab,
+                            None,
+                        )
                         .await
                         .map_err(|e| format!("Step '{}': {e}", step.name))?;
                     println!(
@@ -592,7 +598,13 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 
                     let task_start = Instant::now();
                     let result = session
-                        .run_task(&step.script, Some(&task_values), step_symtab, None)
+                        .run_task(
+                            &step.name,
+                            &step.script,
+                            Some(&task_values),
+                            step_symtab,
+                            None,
+                        )
                         .await
                         .map_err(|e| format!("Step '{}': {e}", step.name))?;
                     let task_duration = task_start.elapsed().as_secs_f64();

@@ -48,7 +48,8 @@ pub use step::{SimpleAction, StepDependency, StepScript, StepTemplate};
 // environment
 pub use environment::{EmbeddedFile, Environment, EnvironmentScript};
 // actions
-pub use actions::{Action, CancelationMode, EnvironmentActions, StepActions};
+pub(crate) use actions::impl_environment_actions_helpers;
+pub use actions::{Action, CancelationMode, EnvironmentActions, StepActions, WrapHookScope};
 // host_requirements
 pub use host_requirements::{AmountRequirement, AttributeRequirement, HostRequirements};
 // task_parameters

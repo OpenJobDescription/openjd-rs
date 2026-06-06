@@ -86,5 +86,94 @@ pub struct StepActions {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_env_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions. Requires the
+    /// `WRAP_ACTIONS` extension.
+    pub on_wrap_env_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }
+
+/// RFC 0008: the per-hook companion template variable a wrap hook exposes
+/// in addition to `WrappedAction.*`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapHookScope {
+    /// `WrappedEnv.Name` — available in `onWrapEnvEnter` and `onWrapEnvExit`.
+    EnvName,
+    /// `WrappedStep.Name` — available in `onWrapTaskRun`.
+    StepName,
+}
+
+/// Generate the shared accessor/iteration helpers for an
+/// `EnvironmentActions` struct.
+///
+/// The template-side (`template::actions`) and job-side (`job`) structs
+/// have identical field names but distinct `Action` types and derives, so
+/// the five action slots — and the three RFC 0008 wrap hooks — are
+/// enumerated here exactly once. Every consumer that needs to "walk the
+/// actions" goes through these methods instead of re-listing the fields,
+/// which is what keeps a field rename from rippling across the codebase.
+macro_rules! impl_environment_actions_helpers {
+    ($ty:ty, $action:ty) => {
+        impl $ty {
+            /// All five action slots paired with their camelCase schema
+            /// name, in declaration order.
+            pub fn named_slots(&self) -> [(&'static str, &Option<$action>); 5] {
+                [
+                    ("onEnter", &self.on_enter),
+                    ("onWrapEnvEnter", &self.on_wrap_env_enter),
+                    ("onWrapTaskRun", &self.on_wrap_task_run),
+                    ("onWrapEnvExit", &self.on_wrap_env_exit),
+                    ("onExit", &self.on_exit),
+                ]
+            }
+
+            /// The defined actions, each paired with its schema name, in
+            /// declaration order.
+            pub fn iter_named(&self) -> impl Iterator<Item = (&'static str, &$action)> {
+                self.named_slots()
+                    .into_iter()
+                    .filter_map(|(name, slot)| slot.as_ref().map(|a| (name, a)))
+            }
+
+            /// The defined actions, in declaration order, without names.
+            pub fn iter_actions(&self) -> impl Iterator<Item = &$action> {
+                self.iter_named().map(|(_, action)| action)
+            }
+
+            /// The three RFC 0008 wrap hooks, each paired with its schema
+            /// name and the companion template variable it exposes.
+            pub fn wrap_hooks(
+                &self,
+            ) -> [(
+                &'static str,
+                &Option<$action>,
+                $crate::template::WrapHookScope,
+            ); 3] {
+                use $crate::template::WrapHookScope::{EnvName, StepName};
+                [
+                    ("onWrapEnvEnter", &self.on_wrap_env_enter, EnvName),
+                    ("onWrapTaskRun", &self.on_wrap_task_run, StepName),
+                    ("onWrapEnvExit", &self.on_wrap_env_exit, EnvName),
+                ]
+            }
+
+            /// True iff at least one of the five actions is defined.
+            pub fn has_any_action(&self) -> bool {
+                self.named_slots().iter().any(|(_, slot)| slot.is_some())
+            }
+
+            /// True iff any of the three RFC 0008 wrap hooks is defined.
+            pub fn has_any_wrap_hook(&self) -> bool {
+                self.wrap_hooks().iter().any(|(_, slot, _)| slot.is_some())
+            }
+        }
+    };
+}
+pub(crate) use impl_environment_actions_helpers;
+
+impl_environment_actions_helpers!(EnvironmentActions, Action);

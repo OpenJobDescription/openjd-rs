@@ -10,6 +10,7 @@
 //! - Pass 7: FEATURE_BUNDLE_1 (validate or reject)
 //! - Pass 8: Format strings (base or EXPR profile)
 //! - Pass 9: TASK_CHUNKING (validate or reject)
+//! - Pass 10: WRAP_ACTIONS (validate or reject, RFC 0008)
 
 mod feature_bundle_1;
 mod format_strings;
@@ -17,6 +18,7 @@ pub(crate) mod helpers;
 mod limits;
 mod structure;
 mod task_chunking;
+mod wrap_actions;
 
 use crate::error::{ModelError, ValidationErrors};
 use crate::template::*;
@@ -87,6 +89,12 @@ pub struct EffectiveRules {
     pub allowed_job_param_types: std::collections::HashSet<JobParameterType>,
     pub allowed_task_param_types: std::collections::HashSet<TaskParameterType>,
     pub allow_fmtstring_in_numeric_fields: bool,
+    /// When the `WRAP_ACTIONS` extension is enabled, an environment script
+    /// is valid if it defines any of `onEnter`, `onExit`, or one of the
+    /// RFC 0008 wrap hooks (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`).
+    /// Without the extension, the base 2023-09 rule applies:
+    /// `onEnter` is required whenever `script` is present.
+    pub wrap_actions_enabled: bool,
 }
 
 impl EffectiveRules {
@@ -144,6 +152,7 @@ impl EffectiveRules {
             allowed_job_param_types: job_param_types,
             allowed_task_param_types: task_param_types,
             allow_fmtstring_in_numeric_fields: fb1,
+            wrap_actions_enabled: ctx.profile.has_extension(ModelExtension::WrapActions),
         }
     }
 }
@@ -171,6 +180,9 @@ pub(crate) fn validate_job_template(
 
     // Pass 9: TASK_CHUNKING (validate or reject)
     task_chunking::validate_task_chunking(jt, ctx, &mut errors);
+
+    // Pass 10: WRAP_ACTIONS (validate or reject, RFC 0008)
+    wrap_actions::validate_wrap_actions_job_template(jt, ctx, &mut errors);
 
     errors.into_result("JobTemplate")
 }
@@ -221,6 +233,9 @@ pub fn validate_environment_template(
         );
     }
     structure::validate_single_environment(env, &limits, &rules, &env_path, &mut errors);
+
+    // WRAP_ACTIONS gating (RFC 0008)
+    wrap_actions::validate_wrap_actions_environment_template(et, ctx, &mut errors);
 
     errors.into_result("EnvironmentTemplate")
 }

@@ -114,8 +114,19 @@ pub struct EnvironmentScript {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onEnter` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_env_enter: Option<Action>,
+    /// RFC 0008 — wraps tasks' `onRun` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_task_run: Option<Action>,
+    /// RFC 0008 — wraps inner environments' `onExit` actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_wrap_env_exit: Option<Action>,
     pub on_exit: Option<Action>,
 }
+
+crate::template::impl_environment_actions_helpers!(EnvironmentActions, Action);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

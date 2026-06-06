@@ -45,6 +45,9 @@ fn env_with_enter(name: &str, cmd: &str, args: Vec<&str>) -> Environment {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action(cmd, args)),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -292,6 +295,7 @@ async fn test_run_task() {
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo task_output"]),
             None,
             None,
@@ -314,6 +318,7 @@ async fn test_run_task_with_env_vars() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo TASK_VAR=$TASK_VAR"]),
             None,
             None,
@@ -329,7 +334,13 @@ async fn test_run_task_fail_run() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
-        .run_task(&step("sh", vec!["-c", "exit 42"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "exit 42"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(r.state, ActionState::Failed);
@@ -341,9 +352,15 @@ async fn test_no_task_run_after_fail() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     // First run fails — session becomes "brittle" (ReadyEnding), only exit_environment allowed
-    s.run_task(&step("sh", vec!["-c", "exit 1"]), None, None, None)
-        .await
-        .unwrap();
+    s.run_task(
+        "test_step",
+        &step("sh", vec!["-c", "exit 1"]),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(s.state(), SessionState::ReadyEnding);
 }
 
@@ -373,7 +390,7 @@ async fn test_run_task_with_variables() {
         embedded_files: None,
     };
     let r = s
-        .run_task(&script, Some(&task_params), None, None)
+        .run_task("test_step", &script, Some(&task_params), None, None)
         .await
         .unwrap();
     assert!(r.stdout.contains("hello"));
@@ -403,6 +420,9 @@ async fn test_enter_environment_with_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo ENV_VAR=$ENV_VAR"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -459,7 +479,7 @@ async fn test_run_task_command_not_found() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let script = step("nonexistent-command-xyz", vec![]);
-    let result = s.run_task(&script, None, None, None).await;
+    let result = s.run_task("test_step", &script, None, None, None).await;
     assert!(result.is_err());
     assert_eq!(s.state(), SessionState::ReadyEnding);
     let status = s
@@ -479,6 +499,9 @@ async fn test_enter_no_action() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -526,6 +549,9 @@ async fn test_enter_environment_with_resolved_variables() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo RESOLVED=$RESOLVED"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -550,6 +576,9 @@ async fn test_exit_environment_basic() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo exited"])),
             },
             embedded_files: None,
@@ -575,6 +604,9 @@ async fn test_exit_environment_with_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo EXIT_VAR=$EXIT_VAR"])),
             },
             embedded_files: None,
@@ -600,6 +632,7 @@ async fn test_exit_environment_removes_variables() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo REMOVED_VAR=${REMOVED_VAR:-gone}"]),
             None,
             None,
@@ -621,6 +654,9 @@ async fn test_exit_environment_fail_run() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "exit 1"])),
             },
             embedded_files: None,
@@ -644,6 +680,7 @@ async fn test_run_task_after_env_exit() {
     // Only process_env vars persist across environment exits.
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo PERSIST=${PERSIST:-no}"]),
             None,
             None,
@@ -667,6 +704,7 @@ async fn test_direct_definition() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo DIRECT=$DIRECT"]),
             None,
             None,
@@ -692,7 +730,13 @@ async fn test_redefinition_nested() {
     s.enter_environment(&env2, None, None, None).await.unwrap();
 
     let r = s
-        .run_task(&step("sh", vec!["-c", "echo VAR=$VAR"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "echo VAR=$VAR"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(r.stdout.contains("VAR=inner"));
@@ -711,6 +755,7 @@ async fn test_def_via_stdout() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo STDOUT_VAR=$STDOUT_VAR"]),
             None,
             None,
@@ -737,6 +782,9 @@ async fn test_def_via_stdout_overrides_direct() {
                     "sh",
                     vec!["-c", "echo 'openjd_env: OVERRIDE=from_stdout'"],
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -748,6 +796,7 @@ async fn test_def_via_stdout_overrides_direct() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo OVERRIDE=$OVERRIDE"]),
             None,
             None,
@@ -774,6 +823,7 @@ async fn test_undef_via_stdout() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo TO_UNDEF=${TO_UNDEF:-gone}"]),
             None,
             None,
@@ -804,6 +854,7 @@ async fn test_def_via_redacted_env_stdout() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo SECRET_KEY=$SECRET_KEY"]),
             None,
             None,
@@ -844,6 +895,7 @@ async fn test_def_via_multi_line_stdout() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "printf 'FOO=%s\n' \"$FOO\""]),
             None,
             None,
@@ -863,7 +915,13 @@ async fn test_def_via_stdout_set_empty() {
     s.enter_environment(&env, None, None, None).await.unwrap();
 
     let r = s
-        .run_task(&step("sh", vec!["-c", "echo FOO=$FOO"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "echo FOO=$FOO"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(r.stdout.contains("FOO="));
@@ -878,7 +936,13 @@ async fn test_def_via_stdout_set_empty_json() {
     s.enter_environment(&env, None, None, None).await.unwrap();
 
     let r = s
-        .run_task(&step("sh", vec!["-c", "echo FOO=$FOO"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "echo FOO=$FOO"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(r.stdout.contains("FOO="));
@@ -899,6 +963,7 @@ async fn test_def_via_redacted_env_json_stdout() {
     // Without extension, the env var should NOT be set
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo API_KEY=${API_KEY:-not_set}"]),
             None,
             None,
@@ -934,6 +999,7 @@ async fn test_def_via_redacted_env_with_extension() {
 
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo PASSWORD=$PASSWORD"]),
             None,
             None,
@@ -964,6 +1030,9 @@ async fn test_def_via_redacted_env_with_variables() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: TOKEN=secret-token'"],
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -976,6 +1045,7 @@ async fn test_def_via_redacted_env_with_variables() {
     // Without extension, the redacted env should NOT override the direct variable
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo TOKEN=$TOKEN"]),
             None,
             None,
@@ -1009,6 +1079,7 @@ async fn test_multiple_different_redacted_env_vars() {
 
     let r = s
         .run_task(
+            "test_step",
             &step(
                 "sh",
                 vec!["-c", "echo PASSWORD=$PASSWORD; echo PASSWORD2=$PASSWORD2"],
@@ -1282,7 +1353,13 @@ async fn test_redefinition_exit() {
     // Exit inner env — outer value should be restored
     s.exit_environment(&id2, None, true, None).await.unwrap();
     let r = s
-        .run_task(&step("sh", vec!["-c", "echo VAR=$VAR"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "echo VAR=$VAR"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(r.stdout.contains("VAR=outer"));
@@ -1312,6 +1389,7 @@ async fn warmup_shell() {
     let mut s = Session::new_for_test(warmup_tmp.path().to_path_buf());
     let _ = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo warmup; sleep 0.05"]),
             None,
             None,
@@ -1365,7 +1443,9 @@ async fn test_callback_receives_progress_before_completion() {
     // negligible relative to the total runtime.
     let script = step("sh", vec!["-c", "echo 'openjd_progress: 50.0'; sleep 2"]);
     let t0 = std::time::Instant::now();
-    s.run_task(&script, None, None, None).await.unwrap();
+    s.run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let total = t0.elapsed();
 
     let ts = ts.lock().unwrap();
@@ -1394,7 +1474,9 @@ async fn test_callback_receives_status_before_completion() {
         vec!["-c", "echo 'openjd_status: Rendering frame 1'; sleep 2"],
     );
     let t0 = std::time::Instant::now();
-    s.run_task(&script, None, None, None).await.unwrap();
+    s.run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let total = t0.elapsed();
 
     let ts = ts.lock().unwrap();
@@ -1449,6 +1531,7 @@ async fn test_run_task_with_per_action_os_env_vars() {
     let extra = HashMap::from([("EXTRA_VAR".to_string(), "extra_value".to_string())]);
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo EXTRA_VAR=$EXTRA_VAR"]),
             None,
             None,
@@ -1484,6 +1567,9 @@ async fn test_exit_environment_with_per_action_os_env_vars() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo EXIT_VAR=$EXIT_VAR"])),
             },
             embedded_files: None,
@@ -1515,6 +1601,7 @@ async fn test_per_action_os_env_vars_override_session_env() {
     let extra = HashMap::from([("MY_VAR".to_string(), "action_value".to_string())]);
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo MY_VAR=$MY_VAR"]),
             None,
             None,
@@ -1533,6 +1620,7 @@ async fn test_per_action_os_env_vars_do_not_persist() {
     let extra = HashMap::from([("EPHEMERAL".to_string(), "yes".to_string())]);
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo EPHEMERAL=$EPHEMERAL"]),
             None,
             None,
@@ -1545,6 +1633,7 @@ async fn test_per_action_os_env_vars_do_not_persist() {
     // Next action without extra env vars should NOT see the variable
     let r = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo EPHEMERAL=${EPHEMERAL:-gone}"]),
             None,
             None,
@@ -1590,7 +1679,10 @@ async fn test_cancel_action_mark_failed() {
     // openjd_env:bad=value (no space after colon) is detected as malformed,
     // causing cancel with mark_action_failed=true.
     let script = step("sh", vec!["-c", "echo 'openjd_env:bad=value'; sleep 10"]);
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(
         r.state,
         ActionState::Failed,
@@ -1608,7 +1700,10 @@ async fn test_malformed_env_cancels_and_marks_failed() {
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_env:FOO=bar'; sleep 10"]);
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Failed);
     assert_eq!(s.state(), SessionState::ReadyEnding);
 
@@ -1624,7 +1719,10 @@ async fn test_malformed_unset_env_cancels_and_marks_failed() {
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_unset_env:FOO'; sleep 10"]);
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Failed);
 }
 
@@ -1635,7 +1733,10 @@ async fn test_invalid_env_var_name_cancels_and_marks_failed() {
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
 
     let script = step("sh", vec!["-c", "echo 'openjd_env: 1BAD=value'; sleep 10"]);
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Failed);
 }
 
@@ -1761,7 +1862,10 @@ async fn test_run_task_action_timeout_enforced() {
         embedded_files: None,
     };
     let start = std::time::Instant::now();
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let elapsed = start.elapsed();
     assert_eq!(
         r.state,
@@ -1800,6 +1904,9 @@ async fn test_enter_environment_action_timeout_enforced() {
                     vec!["-c", "echo entering; sleep 30"],
                     "1",
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: None,
             },
             embedded_files: None,
@@ -1835,6 +1942,9 @@ async fn test_exit_environment_action_timeout_enforced() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("echo", vec!["entered"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action_with_timeout(
                     "sh",
                     vec!["-c", "echo exiting; sleep 30"],
@@ -1867,7 +1977,13 @@ async fn test_run_task_no_timeout_still_works() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let r = s
-        .run_task(&step("sh", vec!["-c", "echo hello"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "echo hello"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(r.state, ActionState::Success);
@@ -1968,6 +2084,9 @@ async fn test_callback_exit_env_with_script() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo bye"])),
             },
             embedded_files: None,
@@ -2023,9 +2142,15 @@ async fn test_callback_run_task_success() {
     let tmp = TempDir::new().unwrap();
     let log: Arc<Mutex<CbLog>> = Arc::new(Mutex::new(Vec::new()));
     let mut s = Session::with_config(cb_test_config(&tmp, "cb-task-ok", log.clone())).unwrap();
-    s.run_task(&step("sh", vec!["-c", "echo ok"]), None, None, None)
-        .await
-        .unwrap();
+    s.run_task(
+        "test_step",
+        &step("sh", vec!["-c", "echo ok"]),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     let log = log.lock().unwrap();
     assert!(!log.is_empty(), "Callback must fire for run_task success");
     assert!(log.iter().any(|(st, _)| *st == ActionState::Success));
@@ -2037,7 +2162,13 @@ async fn test_callback_run_task_failure() {
     let log: Arc<Mutex<CbLog>> = Arc::new(Mutex::new(Vec::new()));
     let mut s = Session::with_config(cb_test_config(&tmp, "cb-task-fail", log.clone())).unwrap();
     let r = s
-        .run_task(&step("sh", vec!["-c", "exit 1"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "exit 1"]),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(r.state, ActionState::Failed);
@@ -2053,7 +2184,13 @@ async fn test_callback_run_task_command_not_found() {
     let mut s =
         Session::with_config(cb_test_config(&tmp, "cb-task-notfound", log.clone())).unwrap();
     let r = s
-        .run_task(&step("nonexistent-cmd-xyz", vec![]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("nonexistent-cmd-xyz", vec![]),
+            None,
+            None,
+            None,
+        )
         .await;
     assert!(r.is_err());
     let log = log.lock().unwrap();
@@ -2156,7 +2293,7 @@ async fn test_run_task_rejects_ended_state() {
     assert_eq!(s.state(), SessionState::Ended);
 
     let result = s
-        .run_task(&step("echo", vec!["hello"]), None, None, None)
+        .run_task("test_step", &step("echo", vec!["hello"]), None, None, None)
         .await;
     let err = result.unwrap_err().to_string();
     assert!(
@@ -2181,6 +2318,9 @@ async fn test_exit_environment_failure_still_pops_for_lifo() {
             let_bindings: None,
             actions: EnvironmentActions {
                 on_enter: Some(action("sh", vec!["-c", "echo enter2"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "exit 1"])),
             },
             embedded_files: None,
@@ -2302,7 +2442,13 @@ async fn test_parent_cancel_token_cancels_running_action() {
     });
 
     let _result = s
-        .run_task(&step("sh", vec!["-c", "sleep 30"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "sleep 30"]),
+            None,
+            None,
+            None,
+        )
         .await;
 
     assert_eq!(s.state(), SessionState::ReadyEnding);
@@ -2366,6 +2512,7 @@ async fn test_cancel_action_with_mark_failed() {
 
     let _result = s
         .run_task(
+            "test_step",
             &step("sh", vec!["-c", "echo 'openjd_env:badformat'; sleep 30"]),
             None,
             None,
@@ -2463,6 +2610,9 @@ async fn test_redacted_env_sets_var_with_extension() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,
@@ -2500,6 +2650,9 @@ async fn test_redacted_env_does_not_set_var_without_extension() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,
@@ -2531,6 +2684,9 @@ async fn test_redactions_disabled_with_no_profile() {
                     "sh",
                     vec!["-c", "echo 'openjd_redacted_env: SECRET=hunter2'"],
                 )),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
                 on_exit: Some(action("sh", vec!["-c", "echo SECRET=${SECRET:-unset}"])),
             },
             embedded_files: None,
@@ -2731,7 +2887,13 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
     parent_token.cancel();
 
     let _result = s
-        .run_task(&step("sh", vec!["-c", "exit 42"]), None, None, None)
+        .run_task(
+            "test_step",
+            &step("sh", vec!["-c", "exit 42"]),
+            None,
+            None,
+            None,
+        )
         .await;
 
     assert_eq!(s.state(), SessionState::ReadyEnding);
@@ -2778,8 +2940,7 @@ async fn test_callback_reports_intermediate_progress() {
 
     // Script prints progress 25 and 75, with a status message
     let result = s
-        .run_task(
-            &step(
+        .run_task("test_step", &step(
                 "sh",
                 vec![
                     "-c",
@@ -2878,7 +3039,10 @@ async fn test_echo_openjd_directives_true_passes_directive_lines_to_log() {
             r#"K=op; J=enjd; printf '%s%s_progress: %s\n' "$K" "$J" 42.0; echo 'echo-on-plain-output'"#,
         ],
     );
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Success);
 
     testing_logger::validate(|captured| {
@@ -2917,7 +3081,10 @@ async fn test_echo_openjd_directives_false_suppresses_directive_lines_from_log()
             r#"K=op; J=enjd; printf '%s%s_progress: %s\n' "$K" "$J" 43.0; echo 'echo-off-plain-output'"#,
         ],
     );
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Success);
 
     testing_logger::validate(|captured| {
@@ -2981,7 +3148,10 @@ async fn test_echo_openjd_directives_true_redacts_redacted_env_in_log() {
             r#"K=op; J=enjd; A=tops; B=ecret; C=123; printf '%s%s_redacted_env: TOKEN=%s%s%s\n' "$K" "$J" "$A" "$B" "$C""#,
         ],
     );
-    let r = s.run_task(&script, None, None, None).await.unwrap();
+    let r = s
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(r.state, ActionState::Success);
 
     testing_logger::validate(|captured| {
