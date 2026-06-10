@@ -224,11 +224,38 @@ impl SessionUser for WindowsSessionUser {
         ""
     }
 
+    /// Returns true if the session user is the user running the current process.
+    ///
+    /// Uses SID comparison via `LookupAccountNameW` to correctly handle different
+    /// username formats (e.g. UPN `user@domain.com` vs DDL `DOMAIN\user`) that
+    /// refer to the same account. Falls back to case-insensitive string comparison
+    /// if SID lookup fails.
     fn is_process_user(&self) -> bool {
+        if let (Ok(user_sid), Some(proc_sid)) = (
+            crate::win32_permissions::lookup_sid(&self.user),
+            get_process_user_sid(),
+        ) {
+            return user_sid == *proc_sid;
+        }
+        // Fall back to string comparison if SID lookup fails
         crate::win32::get_process_user()
             .map(|proc_user| self.user.eq_ignore_ascii_case(&proc_user))
             .unwrap_or(false)
     }
+}
+
+/// Returns the cached SID of the current process user. Computed once since it never changes.
+#[cfg(windows)]
+fn get_process_user_sid() -> Option<&'static Vec<u8>> {
+    use std::sync::OnceLock;
+    static PROCESS_USER_SID: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    PROCESS_USER_SID
+        .get_or_init(|| {
+            crate::win32::get_process_user()
+                .ok()
+                .and_then(|u| crate::win32_permissions::lookup_sid(&u).ok())
+        })
+        .as_ref()
 }
 
 // ---------------------------------------------------------------------------

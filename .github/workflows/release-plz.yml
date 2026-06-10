@@ -70,11 +70,38 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup override set stable
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Generate the third-party license attribution file and attach it to
+      # every GitHub Release created in this run. The file is NOT committed to
+      # source; it is produced here from the released Cargo.lock so the
+      # attributions match exactly what was published. release-plz exposes the
+      # crates it released (with their git tags) via the `releases` output.
+      - name: Install cargo-about
+        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        # The `cli` feature is required to actually build the cargo-about
+        # binary; without it `cargo install` compiles the crate but emits
+        # "none of the package's binaries are available" and installs nothing.
+        run: cargo install cargo-about --locked --features cli
+      - name: Generate and attach THIRD-PARTY-LICENSES to releases
+        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES_JSON: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          set -euo pipefail
+          bash scripts/generate_third_party_licenses.sh THIRD-PARTY-LICENSES
+          # `releases` is a JSON array of { package_name, tag, version, ... }.
+          # Attach the attribution file to each GitHub Release tag created here.
+          echo "$RELEASES_JSON" | jq -r '.[].tag' | while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Uploading THIRD-PARTY-LICENSES to release $tag"
+            gh release upload "$tag" THIRD-PARTY-LICENSES --clobber
+          done
 
   # Open or update the Release PR. This runs on every push to main.
   release-plz-pr:

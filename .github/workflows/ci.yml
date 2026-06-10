@@ -66,22 +66,12 @@ jobs:
         run: cargo deny --manifest-path crates/openjd-sessions/src/helper/Cargo.toml check advisories --exclude-dev
 
   compliance:
-    name: Compliance (copyright headers, third-party licenses)
+    name: Compliance (copyright headers)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Check copyright headers
         run: bash scripts/check_copyright_headers.sh
-      # cargo-about renders `about.hbs` using the workspace Cargo.lock and
-      # `about.toml`. The committed THIRD-PARTY-LICENSES is shipped with
-      # every release, so it must stay in sync with the dependency graph.
-      # The `cli` feature is required to actually build the cargo-about
-      # binary; without it `cargo install` compiles the crate but emits
-      # "none of the package's binaries are available" and installs nothing.
-      - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
-      - name: Check THIRD-PARTY-LICENSES is up to date
-        run: bash scripts/check_third_party_licenses.sh
 
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same
@@ -288,7 +278,7 @@ jobs:
           repository: OpenJobDescription/openjd-specifications
           path: openjd-specifications
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+        uses: astral-sh/setup-uv@v8.2.0
       - name: Run conformance tests (Unix)
         if: runner.os != 'Windows'
         working-directory: openjd-specifications/conformance-tests
