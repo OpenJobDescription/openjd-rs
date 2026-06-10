@@ -43,7 +43,7 @@ const FILE_MODIFY_ACCESS: u32 = 0x001301FF;
 const FILE_READ_EXECUTE_ACCESS: u32 = 0x001200A9;
 
 /// Resolve a principal name to a SID via `LookupAccountNameW`.
-fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
     let name_w: Vec<u16> = principal.encode_utf16().chain(std::iter::once(0)).collect();
     let mut sid_size: u32 = 0;
     let mut domain_size: u32 = 0;

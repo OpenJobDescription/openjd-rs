@@ -4,4 +4,3 @@
 # than Linux/macOS, which can lead to cache keys that are needlessly
 # fragmented or that never match a previously-saved entry.
 Cargo.lock text eol=lf
-THIRD-PARTY-LICENSES text eol=lf

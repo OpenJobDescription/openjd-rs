@@ -3,15 +3,21 @@
 # Copyright by contributors to this project.
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 #
-# Regenerates THIRD-PARTY-LICENSES via `cargo about generate` and fails if
-# the result differs from the committed file. Keeps the shipped license
-# attributions in lockstep with the actual dependency graph in Cargo.lock.
+# Generates the third-party license attribution file via `cargo about generate`
+# and writes it to the given output path (default: THIRD-PARTY-LICENSES).
+#
+# This file is NOT committed to source control. It is produced at release time
+# and attached to each GitHub Release as a build artifact (see
+# .github/workflows/release-plz.yml). crates published to crates.io do not
+# bundle their dependencies, so the published .crate carries no attribution
+# obligation for them; the obligation only applies to distributed artifacts
+# that embed dependency code (e.g. a compiled binary), which is what the
+# Release attachment covers.
 #
 # Usage:
-#   scripts/check_third_party_licenses.sh          # verify (CI mode)
-#   scripts/check_third_party_licenses.sh --update # regenerate in place
+#   scripts/generate_third_party_licenses.sh [OUTPUT_PATH]
 #
-# Requires cargo-about (install with `cargo install cargo-about --locked`).
+# Requires cargo-about (install with `cargo install cargo-about --locked --features cli`).
 
 set -euo pipefail
 
@@ -20,27 +26,24 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+output="${1:-THIRD-PARTY-LICENSES}"
+
+case "${1:-}" in
+    -h|--help)
+        sed -n '2,20p' "$0"
+        exit 0
+        ;;
+esac
+
 if ! command -v cargo-about >/dev/null 2>&1; then
     echo "error: cargo-about not found on PATH." >&2
-    echo "Install it with: cargo install cargo-about --locked" >&2
+    echo "Install it with: cargo install cargo-about --locked --features cli" >&2
     exit 2
 fi
 
-mode="verify"
-if [[ $# -ge 1 ]]; then
-    case "$1" in
-        --update|-u)
-            mode="update"
-            ;;
-        -h|--help)
-            sed -n '2,12p' "$0"
-            exit 0
-            ;;
-        *)
-            echo "error: unknown argument: $1" >&2
-            exit 2
-            ;;
-    esac
+if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq not found on PATH (needed to extract workspace member names)." >&2
+    exit 2
 fi
 
 # `cargo about` reads the workspace Cargo.toml, the `about.toml` config
@@ -57,11 +60,6 @@ generated="$(mktemp)"
 trap 'rm -f "$raw" "$generated"' EXIT
 
 cargo about generate about.hbs > "$raw"
-
-if ! command -v jq >/dev/null 2>&1; then
-    echo "error: jq not found on PATH (needed to extract workspace member names)." >&2
-    exit 2
-fi
 
 workspace_pattern="$(
     cargo metadata --no-deps --format-version=1 \
@@ -87,21 +85,7 @@ awk -v re="^[*][*] ($workspace_pattern); version " '
     }
 ' "$raw" > "$generated"
 
-# Ensure consistent EOL.
-sed -i 's/\r//' "$generated"
+# Ensure consistent LF line endings (portable across GNU/BSD sed).
+tr -d '\r' < "$generated" > "$output"
 
-if [[ "$mode" == "update" ]]; then
-    cp "$generated" THIRD-PARTY-LICENSES
-    echo "Updated THIRD-PARTY-LICENSES."
-    exit 0
-fi
-
-if ! diff -u THIRD-PARTY-LICENSES "$generated"; then
-    echo >&2
-    echo "THIRD-PARTY-LICENSES is out of date with respect to Cargo.lock." >&2
-    echo "Regenerate it with:" >&2
-    echo "  scripts/check_third_party_licenses.sh --update" >&2
-    exit 1
-fi
-
-echo "THIRD-PARTY-LICENSES is up to date."
+echo "Wrote third-party license attributions to $output" >&2
