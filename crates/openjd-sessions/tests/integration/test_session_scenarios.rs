@@ -333,6 +333,7 @@ async fn run_scenario(scenario_path: &Path) {
             for task_params in iter {
                 let result = session
                     .run_task(
+                        "test_step",
                         &step.script,
                         Some(&task_params),
                         step.resolved_symtab.as_ref(),
@@ -354,7 +355,13 @@ async fn run_scenario(scenario_path: &Path) {
         } else {
             // No parameter space — run once with no task params
             let result = session
-                .run_task(&step.script, None, step.resolved_symtab.as_ref(), None)
+                .run_task(
+                    "test_step",
+                    &step.script,
+                    None,
+                    step.resolved_symtab.as_ref(),
+                    None,
+                )
                 .await;
             match result {
                 Ok(r) => {

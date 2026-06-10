@@ -36,7 +36,10 @@ async fn test_path_mapping_file_created_with_rules() {
         },
         embedded_files: None,
     };
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     assert_eq!(json["version"], "pathmapping-1.0");
     let rules = json["path_mapping_rules"].as_array().unwrap();
@@ -62,7 +65,10 @@ async fn test_path_mapping_file_created_empty_when_no_rules() {
         },
         embedded_files: None,
     };
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     // Empty rules should produce empty JSON object
     assert!(json.as_object().unwrap().is_empty() || json.get("path_mapping_rules").is_none());
@@ -89,7 +95,10 @@ async fn test_has_path_mapping_rules_true() {
         },
         embedded_files: None,
     };
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("true"));
 }
 
@@ -109,7 +118,10 @@ async fn test_has_path_mapping_rules_false() {
         },
         embedded_files: None,
     };
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     assert!(result.stdout.contains("false"));
 }
 
@@ -141,7 +153,10 @@ async fn test_path_mapping_multiple_rules() {
         },
         embedded_files: None,
     };
-    let result = session.run_task(&script, None, None, None).await.unwrap();
+    let result = session
+        .run_task("test_step", &script, None, None, None)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     let rules = json["path_mapping_rules"].as_array().unwrap();
     assert_eq!(rules.len(), 2);

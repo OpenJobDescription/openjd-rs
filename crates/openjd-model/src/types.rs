@@ -347,6 +347,9 @@ pub enum ModelExtension {
     RedactedEnvVars,
     FeatureBundle1,
     Expr,
+    /// `WRAP_ACTIONS` — enables `onWrapEnvEnter`, `onWrapTaskRun`, and
+    /// `onWrapEnvExit` on `<EnvironmentActions>`. See RFC 0008.
+    WrapActions,
 }
 
 impl ModelExtension {
@@ -357,6 +360,7 @@ impl ModelExtension {
         Self::RedactedEnvVars,
         Self::FeatureBundle1,
         Self::Expr,
+        Self::WrapActions,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -365,6 +369,7 @@ impl ModelExtension {
             Self::RedactedEnvVars => "REDACTED_ENV_VARS",
             Self::FeatureBundle1 => "FEATURE_BUNDLE_1",
             Self::Expr => "EXPR",
+            Self::WrapActions => "WRAP_ACTIONS",
         }
     }
 }
@@ -377,6 +382,7 @@ impl std::str::FromStr for ModelExtension {
             "REDACTED_ENV_VARS" => Ok(Self::RedactedEnvVars),
             "FEATURE_BUNDLE_1" => Ok(Self::FeatureBundle1),
             "EXPR" => Ok(Self::Expr),
+            "WRAP_ACTIONS" => Ok(Self::WrapActions),
             _ => Err(format!("Unknown extension: {s}")),
         }
     }
