@@ -73,18 +73,39 @@ impl Drop for LogonToken {
     }
 }
 
+/// Parse a DDL (Down-Level Logon) format username into (user, domain) components.
+///
+/// - DDL format `DOMAIN\user` → `("user", Some("DOMAIN"))`
+/// - UPN format `user@domain.com` or local `user` → unchanged, `(username, None)`
+///   Windows resolves UPN and local names automatically when domain is NULL.
+fn parse_ddl_domain_user(username: &str) -> (&str, Option<&str>) {
+    if let Some((domain, user)) = username.split_once('\\') {
+        (user, Some(domain))
+    } else {
+        (username, None)
+    }
+}
+
 /// Attempt to log on as the given user with a password.
 ///
 /// Returns a `LogonToken` that closes the handle on drop.
+/// Supports DDL (`DOMAIN\user`), UPN (`user@domain.com`), and local usernames.
 pub fn logon_user(username: &str, password: &str) -> Result<LogonToken, windows::core::Error> {
-    let username_w: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect();
+    let (user, domain) = parse_ddl_domain_user(username);
+    let user_w: Vec<u16> = user.encode_utf16().chain(std::iter::once(0)).collect();
+    let domain_w: Option<Vec<u16>> =
+        domain.map(|d| d.encode_utf16().chain(std::iter::once(0)).collect());
+    let domain_ptr = domain_w
+        .as_ref()
+        .map(|d| PCWSTR(d.as_ptr()))
+        .unwrap_or(PCWSTR::null());
     let password_w: Vec<u16> = password.encode_utf16().chain(std::iter::once(0)).collect();
     let mut token = HANDLE::default();
 
     unsafe {
         LogonUserW(
-            PCWSTR(username_w.as_ptr()),
-            PCWSTR::null(),
+            PCWSTR(user_w.as_ptr()),
+            domain_ptr,
             PCWSTR(password_w.as_ptr()),
             LOGON32_LOGON_INTERACTIVE,
             LOGON32_PROVIDER_DEFAULT,
@@ -405,7 +426,14 @@ fn spawn_as_user_impl(
     let creation_flags = CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT;
 
     let result = if let Some(pw) = password {
-        let user_w: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect();
+        let (user_part, domain_part) = parse_ddl_domain_user(username);
+        let user_w: Vec<u16> = user_part.encode_utf16().chain(std::iter::once(0)).collect();
+        let domain_w: Option<Vec<u16>> =
+            domain_part.map(|d| d.encode_utf16().chain(std::iter::once(0)).collect());
+        let domain_ptr = domain_w
+            .as_ref()
+            .map(|d| PCWSTR(d.as_ptr()))
+            .unwrap_or(PCWSTR::null());
         let pw_w: Vec<u16> = pw.encode_utf16().chain(std::iter::once(0)).collect();
 
         // For password path, logon to get env block, then call CreateProcessWithLogonW
@@ -415,7 +443,7 @@ fn spawn_as_user_impl(
         unsafe {
             CreateProcessWithLogonW(
                 PCWSTR(user_w.as_ptr()),
-                PCWSTR::null(), // domain
+                domain_ptr,
                 PCWSTR(pw_w.as_ptr()),
                 LOGON_WITH_PROFILE,
                 PCWSTR::null(), // application name
@@ -524,4 +552,30 @@ fn append_arg(cmdline: &mut String, arg: &str) {
         cmdline.push('\\');
     }
     cmdline.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ddl_domain_user_ddl_format() {
+        let (user, domain) = parse_ddl_domain_user("MYDOMAIN\\jsmith");
+        assert_eq!(user, "jsmith");
+        assert_eq!(domain, Some("MYDOMAIN"));
+    }
+
+    #[test]
+    fn parse_ddl_domain_user_upn_format() {
+        let (user, domain) = parse_ddl_domain_user("jsmith@domain.com");
+        assert_eq!(user, "jsmith@domain.com");
+        assert_eq!(domain, None);
+    }
+
+    #[test]
+    fn parse_ddl_domain_user_local_user() {
+        let (user, domain) = parse_ddl_domain_user("localuser");
+        assert_eq!(user, "localuser");
+        assert_eq!(domain, None);
+    }
 }
