@@ -42,16 +42,66 @@ const FILE_MODIFY_ACCESS: u32 = 0x001301FF;
 /// modify or replace it.
 const FILE_READ_EXECUTE_ACCESS: u32 = 0x001200A9;
 
+/// ERROR_NONE_MAPPED (1332): raised when the LSA service hasn't finished
+/// initializing on freshly started EC2 instances.
+const ERROR_NONE_MAPPED: u32 = 1332;
+
+/// Maximum retry attempts for transient LookupAccountNameW failures.
+const LOOKUP_MAX_RETRIES: u32 = 3;
+
+/// `true` if `err` is the Win32 `ERROR_NONE_MAPPED` (1332) failure, accepting
+/// either the bare Win32 code or its `HRESULT_FROM_WIN32` wrapping
+/// (`0x8007_0000 | code`, i.e. `0x8007_0534`). The `windows` crate surfaces
+/// `LookupAccountNameW` failures as the wrapped HRESULT, but we match both
+/// forms defensively.
+fn is_lsa_not_ready(err: &windows::core::Error) -> bool {
+    let code = err.code().0 as u32;
+    code == ERROR_NONE_MAPPED || code == (0x8007_0000 | ERROR_NONE_MAPPED)
+}
+
 /// Resolve a principal name to a SID via `LookupAccountNameW`.
-pub(crate) fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
+///
+/// Retries with exponential backoff (up to 3 attempts, sleeping 1s then 2s)
+/// on ERROR_NONE_MAPPED (1332) which occurs when the LSA service hasn't
+/// finished initializing on freshly started EC2 instances. Any other error
+/// fails immediately rather than burning the backoff window.
+///
+/// Visibility mirrors [`set_permissions`]: declared `pub` so that integration
+/// tests can reach it when the module is exposed under the `test-utils`
+/// feature; without that feature the enclosing module is `pub(crate)`, so this
+/// stays crate-private.
+pub fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
     let name_w: Vec<u16> = principal.encode_utf16().chain(std::iter::once(0)).collect();
+
+    for attempt in 0..LOOKUP_MAX_RETRIES {
+        match lookup_sid_once(&name_w) {
+            Ok(sid) => return Ok(sid),
+            Err(e) => {
+                if is_lsa_not_ready(&e) && attempt < LOOKUP_MAX_RETRIES - 1 {
+                    std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
+                    continue;
+                }
+                return Err(format!("Could not look up account '{principal}': {e}"));
+            }
+        }
+    }
+
+    unreachable!("loop returns on the final attempt")
+}
+
+/// Single `LookupAccountNameW` resolution (size query + populated call) with no
+/// retry. `name_w` is the NUL-terminated wide form of the principal name.
+fn lookup_sid_once(name_w: &[u16]) -> Result<Vec<u8>, windows::core::Error> {
     let mut sid_size: u32 = 0;
     let mut domain_size: u32 = 0;
     let mut sid_type = SID_NAME_USE::default();
 
-    // First call to get buffer sizes
-    unsafe {
-        let _ = LookupAccountNameW(
+    // First call to get buffer sizes. This is expected to fail with
+    // ERROR_INSUFFICIENT_BUFFER; we only care about the returned sizes. A
+    // genuine lookup failure (e.g. ERROR_NONE_MAPPED) surfaces here as an Err
+    // that the caller inspects for retry eligibility.
+    let size_query = unsafe {
+        LookupAccountNameW(
             None,
             windows::core::PCWSTR(name_w.as_ptr()),
             Some(PSID(std::ptr::null_mut())),
@@ -59,12 +109,14 @@ pub(crate) fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
             Some(windows::core::PWSTR(std::ptr::null_mut())),
             &mut domain_size,
             &mut sid_type,
-        );
-    }
+        )
+    };
     if sid_size == 0 {
-        return Err(format!(
-            "Could not look up account '{principal}': LookupAccountNameW returned zero SID size"
-        ));
+        // No buffer size means the name was not resolved; propagate the real
+        // error so the caller can decide whether it is retryable.
+        return Err(size_query
+            .err()
+            .unwrap_or_else(windows::core::Error::from_thread));
     }
 
     let mut sid_buf = vec![0u8; sid_size as usize];
@@ -79,8 +131,7 @@ pub(crate) fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
             Some(windows::core::PWSTR(domain_buf.as_mut_ptr())),
             &mut domain_size,
             &mut sid_type,
-        )
-        .map_err(|e| format!("Could not look up account '{principal}': {e}"))?;
+        )?;
     }
 
     Ok(sid_buf)
