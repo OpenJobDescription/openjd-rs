@@ -427,3 +427,52 @@ fn test_embedded_file_windows_runnable_no_user_has_only_inherited_aces() {
         }
     }
 }
+
+// === lookup_sid retry tests ===
+//
+// These test the retry-with-backoff behavior added to lookup_sid() to handle
+// ERROR_NONE_MAPPED (1332) on freshly started EC2 instances where the LSA
+// service hasn't finished initializing. Mirrors the Python tests in
+// test_named_pipe_helper.py from openjd-adaptor-runtime-for-python PR #262.
+
+/// Verifies that lookup_sid succeeds for the current process user.
+/// This exercises the happy path through the retry loop.
+#[test]
+fn test_lookup_sid_succeeds_for_current_user() {
+    let process_user = openjd_sessions::win32::get_process_user().unwrap();
+    let result = openjd_sessions::win32_permissions::lookup_sid(&process_user);
+    assert!(
+        result.is_ok(),
+        "lookup_sid should succeed for the current process user '{process_user}', got: {:?}",
+        result.err()
+    );
+    assert!(
+        !result.unwrap().is_empty(),
+        "SID buffer should not be empty for the current process user"
+    );
+}
+
+/// Verifies that lookup_sid returns an error for a non-existent user after
+/// exhausting all retries. The error message should reference the principal name.
+#[test]
+fn test_lookup_sid_fails_for_nonexistent_user() {
+    let start = std::time::Instant::now();
+    let result = openjd_sessions::win32_permissions::lookup_sid("nonexistent_user_xyz_12345");
+    let elapsed = start.elapsed();
+
+    assert!(
+        result.is_err(),
+        "lookup_sid should fail for a non-existent user"
+    );
+    let err_msg = result.unwrap_err();
+    assert!(
+        err_msg.contains("nonexistent_user_xyz_12345"),
+        "Error message should contain the principal name, got: {err_msg}"
+    );
+    // Verify that retries occurred: should have slept at least 1s + 2s = 3s
+    // (exponential backoff: 2^0=1s, 2^1=2s before the final attempt fails)
+    assert!(
+        elapsed >= std::time::Duration::from_secs(3),
+        "lookup_sid should have retried with backoff (expected >=3s, got {elapsed:?})"
+    );
+}
