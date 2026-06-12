@@ -42,48 +42,80 @@ const FILE_MODIFY_ACCESS: u32 = 0x001301FF;
 /// modify or replace it.
 const FILE_READ_EXECUTE_ACCESS: u32 = 0x001200A9;
 
+/// ERROR_NONE_MAPPED (1332): raised when the LSA service hasn't finished
+/// initializing on freshly started EC2 instances.
+const ERROR_NONE_MAPPED: u32 = 1332;
+
+/// Maximum retry attempts for transient LookupAccountNameW failures.
+const LOOKUP_MAX_RETRIES: u32 = 3;
+
 /// Resolve a principal name to a SID via `LookupAccountNameW`.
+///
+/// Retries with exponential backoff (up to 3 attempts, sleeping 1s then 2s)
+/// on ERROR_NONE_MAPPED (1332) which occurs when the LSA service hasn't
+/// finished initializing on freshly started EC2 instances.
 pub(crate) fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
     let name_w: Vec<u16> = principal.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut sid_size: u32 = 0;
-    let mut domain_size: u32 = 0;
-    let mut sid_type = SID_NAME_USE::default();
 
-    // First call to get buffer sizes
-    unsafe {
-        let _ = LookupAccountNameW(
-            None,
-            windows::core::PCWSTR(name_w.as_ptr()),
-            Some(PSID(std::ptr::null_mut())),
-            &mut sid_size,
-            Some(windows::core::PWSTR(std::ptr::null_mut())),
-            &mut domain_size,
-            &mut sid_type,
-        );
+    for attempt in 0..LOOKUP_MAX_RETRIES {
+        let mut sid_size: u32 = 0;
+        let mut domain_size: u32 = 0;
+        let mut sid_type = SID_NAME_USE::default();
+
+        // First call to get buffer sizes
+        unsafe {
+            let _ = LookupAccountNameW(
+                None,
+                windows::core::PCWSTR(name_w.as_ptr()),
+                Some(PSID(std::ptr::null_mut())),
+                &mut sid_size,
+                Some(windows::core::PWSTR(std::ptr::null_mut())),
+                &mut domain_size,
+                &mut sid_type,
+            );
+        }
+        if sid_size == 0 {
+            if attempt < LOOKUP_MAX_RETRIES - 1 {
+                std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
+                continue;
+            }
+            return Err(format!(
+                "Could not look up account '{principal}': LookupAccountNameW returned zero SID size"
+            ));
+        }
+
+        let mut sid_buf = vec![0u8; sid_size as usize];
+        let mut domain_buf = vec![0u16; domain_size as usize];
+
+        let result = unsafe {
+            LookupAccountNameW(
+                None,
+                windows::core::PCWSTR(name_w.as_ptr()),
+                Some(PSID(sid_buf.as_mut_ptr() as *mut _)),
+                &mut sid_size,
+                Some(windows::core::PWSTR(domain_buf.as_mut_ptr())),
+                &mut domain_size,
+                &mut sid_type,
+            )
+        };
+
+        match result {
+            Ok(()) => return Ok(sid_buf),
+            Err(e) => {
+                let code = e.code().0 as u32;
+                // HRESULT for Win32 error 1332: 0x80070534
+                let is_none_mapped = code == ERROR_NONE_MAPPED
+                    || code == (0x80070000 | ERROR_NONE_MAPPED);
+                if is_none_mapped && attempt < LOOKUP_MAX_RETRIES - 1 {
+                    std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
+                    continue;
+                }
+                return Err(format!("Could not look up account '{principal}': {e}"));
+            }
+        }
     }
-    if sid_size == 0 {
-        return Err(format!(
-            "Could not look up account '{principal}': LookupAccountNameW returned zero SID size"
-        ));
-    }
 
-    let mut sid_buf = vec![0u8; sid_size as usize];
-    let mut domain_buf = vec![0u16; domain_size as usize];
-
-    unsafe {
-        LookupAccountNameW(
-            None,
-            windows::core::PCWSTR(name_w.as_ptr()),
-            Some(PSID(sid_buf.as_mut_ptr() as *mut _)),
-            &mut sid_size,
-            Some(windows::core::PWSTR(domain_buf.as_mut_ptr())),
-            &mut domain_size,
-            &mut sid_type,
-        )
-        .map_err(|e| format!("Could not look up account '{principal}': {e}"))?;
-    }
-
-    Ok(sid_buf)
+    unreachable!()
 }
 
 /// Build an in-memory DACL buffer populated with the requested allowed
