@@ -979,8 +979,12 @@ impl Session {
 
             // Box::pin keeps the inner subprocess/select! state machine off the
             // outer future's stack. Without this, the combined future exceeds
-            // Windows' default 1 MB thread stack in release builds.
-            let runner_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>> =
+            // Windows' default 1 MB thread stack in release builds. The boxed
+            // type unifies the two match arms; it is intentionally NOT `+ Send`
+            // because on Windows the subprocess future holds a non-Send
+            // `Option<HANDLE>` across an await (and `drive_action` does not
+            // require `Send`), matching the plain `enter`/`exit`/`run` paths.
+            let runner_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _>>> =
                 match wrap_action.as_ref() {
                     Some((_, action)) => Box::pin(runner.run_wrap_action(
                         action,
@@ -1184,8 +1188,10 @@ impl Session {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             // See the note in the onEnter path about Box::pin and the Windows
-            // 1 MB thread-stack limit on release builds.
-            let runner_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>> =
+            // 1 MB thread-stack limit on release builds. As there, the boxed
+            // type is intentionally NOT `+ Send` (the subprocess future holds a
+            // non-Send `Option<HANDLE>` across an await on Windows).
+            let runner_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _>>> =
                 match wrap_action.as_ref() {
                     Some((_, action)) => Box::pin(runner.run_wrap_action(
                         action,
