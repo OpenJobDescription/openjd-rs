@@ -114,6 +114,7 @@ impl EffectiveRules {
         let expr = ctx.profile.has_extension(ModelExtension::Expr);
         let fb1 = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
         let chunking = ctx.profile.has_extension(ModelExtension::TaskChunking);
+        let wrap_actions = ctx.profile.has_extension(ModelExtension::WrapActions);
 
         let mut job_param_types: std::collections::HashSet<JobParameterType> = [
             JobParameterType::String,
@@ -152,7 +153,7 @@ impl EffectiveRules {
             allowed_job_param_types: job_param_types,
             allowed_task_param_types: task_param_types,
             allow_fmtstring_in_numeric_fields: fb1,
-            wrap_actions_enabled: ctx.profile.has_extension(ModelExtension::WrapActions),
+            wrap_actions_enabled: wrap_actions,
         }
     }
 }

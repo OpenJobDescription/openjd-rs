@@ -109,7 +109,19 @@ pub fn validate_wrap_actions_job_template(
     let active = ctx.profile.has_extension(ModelExtension::WrapActions);
     check_expr_prerequisite(ctx, errors);
 
-    // Walk every environment, gating new fields and counting wrap layers.
+    // Single-wrap-layer enforcement (RFC 0008).
+    //
+    // The session model is: a session's environment stack is the job's
+    // `jobEnvironments` plus exactly ONE step's `stepEnvironments`.
+    // Different steps never share a session. So "only one wrap layer per
+    // session" reduces to: for every step, (wrap envs in jobEnvironments)
+    // + (wrap envs in that step's stepEnvironments) must be <= 1.
+    //
+    // `check_env` does double duty below: it gates the new fields on the
+    // extension and returns true iff the env defines any wrap hook, which
+    // is what we sum into the per-scope counts.
+
+    // 1. Count wrap-defining envs in jobEnvironments (shared by every session).
     let mut job_env_wrap_count = 0usize;
     if let Some(envs) = &jt.job_environments {
         let envs_path = path_field(&[], "jobEnvironments");
@@ -119,7 +131,21 @@ pub fn validate_wrap_actions_job_template(
             }
         }
     }
-    let mut any_step_env_violation = false;
+
+    // Job-envs-only violation: multiple wrap envs in jobEnvironments are
+    // reachable from every session, regardless of any step's
+    // stepEnvironments, so emit at the jobEnvironments path as soon as the
+    // job-env count exceeds one. This is independent of the per-step check
+    // below: a template with two job-env wrap layers AND a step that adds
+    // its own should report both the jobEnvironments and stepEnvironments
+    // violations.
+    if active && job_env_wrap_count > 1 {
+        errors.add(&path_field(&[], "jobEnvironments"), SINGLE_WRAP_LAYER_MSG);
+    }
+
+    // 2. For each step, count its stepEnvironments' wrap envs and add the
+    //    job-env total — that sum is exactly the set of wrap envs reachable
+    //    in that step's session.
     for (i, step) in jt.steps.iter().enumerate() {
         let Some(envs) = &step.step_environments else {
             continue;
@@ -135,17 +161,11 @@ pub fn validate_wrap_actions_job_template(
         // Single-wrap-layer rule: a session is built from the job's
         // jobEnvironments plus one step's stepEnvironments, so checking
         // each step's combined total catches every reachable session.
+        // This catches two job-env wrap layers, one job-env + one step-env,
+        // and two step-env layers within the same step.
         if active && job_env_wrap_count + step_env_wrap_count > 1 {
             errors.add(&envs_path, SINGLE_WRAP_LAYER_MSG);
-            any_step_env_violation = true;
         }
-    }
-    // Job-envs-only violation: multiple wrap envs in jobEnvironments
-    // would be reachable from every session, but the per-step loop above
-    // only fires for steps that have stepEnvironments. Emit once at the
-    // jobEnvironments path when no step-env loop would have caught it.
-    if active && job_env_wrap_count > 1 && !any_step_env_violation {
-        errors.add(&path_field(&[], "jobEnvironments"), SINGLE_WRAP_LAYER_MSG);
     }
 }
 

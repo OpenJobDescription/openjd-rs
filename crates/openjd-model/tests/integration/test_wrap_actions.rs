@@ -20,8 +20,11 @@
 
 use openjd_model::{decode_environment_template, decode_job_template, CallerLimits};
 
-const ALL_EXTS: &[&str] = &["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING", "WRAP_ACTIONS"];
-const NO_WRAP_EXTS: &[&str] = &["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
+// These tests only exercise WRAP_ACTIONS and its EXPR prerequisite, so the
+// extension lists are scoped to exactly those. `WRAP_EXTS` enables wrap hooks;
+// `NO_WRAP_EXTS` omits WRAP_ACTIONS to exercise the gating/rejection paths.
+const WRAP_EXTS: &[&str] = &["EXPR", "WRAP_ACTIONS"];
+const NO_WRAP_EXTS: &[&str] = &["EXPR"];
 
 fn yaml_val(s: &str) -> serde_json::Value {
     serde_saphyr::from_str(s).unwrap()
@@ -94,7 +97,7 @@ fn wrap_hooks_accepted_with_extension() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -199,7 +202,7 @@ fn two_job_envs_with_wrap_hooks_rejected() {
                 "script": {"actions": {"onRun": {"command": "echo"}}}
             }]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &[
             "only one environment in the session stack may define any of onWrapEnvEnter, onWrapTaskRun, onWrapEnvExit (RFC 0008).",
         ],
@@ -238,7 +241,7 @@ fn job_env_and_step_env_with_wrap_hooks_rejected() {
                 "script": {"actions": {"onRun": {"command": "echo"}}}
             }]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &[
             "steps[0] -> stepEnvironments:\n\tonly one environment in the session stack may define any of onWrapEnvEnter, onWrapTaskRun, onWrapEnvExit (RFC 0008).",
         ],
@@ -275,7 +278,7 @@ fn single_wrap_layer_in_job_env_ok() {
                 "script": {"actions": {"onRun": {"command": "echo"}}}
             }]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -302,7 +305,7 @@ fn single_wrap_layer_in_step_env_ok() {
                 "script": {"actions": {"onRun": {"command": "echo"}}}
             }]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -343,7 +346,7 @@ fn wrap_hooks_with_plain_inner_step_envs_ok() {
                 "script": {"actions": {"onRun": {"command": "blender"}}}
             }]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -386,7 +389,7 @@ fn wrap_task_run_can_reference_wrapped_action_symbols() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -414,7 +417,7 @@ fn wrap_env_enter_can_reference_wrapped_action_and_wrapped_env_name() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -442,7 +445,7 @@ fn wrap_env_exit_can_reference_wrapped_action_and_wrapped_env_name() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -470,7 +473,7 @@ fn wrap_task_run_can_reference_wrapped_step_name() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -498,7 +501,7 @@ fn wrapped_step_name_not_available_in_wrap_env_enter() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["Undefined variable: 'WrappedStep.Name'"],
     );
 }
@@ -526,7 +529,7 @@ fn wrapped_step_name_not_available_in_wrap_env_exit() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["Undefined variable: 'WrappedStep.Name'"],
     );
 }
@@ -556,7 +559,7 @@ fn wrapped_env_name_not_available_in_wrap_task_run() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["Undefined variable: 'WrappedEnv.Name'"],
     );
 }
@@ -586,7 +589,7 @@ fn wrapped_action_not_available_in_plain_on_enter() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["Undefined variable: 'WrappedAction.Command'"],
     );
 }
@@ -616,7 +619,7 @@ fn wrapped_env_name_not_available_in_plain_on_exit() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["Undefined variable: 'WrappedEnv.Name'"],
     );
 }
@@ -642,7 +645,7 @@ fn defining_only_on_wrap_task_run_rejected() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["must define all three"],
     );
 }
@@ -663,7 +666,7 @@ fn defining_only_on_wrap_env_enter_rejected() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["must define all three"],
     );
 }
@@ -684,7 +687,7 @@ fn defining_two_of_three_wrap_hooks_rejected() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["must define all three"],
     );
 }
@@ -706,7 +709,7 @@ fn defining_zero_wrap_hooks_accepted() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
     );
 }
 
@@ -733,7 +736,7 @@ fn wrap_actions_without_expr_extension_rejected_in_env_template() {
                 }
             }
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["WRAP_ACTIONS requires EXPR"],
     );
 }
@@ -758,7 +761,7 @@ fn wrap_actions_without_expr_extension_rejected_in_job_template() {
             }],
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
         }"#,
-        ALL_EXTS,
+        WRAP_EXTS,
         &["WRAP_ACTIONS requires EXPR"],
     );
 }

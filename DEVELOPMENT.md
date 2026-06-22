@@ -152,6 +152,20 @@ scripts/coverage.sh                                                    # coverag
 
 See AGENTS.md for CI jobs, the conformance suite, and S3 integration tests.
 
+### `OPENJD_TEST_PYTHON`
+
+The `openjd-cli` integration tests run templates whose actions invoke
+`python`. The harness probes `PATH` for `python`, then `python3` and the
+versioned `python3.x` names, building a temporary shim so the fixtures stay
+portable. To pin a specific interpreter (e.g. a particular venv) instead of
+relying on auto-detection, set `OPENJD_TEST_PYTHON` to its absolute path:
+
+```bash
+OPENJD_TEST_PYTHON=/path/to/venv/bin/python cargo test -p openjd-cli
+```
+
+If the path doesn't exist the harness falls back to the `PATH` probe.
+
 ## Coding style
 
 - `cargo fmt` before committing (nightly rustfmt).

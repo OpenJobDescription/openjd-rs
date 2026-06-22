@@ -47,7 +47,10 @@ fn templates_dir() -> PathBuf {
 /// surviving hosts that only install `python3`.
 fn python_shim_dir() -> Option<PathBuf> {
     static SHIM: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
-        let target = resolve_python_interpreter()?;
+        // Fail fast with a clear message: a Python interpreter is required for
+        // the CLI tests, so a failure to find one should not be silently
+        // swallowed into a confusing downstream test failure.
+        let target = resolve_python_interpreter().expect("Failed to find a Python interpreter");
         // If the interpreter is literally named `python` we don't need a shim —
         // its parent directory is already on `PATH` (that's how `which` found
         // it, transitively). Detect this by comparing the file-name component.
@@ -56,7 +59,11 @@ fn python_shim_dir() -> Option<PathBuf> {
         }
         let shim_dir =
             std::env::temp_dir().join(format!("openjd-cli-tests-python-{}", std::process::id()));
-        std::fs::create_dir_all(&shim_dir).ok()?;
+        // A shim was needed but we failed to set it up — fail fast with a
+        // descriptive message rather than returning `None`, which would make
+        // the downstream test fail in a way that's hard to diagnose.
+        std::fs::create_dir_all(&shim_dir)
+            .unwrap_or_else(|e| panic!("Failed to create shim_dir {shim_dir:?}: {e}"));
         let shim_path = shim_dir.join(if cfg!(windows) {
             "python.cmd"
         } else {
@@ -70,17 +77,23 @@ fn python_shim_dir() -> Option<PathBuf> {
             // `python3` breaks when that binary itself inspects `argv[0]` to
             // decide behavior (rare, but some venv wrappers do this).
             let script = format!("#!/bin/sh\nexec {:?} \"$@\"\n", target);
-            std::fs::write(&shim_path, script).ok()?;
-            let mut perms = std::fs::metadata(&shim_path).ok()?.permissions();
+            std::fs::write(&shim_path, script)
+                .unwrap_or_else(|e| panic!("Failed to write python shim {shim_path:?}: {e}"));
+            let mut perms = std::fs::metadata(&shim_path)
+                .unwrap_or_else(|e| panic!("Failed to stat python shim {shim_path:?}: {e}"))
+                .permissions();
             perms.set_mode(0o755);
-            std::fs::set_permissions(&shim_path, perms).ok()?;
+            std::fs::set_permissions(&shim_path, perms).unwrap_or_else(|e| {
+                panic!("Failed to set permissions on python shim {shim_path:?}: {e}")
+            });
         }
         #[cfg(windows)]
         {
             // On Windows a .cmd wrapper works for anything spawned via
             // CreateProcess with a bare name lookup.
             let script = format!("@echo off\r\n{} %*\r\n", target.display());
-            std::fs::write(&shim_path, script).ok()?;
+            std::fs::write(&shim_path, script)
+                .unwrap_or_else(|e| panic!("Failed to write python shim {shim_path:?}: {e}"));
         }
         Some(shim_dir)
     });
@@ -129,11 +142,16 @@ fn run_cli(args: &[&str]) -> (i32, String, String) {
     let mut cmd = Command::new(openjd_bin());
     cmd.args(args).env("RUSTUP_TOOLCHAIN", "1.94.1");
     if let Some(shim) = python_shim_dir() {
-        let existing = std::env::var_os("PATH").unwrap_or_default();
-        let joined =
-            std::env::join_paths(std::iter::once(shim).chain(std::env::split_paths(&existing)))
-                .expect("join_paths");
-        cmd.env("PATH", joined);
+        // Only rewrite PATH when it's actually defined. If PATH is unset
+        // (extremely rare), skip — prepending the shim to an empty PATH would
+        // add an empty entry that searches the current directory for
+        // executables, which we don't want.
+        if let Some(existing) = std::env::var_os("PATH") {
+            let joined =
+                std::env::join_paths(std::iter::once(shim).chain(std::env::split_paths(&existing)))
+                    .expect("join_paths");
+            cmd.env("PATH", joined);
+        }
     }
     let output = cmd.output().expect("failed to execute openjd");
     let exit_code = output.status.code().unwrap_or(-1);

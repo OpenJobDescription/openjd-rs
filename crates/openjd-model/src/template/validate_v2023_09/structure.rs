@@ -386,18 +386,23 @@ pub fn validate_single_environment(
         // define only wrap hooks (or any single action) without a standalone
         // `onEnter`. Concretely, require at least one of the five known
         // actions to be present so we don't accept an empty `actions: {}`.
-        if !script.actions.has_any_action() {
-            if rules.wrap_actions_enabled {
+        if rules.wrap_actions_enabled {
+            // RFC 0008: an env may define only wrap hooks (or any single
+            // action) without a standalone `onEnter`. Require at least one of
+            // the five known actions so an empty `actions: {}` is still
+            // rejected. The all-or-nothing wrap-hook rule (defining any wrap
+            // hook requires all three) is enforced separately in
+            // `wrap_actions.rs`, not here.
+            if !script.actions.has_any_action() {
                 errors.add(
                     &actions_path,
-                    "must define at least one of onEnter, onWrapEnvEnter, onWrapTaskRun, onWrapEnvExit, or onExit.",
+                    "must define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together).",
                 );
-            } else {
-                // Preserve the original wording when the extension is not
-                // enabled so pre-RFC error messages don't change.
-                errors.add(&actions_path, "onEnter is required.");
             }
-        } else if !rules.wrap_actions_enabled && script.actions.on_enter.is_none() {
+        } else if script.actions.on_enter.is_none() {
+            // Preserve the original wording when the extension is not enabled
+            // so pre-RFC error messages don't change. `on_enter.is_none()`
+            // also covers the empty-`actions` case.
             errors.add(&actions_path, "onEnter is required.");
         }
         for (name, action) in script.actions.iter_named() {

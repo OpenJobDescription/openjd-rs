@@ -1005,15 +1005,16 @@ fn validate_env_format_strings(
 ///
 /// The caller has already cloned the session symtab, so we mutate in place.
 fn add_wrapped_action_scope(symtab: &mut SymbolTable) {
-    let list_string = || ExprType::list(ExprType::STRING);
-    let unresolved = ExprValue::unresolved;
     for (name, ty) in [
         ("WrappedAction.Command", ExprType::STRING),
-        ("WrappedAction.Args", list_string()),
-        ("WrappedAction.Environment", list_string()),
+        ("WrappedAction.Args", ExprType::list(ExprType::STRING)),
+        (
+            "WrappedAction.Environment",
+            ExprType::list(ExprType::STRING),
+        ),
         ("WrappedAction.Timeout", ExprType::INT),
     ] {
-        symtab.set(name, unresolved(ty)).expect("symtab");
+        symtab.set(name, ExprValue::unresolved(ty)).expect("symtab");
     }
 }
 
