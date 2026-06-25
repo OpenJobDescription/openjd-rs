@@ -7,7 +7,7 @@
 use aws_sdk_s3::config::{Credentials, Region};
 use openjd_snapshots::{
     cache_sync_manifest, AsyncDataCache, CacheSyncOptions, FileEntry, FileSystemDataCache,
-    HashAlgorithm, Manifest, ManifestRef, RelManifest, S3DataCache,
+    HashAlgorithm, Manifest, ManifestRef, RelManifest, S3CopyConfig, S3DataCache,
 };
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
@@ -207,6 +207,53 @@ async fn cache_sync_s3_to_s3_skip_existing() {
     let (_s3d, src) = make_s3_cache().await;
     let (_s3d2, dst) = make_s3_cache().await;
     run_sync_skip_test(src, dst).await;
+}
+
+/// End-to-end: cache_sync over an S3 destination that opted in to multipart
+/// copy must route a >5 MiB object through server-side parallel UploadPartCopy.
+/// Source and destination share one s3s-fs backend (two buckets) so the
+/// server-side copy actually executes instead of falling back to get+put.
+#[tokio::test(flavor = "multi_thread")]
+async fn cache_sync_s3_to_s3_multipart_when_opted_in() {
+    let tmp = TempDir::new().unwrap();
+    let client = make_s3_client(tmp.path());
+    for b in ["src-bucket", "dst-bucket"] {
+        client.create_bucket().bucket(b).send().await.unwrap();
+    }
+
+    let src: Arc<dyn AsyncDataCache> = Arc::new(S3DataCache::new(
+        "src-bucket".to_string(),
+        PREFIX.to_string(),
+        client.clone(),
+    ));
+    // Destination opts in to the benchmarked cross-region copy settings.
+    let dst: Arc<dyn AsyncDataCache> = Arc::new(
+        S3DataCache::new("dst-bucket".to_string(), PREFIX.to_string(), client)
+            .with_copy_config(S3CopyConfig::default()),
+    );
+
+    // 6 MiB object => above the 5 MiB threshold => multipart (2 parts).
+    let payload: Vec<u8> = (0..6 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    put(&src, "big6m", "xxh128", &payload).await;
+
+    let manifest = test_manifest(vec![{
+        let mut e = FileEntry::new("big.bin");
+        e.hash = Some("big6m".into());
+        e.size = Some(payload.len() as u64);
+        e
+    }]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.copied_objects, 1);
+    assert_eq!(get(&dst, "big6m", "xxh128").await, payload);
 }
 
 // ===== Cancellation =====

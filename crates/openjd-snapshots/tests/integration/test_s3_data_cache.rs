@@ -10,7 +10,8 @@ use openjd_snapshots::{
     collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest, join_snapshot,
     subtree_snapshot, AbsManifest, AsyncDataCache, CollectOptions, CopyResult, DirEntry,
     DownloadOptions, FileConflictResolution, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
-    MultipartDataCache, RangeReadDataCache, S3DataCache, SymlinkPolicy, DEFAULT_FILE_CHUNK_SIZE,
+    MultipartDataCache, RangeReadDataCache, S3CopyConfig, S3DataCache, SymlinkPolicy,
+    DEFAULT_FILE_CHUNK_SIZE,
 };
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
@@ -177,6 +178,9 @@ async fn s3_copy_from_between_buckets() {
         .await
         .unwrap();
 
+    // Default (no copy config) => single CopyObject, no HeadObject routing.
+    assert!(dst.copy_config().is_none());
+
     // Server-side copy
     let result = dst
         .copy_from(src.as_ref() as &dyn AsyncDataCache, "abc123", "xxh128")
@@ -187,6 +191,101 @@ async fn s3_copy_from_between_buckets() {
     // Verify data arrived
     let data = dst.get_object("abc123", "xxh128").await.unwrap();
     assert_eq!(data, b"copy me");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_copy_from_multipart_upload_part_copy() {
+    let tmp = TempDir::new().unwrap();
+    let client = make_s3_client(tmp.path());
+    client
+        .create_bucket()
+        .bucket("src-bucket")
+        .send()
+        .await
+        .unwrap();
+    client
+        .create_bucket()
+        .bucket("dst-bucket")
+        .send()
+        .await
+        .unwrap();
+
+    let src = Arc::new(S3DataCache::new(
+        "src-bucket".to_string(),
+        PREFIX.to_string(),
+        client.clone(),
+    ));
+    // Tiny threshold + part size force the multipart UploadPartCopy path with
+    // small test data. 40 bytes / 8-byte parts => 5 parts, copied in parallel.
+    let dst = Arc::new(
+        S3DataCache::new("dst-bucket".to_string(), PREFIX.to_string(), client).with_copy_config(
+            S3CopyConfig {
+                multipart_threshold: 16,
+                part_size: 8,
+                max_concurrency: 4,
+            },
+        ),
+    );
+
+    let payload = b"0123456789abcdefghijklmnopqrstuvwxyzABCD".to_vec();
+    assert_eq!(payload.len(), 40);
+    src.put_object("big999", "xxh128", payload.clone())
+        .await
+        .unwrap();
+
+    // Copy config present => size-aware multipart routing is enabled.
+    assert!(dst.copy_config().is_some());
+
+    let result = dst
+        .copy_from(src.as_ref() as &dyn AsyncDataCache, "big999", "xxh128")
+        .await
+        .unwrap();
+    assert_eq!(result, CopyResult::ServerSideCopy);
+
+    // The reassembled object must match the source byte-for-byte.
+    let data = dst.get_object("big999", "xxh128").await.unwrap();
+    assert_eq!(data, payload);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_copy_from_default_config_routes_large_object_to_multipart() {
+    // Opting in with S3CopyConfig::default() (the benchmarked cross-region
+    // settings) routes objects above the 5 MiB default threshold to parallel
+    // UploadPartCopy. A 6 MiB object must go multipart and reassemble correctly.
+    let tmp = TempDir::new().unwrap();
+    let client = make_s3_client(tmp.path());
+    for b in ["src-bucket", "dst-bucket"] {
+        client.create_bucket().bucket(b).send().await.unwrap();
+    }
+
+    let src = Arc::new(S3DataCache::new(
+        "src-bucket".to_string(),
+        PREFIX.to_string(),
+        client.clone(),
+    ));
+    let dst = Arc::new(
+        S3DataCache::new("dst-bucket".to_string(), PREFIX.to_string(), client)
+            .with_copy_config(S3CopyConfig::default()),
+    );
+
+    // Opted in to multipart with the default cross-region config.
+    assert!(dst.copy_config().is_some());
+
+    // 6 MiB => 2 parts at the 5 MiB default part size.
+    let payload: Vec<u8> = (0..6 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    src.put_object("big6m", "xxh128", payload.clone())
+        .await
+        .unwrap();
+
+    let result = dst
+        .copy_from(src.as_ref() as &dyn AsyncDataCache, "big6m", "xxh128")
+        .await
+        .unwrap();
+    assert_eq!(result, CopyResult::ServerSideCopy);
+
+    let data = dst.get_object("big6m", "xxh128").await.unwrap();
+    assert_eq!(data.len(), payload.len());
+    assert_eq!(data, payload);
 }
 
 // ===== Category 2: Hash+Upload with S3 =====

@@ -94,7 +94,7 @@ pub use codec::{
 };
 pub use data_cache::{
     AsyncDataCache, CopyResult, FileSystemDataCache, MultipartDataCache, RangeReadDataCache,
-    S3DataCache,
+    S3CopyConfig, S3DataCache,
 };
 pub use error::{Result, SnapshotError};
 pub use hash::{

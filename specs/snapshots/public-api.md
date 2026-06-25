@@ -425,10 +425,12 @@ impl S3DataCache {
     pub fn with_s3_check_cache(self, cache: Option<Arc<S3CheckCache>>) -> Self;
     pub fn with_force_s3_check(self, force: bool) -> Self;
     pub fn with_expected_bucket_owner(self, owner: Option<String>) -> Self;
+    pub fn with_copy_config(self, config: S3CopyConfig) -> Self;
 
     // Accessors
     pub fn client(&self) -> &aws_sdk_s3::Client;
     pub fn expected_bucket_owner(&self) -> Option<&str>;
+    pub fn copy_config(&self) -> Option<&S3CopyConfig>;
     pub fn cache_key(&self, hash: &str, algorithm: &str) -> String;
     pub fn check_cache_exists(&self, hash: &str, algorithm: &str) -> bool;
     pub fn record_in_check_cache(&self, hash: &str, algorithm: &str);
@@ -436,8 +438,43 @@ impl S3DataCache {
 }
 ```
 
-Implements `AsyncDataCache` (with `copy_from` for
-S3-to-S3 server-side copy), `MultipartDataCache`, and `RangeReadDataCache`.
+Implements `AsyncDataCache` (with `copy_from` for S3-to-S3 server-side copy),
+`MultipartDataCache`, and `RangeReadDataCache`. By default `copy_from` performs
+a single `CopyObject` with no extra `HeadObject`. Calling `with_copy_config`
+opts in to size-aware routing: `copy_from` then issues one `HeadObject` and uses
+parallel multipart `UploadPartCopy` for sources above the configured threshold
+(required both to copy sources > 5 GiB and to parallelize large cross-region
+copies).
+
+### S3CopyConfig
+
+`TransferConfig`-style tuning for `S3DataCache::copy_from`. Used to control when
+a server-side copy switches from a single `CopyObject` to a parallel multipart
+`UploadPartCopy`, and how that multipart copy is sized and parallelized.
+
+```rust
+pub struct S3CopyConfig {
+    /// Sources strictly larger than this use multipart UploadPartCopy.
+    /// Default 5 MiB — a performance cutoff, since parallel multipart copy
+    /// beats single CopyObject for cross-region transfers at every size at or
+    /// above S3's 5 MiB minimum part size. Clamped to 5 GiB at copy time (the
+    /// CopyObject ceiling).
+    pub multipart_threshold: u64,
+    /// Target size of each UploadPartCopy part. Default 5 MiB (the S3 minimum
+    /// part size, which maximizes parallelism). Grown automatically to keep
+    /// the part count <= 10,000 and clamped to the S3 part-size range
+    /// (5 MiB..=5 GiB).
+    pub part_size: u64,
+    /// Maximum number of concurrent UploadPartCopy requests per object.
+    /// Default 64.
+    pub max_concurrency: usize,
+}
+
+pub const S3_MAX_SINGLE_COPY_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+```
+
+Implements `Default` (5 MiB threshold, 5 MiB parts, concurrency 64) — the
+empirically validated cross-region copy settings.
 
 ### CacheValidationState
 

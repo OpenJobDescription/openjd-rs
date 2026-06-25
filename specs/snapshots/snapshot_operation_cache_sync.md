@@ -121,13 +121,14 @@ This avoids buffering an entire large object in memory.
 
 When both source and destination are `S3DataCache`, the pipeline uses S3's server-side copy APIs instead of downloading and re-uploading data:
 
-- **`CopyObject`** — For objects ≤ 5GB, a single API call copies data directly between buckets (or prefixes within the same bucket) without the data transiting through the client. This is the common case for content-addressed objects.
-- **`UploadPartCopy`** — For objects > 5GB, use multipart upload with `UploadPartCopy` for each part. Each part is copied server-side.
+- **`CopyObject`** — For sources at or below `S3CopyConfig::multipart_threshold` (5 MiB by default), a single API call copies data directly between buckets (or prefixes within the same bucket) without the data transiting through the client.
+- **`UploadPartCopy`** — For sources above the threshold, the destination opens a multipart upload and copies each byte range with a server-side `UploadPartCopy`. Parts are copied in parallel (bounded by `S3CopyConfig::max_concurrency`, default 64); on any part failure the multipart upload is aborted. The 5 MiB default threshold is a *performance* cutoff, not the 5 GiB single-`CopyObject` API cap: parallel multipart copy outperforms single `CopyObject` for cross-region transfers at every size at or above S3's 5 MiB minimum part size. Multipart copy is opt-in: it is used only when the destination `S3DataCache` was built with `with_copy_config(...)`, in which case `copy_from` issues one `HeadObject` against the source to learn its size and pick the strategy. Without a copy config, `copy_from` does a single `CopyObject` and skips the `HeadObject` (valid for sources up to the 5 GiB cap).
 
 This means S3→S3 transfers:
 - Use zero client bandwidth (data stays within AWS)
 - Are significantly faster (no download/upload round-trip)
 - Don't consume memory pool permits (no data buffered locally)
+- Are not subject to the 5 GiB single-`CopyObject` source cap
 
 This is implemented via the `copy_from` method on the `AsyncDataCache` trait:
 
@@ -145,7 +146,7 @@ pub enum CopyResult {
 }
 ```
 
-`S3DataCache` implements this by checking if `source` is also an `S3DataCache` (via `Any` downcast), and if so, calling `CopyObject` with `CopySource` pointing to the source bucket/key. `FileSystemDataCache` returns `NotSupported`.
+`S3DataCache` implements this by checking if `source` is also an `S3DataCache` (via `Any` downcast), and if so, calling `CopyObject` (or parallel `UploadPartCopy` for sources above the threshold) with `CopySource` pointing to the source bucket/key. `FileSystemDataCache` returns `NotSupported`.
 
 The pipeline flow is:
 

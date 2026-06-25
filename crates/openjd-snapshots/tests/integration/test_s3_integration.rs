@@ -23,8 +23,8 @@
 use openjd_snapshots::{
     cache_sync_manifest, collect_abs_snapshot, download_abs_manifest, hash_upload_abs_manifest,
     join_snapshot, subtree_snapshot, AbsManifest, AsyncDataCache, CacheSyncOptions, CollectOptions,
-    DownloadOptions, FileEntry, HashAlgorithm, HashUploadOptions, Manifest, ManifestRef,
-    RelManifest, S3DataCache, SymlinkPolicy,
+    CopyResult, DownloadOptions, FileEntry, HashAlgorithm, HashUploadOptions, Manifest,
+    ManifestRef, RelManifest, S3CopyConfig, S3DataCache, SymlinkPolicy,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -258,5 +258,65 @@ async fn s3_cache_sync_server_side_copy() {
 
     // Cleanup
     let cleanup_prefix_str = format!("{}/test-cache-sync/{id}", config.prefix);
+    cleanup_prefix(&s3_client, &config.bucket, &cleanup_prefix_str).await;
+}
+
+/// Real-S3 multipart server-side copy. Exercises the parallel `UploadPartCopy`
+/// path against AWS by copying an object larger than the 5 MiB multipart
+/// threshold between two prefixes in the bucket, then verifying byte-for-byte
+/// integrity. Run with:
+///   OPENJD_TEST_S3_BUCKET=my-bucket cargo test -p openjd-snapshots \
+///     --test integration -- --ignored \
+///     test_s3_integration::s3_copy_from_multipart_upload_part_copy_real --nocapture
+#[tokio::test]
+#[ignore] // Requires AWS credentials and S3 bucket access
+async fn s3_copy_from_multipart_upload_part_copy_real() {
+    let Some(config) = s3_test_config() else {
+        eprintln!("Skipping: OPENJD_TEST_S3_BUCKET not set");
+        return;
+    };
+    let s3_client = make_s3_client_async(&config.region).await;
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = format!("{}/test-multipart-copy/{id}", config.prefix);
+    let src_prefix = format!("{base}/src/Data");
+    let dst_prefix = format!("{base}/dst/Data");
+
+    let src = Arc::new(S3DataCache::new(
+        config.bucket.clone(),
+        src_prefix,
+        s3_client.clone(),
+    ));
+    // Opt in to multipart with the benchmarked default config (5 MiB threshold,
+    // 5 MiB parts, 64-way concurrency).
+    let dst = Arc::new(
+        S3DataCache::new(config.bucket.clone(), dst_prefix, s3_client.clone())
+            .with_copy_config(S3CopyConfig::default()),
+    );
+    assert!(dst.copy_config().is_some());
+
+    // 12 MiB => 3 parts at the 5 MiB default part size => real UploadPartCopy.
+    let size = 12 * 1024 * 1024usize;
+    let payload: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+    src.put_object("big12m", "xxh128", payload.clone())
+        .await
+        .unwrap();
+
+    // Server-side multipart copy (no data transits the client).
+    let result = dst
+        .copy_from(src.as_ref() as &dyn AsyncDataCache, "big12m", "xxh128")
+        .await
+        .unwrap();
+    assert_eq!(result, CopyResult::ServerSideCopy);
+
+    // Verify the destination object matches the source byte-for-byte.
+    let copied = dst.get_object("big12m", "xxh128").await.unwrap();
+    assert_eq!(copied.len(), payload.len());
+    assert_eq!(copied, payload);
+
+    // Cleanup
+    let cleanup_prefix_str = format!("{}/test-multipart-copy/{id}", config.prefix);
     cleanup_prefix(&s3_client, &config.bucket, &cleanup_prefix_str).await;
 }

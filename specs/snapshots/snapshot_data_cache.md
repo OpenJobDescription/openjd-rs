@@ -173,10 +173,72 @@ impl S3DataCache {
     pub fn with_s3_check_cache(self, cache: Option<Arc<S3CheckCache>>) -> Self;
     pub fn with_force_s3_check(self, force: bool) -> Self;
     pub fn with_expected_bucket_owner(self, owner: Option<String>) -> Self;
+    pub fn with_copy_config(self, config: S3CopyConfig) -> Self;
 }
 ```
 
 All configuration fields are private; construct with `new` or `new_with_auto_account_id`, then chain `with_*` setters for optional state.
+
+### Server-Side Copy (`copy_from`)
+
+`S3DataCache::copy_from` performs an S3-to-S3 server-side copy when the source is
+also an `S3DataCache` (discovered via an `Any` downcast); otherwise it returns
+`CopyResult::NotSupported` so the caller falls back to `get_object` + `put_object`.
+
+Server-side multipart copy is **opt-in** via
+[`with_copy_config`](#transferconfig-style-copy-tuning-s3copyconfig). The default
+is a single `CopyObject`.
+
+- **No copy config (default)** — a single `CopyObject`, with no extra
+  `HeadObject`. Cheapest path and a no-op behavior change for existing callers;
+  valid for sources up to S3's 5 GiB single-copy limit. Sources larger than
+  5 GiB will fail here, and same-region copies (where parallelism doesn't help)
+  can stay on this path.
+- **Copy config present (e.g. `S3CopyConfig::default()`)** — `copy_from` first
+  issues one `HeadObject` to learn the source size, then:
+  - **Single `CopyObject`** for sources at or below the threshold (≤ 5 MiB by
+    default).
+  - **Parallel multipart `UploadPartCopy`** for sources above the threshold.
+    The destination opens a multipart upload, copies each byte range with a
+    server-side `UploadPartCopy` (run with bounded concurrency), then completes
+    the upload. On any part failure the multipart upload is aborted and the
+    first error is returned.
+
+Why the `HeadObject` is required once multipart is enabled: a single
+`CopyObject` cannot copy sources > 5 GiB, and `UploadPartCopy` needs an explicit
+`x-amz-copy-source-range` for every part — both decisions need the source size.
+Routing a *sub*-5 GiB object to parallel parts (for cross-region throughput)
+likewise needs the size up front. `copy_config` is consulted only by
+`copy_from`, which is used only by cache-sync, so leaving it unset has no effect
+on the upload or download paths.
+
+Both paths set `x-amz-expected-bucket-owner` (destination) and
+`x-amz-source-expected-bucket-owner` (source) for confused-deputy protection,
+and record the object in the S3 check cache on success.
+
+#### TransferConfig-style copy tuning: `S3CopyConfig`
+
+```rust
+pub struct S3CopyConfig {
+    pub multipart_threshold: u64, // default 5 MiB (performance cutoff); clamped to 5 GiB (CopyObject ceiling)
+    pub part_size: u64,           // default 5 MiB (S3 minimum part size — maximizes parallelism)
+    pub max_concurrency: usize,   // default 64
+}
+```
+
+The defaults are the empirically validated cross-region copy settings:
+a single cross-region `CopyObject` runs at roughly single-stream speed
+(~5 MiB/s), while parallel `UploadPartCopy` reaches hundreds of MiB/s, and
+benchmarks show multipart wins at every size at or above S3's 5 MiB minimum
+part size. So the default threshold is **5 MiB** (a *performance* threshold,
+not the 5 GiB API cap), the default part size is the 5 MiB minimum (which
+yields the most parts and hence the most parallelism), and up to 64 parts of a
+single object are copied concurrently.
+
+The effective part size is grown automatically so the part count never exceeds
+S3's 10,000-part limit, and is clamped to the S3 part-size range of
+5 MiB..=5 GiB. This lets a single configuration copy any S3 object up to the
+5 TiB maximum object size.
 
 ### Account ID and Security
 
