@@ -88,19 +88,28 @@ fn main() {
                 .expect("Failed to rename Cargo.bundled.toml to Cargo.toml");
         }
 
-        let status = std::process::Command::new("cargo")
-            .args([
-                "build",
-                "--release",
-                "--manifest-path",
-                &manifest_in_build.to_string_lossy(),
-                "--target-dir",
-                &out_dir.join("helper_build").to_string_lossy(),
-                "--target",
-                &target,
-            ])
-            .status()
-            .expect("Failed to run cargo for helper binary");
+        let mut cmd = std::process::Command::new("cargo");
+        cmd.args([
+            "build",
+            "--release",
+            "--manifest-path",
+            &manifest_in_build.to_string_lossy(),
+            "--target-dir",
+            &out_dir.join("helper_build").to_string_lossy(),
+            "--target",
+            &target,
+        ]);
+        // In offline build environments, network access is disabled after
+        // dependencies are fetched. The helper's deps are in CARGO_HOME
+        // because openjd-sessions declares them as [build-dependencies].
+        // Pass --offline so the nested cargo doesn't attempt index updates.
+        if std::env::var("CARGO_NET_OFFLINE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false)
+        {
+            cmd.arg("--offline");
+        }
+        let status = cmd.status().expect("Failed to run cargo for helper binary");
         assert!(status.success(), "Helper binary compilation failed");
 
         let binary_name = if is_windows {
