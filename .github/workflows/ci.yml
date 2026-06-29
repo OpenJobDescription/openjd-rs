@@ -102,7 +102,7 @@ jobs:
         run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore cargo cache
         id: cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -232,7 +232,7 @@ jobs:
       # Restore-only: build-test(ubuntu) owns the cache write. Saving from
       # here too would race with that job on pushes to main.
       - name: Restore build-test cache (read-only)
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -302,7 +302,7 @@ jobs:
         run: |
           rustup toolchain install 1.92 --profile minimal
           rustup override set 1.92
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -324,7 +324,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -377,7 +377,7 @@ jobs:
         shell: bash
         run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore build-test cache (read-only)
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -438,7 +438,7 @@ jobs:
         with:
           node-version: 20
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/wasm-bindgen
