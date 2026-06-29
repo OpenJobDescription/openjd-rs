@@ -1,6 +1,6 @@
 [package]
 name = "openjd-cli"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -18,8 +18,8 @@ path = "src/main.rs"
 
 [dependencies]
 openjd-expr = { path = "../openjd-expr", version = "0.1.2" }
-openjd-model = { path = "../openjd-model", version = "0.2.1" }
-openjd-sessions = { path = "../openjd-sessions", version = "0.2.3" }
+openjd-model = { path = "../openjd-model", version = "0.3.0" }
+openjd-sessions = { path = "../openjd-sessions", version = "0.3.0" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
