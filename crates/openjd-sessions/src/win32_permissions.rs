@@ -18,6 +18,8 @@
 //! session user would still have Modify on the helper binary through
 //! inheritance and could overwrite it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use windows::Win32::Security::{
     AddAccessAllowedAceEx, InitializeAcl, InitializeSecurityDescriptor, LookupAccountNameW,
     SetFileSecurityW, SetSecurityDescriptorDacl, ACE_REVISION, ACL, CONTAINER_INHERIT_ACE,
@@ -49,22 +51,63 @@ const ERROR_NONE_MAPPED: u32 = 1332;
 /// Maximum retry attempts for transient LookupAccountNameW failures.
 const LOOKUP_MAX_RETRIES: u32 = 3;
 
+/// Set once `LookupAccountNameW` is observed to function — either via a
+/// successful resolution or a successful probe of the current process user.
+/// The LSA service never goes back down within a process lifetime, so once
+/// this latches `true` a subsequent `ERROR_NONE_MAPPED` is known to mean the
+/// *name* is genuinely unmapped rather than the service being mid-init.
+static LSA_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
 /// `true` if `err` is the Win32 `ERROR_NONE_MAPPED` (1332) failure, accepting
 /// either the bare Win32 code or its `HRESULT_FROM_WIN32` wrapping
 /// (`0x8007_0000 | code`, i.e. `0x8007_0534`). The `windows` crate surfaces
 /// `LookupAccountNameW` failures as the wrapped HRESULT, but we match both
 /// forms defensively.
-fn is_lsa_not_ready(err: &windows::core::Error) -> bool {
+///
+/// Note this code is overloaded by Windows: it is returned both when the LSA
+/// service has not finished initializing (transient, only at instance startup)
+/// *and* when a name genuinely does not map to any account (permanent). Callers
+/// must disambiguate via [`lsa_is_available`] before treating it as retryable.
+fn is_error_none_mapped(err: &windows::core::Error) -> bool {
     let code = err.code().0 as u32;
     code == ERROR_NONE_MAPPED || code == (0x8007_0000 | ERROR_NONE_MAPPED)
+}
+
+/// `true` if the Local Security Authority is confirmed up. Cached after the
+/// first positive observation (LSA never restarts within a process lifetime).
+///
+/// When not yet confirmed, this probes by resolving the current process user's
+/// name — which always maps to a SID once LSA is running. This is what lets a
+/// genuine "no such account" lookup fail fast instead of waiting out the
+/// startup backoff: if the probe succeeds, the LSA is up and the original
+/// `ERROR_NONE_MAPPED` must mean the name is unmapped, not that the service is
+/// initializing.
+fn lsa_is_available() -> bool {
+    if LSA_AVAILABLE.load(Ordering::Relaxed) {
+        return true;
+    }
+    let probed = match crate::win32::get_process_user() {
+        Ok(user) => {
+            let name_w: Vec<u16> = user.encode_utf16().chain(std::iter::once(0)).collect();
+            lookup_sid_once(&name_w).is_ok()
+        }
+        Err(_) => false,
+    };
+    if probed {
+        LSA_AVAILABLE.store(true, Ordering::Relaxed);
+    }
+    probed
 }
 
 /// Resolve a principal name to a SID via `LookupAccountNameW`.
 ///
 /// Retries with exponential backoff (up to 3 attempts, sleeping 1s then 2s)
-/// on ERROR_NONE_MAPPED (1332) which occurs when the LSA service hasn't
-/// finished initializing on freshly started EC2 instances. Any other error
-/// fails immediately rather than burning the backoff window.
+/// when — and only when — the LSA service has not finished initializing on a
+/// freshly started EC2 instance. Because `ERROR_NONE_MAPPED` (1332) is also
+/// returned for names that genuinely don't map to an account, the retry is
+/// gated on [`lsa_is_available`]: a steady-state "no such user" lookup (e.g.
+/// the `WindowsSessionUser::is_process_user` fallback path) fails immediately
+/// rather than burning the backoff window. Any other error also fails fast.
 ///
 /// Visibility mirrors [`set_permissions`]: declared `pub` so that integration
 /// tests can reach it when the module is exposed under the `test-utils`
@@ -75,9 +118,15 @@ pub fn lookup_sid(principal: &str) -> Result<Vec<u8>, String> {
 
     for attempt in 0..LOOKUP_MAX_RETRIES {
         match lookup_sid_once(&name_w) {
-            Ok(sid) => return Ok(sid),
+            Ok(sid) => {
+                // A successful resolution proves LSA is up; latch it so future
+                // ERROR_NONE_MAPPED failures skip the probe and fail fast.
+                LSA_AVAILABLE.store(true, Ordering::Relaxed);
+                return Ok(sid);
+            }
             Err(e) => {
-                if is_lsa_not_ready(&e) && attempt < LOOKUP_MAX_RETRIES - 1 {
+                let lsa_still_initializing = is_error_none_mapped(&e) && !lsa_is_available();
+                if lsa_still_initializing && attempt < LOOKUP_MAX_RETRIES - 1 {
                     std::thread::sleep(std::time::Duration::from_secs(1 << attempt));
                     continue;
                 }
