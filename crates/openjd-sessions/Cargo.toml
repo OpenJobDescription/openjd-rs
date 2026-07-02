@@ -61,6 +61,25 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 
+# Build-dependencies that ensure the helper binary's crate deps are fetched
+# into CARGO_HOME during `cargo fetch`. The helper (src/helper/) is compiled
+# by build.rs via a nested `cargo build --offline` invocation; without these
+# entries, offline build environments fail because the helper's deps were never downloaded.
+[build-dependencies]
+# Helper needs nix with "poll" (parent [dependencies] has signal/process/user/fs but not poll)
+[target.'cfg(unix)'.build-dependencies]
+nix = { version = "0.31", features = ["signal", "process", "poll"] }
+
+[target.'cfg(windows)'.build-dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 testing_logger = "0.1"
