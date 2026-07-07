@@ -381,6 +381,46 @@ mod path_traversal {
         assert_rejects("C:\\Windows\\evil.exe", "must not contain path separators");
     }
 
+    // Windows drive-relative anchors contain no `/` or `\`, so they slip past
+    // the separator check. `Path::join` treats them as a drive prefix and would
+    // escape the target directory, so they must be rejected as non-single-
+    // component paths. This is platform-specific: on POSIX these are ordinary
+    // filenames, so the tests only run on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative() {
+        assert_rejects("D:relative", "must be a single path component");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative_with_name() {
+        assert_rejects("C:evil.exe", "must be a single path component");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_bare_drive() {
+        assert_rejects("C:", "must be a single path component");
+    }
+
+    // Windows strips trailing dots and spaces from the final path component, so
+    // a name made only of dots and spaces collapses to `.`/`..` at the OS layer
+    // and escapes the target directory. Any name with a separator is already
+    // caught above, so only these standalone forms reach the dedicated check.
+    // On POSIX they are ordinary filenames, so the tests only run on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_dotdot_trailing_space() {
+        assert_rejects(".. ", "must not consist only of dots and spaces");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_triple_dot() {
+        assert_rejects("...", "must not consist only of dots and spaces");
+    }
+
     #[test]
     fn rejects_nested_subdirectory() {
         assert_rejects("sub/evil.sh", "must not contain path separators");

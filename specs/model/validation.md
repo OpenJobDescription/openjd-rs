@@ -130,7 +130,8 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Script actions: command non-empty, length limits, `Task.File.*` references
   must match embedded file names
 - Embedded files: no duplicate names, type must be `TEXT`, valid identifier names,
-  data required, filename no path separators
+  data required; `filename` must be a single safe path component — non-empty, no
+  path separators (`/` or `\`), no null characters, and not `.` or `..`
 
 **Cycle detection:**
 - Iterative DFS with tri-state marking (Unvisited/Started/Completed) on the step
