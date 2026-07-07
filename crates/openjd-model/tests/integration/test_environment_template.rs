@@ -450,28 +450,30 @@ fn test_embedded_filename_backslash() {
 
 #[test]
 fn test_embedded_filename_dot() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "."}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '.'.",
-    ]);
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '.'."],
+    );
 }
 
 #[test]
 fn test_embedded_filename_dotdot() {
-    check_env_err(r#"{
+    check_env_err(
+        r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {
             "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": ".."}],
             "actions": {"onEnter": {"command": "foo"}}
         }}
-    }"#, &[
-        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '..'.",
-    ]);
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '..'."],
+    );
 }
 
 #[test]

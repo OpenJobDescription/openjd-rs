@@ -85,6 +85,58 @@ async fn test_initialize_with_root_dir() {
     assert_eq!(session.working_directory(), tmp.path());
 }
 
+/// A relative `session_root_directory` is absolutized when the session is
+/// created, so all derived paths (working dir, embedded-files dir) are rooted.
+/// Regression test: previously a relative root produced a relative files
+/// directory, which made every named embedded file fail the containment check
+/// with a spurious "unsafe filename" error.
+#[tokio::test]
+async fn test_relative_session_root_is_absolutized() {
+    // Unique relative directory name resolved against the process CWD.
+    let rel_name = format!(
+        "openjd_rel_root_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let rel_root = std::path::PathBuf::from(&rel_name);
+    std::fs::create_dir(&rel_root).unwrap();
+    // Ensure the directory is removed even if an assertion fails.
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(rel_root.clone());
+
+    assert!(rel_root.is_relative(), "test setup expects a relative root");
+
+    let config = SessionConfig {
+        session_id: "test-relative-root".into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(rel_root),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        profile: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    let session = Session::with_config(config).expect("relative root should be accepted");
+    assert!(
+        session.working_directory().is_absolute(),
+        "working directory derived from a relative root must be absolutized, got {}",
+        session.working_directory().display()
+    );
+}
+
 /// Mirrors Python TestSession::test_root_dir_permissions — POSIX: owner rwx, group r/x, other r/x.
 #[cfg(unix)]
 #[tokio::test]
