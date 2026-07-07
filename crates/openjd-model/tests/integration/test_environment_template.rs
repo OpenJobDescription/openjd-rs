@@ -449,6 +449,45 @@ fn test_embedded_filename_backslash() {
 }
 
 #[test]
+fn test_embedded_filename_dot() {
+    check_env_err(r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "."}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#, &[
+        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '.'.",
+    ]);
+}
+
+#[test]
+fn test_embedded_filename_dotdot() {
+    check_env_err(r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": ".."}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#, &[
+        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '..'.",
+    ]);
+}
+
+#[test]
+fn test_embedded_filename_null_character() {
+    check_env_err(r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "a\u0000b"}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#, &[
+        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not contain null characters.",
+    ]);
+}
+
+#[test]
 fn test_embedded_duplicate_names() {
     check_env_err(
         r#"{
