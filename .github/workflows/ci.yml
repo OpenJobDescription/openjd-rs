@@ -54,16 +54,12 @@ jobs:
         run: cargo deny check licenses bans sources
       - name: Run cargo deny check licenses, bans, sources (helper sub-crate)
         run: cargo deny --manifest-path crates/openjd-sessions/src/helper/Cargo.toml check licenses bans sources
-      # Advisories are scoped to the normal dependency graph (what we
-      # actually ship). Our only remaining legacy-TLS exposure
-      # (`rustls 0.21` / `rustls-webpki 0.101.x` via
-      # `aws-smithy-http-client`'s `legacy-rustls-ring`) is pulled in only
-      # by the `s3s-aws` dev-dependency used in S3 integration tests, not
-      # by any library consumer.
-      - name: Run cargo deny check advisories (workspace, exclude dev)
-        run: cargo deny check advisories --exclude-dev
-      - name: Run cargo deny check advisories (helper sub-crate, exclude dev)
-        run: cargo deny --manifest-path crates/openjd-sessions/src/helper/Cargo.toml check advisories --exclude-dev
+      # Advisories are checked across the full dependency graph, including
+      # dev-dependencies.
+      - name: Run cargo deny check advisories (workspace)
+        run: cargo deny check advisories
+      - name: Run cargo deny check advisories (helper sub-crate)
+        run: cargo deny --manifest-path crates/openjd-sessions/src/helper/Cargo.toml check advisories
 
   compliance:
     name: Compliance (copyright headers)
@@ -300,8 +296,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install MSRV toolchain
         run: |
-          rustup toolchain install 1.92 --profile minimal
-          rustup override set 1.92
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup override set 1.94.1
       - uses: actions/cache@v6
         with:
           path: |
@@ -446,7 +442,7 @@ jobs:
             target
           key: wasm-${{ hashFiles('Cargo.lock') }}
       - name: Install wasm-bindgen-cli
-        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.122
+        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.126
       - name: Install JS deps
         run: cd crates/openjd-for-js && npm install
       - name: Build WASM + generate JS bindings

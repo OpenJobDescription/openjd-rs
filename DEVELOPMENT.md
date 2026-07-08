@@ -12,7 +12,7 @@ project was originally ported from Python and the prompts used, see
 
 ## Environment
 
-1. A [Rust toolchain](https://rustup.rs/) (stable channel, MSRV 1.92).
+1. A [Rust toolchain](https://rustup.rs/) (stable channel, MSRV 1.94.1).
 2. `cargo` (included with the Rust toolchain).
 3. Nightly rustfmt for formatting checks (`rustup toolchain install nightly`).
 

@@ -20,7 +20,7 @@ cargo doc --no-deps --workspace          # Build docs
 scripts/coverage.sh                      # Code coverage (see COVERAGE_REPORT.md)
 ```
 
-MSRV: **1.92** (enforced in CI).
+MSRV: **1.94.1** (enforced in CI).
 
 ## Crate Map
 
@@ -237,7 +237,7 @@ PRs run these checks (all must pass):
 | **Build** | Release build on all three platforms |
 | **Test** | `cargo test --workspace` + helper tests on all three platforms |
 | **Conformance** | Full OpenJD conformance suite (1,038 tests) on all three platforms |
-| **MSRV** | `cargo check --workspace` with Rust 1.92 |
+| **MSRV** | `cargo check --workspace` with Rust 1.94.1 |
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
 | **Compliance** | Copyright header check |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |

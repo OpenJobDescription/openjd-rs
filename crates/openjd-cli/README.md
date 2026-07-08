@@ -62,7 +62,7 @@ Passes 100% of the upstream [OpenJD conformance test suite][conformance]
 
 ## Minimum supported Rust version
 
-Rust **1.92**. Enforced in CI.
+Rust **1.94.1**. Enforced in CI.
 
 ## Relationship to other crates
 

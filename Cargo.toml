@@ -21,7 +21,7 @@ license = "(Apache-2.0 OR MIT)"
 repository = "https://github.com/OpenJobDescription/openjd-rs"
 homepage = "https://github.com/OpenJobDescription/openjd-rs"
 readme = "README.md"
-rust-version = "1.92"
+rust-version = "1.94.1"
 authors = ["Amazon Web Services"]
 keywords = ["openjd", "openjobdescription", "render-farm", "job-template", "rendering"]
 categories = ["command-line-utilities", "parser-implementations"]
@@ -30,7 +30,7 @@ categories = ["command-line-utilities", "parser-implementations"]
 shlex = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde-saphyr = "0.0.27"
+serde-saphyr = "0.0.29"
 thiserror = "2"
 regex = "1"
 regex-syntax = "0.8"

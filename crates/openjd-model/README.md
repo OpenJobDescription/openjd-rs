@@ -35,7 +35,7 @@ macOS, and Windows.
 
 ## Minimum supported Rust version
 
-Rust **1.92**. Enforced in CI.
+Rust **1.94.1**. Enforced in CI.
 
 ## Quick example
 

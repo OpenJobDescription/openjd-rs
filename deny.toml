@@ -21,9 +21,9 @@ allow = [
 
 [bans]
 # Duplicate versions are common in large transitive graphs. The AWS SDK
-# stack and its back-compat dev-dependency `s3s-aws` bring in two copies
-# of hyper, rustls, tokio-rustls, and more. These are forced by upstream
-# and not actionable by us, so suppress the noise.
+# stack and the `s3s`/`s3s-aws` dev-dependencies bring in two copies of
+# crates like http, windows-sys, sha2, digest, and rand. These are forced
+# by upstream and not actionable by us, so suppress the noise.
 multiple-versions = "allow"
 
 [advisories]
