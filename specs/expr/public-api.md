@@ -847,8 +847,10 @@ impl SymbolTable {
     pub fn contains(&self, key: &str) -> bool;
     pub fn keys(&self) -> impl Iterator<Item = &str>;
 
-    /// Collect every leaf path in the table, each prefixed with
-    /// `"{prefix}."` (use `""` for a top-level walk).
+    /// Collect every leaf path in the table in lexicographic order,
+    /// each prefixed with `"{prefix}."` (use `""` for a top-level walk).
+    /// The sort makes serialization canonical: identical tables always
+    /// produce identical transport bytes.
     pub fn all_paths(&self, prefix: &str) -> Vec<String>;
 
     /// Recursively merge `other` into `self`, with leaves from `other`

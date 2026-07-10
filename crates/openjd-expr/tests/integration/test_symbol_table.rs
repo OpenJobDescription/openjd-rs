@@ -673,6 +673,69 @@ fn round_trip_empty_list() {
     assert_eq!(v.list_len(), Some(0));
 }
 
+// ══════════════════════════════════════════════════════════════
+// Serialization determinism (issue #243)
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn serialize_emits_entries_in_sorted_path_order() {
+    // Insert in non-sorted order to make ordering by insertion visible.
+    let mut st = SymbolTable::new();
+    st.set("Task.Param.Frame", ExprValue::Int(7)).unwrap();
+    st.set("Param.B", ExprValue::Int(2)).unwrap();
+    st.set("Session.WorkingDirectory", ExprValue::from("/tmp"))
+        .unwrap();
+    st.set("Param.A", ExprValue::Int(1)).unwrap();
+    let json: serde_json::Value = serde_json::to_value(&st).unwrap();
+    let names: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.get("name").unwrap().as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "Param.A",
+            "Param.B",
+            "Session.WorkingDirectory",
+            "Task.Param.Frame"
+        ]
+    );
+}
+
+#[test]
+fn serialize_is_byte_identical_across_instances() {
+    // Two independently-built tables with the same contents must produce
+    // identical bytes, regardless of HashMap iteration order or insertion
+    // order. This is what content-addressing of resolvedSymTab relies on.
+    let build = |reversed: bool| {
+        let mut pairs = vec![
+            ("Param.Frame", ExprValue::Int(42)),
+            ("Param.Name", ExprValue::from("shot_01")),
+            ("Session.HasPathMappingRules", ExprValue::from("false")),
+            ("Task.Param.Chunk", ExprValue::Int(3)),
+        ];
+        if reversed {
+            pairs.reverse();
+        }
+        SymbolTable::from_pairs(pairs).unwrap()
+    };
+    let a = serde_json::to_string(&build(false)).unwrap();
+    let b = serde_json::to_string(&build(true)).unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn all_paths_returns_sorted_order() {
+    let mut st = SymbolTable::new();
+    st.set("Z", ExprValue::Int(1)).unwrap();
+    st.set("A.Y", ExprValue::Int(2)).unwrap();
+    st.set("A.X", ExprValue::Int(3)).unwrap();
+    st.set("M", ExprValue::Int(4)).unwrap();
+    assert_eq!(st.all_paths(""), vec!["A.X", "A.Y", "M", "Z"]);
+}
+
 // ── Refactor coverage: all_paths return value, from_pairs IntoIterator ──
 
 #[test]

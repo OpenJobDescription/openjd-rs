@@ -76,7 +76,11 @@ Accessor summary:
 | `get_value(key)` | `Option<&ExprValue>` | When you only want a value (None if table or missing) |
 | `get_string(key)` | `Option<&str>` | When you only want a string/path, no type check |
 | `get_table(key)` | `Option<&SymbolTable>` | For subtree iteration |
-| `all_paths(prefix)` | `Vec<String>` | Collect every leaf path; `prefix` is prepended to each (use `""` for top-level) |
+| `all_paths(prefix)` | `Vec<String>` | Collect every leaf path in lexicographic order; `prefix` is prepended to each (use `""` for top-level) |
+
+`all_paths` sorts its output. The backing store is a `HashMap` with
+per-instance-random iteration order, so sorting is what makes every
+downstream consumer — most importantly serialization — deterministic.
 
 ## Path Conflict Detection
 
@@ -148,7 +152,15 @@ A `SymbolTable` serializes as a JSON array of entries:
 ```
 
 Each entry has `name` (dotted path), `type` (`ExprType` display string), and `value`
-(string representation). Entries whose value is `Unresolved` are **skipped** during
+(string representation).
+
+Entries are emitted in **lexicographic order of `name`**. This is a canonical-form
+guarantee: serializing the same logical table always produces the same bytes,
+regardless of insertion order or `HashMap` iteration order. Consumers may rely on
+this for content-addressing, caching, and byte-level equality comparison of
+serialized tables.
+
+Entries whose value is `Unresolved` are **skipped** during
 serialization: the serialized form carries only concrete values that survive a
 process boundary. If a caller needs type information to propagate, it must
 re-materialize the unresolved symtab on the receiving side from parameter

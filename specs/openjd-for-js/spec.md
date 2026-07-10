@@ -338,7 +338,7 @@ Enum: `String`, `Int`, `Float`, `Bool`, `Path`, `RangeExpr`, `ListString`, `List
 | `setString(key: string, value: string)` | `void` — convenience for the common string-parameter case. Same collision semantics as `set`. |
 | `get(key: string)` | `ExprValue \| undefined` — returns `undefined` for missing keys or keys that resolve to a subtable. |
 | `has(key: string)` | `boolean` — true iff the key resolves to a leaf value. |
-| `allPaths()` | `string[]` — every leaf-value path as a dotted string. |
+| `allPaths()` | `string[]` — every leaf-value path as a dotted string, in lexicographic order. |
 
 Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `get` single-dotted-key shape. Resolves review finding F6.
 

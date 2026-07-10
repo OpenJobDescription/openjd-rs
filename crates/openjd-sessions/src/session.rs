@@ -498,7 +498,7 @@ impl Session {
         // it is emitted both as a structured field and in the message text so
         // log consumers can associate this line with the rest of the session.
         // See the module-level docs for rationale.
-        log::info!(target: "openjd.sessions", session_id = config.session_id.as_str(); "Initializing Open Job Description Session: {}", &config.session_id);
+        log::info!(target: "openjd.sessions", session_id = config.session_id.as_str(); "Initializing Open Job Description Session: {}", config.session_id);
         session_log!(
             info,
             &config.session_id,
