@@ -958,9 +958,8 @@ fn test_script_let_chained_with_session_symbol() {
     decode_ok(s);
 }
 
-// Note: Python tests for EnvironmentTemplate let binding extension validation
-// are not ported because EnvironmentTemplate extension handling is not yet
-// implemented in the Rust decode_environment_template function.
+// EnvironmentTemplate let-binding extension validation is covered in
+// test_environment_template.rs (env_template_let_* tests).
 
 // === Step-level let bindings must NOT have host-context symbols or functions ===
 

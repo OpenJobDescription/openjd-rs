@@ -118,7 +118,9 @@ calling this function.
    - Host requirement values (amounts min/max, attribute values)
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges)
    - Step-level let bindings
-3. Carry forward session/task-scope fields as FormatString
+3. Carry forward session/task-scope fields as FormatString (plus action
+   `timeout`/`notifyPeriodInSeconds`, which validate in template scope but
+   resolve on the worker)
 4. With EXPR extension: inject `Job.Name` and `Step.Name` into symbol table
 5. Convert environments from template to job types
 6. Build step dependency list

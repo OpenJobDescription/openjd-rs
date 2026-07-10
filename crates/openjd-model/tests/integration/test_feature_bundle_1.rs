@@ -97,6 +97,73 @@ fn timeout_format_string_with_extension_succeeds() {
     );
 }
 
+#[test]
+fn env_action_timeout_undefined_variable_fails() {
+    // timeout on environment actions is reference-checked in job-creation
+    // scope, like step action timeouts.
+    check_err_fb1(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {"command": "echo", "timeout": "{{Param.Missing}}"}}}}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+        &[
+            "jobEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_action_timeout_session_symbol_fails() {
+    // Session.* resolves at task execution; timeout resolves at job
+    // creation, so the reference must be rejected even though Session.*
+    // is valid in the same action's command.
+    check_err_fb1(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {"command": "echo", "timeout": "{{Session.WorkingDirectory}}"}}}}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+        &[
+            "jobEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\tFailed to parse interpolation expression at [0, 28]. Undefined variable: 'Session.WorkingDirectory'.",
+        ],
+    );
+}
+
+#[test]
+fn env_action_timeout_param_reference_succeeds() {
+    decode_fb1(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "T", "type": "INT", "default": 30}],
+        "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {"command": "echo", "timeout": "{{Param.T}}"}}}}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+    );
+}
+
+#[test]
+fn step_action_timeout_session_symbol_fails() {
+    // Same job-creation-scope rule for step onRun timeouts.
+    check_err_fb1(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo", "timeout": "{{Session.WorkingDirectory}}"}}}}]
+    }"#,
+        &[
+            "steps[0] -> script -> actions -> onRun -> timeout:\n\tFailed to parse interpolation expression at [0, 28]. Undefined variable: 'Session.WorkingDirectory'.",
+        ],
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // NotifyPeriodInSeconds format strings
 // ══════════════════════════════════════════════════════════════

@@ -446,11 +446,14 @@ pub fn evaluate_let_bindings(
 // ── Host-context symbol table filtering ─────────────────────────────
 //
 // `resolved_symtab` is transported to the worker host that runs the job.
-// The host only evaluates host-context (SESSION/TASK scope) format strings,
-// so we filter the full symbol table down to exactly the symbols those
-// format strings reference.
+// The host evaluates the format strings that remain unresolved after job
+// creation, so we filter the full symbol table down to exactly the symbols
+// those format strings reference. Most of these are host-context
+// (SESSION/TASK scope); action `timeout`/`notifyPeriodInSeconds` are
+// template scope (validation restricts them to job-creation-stage symbols)
+// but also resolve on the worker, so their references are included too.
 //
-// Step and Environment have different sets of host-context format strings:
+// Step and Environment have different sets of these format strings:
 //   Step  — step-level let bindings, script (actions, embedded files,
 //           script-level let bindings), and step-scoped environments
 //           (variables, actions, embedded files).
@@ -588,6 +591,12 @@ fn collect_all_accessed_symbols(
         if let Some(t) = &a.timeout {
             collect_from_fs(t, out);
         }
+        if let Some(job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(n),
+        }) = &a.cancelation
+        {
+            collect_from_fs(n, out);
+        }
     }
 
     if let Some(bindings) = step_let_bindings {
@@ -603,12 +612,6 @@ fn collect_all_accessed_symbols(
 
     if let Some(s) = script {
         collect_from_action(&s.actions.on_run, &mut symbols);
-        if let Some(job::CancelationMode::NotifyThenTerminate {
-            notify_period_in_seconds: Some(n),
-        }) = &s.actions.on_run.cancelation
-        {
-            collect_from_fs(n, &mut symbols);
-        }
         if let Some(files) = &s.embedded_files {
             for f in files {
                 if let Some(d) = &f.data {
@@ -691,6 +694,12 @@ fn collect_env_action_refs(
         if let Some(t) = &action.timeout {
             t.copy_used_symtab_values(full, filtered);
         }
+        if let Some(job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(n),
+        }) = &action.cancelation
+        {
+            n.copy_used_symtab_values(full, filtered);
+        }
     }
 }
 
@@ -722,7 +731,8 @@ fn filter_symtab_for_environment(env: &job::Environment, full: &SymbolTable) -> 
     filtered
 }
 
-/// Collect all symbol names accessed by an environment's host-context format strings.
+/// Collect all symbol names accessed by an environment's worker-resolved
+/// format strings (host-context fields plus template-scope timeouts).
 fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::HashSet<String> {
     let mut symbols = std::collections::HashSet::new();
     if let Some(vars) = &env.variables {
@@ -740,6 +750,12 @@ fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::Has
             }
             if let Some(t) = &action.timeout {
                 symbols.extend(t.accessed_symbols());
+            }
+            if let Some(job::CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds: Some(n),
+            }) = &action.cancelation
+            {
+                symbols.extend(n.accessed_symbols());
             }
         }
         if let Some(files) = &es.embedded_files {
