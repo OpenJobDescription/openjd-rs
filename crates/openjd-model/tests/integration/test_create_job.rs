@@ -1412,6 +1412,101 @@ fn test_create_job_resolved_symtab_populated() {
 }
 
 #[test]
+fn env_resolved_symtab_includes_notify_period_refs() {
+    // notifyPeriodInSeconds on an environment action is resolved on the
+    // worker; the symbols it references must survive symtab filtering.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Period", "type": "INT", "default": 10}],
+        "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {
+            "command": "echo",
+            "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{Param.Period}}"}
+        }}}}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+        &[],
+    );
+    let symtab = job.job_environments.as_ref().unwrap()[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        symtab.get_value("Param.Period"),
+        Some(&openjd_expr::ExprValue::Int(10)),
+        "Param.Period is referenced by the env action's notifyPeriodInSeconds"
+    );
+}
+
+#[test]
+fn step_env_resolved_symtab_includes_notify_period_refs() {
+    // Same rule for step environments, whose references flow into the
+    // step's resolved_symtab.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Period", "type": "INT", "default": 10}],
+        "steps": [{
+            "name": "S",
+            "stepEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {
+                "command": "echo",
+                "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{Param.Period}}"}
+            }}}}],
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let symtab = job.steps[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        symtab.get_value("Param.Period"),
+        Some(&openjd_expr::ExprValue::Int(10)),
+        "Param.Period is referenced by the step env action's notifyPeriodInSeconds"
+    );
+}
+
+#[test]
+fn env_resolved_symtab_includes_timeout_refs() {
+    // timeout on an environment action follows the same worker-resolution
+    // path as notifyPeriodInSeconds.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "T", "type": "INT", "default": 30}],
+        "jobEnvironments": [{"name": "E", "script": {"actions": {"onEnter": {
+            "command": "echo", "timeout": "{{Param.T}}"
+        }}}}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+        &[],
+    );
+    let symtab = job.job_environments.as_ref().unwrap()[0]
+        .resolved_symtab
+        .as_ref()
+        .expect("should have resolved_symtab")
+        .to_symtab(openjd_expr::PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        symtab.get_value("Param.T"),
+        Some(&openjd_expr::ExprValue::Int(30)),
+        "Param.T is referenced by the env action's timeout"
+    );
+}
+
+#[test]
 fn test_create_job_resolved_symtab_always_present() {
     let job = parse_and_create(
         r#"{

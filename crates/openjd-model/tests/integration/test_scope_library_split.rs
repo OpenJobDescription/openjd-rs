@@ -107,6 +107,31 @@ fn template_scope_step_let_binding_rejects_apply_path_mapping() {
     check_err(&t, &["apply_path_mapping"]);
 }
 
+#[test]
+fn template_scope_action_timeout_rejects_apply_path_mapping() {
+    // `timeout` is plain @fmtstring — resolved at job creation, before any
+    // session exists, so host functions are not available in it.
+    let t = job_with_path_param(
+        r#""test""#,
+        &simple_step(
+            r#"{"actions": {"onRun": {"command": "run", "timeout": "{{len(apply_path_mapping(Param.Val))}}"}}}"#,
+        ),
+    );
+    check_err(&t, &["apply_path_mapping"]);
+}
+
+#[test]
+fn template_scope_cancelation_notify_rejects_apply_path_mapping() {
+    // `notifyPeriodInSeconds` is plain @fmtstring — same reasoning as timeout.
+    let t = job_with_path_param(
+        r#""test""#,
+        &simple_step(
+            r#"{"actions": {"onRun": {"command": "run", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{len(apply_path_mapping(Param.Val))}}"}}}}"#,
+        ),
+    );
+    check_err(&t, &["apply_path_mapping"]);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SESSION/TASK scope — apply_path_mapping must SUCCEED
 // ═══════════════════════════════════════════════════════════════
@@ -126,28 +151,6 @@ fn task_scope_action_args_accepts_apply_path_mapping() {
         r#""test""#,
         &simple_step(
             r#"{"actions": {"onRun": {"command": "run", "args": ["{{apply_path_mapping(Param.Val)}}"]}}}"#,
-        ),
-    );
-    decode_ok(&t);
-}
-
-#[test]
-fn task_scope_action_timeout_accepts_apply_path_mapping() {
-    let t = job_with_path_param(
-        r#""test""#,
-        &simple_step(
-            r#"{"actions": {"onRun": {"command": "run", "timeout": "{{len(apply_path_mapping(Param.Val))}}"}}}"#,
-        ),
-    );
-    decode_ok(&t);
-}
-
-#[test]
-fn task_scope_cancelation_notify_accepts_apply_path_mapping() {
-    let t = job_with_path_param(
-        r#""test""#,
-        &simple_step(
-            r#"{"actions": {"onRun": {"command": "run", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{len(apply_path_mapping(Param.Val))}}"}}}}"#,
         ),
     );
     decode_ok(&t);

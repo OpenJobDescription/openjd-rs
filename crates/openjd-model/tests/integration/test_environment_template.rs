@@ -807,3 +807,433 @@ fn env_template_case_different_params_accepted() {
     }"#,
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Format string validation (Pass 8) on environment templates:
+// undefined variables, session-scope symbols, EXPR gating for
+// 'let' and complex expressions.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_undefined_variable_in_command() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "{{Param.Missing}}"}}}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onEnter -> command:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_undefined_variable_in_args() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo", "args": ["{{Param.Missing}}"]}}}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onEnter -> args[0]:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_undefined_variable_in_variables() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "variables": {"MY_VAR": "{{Param.Missing}}"}}
+    }"#,
+        &[
+            "environment -> variables -> MY_VAR:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_undefined_variable_in_embedded_file_data() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "F", "type": "TEXT", "data": "{{Param.Missing}}"}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &[
+            "environment -> script -> embeddedFiles[0] -> data:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_undefined_variable_in_on_exit() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "foo"},
+            "onExit": {"command": "{{Param.Missing}}"}
+        }}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onExit -> command:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_session_symbols_available() {
+    // Session.* symbols are session scope — available in env scripts.
+    decode_ok(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "echo", "args": ["{{Session.WorkingDirectory}}"]}
+        }},
+        "variables": {"WORKDIR": "{{Session.WorkingDirectory}}"}}
+    }"#,
+    );
+}
+
+#[test]
+fn env_template_env_file_reference_available() {
+    // Env.File.* references resolve to this environment's embedded files.
+    decode_ok(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "Setup", "type": "TEXT", "data": "hi"}],
+            "actions": {"onEnter": {"command": "{{Env.File.Setup}}"}}
+        }}
+    }"#,
+    );
+}
+
+#[test]
+fn env_template_step_name_not_available() {
+    // Step.Name is never in scope for a standalone environment template,
+    // even with EXPR — the template is not attached to a step.
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "{{Step.Name}}"}}}}
+    }"#,
+        &["EXPR"],
+        &[
+            "environment -> script -> actions -> onEnter -> command:\n\tFailed to parse interpolation expression at [0, 13]. Undefined variable: 'Step.Name'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_job_name_available_with_expr() {
+    // Job.Name is session scope under EXPR — the environment always runs
+    // inside some job's session.
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{Job.Name}}"]}}}}
+    }"#,
+        &["EXPR"],
+    );
+}
+
+#[test]
+fn env_template_job_name_requires_expr() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "{{Job.Name}}"}}}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onEnter -> command:\n\tFailed to parse interpolation expression at [0, 12]. Undefined variable: 'Job.Name'.",
+        ],
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Environment template 'let' bindings — ported from Python
+// EnvironmentTemplate let-binding extension validation tests
+// (previously skipped; see test_let_bindings.rs).
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_let_requires_expr() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "let": ["x = 1"],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["environment -> script -> let:\n\t'let' requires the EXPR extension."],
+    );
+}
+
+#[test]
+fn env_template_let_with_expr_succeeds() {
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{"name": "Base", "type": "INT"}],
+        "environment": {"name": "Foo", "script": {
+            "let": ["doubled = Param.Base * 2"],
+            "actions": {"onEnter": {"command": "echo", "args": ["{{doubled}}"]}}
+        }}
+    }"#,
+        &["EXPR"],
+    );
+}
+
+#[test]
+fn env_template_let_binding_error_reported() {
+    // A let binding referencing an undefined symbol is a validation error.
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name": "Foo", "script": {
+            "let": ["x = Param.Missing + 1"],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["EXPR"],
+        &["environment -> script -> let[0]:"],
+    );
+}
+
+#[test]
+fn env_template_let_chained_bindings() {
+    // Later bindings can reference earlier ones; session symbols usable.
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{"name": "SubDir", "type": "STRING", "default": "output"}],
+        "environment": {"name": "Foo", "script": {
+            "let": [
+                "work_dir = Session.WorkingDirectory / Param.SubDir",
+                "log_file = work_dir / 'env.log'"
+            ],
+            "actions": {"onEnter": {"command": "echo", "args": ["{{log_file}}"]}}
+        }}
+    }"#,
+        &["EXPR"],
+    );
+}
+
+#[test]
+fn env_template_let_duplicate_name_rejected() {
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name": "Foo", "script": {
+            "let": ["x = 1", "x = 2"],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["EXPR"],
+        &["environment -> script -> let[1]:"],
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Complex expressions require EXPR
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_complex_expr_in_command_requires_expr() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "{{ Param.P + 1 }}"}}}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onEnter -> command:\n\tcomplex expressions require the EXPR extension.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_complex_expr_in_args_requires_expr() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{ Param.P + 1 }}"]}}}}
+    }"#,
+        &[
+            "environment -> script -> actions -> onEnter -> args[0]:\n\tcomplex expressions require the EXPR extension.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_complex_expr_in_variables_requires_expr() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {"name": "Foo", "variables": {"V": "{{ Param.P + 1 }}"}}
+    }"#,
+        &["environment -> variables -> V:\n\tcomplex expressions require the EXPR extension."],
+    );
+}
+
+#[test]
+fn env_template_complex_expr_with_expr_succeeds() {
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{ Param.P + 1 }}"]}}}}
+    }"#,
+        &["EXPR"],
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// endOfLine on env-template embedded files requires FEATURE_BUNDLE_1
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_end_of_line_requires_feature_bundle_1() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "F", "type": "TEXT", "data": "hi", "endOfLine": "LF"}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &[
+            "environment -> script -> embeddedFiles[0] -> endOfLine:\n\trequires the FEATURE_BUNDLE_1 extension.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_end_of_line_with_feature_bundle_1_succeeds() {
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "F", "type": "TEXT", "data": "hi", "endOfLine": "LF"}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// timeout / notifyPeriodInSeconds are plain @fmtstring — resolved at
+// job creation, before any session exists. Job parameters are in
+// scope; Session.* and Env.File.* are not.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn env_template_timeout_param_reference_succeeds() {
+    decode_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "parameterDefinitions": [{"name": "T", "type": "INT", "default": 30}],
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "foo", "timeout": "{{Param.T}}"}
+        }}}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+    );
+}
+
+#[test]
+fn env_template_timeout_undefined_variable_rejected() {
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "foo", "timeout": "{{Param.Missing}}"}
+        }}}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+        &[
+            "environment -> script -> actions -> onEnter -> timeout:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_timeout_session_symbol_rejected() {
+    // Session.* resolves at task execution; timeout resolves at job
+    // creation, so the reference must be rejected.
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "foo", "timeout": "{{Session.WorkingDirectory}}"}
+        }}}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+        &[
+            "environment -> script -> actions -> onEnter -> timeout:\n\tFailed to parse interpolation expression at [0, 28]. Undefined variable: 'Session.WorkingDirectory'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_notify_period_env_file_rejected() {
+    // Env.File.* resolves at task execution; notifyPeriodInSeconds
+    // resolves at job creation, so the reference must be rejected.
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "F", "type": "TEXT", "data": "hi"}],
+            "actions": {"onEnter": {
+                "command": "foo",
+                "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{Env.File.F}}"}
+            }}
+        }}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+        &[
+            "environment -> script -> actions -> onEnter -> cancelation:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Env.File.F'.",
+        ],
+    );
+}
+
+#[test]
+fn env_template_on_exit_timeout_undefined_variable_rejected() {
+    // Timeout validation covers every action on the environment, not
+    // just onEnter.
+    check_env_err_with_exts(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "environment": {"name": "Foo", "script": {"actions": {
+            "onEnter": {"command": "foo"},
+            "onExit": {"command": "bar", "timeout": "{{Param.Missing}}"}
+        }}}
+    }"#,
+        &["FEATURE_BUNDLE_1"],
+        &[
+            "environment -> script -> actions -> onExit -> timeout:\n\tFailed to parse interpolation expression at [0, 17]. Undefined variable: 'Param.Missing'.",
+        ],
+    );
+}

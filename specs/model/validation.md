@@ -42,6 +42,30 @@ short-circuiting), so users see all problems at once.
 | 9 | `task_chunking.rs` | Gate TASK_CHUNKING features (ChunkInt parameters) |
 | 10 | `wrap_actions.rs` | Gate WRAP_ACTIONS features (onWrapEnvEnter, onWrapTaskRun, onWrapEnvExit) and enforce the single-wrap-layer-per-session rule (RFC 0008) |
 
+### Environment template pipeline
+
+`validate_environment_template` runs the same passes with job-template-only checks
+omitted (there are no steps, so passes 9's ChunkInt checks and pass 6's step/dependency
+checks have nothing to walk):
+
+- **Limits + structure** — parameter-definition count/uniqueness (its own cap,
+  `max_env_template_param_count`), then `validate_single_environment` for the env body.
+- **Pass 7** — `validate_feature_bundle_1_environment_template`: `endOfLine` on the
+  environment's embedded files requires FEATURE_BUNDLE_1.
+- **Pass 8** — `validate_format_strings_environment_template`: the environment body
+  (`variables`, action `command`/`args`, embedded files — all `@fmtstring[host]`) is
+  validated in **session scope** exactly like an environment inside a job template.
+  `Param.*`/`RawParam.*` come from the template's own `parameterDefinitions`;
+  `Session.*` and `Env.File.*` are available; with EXPR, `Job.Name` is also in scope
+  (the environment runs inside some job's session at runtime) but `Step.Name` is NOT
+  (an environment template is not attached to a step). Action `timeout` and
+  `notifyPeriodInSeconds` are plain `@fmtstring` (job-creation stage) and validate in
+  **template scope** instead — no `Session.*`/`Env.File.*`. `let` bindings require
+  EXPR; with EXPR they are validated and type-checked into the symbol table. Complex
+  expressions (anything beyond a bare `{{Name.Path}}` reference) require EXPR in
+  variables, action commands/args, and embedded-file data/filename.
+- **Pass 10** — WRAP_ACTIONS gating (see below).
+
 ## Pass 5: Limits Enforcement
 
 Walks the template tree checking every name length, list count, and string length against
@@ -126,7 +150,18 @@ Four scope levels, each building on the previous:
 
 3. **Session scope** — For environment scripts/variables. Adds `Session.WorkingDirectory`,
    `Session.HasPathMappingRules`, `Session.PathMappingRulesFile`, `Env.File.*`.
-   With EXPR: adds `Step.Name` in step environments.
+   With EXPR: adds `Job.Name` in all environments and `Step.Name` in step
+   environments only. Used both for environments inside a job template and for
+   standalone environment templates (which never get `Step.Name`).
+
+Scope selection follows the spec's `@fmtstring` stage annotations, not the
+container: `timeout` and `notifyPeriodInSeconds` are plain `@fmtstring`
+(resolved at job creation, before any session exists), so they validate in
+template scope — with `Job.Name`/`Step.Name`/step `let` bindings where
+applicable, but no `Session.*`, no `Env.File.*`, no `Task.*`, and the
+template function library (no `apply_path_mapping`) — even though they sit
+on actions whose `command`/`args` are `@fmtstring[host]` and validate in
+session/task scope.
 
 4. **Task scope** — For step scripts. Adds `Task.Param.*`, `Task.RawParam.*`,
    `Task.File.*`. With EXPR: adds `Job.Name`, `Step.Name`, `Env.File.*` from
