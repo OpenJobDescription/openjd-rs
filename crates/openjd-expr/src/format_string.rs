@@ -343,6 +343,14 @@ impl PartialEq for FormatString {
     }
 }
 impl Eq for FormatString {}
+/// Hashes the raw source text only, consistent with `PartialEq`
+/// (the parsed segments are derived from `raw`, so equal raws imply
+/// equal segments).
+impl std::hash::Hash for FormatString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.raw.hash(state);
+    }
+}
 impl<'de> serde::Deserialize<'de> for FormatString {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct FsVisitor;

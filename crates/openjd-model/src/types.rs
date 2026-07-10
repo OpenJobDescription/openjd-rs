@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// can add new file types (for example, a `Binary` variant, which has
 /// been reserved space in the spec since RFC 0001 discussion) without
 /// a SemVer break for downstream crates that match on this enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[non_exhaustive]
 pub enum FileType {
@@ -38,7 +38,7 @@ impl fmt::Display for FileType {
 }
 
 /// End-of-line mode for embedded files (FEATURE_BUNDLE_1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EndOfLine {
     Lf,

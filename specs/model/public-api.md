@@ -463,6 +463,19 @@ Session- and task-scope strings (in `script.actions`, `variables`,
 embedded file contents, etc.) remain as [`FormatString`] for the session
 runtime to resolve when worker state is available.
 
+All types below implement `Debug`, `Clone`, `PartialEq`, and `Hash`
+with the invariant `a == b ⇒ hash(a) == hash(b)`. Equality is
+structural on the *created job*, not the source template: derived
+state such as `resolved_symtab` participates, and since its transport
+format preserves original float literals, jobs created from `1.0` vs
+`1.00` parameter values compare unequal. Map-typed fields (`IndexMap`,
+`HashMap`) compare order-insensitively and hash as key-sorted entries.
+`f64` fields hash via `to_bits()` after normalizing `-0.0` to `0.0`,
+consistent with `-0.0 == 0.0`. Types whose (transitive) fields include
+`f64` — `Job`, `Step`, `StepParameterSpace`, `TaskParameter`,
+`HostRequirements`, `AmountRequirement` — implement `PartialEq` but
+not `Eq`; the rest also implement `Eq`.
+
 ```rust
 pub struct job::Job {
     pub name: String,
@@ -761,7 +774,7 @@ pub type TaskParameterSet = IndexMap<String, TaskParameterValue>;
 ### Spec-String Enums
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FileType {
     Text,

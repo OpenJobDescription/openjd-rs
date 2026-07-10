@@ -208,3 +208,38 @@ fn deeply_nested_dotted_name() {
     let st = symtab!("Task.Param.Render.Frame" => 100);
     assert_eq!(resolve_str("f{{Task.Param.Render.Frame}}", &st), "f100");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Equality + hashing (by raw source text)
+// ══════════════════════════════════════════════════════════════
+
+fn hash_of<T: std::hash::Hash>(v: &T) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
+}
+
+#[test]
+fn format_string_hash_consistent_with_eq() {
+    let a = FormatString::new("prefix {{Param.Frame}} suffix").unwrap();
+    let b = FormatString::new("prefix {{Param.Frame}} suffix").unwrap();
+    let c = FormatString::new("prefix {{Param.Other}} suffix").unwrap();
+    assert_eq!(a, b);
+    assert_eq!(hash_of(&a), hash_of(&b));
+    assert_ne!(a, c);
+}
+
+#[test]
+// The interior mutability clippy flags is in the ruff AST's atomic node
+// indices; FormatString's Hash/Eq are over the raw source only, which is
+// immutable, so set keys are stable.
+#[allow(clippy::mutable_key_type)]
+fn format_string_usable_in_hash_set() {
+    let mut set = std::collections::HashSet::new();
+    set.insert(FormatString::new("{{Param.A}}").unwrap());
+    set.insert(FormatString::new("{{Param.A}}").unwrap());
+    set.insert(FormatString::new("{{Param.B}}").unwrap());
+    assert_eq!(set.len(), 2);
+    assert!(set.contains(&FormatString::new("{{Param.A}}").unwrap()));
+}
