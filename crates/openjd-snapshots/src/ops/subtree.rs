@@ -38,14 +38,10 @@ fn resolve_symlink<'a>(
             warn!(target, "symlink cycle detected, skipping");
             return None; // cycle
         }
-        match file_lookup.get(current) {
-            Some(entry) => {
-                if entry.symlink_target.is_none() {
-                    return Some(entry);
-                }
-                current = entry.symlink_target.as_ref().unwrap();
-            }
-            None => return None,
+        let entry = file_lookup.get(current)?;
+        match &entry.symlink_target {
+            None => return Some(entry),
+            Some(next) => current = next,
         }
     }
     None

@@ -248,9 +248,17 @@ impl SymbolTable {
     ///
     /// If `prefix` is non-empty, each returned path is prefixed with
     /// `"{prefix}."`. Use `""` for a top-level walk.
+    ///
+    /// Paths are returned in lexicographic order. The internal storage is
+    /// a `HashMap` with per-instance-random iteration order; sorting here
+    /// makes every consumer deterministic — in particular the `Serialize`
+    /// impl, whose JSON transport array must have a canonical order so
+    /// that identical tables produce identical bytes (content-addressing,
+    /// caching, byte-level comparison of `resolvedSymTab`).
     pub fn all_paths(&self, prefix: &str) -> Vec<String> {
         let mut out = Vec::new();
         self.collect_paths(prefix, &mut out);
+        out.sort_unstable();
         out
     }
 

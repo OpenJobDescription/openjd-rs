@@ -1871,7 +1871,7 @@ fn runnable_flag_preserved_through_collapse_escaping() {
     std::os::unix::fs::symlink(&script, inner.join("link.sh")).unwrap();
 
     let m = collect_abs_snapshot(
-        &[inner.to_path_buf()],
+        std::slice::from_ref(&inner),
         &[] as &[PathBuf],
         CollectOptions {
             symlink_policy: SymlinkPolicy::CollapseEscaping,

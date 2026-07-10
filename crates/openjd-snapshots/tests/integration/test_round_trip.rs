@@ -46,7 +46,7 @@ async fn upload_and_remap(
     data_cache: &Arc<FileSystemDataCache>,
 ) -> openjd_snapshots::AbsSnapshot {
     let snapshot = collect_abs_snapshot(
-        &[src_dir.to_path_buf()],
+        std::slice::from_ref(&src_dir),
         &[] as &[std::path::PathBuf],
         CollectOptions::default(),
     )
