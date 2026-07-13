@@ -101,6 +101,17 @@ pub enum SpecificationRevision {
     V2023_09,
 }
 
+impl SpecificationRevision {
+    /// The current revision. Equivalent to the most recent variant.
+    pub const CURRENT: SpecificationRevision = SpecificationRevision::V2023_09;
+}
+
+impl Default for SpecificationRevision {
+    fn default() -> Self {
+        SpecificationRevision::CURRENT
+    }
+}
+
 impl fmt::Display for SpecificationRevision {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -461,6 +472,32 @@ impl ModelProfile {
         }
     }
 
+    /// Shortcut for `ModelProfile::new(SpecificationRevision::CURRENT)`.
+    ///
+    /// Builds a profile with the current revision and *no* extensions. Use
+    /// this when you want a stable baseline: future crate versions that ship
+    /// a new revision will change what [`SpecificationRevision::CURRENT`]
+    /// points to, but the extension set will remain explicitly empty.
+    pub fn current() -> Self {
+        Self::new(SpecificationRevision::CURRENT)
+    }
+
+    /// Build a profile at the current revision *with every known extension
+    /// enabled*.
+    ///
+    /// **This profile is intentionally unstable across crate versions.** As
+    /// new variants are added to [`ModelExtension::ALL`] and new revisions
+    /// land at [`SpecificationRevision::CURRENT`], the set of enabled
+    /// features grows. For behavior stable across crate versions, construct
+    /// a profile with an explicit revision and extension set via
+    /// [`ModelProfile::new`] or [`ModelProfile::current`].
+    pub fn latest() -> Self {
+        Self {
+            revision: SpecificationRevision::CURRENT,
+            extensions: ModelExtension::ALL.iter().copied().collect(),
+        }
+    }
+
     /// Set the enabled extensions (replaces any existing set).
     #[must_use]
     pub fn with_extensions(mut self, extensions: Extensions) -> Self {
@@ -520,6 +557,12 @@ impl ModelProfile {
         openjd_expr::ExprProfile::new(revision)
             .with_extensions(extensions)
             .with_host_context(host_context)
+    }
+}
+
+impl Default for ModelProfile {
+    fn default() -> Self {
+        Self::current()
     }
 }
 
@@ -809,5 +852,40 @@ mod tests {
             serde_json::to_string(&v).unwrap(),
             "[\"EXPR\",\"TASK_CHUNKING\"]"
         );
+    }
+
+    #[test]
+    fn specification_revision_current_is_v2023_09() {
+        assert_eq!(
+            SpecificationRevision::CURRENT,
+            SpecificationRevision::V2023_09
+        );
+    }
+
+    #[test]
+    fn model_profile_current_has_current_revision_and_no_extensions() {
+        let p = ModelProfile::current();
+        assert_eq!(p.revision(), SpecificationRevision::CURRENT);
+        assert!(p.extensions().is_empty());
+    }
+
+    #[test]
+    fn model_profile_latest_enables_all_extensions() {
+        let p = ModelProfile::latest();
+        assert_eq!(p.revision(), SpecificationRevision::CURRENT);
+        for ext in ModelExtension::ALL {
+            assert!(
+                p.has_extension(*ext),
+                "ModelProfile::latest() must enable every extension in ModelExtension::ALL; missing {ext:?}"
+            );
+        }
+        assert_eq!(p.extensions().len(), ModelExtension::ALL.len());
+    }
+
+    #[test]
+    fn model_profile_default_is_current() {
+        let p = ModelProfile::default();
+        assert_eq!(p.revision(), SpecificationRevision::CURRENT);
+        assert!(p.extensions().is_empty());
     }
 }

@@ -41,6 +41,8 @@ mod test_let_bindings;
 mod test_merge_job_parameters;
 #[path = "integration/test_misc_v2023_09.rs"]
 mod test_misc_v2023_09;
+#[path = "integration/test_model_profile.rs"]
+mod test_model_profile;
 #[path = "integration/test_parameter_space.rs"]
 mod test_parameter_space;
 #[path = "integration/test_parse.rs"]
