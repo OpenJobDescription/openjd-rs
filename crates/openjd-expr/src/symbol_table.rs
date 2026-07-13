@@ -390,7 +390,15 @@ impl<'a> FromIterator<(&'a str, ExprValue)> for SymbolTable {
 ///
 /// This mirrors the real-world flow where a scheduler serializes the symbol
 /// table to JSON and sends it to a worker that may be on a different OS.
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// Equality and hashing are structural over the JSON transport value.
+/// This is well-defined because `SymbolTable`'s `Serialize` impl emits
+/// entries in canonical (lexicographic) path order, so identical tables
+/// produce identical transport arrays. Note that float entries carry
+/// their preserved original literal in transport form, so tables built
+/// from `1.0` vs `1.00` compare unequal here even though the
+/// corresponding `ExprValue`s compare equal.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(transparent)]
 pub struct SerializedSymbolTable(serde_json::Value);
 

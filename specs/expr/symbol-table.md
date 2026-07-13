@@ -134,10 +134,16 @@ a live `SymbolTable` with path format awareness.
 Defined in `symbol_table.rs`.
 
 ```rust
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SerializedSymbolTable(serde_json::Value);
 ```
+
+Equality and hashing are structural over the wrapped JSON value. This is
+well-defined because of the canonical (lexicographically sorted) wire
+format below. Note that float entries carry their preserved original
+literal, so tables built from `1.0` vs `1.00` compare unequal at this
+transport level even though the corresponding `ExprValue`s compare equal.
 
 ### Wire Format
 

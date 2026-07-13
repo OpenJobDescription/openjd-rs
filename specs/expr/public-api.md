@@ -879,8 +879,15 @@ session scope (host-native paths). The session crate stores instances
 of this on resolved job structures; at runtime, the session deserializes
 with `PathFormat::host()` so path separators match the worker OS.
 
+Equality and hashing are structural over the JSON transport value. This
+is well-defined because `SymbolTable`'s `Serialize` impl emits entries
+in canonical (lexicographic) path order. Float entries carry their
+preserved original literal in transport form, so tables built from
+`1.0` vs `1.00` compare unequal here even though the corresponding
+`ExprValue`s compare equal.
+
 ```rust
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct SerializedSymbolTable(serde_json::Value);
 
@@ -1001,8 +1008,9 @@ impl FormatString {
 }
 
 impl std::fmt::Display for FormatString;  // displays the raw source
-impl PartialEq for FormatString;
+impl PartialEq for FormatString;          // compares the raw source only
 impl Eq for FormatString;
+impl std::hash::Hash for FormatString;    // hashes the raw source only
 impl<'de> serde::Deserialize<'de> for FormatString;  // accepts str/int/float/bool
 ```
 

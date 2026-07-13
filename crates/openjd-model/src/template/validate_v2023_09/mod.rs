@@ -235,6 +235,12 @@ pub fn validate_environment_template(
     }
     structure::validate_single_environment(env, &limits, &rules, &env_path, &mut errors);
 
+    // Pass 7: FEATURE_BUNDLE_1 (validate or reject)
+    feature_bundle_1::validate_feature_bundle_1_environment_template(et, ctx, &mut errors);
+
+    // Pass 8: Format strings (base or EXPR profile)
+    format_strings::validate_format_strings_environment_template(et, ctx, &mut errors);
+
     // WRAP_ACTIONS gating (RFC 0008)
     wrap_actions::validate_wrap_actions_environment_template(et, ctx, &mut errors);
 

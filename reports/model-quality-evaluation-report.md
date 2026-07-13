@@ -210,7 +210,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 5. No fuzz/property-based testing for parser robustness
 6. REDACTED_ENV_VARS has only 4 tests — minimal behavioral coverage
 7. No stress tests for large templates (many steps, many params)
-8. Environment template extension handling noted as not yet implemented (some Python tests skipped)
+8. ~~Environment template extension handling noted as not yet implemented (some Python tests skipped)~~ **Resolved** — see recommendation 15.
 
 ### Exploratory Test Results
 
@@ -343,7 +343,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 12. Add fuzz/property-based testing for parser robustness.
 13. Expand REDACTED_ENV_VARS test coverage beyond the current 4 tests.
 14. Add stress tests for large templates.
-15. Complete environment template extension handling (noted as not yet implemented).
+15. ~~Complete environment template extension handling (noted as not yet implemented).~~ **Resolved** — `validate_environment_template` now runs the FEATURE_BUNDLE_1 pass (`endOfLine` gating) and the format-string pass (session-scope symbol validation, `let` bindings, EXPR gating for complex expressions) on environment templates; previously skipped Python let-binding tests ported to `test_environment_template.rs`.
 
 ---
 

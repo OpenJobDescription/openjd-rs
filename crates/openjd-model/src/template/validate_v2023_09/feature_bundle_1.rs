@@ -80,6 +80,22 @@ pub fn validate_feature_bundle_1(
     }
 }
 
+/// Pass 7 for a standalone environment template: `endOfLine` on embedded
+/// files requires FEATURE_BUNDLE_1, same as environments in a job template.
+pub fn validate_feature_bundle_1_environment_template(
+    et: &EnvironmentTemplate,
+    ctx: &ValidationContext,
+    errors: &mut ValidationErrors,
+) {
+    let active = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
+    check_single_env_embedded_eol(
+        &et.environment,
+        &[PathElement::Field("environment".into())],
+        active,
+        errors,
+    );
+}
+
 fn check_env_embedded_eol(
     envs: &Option<Vec<Environment>>,
     base_path: &[PathElement],
@@ -88,19 +104,25 @@ fn check_env_embedded_eol(
 ) {
     if let Some(envs) = envs {
         for (i, env) in envs.iter().enumerate() {
-            if let Some(script) = &env.script {
-                if let Some(files) = &script.embedded_files {
-                    let files_path = path_field(
-                        &path_field(&path_index(base_path, i), "script"),
-                        "embeddedFiles",
-                    );
-                    for (j, f) in files.iter().enumerate() {
-                        if let Some(_eol) = &f.end_of_line {
-                            let eol_path = path_field(&path_index(&files_path, j), "endOfLine");
-                            if !active {
-                                errors.add(&eol_path, "requires the FEATURE_BUNDLE_1 extension.");
-                            }
-                        }
+            check_single_env_embedded_eol(env, &path_index(base_path, i), active, errors);
+        }
+    }
+}
+
+fn check_single_env_embedded_eol(
+    env: &Environment,
+    env_path: &[PathElement],
+    active: bool,
+    errors: &mut ValidationErrors,
+) {
+    if let Some(script) = &env.script {
+        if let Some(files) = &script.embedded_files {
+            let files_path = path_field(&path_field(env_path, "script"), "embeddedFiles");
+            for (j, f) in files.iter().enumerate() {
+                if let Some(_eol) = &f.end_of_line {
+                    let eol_path = path_field(&path_index(&files_path, j), "endOfLine");
+                    if !active {
+                        errors.add(&eol_path, "requires the FEATURE_BUNDLE_1 extension.");
                     }
                 }
             }

@@ -21,6 +21,11 @@ Template-scope fields become concrete `String`/`f64`/`i64` values in the `job::*
 Session and task-scope fields remain as `FormatString` because they depend on runtime context
 (e.g., `Session.WorkingDirectory`, `Task.Param.*`).
 
+One exception separates symbol scope from resolution time: action `timeout` and
+`notifyPeriodInSeconds` validate in TEMPLATE scope (only job-creation-stage symbols may be
+referenced — no `Session.*`/`Task.*`/`Env.File.*`), yet they remain `FormatString` in the
+`job::*` types and resolve on the worker alongside the host-context fields.
+
 ## Type Definitions
 
 ### Job
@@ -72,12 +77,14 @@ pub struct Step {
 ```
 
 `resolved_symtab` exists to transport symbol values across the network to the worker host
-that runs the job. The worker only evaluates host-context (SESSION and TASK scope) format
-strings, so `resolved_symtab` is filtered to contain exactly the symbols referenced by
-those format strings. For a Step, the host-context format strings are: the step script's
-actions (command, args, timeout, cancelation), embedded files, script-level let bindings,
-step-level let bindings, and any step-scoped environments' variables, actions, and embedded
-files.
+that runs the job. The worker evaluates the format strings that remain unresolved after job
+creation, so `resolved_symtab` is filtered to contain exactly the symbols referenced by
+those format strings. For a Step, these are: the step script's actions (command, args,
+timeout, cancelation), embedded files, script-level let bindings, step-level let bindings,
+and any step-scoped environments' variables, actions, and embedded files. Most of these are
+host-context (SESSION and TASK scope); timeout and notifyPeriodInSeconds are template scope
+(validation rejects `Session.*`/`Task.*`/`Env.File.*` in them) but still resolve on the
+worker, referencing only the job-creation-stage symbols carried in `resolved_symtab`.
 
 Contents include `RawParam.*`, non-PATH `Param.*` values, `Job.Name`, `Step.Name`, and
 let bindings. PATH-typed `Param.*` entries and any `apply_path_mapping` results are excluded
@@ -104,13 +111,17 @@ pub struct StepActions {
 pub struct Action {
     pub command: FormatString,                           // Task-scope, unresolved
     pub args: Option<Vec<FormatString>>,                 // Task-scope, unresolved
-    pub timeout: Option<FormatString>,                   // Task-scope, unresolved
+    pub timeout: Option<FormatString>,                   // Template-scope symbols only, unresolved
     pub cancelation: Option<CancelationMode>,
 }
 ```
 
-Action fields remain as `FormatString` because they may reference `Task.Param.*` variables
-that are only available at task execution time.
+`command` and `args` remain as `FormatString` because they may reference `Task.Param.*`
+variables that are only available at task execution time. `timeout` (and
+`notifyPeriodInSeconds` inside `cancelation`) also travel unresolved and are resolved by
+the session runtime, but validation restricts them to template-scope symbols (they are
+plain `@fmtstring` in the spec — job-creation stage), so no `Session.*`, `Task.*`, or
+`Env.File.*` references can appear in them.
 
 ### Environment, EnvironmentScript, EnvironmentActions
 
@@ -137,8 +148,8 @@ pub struct EnvironmentActions {
 
 `resolved_symtab` on `Environment` serves the same purpose as on `Step`: transporting
 symbol values to the worker host. It is filtered to contain only the symbols referenced
-by this environment's host-context format strings — its variables, script actions,
-embedded files, and script-level let bindings. The same `RawParam` fallback applies:
+by this environment's worker-resolved format strings — its variables, script actions
+(including their timeouts), embedded files, and script-level let bindings. The same `RawParam` fallback applies:
 if a format string references `Param.X` for a PATH-typed parameter, `RawParam.X` is
 included instead.
 
