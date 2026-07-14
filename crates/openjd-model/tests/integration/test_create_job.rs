@@ -4947,3 +4947,211 @@ fn create_job_accepts_list_list_int_within_constraints() {
     );
     openjd_model::create_job(&jt, &params, &jt.default_validation_context()).unwrap();
 }
+
+// ══════════════════════════════════════════════════════════════
+// PATH parameter default normalization
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn path_default_dotdot_normalized_walk_up_true() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": ".."}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp/templates/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "/tmp/templates",
+        ".. should resolve to parent of template dir"
+    );
+}
+
+#[test]
+fn path_default_dot_slash_dotdot_normalized_walk_up_true() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "./.."}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp/templates/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "/tmp/templates",
+        "./.. should resolve to parent of template dir"
+    );
+}
+
+#[test]
+fn path_default_down_up_normalized_walk_up_true() {
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "sub/../other"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp/templates/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: true,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "/tmp/templates/job1/other",
+        "sub/../other should normalize to just other within template dir"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// PATH default walk-up guard: component-aware containment
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn path_default_sibling_escape_rejected_walk_up_false() {
+    // "../job1-sibling" from /tmp/templates/job1 resolves to the SIBLING
+    // /tmp/templates/job1-sibling, which is outside the template dir. A raw
+    // string-prefix check would wrongly accept it; the guard must reject it.
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "../job1-sibling"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmp/templates/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn path_default_prefix_sibling_escape_rejected_walk_up_false() {
+    // "../job10" from /a/job1 resolves to /a/job10, a sibling that shares the
+    // "/a/job1" string prefix but is not inside it.
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "../job10"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/a/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn path_default_back_to_template_dir_accepted_walk_up_false() {
+    // "sub/.." resolves to exactly the template dir, which is inside it.
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "sub/.."}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/a/job1",
+            current_working_dir: "/tmp/cwd",
+            path_format: PathFormat::Posix,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        params["P"].value.to_display_string(),
+        "/a/job1",
+        "sub/.. should resolve to exactly the template dir and be accepted"
+    );
+}
+
+#[test]
+fn path_default_sibling_escape_rejected_windows() {
+    // Same prefix-sibling escape on Windows paths.
+    let jt = decode_job_template(
+        minimal_job_template(r#"{"name": "P", "type": "PATH", "default": "..\\job1-sibling"}"#),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: r"C:\templates\job1",
+            current_working_dir: r"C:\cwd",
+            path_format: PathFormat::Windows,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}

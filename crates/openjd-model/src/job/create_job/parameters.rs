@@ -954,7 +954,7 @@ pub fn preprocess_job_parameters(
                     let joined = join_for_format(job_template_dir, default, path_format);
                     let normalized = normalize_path_str(&joined, path_format);
                     let normalized_dir = normalize_path_str(job_template_dir, path_format);
-                    if !normalized.starts_with(&normalized_dir) {
+                    if !path_is_within(&normalized, &normalized_dir, path_format) {
                         errors.push(format!(
                             "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
                             param.name
@@ -1115,6 +1115,36 @@ fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat)
     format!("{root}{}", components.join(&sep.to_string()))
 }
 
+/// Return `true` if `path` is `base` itself or a descendant of `base`.
+///
+/// Both arguments must already be normalized (see [`normalize_path_str`]).
+/// This is a **path-component-aware** containment check, not a raw string
+/// prefix check: `/a/job1` contains `/a/job1/sub` but does **not** contain the
+/// sibling `/a/job10`. It matches the Python reference's use of
+/// `Path.is_relative_to` and is what enforces the `allow_template_dir_walk_up`
+/// restriction, so a plain `str::starts_with` here would let a default like
+/// `../job1-sibling` escape into a sibling directory.
+fn path_is_within(path: &str, base: &str, format: openjd_expr::path_mapping::PathFormat) -> bool {
+    use openjd_expr::path_mapping::PathFormat;
+    let sep = match format {
+        PathFormat::Windows => '\\',
+        PathFormat::Posix | PathFormat::Uri => '/',
+    };
+    // Exact match — the path resolves to the base directory itself.
+    if path == base {
+        return true;
+    }
+    // Descendant — `path` must start with `base` followed by a separator so
+    // that only whole-component boundaries match. A `base` that already ends
+    // in a separator (e.g. a filesystem root like "/" or "C:\") needs no extra
+    // separator inserted.
+    if base.ends_with(sep) {
+        path.starts_with(base)
+    } else {
+        path.starts_with(&format!("{base}{sep}"))
+    }
+}
+
 /// Convert a serde_json::Value to an ExprValue.
 pub(super) fn json_to_expr_value(
     val: &serde_json::Value,
@@ -1214,6 +1244,49 @@ mod tests {
         // More .. than components should clamp at server\share
         let result = normalize_path_str(r"\\server\share\..\..\..\..", PathFormat::Windows);
         assert_eq!(result, r"\\server\share", "got {result}");
+    }
+
+    #[test]
+    fn path_is_within_accepts_descendant_and_self() {
+        assert!(path_is_within("/a/job1", "/a/job1", PathFormat::Posix));
+        assert!(path_is_within("/a/job1/sub", "/a/job1", PathFormat::Posix));
+        assert!(path_is_within(
+            "/a/job1/sub/deep",
+            "/a/job1",
+            PathFormat::Posix
+        ));
+    }
+
+    #[test]
+    fn path_is_within_rejects_prefix_sibling() {
+        // Sibling whose name extends the base name must NOT be considered inside.
+        assert!(!path_is_within("/a/job10", "/a/job1", PathFormat::Posix));
+        assert!(!path_is_within(
+            "/tmp/templates/job1-sibling",
+            "/tmp/templates/job1",
+            PathFormat::Posix
+        ));
+    }
+
+    #[test]
+    fn path_is_within_root_base() {
+        // A filesystem root already ends in a separator.
+        assert!(path_is_within("/sub", "/", PathFormat::Posix));
+        assert!(path_is_within("/", "/", PathFormat::Posix));
+    }
+
+    #[test]
+    fn path_is_within_windows() {
+        assert!(path_is_within(
+            r"C:\templates\job1\sub",
+            r"C:\templates\job1",
+            PathFormat::Windows
+        ));
+        assert!(!path_is_within(
+            r"C:\templates\job1-sibling",
+            r"C:\templates\job1",
+            PathFormat::Windows
+        ));
     }
 
     #[test]

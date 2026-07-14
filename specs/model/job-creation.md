@@ -75,7 +75,7 @@ pub struct PathParameterOptions<'a> {
 - User-provided relative paths joined to `current_working_dir`
 - Default relative paths joined to `job_template_dir`
 - URI paths (`s3://`, `https://`) preserved as-is when EXPR extension is enabled
-- `allow_template_dir_walk_up` controls whether paths can traverse above `job_template_dir`
+- `allow_template_dir_walk_up` controls whether paths can traverse above `job_template_dir`. When `false`, a default is rejected unless its normalized form is `job_template_dir` itself or a descendant. Containment is checked per path component, not by raw string prefix.
 
 **Value coercion:**
 - `coerce_from_str` — Parses string input (CLI): numeric parsing, boolean aliases
