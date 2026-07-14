@@ -43,12 +43,14 @@ src/
 ├── uri_path.rs             URI-aware path operations
 ├── error.rs                ExpressionError with caret formatting
 ├── edit_distance.rs        Levenshtein distance for "did you mean?" suggestions (see edit-distance.md)
+├── profile.rs              ExprProfile, ExprRevision, ExprExtension, HostContext (see profile.md)
 ├── default_library.rs      Default FunctionLibrary construction
 ├── function_library.rs     FunctionLibrary, FunctionEntry, dispatch
 ├── eval/
 │   ├── mod.rs              Re-exports ParsedExpression, EvalBuilder, EvalResult, constants
 │   ├── parse.rs            ruff_python_parser integration, AST validation
-│   └── evaluator.rs        AST-walking Evaluator with resource bounds
+│   ├── evaluator.rs        AST-walking Evaluator with resource bounds
+│   └── op_table.rs         OperatorTable: operator→dunder dispatch and syntax gates (shared by parse + eval)
 └── functions/
     ├── mod.rs              Sub-library re-exports
     ├── arithmetic.rs       +, -, *, /, //, %, **, unary +/-

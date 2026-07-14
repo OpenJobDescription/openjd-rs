@@ -71,15 +71,12 @@ pub trait EvalContext {
 #[derive(Clone, Default)]
 pub struct FunctionLibrary {
     functions: HashMap<String, Vec<FunctionEntry>>,
-    pub host_context_enabled: bool,
 }
 
 impl FunctionLibrary {
+    /// Create an empty library with no functions registered.
     pub fn new() -> Self {
-        Self {
-            functions: HashMap::new(),
-            host_context_enabled: false,
-        }
+        Self::default()
     }
 
     /// Register a function overload with an `ExprType::Signature`.

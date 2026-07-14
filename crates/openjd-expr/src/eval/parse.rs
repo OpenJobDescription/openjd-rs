@@ -5,6 +5,7 @@
 //! Expression parsing using the ruff Python parser.
 
 use crate::error::ExpressionError;
+use crate::eval::op_table::{CmpOpSpec, OpSpec, OperatorTable};
 use crate::profile::{ExprProfile, SyntaxFeature};
 use ruff_python_ast as ast;
 use ruff_python_parser;
@@ -650,35 +651,20 @@ fn validate_structure_inner(
             }
         }
         ast::Expr::BinOp(b) => {
-            match b.op {
-                ast::Operator::BitAnd if !profile.allows_syntax(SyntaxFeature::BitwiseAnd) => {
-                    return err("Bitwise AND (&) is not supported", source, node)
+            if let OpSpec::Gated { feature, message } = OperatorTable::current().binop_spec(b.op) {
+                if !profile.allows_syntax(feature) {
+                    return err(message, source, node);
                 }
-                ast::Operator::BitOr if !profile.allows_syntax(SyntaxFeature::BitwiseOr) => {
-                    return err("Bitwise OR (|) is not supported", source, node)
-                }
-                ast::Operator::BitXor if !profile.allows_syntax(SyntaxFeature::BitwiseXor) => {
-                    return err("Bitwise XOR (^) is not supported", source, node)
-                }
-                ast::Operator::LShift if !profile.allows_syntax(SyntaxFeature::LeftShift) => {
-                    return err("Left shift (<<) is not supported", source, node)
-                }
-                ast::Operator::RShift if !profile.allows_syntax(SyntaxFeature::RightShift) => {
-                    return err("Right shift (>>) is not supported", source, node)
-                }
-                ast::Operator::MatMult if !profile.allows_syntax(SyntaxFeature::MatMult) => {
-                    return err("Matrix multiply (@) is not supported", source, node)
-                }
-                _ => {}
             }
             validate_structure_inner(&b.left, source, depth + 1, profile)?;
             validate_structure_inner(&b.right, source, depth + 1, profile)?;
         }
         ast::Expr::UnaryOp(u) => {
-            if matches!(u.op, ast::UnaryOp::Invert)
-                && !profile.allows_syntax(SyntaxFeature::BitwiseNot)
+            if let OpSpec::Gated { feature, message } = OperatorTable::current().unaryop_spec(u.op)
             {
-                return err("Bitwise NOT (~) is not supported", source, node);
+                if !profile.allows_syntax(feature) {
+                    return err(message, source, node);
+                }
             }
             validate_structure_inner(&u.operand, source, depth + 1, profile)?;
         }
@@ -689,14 +675,12 @@ fn validate_structure_inner(
         }
         ast::Expr::Compare(c) => {
             for op in &c.ops {
-                match op {
-                    ast::CmpOp::Is if !profile.allows_syntax(SyntaxFeature::IsOperator) => {
-                        return err("'is' operator is not supported; use '=='", source, node)
+                if let CmpOpSpec::Gated { feature, message } =
+                    OperatorTable::current().cmpop_spec(*op)
+                {
+                    if !profile.allows_syntax(feature) {
+                        return err(message, source, node);
                     }
-                    ast::CmpOp::IsNot if !profile.allows_syntax(SyntaxFeature::IsNotOperator) => {
-                        return err("'is not' operator is not supported; use '!='", source, node)
-                    }
-                    _ => {}
                 }
             }
             validate_structure_inner(&c.left, source, depth + 1, profile)?;

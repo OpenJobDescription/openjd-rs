@@ -9,6 +9,7 @@
 //! implementation which uses `ast.parse()` + a custom `Evaluator` class.
 
 pub(crate) mod evaluator;
+pub(crate) mod op_table;
 mod parse;
 
 pub(crate) use evaluator::Evaluator;

@@ -392,9 +392,6 @@ pub struct FunctionEntry {
 #[derive(Clone, Default)]
 pub struct FunctionLibrary {
     /* functions: private */
-    /// True if this library has any host-context functions registered
-    /// (today: `apply_path_mapping`).
-    pub host_context_enabled: bool,
 }
 
 impl FunctionLibrary {
