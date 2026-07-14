@@ -88,25 +88,25 @@ fn conversion_functions_available() {
 #[test]
 fn default_library_no_host_context() {
     // A profile with HostContext::None yields a library where
-    // host_context_enabled is false and apply_path_mapping is absent.
+    // apply_path_mapping is absent.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current());
-    assert!(!lib.host_context_enabled);
+    assert!(lib.get_signatures("apply_path_mapping").is_empty());
 }
 #[test]
 fn with_host_context_returns_new_library() {
     // for_profile's cache returns the same Arc for two calls with the
     // same profile, but HostContext::None and HostContext::WithRules
     // are distinct profiles that yield distinct libraries — the first
-    // has host_context_enabled == false, the second true.
+    // lacks apply_path_mapping, the second has it.
     let base = FunctionLibrary::for_profile(&ExprProfile::current());
     let with_host = host_lib_empty();
-    assert!(with_host.host_context_enabled);
-    assert!(!base.host_context_enabled);
+    assert!(!with_host.get_signatures("apply_path_mapping").is_empty());
+    assert!(base.get_signatures("apply_path_mapping").is_empty());
 }
 #[test]
 fn with_host_context_chaining() {
     let lib = host_lib_empty();
-    assert!(lib.host_context_enabled);
+    assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 }
 
 // === apply_path_mapping availability ===

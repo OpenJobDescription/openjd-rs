@@ -11,6 +11,7 @@
 use ruff_python_ast as ast;
 
 use crate::error::{write_caret_line, ExpressionError, ExpressionErrorKind};
+use crate::eval::op_table::OperatorTable;
 use crate::path_mapping::PathFormat;
 use crate::symbol_table::SymbolTable;
 use crate::value::{ExprValue, Float64};
@@ -659,45 +660,7 @@ impl<'a> Evaluator<'a> {
 
     fn eval_binop(&mut self, b: &ast::ExprBinOp) -> Result<ExprValue, ExpressionError> {
         // Reject unsupported operators early
-        let op_name = match b.op {
-            ast::Operator::Add => "__add__",
-            ast::Operator::Sub => "__sub__",
-            ast::Operator::Mult => "__mul__",
-            ast::Operator::Div => "__truediv__",
-            ast::Operator::FloorDiv => "__floordiv__",
-            ast::Operator::Mod => "__mod__",
-            ast::Operator::Pow => "__pow__",
-            ast::Operator::BitAnd => {
-                return Err(ExpressionError::unsupported(
-                    "Bitwise AND (&) is not supported",
-                ))
-            }
-            ast::Operator::BitOr => {
-                return Err(ExpressionError::unsupported(
-                    "Bitwise OR (|) is not supported",
-                ))
-            }
-            ast::Operator::BitXor => {
-                return Err(ExpressionError::unsupported(
-                    "Bitwise XOR (^) is not supported",
-                ))
-            }
-            ast::Operator::LShift => {
-                return Err(ExpressionError::unsupported(
-                    "Left shift (<<) is not supported",
-                ))
-            }
-            ast::Operator::RShift => {
-                return Err(ExpressionError::unsupported(
-                    "Right shift (>>) is not supported",
-                ))
-            }
-            ast::Operator::MatMult => {
-                return Err(ExpressionError::unsupported(
-                    "Matrix multiply (@) is not supported",
-                ))
-            }
-        };
+        let op_name = OperatorTable::current().binop(b.op)?;
 
         let left = self.evaluate_with_target(&b.left, None)?;
         let right = self.evaluate_with_target(&b.right, None)?;
@@ -710,11 +673,8 @@ impl<'a> Evaluator<'a> {
 
     fn eval_unaryop(&mut self, u: &ast::ExprUnaryOp) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        if u.op == ast::UnaryOp::Invert {
-            return Err(ExpressionError::unsupported(
-                "Bitwise NOT (~) is not supported",
-            ));
-        }
+        // Reject unsupported operators early
+        let op_name = OperatorTable::current().unaryop(u.op)?;
         // Fold -<int literal> to handle INT64_MIN which can't be represented
         // as a positive literal followed by negation (matching Python trick)
         if matches!(u.op, ast::UnaryOp::USub) {
@@ -738,12 +698,6 @@ impl<'a> Evaluator<'a> {
             }
         }
         let operand = self.evaluate_with_target(&u.operand, None)?;
-        let op_name = match u.op {
-            ast::UnaryOp::USub => "__neg__",
-            ast::UnaryOp::UAdd => "__pos__",
-            ast::UnaryOp::Not => "__not__",
-            ast::UnaryOp::Invert => unreachable!(),
-        };
         self.dispatch_with_node(op_name, vec![operand], Some(&ast::Expr::UnaryOp(u.clone())))
     }
 
@@ -803,21 +757,10 @@ impl<'a> Evaluator<'a> {
 
     fn eval_compare(&mut self, c: &ast::ExprCompare) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        // Reject is/is not
+        let table = OperatorTable::current();
+        // Reject unsupported operators early
         for op in &c.ops {
-            match op {
-                ast::CmpOp::Is => {
-                    return Err(ExpressionError::unsupported(
-                        "'is' operator is not supported; use '=='",
-                    ))
-                }
-                ast::CmpOp::IsNot => {
-                    return Err(ExpressionError::unsupported(
-                        "'is not' operator is not supported; use '!='",
-                    ))
-                }
-                _ => {}
-            }
+            table.cmpop(*op)?;
         }
         let mut left = self.evaluate_with_target(&c.left, None)?;
         for (op, right_node) in c.ops.iter().zip(c.comparators.iter()) {
@@ -827,26 +770,13 @@ impl<'a> Evaluator<'a> {
                 self.release(&right);
                 return self.track(ExprValue::unresolved(ExprType::BOOL));
             }
-            let (op_name, args) = match op {
-                ast::CmpOp::Eq => ("__eq__", vec![left.clone(), right.clone()]),
-                ast::CmpOp::NotEq => ("__ne__", vec![left.clone(), right.clone()]),
-                ast::CmpOp::Lt => ("__lt__", vec![left.clone(), right.clone()]),
-                ast::CmpOp::LtE => ("__le__", vec![left.clone(), right.clone()]),
-                ast::CmpOp::Gt => ("__gt__", vec![left.clone(), right.clone()]),
-                ast::CmpOp::GtE => ("__ge__", vec![left.clone(), right.clone()]),
-                // For 'in'/'not in', container is first arg (right), item is second (left)
-                ast::CmpOp::In => ("__contains__", vec![right.clone(), left.clone()]),
-                ast::CmpOp::NotIn => ("__not_contains__", vec![right.clone(), left.clone()]),
-                ast::CmpOp::Is => {
-                    return Err(ExpressionError::unsupported(
-                        "'is' operator is not supported; use '=='",
-                    ))
-                }
-                ast::CmpOp::IsNot => {
-                    return Err(ExpressionError::unsupported(
-                        "'is not' operator is not supported; use '!='",
-                    ))
-                }
+            let dispatch = table.cmpop(*op)?;
+            let op_name = dispatch.dunder;
+            // For 'in'/'not in', container is first arg (right), item is second (left)
+            let args = if dispatch.container_first {
+                vec![right.clone(), left.clone()]
+            } else {
+                vec![left.clone(), right.clone()]
             };
 
             // Use the compare expression's range for error caret positioning

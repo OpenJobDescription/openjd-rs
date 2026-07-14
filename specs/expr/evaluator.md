@@ -198,8 +198,38 @@ Handles dotted access like `Param.Frame` or `path.name`. Resolution order:
 This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 `my_path.name` works as a property access, using the same syntax.
 
+### Operator dispatch table (`eval/op_table.rs`)
+
+The mapping from Python AST operators to dunder function names — and the
+gate list of unsupported operators (bitwise ops, shifts, `@`, `~`, `is`,
+`is not`) — lives in a single `OperatorTable` type in `eval/op_table.rs`.
+Each operator maps to either a dunder name (`OpSpec::Dunder` /
+`CmpOpSpec::Dispatch`) or a gate (`OpSpec::Gated` / `CmpOpSpec::Gated`)
+pairing the `SyntaxFeature` that would enable it with its rejection
+message. The table has two consumers:
+
+- **Parse time** — `validate_structure` in `eval/parse.rs` consults the
+  `*_spec` lookups together with the profile: a gated operator is rejected
+  unless `ExprProfile::allows_syntax` grants its feature. This is the
+  profile-aware gate and the layer that rejects gated operators today.
+- **Eval time** — `eval_binop`, `eval_unaryop`, and `eval_compare` consult
+  the `Result`-returning lookups (`binop`/`unaryop`/`cmpop`), which reject
+  gated operators unconditionally. The evaluator holds no profile; these
+  arms are a defense-in-depth backstop behind the parse gate. When an
+  extension first grants an operator feature, the evaluator additionally
+  needs profile plumbing (e.g. a table derived from the `FunctionLibrary`)
+  and a registered dunder for the operator.
+
+Because both layers read the same table, a future revision or extension
+that adds, removes, or remaps an operator changes one table, and the
+parse-time and eval-time error messages cannot drift apart. The lookup
+matches are exhaustive without wildcards, so a new operator variant
+introduced by a `ruff_python_ast` upgrade is a compile error in one file.
+Today there is a single baseline table shared by all profiles.
+
 ### BinOp (`eval_binop`)
-Maps Python operators to dunder function names and dispatches through the library:
+Maps Python operators to dunder function names (via the operator table)
+and dispatches through the library:
 
 ```
 a + b  → __add__(a, b)

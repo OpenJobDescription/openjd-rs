@@ -240,12 +240,12 @@ pub(crate) enum SyntaxFeature {
 /// // Default profile: current revision, no extensions, no host context.
 /// let profile = ExprProfile::current();
 /// let lib = FunctionLibrary::for_profile(&profile);
-/// assert!(!lib.host_context_enabled);
+/// assert!(lib.get_signatures("apply_path_mapping").is_empty());
 ///
 /// // Template-validation profile: same as above but with unresolved host.
 /// let profile = ExprProfile::current().with_host_context(HostContext::Unresolved);
 /// let lib = FunctionLibrary::for_profile(&profile);
-/// assert!(lib.host_context_enabled);
+/// assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 /// ```
 #[derive(Debug, Clone)]
 pub struct ExprProfile {

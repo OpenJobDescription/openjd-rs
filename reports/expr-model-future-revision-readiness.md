@@ -73,10 +73,17 @@ the language subset?" — the answer is now **partially yes**:
   revision can widen the baseline or a future extension can grant
   additional features. Under V2026_02 both layers return `false`,
   preserving today's behavior.
-- ❌ **Not ready** for a revision or extension that **adds a new
-  operator or renames an existing one**. The `Operator::* → "__add__"`
-  mapping is a hardcoded `match` in `eval_binop`; `eval_compare` has
-  the same pattern. There's no data-driven operator table.
+- ✅ **Ready** for a revision or extension that **adds a new
+  operator or renames an existing one** at the dispatch level.
+  ~~The `Operator::* → "__add__"` mapping is a hardcoded `match` in
+  `eval_binop`; `eval_compare` has the same pattern. There's no
+  data-driven operator table.~~ **Resolved** — `OperatorTable` in
+  `eval/op_table.rs` centralizes all operator→dunder mappings and the
+  gate list, and is consulted by both the parse-time `SyntaxFeature`
+  gate and the evaluator's dispatch, so the two layers cannot drift;
+  profile-specific eval tables can be constructed when a revision
+  first needs one. (Parsing a genuinely new operator token still
+  requires parser support — see §5.4.)
 - ❌ **Not ready** for a revision that **adds a reserved identifier** or
   removes one. `PYTHON_KEYWORDS: &[&str]` in `eval/parse.rs` is a hardcoded
   const and the contextual-keyword rename mechanism iterates it directly.
@@ -95,25 +102,20 @@ the language subset?" — the answer is now **partially yes**:
   Versioning and Stability Conventions section enumerating the
   `#[non_exhaustive]` surface.
 
-The most concentrated risk remaining is two specific hardcoded tables.
-The third item from the prior pass — the unsupported-AST-node rejection
-list in `validate_structure` — has been resolved:
-`ParsedExpression::with_profile` / `FormatString::with_profile` now
-thread a profile through each rejection arm, gated on
-`ExprProfile::allows_syntax(SyntaxFeature::X)`.
+The most concentrated risk remaining is one specific hardcoded table.
+The other two items from the prior pass have been resolved:
 
-1. The operator → dunder name dispatch in `evaluator.rs`.
-2. The `PYTHON_KEYWORDS` reserved-word list in `eval/parse.rs`.
+1. ~~The operator → dunder name dispatch in `evaluator.rs`.~~
+   **Resolved** — centralized in `eval/op_table.rs::OperatorTable`.
+2. The `PYTHON_KEYWORDS` reserved-word list in `eval/parse.rs` —
+   **deliberately deferred**: Python's keyword set is stable, so this
+   is left as-is until a future revision actually needs to change it.
 3. ~~The unsupported-AST-node rejection list in `validate_structure`
    in `eval/parse.rs`.~~ **Resolved** — now profile-gated.
 
-Both remaining items are about the Python host grammar rather than
-OpenJD semantics and can be addressed when (and only when) a future
-revision actually needs to change them.
-
-Priority 3 remains the main body of internal-cleanup work left
-(operator-to-dunder table, `PYTHON_KEYWORDS` relocation,
-`host_context_enabled` replacement). Priority 4 is closed:
+Priority 3 is closed apart from the deliberately-deferred
+`PYTHON_KEYWORDS` relocation (the operator-to-dunder table and the
+`host_context_enabled` removal are both done). Priority 4 is closed:
 public-api.md docs exist for `openjd-expr`, `openjd-model`, and
 `openjd-sessions`, each with a Versioning and Stability Conventions
 section. Priority 1 is now fully closed — the three enums from §1
@@ -156,9 +158,9 @@ the current tree.
 
 | # | Prior claim | Verification | Status |
 |---|---|---|---|
-| 11 | Operator → dunder table driven by data | Not implemented. `eval_binop` still uses `match b.op { ast::Operator::Add => "__add__", ... }` (evaluator.rs:633). `eval_compare` has the same pattern for `CmpOp` (evaluator.rs:802). Nothing consults the profile | ❌ **Not resolved** |
-| 12 | `PYTHON_KEYWORDS` behind a profile-derived set | Not implemented. `const PYTHON_KEYWORDS: &[&str] = &[…]` in `eval/parse.rs` is a static list, referenced directly by `make_replacement` and by the keyword-rename loop in `parse_inner` | ❌ **Not resolved** |
-| 13 | Replace `host_context_enabled: bool` with set | Not implemented. `FunctionLibrary` still has `pub host_context_enabled: bool` | ❌ **Not resolved** |
+| 11 | Operator → dunder table driven by data | Implemented — `OperatorTable` in `eval/op_table.rs` centralizes the binop/unaryop/cmpop mappings and the reject list; `eval_binop`, `eval_unaryop`, and `eval_compare` consult it | ✅ **Resolved** |
+| 12 | `PYTHON_KEYWORDS` behind a profile-derived set | Not implemented. `const PYTHON_KEYWORDS: &[&str] = &[…]` in `eval/parse.rs` is a static list, referenced directly by `make_replacement` and by the keyword-rename loop in `parse_inner`. **Deliberately skipped** — Python's keyword set is stable; revisit only if a future revision actually changes it | ❌ **Won't do (for now)** |
+| 13 | Replace `host_context_enabled: bool` with set | Resolved by removal — the field was vestigial after the profile refactor (no production readers); host-function availability is checked via `get_signatures` | ✅ **Resolved** |
 
 ### Priority 4 — Documentation
 
@@ -173,15 +175,15 @@ the current tree.
 |------|------:|---------:|----------:|-------------:|
 | P1 (core future-proofing) | 5 | 4 | 1 | 0 |
 | P2 (model plumbing) | 5 | 5 | 0 | 0 |
-| P3 (internal cleanup) | 3 | 1 | 0 | 2 |
+| P3 (internal cleanup) | 3 | 2 | 0 | 1 (deferred) |
 | P4 (documentation) | 2 | 2 | 0 | 0 |
 
-The pattern is sharp: nearly everything structural and typed is done;
-the remaining work is (a) three enums that still need `#[non_exhaustive]`
-— `ModelExtension`, `TaskParameterType`, `FileType` — and (b) three
-specific hardcoded tables (operator→dunder dispatch, `PYTHON_KEYWORDS`,
-`host_context_enabled: bool`). The AST-node whitelist and the missing
-spec documentation are both now resolved.
+Everything structural and typed is done. The operator→dunder dispatch
+now lives in `eval/op_table.rs::OperatorTable` and the vestigial
+`host_context_enabled: bool` has been removed. The one remaining item —
+relocating `PYTHON_KEYWORDS` behind the profile — is deliberately
+deferred because Python's keyword set is stable. The AST-node
+whitelist and the missing spec documentation are both resolved.
 
 ## 2. Current profile architecture — how it handles future rev/ext
 
@@ -211,8 +213,8 @@ a compute-derived answer is produced:
 | Which template types validate? | `template::validation::validate_*_template` | ✅ `match` arm |
 | Which template shape decodes? | `decode_*_template` | ✅ `match` arm |
 | Which Python subset parses? | `eval/parse.rs::validate_structure` | ✅ Profile-threaded, data-driven via `SyntaxFeature` |
-| Which operators are active? | `eval/evaluator.rs::eval_binop`, `eval_compare` | ❌ Hardcoded map |
-| Which reserved words rename? | `eval/parse.rs::PYTHON_KEYWORDS` | ❌ Hardcoded const |
+| Which operators are active? | `eval/op_table.rs::OperatorTable` | ✅ Single data table consulted by both parse (profile-gated via `SyntaxFeature`) and eval (unconditional backstop); profile-specific eval tables when first needed |
+| Which reserved words rename? | `eval/parse.rs::PYTHON_KEYWORDS` | ❌ Hardcoded const (deliberately deferred — Python's keyword set is stable) |
 
 The top five rows are the profile-driven part — and they cover the
 majority of "a new revision changes limits / rules / functions / which
@@ -371,15 +373,25 @@ each extension is empty today, so that adding a variant to
 
 ### 3.6 `FunctionLibrary::host_context_enabled: bool`
 
+**Resolved** — the field was removed outright. After the profile
+refactor no production code read it (zero references in
+`openjd-model`, `openjd-sessions`, `openjd-for-js`, and none in the
+expr evaluator itself); the only readers were tests and doc examples
+asserting the flag was set. Host-function availability is determined
+by whether the function is actually registered — callers check
+`get_signatures("apply_path_mapping")` — so the single-bit collision
+concern below no longer applies. The prior state is preserved for
+historical reference.
+
 ```rust
-// function_library.rs:62
+// function_library.rs:62 (previous)
 pub struct FunctionLibrary {
     functions: HashMap<String, Vec<FunctionEntry>>,
     pub host_context_enabled: bool,
 }
 ```
 
-This flag is currently meaningful only for `apply_path_mapping`. Any
+~~This flag is currently meaningful only for `apply_path_mapping`. Any
 future host-state-dependent function (e.g., a hypothetical
 `host_env_var(name)` registered via a `SECRETS` extension) collides
 with this single bit. Readers today are `tests/test_function_context.rs`
@@ -390,7 +402,7 @@ to `Extensions`) so "is feature X active?" remains a single-bit read
 but generalises to multiple features. If that seems heavyweight for a
 single-feature system, a method `is_host_enabled()` that derives the
 answer from signature inspection keeps the reading API stable while
-letting the field disappear.
+letting the field disappear.~~
 
 ### 3.7 `decode_environment_template` does not wrap struct decoding in a revision match
 
@@ -423,9 +435,31 @@ Priority 2 item 10 dispatch work.~~
 ## 4. Internal implementation readiness for language changes
 
 The following three items are the concrete Priority 3 work from the
-prior report. None has been done.
+prior report. §4.1 and §4.2 are resolved; §4.3 is deliberately
+deferred.
 
 ### 4.1 Operator dispatch is a hardcoded match
+
+**Resolved** — the operator→dunder mappings for `eval_binop`,
+`eval_unaryop`, and `eval_compare`, along with the gate list
+(bitwise ops, shifts, `@`, `~`, `is`, `is not`), moved into a single
+`OperatorTable` type in `eval/op_table.rs`. Each operator maps to
+either a dunder (`OpSpec::Dunder` / `CmpOpSpec::Dispatch`, where
+`CmpDispatch` also carries the `in`/`not in` argument-order flag) or
+a gate (`OpSpec::Gated`) pairing the `SyntaxFeature` that would enable
+it with its rejection message. Both layers consult the same table:
+`validate_structure` in `eval/parse.rs` reads the `*_spec` lookups and
+applies `profile.allows_syntax` to the gate feature, while the
+evaluator's `Result`-returning lookups reject gated operators
+unconditionally as a defense-in-depth backstop behind the parse gate —
+so the parse-time and eval-time error messages cannot drift apart, and
+granting an operator's `SyntaxFeature` is the single switch at parse
+time. (Eval-side enablement additionally needs profile plumbing into
+the evaluator — e.g. a table derived from `FunctionLibrary` — plus a
+registered dunder, when an extension first needs it.) The matches are
+exhaustive without wildcards so a new operator variant from a
+`ruff_python_ast` upgrade is a compile error in one file. The prior
+state is preserved below for historical reference.
 
 ```rust
 // eval/evaluator.rs:631
@@ -546,6 +580,10 @@ future revision wants to toggle.
 
 ### 4.3 `PYTHON_KEYWORDS` is a hardcoded const
 
+**Deliberately deferred** — Python's keyword set is stable, so the
+value of profile-owning this list is low until a revision or Python
+grammar change actually alters it. Left as-is by explicit decision.
+
 ```rust
 // eval/parse.rs:47
 const PYTHON_KEYWORDS: &[&str] = &[
@@ -642,16 +680,21 @@ Outcome: this case is handled well. The profile design does its job.
    to change parsers or add a pre-processor. ❌ Out-of-scope for this
    report, but worth noting.
 2. If the parser accepted `|>` and produced `ast::Operator::Pipeline`,
-   `eval_binop`'s match would not cover it and produce a warning
-   (non-exhaustive match) at compile time — but `ast::Operator` is
-   external, so the match today uses exhaustive coverage and would
-   need a new arm. No profile gating. ❌ (§4.1.)
+   the exhaustive match inside `OperatorTable::binop` would fail to
+   compile until a mapping (or rejection) is added — a single edit in
+   `eval/op_table.rs`. ✅ (§4.1 resolved.)
 3. The dispatch would wire through `dispatch_with_node("__pipeline__", ...)`
    and `FunctionLibrary` would register the dunder cleanly. ✅
 
-Outcome: the library accommodates the new operator, but the dispatch
-layer is code-shaped, not data-shaped, so the extension has to patch
-two files rather than one.
+Outcome: apart from the parser itself, the dispatch layer is now
+data-shaped — the extension patches the operator table and registers
+the dunder. For an operator that is currently *gated* (e.g. an
+extension enabling `&`), the parse-time switch is granting the
+`SyntaxFeature` in the profile, which the table's gate entries key on;
+the evaluator's unconditional backstop then additionally needs profile
+plumbing (e.g. a table derived from `FunctionLibrary`) before the
+operator evaluates — that plumbing is deliberately deferred until an
+extension first needs it.
 
 ## 6. Specific recommendations
 
@@ -701,16 +744,23 @@ structural Priority 1/2 gap.
 
 ### Priority — before first non-trivial extension lands
 
-7. **Replace `host_context_enabled: bool` with a
+7. ~~**Replace `host_context_enabled: bool` with a
    `HashSet<HostFeature>`**, or hide it behind an `is_host_enabled()`
-   method so callers stop depending on the field directly. (Gap §3.6.)
+   method so callers stop depending on the field directly. (Gap §3.6.)~~
+   **Resolved** — the field was removed entirely; no production code
+   read it after the profile refactor. Host-function availability is
+   now checked via `get_signatures("apply_path_mapping")`.
 
-8. **Extract the operator-to-dunder map.** Move the `match b.op`
+8. ~~**Extract the operator-to-dunder map.** Move the `match b.op`
    arms in `eval_binop`, the `match op` arms in `eval_compare`, and
    the `UnaryOp` → dunder mapping into a single `OperatorTable`.
    Start with the table owning exactly today's behavior (all accepts
    + the BitOp reject list), then allow profile-driven overrides
-   as a second step. (§4.1, Priority 3 item 11.)
+   as a second step. (§4.1, Priority 3 item 11.)~~ **Resolved** —
+   `OperatorTable` in `eval/op_table.rs` owns all three mappings and
+   the reject list, with exactly the prior behavior. Profile-driven
+   overrides remain a second step for when a revision or extension
+   first needs one.
 
 9. ~~**Thread the profile into `validate_structure`.** Add a
    `profile: &ExprProfile` parameter to `validate_structure_inner`
@@ -728,7 +778,9 @@ structural Priority 1/2 gap.
    crate versions.
 
 10. **Move `PYTHON_KEYWORDS` to a profile-owned set.** Smallest of
-    the Priority 3 items. (§4.3.)
+    the Priority 3 items. (§4.3.) **Deliberately deferred** — Python's
+    keyword set is stable; revisit only if a future revision or a
+    Python grammar change actually alters it.
 
 ### Documentation debt
 
@@ -837,10 +889,10 @@ For reviewers checking this report:
 | `decode_environment_template` revision match (resolved) | `crates/openjd-model/src/template/parse.rs` | line 275 |
 | `create_job` takes `&ValidationContext` | `crates/openjd-model/src/job/create_job/mod.rs` | line 49 |
 | `JobTemplate::default_validation_context` + `profile` | `crates/openjd-model/src/template/job_template.rs` | `profile()` at line 59, `default_validation_context()` at line 90 |
-| Operator dispatch hardcoded | `crates/openjd-expr/src/eval/evaluator.rs` | `eval_binop` at line 631 (`Add => "__add__"` at 634), `eval_compare` at line 775 |
+| Operator dispatch table (resolved) | `crates/openjd-expr/src/eval/op_table.rs` | `OperatorTable` with `binop` / `unaryop` / `cmpop` lookups; consulted by `eval_binop`, `eval_unaryop`, `eval_compare` |
 | `PYTHON_KEYWORDS` const | `crates/openjd-expr/src/eval/parse.rs` | line 52 |
 | `validate_structure_inner` profile-gated | `crates/openjd-expr/src/eval/parse.rs` | `validate_structure(&expr_node, expr_str, profile)` at line 511; `SyntaxFeature` imported at line 8 |
-| `FunctionLibrary::host_context_enabled` bool | `crates/openjd-expr/src/function_library.rs` | line 74 |
+| `FunctionLibrary::host_context_enabled` bool (removed) | `crates/openjd-expr/src/function_library.rs` | field deleted; availability checked via `get_signatures` |
 | `ModelExtension` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute + enum at ~line 335 |
 | `TemplateSpecificationVersion` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute at line 112, enum at line 113 |
 | `TaskParameterType` `#[non_exhaustive]` | `crates/openjd-model/src/types.rs` | attribute + enum at ~line 247 |

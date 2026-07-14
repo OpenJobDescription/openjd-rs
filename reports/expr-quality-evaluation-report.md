@@ -54,15 +54,16 @@ Python reference, and explicit references to the canonical
 
 **Minor gaps found (none material):**
 
-- `architecture.md` shows the spec-form module layout, but the source
+- ~~`architecture.md` shows the spec-form module layout, but the source
   `lib.rs` adds a `profile.rs` module that is documented in
   `public-api.md` and referenced from elsewhere. It would be helpful to
   list `profile.rs` alongside the others in the architecture module
-  layout block too. *(P3)*
-- The README's "Specification Documents" table omits `profile.rs`'s
+  layout block too. *(P3)*~~ **Resolved.**
+- ~~The README's "Specification Documents" table omits `profile.rs`'s
   spec area entirely (profile design lives only in inline rustdoc and
   the `expr-model-future-revision-readiness.md` report). A short
-  `profile.md` would make the spec set complete and discoverable. *(P3)*
+  `profile.md` would make the spec set complete and discoverable.
+  *(P3)*~~ **Resolved** — `specs/expr/profile.md` added and indexed.
 
 Otherwise the specs accurately and completely describe what the code
 does, including non-obvious rationale (the FormatString location, the
@@ -554,8 +555,8 @@ small polish items, none gating release. Priority labels:
 
 | # | Priority | Subject | Detail |
 |---|---|---|---|
-| 1 | P3 | Add `profile.md` to `specs/expr/` | The profile design is documented in inline rustdoc and in `reports/expr-model-future-revision-readiness.md` but has no spec document. A short `specs/expr/profile.md` covering `ExprRevision` / `ExprExtension` / `HostContext` / `ExprProfile` (plus the cache-key shape) would round out the spec set. |
-| 2 | P3 | Update `architecture.md` module layout block | Add `profile.rs` to the layout diagram in `architecture.md` so the spec layout matches `lib.rs`. |
+| 1 | P3 | ~~Add `profile.md` to `specs/expr/`~~ **Resolved** — `specs/expr/profile.md` covers the three profile axes, `SyntaxFeature` gating, and the rules-independent cache key; linked from the README spec table. | The profile design is documented in inline rustdoc and in `reports/expr-model-future-revision-readiness.md` but has no spec document. A short `specs/expr/profile.md` covering `ExprRevision` / `ExprExtension` / `HostContext` / `ExprProfile` (plus the cache-key shape) would round out the spec set. |
+| 2 | P3 | ~~Update `architecture.md` module layout block~~ **Resolved** — `profile.rs` (and the new `eval/op_table.rs`) added to the layout diagram. | Add `profile.rs` to the layout diagram in `architecture.md` so the spec layout matches `lib.rs`. |
 | 3 | P3 | Consider a `tests/common/` shared helper module | The repeated `eval`/`eval_err`/`assert_err`/`eval_posix` helpers across the 38 integration files duplicate ~50–100 lines. Since `tests/integration.rs` already aggregates everything into one binary, adding a `tests/common/mod.rs` declared from `integration.rs` could deduplicate without breaking the existing pattern. |
 | 4 | P3 | `eval_attribute` clone on the prop-access dispatch path | `dispatch_with_node(prop_name, vec![value.clone()], …)` clones the receiver before checking whether the dispatch will succeed; on failure the clone is wasted. Could be reorganized to look up the property type first via the library, then dispatch only if a candidate exists. The win is small (most receivers are scalars) and the existing structure is clear. |
 | 5 | P3 | `resolve_keyword_renames` `O(R × L)` replace loop | Rare in practice (R ≈ 0 or 1 for typical templates), but a single-pass rewrite walking the dotted path component-by-component would be both faster and more obviously correct. |
