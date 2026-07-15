@@ -1641,9 +1641,9 @@ fn test_scope_boundary_embedded_file_filename_not_resolved() {
     );
     let files = job.steps[0].script.embedded_files.as_ref().unwrap();
     assert_eq!(
-        files[0].filename.as_ref().unwrap().raw(),
-        "{{Param.Val}}",
-        "EmbeddedFile filename is SESSION/TASK scope — must NOT be resolved during create_job"
+        files[0].filename.as_deref(),
+        Some("{{Param.Val}}"),
+        "EmbeddedFile filename is a plain string (not @fmtstring) — braces are literal text, never resolved"
     );
 }
 
@@ -1760,8 +1760,8 @@ fn test_scope_boundary_env_embedded_files_not_resolved() {
         .embedded_files
         .as_ref()
         .unwrap();
-    assert_eq!(files[0].filename.as_ref().unwrap().raw(), "{{Param.Val}}",
-        "Environment embedded file filename is SESSION scope — must NOT be resolved during create_job");
+    assert_eq!(files[0].filename.as_deref(), Some("{{Param.Val}}"),
+        "Environment embedded file filename is a plain string (not @fmtstring) — braces are literal text, never resolved");
     assert_eq!(
         files[0].data.as_ref().unwrap().raw(),
         "echo {{Param.Val}}",

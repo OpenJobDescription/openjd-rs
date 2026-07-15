@@ -126,11 +126,14 @@ steps:
         - task_combined = step_int + Task.Param.Frame
         - task_output_name = step_string + "_" + string(Task.Param.Frame) + ".exr"
         - task_msg = "Frame " + string(Task.Param.Frame) + " of " + string(step_int // 10)
+        # Task.File.* is available to script-level lets: file paths are allocated before let evaluation
+        - task_cfg_stem = Task.File.config.stem
       # Embedded file using let binding values
       embeddedFiles:
         - name: config
           type: TEXT
-          filename: "config_{{task_frame}}.txt"
+          # filename is a plain string (not @fmtstring) per the 2023-09 schema
+          filename: "config.txt"
           data: |
             # Config for frame {{task_frame}}
             output_name={{task_output_name}}
@@ -143,6 +146,7 @@ steps:
             - |
               echo "=== Embedded file content ==="
               cat {{repr_sh(Task.File.config)}}
+              echo task_cfg_stem={{repr_sh(task_cfg_stem)}}
               echo "=== Step-level bindings ==="
               echo step_int={{repr_sh(string(step_int))}}
               echo step_float={{repr_sh(string(step_float))}}

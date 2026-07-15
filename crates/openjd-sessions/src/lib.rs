@@ -41,7 +41,9 @@ pub use error::SessionError;
 pub use logging::LogContent;
 pub use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 pub use runner::{CancelMethod, ScriptRunnerState};
-pub use session::{EnvironmentIdentifier, Session, SessionConfig, SessionState};
+pub use session::{
+    EnvironmentIdentifier, Session, SessionCancelHandle, SessionConfig, SessionState,
+};
 #[cfg(windows)]
 pub use session_user::BadCredentialsError;
 #[cfg(unix)]

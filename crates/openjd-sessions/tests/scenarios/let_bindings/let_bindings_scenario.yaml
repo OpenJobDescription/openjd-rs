@@ -63,6 +63,7 @@ expect:
     - "step_first_file_stem=file1"
     - 'step_file_stems=["file1", "file2", "file3"]'
     # Task-level bindings for frame 1 (step_int//10 = 2, so frames 1-2)
+    - "task_cfg_stem=config"
     - "task_frame=1"
     - "task_combined=21"
     - "task_output_name=hello_world_1.exr"

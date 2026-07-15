@@ -193,21 +193,22 @@ pub async fn run(
 
 The ordering differs from environment scripts:
 
-1. Evaluate let bindings first (they can reference `Task.Param.*` but not `Task.File.*`
-   since step-level let bindings are evaluated before embedded files)
-2. Materialize embedded files (allocate paths + write contents, using the let-binding-
-   enriched symbol table)
-3. Resolve action args and run subprocess
+1. Allocate embedded file paths (registers `Task.File.*` in the symbol table;
+   `filename` is a plain string per the 2023-09 schema, so allocation has no
+   dependency on let bindings)
+2. Evaluate let bindings (they can reference `Task.Param.*` and `Task.File.*`)
+3. Write embedded file contents (using the let-binding-enriched symbol table)
+4. Resolve action args and run subprocess
 
-### Why the ordering differs from EnvironmentScriptRunner
+### Ordering matches EnvironmentScriptRunner
 
-In the spec, `StepScript.let` bindings are scoped to the step script and are evaluated
-before embedded files. This means let bindings can't reference `Task.File.*` paths
-(unlike environment scripts where let bindings can reference `Env.File.*`). The simpler
-ordering reflects this: let bindings first, then files, then action.
-
-The Python library follows the same ordering distinction between environment and step
-scripts.
+Step scripts use the same two-phase flow as environment scripts: paths first,
+then let bindings, then file contents. `Task.File.*` is therefore available to
+script-level `let` bindings, mirroring `Env.File.*` in environment scripts —
+and matching decode-time validation, which seeds `Task.File.*` into the
+let-binding scope. (An earlier revision evaluated step let bindings before
+file allocation, which made `Task.File.*` in a `let` validate but fail at
+runtime.)
 
 
 ## resolve_action_timeout

@@ -639,7 +639,10 @@ fn test_env_file_has_path_properties() {
 
 #[test]
 fn test_task_file_has_path_properties() {
-    // Task.File.* is PATH type, so .stem should work in script-level let bindings
+    // Task.File.* is PATH type and IS in scope for script-level let bindings:
+    // `filename` is a plain string (never an expression), so the runtime
+    // allocates embedded file paths — defining Task.File.* — before `let`
+    // evaluation, mirroring Env.File.* in environment scripts.
     let s = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],

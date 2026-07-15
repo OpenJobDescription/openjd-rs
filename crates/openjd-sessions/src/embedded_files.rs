@@ -178,14 +178,14 @@ fn random_hex_filename() -> String {
 /// rejecting `/` and `\` in the filename.
 ///
 /// This function is a defense-in-depth check at the point where the
-/// resolved filename is joined to the target directory. It protects against:
+/// filename is joined to the target directory. It protects against:
 /// - Bugs or gaps in model-layer validation.
 /// - Call paths that reach the session layer without going through full
-///   model validation.
-/// - Any implementation-level format-string substitution in the filename
-///   (the current model stores `filename` as a `FormatString`) that could
-///   introduce separators or traversal components from symbol values at
-///   session time.
+///   model validation (e.g. an `EmbeddedFile` constructed directly).
+///
+/// Note: `filename` is a plain string per the 2023-09 schema (not
+/// `@fmtstring`), so no expression substitution can introduce separators
+/// at session time — the value checked here is exactly the template value.
 ///
 /// Rejects filenames that:
 /// - Are empty.
@@ -268,27 +268,23 @@ impl EmbeddedFiles {
         );
         for file in files {
             let symbol = symtab_key(self.scope, &file.name);
-            let filename = if let Some(ref fname_fs) = file.filename {
-                let resolved = fname_fs
-                    .resolve_string_with(symtab, &openjd_expr::FormatStringOptions::new())
-                    .map_err(|e| SessionError::FormatString {
-                        context: format!("embedded file '{}' filename", file.name),
-                        reason: e.to_string(),
-                    })?;
+            let filename = if let Some(ref fname) = file.filename {
+                // `filename` is a plain string per the 2023-09 schema (not
+                // @fmtstring) — use it literally, no expression resolution.
+                //
                 // Defense-in-depth: the spec requires `filename` to be a
                 // plain basename and the model layer rejects path separators
                 // in the raw template. Re-check the value here before it is
                 // joined to the target directory, in case model validation
-                // was bypassed or the resolved value differs from the raw
-                // template.
-                validate_resolved_filename(&resolved).map_err(|reason| {
+                // was bypassed.
+                validate_resolved_filename(fname).map_err(|reason| {
                     SessionError::EmbeddedFilePath {
                         name: file.name.clone(),
-                        filename: resolved.clone(),
+                        filename: fname.clone(),
                         reason,
                     }
                 })?;
-                self.target_directory.join(resolved)
+                self.target_directory.join(fname)
             } else {
                 let name = random_hex_filename();
                 let path = self.target_directory.join(&name);

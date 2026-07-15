@@ -171,7 +171,11 @@ fn task_scope_embedded_file_data_accepts_apply_path_mapping() {
 }
 
 #[test]
-fn task_scope_embedded_file_filename_accepts_apply_path_mapping() {
+fn task_scope_embedded_file_filename_is_plain_string() {
+    // `filename` is a plain string per the 2023-09 schema (not @fmtstring):
+    // brace syntax is literal text, so no format-string/library validation
+    // applies (though it still fails the runtime basename check if it
+    // contains separators — none here).
     let t = job_with_path_param(
         r#""test""#,
         &simple_step(

@@ -925,7 +925,7 @@ fn validate_embedded_files(
             }
         }
         if let Some(filename) = &f.filename {
-            let fname = filename.raw();
+            let fname = filename.as_str();
             if fname.is_empty() {
                 errors.add(&path_field(&f_path, "filename"), "must not be empty.");
             }

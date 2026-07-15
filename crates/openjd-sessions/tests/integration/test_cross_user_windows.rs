@@ -548,6 +548,105 @@ async fn test_cross_user_session_run_subprocess() {
     session.cleanup();
 }
 
+// === Session-level: SessionCancelHandle cancels a helper-routed subprocess ===
+
+/// A `SessionCancelHandle` must be able to cancel a subprocess that runs via
+/// the cross-user helper: the helper path registers per-action cancel state,
+/// and the handle delivers the cancel command over the helper pipe. This is
+/// the cross-user counterpart of the same-user handle tests in
+/// `test_session.rs` (which cannot exercise helper routing).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+    let handle = session.cancel_handle();
+
+    let delivered: Arc<std::sync::Mutex<Option<bool>>> = Arc::new(std::sync::Mutex::new(None));
+    let delivered_clone = delivered.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
+    });
+
+    let started = std::time::Instant::now();
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&[
+                "-Command".to_string(),
+                "Start-Sleep -Seconds 60".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        *delivered.lock().unwrap(),
+        Some(true),
+        "handle must find the in-flight helper action and deliver the cancel"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
+    match result {
+        // With the cancel-request channel wired into the helper config, the
+        // exit must classify as Canceled rather than Failed.
+        Ok(r) => assert_eq!(
+            r.state,
+            ActionState::Canceled,
+            "canceled helper subprocess must classify as Canceled"
+        ),
+        Err(_) => { /* helper-side cancel may surface as an error result */ }
+    }
+    session.cleanup();
+}
+
+/// `mark_action_failed=true` must convert a canceled helper subprocess to
+/// Failed, matching drive_action's conversion and the
+/// `SessionCancelHandle::cancel` contract.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+    let handle = session.cancel_handle();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        handle.cancel(None, true);
+    });
+
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&[
+                "-Command".to_string(),
+                "Start-Sleep -Seconds 60".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await;
+
+    match result {
+        Ok(r) => assert_eq!(
+            r.state,
+            ActionState::Failed,
+            "mark_action_failed must report the canceled helper subprocess as Failed"
+        ),
+        Err(_) => { /* helper-side cancel may surface as an error result */ }
+    }
+    session.cleanup();
+}
+
 // === Session-level: cleanup with cross-user files ===
 
 /// Session cleanup deletes the working directory even when files were created
