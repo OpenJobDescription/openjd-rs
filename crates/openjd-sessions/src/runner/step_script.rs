@@ -119,18 +119,14 @@ impl StepScriptRunner {
         env_vars: &HashMap<String, Option<String>>,
         message_tx: mpsc::UnboundedSender<ActionMessage>,
     ) -> Result<SubprocessResult, SessionError> {
-        // Step scripts: evaluate let bindings first, then materialize files
-        let mut final_symtab = if let Some(bindings) = &script.let_bindings {
-            evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host())
-                .map_err(|e| SessionError::FormatString {
-                    context: "let bindings".into(),
-                    reason: e.to_string(),
-                })?
-        } else {
-            symtab.clone()
-        };
-
-        if let Some(files) = &script.embedded_files {
+        // Step scripts: allocate embedded file paths first — `filename` is a
+        // plain string (never an expression) so allocation has no dependency
+        // on `let` values, and it defines the `Task.File.*` symbols that
+        // `let` bindings may reference. File *contents* are written after
+        // `let` evaluation so `data` expressions can use let-bound values.
+        // This matches the environment runner's ordering for `Env.File.*`.
+        let mut final_symtab = symtab.clone();
+        let ef = if let Some(files) = &script.embedded_files {
             let mut ef = EmbeddedFiles::new(
                 EmbeddedFilesScope::Step,
                 self.base.files_directory.clone(),
@@ -138,6 +134,25 @@ impl StepScriptRunner {
             )
             .with_user(self.base.user.clone());
             ef.allocate_file_paths(files, &mut final_symtab)?;
+            Some(ef)
+        } else {
+            None
+        };
+
+        if let Some(bindings) = &script.let_bindings {
+            final_symtab = evaluate_let_bindings(
+                bindings,
+                &final_symtab,
+                library,
+                openjd_expr::PathFormat::host(),
+            )
+            .map_err(|e| SessionError::FormatString {
+                context: "let bindings".into(),
+                reason: e.to_string(),
+            })?;
+        }
+
+        if let Some(ef) = ef {
             ef.write_file_contents(&final_symtab, library)?;
         }
 

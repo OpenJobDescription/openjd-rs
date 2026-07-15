@@ -203,7 +203,7 @@ pub struct EmbeddedFile {
     pub name: String,
     #[serde(alias = "type")]
     pub file_type: FileType,
-    pub filename: Option<FormatString>,
+    pub filename: Option<String>,
     pub data: Option<FormatString>,
     pub runnable: Option<bool>,
     pub end_of_line: Option<EndOfLine>,

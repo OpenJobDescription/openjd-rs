@@ -66,7 +66,8 @@ use `Env.File.*`, step-scoped files use `Task.File.*`.
 For each embedded file:
 
 1. Determine the file path:
-   - If `filename` is specified: resolve its format string, validate it as a
+   - If `filename` is specified: it is a plain string per the 2023-09 schema
+     (not `@fmtstring`) — use it literally, validate it as a
      safe single path component (see [Filename path-traversal defense-in-depth](#filename-path-traversal-defense-in-depth)),
      then join with `files_directory`.
    - Otherwise: `files_directory / {random_hex}` (hash-based name for uniqueness)
@@ -153,14 +154,12 @@ that produce multi-line strings get consistent line endings.
 
 ## Integration with Runners
 
-Environment scripts use the full two-phase flow:
+Environment and step scripts both use the full two-phase flow:
 ```
 allocate_file_paths() → evaluate_let_bindings() → write_file_contents()
 ```
 
-Step scripts use a simplified flow (let bindings evaluated first):
-```
-evaluate_let_bindings() → allocate_file_paths() + write_file_contents()
-```
-
-See [runners.md](runners.md) for why the ordering differs.
+This is what makes `Env.File.*` / `Task.File.*` available to `let` bindings
+while letting file `data` reference let-bound values. It is only possible
+because `filename` is a plain string (2023-09 schema, not `@fmtstring`), so
+path allocation never depends on `let` values.

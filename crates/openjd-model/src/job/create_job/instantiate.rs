@@ -501,9 +501,6 @@ fn filter_symtab_for_step(
                 if let Some(d) = &f.data {
                     d.copy_used_symtab_values(full, &mut filtered);
                 }
-                if let Some(n) = &f.filename {
-                    n.copy_used_symtab_values(full, &mut filtered);
-                }
             }
         }
         if let Some(bindings) = &s.let_bindings {
@@ -524,9 +521,6 @@ fn filter_symtab_for_step(
                     for f in files {
                         if let Some(d) = &f.data {
                             d.copy_used_symtab_values(full, &mut filtered);
-                        }
-                        if let Some(n) = &f.filename {
-                            n.copy_used_symtab_values(full, &mut filtered);
                         }
                     }
                 }
@@ -617,9 +611,6 @@ fn collect_all_accessed_symbols(
                 if let Some(d) = &f.data {
                     collect_from_fs(d, &mut symbols);
                 }
-                if let Some(n) = &f.filename {
-                    collect_from_fs(n, &mut symbols);
-                }
             }
         }
         if let Some(bindings) = &s.let_bindings {
@@ -649,9 +640,6 @@ fn collect_all_accessed_symbols(
                     for f in files {
                         if let Some(d) = &f.data {
                             collect_from_fs(d, &mut symbols);
-                        }
-                        if let Some(n) = &f.filename {
-                            collect_from_fs(n, &mut symbols);
                         }
                     }
                 }
@@ -717,9 +705,6 @@ fn filter_symtab_for_environment(env: &job::Environment, full: &SymbolTable) -> 
                 if let Some(d) = &f.data {
                     d.copy_used_symtab_values(full, &mut filtered);
                 }
-                if let Some(n) = &f.filename {
-                    n.copy_used_symtab_values(full, &mut filtered);
-                }
             }
         }
         if let Some(bindings) = &es.let_bindings {
@@ -762,9 +747,6 @@ fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::Has
             for f in files {
                 if let Some(d) = &f.data {
                     symbols.extend(d.accessed_symbols());
-                }
-                if let Some(n) = &f.filename {
-                    symbols.extend(n.accessed_symbols());
                 }
             }
         }

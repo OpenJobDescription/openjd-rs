@@ -129,7 +129,7 @@ pub struct EnvironmentScript {
 pub struct EmbeddedFile {
     pub name: String,
     pub file_type: String,                    // "type" field; must be "TEXT"
-    pub filename: Option<FormatString>,
+    pub filename: Option<String>,             // Plain string (not @fmtstring)
     pub data: Option<FormatString>,
     pub runnable: Option<bool>,
     pub end_of_line: Option<String>,          // FEATURE_BUNDLE_1: "LF", "CRLF", "AUTO"

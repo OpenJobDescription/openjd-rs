@@ -236,8 +236,8 @@ differs from the CLI's iteration order.
 
 For each step, embedded file paths are pre-computed before task iteration:
 
-1. Filenames are resolved against the step symbol table (format strings may reference
-   step-level variables)
+1. Filenames are plain strings per the 2023-09 schema (not `@fmtstring`) and
+   are used literally
 2. File paths are constructed relative to the session working directory
 3. For each task, file contents are resolved against the task symbol table and written
    via `openjd_sessions::embedded_files::write_embedded_file()`

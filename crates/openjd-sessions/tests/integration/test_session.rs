@@ -2837,6 +2837,93 @@ mod cancel_escalation {
         assert_eq!(msgs[0]["token"].as_str().unwrap(), "AbCdEfGhIjKlMnOpQrStUv",);
         assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
     }
+
+    /// `SessionCancelHandle` must deliver the helper pipe command like
+    /// `cancel_action` does. Unlike `cancel_action`, the handle only fires
+    /// when a per-action token is registered, so this drives a real running
+    /// action and cancels it mid-flight from another task.
+    ///
+    /// Note: this covers handle → pipe delivery. Full cancellation of a
+    /// helper-ROUTED subprocess (helper spawned for a cross-user session)
+    /// requires a second OS user and is exercised by the cross-user
+    /// integration tests' environments.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_writes_notify_command_to_helper_pipe() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+        s.set_helper_auth_token_for_test("HandleTok123".into());
+
+        // Handle taken after the writer is injected, so it dup's the pipe.
+        let handle = s.cancel_handle();
+        let delivered: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+        let delivered_clone = delivered.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
+        });
+
+        let r = s
+            .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+        assert_eq!(*delivered.lock().unwrap(), Some(true));
+
+        let msgs = read_cancel_messages(&writer_path);
+        assert_eq!(
+            msgs.len(),
+            1,
+            "handle must write exactly one cancel command to the helper pipe"
+        );
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 5);
+        assert_eq!(
+            msgs[0]["token"].as_str().unwrap(),
+            "HandleTok123",
+            "handle pipe command must carry the helper auth token"
+        );
+    }
+
+    /// Urgent cancel (`time_limit = 0`) through the handle writes TERMINATE.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_urgent_cancel_writes_terminate_command_to_helper_pipe() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            handle.cancel(Some(Duration::from_secs(0)), false);
+        });
+
+        let r = s
+            .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+
+        let msgs = read_cancel_messages(&writer_path);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+        assert!(
+            msgs[0].get("notifyPeriodInSeconds").is_none(),
+            "TERMINATE should not include notifyPeriodInSeconds"
+        );
+    }
 }
 
 /// Test Option 1: Session-level test for the cancel race condition.
@@ -3177,4 +3264,263 @@ async fn test_echo_openjd_directives_true_redacts_redacted_env_in_log() {
             "expected the redacted_env line to show NAME=******** in the log"
         );
     });
+}
+
+// ══════════════════════════════════════════════════════════════
+// SessionCancelHandle — external cancellation while the Session
+// is owned by the thread/task driving the action
+// ══════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_cancel_handle_idle_returns_false() {
+    let tmp = TempDir::new().unwrap();
+    let s = Session::new_for_test(tmp.path().to_path_buf());
+    let handle = s.cancel_handle();
+    assert!(
+        !handle.cancel(None, false),
+        "no action running — cancel must report nothing to cancel"
+    );
+    assert_eq!(s.state(), SessionState::Ready);
+}
+
+#[tokio::test]
+async fn test_cancel_handle_cancels_running_action() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let handle = s.cancel_handle();
+
+    let delivered: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+    let delivered_clone = delivered.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
+    });
+
+    let r = s
+        .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Canceled);
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert_eq!(
+        *delivered.lock().unwrap(),
+        Some(true),
+        "handle must report the cancel as delivered"
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_handle_mark_action_failed() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let handle = s.cancel_handle();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        handle.cancel(None, true);
+    });
+
+    let r = s
+        .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Failed,
+        "mark_action_failed must report the canceled action as Failed"
+    );
+}
+
+/// The same handle stays usable across actions, and a cancel does not
+/// poison later actions (each action installs a fresh token — unlike the
+/// one-shot `SessionConfig::cancel_token`, whose cancellation is permanent).
+#[tokio::test]
+async fn test_cancel_handle_reusable_across_actions() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let handle = s.cancel_handle();
+
+    // Enter two environments (quick onEnter; E1 has a slow onExit).
+    let e2 = env_with_enter("E2", "sh", vec!["-c", "echo enter2"]);
+    let e1 = Environment {
+        name: "E1".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action("sh", vec!["-c", "echo enter1"])),
+                on_exit: Some(action("sh", vec!["-c", "sleep 30"])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id1 = s.enter_environment(&e1, None, None, None).await.unwrap();
+    let id2 = s.enter_environment(&e2, None, None, None).await.unwrap();
+
+    // Action 1: cancel a running task via the handle.
+    let h = s.cancel_handle();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        h.cancel(None, false);
+    });
+    let r = s
+        .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Canceled);
+
+    // Action 2 (E2 exit, quick): must run normally after the cancel — the
+    // cancel must not have poisoned subsequent actions.
+    s.exit_environment(&id2, None, true, None).await.unwrap();
+    assert_eq!(
+        s.action_status().unwrap().state,
+        ActionState::Success,
+        "action after a handle cancel must not be born-canceled"
+    );
+
+    // Action 3 (E1 exit, slow): cancel again via the ORIGINAL handle.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        handle.cancel(None, false);
+    });
+    let _ = s.exit_environment(&id1, None, true, None).await;
+    assert_eq!(
+        s.action_status().unwrap().state,
+        ActionState::Canceled,
+        "the same handle must be reusable for later actions"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// fail_action_setup — failures after the Running transition must
+// produce a terminal Failed status, not wedge the session
+// ══════════════════════════════════════════════════════════════
+
+/// RFC 0008 wrap seeding resolves the wrapped (inner) action's timeout;
+/// an unresolvable expression there previously returned early with the
+/// session stuck in Running forever and nothing logged.
+#[tokio::test]
+async fn test_wrap_seed_failure_reports_failed_action() {
+    let tmp = TempDir::new().unwrap();
+    let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
+    let statuses_clone = statuses.clone();
+    let config = SessionConfig {
+        session_id: "wrap-seed-fail".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: Some(Box::new(move |_sid, status| {
+            statuses_clone.lock().unwrap().push(status.state);
+        })),
+        os_env_vars: None,
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        profile: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    let mut s = Session::with_config(config).unwrap();
+
+    // Wrap environment declaring all three wrap hooks.
+    let wrap_env = Environment {
+        name: "WrapEnv".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action("sh", vec!["-c", "echo wrap-enter"])),
+                on_exit: Some(action("sh", vec!["-c", "echo wrap-exit"])),
+                on_wrap_env_enter: Some(action("sh", vec!["-c", "echo wrapped"])),
+                on_wrap_task_run: Some(action("sh", vec!["-c", "echo wrapped"])),
+                on_wrap_env_exit: Some(action("sh", vec!["-c", "echo wrapped"])),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    s.enter_environment(&wrap_env, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner environment whose onEnter timeout references an undefined
+    // symbol — seeding WrappedAction.Timeout fails during action setup.
+    let inner = Environment {
+        name: "Inner".into(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: fs("sh"),
+                    args: Some(vec![fs("-c"), fs("echo inner")]),
+                    timeout: Some(fs("{{ Param.Missing }}")),
+                    cancelation: None,
+                }),
+                on_exit: None,
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+
+    let result = s.enter_environment(&inner, None, None, None).await;
+    assert!(result.is_err(), "setup failure must surface as an error");
+
+    // The session must NOT be wedged in Running, and the failure must be
+    // observable through the action status and the callback.
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let status = s.action_status().expect("terminal action status");
+    assert_eq!(status.state, ActionState::Failed);
+    let msg = status.fail_message.expect("fail_message must be recorded");
+    assert!(
+        msg.contains("timeout"),
+        "fail_message should identify the failing field, got: {msg}"
+    );
+    assert!(
+        statuses.lock().unwrap().contains(&ActionState::Failed),
+        "callback must observe the Failed transition"
+    );
+}
+
+/// A runner error during dispatch (here: an undefined symbol in the action's
+/// args, which fails command-line resolution inside the runner) must surface
+/// through drive_action's error branch with a recorded `fail_message` — not
+/// as a bare Failed status with no message and nothing logged, and not as a
+/// session wedged in Running.
+#[tokio::test]
+async fn test_runner_resolution_error_records_fail_message() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+
+    let script = step("sh", vec!["-c", "echo {{ No.Such.Symbol }}"]);
+    let result = s.run_task("t", &script, None, None, None).await;
+    assert!(
+        result.is_err(),
+        "resolution failure must surface as an error"
+    );
+
+    assert_eq!(
+        s.state(),
+        SessionState::ReadyEnding,
+        "session must not be wedged in Running"
+    );
+    let status = s.action_status().expect("terminal action status");
+    assert_eq!(status.state, ActionState::Failed);
+    let msg = status.fail_message.expect("fail_message must be recorded");
+    assert!(
+        msg.contains("No.Such.Symbol"),
+        "fail_message should identify the unresolvable symbol, got: {msg}"
+    );
 }

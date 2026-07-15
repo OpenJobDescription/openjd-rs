@@ -63,7 +63,9 @@ checks have nothing to walk):
   **template scope** instead — no `Session.*`/`Env.File.*`. `let` bindings require
   EXPR; with EXPR they are validated and type-checked into the symbol table. Complex
   expressions (anything beyond a bare `{{Name.Path}}` reference) require EXPR in
-  variables, action commands/args, and embedded-file data/filename.
+  variables, action commands/args, and embedded-file data. Embedded-file
+  `filename` is a plain string (not `@fmtstring`) — brace syntax in it is
+  literal text and no format-string validation applies.
 - **Pass 10** — WRAP_ACTIONS gating (see below).
 
 ## Pass 5: Limits Enforcement

@@ -224,7 +224,11 @@ fn build_task_scope_symtab(
         }
     }
 
-    // Task.File.* from step script embedded files
+    // Task.File.* from step script embedded files. In scope for script-level
+    // `let` bindings too: `filename` is a plain string (never an expression),
+    // so the runtime allocates embedded file paths — defining Task.File.* —
+    // before evaluating `let`, mirroring the environment runner's Env.File.*
+    // ordering.
     if let Some(script) = step
         .resolve_syntax_sugar()
         .ok()
@@ -662,7 +666,10 @@ pub fn validate_format_strings(
         if let Some(script) = &step.script {
             let script_path = path_field(&step_path, "script");
 
-            // Script-level let bindings (TASK scope — host_lib)
+            // Script-level let bindings (TASK scope — host_lib). Task.File.*
+            // is in scope: file paths are allocated before `let` evaluation
+            // at runtime (filenames are plain strings, so allocation cannot
+            // depend on `let` values).
             if let Some(bindings) = &script.let_bindings {
                 let let_path = path_field(&script_path, "let");
                 if !expr_active {
@@ -763,15 +770,8 @@ pub fn validate_format_strings(
                             errors,
                         );
                     }
-                    if let Some(filename) = &f.filename {
-                        validate_fs(
-                            filename,
-                            &task_symtab,
-                            &host_lib,
-                            &path_field(&f_path, "filename"),
-                            errors,
-                        );
-                    }
+                    // `filename` is a plain string per the 2023-09 schema
+                    // (not @fmtstring) — no format-string validation.
                 }
             }
 
@@ -1186,16 +1186,8 @@ fn validate_env_format_strings(
                     }
                     validate_fs(data, symtab, lib, &data_path, errors);
                 }
-                if let Some(filename) = &f.filename {
-                    let filename_path = path_field(&f_path, "filename");
-                    if !expr_active && filename.has_complex_expressions() {
-                        errors.add(
-                            &filename_path,
-                            "complex expressions require the EXPR extension.",
-                        );
-                    }
-                    validate_fs(filename, symtab, lib, &filename_path, errors);
-                }
+                // `filename` is a plain string per the 2023-09 schema
+                // (not @fmtstring) — no format-string validation.
             }
         }
     }

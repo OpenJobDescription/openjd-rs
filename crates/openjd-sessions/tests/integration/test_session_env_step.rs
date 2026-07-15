@@ -174,7 +174,7 @@ async fn test_env_with_embedded_files() {
             embedded_files: Some(vec![EmbeddedFile {
                 name: "Script".to_string(),
                 file_type: openjd_model::types::FileType::Text,
-                filename: Some(fs("script.txt")),
+                filename: Some("script.txt".to_string()),
                 data: Some(fs("file content here")),
                 runnable: None,
                 end_of_line: None,
@@ -535,7 +535,7 @@ async fn test_env_with_let_bindings_and_embedded_files() {
             embedded_files: Some(vec![EmbeddedFile {
                 name: "Config".to_string(),
                 file_type: openjd_model::types::FileType::Text,
-                filename: Some(fs("config.txt")),
+                filename: Some("config.txt".to_string()),
                 data: Some(fs("config data")),
                 runnable: None,
                 end_of_line: None,
@@ -576,7 +576,7 @@ async fn test_step_with_let_bindings_and_embedded_files() {
         embedded_files: Some(vec![EmbeddedFile {
             name: "Data".to_string(),
             file_type: openjd_model::types::FileType::Text,
-            filename: Some(fs("data.txt")),
+            filename: Some("data.txt".to_string()),
             data: Some(fs("{{ greeting }}")),
             runnable: None,
             end_of_line: None,

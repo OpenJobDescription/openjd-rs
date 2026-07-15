@@ -159,7 +159,7 @@ included instead.
 pub struct EmbeddedFile {
     pub name: String,
     pub file_type: FileType,                             // Typed enum, not String
-    pub filename: Option<FormatString>,                  // Session/task-scope
+    pub filename: Option<String>,                        // Plain string (not @fmtstring)
     pub data: Option<FormatString>,                      // Session/task-scope
     pub runnable: Option<bool>,
     pub end_of_line: Option<EndOfLine>,                  // Typed enum, not String

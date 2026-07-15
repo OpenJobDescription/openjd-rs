@@ -78,7 +78,7 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
                         );
                     }
                     if let Some(filename) = &f.filename {
-                        if filename.raw().len() > limits.max_filename_len {
+                        if filename.len() > limits.max_filename_len {
                             errors.add(
                                 &path_field(&f_path, "filename"),
                                 format!("exceeds {} characters.", limits.max_filename_len),
@@ -139,7 +139,7 @@ fn enforce_environment_limits(
                     );
                 }
                 if let Some(filename) = &f.filename {
-                    if filename.raw().len() > limits.max_filename_len {
+                    if filename.len() > limits.max_filename_len {
                         errors.add(
                             &path_field(&f_path, "filename"),
                             format!("exceeds {} characters.", limits.max_filename_len),

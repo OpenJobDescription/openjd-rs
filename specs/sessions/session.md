@@ -319,6 +319,29 @@ Unset takes precedence over set within the same environment, matching the spec.
 The `time_limit` parameter sets a deadline for the cancelation to complete. If the
 subprocess doesn't exit within the limit, it's forcefully killed.
 
+### SessionCancelHandle
+
+`cancel_action` requires `&mut Session`, which is unavailable while an action-driving
+thread owns the `Session` (the embedding pattern used by the Python bindings). For that
+case, `Session::cancel_handle()` returns a `SessionCancelHandle` — a thread-safe,
+reusable handle over the shared per-action cancel state (token, cancel-request watch
+channel, `mark_failed` flag, all behind one `Arc<Mutex<..>>`).
+
+`SessionCancelHandle::cancel(time_limit, mark_action_failed) -> bool`:
+
+- Returns `false` if no action is running (no per-action token installed).
+- Otherwise delivers exactly what `cancel_action` delivers — the helper pipe cancel
+  command (cross-user sessions), the `time_limit` over the watch channel, and the
+  token cancel — while holding the shared lock so the target action cannot change
+  mid-delivery.
+- Unlike `cancel_action`, it cannot set the session's transient `Canceling` state
+  (the `Session` is owned elsewhere); the state moves directly to the terminal value
+  when the canceled action finishes.
+
+Every action installs fresh cancel state, so a cancel never poisons later actions
+(contrast with `SessionConfig::cancel_token`, whose cancellation is permanent) and
+the same handle works for the life of the session.
+
 ## Cleanup
 
 See [Session Lifecycle Contract](#session-lifecycle-contract) for the full cleanup

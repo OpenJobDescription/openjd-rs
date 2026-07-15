@@ -253,6 +253,55 @@ fn test_materialize_resolved_data() {
     assert_eq!(fs::read_to_string(&bar_path).unwrap(), resolved);
 }
 
+// === Filename is a plain string (2023-09 schema: not @fmtstring) ===
+
+/// `{{ }}` sequences in an embedded file's `filename` are literal text —
+/// never resolved as expressions — even when the referenced symbol exists
+/// in the symbol table. Pins the sessions-layer half of the plain-string
+/// filename contract (the model layer pins the decode half).
+#[test]
+fn literal_braces_in_filename_are_not_resolved() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_expr::ExprValue;
+    use openjd_model::job::EmbeddedFile;
+    use openjd_model::symbol_table::SymbolTable;
+    use openjd_model::types::FileType;
+
+    let tmp = TempDir::new().unwrap();
+    let mut ef = EmbeddedFiles::new(
+        EmbeddedFilesScope::Step,
+        tmp.path().to_path_buf(),
+        "test-session",
+    );
+    let file = EmbeddedFile {
+        name: "f".to_string(),
+        file_type: FileType::Text,
+        filename: Some("literal_{{Param.X}}.txt".to_string()),
+        data: Some(FormatString::new("hello").unwrap()),
+        runnable: None,
+        end_of_line: None,
+    };
+    // Param.X IS defined — a regression to format-string semantics would
+    // silently resolve rather than error.
+    let mut st = SymbolTable::new();
+    st.set("Param.X", ExprValue::String("resolved".to_string()))
+        .unwrap();
+
+    ef.allocate_file_paths(&[file], &mut st).unwrap();
+    ef.write_file_contents(&st, None).unwrap();
+
+    let literal = tmp.path().join("literal_{{Param.X}}.txt");
+    assert!(
+        literal.exists(),
+        "file must be created under the literal filename"
+    );
+    assert_eq!(fs::read_to_string(&literal).unwrap(), "hello");
+    assert!(
+        !tmp.path().join("literal_resolved.txt").exists(),
+        "filename must not be expression-resolved"
+    );
+}
+
 // === Path traversal defense-in-depth (CWE-22) ===
 //
 // Per spec (§6.1.1), embedded file `filename` must be a plain basename and
@@ -260,37 +309,28 @@ fn test_materialize_resolved_data() {
 // time. These tests exercise the sessions-layer check that re-validates
 // the filename before it is joined to the target directory. This check
 // catches traversal strings that could reach the session layer via any
-// bypass of model validation, including implementation-level format-string
-// substitution (the current model stores `filename` as a `FormatString`).
+// bypass of model validation (e.g. an `EmbeddedFile` constructed directly
+// rather than decoded from a validated template).
 
 mod path_traversal {
     use super::*;
     use openjd_expr::format_string::FormatString;
-    use openjd_expr::ExprValue;
     use openjd_model::job::EmbeddedFile;
     use openjd_model::symbol_table::SymbolTable;
     use openjd_model::types::FileType;
     use openjd_sessions::SessionError;
 
-    /// Build an `EmbeddedFile` with a `filename` template that references
-    /// `Param.Evil` — the tainted value is supplied via the symbol table so
-    /// the traversal string bypasses any raw-template validation.
-    fn file_with_tainted_filename(name: &str) -> EmbeddedFile {
+    /// Build an `EmbeddedFile` whose `filename` carries a traversal string
+    /// directly, as if model validation had been bypassed.
+    fn file_with_tainted_filename(name: &str, filename: &str) -> EmbeddedFile {
         EmbeddedFile {
             name: name.to_string(),
             file_type: FileType::Text,
-            filename: Some(FormatString::new("{{Param.Evil}}").unwrap()),
+            filename: Some(filename.to_string()),
             data: Some(FormatString::new("echo hello").unwrap()),
             runnable: None,
             end_of_line: None,
         }
-    }
-
-    fn symtab_with_evil(value: &str) -> SymbolTable {
-        let mut st = SymbolTable::new();
-        st.set("Param.Evil", ExprValue::String(value.to_string()))
-            .unwrap();
-        st
     }
 
     fn allocate_with_tainted(value: &str) -> Result<(), SessionError> {
@@ -300,8 +340,8 @@ mod path_traversal {
             tmp.path().to_path_buf(),
             "test-session",
         );
-        let mut st = symtab_with_evil(value);
-        let file = file_with_tainted_filename("evil");
+        let mut st = SymbolTable::new();
+        let file = file_with_tainted_filename("evil", value);
         ef.allocate_file_paths(&[file], &mut st)
     }
 

@@ -110,7 +110,7 @@ impl StepTemplate {
                 embedded_files: Some(vec![EmbeddedFile {
                     name: embedded_name,
                     file_type: crate::types::FileType::Text,
-                    filename: Some(FormatString::new(&filename).unwrap()),
+                    filename: Some(filename),
                     data: Some(FormatString::new(&sa.script).map_err(|e| {
                         crate::ModelError::DecodeValidation(format!(
                             "SimpleAction script format string error: {e}"
