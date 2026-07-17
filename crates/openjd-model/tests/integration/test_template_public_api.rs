@@ -218,7 +218,9 @@ fn step_template_full_surface() {
         } => {
             assert_eq!(notify_period_in_seconds.as_ref().unwrap().raw(), "30");
         }
-        CancelationMode::Terminate => panic!("expected NotifyThenTerminate"),
+        CancelationMode::Terminate | CancelationMode::DeferredMode { .. } => {
+            panic!("expected NotifyThenTerminate")
+        }
     }
 
     let ef: &EmbeddedFile = &script.embedded_files.as_ref().unwrap()[0];
