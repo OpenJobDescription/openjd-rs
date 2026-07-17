@@ -550,6 +550,76 @@ async fn test_cross_user_session_run_subprocess() {
 
 // === Session-level: SessionCancelHandle cancels a helper-routed subprocess ===
 
+/// The session working directory must carry an explicit DACL granting the
+/// session user Modify and the process user Full Control — the session user
+/// otherwise cannot use its own working directory (the session root commonly
+/// lives under the process user's profile, which grants nothing to others).
+///
+/// This pins the directory ACL itself; the embedded-file tests only cover
+/// ACLs of files placed inside it.
+#[test]
+#[ignore]
+fn test_cross_user_session_working_dir_permissions() {
+    let user = require_windows_user();
+    let user_name = windows_user_name();
+    let proc_user = process_user_bare();
+    let mut session = make_session(user);
+    let working_dir = session.working_directory().to_string_lossy().to_string();
+
+    let aces = get_aces_for_object(&working_dir);
+    assert!(
+        principal_has_access(&working_dir, &proc_user, FULL_CONTROL_MASK),
+        "Process user should have Full Control on the session working dir, got aces: {aces:?}"
+    );
+    assert!(
+        principal_has_access(&working_dir, &user_name, MODIFY_READ_WRITE_MASK),
+        "Session user should have Modify access on the session working dir, got aces: {aces:?}"
+    );
+
+    session.cleanup();
+}
+
+/// PowerShell must be able to run successfully as the session user with the
+/// session working directory as its CWD. PowerShell's provider initialization
+/// enumerates the current directory, so it detects working-dir ACL problems
+/// that `cmd`/`whoami` (which never list their CWD) sail past — this is the
+/// positive-path coverage the cancel tests were implicitly relying on.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_powershell_runs_successfully() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&[
+                "-Command".to_string(),
+                "Get-ChildItem . | Out-Null; Write-Output 'ps-ok'".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("powershell must run as the session user");
+
+    assert_eq!(
+        result.state,
+        ActionState::Success,
+        "powershell as the session user must succeed; exit_code: {:?}, stdout: {}",
+        result.exit_code,
+        result.stdout
+    );
+    assert!(
+        result.stdout.contains("ps-ok"),
+        "expected 'ps-ok' in stdout: {}",
+        result.stdout
+    );
+    session.cleanup();
+}
+
 /// Repeatedly attempt to deliver a cancel through `handle` until it finds a
 /// running action, starting after a short delay so the cancel lands
 /// mid-action in the healthy case. Resolves to whether delivery succeeded.
