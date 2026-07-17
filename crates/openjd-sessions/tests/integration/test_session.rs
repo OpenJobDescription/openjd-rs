@@ -6,7 +6,8 @@
 
 use openjd_expr::format_string::FormatString;
 use openjd_model::job::{
-    Action, Environment, EnvironmentActions, EnvironmentScript, StepActions, StepScript,
+    Action, CancelationMode, Environment, EnvironmentActions, EnvironmentScript, StepActions,
+    StepScript,
 };
 use openjd_sessions::action::ActionState;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
@@ -2923,6 +2924,101 @@ mod cancel_escalation {
             msgs[0].get("notifyPeriodInSeconds").is_none(),
             "TERMINATE should not include notifyPeriodInSeconds"
         );
+    }
+
+    /// A step that declares notifyThenTerminate cancelation with the given
+    /// notify period.
+    fn step_with_ntt_cancel(cmd: &str, args: Vec<&str>, notify_secs: u64) -> StepScript {
+        let mut on_run = action(cmd, args);
+        on_run.cancelation = Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(fs(&notify_secs.to_string())),
+        });
+        StepScript {
+            let_bindings: None,
+            actions: StepActions { on_run },
+            embedded_files: None,
+        }
+    }
+
+    /// Drive `sleep 30` as a task and cancel it via the handle with
+    /// `time_limit`, returning the JSON messages written to the injected
+    /// cancel pipe.
+    async fn run_and_handle_cancel(
+        script: &StepScript,
+        time_limit: Option<Duration>,
+    ) -> Vec<serde_json::Value> {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            handle.cancel(time_limit, false);
+        });
+
+        let r = s.run_task("t", script, None, None, None).await.unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+        read_cancel_messages(&writer_path)
+    }
+
+    /// The declared terminate_delay caps the notify period when the caller's
+    /// time_limit is larger — mirroring the same-user path, which computes
+    /// `time_limit.min(terminate_delay)`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_caps_notify_period_at_declared_terminate_delay() {
+        let script = step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 3);
+        let msgs = run_and_handle_cancel(&script, Some(Duration::from_secs(60))).await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(
+            msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(),
+            3,
+            "time_limit larger than the declared terminate_delay must be capped at it"
+        );
+    }
+
+    /// A time_limit smaller than the declared terminate_delay wins.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_smaller_time_limit_wins_over_terminate_delay() {
+        let script = step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 3);
+        let msgs = run_and_handle_cancel(&script, Some(Duration::from_secs(1))).await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 1);
+    }
+
+    /// With no time_limit, the declared terminate_delay applies on its own
+    /// (not the legacy 5s default) — matching the same-user path's
+    /// `None => terminate_delay` arm.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_without_time_limit_uses_declared_terminate_delay() {
+        let script = step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 8);
+        let msgs = run_and_handle_cancel(&script, None).await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(
+            msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(),
+            8,
+            "declared terminate_delay must apply when no time_limit is given"
+        );
+    }
+
+    /// Actions that do not declare notifyThenTerminate keep the legacy
+    /// behavior: the caller's time_limit is used as-is.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_without_declared_cancelation_passes_time_limit_through() {
+        let script = step("sh", vec!["-c", "sleep 30"]);
+        let msgs = run_and_handle_cancel(&script, Some(Duration::from_secs(60))).await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
+        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 60);
     }
 }
 
