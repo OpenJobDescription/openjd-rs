@@ -183,10 +183,33 @@ fn windows_user_name() -> String {
     std::env::var("OPENJD_TEST_WIN_USER_NAME").expect("OPENJD_TEST_WIN_USER_NAME must be set")
 }
 
-fn make_session(user: Arc<WindowsSessionUser>) -> Session {
-    let tmp = tempfile::TempDir::new().unwrap();
+/// Create a session root for cross-user tests.
+///
+/// Deliberately NOT under `%TEMP%`: on GitHub runners `%TEMP%` is the
+/// process user's profile Temp with an 8.3 short component
+/// (`C:\Users\RUNNER~1\...`). Windows PowerShell normalizes its startup
+/// working directory by enumerating each parent directory, and other users
+/// lack List Folder access on the profile directory — so powershell running
+/// as the session user fails with `UnauthorizedAccessException` before
+/// executing any command (cmd.exe performs no such normalization and is
+/// unaffected). See https://github.com/PowerShell/PowerShell/issues/7760
+/// and https://github.com/actions/runner-images/issues/712.
+///
+/// `%PUBLIC%` is listable by all local users, mirroring production session
+/// roots under `C:\ProgramData`.
+fn test_session_root() -> PathBuf {
+    let public = std::env::var("PUBLIC").unwrap_or_else(|_| r"C:\Users\Public".to_string());
+    let tmp = tempfile::Builder::new()
+        .prefix("openjd-cross-user-")
+        .tempdir_in(public)
+        .unwrap();
     let root = tmp.path().to_path_buf();
     std::mem::forget(tmp);
+    root
+}
+
+fn make_session(user: Arc<WindowsSessionUser>) -> Session {
+    let root = test_session_root();
     let config = SessionConfig {
         session_id: "cross-user-win-test".into(),
         job_parameter_values: HashMap::new(),
