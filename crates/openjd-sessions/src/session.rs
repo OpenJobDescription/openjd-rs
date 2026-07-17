@@ -2363,15 +2363,51 @@ fn seed_wrapped_action_symbols(
         .map(|(k, v)| format!("{k}={v}"))
         .collect();
     // WrappedAction.Timeout carries the ORIGINAL wrapped action's timeout
-    // (RFC 0008), not the wrap action's. `0` means unset.
-    let wrapped_timeout_secs =
+    // (RFC 0008), not the wrap action's. `None` (null) means the wrapped
+    // action specified no timeout — int? per the EXPR optional-data
+    // semantics, so whole-field forwarding drops the field.
+    let wrapped_timeout_secs: Option<i64> =
         crate::runner::resolve_action_timeout(wrapped_action, action_symtab, lib, None)
             .map_err(|e| SessionError::FormatString {
                 context: format!("wrapped {phase} timeout"),
                 reason: e.to_string(),
             })?
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+            .map(|d| d.as_secs() as i64);
+
+    // WrappedAction.Cancelation.{Mode, NotifyPeriodInSeconds} carry the
+    // wrapped action's cancelation config (RFC 0008). The mode is null
+    // (`None` here) when no <Cancelation> is defined; the notify period
+    // is null unless the mode is NOTIFY_THEN_TERMINATE.
+    //
+    // When the wrapped action requests NOTIFY_THEN_TERMINATE without an
+    // explicit notifyPeriodInSeconds, the runtime supplies the schema
+    // default for the action's position (Template Schemas §5.3.2:
+    // 120 seconds for a task's onRun, 30 seconds otherwise). This mirrors
+    // the value the runtime would have enforced if the action ran
+    // unwrapped.
+    // Resolution goes through the same helper the enforcement path uses
+    // (`resolve_effective_cancelation`) — including a wrapped action whose
+    // own mode is deferred (a format string) — so the value a wrap script
+    // sees is always the value the runtime would enforce.
+    let (wrapped_cancelation_mode, wrapped_cancelation_notify_period): (Option<&str>, Option<i64>) =
+        match crate::runner::resolve_effective_cancelation(
+            &wrapped_action.cancelation,
+            action_symtab,
+            lib,
+        )? {
+            crate::runner::EffectiveCancelation::Undeclared => (None, None),
+            crate::runner::EffectiveCancelation::Terminate => (Some("TERMINATE"), None),
+            crate::runner::EffectiveCancelation::NotifyThenTerminate {
+                notify_period_seconds,
+            } => {
+                let default_period_secs: i64 = if phase == "task" { 120 } else { 30 };
+                (
+                    Some("NOTIFY_THEN_TERMINATE"),
+                    Some(notify_period_seconds.unwrap_or(default_period_secs)),
+                )
+            }
+        };
+
     overlay_wrapped_action_symbols(
         action_symtab,
         Some(context),
@@ -2379,6 +2415,8 @@ fn seed_wrapped_action_symbols(
         &args,
         &wrapped_env,
         wrapped_timeout_secs,
+        wrapped_cancelation_mode,
+        wrapped_cancelation_notify_period,
     )
 }
 
@@ -2390,20 +2428,30 @@ fn seed_wrapped_action_symbols(
 /// - `WrappedAction.Environment` — `"KEY=value"` entries for every
 ///   `openjd_env` export captured so far in the session.
 /// - `WrappedAction.Timeout` — the timeout in seconds of the wrapped
-///   action, or `0` when the wrapped action specified no timeout.
+///   action, or `null` when the wrapped action specified no timeout.
+/// - `WrappedAction.Cancelation.Mode` — `"TERMINATE"`,
+///   `"NOTIFY_THEN_TERMINATE"`, or `null` when the wrapped action defines
+///   no `<Cancelation>`.
+/// - `WrappedAction.Cancelation.NotifyPeriodInSeconds` — the effective
+///   grace period in seconds when the wrapped mode is
+///   `NOTIFY_THEN_TERMINATE` (with schema defaults applied when the
+///   wrapped action omits the field), or `null` otherwise.
 ///
 /// `wrapped` selects the per-hook companion variable: `WrappedEnv.Name`
 /// for env hooks, `WrappedStep.Name` for `onWrapTaskRun`. `None` is used
 /// only by tests that exercise the `WrappedAction.*` portion in isolation.
 ///
 /// Errors from `SymbolTable::set` are reported as `SessionError::Runtime`.
+#[allow(clippy::too_many_arguments)]
 fn overlay_wrapped_action_symbols(
     symtab: &mut SymbolTable,
     wrapped: Option<WrappedContext<'_>>,
     wrapped_command: &str,
     wrapped_args: &[String],
     wrapped_environment: &[String],
-    wrapped_timeout_secs: i64,
+    wrapped_timeout_secs: Option<i64>,
+    wrapped_cancelation_mode: Option<&str>,
+    wrapped_cancelation_notify_period: Option<i64>,
 ) -> Result<(), SessionError> {
     match wrapped {
         Some(WrappedContext::Env(name)) => {
@@ -2417,7 +2465,17 @@ fn overlay_wrapped_action_symbols(
     set_string_symbol(symtab, "WrappedAction.Command", wrapped_command)?;
     set_string_list_symbol(symtab, "WrappedAction.Args", wrapped_args)?;
     set_string_list_symbol(symtab, "WrappedAction.Environment", wrapped_environment)?;
-    set_int_symbol(symtab, "WrappedAction.Timeout", wrapped_timeout_secs)?;
+    set_optional_int_symbol(symtab, "WrappedAction.Timeout", wrapped_timeout_secs)?;
+    set_optional_string_symbol(
+        symtab,
+        "WrappedAction.Cancelation.Mode",
+        wrapped_cancelation_mode,
+    )?;
+    set_optional_int_symbol(
+        symtab,
+        "WrappedAction.Cancelation.NotifyPeriodInSeconds",
+        wrapped_cancelation_notify_period,
+    )?;
     Ok(())
 }
 
@@ -2428,6 +2486,20 @@ fn set_string_symbol(
 ) -> Result<(), SessionError> {
     symtab
         .set(name, openjd_expr::ExprValue::String(value.into()))
+        .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
+}
+
+fn set_optional_string_symbol(
+    symtab: &mut SymbolTable,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), SessionError> {
+    let expr = match value {
+        Some(v) => openjd_expr::ExprValue::String(v.into()),
+        None => openjd_expr::ExprValue::Null,
+    };
+    symtab
+        .set(name, expr)
         .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
 }
 
@@ -2447,9 +2519,21 @@ fn set_string_list_symbol(
         .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
 }
 
-fn set_int_symbol(symtab: &mut SymbolTable, name: &str, value: i64) -> Result<(), SessionError> {
+/// Set a symbol with type `int?`: an integer when `Some`, `null` when
+/// `None`. Used for `WrappedAction.Cancelation.NotifyPeriodInSeconds`,
+/// where `null` is the RFC 0008 sentinel for "not applicable" (the mode
+/// is `TERMINATE` or the wrapped action defined no `<Cancelation>`).
+fn set_optional_int_symbol(
+    symtab: &mut SymbolTable,
+    name: &str,
+    value: Option<i64>,
+) -> Result<(), SessionError> {
+    let expr = match value {
+        Some(v) => openjd_expr::ExprValue::Int(v),
+        None => openjd_expr::ExprValue::Null,
+    };
     symtab
-        .set(name, openjd_expr::ExprValue::Int(value))
+        .set(name, expr)
         .map_err(|e| SessionError::Runtime(format!("Failed to set {name}: {e}")))
 }
 
@@ -2575,7 +2659,9 @@ mod wrap_actions_tests {
             "echo",
             &["a".into(), "b c".into()],
             &["FOO=bar".into()],
-            42,
+            Some(42),
+            Some("NOTIFY_THEN_TERMINATE"),
+            Some(45),
         )
         .unwrap();
 
@@ -2593,6 +2679,15 @@ mod wrap_actions_tests {
             Some(&ExprValue::String("MyStep".into()))
         );
         assert!(symtab.get_value("WrappedEnv.Name").is_none());
+        // Cancelation.* forwarded verbatim from the overlay arguments.
+        assert_eq!(
+            symtab.get_value("WrappedAction.Cancelation.Mode"),
+            Some(&ExprValue::String("NOTIFY_THEN_TERMINATE".into()))
+        );
+        assert_eq!(
+            symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
+            Some(&ExprValue::Int(45))
+        );
     }
 
     #[test]
@@ -2604,7 +2699,9 @@ mod wrap_actions_tests {
             "true",
             &[],
             &[],
-            0,
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -2618,15 +2715,28 @@ mod wrap_actions_tests {
     #[test]
     fn overlay_handles_empty_args_and_environment() {
         let mut symtab = SymbolTable::default();
-        overlay_wrapped_action_symbols(&mut symtab, None, "true", &[], &[], 0).unwrap();
+        overlay_wrapped_action_symbols(&mut symtab, None, "true", &[], &[], None, None, None)
+            .unwrap();
         // Both lists must be set as empty list[string] so iteration in wrap
         // scripts (`for a in {{ ... }}`) sees zero iterations rather than
         // "Undefined variable".
         assert!(symtab.get_value("WrappedAction.Args").is_some());
         assert!(symtab.get_value("WrappedAction.Environment").is_some());
+        // int?: null when the wrapped action specified no timeout.
         assert_eq!(
             symtab.get_value("WrappedAction.Timeout"),
-            Some(&ExprValue::Int(0))
+            Some(&ExprValue::Null)
+        );
+        // Cancelation values for "no <Cancelation>": null Mode, null
+        // NotifyPeriodInSeconds. This locks in the RFC 0008 string?/int?
+        // semantics.
+        assert_eq!(
+            symtab.get_value("WrappedAction.Cancelation.Mode"),
+            Some(&ExprValue::Null)
+        );
+        assert_eq!(
+            symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
+            Some(&ExprValue::Null)
         );
     }
 }

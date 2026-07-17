@@ -264,6 +264,13 @@ fn convert_action(a: &template::Action) -> job::Action {
             } => job::CancelationMode::NotifyThenTerminate {
                 notify_period_in_seconds: notify_period_in_seconds.clone(),
             },
+            template::CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            } => job::CancelationMode::DeferredMode {
+                mode: mode.clone(),
+                notify_period_in_seconds: notify_period_in_seconds.clone(),
+            },
         }),
     }
 }
@@ -490,11 +497,20 @@ fn filter_symtab_for_step(
         if let Some(t) = &s.actions.on_run.timeout {
             t.copy_used_symtab_values(full, &mut filtered);
         }
-        if let Some(job::CancelationMode::NotifyThenTerminate {
-            notify_period_in_seconds: Some(n),
-        }) = &s.actions.on_run.cancelation
-        {
-            n.copy_used_symtab_values(full, &mut filtered);
+        match &s.actions.on_run.cancelation {
+            Some(job::CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds: Some(n),
+            }) => n.copy_used_symtab_values(full, &mut filtered),
+            Some(job::CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            }) => {
+                mode.copy_used_symtab_values(full, &mut filtered);
+                if let Some(n) = notify_period_in_seconds {
+                    n.copy_used_symtab_values(full, &mut filtered);
+                }
+            }
+            _ => {}
         }
         if let Some(files) = &s.embedded_files {
             for f in files {
@@ -585,11 +601,20 @@ fn collect_all_accessed_symbols(
         if let Some(t) = &a.timeout {
             collect_from_fs(t, out);
         }
-        if let Some(job::CancelationMode::NotifyThenTerminate {
-            notify_period_in_seconds: Some(n),
-        }) = &a.cancelation
-        {
-            collect_from_fs(n, out);
+        match &a.cancelation {
+            Some(job::CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds: Some(n),
+            }) => collect_from_fs(n, out),
+            Some(job::CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            }) => {
+                collect_from_fs(mode, out);
+                if let Some(n) = notify_period_in_seconds {
+                    collect_from_fs(n, out);
+                }
+            }
+            _ => {}
         }
     }
 

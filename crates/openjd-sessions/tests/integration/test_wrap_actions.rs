@@ -541,3 +541,262 @@ async fn wrapped_action_visible_in_wrap_env_enter_and_wrap_env_exit() {
         "WrappedAction.Command should resolve in onWrapEnvExit; got:\n{contents}"
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// WrappedAction.Cancelation.* (RFC 0008, PR #148)
+// ────────────────────────────────────────────────────────────────────
+
+/// Build a wrap `onWrapTaskRun` script that echoes `MODE=<...>`,
+/// `MODE_OR=<...>` (null-coalesced so a null Mode is observable as
+/// `UNDECLARED` rather than rendering empty), and `NP=<...>`
+/// (delimiter-wrapped so empty/null values render as `<>` unambiguously)
+/// into the given trace path.
+fn cancel_probe_action(trace: &std::path::Path) -> Action {
+    let script = format!(
+        r#"
+        echo "MODE=<{{{{WrappedAction.Cancelation.Mode}}}}>" >> '{path}'
+        echo "MODE_OR=<{{{{ WrappedAction.Cancelation.Mode or 'UNDECLARED' }}}}>" >> '{path}'
+        echo "NP=<{{{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}}}>" >> '{path}'
+        "#,
+        path = trace.display(),
+    );
+    Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&script)]),
+        timeout: None,
+        cancelation: None,
+    }
+}
+
+/// A task's `onRun` that carries `CancelationMode::Terminate` surfaces
+/// as `WrappedAction.Cancelation.Mode = "TERMINATE"` with
+/// `WrappedAction.Cancelation.NotifyPeriodInSeconds = null`.
+#[tokio::test]
+async fn wrap_task_run_forwards_cancelation_mode_terminate() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(cancel_probe_action(&trace)),
+        None,
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    let mut inner_step = step("true", vec![]);
+    inner_step.actions.on_run.cancelation = Some(openjd_model::job::CancelationMode::Terminate);
+
+    let result = session
+        .run_task("test_step", &inner_step, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("MODE=<TERMINATE>"),
+        "expected MODE=<TERMINATE>; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("NP=<>"),
+        "expected NP=<> (null coerces to empty in format-string); got:\n{contents}"
+    );
+}
+
+/// A task's `onRun` with `CancelationMode::NotifyThenTerminate` and an
+/// explicit `notify_period_in_seconds` surfaces both fields verbatim.
+#[tokio::test]
+async fn wrap_task_run_forwards_cancelation_mode_notify_then_terminate_with_period() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(cancel_probe_action(&trace)),
+        None,
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    let mut inner_step = step("true", vec![]);
+    inner_step.actions.on_run.cancelation =
+        Some(openjd_model::job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(fs("45")),
+        });
+
+    let result = session
+        .run_task("test_step", &inner_step, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("MODE=<NOTIFY_THEN_TERMINATE>"),
+        "expected MODE=<NOTIFY_THEN_TERMINATE>; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("NP=<45>"),
+        "expected NP=<45>; got:\n{contents}"
+    );
+}
+
+/// When a task's `onRun` declares no `<Cancelation>`, the wrap script sees
+/// `Mode = null` and `NotifyPeriodInSeconds = null`. This differs from
+/// `TERMINATE` mode even though the runtime treats both identically for
+/// cancelation dispatch — the template variable preserves the "author
+/// did not declare" distinction. Null renders empty in interpolation
+/// (`MODE=<>`), and is observable via null-coalescing
+/// (`MODE_OR=<UNDECLARED>`).
+#[tokio::test]
+async fn wrap_task_run_cancelation_null_when_no_cancelation() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(cancel_probe_action(&trace)),
+        None,
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    // Note: step() helper produces an Action with `cancelation: None`.
+    let inner_step = step("true", vec![]);
+    assert!(inner_step.actions.on_run.cancelation.is_none());
+
+    let result = session
+        .run_task("test_step", &inner_step, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("MODE=<>"),
+        "expected MODE=<> for un-declared cancelation (null renders empty); got:\n{contents}"
+    );
+    assert!(
+        contents.contains("MODE_OR=<UNDECLARED>"),
+        "expected MODE_OR=<UNDECLARED> (null Mode coalesces); got:\n{contents}"
+    );
+    assert!(
+        contents.contains("NP=<>"),
+        "expected NP=<>; got:\n{contents}"
+    );
+}
+
+/// `NOTIFY_THEN_TERMINATE` without an explicit `notifyPeriodInSeconds` on
+/// a task's `onRun` surfaces the schema default of 120 seconds
+/// (Template Schemas §5.3.2). This asserts the "runtime supplies the
+/// value it would have enforced in the unwrapped case" contract from
+/// RFC 0008.
+#[tokio::test]
+async fn wrap_task_run_notify_period_defaults_to_120_when_task_omits_period() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(cancel_probe_action(&trace)),
+        None,
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    let mut inner_step = step("true", vec![]);
+    inner_step.actions.on_run.cancelation =
+        Some(openjd_model::job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: None,
+        });
+
+    let result = session
+        .run_task("test_step", &inner_step, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("MODE=<NOTIFY_THEN_TERMINATE>"),
+        "expected MODE=<NOTIFY_THEN_TERMINATE>; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("NP=<120>"),
+        "expected NP=<120> (task onRun default); got:\n{contents}"
+    );
+}
+
+/// `NOTIFY_THEN_TERMINATE` without an explicit `notifyPeriodInSeconds` on
+/// an inner environment's `onEnter` surfaces the "otherwise" default of
+/// 30 seconds (Template Schemas §5.3.2). Complements the 120-second
+/// task-onRun test above and locks in that the seed path picks the right
+/// default based on the wrapped action's position.
+#[tokio::test]
+async fn wrap_env_enter_notify_period_defaults_to_30_when_env_omits_period() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env intercepts the inner env's onEnter via onWrapEnvEnter and
+    // echoes the injected values, then keeps onWrapTaskRun as a no-op so
+    // the task's onRun still runs (unwrapped is fine for this test).
+    let env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        Some(cancel_probe_action(&trace)),
+        Some(action_with_command("true", vec![])),
+        Some(action_with_command("true", vec![])),
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env's onEnter declares NOTIFY_THEN_TERMINATE with no period.
+    let inner_on_enter = Action {
+        command: fs("inner-enter-cmd"),
+        args: Some(vec![fs("--flag")]),
+        timeout: None,
+        cancelation: Some(openjd_model::job::CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: None,
+        }),
+    };
+    let inner_env = plain_env("InnerEnv", Some(inner_on_enter), None);
+
+    session
+        .enter_environment(&inner_env, None, None, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("MODE=<NOTIFY_THEN_TERMINATE>"),
+        "expected MODE=<NOTIFY_THEN_TERMINATE>; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("NP=<30>"),
+        "expected NP=<30> (onEnter/otherwise default); got:\n{contents}"
+    );
+}

@@ -743,10 +743,26 @@ pub fn validate_format_strings(
                     errors,
                 );
             }
-            if let Some(CancelationMode::NotifyThenTerminate {
-                notify_period_in_seconds: Some(notify),
-            }) = &script.actions.on_run.cancelation
-            {
+            let (mode_fs, notify_fs) = match &script.actions.on_run.cancelation {
+                Some(CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds,
+                }) => (None, notify_period_in_seconds.as_ref()),
+                Some(CancelationMode::DeferredMode {
+                    mode,
+                    notify_period_in_seconds,
+                }) => (Some(mode), notify_period_in_seconds.as_ref()),
+                _ => (None, None),
+            };
+            if let Some(mode) = mode_fs {
+                validate_fs(
+                    mode,
+                    &step_template_symtab,
+                    &template_lib,
+                    &path_field(&action_path, "cancelation"),
+                    errors,
+                );
+            }
+            if let Some(notify) = notify_fs {
                 validate_fs(
                     notify,
                     &step_template_symtab,
@@ -1145,27 +1161,59 @@ fn validate_env_format_strings(
                 errors,
             );
         }
-        // Timeout and notifyPeriodInSeconds on every env action are plain
-        // @fmtstring (resolved at job creation, before any session exists),
-        // so they validate against the template-scope symtab.
+        // Timeout, cancelation mode (DeferredMode), and
+        // notifyPeriodInSeconds on env actions are @fmtstring fields. On
+        // the plain lifecycle actions they resolve at job creation, before
+        // any session exists, so they validate against the template-scope
+        // symtab. On the RFC 0008 wrap hooks they resolve at run time with
+        // the `WrappedAction.*` variables seeded — that is what makes
+        // round-trip forwarding (`timeout: "{{WrappedAction.Timeout}}"`,
+        // `mode: "{{WrappedAction.Cancelation.Mode}}"`) possible — so they
+        // validate against the wrapped-action scope.
+        let wrap_hook_names: [&str; 3] = ["onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit"];
         for (name, action) in script.actions.iter_named() {
             let action_path = path_field(&actions_path, name);
+            let scoped_symtab: SymbolTable;
+            let field_symtab: &SymbolTable = if wrap_hook_names.contains(&name) {
+                let mut st = template_symtab.clone();
+                add_wrapped_action_scope(&mut st);
+                scoped_symtab = st;
+                &scoped_symtab
+            } else {
+                template_symtab
+            };
             if let Some(timeout) = &action.timeout {
                 validate_fs(
                     timeout,
-                    template_symtab,
+                    field_symtab,
                     template_lib,
                     &path_field(&action_path, "timeout"),
                     errors,
                 );
             }
-            if let Some(CancelationMode::NotifyThenTerminate {
-                notify_period_in_seconds: Some(notify),
-            }) = &action.cancelation
-            {
+            let (mode_fs, notify_fs) = match &action.cancelation {
+                Some(CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds,
+                }) => (None, notify_period_in_seconds.as_ref()),
+                Some(CancelationMode::DeferredMode {
+                    mode,
+                    notify_period_in_seconds,
+                }) => (Some(mode), notify_period_in_seconds.as_ref()),
+                _ => (None, None),
+            };
+            if let Some(mode) = mode_fs {
+                validate_fs(
+                    mode,
+                    field_symtab,
+                    template_lib,
+                    &path_field(&action_path, "cancelation"),
+                    errors,
+                );
+            }
+            if let Some(notify) = notify_fs {
                 validate_fs(
                     notify,
-                    template_symtab,
+                    field_symtab,
                     template_lib,
                     &path_field(&action_path, "cancelation"),
                     errors,
@@ -1199,8 +1247,14 @@ fn validate_env_format_strings(
 /// - `WrappedAction.Command` — string
 /// - `WrappedAction.Args` — list[string]
 /// - `WrappedAction.Environment` — list[string] (entries of the form `"KEY=value"`)
-/// - `WrappedAction.Timeout` — int (seconds, or `0` when the wrapped action
-///   specified no timeout)
+/// - `WrappedAction.Timeout` — int? (seconds, or `null` when the wrapped
+///   action specified no timeout)
+/// - `WrappedAction.Cancelation.Mode` — string? (`"TERMINATE"`,
+///   `"NOTIFY_THEN_TERMINATE"`, or `null` when the wrapped action defines
+///   no `<Cancelation>`)
+/// - `WrappedAction.Cancelation.NotifyPeriodInSeconds` — int? (the
+///   effective grace period when the mode is `NOTIFY_THEN_TERMINATE`;
+///   `null` for `TERMINATE` or when no `<Cancelation>` is defined)
 ///
 /// The caller has already cloned the session symtab, so we mutate in place.
 fn add_wrapped_action_scope(symtab: &mut SymbolTable) {
@@ -1211,7 +1265,18 @@ fn add_wrapped_action_scope(symtab: &mut SymbolTable) {
             "WrappedAction.Environment",
             ExprType::list(ExprType::STRING),
         ),
-        ("WrappedAction.Timeout", ExprType::INT),
+        (
+            "WrappedAction.Timeout",
+            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]),
+        ),
+        (
+            "WrappedAction.Cancelation.Mode",
+            ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]),
+        ),
+        (
+            "WrappedAction.Cancelation.NotifyPeriodInSeconds",
+            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]),
+        ),
     ] {
         symtab.set(name, ExprValue::unresolved(ty)).expect("symtab");
     }

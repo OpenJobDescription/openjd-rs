@@ -210,14 +210,107 @@ pub struct EmbeddedFile {
 }
 
 /// §5.3 CancelationMethod — discriminated union on `mode`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+///
+/// `DeferredMode` carries a format-string `mode` (FEATURE_BUNDLE_1) whose
+/// TERMINATE-vs-NOTIFY_THEN_TERMINATE decision is made at run time, right
+/// before the action launches — see the documentation on
+/// [`crate::template::CancelationMode`] for the full "what is the problem"
+/// explanation (in short: `mode` is the schema selector, so it normally
+/// must be known at parse time, but a forwarded value like
+/// `{{WrappedAction.Cancelation.Mode}}` only exists at run time). A `null`
+/// resolution (whole-field expressions only) means the whole cancelation
+/// object is treated as never declared.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CancelationMode {
     Terminate,
-    #[serde(rename_all = "camelCase")]
     NotifyThenTerminate {
         notify_period_in_seconds: Option<FormatString>,
     },
+    DeferredMode {
+        mode: FormatString,
+        notify_period_in_seconds: Option<FormatString>,
+    },
+}
+
+// Manual serde impls: the wire shape is `{"mode": <string>, ...}` where a
+// DeferredMode's `mode` is the raw format string. A serde `tag = "mode"`
+// representation cannot express that (the tag would collide with the
+// variant's own `mode` field), so both directions are hand-written.
+impl Serialize for CancelationMode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        match self {
+            CancelationMode::Terminate => {
+                map.serialize_entry("mode", "TERMINATE")?;
+            }
+            CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds,
+            } => {
+                map.serialize_entry("mode", "NOTIFY_THEN_TERMINATE")?;
+                if let Some(n) = notify_period_in_seconds {
+                    map.serialize_entry("notifyPeriodInSeconds", n)?;
+                }
+            }
+            CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            } => {
+                map.serialize_entry("mode", mode)?;
+                if let Some(n) = notify_period_in_seconds {
+                    map.serialize_entry("notifyPeriodInSeconds", n)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CancelationMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use std::collections::HashMap;
+        let map = HashMap::<String, serde_json::Value>::deserialize(deserializer)?;
+        let mode = map
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| serde::de::Error::missing_field("mode"))?;
+        let deny_extra = |allowed: &[&str]| -> Result<(), D::Error> {
+            if let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
+                return Err(serde::de::Error::custom(format!("unknown field `{extra}`")));
+            }
+            Ok(())
+        };
+        let notify = || -> Result<Option<FormatString>, D::Error> {
+            map.get("notifyPeriodInSeconds")
+                .map(|v| FormatString::deserialize(v.clone()))
+                .transpose()
+                .map_err(serde::de::Error::custom)
+        };
+        match mode {
+            "TERMINATE" => {
+                deny_extra(&["mode"])?;
+                Ok(CancelationMode::Terminate)
+            }
+            "NOTIFY_THEN_TERMINATE" => {
+                deny_extra(&["mode", "notifyPeriodInSeconds"])?;
+                Ok(CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds: notify()?,
+                })
+            }
+            other if other.contains("{{") => {
+                deny_extra(&["mode", "notifyPeriodInSeconds"])?;
+                let mode = FormatString::deserialize(map.get("mode").unwrap().clone())
+                    .map_err(serde::de::Error::custom)?;
+                Ok(CancelationMode::DeferredMode {
+                    mode,
+                    notify_period_in_seconds: notify()?,
+                })
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "unknown variant `{other}`, expected `TERMINATE` or `NOTIFY_THEN_TERMINATE`"
+            ))),
+        }
+    }
 }
 
 /// Resolved parameter space with concrete ranges.

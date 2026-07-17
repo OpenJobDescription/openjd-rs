@@ -153,7 +153,8 @@ impl ScriptRunnerBase {
         log_subsection_banner(&self.session_id, "Phase: Running action");
         let args = resolve_action_args(action, symtab, library)?;
         let timeout = resolve_action_timeout(action, symtab, library, default_timeout)?;
-        let cancel_method = cancel_method_for_action(&action.cancelation, default_cancel_period);
+        let cancel_method =
+            cancel_method_for_action(&action.cancelation, symtab, library, default_cancel_period)?;
         let config = SubprocessConfig {
             args,
             env_vars: env_vars.clone(),
@@ -208,26 +209,140 @@ fn state_from_action(action_state: ActionState) -> ScriptRunnerState {
     }
 }
 
-/// Determine the cancel method from an action's cancelation field.
-pub(crate) fn cancel_method_for_action(
+/// An action's `<Cancelation>` with every format string resolved — the
+/// run-time counterpart of [`CancelationMode`].
+///
+/// # What is the problem this solves?
+///
+/// Format strings are normally delay-processed: the parser stores "this is
+/// a format string" and the value resolves right before the action runs.
+/// But a cancelation's `mode` is the *schema selector* — the parser needs
+/// it to know which object shape it is reading — while a forwarded value
+/// like `mode: "{{WrappedAction.Cancelation.Mode}}"` (RFC 0008 round-trip
+/// forwarding) only exists at run time. The model therefore carries such a
+/// mode as [`CancelationMode::DeferredMode`], and *this* type is where the
+/// deferred decision finally lands: right before the action launches, when
+/// the symbol table has the `WrappedAction.*` values, the mode expression
+/// resolves to `"TERMINATE"`, `"NOTIFY_THEN_TERMINATE"`, or null — and a
+/// null mode means the whole cancelation object is treated as never
+/// declared (the runtime default applies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EffectiveCancelation {
+    /// No `<Cancelation>` declared, or a deferred mode that resolved to
+    /// null. Canceled with the runtime default (terminate).
+    Undeclared,
+    Terminate,
+    NotifyThenTerminate {
+        /// `None` when the field was omitted or its whole-field expression
+        /// resolved to null — the caller applies the positional schema
+        /// default (120 for a task's onRun, 30 otherwise).
+        notify_period_seconds: Option<i64>,
+    },
+}
+
+/// Resolve an action's cancelation config against the symbol table,
+/// deciding a deferred (format-string) mode and resolving any
+/// notifyPeriodInSeconds format string to its numeric value.
+pub(crate) fn resolve_effective_cancelation(
     cancelation: &Option<CancelationMode>,
-    default_notify_period: Duration,
-) -> CancelMethod {
+    symtab: &SymbolTable,
+    library: Option<&FunctionLibrary>,
+) -> Result<EffectiveCancelation, SessionError> {
     match cancelation {
-        None | Some(CancelationMode::Terminate) => CancelMethod::Terminate,
+        None => Ok(EffectiveCancelation::Undeclared),
+        Some(CancelationMode::Terminate) => Ok(EffectiveCancelation::Terminate),
         Some(CancelationMode::NotifyThenTerminate {
             notify_period_in_seconds,
+        }) => Ok(EffectiveCancelation::NotifyThenTerminate {
+            notify_period_seconds: resolve_notify_period_seconds(
+                notify_period_in_seconds.as_ref(),
+                symtab,
+                library,
+            )?,
+        }),
+        Some(CancelationMode::DeferredMode {
+            mode,
+            notify_period_in_seconds,
         }) => {
-            let period = notify_period_in_seconds
-                .as_ref()
-                .and_then(|fs| fs.raw().parse::<u64>().ok())
-                .map(Duration::from_secs)
-                .unwrap_or(default_notify_period);
-            CancelMethod::NotifyThenTerminate {
-                terminate_delay: period,
+            let value = mode
+                .resolve_with(
+                    symtab,
+                    &openjd_expr::FormatStringOptions::new().with_library(library),
+                )
+                .map_err(|e| SessionError::FormatString {
+                    context: "cancelation mode".into(),
+                    reason: e.to_string(),
+                })?;
+            match value {
+                openjd_expr::ExprValue::Null => {
+                    // Null mode drops the ENTIRE cancelation object: mode is
+                    // the object's required discriminator, so an "omitted"
+                    // mode cannot leave a partial object behind. The action
+                    // behaves exactly as if no <Cancelation> were declared.
+                    Ok(EffectiveCancelation::Undeclared)
+                }
+                openjd_expr::ExprValue::String(s) if s == "TERMINATE" => {
+                    // Post-resolution the object must validate against the
+                    // resolved variant's shape: TERMINATE admits no notify
+                    // period, so a non-null period is an error.
+                    let period = resolve_notify_period_seconds(
+                        notify_period_in_seconds.as_ref(),
+                        symtab,
+                        library,
+                    )?;
+                    if period.is_some() {
+                        return Err(SessionError::FormatString {
+                            context: "cancelation mode".into(),
+                            reason: "mode resolved to TERMINATE, which does not accept \
+                                     notifyPeriodInSeconds"
+                                .into(),
+                        });
+                    }
+                    Ok(EffectiveCancelation::Terminate)
+                }
+                openjd_expr::ExprValue::String(s) if s == "NOTIFY_THEN_TERMINATE" => {
+                    Ok(EffectiveCancelation::NotifyThenTerminate {
+                        notify_period_seconds: resolve_notify_period_seconds(
+                            notify_period_in_seconds.as_ref(),
+                            symtab,
+                            library,
+                        )?,
+                    })
+                }
+                other => Err(SessionError::FormatString {
+                    context: "cancelation mode".into(),
+                    reason: format!(
+                        "must resolve to TERMINATE, NOTIFY_THEN_TERMINATE, or null; got {other:?}"
+                    ),
+                }),
             }
         }
     }
+}
+
+/// Determine the cancel method from an action's cancelation field,
+/// resolving format strings (a deferred mode, or a FEATURE_BUNDLE_1
+/// notifyPeriodInSeconds) against the symbol table.
+pub(crate) fn cancel_method_for_action(
+    cancelation: &Option<CancelationMode>,
+    symtab: &SymbolTable,
+    library: Option<&FunctionLibrary>,
+    default_notify_period: Duration,
+) -> Result<CancelMethod, SessionError> {
+    Ok(
+        match resolve_effective_cancelation(cancelation, symtab, library)? {
+            EffectiveCancelation::Undeclared | EffectiveCancelation::Terminate => {
+                CancelMethod::Terminate
+            }
+            EffectiveCancelation::NotifyThenTerminate {
+                notify_period_seconds,
+            } => CancelMethod::NotifyThenTerminate {
+                terminate_delay: notify_period_seconds
+                    .map(|n| Duration::from_secs(n as u64))
+                    .unwrap_or(default_notify_period),
+            },
+        },
+    )
 }
 
 /// Resolve an Action's timeout field to a Duration, falling back to a default.
@@ -239,8 +354,8 @@ pub(crate) fn resolve_action_timeout(
 ) -> Result<Option<Duration>, SessionError> {
     match &action.timeout {
         Some(fmt) => {
-            let s = fmt
-                .resolve_string_with(
+            let value = fmt
+                .resolve_with(
                     symtab,
                     &openjd_expr::FormatStringOptions::new().with_library(library),
                 )
@@ -248,20 +363,98 @@ pub(crate) fn resolve_action_timeout(
                     context: "timeout".into(),
                     reason: e.to_string(),
                 })?;
-            let secs: u64 = s.parse().map_err(|_| SessionError::FormatString {
-                context: "timeout".into(),
-                reason: format!("timeout must be a positive integer, got '{s}'"),
-            })?;
-            if secs == 0 {
-                return Err(SessionError::FormatString {
-                    context: "timeout".into(),
-                    reason: "timeout must be a positive integer, got '0'".into(),
-                });
-            }
+            let secs: u64 = match value {
+                // Whole-field expression resolved to null (e.g. forwarding
+                // `timeout: "{{WrappedAction.Timeout}}"` when the wrapped
+                // action specified no timeout): the field is treated as
+                // not provided, so the positional default applies.
+                openjd_expr::ExprValue::Null => return Ok(default),
+                openjd_expr::ExprValue::Int(n) if n > 0 => n as u64,
+                openjd_expr::ExprValue::String(ref s) => match s.parse::<u64>() {
+                    Ok(n) if n > 0 => n,
+                    _ => {
+                        return Err(SessionError::FormatString {
+                            context: "timeout".into(),
+                            reason: format!("timeout must be a positive integer, got '{s}'"),
+                        })
+                    }
+                },
+                other => {
+                    return Err(SessionError::FormatString {
+                        context: "timeout".into(),
+                        reason: format!("timeout must be a positive integer, got {other:?}"),
+                    })
+                }
+            };
             Ok(Some(Duration::from_secs(secs)))
         }
         None => Ok(default),
     }
+}
+
+/// Resolve an optional `notifyPeriodInSeconds` FormatString into an
+/// optional positive integer number of seconds.
+///
+/// Full FormatString resolution against the supplied symbol table. The
+/// field is `int?` under whole-field expression semantics (Template
+/// Schemas §5.3.2): `Ok(None)` means the field was omitted or its
+/// whole-field expression resolved to null — the caller applies the
+/// positional schema default. Zero and negative values are rejected,
+/// matching the schema's `<posinteger>` typing.
+///
+/// Used by both the WRAP_ACTIONS seed path (populating
+/// `WrappedAction.Cancelation.NotifyPeriodInSeconds` per RFC 0008) and the
+/// enforcement path (`cancel_method_for_action`), so the value a wrap
+/// script *sees* is always the value the runtime *enforces*.
+pub(crate) fn resolve_notify_period_seconds(
+    fs: Option<&openjd_model::FormatString>,
+    symtab: &SymbolTable,
+    library: Option<&FunctionLibrary>,
+) -> Result<Option<i64>, SessionError> {
+    let Some(fs) = fs else {
+        return Ok(None);
+    };
+    let value = fs
+        .resolve_with(
+            symtab,
+            &openjd_expr::FormatStringOptions::new().with_library(library),
+        )
+        .map_err(|e| SessionError::FormatString {
+            context: "notifyPeriodInSeconds".into(),
+            reason: e.to_string(),
+        })?;
+    let n: i64 = match value {
+        // Whole-field expression resolved to null: the field is treated as
+        // not provided (schema defaults apply).
+        openjd_expr::ExprValue::Null => return Ok(None),
+        openjd_expr::ExprValue::Int(n) => n,
+        openjd_expr::ExprValue::String(s) => s.parse().map_err(|_| SessionError::FormatString {
+            context: "notifyPeriodInSeconds".into(),
+            reason: format!("notifyPeriodInSeconds must be a positive integer, got '{s}'"),
+        })?,
+        other => {
+            return Err(SessionError::FormatString {
+                context: "notifyPeriodInSeconds".into(),
+                reason: format!("notifyPeriodInSeconds must be a positive integer, got {other:?}"),
+            })
+        }
+    };
+    if n <= 0 {
+        return Err(SessionError::FormatString {
+            context: "notifyPeriodInSeconds".into(),
+            reason: format!("notifyPeriodInSeconds must be positive, got '{n}'"),
+        });
+    }
+    // Mirror the static validator's cap on literal values (Template
+    // Schemas §5.3.2 maximum: 600): format-string values could not be
+    // checked at parse time, so the resolved value is bounds-checked here.
+    if n > 600 {
+        return Err(SessionError::FormatString {
+            context: "notifyPeriodInSeconds".into(),
+            reason: format!("notifyPeriodInSeconds must not exceed 600, got '{n}'"),
+        });
+    }
+    Ok(Some(n))
 }
 
 /// Resolve an Action's command and args into a flat argument list.
@@ -340,6 +533,47 @@ mod tests {
             }
             .to_string(),
             "NotifyThenTerminate(30s)"
+        );
+    }
+
+    fn fs(s: &str) -> openjd_model::FormatString {
+        openjd_model::FormatString::new(s).unwrap()
+    }
+
+    #[test]
+    fn notify_period_resolves_literal_and_bounds() {
+        let symtab = SymbolTable::default();
+        // In-range values resolve.
+        assert_eq!(
+            resolve_notify_period_seconds(Some(&fs("45")), &symtab, None).unwrap(),
+            Some(45)
+        );
+        // Omitted field is None.
+        assert_eq!(
+            resolve_notify_period_seconds(None, &symtab, None).unwrap(),
+            None
+        );
+        // The Template Schemas §5.3.2 cap applies to resolved values just
+        // as the static validator applies it to literals: format-string
+        // values could not be checked at parse time.
+        let err = resolve_notify_period_seconds(Some(&fs("9999")), &symtab, None).unwrap_err();
+        assert!(
+            err.to_string().contains("must not exceed 600"),
+            "expected cap error; got: {err}"
+        );
+        // Non-positive values are rejected.
+        assert!(resolve_notify_period_seconds(Some(&fs("0")), &symtab, None).is_err());
+    }
+
+    #[test]
+    fn notify_period_whole_field_null_is_none() {
+        let mut symtab = SymbolTable::default();
+        symtab
+            .set("X", openjd_expr::ExprValue::Null)
+            .expect("symtab");
+        assert_eq!(
+            resolve_notify_period_seconds(Some(&fs("{{X}}")), &symtab, None).unwrap(),
+            None
         );
     }
 }

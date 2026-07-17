@@ -765,3 +765,177 @@ fn wrap_actions_without_expr_extension_rejected_in_job_template() {
         &["WRAP_ACTIONS requires EXPR"],
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// Cancelation round-trip forwarding (PR #261 review, discussion
+// r3597453516). A wrap hook must be able to forward the wrapped
+// action's cancelation verbatim via whole-field expressions:
+//
+//     cancelation:
+//       mode: "{{WrappedAction.Cancelation.Mode}}"
+//       notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+//
+// Under RFC 0005 type-forwarding, a single outer {{...}} forwards the
+// expression's type into the field: a string mode behaves like the
+// literal, and a null result means the field is omitted (a null mode
+// drops the whole cancelation object; a null period falls back to the
+// schema default).
+//
+// Note: Mark's example also forwards `timeout:`; that is deliberately
+// out of scope here pending the WrappedAction.Timeout int-vs-int?
+// question (the 0-when-unset sentinel is not a valid <posinteger>).
+// ════════════════════════════════════════════════════════════════════
+
+const ROUND_TRIP_EXTS: &[&str] = &["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"];
+
+#[test]
+fn cancelation_round_trip_forwarding_accepted() {
+    // Mark's example from the PR #261 review thread (minus timeout):
+    // the whole-field expressions in the wrap hook's cancelation block
+    // must parse and validate.
+    expect_env_ok(
+        r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ROUND_TRIP_EXTS,
+    );
+}
+
+#[test]
+fn cancelation_round_trip_notify_period_only_accepted() {
+    // The narrower forward: a literal mode with only the notify period
+    // forwarded. notifyPeriodInSeconds is already @fmtstring under
+    // FEATURE_BUNDLE_1; the whole-field expression is int? and a null
+    // result must drop the field (schema default applies).
+    expect_env_ok(
+        r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: NOTIFY_THEN_TERMINATE
+          notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ROUND_TRIP_EXTS,
+    );
+}
+
+#[test]
+fn cancelation_fmtstring_mode_requires_feature_bundle_1() {
+    // The format-string mode form is gated on FEATURE_BUNDLE_1 (Template
+    // Schemas §5.3); with only WRAP_ACTIONS + EXPR it must be rejected.
+    expect_env_err(
+        r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{WrappedAction.Cancelation.Mode}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        WRAP_EXTS,
+        &["FEATURE_BUNDLE_1"],
+    );
+}
+
+#[test]
+fn cancelation_fmtstring_mode_with_trailing_text_rejected() {
+    // "{{X}}Y}}" contains an unbalanced trailing "}}", which the
+    // expression parser rejects ("Missing opening braces") — a malformed
+    // format string is invalid in `mode` just as in any other @fmtstring
+    // field.
+    expect_env_err(
+        r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{WrappedAction.Cancelation.Mode}}Y}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ROUND_TRIP_EXTS,
+        &["Missing opening braces"],
+    );
+}
+
+#[test]
+fn cancelation_partial_fmtstring_mode_accepted() {
+    // A format-string mode gets normal format string behavior (Template
+    // Schemas §5.3): partial interpolation is statically valid, and the
+    // resolved value is checked against the two mode names at run time.
+    // Only a whole-field expression additionally gets string? null
+    // semantics (a null result drops the cancelation object).
+    expect_env_ok(
+        r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: "TERMIN{{WrappedAction.Cancelation.Mode}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ROUND_TRIP_EXTS,
+    );
+}

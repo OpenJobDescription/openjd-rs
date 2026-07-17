@@ -459,10 +459,32 @@ fn validate_action(
             }
         }
     }
-    if let Some(CancelationMode::NotifyThenTerminate {
-        notify_period_in_seconds: Some(period),
-    }) = &action.cancelation
-    {
+    // A format-string `mode` (CancelationMode::DeferredMode) defers the
+    // TERMINATE-vs-NOTIFY_THEN_TERMINATE decision to run time. It is gated
+    // on FEATURE_BUNDLE_1 (the same extension that admits format strings
+    // into the other literal-typed Action fields). Any format string is
+    // permitted; the resolved value must be one of the two mode names at
+    // run time (Template Schemas §5.3), with whole-field expressions
+    // additionally allowed to resolve to null (dropping the object).
+    if let Some(CancelationMode::DeferredMode { .. }) = &action.cancelation {
+        if !rules.allow_fmtstring_in_numeric_fields {
+            errors.add(
+                path,
+                "a format string in cancelation mode requires the FEATURE_BUNDLE_1 extension.",
+            );
+        }
+    }
+    let notify_period = match &action.cancelation {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: Some(period),
+        }) => Some(period),
+        Some(CancelationMode::DeferredMode {
+            notify_period_in_seconds: Some(period),
+            ..
+        }) => Some(period),
+        _ => None,
+    };
+    if let Some(period) = notify_period {
         let raw = period.raw().trim();
         if !period.has_complex_expressions() && !raw.contains("{{") {
             match raw.parse::<i64>() {
