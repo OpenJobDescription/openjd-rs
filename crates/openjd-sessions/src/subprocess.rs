@@ -237,13 +237,13 @@ mod platform {
         }
     }
 
-    /// Get child PIDs of a process using CreateToolhelp32Snapshot.
-    fn get_child_pids(parent_pid: u32) -> Vec<u32> {
+    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass.
+    fn snapshot_process_parents() -> Vec<(u32, u32)> {
         use windows::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
             TH32CS_SNAPPROCESS,
         };
-        let mut children = Vec::new();
+        let mut pairs = Vec::new();
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if let Ok(snap) = snap {
@@ -253,9 +253,7 @@ mod platform {
                 };
                 if Process32FirstW(snap, &mut entry).is_ok() {
                     loop {
-                        if entry.th32ParentProcessID == parent_pid {
-                            children.push(entry.th32ProcessID);
-                        }
+                        pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
                         if Process32NextW(snap, &mut entry).is_err() {
                             break;
                         }
@@ -264,25 +262,46 @@ mod platform {
                 let _ = CloseHandle(snap);
             }
         }
-        children
+        pairs
     }
 
     /// Kill a process tree: collect all descendants, then kill leaf-to-root.
     /// Mirrors Python's `_windows_process_killer.py`.
     fn kill_process_tree(root_pid: u32) {
-        let mut to_kill = Vec::new();
-        collect_tree(root_pid, &mut to_kill);
-        // Kill in reverse order (children first)
+        // Kill in reverse order (children first): breadth-first order lists
+        // every parent before its children, so the reverse kills leaves
+        // before their ancestors.
+        let to_kill = collect_tree(root_pid);
         for &pid in to_kill.iter().rev() {
             kill_process(pid);
         }
     }
 
-    fn collect_tree(pid: u32, result: &mut Vec<u32>) {
-        result.push(pid);
-        for child in get_child_pids(pid) {
-            collect_tree(child, result);
+    /// Collect the process tree rooted at `root_pid` in breadth-first order.
+    ///
+    /// Walks a single toolhelp snapshot with a visited set instead of
+    /// recursing with a fresh snapshot per level. Both details matter:
+    /// `th32ParentProcessID` is recorded at child creation time, so PID
+    /// reuse can make the recorded parent graph cyclic (a dead ancestor's
+    /// PID reused by a descendant). The previous recursive implementation
+    /// had no cycle guard and overflowed the thread's stack (0xc00000fd)
+    /// when it hit such a cycle.
+    fn collect_tree(root_pid: u32) -> Vec<u32> {
+        use std::collections::HashSet;
+        let parents = snapshot_process_parents();
+        let mut result = vec![root_pid];
+        let mut seen: HashSet<u32> = HashSet::from([root_pid]);
+        let mut i = 0;
+        while i < result.len() {
+            let pid = result[i];
+            i += 1;
+            for &(child, ppid) in &parents {
+                if ppid == pid && seen.insert(child) {
+                    result.push(child);
+                }
+            }
         }
+        result
     }
 
     /// Terminate: kill the entire process tree.
