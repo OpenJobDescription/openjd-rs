@@ -175,11 +175,22 @@ pub enum CancelationMode {
     NotifyThenTerminate {
         notify_period_in_seconds: Option<FormatString>,
     },
+    DeferredMode {
+        mode: FormatString,
+        notify_period_in_seconds: Option<FormatString>,
+    },
 }
 ```
 
-`CancelationMode` is an enum (same pattern as the template side), serialized with
-`#[serde(tag = "mode", rename_all = "SCREAMING_SNAKE_CASE")]`.
+`CancelationMode` is an enum (same pattern as the template side — see
+[template-types.md](template-types.md#cancelationmode) for the `DeferredMode`
+rationale) with hand-written serde impls. The wire shape is
+`{"mode": <string>, ...}`; a derived `#[serde(tag = "mode")]` representation
+cannot express `DeferredMode`, whose tag position holds the raw format string
+itself. Serialization omits `notifyPeriodInSeconds` when unset; deserialization
+accepts an explicit `null` as unset for backward compatibility with documents
+written by the previous derived impl (which always wrote
+`"notifyPeriodInSeconds": null`).
 
 ### StepParameterSpace
 

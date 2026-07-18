@@ -167,11 +167,62 @@ pub enum CancelationMode {
     NotifyThenTerminate {
         notify_period_in_seconds: Option<FormatString>,
     },
+    DeferredMode {
+        mode: FormatString,
+        notify_period_in_seconds: Option<FormatString>,
+    },
 }
 ```
 
 The `Terminate` variant rejects any extra fields. The `NotifyThenTerminate` variant
-accepts an optional `notifyPeriodInSeconds` field.
+accepts an optional `notifyPeriodInSeconds` field. An explicit JSON/YAML `null` for
+`notifyPeriodInSeconds` is treated the same as omitting the field, matching the
+Python implementation (pydantic `Optional`).
+
+#### DeferredMode: why the mode decision can be deferred
+
+Format strings in general are already delay-processed: when a template says
+`args: ["{{WrappedAction.Command}}"]`, the parser just stores "this is a format
+string" and the value gets resolved much later, inside a running session, right
+before the action launches — that's when the runtime seeds the `WrappedAction.*`
+variables from the action being wrapped. "Resolve later" is the normal pipeline
+for every other field.
+
+`mode` is different because it isn't a normal value field — it's the *schema
+selector*. The parser needs to know TERMINATE vs NOTIFY_THEN_TERMINATE at parse
+time to decide what shape of object it's even reading (only one of them allows
+`notifyPeriodInSeconds`). So the "which shape?" decision happens at parse time,
+but a forwarded value like `mode: "{{WrappedAction.Cancelation.Mode}}"` only
+exists at run time — that mismatch made round-trip cancelation forwarding in
+RFC 0008 wrap hooks impossible (the parser rejected the template with "unknown
+variant").
+
+`DeferredMode` resolves the mismatch: the parser accepts a format string in
+`mode` as a third, "decided later" state (gated on the FEATURE_BUNDLE_1
+extension), and the shape decision moves to resolution time, right before the
+action runs:
+
+1. The runtime seeds `WrappedAction.Cancelation.Mode` from the wrapped action
+   (`"TERMINATE"`, `"NOTIFY_THEN_TERMINATE"`, or null).
+2. It resolves the `mode:` expression against that.
+3. `"TERMINATE"`/`"NOTIFY_THEN_TERMINATE"` — the cancelation block now acts as
+   that method, and its sibling fields are validated against that shape. Null
+   (whole-field expressions only) — the whole `cancelation:` block is treated
+   as never written. Anything else — the action fails.
+
+Static validation is *not* deferred: at parse time the validator still checks
+the expression is well-formed and that `WrappedAction.*` is only referenced
+inside wrap hooks. Any format string is accepted — normal interpolation like
+`"{{Prefix}}_THEN_TERMINATE"` is permitted; only the resolved value is
+constrained. You just can't know *which* of the two modes it'll be until the
+wrapped action is in front of you — which is inherent to forwarding: the same
+wrap environment gets reused across many steps whose cancelation settings
+differ.
+
+The run-time resolution lives in `openjd-sessions`
+(`resolve_effective_cancelation` in `runner/mod.rs`). See openjd-specifications
+Template Schemas §5.3 and RFC 0008 "Cancelation behavior" for the normative
+rules.
 
 ## StepScript (§3.5)
 

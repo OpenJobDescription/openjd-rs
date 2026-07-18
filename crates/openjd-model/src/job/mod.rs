@@ -213,13 +213,12 @@ pub struct EmbeddedFile {
 ///
 /// `DeferredMode` carries a format-string `mode` (FEATURE_BUNDLE_1) whose
 /// TERMINATE-vs-NOTIFY_THEN_TERMINATE decision is made at run time, right
-/// before the action launches — see the documentation on
-/// [`crate::template::CancelationMode`] for the full "what is the problem"
-/// explanation (in short: `mode` is the schema selector, so it normally
-/// must be known at parse time, but a forwarded value like
-/// `{{WrappedAction.Cancelation.Mode}}` only exists at run time). A `null`
-/// resolution (whole-field expressions only) means the whole cancelation
-/// object is treated as never declared.
+/// before the action launches (in short: `mode` is the schema selector,
+/// so it normally must be known at parse time, but a forwarded value like
+/// `{{WrappedAction.Cancelation.Mode}}` only exists at run time — see
+/// `specs/model/template-types.md` § CancelationMode for the full design
+/// rationale). A `null` resolution (whole-field expressions only) means
+/// the whole cancelation object is treated as never declared.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CancelationMode {
     Terminate,
@@ -270,18 +269,25 @@ impl<'de> Deserialize<'de> for CancelationMode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use std::collections::HashMap;
         let map = HashMap::<String, serde_json::Value>::deserialize(deserializer)?;
-        let mode = map
+        let mode_value = map
             .get("mode")
-            .and_then(|v| v.as_str())
             .ok_or_else(|| serde::de::Error::missing_field("mode"))?;
+        let mode = mode_value
+            .as_str()
+            .ok_or_else(|| serde::de::Error::custom("`mode` must be a string"))?;
         let deny_extra = |allowed: &[&str]| -> Result<(), D::Error> {
             if let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
                 return Err(serde::de::Error::custom(format!("unknown field `{extra}`")));
             }
             Ok(())
         };
+        // An explicit null is treated as "not provided": the previous
+        // derived impl serialized an unset period as
+        // `"notifyPeriodInSeconds": null`, so documents written by released
+        // versions must read back as None rather than failing.
         let notify = || -> Result<Option<FormatString>, D::Error> {
             map.get("notifyPeriodInSeconds")
+                .filter(|v| !v.is_null())
                 .map(|v| FormatString::deserialize(v.clone()))
                 .transpose()
                 .map_err(serde::de::Error::custom)
@@ -299,7 +305,7 @@ impl<'de> Deserialize<'de> for CancelationMode {
             }
             other if other.contains("{{") => {
                 deny_extra(&["mode", "notifyPeriodInSeconds"])?;
-                let mode = FormatString::deserialize(map.get("mode").unwrap().clone())
+                let mode = FormatString::deserialize(mode_value.clone())
                     .map_err(serde::de::Error::custom)?;
                 Ok(CancelationMode::DeferredMode {
                     mode,

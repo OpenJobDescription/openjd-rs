@@ -31,6 +31,8 @@ mod test_expr_parameters;
 mod test_feature_bundle_1;
 #[path = "integration/test_host_requirements.rs"]
 mod test_host_requirements;
+#[path = "integration/test_job_cancelation_serde.rs"]
+mod test_job_cancelation_serde;
 #[path = "integration/test_job_eq_hash.rs"]
 mod test_job_eq_hash;
 #[path = "integration/test_job_parameters.rs"]

@@ -96,6 +96,16 @@ fn test_action_cancel_notify_as_string() {
 }
 
 #[test]
+fn test_action_cancel_notify_explicit_null_is_unset() {
+    // An explicit null is treated as "not provided" (the schema default
+    // applies at run time), matching the Python implementation, which
+    // accepts an explicit null for any pydantic Optional field.
+    decode_ok(&job_with_action(
+        r#"{"command": "foo", "cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": null}}"#,
+    ));
+}
+
+#[test]
 fn test_action_arg_empty_string() {
     decode_ok(&job_with_action(r#"{"command": "foo", "args": [""]}"#));
 }
