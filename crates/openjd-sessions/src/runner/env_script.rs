@@ -25,7 +25,12 @@ use crate::session_user::SessionUser;
 use crate::subprocess::SubprocessResult;
 
 /// Default timeout for environment exit actions (5 minutes), matching Python's _ENV_EXIT_DEFAULT_TIMEOUT.
-const ENV_EXIT_DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+///
+/// `pub(crate)` because the session's RFC 0008 wrap dispatch applies the
+/// same default to `onWrapEnvExit` (Template Schemas §5 timeout defaults
+/// table assigns the wrap-exit hook the same 300-second default as
+/// `onExit`, so sessions always tear down in bounded time).
+pub(crate) const ENV_EXIT_DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub struct EnvironmentScriptRunner {
     base: ScriptRunnerBase,

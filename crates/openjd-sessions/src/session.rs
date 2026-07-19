@@ -1091,6 +1091,27 @@ impl Session {
             });
         }
 
+        // RFC 0008 single-layer rule: at most one environment in the session
+        // stack may define any wrap hook. The model-level validator enforces
+        // this within a single job template, but environments supplied
+        // separately (external environment templates, worker-agent-injected
+        // environments) can only be checked here — at enter time, before any
+        // state for the new environment is recorded, so the session stays
+        // Ready and no cleanup is owed for the rejected environment. This
+        // mirrors the Python runtime's check in Session.enter_environment.
+        if env_has_any_wrap_hook(env) {
+            for entered_id in &self.environments_entered {
+                if let Some(existing) = self.environments.get(entered_id) {
+                    if env_has_any_wrap_hook(existing) {
+                        return Err(SessionError::MultipleWrapEnvironments {
+                            existing: existing.name.clone(),
+                            entering: env.name.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
         let symtab = self.build_symbol_table(None, resolved_symtab)?;
 
         let identifier = match identifier {
@@ -1466,13 +1487,19 @@ impl Session {
             // non-Send `Option<HANDLE>` across an await on Windows).
             let runner_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _>>> =
                 match wrap_action.as_ref() {
+                    // RFC 0008 / Template Schemas §5 defaults table: the
+                    // substituted onWrapEnvExit gets the same 300-second
+                    // default timeout as the onExit it replaces, so a hung
+                    // wrap-exit script cannot block session teardown
+                    // indefinitely. (The enter path correctly passes None —
+                    // onEnter/onWrapEnvEnter have no default timeout.)
                     Some((_, action)) => Box::pin(runner.run_wrap_action(
                         action,
                         &action_symtab,
                         Some(&lib),
                         &env_vars,
                         tx,
-                        None,
+                        Some(crate::runner::env_script::ENV_EXIT_DEFAULT_TIMEOUT),
                     )),
                     None => Box::pin(runner.exit(&env, &action_symtab, Some(&lib), &env_vars, tx)),
                 };

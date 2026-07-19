@@ -3301,3 +3301,65 @@ mod python_compat {
         );
     }
 }
+
+// ============================================================
+// Group: RFC 0008 wrap actions (session-level rules + env params)
+// ============================================================
+
+mod wrap_actions {
+    use super::*;
+
+    /// RFC 0008 review finding F11: a wrap environment template's own
+    /// `parameterDefinitions` must resolve inside its wrap hooks. The CLI
+    /// converts env-template environments with the preprocessed parameter
+    /// symtab so the frozen `resolved_symtab` carries `Param.*` values the
+    /// hooks reference; `Session::run_task`'s step-filtered symbol table
+    /// cannot supply them.
+    #[test]
+    fn test_run_wrap_env_template_parameters_resolve_in_hooks() {
+        let tdir = templates_dir();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("wrap_simple_job.yaml").to_str().unwrap(),
+            "--env",
+            tdir.join("wrap_env_with_param.yaml").to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "should succeed. stderr: {stderr}");
+        assert!(
+            stdout.contains("WrapParam Task FROM_ENV_PARAM"),
+            "wrap hook must resolve the env template's own parameter. stdout: {stdout}"
+        );
+        assert!(
+            !stdout.contains("TaskBody Ran"),
+            "the wrapped task body must be replaced by the wrap hook. stdout: {stdout}"
+        );
+    }
+
+    /// RFC 0008 review finding F8: the single-layer rule must hold across
+    /// separately-supplied environment templates. The model validator can
+    /// only see one template at a time, so the session rejects the second
+    /// wrap-defining environment at enter time, before running anything
+    /// under it.
+    #[test]
+    fn test_run_two_wrap_env_templates_rejected() {
+        let tdir = templates_dir();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("wrap_simple_job.yaml").to_str().unwrap(),
+            "--env",
+            tdir.join("wrap_env_with_param.yaml").to_str().unwrap(),
+            "--env",
+            tdir.join("wrap_env_second.yaml").to_str().unwrap(),
+        ]);
+        assert_ne!(code, 0, "two wrap env templates must fail the run");
+        let combined = format!("{stdout}\n{stderr}");
+        assert!(
+            combined.contains("at most one Environment defining wrap hooks"),
+            "expected the RFC 0008 single-layer rejection; got:\n{combined}"
+        );
+        assert!(
+            !stdout.contains("WrapB Task") && !stdout.contains("TaskBody Ran"),
+            "no task may run in a session with two wrap layers. stdout: {stdout}"
+        );
+    }
+}

@@ -294,7 +294,18 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         job.name
     );
 
-    // Enter environment template environments
+    // Enter environment template environments.
+    //
+    // Convert with the preprocessed parameter symbol table so each
+    // environment's frozen `resolved_symtab` carries the Param.*/RawParam.*
+    // values its own format strings reference (preprocess_job_parameters
+    // already merged the environment templates' parameterDefinitions into
+    // `param_values`). Without this, actions resolved against a
+    // step-filtered symbol table — the RFC 0008 wrap hooks dispatched from
+    // `Session::run_task` — cannot see the environment template's own
+    // parameters and fail with "Undefined variable".
+    let env_template_symtab = openjd_model::build_symbol_table(&param_values)
+        .map_err(|e| format!("Failed to build environment template symbol table: {e}"))?;
     for et in &env_templates {
         println!("{}\t", fmt_elapsed(&session_start));
         println!(
@@ -310,7 +321,10 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
             "{}\t==============================================",
             fmt_elapsed(&session_start)
         );
-        let job_env = openjd_model::convert_environment(&et.environment);
+        let job_env = openjd_model::convert_environment_with_symtab(
+            &et.environment,
+            Some(&env_template_symtab),
+        );
         let _out = session
             .enter_environment(&job_env, None, None, None)
             .await

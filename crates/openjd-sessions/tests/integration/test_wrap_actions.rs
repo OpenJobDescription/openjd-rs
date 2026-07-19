@@ -800,3 +800,215 @@ async fn wrap_env_enter_notify_period_defaults_to_30_when_env_omits_period() {
         "expected NP=<30> (onEnter/otherwise default); got:\n{contents}"
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// RFC 0008 single-layer rule (session-level)
+// ────────────────────────────────────────────────────────────────────
+
+/// RFC 0008: "A session MUST have at most one wrapping environment.
+/// Schedulers MUST reject sessions whose stack contains two or more
+/// environments that define any wrap hook, before entering any
+/// environment." The model validator enforces this within one job
+/// template; environments supplied separately (external environment
+/// templates) can only be caught at enter time. The rejection must
+/// happen before any state is recorded for the second environment, so
+/// the session remains fully usable with the first wrap env.
+#[tokio::test]
+async fn entering_second_wrap_env_rejected_and_session_stays_usable() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let mark = |label: &str| -> String { format!(r#"echo "{label}" >> '{}'"#, trace.display()) };
+    let wrap_task = |label: &str| -> Action {
+        Action {
+            command: fs("bash"),
+            args: Some(vec![fs("-c"), fs(&mark(label))]),
+            timeout: None,
+            cancelation: None,
+        }
+    };
+
+    let wrap_a = wrap_env(
+        "WrapA",
+        action_with_command("true", vec![]),
+        Some(wrap_task("[a-enter]")),
+        Some(wrap_task("[a-task]")),
+        Some(wrap_task("[a-exit]")),
+    );
+    let a_id = session
+        .enter_environment(&wrap_a, None, None, None)
+        .await
+        .unwrap();
+
+    let wrap_b = wrap_env(
+        "WrapB",
+        action_with_command("true", vec![]),
+        Some(wrap_task("[b-enter]")),
+        Some(wrap_task("[b-task]")),
+        Some(wrap_task("[b-exit]")),
+    );
+    let err = session
+        .enter_environment(&wrap_b, None, None, None)
+        .await
+        .expect_err("entering a second wrap-defining environment must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("at most one Environment defining wrap hooks"),
+        "unexpected error message: {msg}"
+    );
+    assert!(
+        msg.contains("WrapA") && msg.contains("WrapB"),
+        "error should name both environments: {msg}"
+    );
+
+    // The rejected environment must leave no trace: WrapB is not entered,
+    // and the session is still Ready — a task runs (wrapped by WrapA) and
+    // WrapA exits cleanly.
+    assert_eq!(session.environments_entered().len(), 1);
+    let task = step("bash", vec!["-c", &mark("task-body")]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+    session
+        .exit_environment(&a_id, None, true, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[a-task]"),
+        "task must be wrapped by WrapA after the rejected enter; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("[b-task]") && !contents.contains("[b-enter]"),
+        "the rejected WrapB must never run any hook; got:\n{contents}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Wrap env's own frozen symtab (environment template parameters)
+// ────────────────────────────────────────────────────────────────────
+
+/// A wrap environment converted from an environment template carries its
+/// own `parameterDefinitions` values in its frozen `resolved_symtab`
+/// (`convert_environment_with_symtab`). The wrap dispatch merges that
+/// symtab before resolving the hook, so `{{Param.X}}` in a wrap hook
+/// resolves even when the wrapped step's own symbol table does not
+/// contain the parameter. Regression test for the wrap-env-parameters
+/// gap found in the RFC 0008 review (audit finding F11).
+#[tokio::test]
+async fn wrap_env_resolved_symtab_params_available_in_wrap_hooks() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // The wrap env's own parameter, frozen at conversion time — exactly
+    // what openjd-cli now produces via convert_environment_with_symtab.
+    let mut env_param_symtab = openjd_expr::SymbolTable::new();
+    env_param_symtab
+        .set(
+            "Param.Prefix",
+            openjd_expr::ExprValue::String("FROM_ENV_PARAM".into()),
+        )
+        .unwrap();
+
+    let wrap_task_script = format!(
+        r#"echo "[wrap-task] prefix={{{{Param.Prefix}}}}" >> '{}'"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let mut env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    env.resolved_symtab = Some(openjd_expr::SerializedSymbolTable::from_symtab(
+        &env_param_symtab,
+    ));
+
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    // The step knows nothing about Param.Prefix: run_task is called with
+    // no task parameters and no resolved symtab, mirroring a plain job.
+    let task = step("true", vec![]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[wrap-task] prefix=FROM_ENV_PARAM"),
+        "wrap hook must resolve the wrap env's own Param.* from its frozen \
+         resolved_symtab; got:\n{contents}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Wrap-hook default timeouts
+// ────────────────────────────────────────────────────────────────────
+
+/// `run_wrap_action` enforces the caller-supplied default timeout when the
+/// wrap action declares none. The session's exit dispatch relies on this
+/// to give a substituted `onWrapEnvExit` the same 300-second default as
+/// the `onExit` it replaces (Template Schemas §5 timeout defaults table);
+/// the constant itself is too long to observe in a test, so this pins the
+/// mechanism with a short duration.
+#[tokio::test]
+async fn run_wrap_action_applies_default_timeout_when_action_has_none() {
+    use openjd_sessions::runner::env_script::EnvironmentScriptRunner;
+
+    let tmp = TempDir::new().unwrap();
+    let files_dir = tmp.path().join("files");
+    std::fs::create_dir_all(&files_dir).unwrap();
+
+    let mut runner = EnvironmentScriptRunner::new(
+        "wrap-timeout-test",
+        tmp.path().to_path_buf(),
+        files_dir,
+        None,
+    );
+
+    // No timeout on the action itself: the default must bound it.
+    let action = action_with_command("sh", vec!["-c", "sleep 30"]);
+    let symtab = openjd_expr::SymbolTable::new();
+    let env_vars = std::collections::HashMap::new();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let started = std::time::Instant::now();
+    let result = runner
+        .run_wrap_action(
+            &action,
+            &symtab,
+            None,
+            &env_vars,
+            tx,
+            Some(std::time::Duration::from_millis(500)),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.state,
+        ActionState::Timeout,
+        "a wrap action without its own timeout must be bounded by the default"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "timeout must fire at the default, not wait for the subprocess"
+    );
+}

@@ -707,11 +707,25 @@ fn collect_env_action_refs(
         if let Some(t) = &action.timeout {
             t.copy_used_symtab_values(full, filtered);
         }
-        if let Some(job::CancelationMode::NotifyThenTerminate {
-            notify_period_in_seconds: Some(n),
-        }) = &action.cancelation
-        {
-            n.copy_used_symtab_values(full, filtered);
+        match &action.cancelation {
+            Some(job::CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds: Some(n),
+            }) => n.copy_used_symtab_values(full, filtered),
+            // A deferred (format-string) cancelation mode and its period are
+            // resolved at run time; their referenced symbols must survive the
+            // filter or resolution fails with "Undefined variable". Keep in
+            // sync with collect_env_accessed_symbols below, which collects
+            // the same fields for the RawParam.* fallback pass.
+            Some(job::CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            }) => {
+                mode.copy_used_symtab_values(full, filtered);
+                if let Some(n) = notify_period_in_seconds {
+                    n.copy_used_symtab_values(full, filtered);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -761,11 +775,25 @@ fn collect_env_accessed_symbols(env: &job::Environment) -> std::collections::Has
             if let Some(t) = &action.timeout {
                 symbols.extend(t.accessed_symbols());
             }
-            if let Some(job::CancelationMode::NotifyThenTerminate {
-                notify_period_in_seconds: Some(n),
-            }) = &action.cancelation
-            {
-                symbols.extend(n.accessed_symbols());
+            match &action.cancelation {
+                Some(job::CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds: Some(n),
+                }) => symbols.extend(n.accessed_symbols()),
+                // Deferred (format-string) cancelation fields resolve at run
+                // time; their symbols feed include_raw_param_fallbacks so a
+                // PATH/LIST[PATH] Param.* referenced only here still gets its
+                // RawParam.* fallback in the filtered symtab. Keep in sync
+                // with collect_env_action_refs above.
+                Some(job::CancelationMode::DeferredMode {
+                    mode,
+                    notify_period_in_seconds,
+                }) => {
+                    symbols.extend(mode.accessed_symbols());
+                    if let Some(n) = notify_period_in_seconds {
+                        symbols.extend(n.accessed_symbols());
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(files) = &es.embedded_files {

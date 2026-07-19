@@ -939,3 +939,171 @@ environment:
         ROUND_TRIP_EXTS,
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// Environment-template conversion — frozen symtab for wrap hooks
+// ════════════════════════════════════════════════════════════════════
+
+/// `convert_environment_with_symtab` must retain symbols referenced only
+/// by the RFC 0008 wrap hooks (not just onEnter/onExit) in the frozen
+/// `resolved_symtab`, including references from a deferred (format-string)
+/// cancelation mode and its notify period. This is what lets a wrap
+/// environment template's own `parameterDefinitions` resolve inside its
+/// hooks at run time (audit finding F11): the session's wrap dispatch
+/// merges this frozen symtab before resolving the hook.
+#[test]
+fn convert_env_with_symtab_retains_wrap_hook_and_deferred_cancelation_refs() {
+    let env_template = decode_environment_template(
+        yaml_val(
+            r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+parameterDefinitions:
+- name: Prefix
+  type: STRING
+  default: FROM_ENV_PARAM
+- name: CancelMode
+  type: STRING
+  default: TERMINATE
+- name: Grace
+  type: INT
+  default: 45
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{Param.Prefix}} {{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{Param.CancelMode}}"
+          notifyPeriodInSeconds: "{{Param.Grace}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ),
+        Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+    )
+    .expect("env template should decode");
+
+    // The full symtab a runner would build from preprocessed parameters.
+    let mut full = openjd_expr::SymbolTable::new();
+    for (key, value) in [
+        ("Param.Prefix", "FROM_ENV_PARAM"),
+        ("Param.CancelMode", "TERMINATE"),
+        ("Param.Unrelated", "NOISE"),
+    ] {
+        full.set(key, openjd_expr::ExprValue::String(value.into()))
+            .expect("set should succeed");
+    }
+    full.set("Param.Grace", openjd_expr::ExprValue::Int(45))
+        .expect("set should succeed");
+
+    let converted =
+        openjd_model::convert_environment_with_symtab(&env_template.environment, Some(&full));
+    let frozen = converted
+        .resolved_symtab
+        .expect("conversion with a symtab must produce a frozen resolved_symtab");
+    let st = frozen
+        .to_symtab(openjd_expr::path_mapping::PathFormat::host())
+        .expect("frozen symtab should deserialize");
+
+    // Referenced only by onWrapTaskRun's args: must survive the filter.
+    assert_eq!(
+        st.get_value("Param.Prefix"),
+        Some(&openjd_expr::ExprValue::String("FROM_ENV_PARAM".into())),
+        "wrap-hook arg references must be retained"
+    );
+    // Referenced only by the deferred cancelation mode / period.
+    assert_eq!(
+        st.get_value("Param.CancelMode"),
+        Some(&openjd_expr::ExprValue::String("TERMINATE".into())),
+        "deferred cancelation mode references must be retained"
+    );
+    assert_eq!(
+        st.get_value("Param.Grace"),
+        Some(&openjd_expr::ExprValue::Int(45)),
+        "deferred cancelation notify-period references must be retained"
+    );
+    // Not referenced anywhere: the filter must drop it.
+    assert!(
+        st.get_value("Param.Unrelated").is_none(),
+        "unreferenced symbols must be filtered out of the frozen symtab"
+    );
+}
+
+/// `include_raw_param_fallbacks` copies `RawParam.X` into the frozen
+/// symtab for every *accessed* `Param.X` that is absent from the full
+/// symtab (the mechanism that lets host-context PATH parameters resolve
+/// at session time from their raw value). The accessed-symbol collection
+/// feeding that pass (`collect_env_accessed_symbols`) must include the
+/// deferred (format-string) cancelation mode/period — matching
+/// `collect_env_action_refs` — or a parameter referenced only there gets
+/// no fallback. Exercised at the API level: the caller-supplied symtab
+/// deliberately carries only `RawParam.WorkRoot`, so the fallback is the
+/// only way the name can reach the frozen symtab.
+#[test]
+fn convert_env_with_symtab_applies_raw_param_fallback_for_deferred_cancelation_refs() {
+    let env_template = decode_environment_template(
+        yaml_val(
+            r#"
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+parameterDefinitions:
+- name: WorkRoot
+  type: STRING
+  default: /tmp/work
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          # Only the deferred mode references the parameter, so the
+          # RawParam fallback can come from no other field's collection.
+          mode: "{{Param.WorkRoot}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+"#,
+        ),
+        Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+    )
+    .expect("env template should decode");
+
+    // Param.WorkRoot deliberately absent; only the raw value is supplied —
+    // the shape build_symbol_table produces for host-context (PATH-typed)
+    // parameters, applied here to a STRING param so the reference stays
+    // statically valid in the creation-scoped cancelation field.
+    let mut full = openjd_expr::SymbolTable::new();
+    full.set(
+        "RawParam.WorkRoot",
+        openjd_expr::ExprValue::String("/tmp/work".into()),
+    )
+    .expect("set should succeed");
+
+    let converted =
+        openjd_model::convert_environment_with_symtab(&env_template.environment, Some(&full));
+    let frozen = converted
+        .resolved_symtab
+        .expect("conversion with a symtab must produce a frozen resolved_symtab");
+    let st = frozen
+        .to_symtab(openjd_expr::path_mapping::PathFormat::host())
+        .expect("frozen symtab should deserialize");
+
+    assert_eq!(
+        st.get_value("RawParam.WorkRoot"),
+        Some(&openjd_expr::ExprValue::String("/tmp/work".into())),
+        "a Param.* accessed only by a deferred cancelation field must get \
+         its RawParam.* fallback in the frozen symtab"
+    );
+}

@@ -109,6 +109,17 @@ pub enum SessionError {
         "Must exit the most recently entered environment first. Expected {expected}, got {got}"
     )]
     LifoViolation { expected: String, got: String },
+
+    /// RFC 0008 single-layer rule: a session may contain at most one
+    /// environment that defines wrap hooks. Raised when entering an
+    /// environment with wrap hooks while another wrap-defining environment
+    /// is already active. The message mirrors the Python runtime's wording.
+    #[error(
+        "RFC 0008: a session may have at most one Environment defining wrap hooks \
+         (onWrapEnvEnter / onWrapTaskRun / onWrapEnvExit). Environment '{existing}' \
+         already defines wrap hooks; cannot also enter '{entering}'."
+    )]
+    MultipleWrapEnvironments { existing: String, entering: String },
 }
 
 fn format_expected(states: &[SessionState]) -> String {
