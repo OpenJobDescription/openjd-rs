@@ -16,6 +16,13 @@ allow = [
 
 [bans]
 multiple-versions = "deny"
+# serde_derive 1.0.229+ moved to syn 3.x while the windows proc-macro
+# crates (windows-implement/windows-interface) still use syn 2.x. Both are
+# forced by upstream and not actionable here; syn is a build-time
+# proc-macro dependency, so the duplicate never reaches the shipped binary.
+skip = [
+    { name = "syn" },
+]
 
 [advisories]
 version = 2
