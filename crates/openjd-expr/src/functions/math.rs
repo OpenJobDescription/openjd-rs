@@ -6,7 +6,7 @@
 
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
-use crate::value::{ExprValue, Float64};
+use crate::value::{float_fits_i64, ExprValue, Float64};
 
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
@@ -99,7 +99,7 @@ pub fn floor_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
             let v = f.floor();
-            if v.abs() > i64::MAX as f64 {
+            if !float_fits_i64(v) {
                 return Err(ExpressionError::integer_overflow());
             }
             Ok(ExprValue::Int(v as i64))
@@ -119,7 +119,7 @@ pub fn ceil_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
             let v = f.ceil();
-            if v.abs() > i64::MAX as f64 {
+            if !float_fits_i64(v) {
                 return Err(ExpressionError::integer_overflow());
             }
             Ok(ExprValue::Int(v as i64))
@@ -135,7 +135,7 @@ pub fn ceil_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
-pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
+pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
             let has_ndigits = a.len() > 1;
@@ -148,25 +148,62 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
                 .unwrap_or(0);
             if !has_ndigits {
                 let v = round_half_even(f.value());
-                if v.abs() > i64::MAX as f64 {
+                if !float_fits_i64(v) {
                     return Err(ExpressionError::integer_overflow());
                 }
                 Ok(ExprValue::Int(v as i64))
             } else if ndigits >= 0 {
-                let factor = 10f64.powi(ndigits as i32);
-                let rounded = round_half_even(f.value() * factor) / factor;
-                if ndigits == 0 {
-                    Ok(ExprValue::Float(Float64::with_str(
-                        rounded,
-                        format!("{}.0", rounded as i64),
-                    )?))
+                // The formatted output grows with ndigits; charge the
+                // budget before computing so a huge precision (e.g.
+                // round(1.5, 10**18)) trips the operation limit instead
+                // of attempting a matching allocation.
+                let requested = usize::try_from(ndigits).unwrap_or(usize::MAX);
+                ctx.count_string_ops(requested)?;
+                let factor = 10f64.powi(ndigits.min(i32::MAX as i64) as i32);
+                // 10^ndigits overflows f64 beyond ~308 digits; rounding
+                // at that precision leaves any f64 unchanged.
+                let rounded = if factor.is_infinite() {
+                    f.value()
                 } else {
-                    Ok(ExprValue::Float(Float64::with_str(
-                        rounded,
-                        format!("{:.prec$}", rounded, prec = ndigits as usize),
-                    )?))
+                    round_half_even(f.value() * factor) / factor
+                };
+                if ndigits == 0 {
+                    // `rounded` is integral, so the default display
+                    // (`format_float`) already renders it canonically:
+                    // trailing `.0` in range, scientific notation outside.
+                    Ok(ExprValue::Float(Float64::new(rounded)?))
+                } else {
+                    // Rust's formatting machinery panics ("Formatting
+                    // argument out of range") for precision above
+                    // u16::MAX, and operation budgeting alone admits
+                    // precisions like 100,000. An f64's exact decimal
+                    // expansion has at most 1074 fractional digits, so
+                    // format at most that many and zero-fill the rest —
+                    // the digits past that point are always zero, so the
+                    // output is unchanged — with the full length checked
+                    // against the memory budget before allocation.
+                    const MAX_F64_FRACTION_DIGITS: usize = 1074;
+                    let prec = requested.min(MAX_F64_FRACTION_DIGITS);
+                    let mut text = format!("{:.prec$}", rounded, prec = prec);
+                    let pad = requested - prec;
+                    if pad > 0 {
+                        ctx.check_memory(text.len() + pad)?;
+                        text.reserve_exact(pad);
+                        for _ in 0..pad {
+                            text.push('0');
+                        }
+                    }
+                    Ok(ExprValue::Float(Float64::with_str(rounded, text)?))
                 }
             } else {
+                // ndigits < 0. round(v, n) is 0 whenever 10^|n| exceeds
+                // 2·|v|, and every finite f64 is below 10^309 / 2, so
+                // short-circuit — this also keeps the negation and powi
+                // below in range (ndigits can be i64::MIN, whose direct
+                // negation overflows).
+                if ndigits <= -309 {
+                    return Ok(ExprValue::Float(Float64::new(0.0)?));
+                }
                 let factor = 10f64.powi((-ndigits) as i32);
                 Ok(ExprValue::Float(Float64::new(
                     round_half_even(f.value() / factor) * factor,
@@ -184,9 +221,15 @@ pub fn round_fn(_: Ctx, a: &[ExprValue]) -> R {
             if ndigits >= 0 {
                 Ok(ExprValue::Int(*i))
             } else {
+                // 10^20 / 2 exceeds i64::MAX, so every i64 rounds to 0
+                // for ndigits <= -20. Short-circuiting also keeps the
+                // negation below from overflowing on extreme ndigits.
+                if ndigits <= -20 {
+                    return Ok(ExprValue::Int(0));
+                }
                 let factor = 10f64.powi((-ndigits) as i32);
                 let v = round_half_even(*i as f64 / factor) * factor;
-                if v.abs() > i64::MAX as f64 {
+                if !float_fits_i64(v) {
                     return Err(ExpressionError::integer_overflow());
                 }
                 Ok(ExprValue::Int(v as i64))

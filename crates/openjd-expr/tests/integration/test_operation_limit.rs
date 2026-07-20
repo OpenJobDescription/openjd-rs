@@ -229,7 +229,7 @@ fn list_multiply_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Expression operation count (101) exceeded limit (100)\n",
+                "Expression operation count (3001) exceeded limit (100)\n",
                 "  [1, 2, 3] * 1000\n",
                 "  ~~~~~~~~~~^~~~~~"
             ]
@@ -245,7 +245,7 @@ fn any_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Expression operation count (101) exceeded limit (100)\n",
+                "Expression operation count (1002) exceeded limit (100)\n",
                 "  any([False] * 1000)\n",
                 "      ~~~~~~~~^~~~~~"
             ]
@@ -261,7 +261,7 @@ fn all_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Expression operation count (101) exceeded limit (100)\n",
+                "Expression operation count (1002) exceeded limit (100)\n",
                 "  all([True] * 1000)\n",
                 "      ~~~~~~~^~~~~~"
             ]
@@ -279,7 +279,7 @@ fn flatten_iterations_count() {
     assert!(
         e.contains(
             &[
-                "Expression operation count (101) exceeded limit (100)\n",
+                "Expression operation count (1002) exceeded limit (100)\n",
                 "  flatten([[1,2],[3,4]] * 500)\n",
                 "          ~~~~~~~~~~~~~~^~~~~"
             ]

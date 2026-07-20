@@ -282,3 +282,87 @@ fn int_from_float_boundary_overflow() {
     // i64::MAX as f64 rounds up to 9223372036854775808.0 which exceeds i64::MAX
     assert_err("int(9223372036854775808.0)", &["Integer overflow"]);
 }
+
+// === Regression tests: exact f64→i64 boundary (2^63) ===
+// `v.abs() > i64::MAX as f64` was the wrong guard: i64::MAX rounds up
+// to exactly 2^63 in f64, so an input of exactly 2^63 passed the guard
+// and the `as i64` cast silently saturated to i64::MAX.
+
+#[test]
+fn floor_exactly_2_63_overflow() {
+    assert_err("floor(9223372036854775808.0)", &["Integer overflow"]);
+}
+#[test]
+fn ceil_exactly_2_63_overflow() {
+    assert_err("ceil(9223372036854775808.0)", &["Integer overflow"]);
+}
+#[test]
+fn round_exactly_2_63_overflow() {
+    assert_err("round(9223372036854775808.0)", &["Integer overflow"]);
+}
+#[test]
+fn floordiv_exactly_2_63_overflow() {
+    assert_err("9223372036854775808.0 // 1.0", &["Integer overflow"]);
+}
+#[test]
+fn floor_largest_f64_below_2_63_ok() {
+    // The largest f64 below 2^63 is exactly representable in i64.
+    assert_eq!(
+        eval("floor(9223372036854774784.0)").to_display_string(),
+        "9223372036854774784"
+    );
+}
+#[test]
+fn floor_exactly_i64_min_ok() {
+    // -2^63 == i64::MIN is a valid i64; an abs()-based guard would
+    // wrongly reject it.
+    assert_eq!(
+        eval("floor(-9223372036854775808.0)").to_display_string(),
+        "-9223372036854775808"
+    );
+}
+
+// === Regression tests: round() at extreme ndigits ===
+
+#[test]
+fn round_float_i64_min_ndigits() {
+    // Negating i64::MIN previously panicked in debug builds. Rounding
+    // any float at 10^|huge| precision is 0.
+    assert_eq!(
+        eval("round(1.5, -9223372036854775808)").to_display_string(),
+        "0.0"
+    );
+}
+#[test]
+fn round_int_i64_min_ndigits() {
+    assert_eq!(
+        eval("round(15, -9223372036854775808)").to_display_string(),
+        "0"
+    );
+}
+#[test]
+fn round_float_huge_positive_ndigits_hits_limit() {
+    // The formatted output grows with ndigits; a huge precision must
+    // trip the operation budget instead of allocating to match.
+    assert!(eval_fails("round(1.5, 9223372036854775807)"));
+}
+#[test]
+fn round_moderate_precision_succeeds() {
+    // format!("{:.prec$}") panics for precision above u16::MAX; round
+    // formats at most an f64's 1074 meaningful fractional digits and
+    // zero-fills the rest.
+    let v = eval("len(string(round(1.5, 100000)))");
+    // "1." + 100000 fractional digits
+    assert_eq!(v.to_display_string(), "100002");
+}
+#[test]
+fn round_moderate_precision_value_prefix() {
+    let v = eval("string(round(1.5, 100000))[0:6]").to_display_string();
+    assert_eq!(v, "1.5000");
+}
+#[test]
+fn round_precision_over_u16_boundary() {
+    // Just above the fmt machinery's u16::MAX limit.
+    let v = eval("len(string(round(2.25, 65536)))");
+    assert_eq!(v.to_display_string(), "65538");
+}

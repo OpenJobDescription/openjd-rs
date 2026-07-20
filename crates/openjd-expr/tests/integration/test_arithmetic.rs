@@ -369,6 +369,28 @@ fn round_ndigits_3_5_0() {
 }
 
 #[test]
+fn round_ndigits_zero_large_float_preserves_display() {
+    assert_eq!(
+        eval("string(round(1e300, 0))").to_display_string(),
+        "1e+300"
+    );
+    assert_eq!(
+        eval("string(round(-1e300, 0))").to_display_string(),
+        "-1e+300"
+    );
+}
+
+#[test]
+fn round_ndigits_zero_matches_display_threshold() {
+    // Float display switches to scientific notation at 1e16.
+    assert_eq!(eval("string(round(1e17, 0))").to_display_string(), "1e+17");
+    assert_eq!(
+        eval("string(round(9e15, 0))").to_display_string(),
+        "9000000000000000.0"
+    );
+}
+
+#[test]
 fn round_int_ndigits_42_0() {
     assert_eq!(eval("round(42, 0)").to_display_string(), "42");
 }
@@ -904,4 +926,35 @@ fn sum_int_list_overflow() {
 #[test]
 fn floordiv_float_large_result_overflow() {
     assert_err("1e300 // 1.0", &["Integer overflow"]);
+}
+
+#[test]
+fn string_mul_length_overflow() {
+    // 4 bytes * 2^62 == 2^64 wraps to 0 with unchecked math, defeating
+    // the operation and memory budgets before str::repeat panicked.
+    assert_err(
+        "'abcd' * 4611686018427387904",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  'abcd' * 4611686018427387904\n",
+            "  ~~~~~~~^~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn list_mul_length_overflow() {
+    assert_err(
+        "[1, 2, 3, 4] * 4611686018427387904",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  [1, 2, 3, 4] * 4611686018427387904\n",
+            "  ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn empty_list_mul_huge_is_empty() {
+    assert_eq!(eval("[] * 4611686018427387904").to_display_string(), "[]");
 }

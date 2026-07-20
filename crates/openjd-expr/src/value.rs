@@ -26,6 +26,19 @@ impl std::hash::Hash for Float64 {
     }
 }
 
+/// Return `true` if `v` is exactly representable in the i64 value range.
+///
+/// The valid f64 doubles convertible to i64 lie in `[-2^63, 2^63)`.
+/// `i64::MIN as f64` is exactly `-2^63`; the upper bound is its negation.
+/// Note that a `> i64::MAX as f64` check is wrong: `i64::MAX` rounds up
+/// to `2^63` in f64, which would let `2^63` through to an `as i64` cast
+/// that silently saturates to `i64::MAX`. NaN compares false and is
+/// therefore rejected.
+pub(crate) fn float_fits_i64(v: f64) -> bool {
+    const LOWER: f64 = i64::MIN as f64; // exactly -2^63
+    (LOWER..-LOWER).contains(&v)
+}
+
 /// Normalize -0.0 to 0.0 (matches Python's copysign normalization).
 fn normalize_zero(v: f64) -> f64 {
     if v == 0.0 {
@@ -664,6 +677,16 @@ impl ExprValue {
             (ExprValue::Float(f), TypeCode::Int) => {
                 let v = f.value();
                 if v.fract() == 0.0 && v.is_finite() {
+                    // Range check before the cast: `as i64` silently
+                    // saturates for out-of-range values (e.g. 1e30 would
+                    // become i64::MAX), so reject them with an integer
+                    // overflow error instead.
+                    if !float_fits_i64(v) {
+                        return Err(
+                            "Integer overflow: result is outside the 64-bit signed range"
+                                .to_string(),
+                        );
+                    }
                     Ok(ExprValue::Int(v as i64))
                 } else {
                     Err(format!(

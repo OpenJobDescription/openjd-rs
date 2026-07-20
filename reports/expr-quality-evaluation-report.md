@@ -53,13 +53,13 @@ All 25 source files were reviewed. Quality is generally high: pervasive doc comm
 2. `eval/parse.rs` contextual-keyword retry loop — rewrites keyword-like text inside **string literals**, silently corrupting values.
 3. `eval/evaluator.rs` `eval_number` float passthrough — literal source ranges computed against the parenthesized parse string are applied to the unwrapped source; multiline expressions mis-slice the display string.
 4. `path_mapping.rs:150–155` (`split_path_parts`) — discards the absolute/relative distinction, so relative inputs match absolute rules.
-5. `value.rs` `coerce` Float→Int — `as i64` silently saturates for out-of-range whole floats.
+5. ~~`value.rs` `coerce` Float→Int — `as i64` silently saturates for out-of-range whole floats.~~ **Resolved** — explicit `float_fits_i64` range check before the cast.
 6. `value.rs` `equals(ListInt, RangeExpr)` — materializes the entire range before the length check, outside all evaluator budgets (1.78 s / 800 MB for a 100M-element range).
-7. `functions/arithmetic.rs:273` (`mul_string`) — unchecked `s.len() * n`; a wrapped length defeats `count_string_ops` and `check_memory` in release builds.
-8. `functions/arithmetic.rs` (`mul_list`) — same unchecked multiply (inspection); worse: with a wrapped `result_len` of 0 the build loop runs up to 2^62 iterations with no op counting (uncounted CPU hang even for `[] * huge`). Op counting is also a literal `for _ in 0..result_len { ctx.count_op()?; }` loop instead of one `count_ops(result_len)` call.
+7. ~~`functions/arithmetic.rs:273` (`mul_string`) — unchecked `s.len() * n`; a wrapped length defeats `count_string_ops` and `check_memory` in release builds.~~ **Resolved** — `checked_mul` with Integer overflow error.
+8. ~~`functions/arithmetic.rs` (`mul_list`) — same unchecked multiply (inspection); worse: with a wrapped `result_len` of 0 the build loop runs up to 2^62 iterations with no op counting (uncounted CPU hang even for `[] * huge`). Op counting is also a literal `for _ in 0..result_len { ctx.count_op()?; }` loop instead of one `count_ops(result_len)` call.~~ **Resolved** — `mul_list` now uses `checked_mul` (Integer overflow error on wrap), returns `[]` early for empty lists, and bulk-meters via a single `count_ops(result_len)` call.
 9. `functions/list.rs:120` (`range_fn`) — unchecked `v += step` overflows near `i64::MAX`.
 10. `functions/list.rs` (`sum_list`, RangeExpr branch) — unchecked `r.iter().sum::<i64>()`; the list branch uses `checked_add` correctly, the range branch does not (also iterates the range twice).
-11. `functions/math.rs:170` (`round_fn`) — unchecked negation of `ndigits` panics for `i64::MIN`.
+11. ~~`functions/math.rs:170` (`round_fn`) — unchecked negation of `ndigits` panics for `i64::MIN`.~~ **Resolved** — extreme negative ndigits short-circuit to 0 before the negation.
 12. `functions/string.rs:212` (`split_fn`/`rsplit_fn`) — negative `maxsplit` wraps via `as usize`, then `n + 1` overflows; release builds produce `[]` where Python treats negative maxsplit as "no limit."
 13. `functions/regex.rs:363` (`re_split_fn`) — same `n + 1` overflow; also the only regex function using unchecked `make_list` instead of `make_list_checked`.
 14. `functions/string.rs` (`zfill_fn`) — negative width wraps to `usize::MAX` → `"0".repeat(huge)` allocation abort (inspection; not executed to avoid aborting the harness). Output size is also never charged to memory/op budgets.
@@ -130,7 +130,7 @@ A scratch test file with 16 reproductions was written and run in debug mode (whe
 | X15 | `repr_py('a\nb')` | `'a` + raw newline + `b'` — not a valid Python literal | Wrong repr |
 | X16 | `'日本語' + X.iffy` (byte/char index mismatch probe) | passed — not reproduced with this input (defect confirmed by inspection only) | — |
 
-Not executed (would abort/hang the test harness; confirmed by inspection): `zfill('5', -1)` → `"0".repeat(usize::MAX)` allocation abort; `[1,2,3,4] * 4611686018427387904` and `[] * 4611686018427387904` → uncounted loop of up to 2^62 iterations in release builds.
+Not executed (would abort/hang the test harness; confirmed by inspection): `zfill('5', -1)` → `"0".repeat(usize::MAX)` allocation abort. ~~`[1,2,3,4] * 4611686018427387904` and `[] * 4611686018427387904` → uncounted loop of up to 2^62 iterations in release builds.~~ **Resolved** — these now return an Integer overflow error and `[]` respectively (regression tests `list_mul_length_overflow`, `empty_list_mul_huge_is_empty`).
 
 Additional note for spec cross-check: `cmd_quote` does not double backslashes preceding the closing quote (`repr_cmd('C:\\dir\\')` → `"C:\dir\"`), which corrupts the argument for programs parsing argv with MSVCRT rules. Whether this is a bug depends on what spec §2.2.6 prescribes; the missing subprocess round-trip tests (§5) would settle it.
 
@@ -138,13 +138,13 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 
 ### Priority 1 — Correctness bugs reachable from untrusted input
 
-1. **Adopt checked arithmetic at the function-library boundary.** Fix X1–X7 with `checked_add`/`checked_mul`/`checked_neg` (or saturating where semantically safe) in `range_expr.rs:130` (+ `len()`/`contains()`), `arithmetic.rs` `mul_string`/`mul_list`, `list.rs` `range_fn`/`sum_list`, `math.rs` `round_fn`, `string.rs` `split_fn`/`rsplit_fn`, `regex.rs` `re_split_fn`. Add regression tests from the §7 table.
+1. **Adopt checked arithmetic at the function-library boundary.** Fix X1–X7 with `checked_add`/`checked_mul`/`checked_neg` (or saturating where semantically safe) in `range_expr.rs:130` (+ `len()`/`contains()`), ~~`arithmetic.rs` `mul_string`/`mul_list`~~ (**Resolved** — `checked_mul` + regression tests), `list.rs` `range_fn`/`sum_list`, ~~`math.rs` `round_fn`~~ (**Resolved** — extreme-ndigits short-circuits, budgeted precision, regression tests), `string.rs` `split_fn`/`rsplit_fn`, `regex.rs` `re_split_fn`. Add regression tests from the §7 table.
 2. **Validate negative int arguments before `as usize`.** `zfill`, `center`, `ljust`, `rjust`, `split`/`rsplit`/`re_split` maxsplit. Match Python semantics (negative width → unchanged string; negative maxsplit → no limit). Share one validation helper across the width-taking functions.
 3. **Fix the contextual-keyword retry to skip string literals** (X9, `eval/parse.rs`) — corrupts user data silently. Also fix the byte-vs-char index mix in the after-keyword boundary check.
 4. **Fix float-literal passthrough source slicing for multiline expressions** (X10, `eval/evaluator.rs` `eval_number`); have `Float64::with_str` validate that the string round-trips to the value as a backstop.
 5. **Fix `path_starts_with` char-boundary panic** (X8, `path.rs:526`) — use `get(..len)` or char-aware case-insensitive comparison.
 6. **Make `split_path_parts` preserve absoluteness** (X12, `path_mapping.rs:150`) so relative paths never match absolute rules; use the rule's source format (not host format) for output joining, or document why host format is intended.
-7. **Fix Float→Int coercion saturation** (X11, `value.rs`) with an explicit range check; same `>=` fix for the `> i64::MAX as f64` guards in `floordiv_float` and `math.rs` floor/ceil/round.
+7. ~~**Fix Float→Int coercion saturation** (X11, `value.rs`) with an explicit range check; same `>=` fix for the `> i64::MAX as f64` guards in `floordiv_float` and `math.rs` floor/ceil/round.~~ **Resolved** — shared `float_fits_i64` helper (exact `[-2^63, 2^63)` check) used by coercion, `floordiv_float`, and `math.rs` floor/ceil/round.
 8. **Escape control characters in `repr_py`** (X15) and cross-check `repr_cmd` trailing-backslash behavior against spec §2.2.6, ideally with subprocess round-trip tests.
 9. **Guard `equals(ListInt, RangeExpr)`**: compare `len()` first and zip `iter()` without materializing.
 
@@ -168,4 +168,4 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 19. **Upgrade the 29 statement-rejection tests in `test_evaluation.rs` to full-message assertions**; tighten `test_regex_validation.rs` and the four bare `is_err()` checks in `test_path_mapping.rs`; pin the behavior in `test_unresolved_eval.rs:256`.
 20. **Add a property-based/fuzz harness** (proptest or cargo-fuzz) asserting the evaluator never panics on arbitrary input — it would have caught X1–X8 mechanically; port the spirit of Python's `test_fuzz.py`.
 21. **Extract a shared `tests/integration/common.rs`** for the copy-pasted eval/assert helpers; remove the duplicated `basic_types` unit test and redundant `eval_fails` twins.
-22. **Move the format-string segment cap inside the parse loop**; replace `mul_list`'s per-element `count_op` loop with a single `count_ops(n)`; add list-comparison fast paths that avoid per-element `String` clones.
+22. **Move the format-string segment cap inside the parse loop**; ~~replace `mul_list`'s per-element `count_op` loop with a single `count_ops(n)`~~ **Resolved** — list multiplication now bulk-meters the checked result length; add list-comparison fast paths that avoid per-element `String` clones.
