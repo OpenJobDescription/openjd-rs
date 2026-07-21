@@ -16,11 +16,11 @@ allow = [
 
 [bans]
 multiple-versions = "deny"
+# serde_derive 1.0.229+ moved to syn 3.x while the windows proc-macro
+# crates (windows-implement/windows-interface) still use syn 2.x. Both are
+# forced by upstream and not actionable here; syn is a build-time
+# proc-macro dependency, so the duplicate never reaches the shipped binary.
 skip = [
-    # serde_derive moved to syn 3 while the windows-* proc macros still
-    # use syn 2. Proc-macro crates are compile-time only, so the
-    # duplicate never ships in the helper binary. Remove once the
-    # windows crates migrate to syn 3 and the tree converges.
     { name = "syn" },
 ]
 

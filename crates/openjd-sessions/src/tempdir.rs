@@ -202,18 +202,25 @@ impl TempDir {
         #[cfg(windows)]
         {
             if let Some(u) = _user.filter(|u| !u.is_process_user()) {
-                if let Ok(process_user) = crate::win32::get_process_user() {
-                    if let Err(e) = crate::win32_permissions::set_permissions(
-                        &path.to_string_lossy(),
-                        &[process_user.as_str()],
-                        &[u.user()],
-                        &[],
-                    ) {
-                        return Err(SessionError::PathPermissions {
-                            path: path.display().to_string(),
-                            reason: e.to_string(),
-                        });
+                // Fail closed: a cross-user directory without the DACL grant is
+                // unusable by the session user (and silently skipping the grant
+                // previously masked the failure until a subprocess hit it).
+                let process_user = crate::win32::get_process_user().map_err(|e| {
+                    SessionError::PathPermissions {
+                        path: path.display().to_string(),
+                        reason: format!("Could not determine the process user for DACL setup: {e}"),
                     }
+                })?;
+                if let Err(e) = crate::win32_permissions::set_permissions(
+                    &path.to_string_lossy(),
+                    &[process_user.as_str()],
+                    &[u.user()],
+                    &[],
+                ) {
+                    return Err(SessionError::PathPermissions {
+                        path: path.display().to_string(),
+                        reason: e.to_string(),
+                    });
                 }
             }
         }

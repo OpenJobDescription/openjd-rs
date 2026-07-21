@@ -212,6 +212,13 @@ struct CancelShared {
     token: Option<CancellationToken>,
     /// Channel to send cancel requests (with optional time limit) to the subprocess.
     request_tx: Option<tokio::sync::watch::Sender<Option<Duration>>>,
+    /// The running action's declared NOTIFY_THEN_TERMINATE grace period,
+    /// recorded once the effective action is known so helper-pipe cancel
+    /// delivery can cap the notify period at it — mirroring the same-user
+    /// path, where the runner computes `time_limit.min(terminate_delay)`
+    /// (see `subprocess.rs`). `None` when the action does not declare
+    /// notifyThenTerminate cancelation.
+    terminate_delay: Option<Duration>,
     /// When true, a Canceled action result is reported as Failed.
     mark_failed: bool,
 }
@@ -230,6 +237,7 @@ impl CancelFields {
             shared: Arc::new(StdMutex::new(CancelShared {
                 token: None,
                 request_tx: None,
+                terminate_delay: None,
                 mark_failed: false,
             })),
             parent_token,
@@ -252,12 +260,25 @@ impl CancelFields {
         let mut shared = self.lock();
         shared.token = Some(token);
         shared.request_tx = Some(request_tx);
+        // The effective action (and hence its declared grace period) is not
+        // known yet at registration time — an RFC 0008 wrap hook may still
+        // substitute the action. Cleared here; recorded by
+        // `set_terminate_delay` once the action to run is resolved.
+        shared.terminate_delay = None;
+    }
+
+    /// Record the effective action's declared NOTIFY_THEN_TERMINATE grace
+    /// period. Called after `set_action`, once any wrap-hook substitution
+    /// has resolved which action will actually run.
+    fn set_terminate_delay(&self, delay: Option<Duration>) {
+        self.lock().terminate_delay = delay;
     }
 
     fn reset(&self) {
         let mut shared = self.lock();
         shared.token = None;
         shared.request_tx = None;
+        shared.terminate_delay = None;
         shared.mark_failed = false;
     }
 }
@@ -317,7 +338,12 @@ impl SessionCancelHandle {
         // Cross-user sessions: also deliver the cancel command to the helper
         // process over the dup'd pipe, mirroring Session::cancel_action.
         if let Some(ref writer) = self.cancel_writer {
-            send_helper_cancel_command(writer, self.helper_auth_token.as_deref(), time_limit);
+            send_helper_cancel_command(
+                writer,
+                self.helper_auth_token.as_deref(),
+                time_limit,
+                shared.terminate_delay,
+            );
         }
 
         if let Some(tx) = &shared.request_tx {
@@ -334,9 +360,20 @@ fn send_helper_cancel_command(
     mut writer: &std::fs::File,
     auth_token: Option<&str>,
     time_limit: Option<Duration>,
+    terminate_delay: Option<Duration>,
 ) {
     use std::io::Write;
-    let is_terminate = matches!(time_limit, Some(d) if d.is_zero());
+    // The effective grace bound is the smaller of the caller's time_limit
+    // and the action's declared notifyThenTerminate period — mirroring the
+    // same-user path, where the runner computes
+    // `time_limit.min(terminate_delay)` (see `subprocess.rs`). Absent a
+    // time_limit, the declared period applies on its own; absent both, the
+    // legacy default is used.
+    let effective_limit = match (time_limit, terminate_delay) {
+        (Some(limit), Some(delay)) => Some(limit.min(delay)),
+        (limit, delay) => limit.or(delay),
+    };
+    let is_terminate = matches!(effective_limit, Some(d) if d.is_zero());
     let token_field = match auth_token {
         Some(t) => format!(r#""token":"{t}","#),
         None => String::new(),
@@ -344,7 +381,7 @@ fn send_helper_cancel_command(
     let cmd = if is_terminate {
         format!(r#"{{{token_field}"cancel":"TERMINATE"}}"#)
     } else {
-        let notify_period = time_limit
+        let notify_period = effective_limit
             .unwrap_or(Duration::from_secs(DEFAULT_CANCEL_NOTIFY_PERIOD_SECS))
             .as_secs();
         format!(
@@ -354,6 +391,36 @@ fn send_helper_cancel_command(
     let _ = writer.write_all(cmd.as_bytes());
     let _ = writer.write_all(b"\n");
     let _ = writer.flush();
+}
+
+/// The declared NOTIFY_THEN_TERMINATE grace period of an action, if any.
+///
+/// Derives through [`crate::runner::cancel_method_for_action`] so the value
+/// recorded for helper-pipe cancel delivery is exactly what the runner will
+/// enforce on the same-user path.
+fn declared_terminate_delay(
+    cancelation: &Option<openjd_model::job::CancelationMode>,
+    symtab: &SymbolTable,
+    library: Option<&FunctionLibrary>,
+    default_notify_period: Duration,
+) -> Option<Duration> {
+    match crate::runner::cancel_method_for_action(
+        cancelation,
+        symtab,
+        library,
+        default_notify_period,
+    ) {
+        Ok(crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay }) => {
+            Some(terminate_delay)
+        }
+        Ok(crate::runner::CancelMethod::Terminate) => None,
+        // Resolution failures are surfaced authoritatively by the runner's
+        // own cancel_method_for_action call when the action executes; this
+        // value is only an advisory cap for helper-pipe cancel delivery,
+        // so treat a failure as "no declared grace" rather than duplicating
+        // the error path here.
+        Err(_) => None,
+    }
 }
 
 /// Cross-user execution state.
@@ -855,6 +922,7 @@ impl Session {
                 writer,
                 self.cross_user.helper_auth_token.as_deref(),
                 time_limit,
+                self.cancel.lock().terminate_delay,
             );
         }
 
@@ -1116,6 +1184,21 @@ impl Session {
                 .map_err(|e| self.fail_action_setup(e))?;
             }
 
+            // The effective action is now resolved (wrap hook or the env's
+            // own onEnter); record its declared cancel grace so helper-pipe
+            // cancel delivery can cap the notify period at it. The default
+            // matches EnvironmentScriptRunner's default_cancel_period.
+            self.cancel.set_terminate_delay(declared_terminate_delay(
+                &wrap_action
+                    .as_ref()
+                    .map(|(_, a)| a)
+                    .unwrap_or(inner_on_enter)
+                    .cancelation,
+                &action_symtab,
+                Some(&lib),
+                Duration::from_secs(30),
+            ));
+
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
             let env_vars = Box::new(env_vars);
@@ -1327,6 +1410,19 @@ impl Session {
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
             }
+
+            // See the onEnter path: record the effective action's declared
+            // cancel grace once the wrap decision is made.
+            self.cancel.set_terminate_delay(declared_terminate_delay(
+                &wrap_action
+                    .as_ref()
+                    .map(|(_, a)| a)
+                    .unwrap_or(inner_on_exit)
+                    .cancelation,
+                &action_symtab,
+                Some(&lib),
+                Duration::from_secs(30),
+            ));
 
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
@@ -1565,6 +1661,17 @@ impl Session {
             }),
             None => std::borrow::Cow::Borrowed(script),
         };
+
+        // The effective action is now resolved (wrap hook or the step's own
+        // onRun); record its declared cancel grace so helper-pipe cancel
+        // delivery can cap the notify period at it. The default matches
+        // StepScriptRunner's default_cancel_period.
+        self.cancel.set_terminate_delay(declared_terminate_delay(
+            &effective_script.actions.on_run.cancelation,
+            &action_symtab,
+            Some(&lib),
+            Duration::from_secs(120),
+        ));
 
         // See the note in the onEnter path about Box::pin and the Windows
         // 1 MB thread-stack limit on release builds.

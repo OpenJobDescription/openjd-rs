@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openjd_sessions::action::ActionState;
-use openjd_sessions::session::{Session, SessionConfig};
+use openjd_sessions::session::{Session, SessionCancelHandle, SessionConfig};
 use openjd_sessions::session_user::{BadCredentialsError, WindowsSessionUser};
 use openjd_sessions::SessionUser;
 
@@ -183,10 +183,33 @@ fn windows_user_name() -> String {
     std::env::var("OPENJD_TEST_WIN_USER_NAME").expect("OPENJD_TEST_WIN_USER_NAME must be set")
 }
 
-fn make_session(user: Arc<WindowsSessionUser>) -> Session {
-    let tmp = tempfile::TempDir::new().unwrap();
+/// Create a session root for cross-user tests.
+///
+/// Deliberately NOT under `%TEMP%`: on GitHub runners `%TEMP%` is the
+/// process user's profile Temp with an 8.3 short component
+/// (`C:\Users\RUNNER~1\...`). Windows PowerShell normalizes its startup
+/// working directory by enumerating each parent directory, and other users
+/// lack List Folder access on the profile directory — so powershell running
+/// as the session user fails with `UnauthorizedAccessException` before
+/// executing any command (cmd.exe performs no such normalization and is
+/// unaffected). See https://github.com/PowerShell/PowerShell/issues/7760
+/// and https://github.com/actions/runner-images/issues/712.
+///
+/// `%PUBLIC%` is listable by all local users, mirroring production session
+/// roots under `C:\ProgramData`.
+fn test_session_root() -> PathBuf {
+    let public = std::env::var("PUBLIC").unwrap_or_else(|_| r"C:\Users\Public".to_string());
+    let tmp = tempfile::Builder::new()
+        .prefix("openjd-cross-user-")
+        .tempdir_in(public)
+        .unwrap();
     let root = tmp.path().to_path_buf();
     std::mem::forget(tmp);
+    root
+}
+
+fn make_session(user: Arc<WindowsSessionUser>) -> Session {
+    let root = test_session_root();
     let config = SessionConfig {
         session_id: "cross-user-win-test".into(),
         job_parameter_values: HashMap::new(),
@@ -550,6 +573,103 @@ async fn test_cross_user_session_run_subprocess() {
 
 // === Session-level: SessionCancelHandle cancels a helper-routed subprocess ===
 
+/// The session working directory must carry an explicit DACL granting the
+/// session user Modify and the process user Full Control — the session user
+/// otherwise cannot use its own working directory (the session root commonly
+/// lives under the process user's profile, which grants nothing to others).
+///
+/// This pins the directory ACL itself; the embedded-file tests only cover
+/// ACLs of files placed inside it.
+#[test]
+#[ignore]
+fn test_cross_user_session_working_dir_permissions() {
+    let user = require_windows_user();
+    let user_name = windows_user_name();
+    let proc_user = process_user_bare();
+    let mut session = make_session(user);
+    let working_dir = session.working_directory().to_string_lossy().to_string();
+
+    let aces = get_aces_for_object(&working_dir);
+    assert!(
+        principal_has_access(&working_dir, &proc_user, FULL_CONTROL_MASK),
+        "Process user should have Full Control on the session working dir, got aces: {aces:?}"
+    );
+    assert!(
+        principal_has_access(&working_dir, &user_name, MODIFY_READ_WRITE_MASK),
+        "Session user should have Modify access on the session working dir, got aces: {aces:?}"
+    );
+
+    session.cleanup();
+}
+
+/// PowerShell must be able to run successfully as the session user with the
+/// session working directory as its CWD. PowerShell's provider initialization
+/// enumerates the current directory, so it detects working-dir ACL problems
+/// that `cmd`/`whoami` (which never list their CWD) sail past — this is the
+/// positive-path coverage the cancel tests were implicitly relying on.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_powershell_runs_successfully() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&[
+                "-Command".to_string(),
+                "Get-ChildItem . | Out-Null; Write-Output 'ps-ok'".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("powershell must run as the session user");
+
+    assert_eq!(
+        result.state,
+        ActionState::Success,
+        "powershell as the session user must succeed; exit_code: {:?}, stdout: {}",
+        result.exit_code,
+        result.stdout
+    );
+    assert!(
+        result.stdout.contains("ps-ok"),
+        "expected 'ps-ok' in stdout: {}",
+        result.stdout
+    );
+    session.cleanup();
+}
+
+/// Repeatedly attempt to deliver a cancel through `handle` until it finds a
+/// running action, starting after a short delay so the cancel lands
+/// mid-action in the healthy case. Resolves to whether delivery succeeded.
+///
+/// A single fixed-delay cancel is racy in both directions: a slowly starting
+/// subprocess may not be registered yet (the cancel finds nothing), and a
+/// subprocess that exits early ends the run before the delay elapses,
+/// leaving the cancel result unrecorded when the assertions execute.
+fn spawn_cancel_with_retry(
+    handle: SessionCancelHandle,
+    mark_action_failed: bool,
+) -> tokio::task::JoinHandle<bool> {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if handle.cancel(None, mark_action_failed) {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+}
+
 /// A `SessionCancelHandle` must be able to cancel a subprocess that runs via
 /// the cross-user helper: the helper path registers per-action cancel state,
 /// and the handle delivers the cancel command over the helper pipe. This is
@@ -560,14 +680,7 @@ async fn test_cross_user_session_run_subprocess() {
 async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
     let user = require_windows_user();
     let mut session = make_session(user);
-    let handle = session.cancel_handle();
-
-    let delivered: Arc<std::sync::Mutex<Option<bool>>> = Arc::new(std::sync::Mutex::new(None));
-    let delivered_clone = delivered.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
-    });
+    let canceller = spawn_cancel_with_retry(session.cancel_handle(), false);
 
     let started = std::time::Instant::now();
     let result = session
@@ -585,25 +698,33 @@ async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
         .await;
     let elapsed = started.elapsed();
 
-    assert_eq!(
-        *delivered.lock().unwrap(),
-        Some(true),
-        "handle must find the in-flight helper action and deliver the cancel"
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(30),
-        "cancel must interrupt the 60s sleep, took {elapsed:?}"
-    );
+    let delivered = canceller.await.expect("canceller task must not panic");
     match result {
         // With the cancel-request channel wired into the helper config, the
         // exit must classify as Canceled rather than Failed.
         Ok(r) => assert_eq!(
             r.state,
             ActionState::Canceled,
-            "canceled helper subprocess must classify as Canceled"
+            "canceled helper subprocess must classify as Canceled; exit_code: {:?}, stdout: {}",
+            r.exit_code,
+            r.stdout
         ),
-        Err(_) => { /* helper-side cancel may surface as an error result */ }
+        // A canceled helper subprocess may surface as an error result — but
+        // only when the cancel was actually delivered. Otherwise the
+        // subprocess failed on its own: fail with the underlying error.
+        Err(e) => assert!(
+            delivered,
+            "subprocess failed before any cancel was delivered: {e}"
+        ),
     }
+    assert!(
+        delivered,
+        "handle must find the in-flight helper action and deliver the cancel"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
     session.cleanup();
 }
 
@@ -615,12 +736,7 @@ async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
 async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
     let user = require_windows_user();
     let mut session = make_session(user);
-    let handle = session.cancel_handle();
-
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        handle.cancel(None, true);
-    });
+    let canceller = spawn_cancel_with_retry(session.cancel_handle(), true);
 
     let result = session
         .run_subprocess(
@@ -636,14 +752,28 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
         )
         .await;
 
+    let delivered = canceller.await.expect("canceller task must not panic");
     match result {
         Ok(r) => assert_eq!(
             r.state,
             ActionState::Failed,
-            "mark_action_failed must report the canceled helper subprocess as Failed"
+            "mark_action_failed must report the canceled helper subprocess as Failed; exit_code: {:?}, stdout: {}",
+            r.exit_code,
+            r.stdout
         ),
-        Err(_) => { /* helper-side cancel may surface as an error result */ }
+        // Tolerated only when the cancel was actually delivered — otherwise
+        // the subprocess failed on its own: fail with the underlying error.
+        Err(e) => assert!(
+            delivered,
+            "subprocess failed before any cancel was delivered: {e}"
+        ),
     }
+    // Without this, a subprocess that fails on its own also yields Failed
+    // and the test passes without exercising cancellation at all.
+    assert!(
+        delivered,
+        "cancel must be delivered for this test to exercise mark_action_failed"
+    );
     session.cleanup();
 }
 
