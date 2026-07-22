@@ -942,6 +942,12 @@ pub enum SessionError {
     /// Tried to exit an environment that wasn't the most recently
     /// entered one.
     LifoViolation { expected: String, got: String },
+
+    /// RFC 0008 single-layer rule: `enter_environment` called with a
+    /// wrap-hook-defining environment while another wrap-defining
+    /// environment is already active. Raised before any state is
+    /// recorded for the rejected environment; the session stays Ready.
+    MultipleWrapEnvironments { existing: String, entering: String },
 }
 ```
 

@@ -60,6 +60,10 @@ fn plain_env(name: &str, on_enter: Option<Action>, on_exit: Option<Action>) -> E
     }
 }
 
+fn fs_map(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, FormatString> {
+    pairs.iter().map(|(k, v)| (k.to_string(), fs(v))).collect()
+}
+
 /// Build a wrap environment with the three optional wrap hooks plus its
 /// own `on_enter`. We always set `on_enter` so the session can track the
 /// env through its lifecycle (a session ENTER with no action is allowed
@@ -955,6 +959,175 @@ async fn wrap_env_resolved_symtab_params_available_in_wrap_hooks() {
         contents.contains("[wrap-task] prefix=FROM_ENV_PARAM"),
         "wrap hook must resolve the wrap env's own Param.* from its frozen \
          resolved_symtab; got:\n{contents}"
+    );
+}
+
+/// Template Schemas §4.2: an environment script's `let` bindings are
+/// available in its actions — and the wrap hooks are actions of the wrap
+/// environment's script. The wrapped step's symbol table knows nothing
+/// about these names, so the dispatch must evaluate the wrap env's own
+/// let scope when seeding the hook's symbol table.
+#[tokio::test]
+async fn wrap_env_let_bindings_available_in_wrap_hooks() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"echo "[wrap-task] greeting={{{{greeting}}}}" >> '{}'"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let mut env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    env.script.as_mut().unwrap().let_bindings = Some(vec!["greeting = 'FROM_ENV_LET'".to_string()]);
+
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    let task = step("true", vec![]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[wrap-task] greeting=FROM_ENV_LET"),
+        "wrap hook must resolve the wrap env's own let bindings; got:\n{contents}"
+    );
+}
+
+/// Wrapper and wrapped `let` scopes must not be conflated. When the wrap
+/// environment and the wrapped step both bind the same name, the hook's
+/// own args resolve against the WRAPPER's value while `WrappedAction.*`
+/// (the step's onRun resolved for forwarding) carries the STEP's value —
+/// each scope sees exactly what it would have seen unwrapped.
+#[tokio::test]
+async fn wrapper_and_wrapped_let_scopes_are_separate() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // The hook prints its own view of `who` and the forwarded command,
+    // which embeds the step's view of `who`.
+    let wrap_task_script = format!(
+        r#"echo "[hook] who={{{{who}}}} wrapped-arg={{{{WrappedAction.Args[0]}}}}" >> '{}'"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let mut env = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    env.script.as_mut().unwrap().let_bindings = Some(vec!["who = 'WRAPPER'".to_string()]);
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    // The step binds the SAME name and references it from its onRun args.
+    let mut task = step("echo", vec!["{{who}}"]);
+    task.let_bindings = Some(vec!["who = 'STEP'".to_string()]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[hook] who=WRAPPER wrapped-arg=STEP"),
+        "hook must see the wrapper's binding and WrappedAction.* the step's; got:\n{contents}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// WrappedAction.Environment contents
+// ────────────────────────────────────────────────────────────────────
+
+/// Template Schemas §4.3.1: `WrappedAction.Environment` carries all
+/// session-defined variables — `openjd_env` exports AND entered
+/// environments' declarative `variables:` maps.
+#[tokio::test]
+async fn wrapped_action_environment_includes_variables_map_and_openjd_env() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env: STATIC_VAR via `variables:`, DYNAMIC_VAR via openjd_env.
+    let mut inner = plain_env(
+        "InnerVars",
+        Some(action_with_command(
+            "bash",
+            vec!["-c", "echo 'openjd_env: DYNAMIC_VAR=world'"],
+        )),
+        None,
+    );
+    inner.variables = Some(fs_map(&[("STATIC_VAR", "hello")]));
+    session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+
+    let task = step("true", vec![]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("ENVLINE=DYNAMIC_VAR=world"),
+        "openjd_env exports must surface in WrappedAction.Environment; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=STATIC_VAR=hello"),
+        "declarative variables: entries must surface in WrappedAction.Environment; got:\n{contents}"
     );
 }
 

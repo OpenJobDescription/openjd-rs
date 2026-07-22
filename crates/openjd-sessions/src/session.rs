@@ -41,6 +41,7 @@ use tokio_util::sync::CancellationToken;
 use crate::action::{ActionMessage, ActionResult, ActionState};
 use crate::action_status::ActionStatus;
 use crate::cross_user_helper::run_via_helper;
+use crate::embedded_files::{EmbeddedFiles, EmbeddedFilesScope};
 
 /// Default notify period (in seconds) for `NOTIFY_THEN_TERMINATE` cancel when
 /// no explicit time_limit is provided. Matches the OpenJD spec default.
@@ -1188,14 +1189,31 @@ impl Session {
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_env_enter.as_ref())
                     .cloned()
-                    .map(|action| (outer.resolved_symtab.clone(), action))
+                    .map(|action| (outer.clone(), action))
             });
 
             let lib = self.library.clone();
-            if let Some((wrap_symtab, _)) = wrap_action.as_ref() {
+            if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // The wrapped onEnter resolves against the INNER env's own
+                // scope (its embedded files and lets) — the same scope
+                // `runner.enter` would have built had the action run
+                // unwrapped. The hook itself resolves against the wrap
+                // env's scope built in seed_wrapped_action_symbols.
+                let inner_symtab = self
+                    .build_wrapped_inner_scope(
+                        EmbeddedFilesScope::Env,
+                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
+                        env.script
+                            .as_ref()
+                            .and_then(|s| s.embedded_files.as_deref()),
+                        &action_symtab,
+                        Some(&lib),
+                    )
+                    .map_err(|e| self.fail_action_setup(e))?;
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
-                    wrap_symtab,
+                    wrap_env,
+                    &inner_symtab,
                     inner_on_enter,
                     WrappedContext::Env(&env.name),
                     &self.env_vars,
@@ -1415,14 +1433,28 @@ impl Session {
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_env_exit.as_ref())
                     .cloned()
-                    .map(|action| (outer.resolved_symtab.clone(), action))
+                    .map(|action| (outer.clone(), action))
             });
 
             let lib = self.library.clone();
-            if let Some((wrap_symtab, _)) = wrap_action.as_ref() {
+            if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // See the onEnter path: the wrapped onExit resolves against
+                // the INNER env's own scope.
+                let inner_symtab = self
+                    .build_wrapped_inner_scope(
+                        EmbeddedFilesScope::Env,
+                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
+                        env.script
+                            .as_ref()
+                            .and_then(|s| s.embedded_files.as_deref()),
+                        &action_symtab,
+                        Some(&lib),
+                    )
+                    .map_err(|e| self.fail_action_setup(e))?;
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
-                    wrap_symtab,
+                    wrap_env,
+                    &inner_symtab,
                     inner_on_exit,
                     WrappedContext::Env(&env.name),
                     &self.env_vars,
@@ -1614,16 +1646,27 @@ impl Session {
                     .script
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_task_run.clone())
-                    .map(|action| (wrap_env.resolved_symtab.clone(), action))
+                    .map(|action| (wrap_env.clone(), action))
             })
-            .map(|(wrap_symtab, action)| {
+            .map(|(wrap_env, action)| {
                 // Seed WrappedAction.* / WrappedStep.Name from the step's own
-                // onRun, layering the wrap env's frozen symtab (its Param.*,
-                // let bindings) on top of the task symtab. Shared with the
+                // onRun. The wrapped onRun resolves against the STEP's own
+                // scope — its embedded files and script-level lets, the same
+                // scope StepScriptRunner::run would have built unwrapped —
+                // while the hook resolves against the wrap env's scope built
+                // in seed_wrapped_action_symbols. Shared with the
                 // onEnter/onExit hooks so all three behave identically.
+                let inner_symtab = self.build_wrapped_inner_scope(
+                    EmbeddedFilesScope::Step,
+                    script.let_bindings.as_deref(),
+                    script.embedded_files.as_deref(),
+                    &action_symtab,
+                    Some(&lib),
+                )?;
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
-                    &wrap_symtab,
+                    &wrap_env,
+                    &inner_symtab,
                     &script.actions.on_run,
                     WrappedContext::Step(step_name),
                     &self.env_vars,
@@ -1677,14 +1720,19 @@ impl Session {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         // Build the script the runner actually executes. When a wrap hook
-        // is in play, the step's own onRun is replaced by the wrap action;
-        // step let_bindings and embedded_files still run on the host side
-        // because they belong to the step scope, not the task subprocess.
+        // is in play, the step's own onRun is replaced by the wrap action,
+        // and the step's let_bindings/embedded_files are dropped from the
+        // runner's script: they belong to the WRAPPED (inner) scope, which
+        // build_wrapped_inner_scope already materialized when resolving
+        // WrappedAction.* above. Re-applying them here would overwrite the
+        // wrap environment's own let bindings in the hook's scope — a
+        // same-named binding would make the hook see the step's value
+        // while WrappedAction.* carried the wrapper's (or vice versa).
         let effective_script: std::borrow::Cow<'_, StepScript> = match wrap_action {
             Some(action) => std::borrow::Cow::Owned(StepScript {
-                let_bindings: script.let_bindings.clone(),
+                let_bindings: None,
                 actions: openjd_model::job::StepActions { on_run: action },
-                embedded_files: script.embedded_files.clone(),
+                embedded_files: None,
             }),
             None => std::borrow::Cow::Borrowed(script),
         };
@@ -2382,6 +2430,52 @@ impl Session {
     // RFC 0008: wrap-hook routing
     // ────────────────────────────────────────────────────────────────
 
+    /// Build the scope a wrapped action would have resolved against had it
+    /// run unwrapped: `base` (the inner entity's own symbol table) plus its
+    /// embedded files and script-level `let` bindings, in the same order
+    /// the runners use (allocate file paths → evaluate lets → write file
+    /// contents, so `data` expressions can reference let-bound values).
+    ///
+    /// `WrappedAction.*` values are resolved against this table so that
+    /// names defined by the WRAPPING environment (its `Param.*`, its lets)
+    /// can never leak into the wrapped action's resolved command/args —
+    /// and, symmetrically, the inner entity's lets never apply to the
+    /// hook's own resolution scope.
+    fn build_wrapped_inner_scope(
+        &self,
+        scope: EmbeddedFilesScope,
+        let_bindings: Option<&[String]>,
+        embedded_files: Option<&[openjd_model::job::EmbeddedFile]>,
+        base: &SymbolTable,
+        lib: Option<&FunctionLibrary>,
+    ) -> Result<SymbolTable, SessionError> {
+        let mut st = base.clone();
+        let ef = if let Some(files) = embedded_files {
+            let mut ef = EmbeddedFiles::new(scope, self.files_directory.clone(), &self.session_id)
+                .with_user(self.cross_user.user.clone());
+            ef.allocate_file_paths(files, &mut st)?;
+            Some(ef)
+        } else {
+            None
+        };
+        if let Some(bindings) = let_bindings {
+            st = crate::let_bindings::evaluate_let_bindings(
+                bindings,
+                &st,
+                lib,
+                openjd_expr::PathFormat::host(),
+            )
+            .map_err(|e| SessionError::FormatString {
+                context: "let bindings".into(),
+                reason: e.to_string(),
+            })?;
+        }
+        if let Some(ef) = ef {
+            ef.write_file_contents(&st, lib)?;
+        }
+        Ok(st)
+    }
+
     /// Return the innermost currently-active environment that defines *any*
     /// wrap hook, if one exists.
     ///
@@ -2440,10 +2534,26 @@ pub(crate) enum WrappedContext<'a> {
     Step(&'a str),
 }
 
-/// Deserialize a wrap environment's frozen `resolved_symtab` (if present)
-/// and merge it into `action_symtab`, then resolve the wrapped action's
-/// command/args/timeout and overlay the RFC 0008 `WrappedAction.*` (plus
-/// the companion `WrappedEnv`/`WrappedStep` variable) onto the same table.
+/// Build the wrap hook's resolution scope on `action_symtab` and resolve
+/// the wrapped action's command/args/timeout/cancelation, overlaying the
+/// RFC 0008 `WrappedAction.*` (plus the companion `WrappedEnv`/`WrappedStep`
+/// variable) onto the hook's table.
+///
+/// Two distinct scopes are in play and MUST NOT be conflated:
+///
+/// - **Inner scope** (`inner_symtab`) — the scope the WRAPPED action would
+///   have resolved against had it run unwrapped (the inner entity's own
+///   symbols, including its `let` bindings where the caller evaluates
+///   them). `WrappedAction.Command`/`Args`/`Timeout`/`Cancelation.*` are
+///   resolved against this table, so a wrapper-defined name can never
+///   leak into the wrapped action's resolved values.
+/// - **Hook scope** (`action_symtab`, mutated in place) — the wrap
+///   environment's own scope: its frozen `resolved_symtab` (its `Param.*`)
+///   and its script-level `let` bindings (Template Schemas §4.2: an
+///   environment script's `let` names "are available in actions" — the
+///   wrap hooks are actions of the wrap environment's script), plus the
+///   `WrappedAction.*` overlay. The hook action resolves against this
+///   table only; the inner entity's `let` bindings are NOT applied to it.
 ///
 /// This is the single implementation shared by the three wrap-hook call
 /// sites (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`), guaranteeing
@@ -2451,24 +2561,27 @@ pub(crate) enum WrappedContext<'a> {
 /// `phase` names the wrapped lifecycle action for error messages
 /// ("onEnter", "onExit", or "task").
 ///
-/// `session_env_vars` MUST be the session's `openjd_env`-exported variables
-/// only (`self.env_vars`); host-inherited variables are intentionally
-/// excluded per RFC 0008.
+/// `session_env_vars` MUST be the session's session-defined variables
+/// (`self.env_vars`): `openjd_env` exports plus entered environments'
+/// declarative `variables:` maps. Host-inherited variables are
+/// intentionally excluded per RFC 0008.
+#[allow(clippy::too_many_arguments)]
 fn seed_wrapped_action_symbols(
     action_symtab: &mut SymbolTable,
-    wrap_resolved: &Option<openjd_expr::SerializedSymbolTable>,
+    wrap_env: &Environment,
+    inner_symtab: &SymbolTable,
     wrapped_action: &openjd_model::job::Action,
     context: WrappedContext<'_>,
     session_env_vars: &HashMap<String, String>,
     lib: Option<&FunctionLibrary>,
     phase: &str,
 ) -> Result<(), SessionError> {
-    // Layer the wrap env's frozen symtab on top of the action symtab so the
+    // Layer the wrap env's frozen symtab on top of the hook's table so the
     // wrap action can reference symbols only it knows about (its own
-    // `Param.*`, let bindings). A deserialize failure is logged and skipped
-    // rather than failing the action — resolution will surface later only if
-    // a missing symbol is actually referenced.
-    if let Some(ser) = wrap_resolved.as_ref() {
+    // `Param.*`). A deserialize failure is logged and skipped rather than
+    // failing the action — resolution will surface later only if a missing
+    // symbol is actually referenced.
+    if let Some(ser) = wrap_env.resolved_symtab.as_ref() {
         match ser.to_symtab(openjd_expr::path_mapping::PathFormat::host()) {
             Ok(st) => action_symtab.merge_from(&st),
             Err(e) => {
@@ -2481,9 +2594,33 @@ fn seed_wrapped_action_symbols(
         }
     }
 
-    // Resolve the wrapped action's command/args using the inner scope
-    // (the symtab built so far). These seed WrappedAction.Command/Args.
-    let resolved_cmd = crate::runner::resolve_action_args(wrapped_action, action_symtab, lib)
+    // The wrap env's own script-level `let` bindings are part of the scope
+    // its hooks resolve against. They are evaluated here — against the wrap
+    // env's frozen symtab merged above — rather than carried from enter
+    // time, because the session does not persist per-environment evaluated
+    // let scopes. The bindings only reference environment-scope symbols
+    // (Param.*, Session.*), so re-evaluation is deterministic.
+    if let Some(bindings) = wrap_env
+        .script
+        .as_ref()
+        .and_then(|s| s.let_bindings.as_deref())
+    {
+        let with_lets = crate::let_bindings::evaluate_let_bindings(
+            bindings,
+            action_symtab,
+            lib,
+            openjd_expr::PathFormat::host(),
+        )
+        .map_err(|e| SessionError::FormatString {
+            context: format!("wrap environment '{}' let bindings", wrap_env.name),
+            reason: e.to_string(),
+        })?;
+        *action_symtab = with_lets;
+    }
+
+    // Resolve the wrapped action's command/args against the INNER scope.
+    // These seed WrappedAction.Command/Args.
+    let resolved_cmd = crate::runner::resolve_action_args(wrapped_action, inner_symtab, lib)
         .map_err(|e| SessionError::FormatString {
             context: format!("wrapped {phase} command"),
             reason: e.to_string(),
@@ -2501,7 +2638,7 @@ fn seed_wrapped_action_symbols(
     // action specified no timeout — int? per the EXPR optional-data
     // semantics, so whole-field forwarding drops the field.
     let wrapped_timeout_secs: Option<i64> =
-        crate::runner::resolve_action_timeout(wrapped_action, action_symtab, lib, None)
+        crate::runner::resolve_action_timeout(wrapped_action, inner_symtab, lib, None)
             .map_err(|e| SessionError::FormatString {
                 context: format!("wrapped {phase} timeout"),
                 reason: e.to_string(),
@@ -2526,7 +2663,7 @@ fn seed_wrapped_action_symbols(
     let (wrapped_cancelation_mode, wrapped_cancelation_notify_period): (Option<&str>, Option<i64>) =
         match crate::runner::resolve_effective_cancelation(
             &wrapped_action.cancelation,
-            action_symtab,
+            inner_symtab,
             lib,
         )? {
             crate::runner::EffectiveCancelation::Undeclared => (None, None),
@@ -2560,7 +2697,8 @@ fn seed_wrapped_action_symbols(
 /// - `WrappedAction.Command` — the wrapped action's resolved command string.
 /// - `WrappedAction.Args` — the wrapped action's resolved argument list.
 /// - `WrappedAction.Environment` — `"KEY=value"` entries for every
-///   `openjd_env` export captured so far in the session.
+///   session-defined variable captured so far: `openjd_env` exports and
+///   entered environments' declarative `variables:` maps.
 /// - `WrappedAction.Timeout` — the timeout in seconds of the wrapped
 ///   action, or `null` when the wrapped action specified no timeout.
 /// - `WrappedAction.Cancelation.Mode` — `"TERMINATE"`,

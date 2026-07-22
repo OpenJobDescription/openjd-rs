@@ -124,8 +124,8 @@ execute(args).await
   │       └── Exit step environments (reverse order)
   │
   ├── 5. ENVIRONMENT EXIT
-  │   ├── Exit job environments (reverse order)
-  │   └── Exit environment template environments (reverse order)
+  │   └── Exit every entered environment (LIFO), including any whose
+  │       enter action failed (cleanup guarantee)
   │
   └── 6. RESULTS
       ├── Print session summary (format depends on --output)
@@ -222,15 +222,39 @@ Exit:   job_envs[N], ..., job_envs[0], env_templates[N], ..., env_templates[0]
 ```
 
 Environment template environments (from `--environment` files) are converted from
-`template::Environment` to `job::Environment` via `openjd_model::convert_environment()`
-before being passed to the session.
+`template::Environment` to `job::Environment` via
+`openjd_model::convert_environment_with_symtab()`, passing a symbol table built from
+the preprocessed parameter values (`openjd_model::build_symbol_table(&param_values)`).
+This freezes the environment template's own `Param.*`/`RawParam.*` values into its
+`resolved_symtab`, which the session's RFC 0008 wrap-hook dispatch merges into hook
+scope — a wrap hook resolved against a step's symbol table could not otherwise see
+the environment template's own parameters.
 
 Step environments receive the step's symbol table (`step_symtab`) for format string
 resolution. Job and template environments receive `None` for the step symbol table.
 
-Exit uses `session.environments_entered().last().cloned()` to get the most recently
-entered environment ID, ensuring LIFO order even if the session's internal tracking
-differs from the CLI's iteration order.
+**Single-wrap-layer preflight (RFC 0008).** Before entering any environment,
+the CLI validates every session stack this run will build — external
+environment templates + job environments + each selected step's step
+environments — and rejects the run if more than one environment in any stack
+defines a wrap hook. The RFC requires rejection "before entering any
+Environment", so this happens before the first wrapper's own `onEnter` can
+run. The session's enter-time check (`SessionError::MultipleWrapEnvironments`)
+remains as defense in depth for library callers.
+
+Every entered environment — template, job, and step scoped — is tracked in an
+`entered_envs` list of `(identifier, name, step_symtab)` tuples as it is
+entered. A failed enter action marks the session failed but still records the
+environment (the session keeps a failed-enter environment on its stack),
+prints the failing action's `Process exited with code: N` line, and skips
+entering further environments and running tasks. Step environments are
+unwound to the pre-step baseline at the end of each step (or after a step-env
+enter failure); final cleanup then exits every remaining recorded environment
+in LIFO order. This is the OpenJD cleanup guarantee (extended to wrapped
+exits by RFC 0008 "Lifecycle and cleanup guarantees"): every environment
+entered or attempted has its `onExit` (or substituted `onWrapEnvExit`) run
+before the session ends. An environment rejected before entry is not recorded
+and not exited.
 
 ## Embedded File Handling
 

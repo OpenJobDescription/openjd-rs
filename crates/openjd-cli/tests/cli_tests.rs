@@ -3362,4 +3362,40 @@ mod wrap_actions {
             "no task may run in a session with two wrap layers. stdout: {stdout}"
         );
     }
+
+    /// RFC 0008 "Lifecycle and cleanup guarantees", scenario row 1: a
+    /// failed `onWrapEnvEnter` for an inner environment still runs that
+    /// environment's `onWrapEnvExit` and the wrapping environment's own
+    /// `onExit` before the run ends, and the failing hook's exit code is
+    /// the one surfaced for the failure.
+    #[test]
+    fn test_run_failed_wrap_enter_still_runs_wrap_exit_and_own_exit() {
+        let tdir = templates_dir();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("wrap_job_with_inner_env.yaml").to_str().unwrap(),
+            "--env",
+            tdir.join("wrap_env_failing_enter.yaml").to_str().unwrap(),
+        ]);
+        assert_ne!(code, 0, "the failed enter must fail the run");
+        let combined = format!("{stdout}\n{stderr}");
+        for expected in [
+            "WrapEnv Own Enter",
+            "Wrap Enter Failing",
+            "Process exited with code: 7",
+            "Wrap Exit Ran for InnerEnv",
+            "WrapEnv Own Exit",
+        ] {
+            assert!(
+                combined.contains(expected),
+                "expected '{expected}' in output; got:\n{combined}"
+            );
+        }
+        for forbidden in ["TaskBody Ran", "Inner Enter Body", "Inner Exit Body"] {
+            assert!(
+                !combined.contains(forbidden),
+                "'{forbidden}' must not run after the failed enter; got:\n{combined}"
+            );
+        }
+    }
 }

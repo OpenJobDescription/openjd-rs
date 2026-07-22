@@ -157,6 +157,11 @@ pub fn evaluate_let_bindings(
 ) -> Result<SymbolTable, ModelError>;
 
 pub fn convert_environment(env: &template::Environment) -> job::Environment;
+
+pub fn convert_environment_with_symtab(
+    env: &template::Environment,
+    symtab: Option<&SymbolTable>,
+) -> job::Environment;
 ```
 
 [`create_job`] is the high-level entry point: it resolves the job name
@@ -184,6 +189,15 @@ to its resolved [`job::Environment`] counterpart without running the
 full `create_job` pipeline. This is used by the session runtime when
 it needs a resolved environment shape for an environment template
 that's being entered directly without a parent job.
+
+[`convert_environment_with_symtab`] is the same conversion but freezes
+a filtered copy of the given symbol table into the returned
+environment's `resolved_symtab` — only the symbols the environment's
+own format strings reference are retained (plus `RawParam.*` fallbacks
+for PATH-typed parameters). The CLI uses this for `--environment`
+templates so the environment's own `parameterDefinitions` resolve
+inside its actions and RFC 0008 wrap hooks. Also available via the
+`create_job::` module path.
 
 ## Template Types (Unresolved)
 
@@ -1022,7 +1036,9 @@ impl MergedParameterDefinition {
 
 ### `convert_environment_with_symtab`
 
-Available via the `create_job::` module path:
+Re-exported at the crate root (see
+[Entry Points at the Crate Root](#entry-points-at-the-crate-root)) and
+also available via the `create_job::` module path:
 
 ```rust
 /// Convert a template Environment to a job Environment, optionally

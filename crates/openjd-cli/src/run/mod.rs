@@ -306,53 +306,6 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     // parameters and fail with "Undefined variable".
     let env_template_symtab = openjd_model::build_symbol_table(&param_values)
         .map_err(|e| format!("Failed to build environment template symbol table: {e}"))?;
-    for et in &env_templates {
-        println!("{}\t", fmt_elapsed(&session_start));
-        println!(
-            "{}\t==============================================",
-            fmt_elapsed(&session_start)
-        );
-        println!(
-            "{}\t--------- Entering Environment: {}",
-            fmt_elapsed(&session_start),
-            et.environment.name
-        );
-        println!(
-            "{}\t==============================================",
-            fmt_elapsed(&session_start)
-        );
-        let job_env = openjd_model::convert_environment_with_symtab(
-            &et.environment,
-            Some(&env_template_symtab),
-        );
-        let _out = session
-            .enter_environment(&job_env, None, None, None)
-            .await
-            .map_err(|e| format!("Environment template setup failed: {e}"))?;
-    }
-    // Enter job environments
-    if let Some(job_envs) = &job.job_environments {
-        for env in job_envs {
-            println!("{}\t", fmt_elapsed(&session_start));
-            println!(
-                "{}\t==============================================",
-                fmt_elapsed(&session_start)
-            );
-            println!(
-                "{}\t--------- Entering Environment: {}",
-                fmt_elapsed(&session_start),
-                env.name
-            );
-            println!(
-                "{}\t==============================================",
-                fmt_elapsed(&session_start)
-            );
-            let _out = session
-                .enter_environment(env, None, None, None)
-                .await
-                .map_err(|e| format!("Environment setup failed: {e}"))?;
-        }
-    }
 
     let mut tasks_run: usize = 0;
     let mut session_failed = false;
@@ -403,6 +356,182 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         StepDependencyGraph::new(&job)?.topo_sorted()?
     };
 
+    // RFC 0008 preflight: "If more than one Environment in the session
+    // stack defines any wrap hook, the session is invalid and the
+    // scheduler must reject it before entering any Environment." The model
+    // validator enforces this within one template; here we check the
+    // stacks this run will actually build — external env templates + job
+    // environments + each selected step's step environments — before
+    // entering anything. (The session's own enter-time check remains as
+    // defense in depth for library callers.)
+    {
+        let mut base_wrap_envs: Vec<&str> = Vec::new();
+        for et in &env_templates {
+            if et
+                .environment
+                .script
+                .as_ref()
+                .is_some_and(|s| s.actions.has_any_wrap_hook())
+            {
+                base_wrap_envs.push(et.environment.name.as_str());
+            }
+        }
+        if let Some(job_envs) = &job.job_environments {
+            for env in job_envs {
+                if env
+                    .script
+                    .as_ref()
+                    .is_some_and(|s| s.actions.has_any_wrap_hook())
+                {
+                    base_wrap_envs.push(env.name.as_str());
+                }
+            }
+        }
+        let reject = |names: Vec<&str>| -> Box<dyn std::error::Error> {
+            format!(
+                "RFC 0008: a session may have at most one Environment defining wrap hooks \
+                 (onWrapEnvEnter / onWrapTaskRun / onWrapEnvExit). Found {}: {}.",
+                names.len(),
+                names.join(", ")
+            )
+            .into()
+        };
+        if base_wrap_envs.len() > 1 {
+            return Err(reject(base_wrap_envs));
+        }
+        for &step_idx in &steps_to_run {
+            let step = &job.steps[step_idx];
+            let mut stack_wrap_envs = base_wrap_envs.clone();
+            if let Some(step_envs) = &step.step_environments {
+                for env in step_envs {
+                    if env
+                        .script
+                        .as_ref()
+                        .is_some_and(|s| s.actions.has_any_wrap_hook())
+                    {
+                        stack_wrap_envs.push(env.name.as_str());
+                    }
+                }
+            }
+            if stack_wrap_envs.len() > 1 {
+                return Err(reject(stack_wrap_envs));
+            }
+        }
+    }
+
+    // Environments entered so far, as (identifier, name, step symtab), in
+    // enter order. Cleanup exits these in LIFO order — including an
+    // environment whose enter action FAILED. OpenJD's cleanup guarantee
+    // (How Jobs Are Run, extended by RFC 0008 "Lifecycle and cleanup
+    // guarantees") is that every environment the session entered or
+    // attempted to enter has its onExit run — through the wrap layer when
+    // one is active — before the session ends. The third element is the
+    // step's resolved symtab for step-scoped environments (`None` for job
+    // and template environments).
+    type EnvSymtab = Option<openjd_expr::SerializedSymbolTable>;
+    let mut entered_envs: Vec<(String, String, EnvSymtab)> = Vec::new();
+
+    // Enter an environment, recording it for cleanup. On failure, report
+    // the failing action's exit code (the conformance suite attributes the
+    // first non-zero `exited with code:` line to the failure) and record
+    // the environment anyway when the session kept it on its stack, so
+    // cleanup still exits it.
+    macro_rules! enter_env {
+        ($env:expr, $name:expr, $symtab:expr) => {{
+            println!("{}\t", fmt_elapsed(&session_start));
+            println!(
+                "{}\t==============================================",
+                fmt_elapsed(&session_start)
+            );
+            println!(
+                "{}\t--------- Entering Environment: {}",
+                fmt_elapsed(&session_start),
+                $name
+            );
+            println!(
+                "{}\t==============================================",
+                fmt_elapsed(&session_start)
+            );
+            let symtab: EnvSymtab = $symtab;
+            match session
+                .enter_environment($env, symtab.as_ref(), None, None)
+                .await
+            {
+                Ok(id) => entered_envs.push((id, $name.to_string(), symtab)),
+                Err(e) => {
+                    eprintln!("ERROR: Environment setup failed: {e}");
+                    if let Some(code) = session.action_status().and_then(|s| s.exit_code) {
+                        println!(
+                            "{}\tProcess exited with code: {}",
+                            fmt_elapsed(&session_start),
+                            code
+                        );
+                    }
+                    // A failed enter action leaves the environment on the
+                    // session stack; a rejection before entry (e.g. the
+                    // RFC 0008 single-wrap-layer rule) does not.
+                    if let Some(id) = session.environments_entered().last() {
+                        if !entered_envs.iter().any(|(eid, _, _)| eid == id) {
+                            entered_envs.push((id.clone(), $name.to_string(), symtab));
+                        }
+                    }
+                    session_failed = true;
+                }
+            }
+        }};
+    }
+
+    // Exit recorded environments in LIFO order until only `$baseline`
+    // remain. Runs the exits even after failures — the cleanup guarantee.
+    macro_rules! exit_envs_down_to {
+        ($baseline:expr) => {{
+            while entered_envs.len() > $baseline {
+                let (id, name, symtab) = entered_envs.pop().expect("guarded by len");
+                println!("{}\t", fmt_elapsed(&session_start));
+                println!(
+                    "{}\t==============================================",
+                    fmt_elapsed(&session_start)
+                );
+                println!(
+                    "{}\t--------- Exiting Environment: {}",
+                    fmt_elapsed(&session_start),
+                    name
+                );
+                println!(
+                    "{}\t==============================================",
+                    fmt_elapsed(&session_start)
+                );
+                if let Err(e) = session
+                    .exit_environment(&id, symtab.as_ref(), true, None)
+                    .await
+                {
+                    eprintln!("ERROR: Environment teardown failed: {e}");
+                    session_failed = true;
+                }
+            }
+        }};
+    }
+
+    // Enter environment template environments, then job environments.
+    for et in &env_templates {
+        if session_failed {
+            break;
+        }
+        let job_env = openjd_model::convert_environment_with_symtab(
+            &et.environment,
+            Some(&env_template_symtab),
+        );
+        enter_env!(&job_env, &et.environment.name, None);
+    }
+    if let Some(job_envs) = &job.job_environments {
+        for env in job_envs {
+            if session_failed {
+                break;
+            }
+            enter_env!(env, &env.name, None);
+        }
+    }
+
     // Execute steps
     for &step_idx in &steps_to_run {
         if session_failed || interrupted.load(Ordering::SeqCst) {
@@ -418,14 +547,25 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         let step_symtab = step.resolved_symtab.as_ref();
 
-        // Enter step environments
+        // The job/template environments stay entered across steps; step
+        // environments stack on top and are unwound to this baseline at
+        // the end of the step (or on failure).
+        let step_env_baseline = entered_envs.len();
+
+        // Enter step environments. A failure marks the session failed and
+        // skips the tasks, but the unwind below still exits everything
+        // this step entered (cleanup guarantee).
         if let Some(step_envs) = &step.step_environments {
             for env in step_envs {
-                let _out = session
-                    .enter_environment(env, step_symtab, None, None)
-                    .await
-                    .map_err(|e| format!("Step environment setup failed: {e}"))?;
+                if session_failed {
+                    break;
+                }
+                enter_env!(env, &env.name, step.resolved_symtab.clone());
             }
+        }
+        if session_failed {
+            exit_envs_down_to!(step_env_baseline);
+            break;
         }
 
         // Build iterator
@@ -681,58 +821,15 @@ pub async fn execute(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Exit step environments in reverse
-        if let Some(step_envs) = &step.step_environments {
-            for _env in step_envs.iter().rev() {
-                if let Some(id) = session.environments_entered().last().cloned() {
-                    if let Ok(_out) = session.exit_environment(&id, step_symtab, true, None).await {
-                    }
-                }
-            }
-        }
+        // Exit step environments in reverse (down to the pre-step baseline).
+        exit_envs_down_to!(step_env_baseline);
     }
 
-    // Exit job environments in reverse
-    if let Some(job_envs) = &job.job_environments {
-        for env in job_envs.iter().rev() {
-            println!("{}\t", fmt_elapsed(&session_start));
-            println!(
-                "{}\t==============================================",
-                fmt_elapsed(&session_start)
-            );
-            println!(
-                "{}\t--------- Exiting Environment: {}",
-                fmt_elapsed(&session_start),
-                env.name
-            );
-            println!(
-                "{}\t==============================================",
-                fmt_elapsed(&session_start)
-            );
-            if let Some(id) = session.environments_entered().last().cloned() {
-                if let Ok(_out) = session.exit_environment(&id, None, true, None).await {}
-            }
-        }
-    }
-    for et in env_templates.iter().rev() {
-        println!("{}\t", fmt_elapsed(&session_start));
-        println!(
-            "{}\t==============================================",
-            fmt_elapsed(&session_start)
-        );
-        println!(
-            "{}\t--------- Exiting Environment: {}",
-            fmt_elapsed(&session_start),
-            et.environment.name
-        );
-        println!(
-            "{}\t==============================================",
-            fmt_elapsed(&session_start)
-        );
-        if let Some(id) = session.environments_entered().last().cloned() {
-            if let Ok(_out) = session.exit_environment(&id, None, true, None).await {}
-        }
-    }
+    // Exit every remaining entered environment in LIFO order. This runs
+    // even when an enter action failed — the cleanup guarantee (How Jobs
+    // Are Run; RFC 0008 for wrapped exits) is that every environment
+    // entered or attempted has its onExit run before the session ends.
+    exit_envs_down_to!(0);
 
     println!("{}\t", fmt_elapsed(&session_start));
     if session_failed {
