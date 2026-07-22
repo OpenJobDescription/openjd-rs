@@ -4,6 +4,19 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.3.1...openjd-model-v0.4.0) - 2026-07-22
+
+### Bug fixes
+
+- Close top three RFC 0008 wrap-action review gaps ([#265](https://github.com/OpenJobDescription/openjd-rs/pull/265))
+
+- Address post-merge review comments on PR #261 ([#264](https://github.com/OpenJobDescription/openjd-rs/pull/264))
+
+- Forward WrappedAction.Cancelation.* to wrap hooks
+
+- [**breaking**] Cancel handle, setup-failure reporting, plain filename, let scope
+
+
 ## [0.3.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.3.0...openjd-model-v0.3.1) - 2026-07-15
 
 ### Bug fixes

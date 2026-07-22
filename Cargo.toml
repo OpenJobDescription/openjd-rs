@@ -15,7 +15,7 @@ resolver = "2"
 # the workspace version below as a convenience — it has `publish = false` so
 # the version number is not meaningful on npm.
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "(Apache-2.0 OR MIT)"
 repository = "https://github.com/OpenJobDescription/openjd-rs"
