@@ -13,6 +13,7 @@
 //! Uses `ruff_python_parser` for EXPR extension expression parsing.
 //! See `specs/expr/parser.md` for rationale.
 
+pub(crate) mod budgeted_vec;
 pub mod default_library;
 pub(crate) mod edit_distance;
 pub mod error;

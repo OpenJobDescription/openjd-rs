@@ -583,15 +583,6 @@ impl RangeExpr {
     /// collect elements into a list, since `RangeExpr` cannot represent
     /// descending sequences.
     pub fn slice(&self, start: i64, stop: i64, step: i64) -> Result<RangeExpr, ExpressionError> {
-        self.slice_impl(start, stop, step)
-    }
-
-    pub(crate) fn slice_impl(
-        &self,
-        start: i64,
-        stop: i64,
-        step: i64,
-    ) -> Result<RangeExpr, ExpressionError> {
         if step <= 0 {
             return Err(ExpressionError::parse_error(
                 "RangeExpr::slice requires a positive step",

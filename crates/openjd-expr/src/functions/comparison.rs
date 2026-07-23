@@ -4,6 +4,7 @@
 
 //! Comparison, containment, and slice operator implementations.
 
+use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::ExprValue;
@@ -107,7 +108,11 @@ pub fn not_contains_string(ctx: Ctx, a: &[ExprValue]) -> R {
 fn range_contains(a: &[ExprValue]) -> Result<bool, ExpressionError> {
     let r = match &a[0] {
         ExprValue::RangeExpr(r) => r,
-        _ => return Err(ExpressionError::type_error("type error")),
+        _ => {
+            return Err(ExpressionError::type_error(
+                "__contains__ requires a range_expr container",
+            ))
+        }
     };
     // Membership by value equality, mirroring list containment (and
     // Python, where `1.0 in range(1, 4)` is True): integral floats can
@@ -285,25 +290,62 @@ pub fn slice_range(ctx: Ctx, a: &[ExprValue]) -> R {
         } else {
             0
         };
-        ctx.check_memory(result_len.saturating_mul(std::mem::size_of::<ExprValue>()))?;
-        // Preallocate to the exact checked size so the buffer never
-        // exceeds what was checked (an empty Vec's doubling growth can
-        // overshoot the projection by ~2x).
-        let mut result = Vec::with_capacity(result_len);
+        let mut result = BudgetedVec::with_capacity(ctx, result_len)?;
         let mut idx = s;
         while idx > e {
             if idx >= 0 {
                 ctx.count_op()?;
                 if let Some(v) = r.value_at(idx as u64) {
-                    result.push(ExprValue::Int(v));
+                    result.push(ctx, ExprValue::Int(v))?;
                 }
             }
             idx += step;
         }
         Ok(ExprValue::make_list_checked(
             ctx,
-            result,
+            result.into_vec(),
             crate::types::ExprType::INT,
         )?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::path_mapping::PathFormat;
+
+    struct TestContext;
+
+    impl EvalContext for TestContext {
+        fn path_format(&self) -> PathFormat {
+            PathFormat::host()
+        }
+
+        fn count_op(&mut self) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+
+        fn count_ops(&mut self, _n: usize) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+
+        fn count_string_ops(&mut self, _len: usize) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+
+        fn check_memory(&self, _bytes: usize) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn range_contains_direct_call_rejects_non_range_container() {
+        let err =
+            contains_range(&mut TestContext, &[ExprValue::Int(1), ExprValue::Int(1)]).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "__contains__ requires a range_expr container"
+        );
     }
 }

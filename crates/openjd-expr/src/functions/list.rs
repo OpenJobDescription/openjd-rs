@@ -4,6 +4,7 @@
 
 //! List function implementations (sorted, reversed, unique, flatten, range).
 
+use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::types::ExprType;
@@ -154,13 +155,15 @@ pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
             // op charge alone admits up to the operation limit in
             // elements (~640 MB of ExprValues under default limits)
             // before make_list_checked's post-hoc memory check.
-            ctx.check_memory(r.len().saturating_mul(std::mem::size_of::<ExprValue>()))?;
-            // Preallocate to the exact checked size so the buffer never
-            // exceeds what was checked (an empty Vec's doubling growth
-            // can overshoot the projection by ~2x).
-            let mut elements: Vec<ExprValue> = Vec::with_capacity(r.len());
-            elements.extend(r.iter().map(ExprValue::Int));
-            Ok(ExprValue::make_list_checked(ctx, elements, ExprType::INT)?)
+            let mut elements = BudgetedVec::with_capacity(ctx, r.len())?;
+            for value in r.iter() {
+                elements.push(ctx, ExprValue::Int(value))?;
+            }
+            Ok(ExprValue::make_list_checked(
+                ctx,
+                elements.into_vec(),
+                ExprType::INT,
+            )?)
         }
         _ => Err(ExpressionError::new("list() argument must be range_expr")),
     }
