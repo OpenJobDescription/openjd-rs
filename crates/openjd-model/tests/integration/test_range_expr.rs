@@ -314,13 +314,15 @@ fn from_str_end_becomes_actual_last_3_values() {
 
 #[test]
 fn from_values_one_int() {
-    assert_eq!(RangeExpr::from_values(vec![5]).to_string(), "5");
+    assert_eq!(RangeExpr::from_values(vec![5]).unwrap().to_string(), "5");
 }
 
 #[test]
 fn from_values_two_ranges() {
     assert_eq!(
-        RangeExpr::from_values(vec![1, 2, 3, 4, 5, 7]).to_string(),
+        RangeExpr::from_values(vec![1, 2, 3, 4, 5, 7])
+            .unwrap()
+            .to_string(),
         "1-5,7"
     );
 }
@@ -328,7 +330,9 @@ fn from_values_two_ranges() {
 #[test]
 fn from_values_out_of_order() {
     assert_eq!(
-        RangeExpr::from_values(vec![9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5]).to_string(),
+        RangeExpr::from_values(vec![9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5])
+            .unwrap()
+            .to_string(),
         "0-10"
     );
 }
@@ -336,7 +340,9 @@ fn from_values_out_of_order() {
 #[test]
 fn from_values_different_step_sizes() {
     assert_eq!(
-        RangeExpr::from_values(vec![1, 3, 5, 6, 7, 8, 10, 13, 16]).to_string(),
+        RangeExpr::from_values(vec![1, 3, 5, 6, 7, 8, 10, 13, 16])
+            .unwrap()
+            .to_string(),
         "1-5:2,6-8,10-16:3"
     );
 }

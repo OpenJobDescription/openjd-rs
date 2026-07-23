@@ -426,3 +426,287 @@ fn range_expr_max_large_range_perf() {
         "max(range_expr('1-1000000000')) took {elapsed:?}, expected < 1s"
     );
 }
+
+// === Regression tests: bounded value domain (|v| < 2^62) ===
+// Range endpoints and steps are restricted below the full i64 domain so
+// all derived arithmetic (spans, counts, index products, cumulative
+// sums) stays exactly representable in i64/u64. Inputs at or beyond the
+// bound raise an integer overflow error at construction.
+
+#[test]
+fn endpoint_at_bound_rejected_with_overflow_error() {
+    assert_err(
+        "range_expr('0-4611686018427387904')",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  range_expr('0-4611686018427387904')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "range_expr('-4611686018427387904')",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  range_expr('-4611686018427387904')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn step_at_bound_rejected_with_overflow_error() {
+    assert_err(
+        "range_expr('0-10:4611686018427387904')",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  range_expr('0-10:4611686018427387904')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn from_value_list_at_bound_rejected() {
+    assert_err(
+        "range_expr([1, 4611686018427387904])",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  range_expr([1, 4611686018427387904])\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn widest_legal_range_exact_everywhere() {
+    // Largest legal magnitude: 2^62 - 1. Every derived quantity is
+    // exact — len, tail indexing, membership, min/max, equality.
+    let max = (1i64 << 62) - 1;
+    let mut st = SymbolTable::new();
+    st.set(
+        "R",
+        ExprValue::RangeExpr(format!("{}-{}", -max, max).parse().unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        eval_with("len(R)", &st).to_display_string(),
+        "9223372036854775807" // 2 * (2^62 - 1) + 1
+    );
+    assert_eq!(eval_with("R[-1]", &st).to_display_string(), max.to_string());
+    assert_eq!(
+        eval_with("R[0]", &st).to_display_string(),
+        (-max).to_string()
+    );
+    assert_eq!(eval_with("5 in R", &st).to_display_string(), "true");
+    assert_eq!(
+        eval_with("max(R)", &st).to_display_string(),
+        max.to_string()
+    );
+    assert_eq!(
+        eval_with("min(R)", &st).to_display_string(),
+        (-max).to_string()
+    );
+    assert_eq!(eval_with("R == []", &st).to_display_string(), "false");
+}
+
+#[test]
+fn widest_legal_range_slice_exact() {
+    let max = (1i64 << 62) - 1;
+    let mut st = SymbolTable::new();
+    st.set(
+        "R",
+        ExprValue::RangeExpr(format!("{}-{}", -max, max).parse().unwrap()),
+    )
+    .unwrap();
+    let sliced = eval_with("R[0:3]", &st).to_display_string();
+    assert_eq!(sliced, format!("{}-{}", -max, -max + 2));
+    // Tail slice resolves against the exact length. (Two-element ranges
+    // display in comma form.)
+    let tail = eval_with("R[-2:]", &st).to_display_string();
+    assert_eq!(tail, format!("{},{}", max - 1, max));
+}
+
+#[test]
+fn reverse_slice_with_huge_step_single_element() {
+    // A reverse step of huge magnitude visits only the start element,
+    // and must not overflow the walk arithmetic.
+    assert_eq!(
+        eval("range_expr('1-5')[::-4611686018427387903]").to_display_string(),
+        "[5]"
+    );
+}
+
+#[test]
+fn merge_at_value_bound_no_overflow() {
+    // Two singletons adjacent at the top of the legal domain: the merge
+    // check computes end + step without overflow.
+    let max = (1i64 << 62) - 1;
+    let r: RangeExpr = format!("{},{}", max - 1, max).parse().unwrap();
+    assert_eq!(r.len(), 2);
+    assert_eq!(r.get(-1), Some(max));
+}
+
+#[test]
+fn parse_duplicate_bound_singletons_overlap_error() {
+    // Duplicates are an overlap error (and the merge check's end + step
+    // stays in i64 at the domain edge).
+    let max = (1i64 << 62) - 1;
+    let expr = format!("range_expr('{max},{max}')");
+    let e = ParsedExpression::new(&expr)
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("overlapping ranges"), "got:\n{e}");
+}
+
+// === Regression tests: range containment by value equality ===
+
+#[test]
+fn float_in_range_matches_python() {
+    assert_eq!(eval("1.0 in range_expr('1-3')").to_display_string(), "true");
+    assert_eq!(
+        eval("1.5 in range_expr('1-3')").to_display_string(),
+        "false"
+    );
+    assert_eq!(
+        eval("'a' in range_expr('1-3')").to_display_string(),
+        "false"
+    );
+    assert_eq!(
+        eval("4.0 not in range_expr('1-3')").to_display_string(),
+        "true"
+    );
+}
+
+// === Regression tests: reverse-slice stop clamping ===
+
+#[test]
+fn reverse_slice_huge_negative_stop_clamped() {
+    // A stop far below -len must clamp to the -1 sentinel ("walk to
+    // index 0"), not leave the reverse walk spinning through ~i64::MAX
+    // uncharged below-zero indices.
+    assert_eq!(
+        eval("range_expr('1-5')[:-9223372036854775807:-1]").to_display_string(),
+        "[5, 4, 3, 2, 1]"
+    );
+    // Same for a huge negative start.
+    assert_eq!(
+        eval("range_expr('1-5')[-9223372036854775807::-1]").to_display_string(),
+        "[]"
+    );
+}
+
+#[test]
+fn list_and_string_reverse_slice_huge_negative_stop_clamped() {
+    // Same clamp in the shared compute_slice_indices helper: list and
+    // string reverse slices previously spun through uncharged
+    // below-zero indices for stops far below -len.
+    assert_eq!(
+        eval("[1, 2, 3][:-9223372036854775807:-1]").to_display_string(),
+        "[3, 2, 1]"
+    );
+    assert_eq!(
+        eval("'abc'[:-9223372036854775807:-1]").to_display_string(),
+        "cba"
+    );
+}
+
+// === Regression tests: hashing on boundary values ===
+
+#[test]
+fn list_float_hash_consistent_with_exact_equality() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    fn hash_of(v: &ExprValue) -> u64 {
+        let mut h = DefaultHasher::new();
+        v.hash(&mut h);
+        h.finish()
+    }
+    // 2^63 as f64 is NOT exactly representable in i64, so it must hash
+    // under the float tag in both the top-level Float arm and the
+    // ListFloat arm — and a ListFloat must hash identically to the
+    // equal ListList of the same floats (a == b requires
+    // hash(a) == hash(b)).
+    let boundary = 9223372036854775808.0f64; // 2^63
+    let f = openjd_expr::value::Float64::with_str(boundary, "x".into()).unwrap();
+    let list_float = ExprValue::ListFloat(vec![f.clone()]);
+    // Externally constructed ListList holding the same float (ExprValue's
+    // variants are public API): equality is generic across list variants,
+    // so hashing must agree too.
+    let list_list = ExprValue::ListList(
+        vec![ExprValue::Float(f)],
+        openjd_expr::types::ExprType::FLOAT,
+        0,
+    );
+    assert!(matches!(list_list, ExprValue::ListList(..)));
+    assert_eq!(list_float, list_list);
+    assert_eq!(hash_of(&list_float), hash_of(&list_list));
+}
+
+#[test]
+fn coerce_large_range_to_list_rejected() {
+    // ExprValue::coerce runs outside any evaluation budget; a range
+    // larger than the default operation limit must be rejected, not
+    // materialized.
+    let r: RangeExpr = "1-100000000".parse().unwrap();
+    let v = ExprValue::RangeExpr(r);
+    let err = v
+        .coerce(
+            &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT),
+            openjd_expr::path_mapping::PathFormat::Posix,
+        )
+        .unwrap_err();
+    assert!(err.contains("Cannot coerce range_expr"), "got: {err}");
+    // A small range still coerces.
+    let small = ExprValue::RangeExpr("1-3".parse::<RangeExpr>().unwrap());
+    assert_eq!(
+        small
+            .coerce(
+                &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT),
+                openjd_expr::path_mapping::PathFormat::Posix,
+            )
+            .unwrap()
+            .to_display_string(),
+        "[1, 2, 3]"
+    );
+}
+
+// === Regression tests: seventh review round ===
+
+#[test]
+fn from_values_far_apart_values_stay_singletons() {
+    // The gap between two in-bound values can span up to just under
+    // 2^63, exceeding the per-chunk step bound (2^62): the pair must
+    // stay singleton chunks, and the extrapolation must not overflow.
+    let max = (1i64 << 62) - 1;
+    let r = RangeExpr::from_values(vec![-max, max]).unwrap();
+    assert_eq!(r.ranges().len(), 2);
+    assert_eq!(r.get(0), Some(-max));
+    assert_eq!(r.get(1), Some(max));
+    // Three equally-spaced values whose step (2^62 - 1) is within the
+    // bound form a legal stepped chunk — and extrapolating one step past
+    // `max` (which would overflow i64) must terminate cleanly.
+    let r = RangeExpr::from_values(vec![-max, 0, max]).unwrap();
+    assert_eq!(r.ranges().len(), 1);
+    assert_eq!(r.ranges()[0].step(), max);
+    assert_eq!(r.get(-1), Some(max));
+}
+
+#[test]
+fn int_range_deserialize_revalidates_invariants() {
+    // Fields are private, and the manual Deserialize implementation
+    // re-validates serialized input through IntRange::new.
+    let err = serde_json::from_str::<openjd_expr::range_expr::IntRange>(
+        r#"{"start": 0, "end": 1, "step": 0}"#,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("step must not be zero"),
+        "got: {err}"
+    );
+    // A descending pair is rejected rather than corrupting invariants.
+    assert!(serde_json::from_str::<openjd_expr::range_expr::IntRange>(
+        r#"{"start": 5, "end": 1, "step": 1}"#,
+    )
+    .is_err());
+}

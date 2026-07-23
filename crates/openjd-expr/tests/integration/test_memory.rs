@@ -497,3 +497,101 @@ fn estimate_list_heap_size_is_upper_bound() {
     );
     check(vec![], ExprType::INT);
 }
+
+// === Regression tests: memory limits on range materialization ===
+
+#[test]
+fn comprehension_over_range_memory_bounded_incrementally() {
+    // Ranges are iterated lazily and the growing result is checked
+    // against the memory limit each iteration, so a small limit trips
+    // after a few elements — with an honest usage figure — instead of
+    // the comprehension materializing 2M elements (~128 MB) first.
+    let e = eval_bounded("[x for x in range_expr('1-2000000')]", 10000)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 16480 = logical result bytes plus the Vec's projected
+            // post-doubling capacity slack: the check accounts for the
+            // buffer the push is about to allocate, not just elements.
+            "Expression memory usage (16480 bytes) exceeded limit (10000 bytes)
+",
+            "  [x for x in range_expr('1-2000000')]
+",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn reverse_range_slice_memory_checked_before_walk() {
+    // Same for reverse slices: the result size must be pre-checked.
+    let e = eval_bounded("range_expr('1-2000000')[::-1]", 10000)
+        .unwrap_err()
+        .to_string();
+    // 128,000,000 = 2,000,000 × size_of::<ExprValue>() (64); the
+    // remainder is the tracked RangeExpr and slice-argument values.
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (128000160 bytes) exceeded limit (10000 bytes)\n",
+            "  range_expr('1-2000000')[::-1]\n",
+            "  ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn list_of_range_memory_checked_before_collect() {
+    // list(range_expr(...)) materializes every element: the projected
+    // allocation must be pre-checked, not discovered by
+    // make_list_checked after ~128 MB is already allocated.
+    let e = eval_bounded("list(range_expr('1-2000000'))", 10000)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (128000000 bytes) exceeded limit (10000 bytes)\n",
+            "  list(range_expr('1-2000000'))\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn comprehension_over_string_list_no_double_footprint() {
+    // List iterables are iterated in place (borrowing ListIter), not
+    // collected into a second Vec: a comprehension over a list of large
+    // strings must not transiently hold ~2x the list's memory. The list
+    // itself is ~1 MB (tracked); peak should stay well under two full
+    // copies plus per-iteration transients.
+    let mut st = SymbolTable::new();
+    let strings: Vec<ExprValue> = (0..100)
+        .map(|i| ExprValue::String(format!("{i:0>10000}")))
+        .collect();
+    st.set(
+        "L",
+        ExprValue::make_list(strings, openjd_expr::types::ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    let r = ParsedExpression::new("[len(x) for x in L]")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string().matches("10000").count(), 100);
+    // One tracked copy (~1 MB) + one transient loop-variable clone
+    // (~10 KB) + result ints. Two full copies would be ~2 MB.
+    assert!(
+        r.peak_memory < 1_500_000,
+        "peak_memory={} suggests the list was copied wholesale",
+        r.peak_memory
+    );
+}

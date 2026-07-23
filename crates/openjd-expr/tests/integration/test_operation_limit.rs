@@ -710,3 +710,251 @@ fn operation_limit_error_kind_from_evaluator() {
         err.kind()
     );
 }
+
+#[test]
+fn list_containment_precharges_candidate_count() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "L",
+        ExprValue::make_list((0..1000).map(ExprValue::Int).collect(), ExprType::INT).unwrap(),
+    )
+    .unwrap();
+    let e = ParsedExpression::new("999 in L")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression operation count (1002) exceeded limit (100)\n",
+            "  999 in L\n",
+            "  ^~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn list_range_equality_bounded_by_list_length() {
+    // Comparing a materialized list with a huge symbolic range must not
+    // expand the range: cost is O(list_len + 1), decided by walking the
+    // range lazily, so it succeeds under a tight operation limit.
+    let mut st = SymbolTable::new();
+    st.set("L", ExprValue::ListInt(vec![1])).unwrap();
+    st.set("R", ExprValue::RangeExpr("1-100000000".parse().unwrap()))
+        .unwrap();
+    let r = ParsedExpression::new("L == R")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "false");
+    assert!(
+        r.operation_count <= 10,
+        "operation_count={} should be bounded by list length, not range length",
+        r.operation_count
+    );
+}
+
+#[test]
+fn list_in_list_of_ranges_bounded_by_list_length() {
+    // Containment scans must not charge symbolic range lengths either:
+    // each candidate comparison is bounded by the needle's length.
+    let mut st = SymbolTable::new();
+    st.set(
+        "L",
+        ExprValue::make_list(
+            vec![
+                ExprValue::RangeExpr("1-100000000".parse().unwrap()),
+                ExprValue::RangeExpr("1-2".parse().unwrap()),
+            ],
+            ExprType::RANGE_EXPR,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let r = ParsedExpression::new("[1, 2] in L")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "true");
+}
+
+#[test]
+fn same_variant_list_equality_charges_budget() {
+    // Typed-list fast paths must charge the operation budget like the
+    // generic arm: comparing two 1000-element int lists under a limit of
+    // 100 must fail, not sneak through the slice-compare shortcut.
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::ListInt((0..1000).collect()))
+        .unwrap();
+    st.set("B", ExprValue::ListInt((0..1000).collect()))
+        .unwrap();
+    let e = ParsedExpression::new("A == B")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression operation count (101) exceeded limit (100)\n",
+            "  A == B\n",
+            "  ^~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn same_variant_list_length_mismatch_uncharged() {
+    // A length mismatch is O(1) and free, even for same-variant lists.
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::ListInt((0..1000).collect()))
+        .unwrap();
+    st.set("B", ExprValue::ListInt((0..999).collect())).unwrap();
+    let r = ParsedExpression::new("A == B")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "false");
+}
+
+#[test]
+fn list_range_length_mismatch_charged_by_steps_taken() {
+    // A long list against a short range must fail fast and cheap: the
+    // walk charges per comparison performed, so the mismatch at the
+    // range's exhaustion point costs O(range_len), not O(list_len).
+    let mut st = SymbolTable::new();
+    st.set("L", ExprValue::ListInt((1..=1000).collect()))
+        .unwrap();
+    st.set("R", ExprValue::RangeExpr("1".parse().unwrap()))
+        .unwrap();
+    let r = ParsedExpression::new("L == R")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "false");
+    assert!(
+        r.operation_count <= 10,
+        "operation_count={} should reflect steps taken, not list length",
+        r.operation_count
+    );
+}
+
+#[test]
+fn comprehension_over_huge_range_bounded_lazily() {
+    // A huge symbolic range is iterated lazily: the default memory
+    // limit trips while the result is being built (honest usage
+    // figure), rather than an up-front materialization of ~4.6e18
+    // elements or a pre-charge with an astronomical op count.
+    let e = ParsedExpression::new("[x for x in range_expr('0-4611686018427387902')]")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 134217824 ~ 128 MiB: the Vec's projected post-doubling
+            // capacity, charged before the growth allocation happens.
+            "Expression memory usage (134217824 bytes) exceeded limit (100000000 bytes)
+",
+            "  [x for x in range_expr('0-4611686018427387902')]
+",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn range_comprehension_charges_iteration_once() {
+    // Range comprehensions pre-charge N for the materializing collect and
+    // must not charge again per item: total cost matches the +N model
+    // that list comprehensions follow (plus constant overhead).
+    let range_cost = op_count("[x for x in range_expr('1-100')]");
+    let list_cost = op_count("[x for x in [1,2,3,4,5,6,7,8,9,10]]");
+    // 100 elements → cost within [100, 110]: N plus small constant, not 2N.
+    assert!(
+        (100..=110).contains(&range_cost),
+        "range comprehension cost {range_cost} should be ~N, not 2N"
+    );
+    // Sanity: the equivalent list comprehension follows the same model.
+    assert!(
+        (10..=20).contains(&list_cost),
+        "list comprehension cost {list_cost} should be ~N"
+    );
+}
+
+#[test]
+fn same_variant_list_mismatch_at_head_cheap() {
+    // A first-element mismatch must cost O(1), not the list length.
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::ListInt((0..1000).collect()))
+        .unwrap();
+    st.set("B", ExprValue::ListInt((1..1001).collect()))
+        .unwrap();
+    let r = ParsedExpression::new("A == B")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "false");
+    assert!(
+        r.operation_count <= 10,
+        "operation_count={} should reflect comparisons performed",
+        r.operation_count
+    );
+}
+
+#[test]
+fn mixed_list_mismatch_at_head_cheap() {
+    // A ListInt vs ListFloat comparison goes through the generic
+    // (mixed-variant) arm; a first-element mismatch must cost O(1),
+    // not the list length.
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::ListInt((0..1000).collect()))
+        .unwrap();
+    st.set(
+        "B",
+        ExprValue::ListFloat(
+            (0..1000)
+                .map(|i| openjd_expr::value::Float64::new(i as f64 + 0.5).unwrap())
+                .collect(),
+        ),
+    )
+    .unwrap();
+    let r = ParsedExpression::new("A == B")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap();
+    assert_eq!(r.value.to_display_string(), "false");
+    assert!(
+        r.operation_count <= 10,
+        "operation_count={} should reflect comparisons performed",
+        r.operation_count
+    );
+}

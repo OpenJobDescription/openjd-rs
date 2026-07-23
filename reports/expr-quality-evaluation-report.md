@@ -35,7 +35,7 @@ Code-side doc rot found during the spec review: `default_library.rs:7–10` modu
 **Accuracy errors:**
 
 - **PA1** — `ExprValue::from_json_transport` documented with 3 parameters; code has 2 (`value.rs:804`), with the type coming from the JSON's `"type"` field.
-- **PA2** — `IntRange` fields documented as private; they are `pub` (`range_expr.rs:96–99`). This is also an API-hygiene risk: public fields let callers violate the `start <= end, step > 0` invariant that `len()` and `from_ranges` merging assume (and `len()` panics on overflow — see §7, X1).
+- ~~**PA2** — `IntRange` fields documented as private; they are `pub` (`range_expr.rs:96–99`). This is also an API-hygiene risk: public fields let callers violate the `start <= end, step > 0` invariant that `len()` and `from_ranges` merging assume (and `len()` panics on overflow — see §7, X1).~~ **Resolved** — fields privatized (the spec's claim is now true); accessors added, deserialization re-validates.
 - **PA3** — `default_library` mislabeled a "deprecated module alias"; it is neither deprecated nor an alias.
 - **PA4** — the blanket claim that `functions::*` implementations "have the shape required by `FunctionImpl`" is false for `functions::path_parse`, whose 11 public functions are string-level utilities with unrelated signatures.
 
@@ -49,12 +49,12 @@ All 25 source files were reviewed. Quality is generally high: pervasive doc comm
 
 **Confirmed bugs (all verified by execution in §7 unless marked "inspection"):**
 
-1. `range_expr.rs:130` (`IntRange::new`) — unchecked subtraction overflows for extreme ranges; `len()` and `contains()` carry the same expression.
+1. ~~`range_expr.rs:130` (`IntRange::new`) — unchecked subtraction overflows for extreme ranges; `len()` and `contains()` carry the same expression.~~ **Resolved** — range endpoint/step magnitudes are bounded below 2^62 at every construction path (integer overflow error beyond), which keeps all derived arithmetic (`new`, `len`, `contains`, `iter`, `get`, slicing, `from_values`, `from_ranges` merging) exactly representable in plain i64/u64 with no widening or saturation. See `specs/expr/range-expr.md` (Value Bounds).
 2. `eval/parse.rs` contextual-keyword retry loop — rewrites keyword-like text inside **string literals**, silently corrupting values.
 3. `eval/evaluator.rs` `eval_number` float passthrough — literal source ranges computed against the parenthesized parse string are applied to the unwrapped source; multiline expressions mis-slice the display string.
 4. `path_mapping.rs:150–155` (`split_path_parts`) — discards the absolute/relative distinction, so relative inputs match absolute rules.
 5. ~~`value.rs` `coerce` Float→Int — `as i64` silently saturates for out-of-range whole floats.~~ **Resolved** — explicit `float_fits_i64` range check before the cast.
-6. `value.rs` `equals(ListInt, RangeExpr)` — materializes the entire range before the length check, outside all evaluator budgets (1.78 s / 800 MB for a 100M-element range).
+6. ~~`value.rs` `equals(ListInt, RangeExpr)` — materializes the entire range before the length check, outside all evaluator budgets (1.78 s / 800 MB for a 100M-element range).~~ **Resolved** — list↔range equality now walks the range's lazy iterator bounded at O(list_len + 1) with no materialization; the evaluator's `==`/`!=`/`in` charge the operation budget through the shared `equals_charged` core.
 7. ~~`functions/arithmetic.rs:273` (`mul_string`) — unchecked `s.len() * n`; a wrapped length defeats `count_string_ops` and `check_memory` in release builds.~~ **Resolved** — `checked_mul` with Integer overflow error.
 8. ~~`functions/arithmetic.rs` (`mul_list`) — same unchecked multiply (inspection); worse: with a wrapped `result_len` of 0 the build loop runs up to 2^62 iterations with no op counting (uncounted CPU hang even for `[] * huge`). Op counting is also a literal `for _ in 0..result_len { ctx.count_op()?; }` loop instead of one `count_ops(result_len)` call.~~ **Resolved** — `mul_list` now uses `checked_mul` (Integer overflow error on wrap), returns `[]` early for empty lists, and bulk-meters via a single `count_ops(result_len)` call.
 9. `functions/list.rs:120` (`range_fn`) — unchecked `v += step` overflows near `i64::MAX`.
@@ -138,7 +138,7 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 
 ### Priority 1 — Correctness bugs reachable from untrusted input
 
-1. **Adopt checked arithmetic at the function-library boundary.** Fix X1–X7 with `checked_add`/`checked_mul`/`checked_neg` (or saturating where semantically safe) in `range_expr.rs:130` (+ `len()`/`contains()`), ~~`arithmetic.rs` `mul_string`/`mul_list`~~ (**Resolved** — `checked_mul` + regression tests), `list.rs` `range_fn`/`sum_list`, ~~`math.rs` `round_fn`~~ (**Resolved** — extreme-ndigits short-circuits, budgeted precision, regression tests), `string.rs` `split_fn`/`rsplit_fn`, `regex.rs` `re_split_fn`. Add regression tests from the §7 table.
+1. **Adopt checked arithmetic at the function-library boundary.** Fix X1–X7 with `checked_add`/`checked_mul`/`checked_neg` (or saturating where semantically safe) in ~~`range_expr.rs:130` (+ `len()`/`contains()`)~~ (range_expr **Resolved** — endpoint/step magnitudes bounded below 2^62 at construction, keeping all derived arithmetic exactly in i64), ~~`arithmetic.rs` `mul_string`/`mul_list`~~ (**Resolved** — `checked_mul` + regression tests), `list.rs` `range_fn`/`sum_list`, ~~`math.rs` `round_fn`~~ (**Resolved** — extreme-ndigits short-circuits, budgeted precision, regression tests), `string.rs` `split_fn`/`rsplit_fn`, `regex.rs` `re_split_fn`. Add regression tests from the §7 table.
 2. **Validate negative int arguments before `as usize`.** `zfill`, `center`, `ljust`, `rjust`, `split`/`rsplit`/`re_split` maxsplit. Match Python semantics (negative width → unchanged string; negative maxsplit → no limit). Share one validation helper across the width-taking functions.
 3. **Fix the contextual-keyword retry to skip string literals** (X9, `eval/parse.rs`) — corrupts user data silently. Also fix the byte-vs-char index mix in the after-keyword boundary check.
 4. **Fix float-literal passthrough source slicing for multiline expressions** (X10, `eval/evaluator.rs` `eval_number`); have `Float64::with_str` validate that the string round-trips to the value as a backstop.
@@ -146,7 +146,8 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 6. **Make `split_path_parts` preserve absoluteness** (X12, `path_mapping.rs:150`) so relative paths never match absolute rules; use the rule's source format (not host format) for output joining, or document why host format is intended.
 7. ~~**Fix Float→Int coercion saturation** (X11, `value.rs`) with an explicit range check; same `>=` fix for the `> i64::MAX as f64` guards in `floordiv_float` and `math.rs` floor/ceil/round.~~ **Resolved** — shared `float_fits_i64` helper (exact `[-2^63, 2^63)` check) used by coercion, `floordiv_float`, and `math.rs` floor/ceil/round.
 8. **Escape control characters in `repr_py`** (X15) and cross-check `repr_cmd` trailing-backslash behavior against spec §2.2.6, ideally with subprocess round-trip tests.
-9. **Guard `equals(ListInt, RangeExpr)`**: compare `len()` first and zip `iter()` without materializing.
+9. ~~**Guard `equals(ListInt, RangeExpr)`**: compare `len()` first and zip `iter()` without materializing.~~ **Resolved** — implemented as a bounded lazy walk (O(list_len + 1), no `len()` consultation, which also sidesteps saturated lengths); a single `equals_charged` core backs `equals()`, `PartialEq`, and the budgeted evaluator operators.
+   Related, found during review: `RangeExpr`'s `PartialEq`/`Hash` compare the *stored chunk lists*, which are not canonical for a value sequence — `range_expr('1-3,4-6:2') == range_expr('1-4,6')` is `false` today even though both denote `1,2,3,4,6`, and any list↔range comparison built on chunk conversion inherits the same false negatives. **Recommendation:** keep the stored chunks as parsed (display fidelity), but make `eq` compare by lazily re-chunking both sides to a canonical greedy form (O(chunks_a + chunks_b), no materialization), and derive `Hash` from the same canonical chunking so `a == b ⇒ hash(a) == hash(b)` holds. The lazy canonical-chunk iterator also serves list↔range equality (`is_sorted_strictly_ascending(list) && canonical(list) == canonical(range)`). Coordinate with the equality/hashing work on `expr-eq-hash-indevelopment`, which pins the `Hash` contract this touches.
 
 ### Priority 2 — Spec conformance and Python parity
 
@@ -159,7 +160,7 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 ### Priority 3 — Specs and public API hygiene
 
 15. **Fix `public-api.md`** (PA1–PA4, PM1–PM7); consider a `cargo public-api` CI diff to keep it honest.
-16. **Privatize `IntRange` fields** (or document the invariant risk) — the spec already believes they're private, and `len()` panics on invariant-violating values.
+16. ~~**Privatize `IntRange` fields** (or document the invariant risk) — the spec already believes they're private, and `len()` panics on invariant-violating values.~~ **Resolved** — fields are private with `start()`/`end()`/`step()` accessors; deserialization and `from_ranges` re-validate through `IntRange::new`, so the construction invariants hold everywhere.
 17. **Fix the spec/code contradictions** A1, T1, V1, F1, F2, FS1, FS2, R1, PP1 (§1) and the stale `default_library.rs` module doc; decide whether `copy_symbol_value` should be public, and make `set_table` dotted-path aware (or reject dotted keys).
 18. **Unify stringly-typed `Result<_, String>` returns** (`coerce`, `from_str_coerce`, `to_symtab`, `ExprType::parse`, `register_sig`) on structured error types.
 

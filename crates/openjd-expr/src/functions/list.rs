@@ -4,6 +4,7 @@
 
 //! List function implementations (sorted, reversed, unique, flatten, range).
 
+use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::types::ExprType;
@@ -150,8 +151,19 @@ pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::RangeExpr(r) => {
             ctx.count_ops(r.len())?;
-            let elements: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
-            Ok(ExprValue::make_list_checked(ctx, elements, ExprType::INT)?)
+            // Pre-check the projected allocation before collecting: the
+            // op charge alone admits up to the operation limit in
+            // elements (~640 MB of ExprValues under default limits)
+            // before make_list_checked's post-hoc memory check.
+            let mut elements = BudgetedVec::with_capacity(ctx, r.len())?;
+            for value in r.iter() {
+                elements.push(ctx, ExprValue::Int(value))?;
+            }
+            Ok(ExprValue::make_list_checked(
+                ctx,
+                elements.into_vec(),
+                ExprType::INT,
+            )?)
         }
         _ => Err(ExpressionError::new("list() argument must be range_expr")),
     }
@@ -184,7 +196,7 @@ pub fn range_expr_from_list(ctx: Ctx, a: &[ExprValue]) -> R {
         }
         ints.sort();
         ints.dedup();
-        let r = crate::range_expr::RangeExpr::from_values(ints);
+        let r = crate::range_expr::RangeExpr::from_values(ints)?;
         Ok(ExprValue::RangeExpr(r))
     } else {
         Err(ExpressionError::new("range_expr() argument must be list"))

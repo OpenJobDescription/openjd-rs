@@ -272,9 +272,36 @@ on length mismatch without iterating.
 | `ListInt([1]) == ListFloat([1.0])` | `true` | Element-wise cross-type comparison via `equals()` |
 
 `PartialEq` delegates to the `equals()` method, which handles cross-type matching
-explicitly: Int↔Float compares via `(i as f64) == f`, String↔Path compares the string
-values, and list↔list iterates element-wise using `equals()` recursively. List↔RangeExpr
-comparison materializes the range and compares element-by-element.
+explicitly: Int↔Float compares exactly in the integer domain (see below),
+String↔Path compares the string values, same-variant typed lists compare their
+primitive elements directly (charged per comparison performed, like the generic
+arm), and mixed list↔list comparison iterates element-wise recursively. List↔RangeExpr
+comparison decides length mismatches in O(1) with no charge (range lengths are
+exact arithmetic under the bounded value domain), then walks the range's lazy
+iterator against the list — never materializing the range — charged per element
+comparison performed.
+
+Both `equals()` and the evaluator's `==`/`!=`/`in` operators are backed by one
+core, `equals_charged`, which takes a charge callback invoked with the number of
+element comparisons about to be performed. The evaluator passes the operation
+budget (so comparing large lists charges `count_ops` and can raise
+`OperationLimitExceeded`); `equals()`/`PartialEq` pass an infallible no-op.
+Comparisons decidable by length alone are decided in O(1) with no charge.
+
+Int↔Float equality is exact, matching Python: the float must be an integer
+exactly representable in i64 whose converted value equals the int
+(`float_as_exact_i64`). A widening comparison like `(i as f64) == v` would
+round `i` first, making distinct integers near 2^63 compare equal to the
+same float (`float(2**63) == 2**63 - 1` is False in Python). The same rule
+drives `Hash` (an integral in-range float hashes as its integer) and
+range membership (`x in range_expr(...)` for float `x`).
+
+Int↔Float *ordering* uses the same exact semantics (`int_float_cmp`):
+floats at or beyond the i64 domain order strictly by sign against every
+int, and in-domain floats compare via exact truncation with a fractional
+tie-break. This keeps `<`/`<=`/`>`/`>=` consistent with equality —
+`i64::MAX < float(2**63)` is true, where a widening comparison would call
+them equal while `==` says they differ.
 
 ### Tag-Based Hashing Strategy
 

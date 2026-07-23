@@ -366,3 +366,81 @@ fn round_precision_over_u16_boundary() {
     let v = eval("len(string(round(2.25, 65536)))");
     assert_eq!(v.to_display_string(), "65538");
 }
+
+// === Regression tests: exact int↔float equality at the 2^63 boundary ===
+// `(i as f64) == v` rounds i first, so i64::MAX compared equal to 2^63.
+// Python compares exactly: float(2**63) == 2**63 - 1 is False.
+
+#[test]
+fn int_float_equality_exact_at_boundary() {
+    // 9223372036854775807.0 parses to the f64 2^63, which is NOT i64::MAX.
+    assert_eq!(
+        eval("9223372036854775807.0 == 9223372036854775807").to_display_string(),
+        "false"
+    );
+    assert_eq!(
+        eval("9223372036854775807.0 in [9223372036854775807]").to_display_string(),
+        "false"
+    );
+    // An exactly-representable integer still compares equal.
+    assert_eq!(
+        eval("9223372036854774784.0 == 9223372036854774784").to_display_string(),
+        "true"
+    );
+}
+
+#[test]
+fn range_and_list_containment_agree_at_boundary() {
+    // Both containment paths use the same exact equality rule. Range
+    // values are bounded to |v| < 2^62, so probe at that scale: the f64
+    // nearest to 2^62 - 1 is 2^62, which is NOT a member of a range
+    // ending at 2^62 - 1 — the exact rule (not widening) decides this.
+    assert_eq!(
+        eval("4611686018427387903.0 in range_expr('4611686018427387903')").to_display_string(),
+        "false"
+    );
+    // An exactly-representable value at the same scale is a member.
+    assert_eq!(
+        eval("4611686018427387392.0 in range_expr('4611686018427387392')").to_display_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("4611686018427387903.0 in [4611686018427387903]").to_display_string(),
+        "false"
+    );
+}
+
+// === Regression tests: exact int↔float ordering at the 2^63 boundary ===
+// Ordering must agree with the exact equality rule: the widening
+// comparison made i64::MAX < 2^63f64 false while equality said they
+// differ.
+
+#[test]
+fn int_float_ordering_exact_at_boundary() {
+    // 9223372036854775807.0 is the f64 2^63, which is > i64::MAX.
+    assert_eq!(
+        eval("9223372036854775807 < 9223372036854775807.0").to_display_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("9223372036854775807.0 > 9223372036854775807").to_display_string(),
+        "true"
+    );
+    // And consistent with equality on exactly-representable values.
+    assert_eq!(
+        eval("9223372036854774784 <= 9223372036854774784.0").to_display_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("9223372036854774784 < 9223372036854774784.0").to_display_string(),
+        "false"
+    );
+}
+
+#[test]
+fn int_float_ordering_fractional_ties() {
+    assert_eq!(eval("2 < 2.5").to_display_string(), "true");
+    assert_eq!(eval("3 > 2.5").to_display_string(), "true");
+    assert_eq!(eval("-2 > -2.5").to_display_string(), "true");
+    assert_eq!(eval("-3 < -2.5").to_display_string(), "true");
+}

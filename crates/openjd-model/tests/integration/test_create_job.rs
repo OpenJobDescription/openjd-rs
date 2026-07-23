@@ -5155,3 +5155,61 @@ fn path_default_sibling_escape_rejected_windows() {
         "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted."
     );
 }
+
+#[test]
+fn chunk_int_list_value_beyond_range_bound_rejected() {
+    // CHUNK[INT] regroups values into generated RangeExpr chunks, whose
+    // values are bounded to |v| < 2^62. A list range accepts full i64,
+    // so an out-of-bound value must be a clean job-creation error, not
+    // a panic when the chunk is built during iteration.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{
+                    "name": "Frame",
+                    "type": "CHUNK[INT]",
+                    "range": [1, 2, 4611686018427387904],
+                    "chunks": {"defaultTaskCount": 2, "rangeConstraint": "NONCONTIGUOUS"}
+                }]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Frame': value 4611686018427387904 \
+         exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}
+
+#[test]
+fn plain_int_list_value_beyond_range_bound_still_accepted() {
+    // Plain INT list ranges never build RangeExpr chunks; full-i64
+    // values remain valid there.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{
+                    "name": "Frame",
+                    "type": "INT",
+                    "range": [1, 4611686018427387904]
+                }]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(job.steps.len(), 1);
+}

@@ -536,11 +536,25 @@ pub fn escape_format_string(s: &str) -> String {
 }
 
 /// Parse a range expression (e.g., "1-10:2") into an array of integers.
+///
+/// Rejects ranges whose logical element count exceeds the default
+/// operation limit: this export materializes every element and runs
+/// outside any evaluation budget, and a symbolic range like
+/// `"1-9223372036854775807"` parses in O(1) but would hang the host
+/// building ~2^63 integers.
 #[wasm_bindgen(js_name = "parseRangeExpr")]
 pub fn parse_range_expr(expr: &str) -> Result<Vec<i64>, JsError> {
     let range: openjd_expr::RangeExpr = expr
         .parse()
         .map_err(|e: openjd_expr::ExpressionError| JsError::new(&e.to_string()))?;
+    if range.len() > openjd_expr::DEFAULT_OPERATION_LIMIT {
+        return Err(JsError::new(&format!(
+            "Range expression has too many elements to materialize \
+             ({} > {})",
+            range.len(),
+            openjd_expr::DEFAULT_OPERATION_LIMIT
+        )));
+    }
     Ok(range.iter().collect())
 }
 

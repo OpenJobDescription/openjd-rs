@@ -13,6 +13,7 @@
 //! Uses `ruff_python_parser` for EXPR extension expression parsing.
 //! See `specs/expr/parser.md` for rationale.
 
+pub(crate) mod budgeted_vec;
 pub mod default_library;
 pub(crate) mod edit_distance;
 pub mod error;
@@ -40,7 +41,7 @@ pub use format_string::FormatStringValidationError;
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
 pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
-pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS};
+pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_VALUE_MAGNITUDE};
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };

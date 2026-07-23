@@ -39,6 +39,85 @@ pub(crate) fn float_fits_i64(v: f64) -> bool {
     (LOWER..-LOWER).contains(&v)
 }
 
+/// The exact i64 value of `v`, or `None` if `v` is not an integer exactly
+/// representable in i64. NaN and infinities fail the `fract()` test.
+pub(crate) fn float_as_exact_i64(v: f64) -> Option<i64> {
+    (v.fract() == 0.0 && float_fits_i64(v)).then_some(v as i64)
+}
+
+/// Budgeted equality for same-variant typed lists: O(1) length check,
+/// then per-element comparison with one charge per comparison performed,
+/// so an early mismatch costs the steps taken rather than the length.
+fn primitive_lists_eq<T, E>(
+    a: &[T],
+    b: &[T],
+    charge: &mut dyn FnMut(usize) -> Result<(), E>,
+    eq: impl Fn(&T, &T) -> bool,
+) -> Result<bool, E> {
+    if a.len() != b.len() {
+        return Ok(false);
+    }
+    for (x, y) in a.iter().zip(b.iter()) {
+        charge(1)?;
+        if !eq(x, y) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Exact int↔float equality, matching Python.
+///
+/// A plain `(i as f64) == v` comparison rounds `i` to the nearest f64
+/// first, so near the 2^63 boundary distinct integers compare equal to
+/// the same float: `i64::MAX as f64` is exactly 2^63, which is NOT the
+/// value of `i64::MAX`, yet `(i64::MAX as f64) == 2^63 as f64` is true.
+/// Python compares exactly (`float(2**63) == 2**63 - 1` is False). An
+/// integral f64 in the i64 domain converts exactly, so comparing the
+/// converted value in the integer domain gives the exact answer.
+pub(crate) fn int_float_eq(i: i64, v: f64) -> bool {
+    float_as_exact_i64(v) == Some(i)
+}
+
+/// Exact int↔float ordering (`i` vs `v`), matching Python; `None` for NaN.
+///
+/// Ordering must agree with [`int_float_eq`]: with the rounding
+/// comparison, `i64::MAX < 2^63 as f64` was false (the int rounds up to
+/// exactly 2^63) while equality correctly said they differ — an
+/// inconsistent order. Compare in the widened i128/f64 domains instead:
+/// out-of-i64-domain floats order by sign against every int, and
+/// in-domain floats compare exactly via truncation plus a fractional
+/// tie-break.
+pub(crate) fn int_float_cmp(i: i64, v: f64) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    if v.is_nan() {
+        return None;
+    }
+    // Every i64 lies in [-2^63, 2^63); a float at or beyond the bounds
+    // orders strictly by sign. (-(i64::MIN as f64) is exactly 2^63.)
+    if v >= -(i64::MIN as f64) {
+        return Some(Ordering::Less); // i < v (covers +inf)
+    }
+    if v < i64::MIN as f64 {
+        return Some(Ordering::Greater); // i > v (covers -inf)
+    }
+    // In-domain: truncation is exact (|v| < 2^63), so compare the integer
+    // parts, breaking ties on the fractional remainder.
+    let vt = v.trunc() as i64;
+    Some(i.cmp(&vt).then_with(|| {
+        let frac = v - v.trunc();
+        // i == trunc(v): a positive remainder means v is bigger, a
+        // negative remainder means v is smaller.
+        if frac > 0.0 {
+            Ordering::Less
+        } else if frac < 0.0 {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }))
+}
+
 /// Normalize -0.0 to 0.0 (matches Python's copysign normalization).
 fn normalize_zero(v: f64) -> f64 {
     if v == 0.0 {
@@ -184,13 +263,14 @@ impl std::hash::Hash for ExprValue {
                 2u8.hash(state);
                 i.hash(state);
             }
-            // Float hashes as Int when it's an exact integer in i64 range,
-            // otherwise uses float tag + f64 bits.
+            // Float hashes as Int when it's an exact integer in i64 range
+            // (same rule as int↔float equality), otherwise uses float tag
+            // + f64 bits.
             Self::Float(f) => {
                 let v = f.value;
-                if v.fract() == 0.0 && v >= i64::MIN as f64 && v <= i64::MAX as f64 {
+                if let Some(i) = float_as_exact_i64(v) {
                     2u8.hash(state);
-                    (v as i64).hash(state);
+                    i.hash(state);
                 } else {
                     12u8.hash(state);
                     v.to_bits().hash(state);
@@ -226,9 +306,11 @@ impl std::hash::Hash for ExprValue {
                 4u8.hash(state);
                 for f in v {
                     let fv = f.value;
-                    if fv.fract() == 0.0 && fv >= i64::MIN as f64 && fv <= i64::MAX as f64 {
+                    // Same exact rule as the top-level Float arm: an
+                    // integral in-i64-range float hashes as its integer.
+                    if let Some(i) = float_as_exact_i64(fv) {
                         2u8.hash(state);
-                        (fv as i64).hash(state);
+                        i.hash(state);
                     } else {
                         12u8.hash(state);
                         fv.to_bits().hash(state);
@@ -705,7 +787,23 @@ impl ExprValue {
                 Ok(ExprValue::String(value.clone()))
             }
             (ExprValue::RangeExpr(r), TypeCode::String) => Ok(ExprValue::String(r.to_string())),
-            (ExprValue::RangeExpr(r), TypeCode::List) => Ok(ExprValue::ListInt(r.to_vec())),
+            (ExprValue::RangeExpr(r), TypeCode::List) => {
+                // coerce() runs outside any EvalContext (post-evaluation
+                // target-type hook, public API), so no operation or memory
+                // budget applies here. Cap the materialization at the
+                // evaluator's default operation limit: a range longer than
+                // that could not have been built as a list through any
+                // budgeted path either.
+                if r.len_u64() > crate::eval::DEFAULT_OPERATION_LIMIT as u64 {
+                    return Err(format!(
+                        "Cannot coerce range_expr of {} elements to list[int] \
+                         (maximum {})",
+                        r.len_u64(),
+                        crate::eval::DEFAULT_OPERATION_LIMIT
+                    ));
+                }
+                Ok(ExprValue::ListInt(r.to_vec()))
+            }
             _ if target.code() == TypeCode::List && target.params().len() == 1 => {
                 let elem_type = &target.params()[0];
                 if let Some(elements) = self.list_elements() {
@@ -1102,37 +1200,93 @@ impl ExprValue {
 
     /// Value equality with cross-type support (Int↔Float, String↔Path).
     pub fn equals(&self, other: &ExprValue) -> bool {
-        match (self, other) {
+        match self.equals_charged(other, &mut |_| Ok::<(), std::convert::Infallible>(())) {
+            Ok(eq) => eq,
+            Err(e) => match e {},
+        }
+    }
+
+    /// Core of [`equals`]: value equality with a caller-supplied `charge`
+    /// callback invoked with the number of element comparisons about to be
+    /// performed. The evaluator's `==`/`!=`/`in` operators pass the
+    /// operation budget; `equals`/`PartialEq` pass an infallible no-op.
+    ///
+    /// Comparisons decidable by length alone are decided in O(1) with no
+    /// charge — a symbolic range's length is pure arithmetic, so a length
+    /// mismatch never requires expanding anything.
+    pub(crate) fn equals_charged<E>(
+        &self,
+        other: &ExprValue,
+        charge: &mut dyn FnMut(usize) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        Ok(match (self, other) {
             (Self::Null, Self::Null) => true,
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Int(a), Self::Int(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => a.value == b.value,
-            (Self::Int(a), Self::Float(b)) => (*a as f64) == b.value,
-            (Self::Float(a), Self::Int(b)) => a.value == (*b as f64),
+            (Self::Int(a), Self::Float(b)) => int_float_eq(*a, b.value),
+            (Self::Float(a), Self::Int(b)) => int_float_eq(*b, a.value),
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => a == b,
             (Self::String(a), Self::Path { value: b, .. })
             | (Self::Path { value: b, .. }, Self::String(a)) => a == b,
+            // Same-variant typed lists: primitive element comparison (no
+            // per-element ExprValue construction), charged per comparison
+            // actually performed after the O(1) length check — a mismatch
+            // at element zero costs one op, not the list length.
+            (Self::ListBool(a), Self::ListBool(b)) => {
+                return primitive_lists_eq(a, b, charge, |x, y| x == y);
+            }
+            (Self::ListInt(a), Self::ListInt(b)) => {
+                return primitive_lists_eq(a, b, charge, |x, y| x == y);
+            }
+            (Self::ListFloat(a), Self::ListFloat(b)) => {
+                return primitive_lists_eq(a, b, charge, |x, y| x.value == y.value);
+            }
+            (Self::ListString(a, _), Self::ListString(b, _)) => {
+                return primitive_lists_eq(a, b, charge, |x, y| x == y);
+            }
             _ if self.is_list() && other.is_list() => {
                 let (a_iter, b_iter) = match (self.list_iter(), other.list_iter()) {
                     (Some(a), Some(b)) => (a, b),
-                    _ => return false,
+                    _ => return Ok(false),
                 };
-                let (a_len, b_len) = (a_iter.len(), b_iter.len());
-                if a_len != b_len {
-                    return false;
+                if a_iter.len() != b_iter.len() {
+                    return Ok(false);
                 }
-                a_iter.zip(b_iter).all(|(x, y)| x.equals(&y))
+                // Charge per comparison performed (like the typed-list
+                // arms): a first-element mismatch costs one op, not the
+                // list length.
+                for (x, y) in a_iter.zip(b_iter) {
+                    charge(1)?;
+                    if !x.equals_charged(&y, charge)? {
+                        return Ok(false);
+                    }
+                }
+                true
             }
             (Self::ListInt(elems), Self::RangeExpr(r))
             | (Self::RangeExpr(r), Self::ListInt(elems)) => {
-                let rv: Vec<i64> = r.iter().collect();
-                elems.len() == rv.len() && elems.iter().zip(rv.iter()).all(|(a, b)| a == b)
+                // O(1) uncharged length check first — len_u64() is exact
+                // arithmetic under the bounded value domain — matching
+                // the list arms. Then walk the range lazily (never
+                // materializing it), charged per comparison performed;
+                // equal lengths guarantee the zip covers both sides.
+                if elems.len() as u64 != r.len_u64() {
+                    return Ok(false);
+                }
+                for (e, rv) in elems.iter().zip(r.iter()) {
+                    charge(1)?;
+                    if *e != rv {
+                        return Ok(false);
+                    }
+                }
+                true
             }
             (Self::RangeExpr(a), Self::RangeExpr(b)) => a == b,
             (Self::Unresolved(a), Self::Unresolved(b)) => a == b,
             _ => false,
-        }
+        })
     }
 
     /// Ordering comparison. Returns `Err` for incomparable types.
@@ -1146,12 +1300,10 @@ impl ExprValue {
                 .value
                 .partial_cmp(&b.value)
                 .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
-            (Self::Int(a), Self::Float(b)) => (*a as f64)
-                .partial_cmp(&b.value)
+            (Self::Int(a), Self::Float(b)) => int_float_cmp(*a, b.value)
                 .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
-            (Self::Float(a), Self::Int(b)) => a
-                .value
-                .partial_cmp(&(*b as f64))
+            (Self::Float(a), Self::Int(b)) => int_float_cmp(*b, a.value)
+                .map(std::cmp::Ordering::reverse)
                 .ok_or_else(|| crate::error::ExpressionError::new("Cannot compare NaN")),
             (Self::Bool(a), Self::Bool(b)) => Ok(a.cmp(b)),
             (Self::String(a), Self::String(b)) => Ok(a.cmp(b)),

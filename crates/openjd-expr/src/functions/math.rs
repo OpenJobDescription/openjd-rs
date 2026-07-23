@@ -36,9 +36,17 @@ fn min_max_items(a: &[ExprValue], name: &str) -> Result<Vec<ExprValue>, Expressi
                     )));
                 }
                 if name == "min" {
-                    return Ok(vec![ExprValue::Int(r.iter().next().unwrap())]);
+                    return Ok(vec![ExprValue::Int(
+                        r.iter().next().expect("guarded above: range is non-empty"),
+                    )]);
                 } else {
-                    Ok(vec![ExprValue::Int(r.get(r.len() as i64 - 1).unwrap())])
+                    // get(-1) resolves against the exact logical length;
+                    // deriving the last index from the saturating len()
+                    // returns a mid-range element for ranges past the
+                    // saturation point.
+                    Ok(vec![ExprValue::Int(
+                        r.get(-1).expect("guarded above: range is non-empty"),
+                    )])
                 }
             }
             _ => Ok(a.to_vec()),

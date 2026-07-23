@@ -339,21 +339,21 @@ fn count_contiguous_chunks_from_sub_ranges(r: &RangeExpr, default_task_count: us
     let mut interval: Option<(i64, i64)> = None;
 
     for sr in sub_ranges {
-        if sr.step == 1 {
-            // This sub-range is contiguous: values from sr.start to sr.end
+        if sr.step() == 1 {
+            // This sub-range is contiguous: values from sr.start() to sr.end()
             match interval {
-                Some((is, ie)) if sr.start == ie + 1 => {
+                Some((is, ie)) if sr.start() == ie + 1 => {
                     // Extends the current interval
-                    interval = Some((is, sr.end));
+                    interval = Some((is, sr.end()));
                 }
                 Some((is, ie)) => {
                     // Gap — flush the current interval
                     let len = (ie - is + 1) as usize;
                     total_chunks += len.div_ceil(default_task_count);
-                    interval = Some((sr.start, sr.end));
+                    interval = Some((sr.start(), sr.end()));
                 }
                 None => {
-                    interval = Some((sr.start, sr.end));
+                    interval = Some((sr.start(), sr.end()));
                 }
             }
         } else {
@@ -508,20 +508,23 @@ impl ContiguousChunkIterState {
             job::TaskParamRange::RangeExpr(r) => {
                 // Use sub-ranges: find which sub-range contains `start`, then
                 // walk forward through step-1 sub-ranges that are adjacent.
+                // cumulative_lengths is u64 (exact per-chunk element counts);
+                // task-parameter ranges are bounded well below usize on all
+                // practical targets, so the conversions are lossless here.
                 let cumulative = r.cumulative_lengths();
                 let sub_ranges = r.ranges();
 
                 // Binary search for the sub-range containing `start`
-                let sr_idx = cumulative.partition_point(|&c| c <= start);
+                let sr_idx = cumulative.partition_point(|&c| c <= start as u64);
                 let sr_offset = if sr_idx == 0 {
                     0
                 } else {
-                    cumulative[sr_idx - 1]
+                    cumulative[sr_idx - 1] as usize
                 };
 
                 let sr = &sub_ranges[sr_idx];
 
-                if sr.step != 1 {
+                if sr.step() != 1 {
                     // Step > 1: each value is isolated
                     return start;
                 }
@@ -530,12 +533,12 @@ impl ContiguousChunkIterState {
                 let mut end = sr_offset + sr.len() - 1;
 
                 // Check subsequent sub-ranges for adjacency
-                let mut last_val = sr.end;
+                let mut last_val = sr.end();
                 for next_sr in &sub_ranges[sr_idx + 1..] {
-                    if next_sr.start == last_val + 1 && next_sr.step == 1 {
+                    if next_sr.start() == last_val + 1 && next_sr.step() == 1 {
                         end += next_sr.len();
-                        last_val = next_sr.end;
-                    } else if next_sr.start == last_val + 1 && next_sr.step > 1 {
+                        last_val = next_sr.end();
+                    } else if next_sr.start() == last_val + 1 && next_sr.step() > 1 {
                         // First value is adjacent, but subsequent values have gaps
                         end += 1;
                         break;
@@ -1257,6 +1260,28 @@ impl StepParameterSpaceIterator {
         space: &job::StepParameterSpace,
         chunk_override: Option<usize>,
     ) -> Result<Self, ModelError> {
+        // CHUNK[INT] regroups values into generated RangeExpr chunks,
+        // which bound values to |v| < 2^62. create_job validates this,
+        // but StepParameterSpace is publicly constructible and
+        // deserializable, so re-validate here: an out-of-bound value
+        // would otherwise panic when a chunk is built during iteration.
+        for (name, param) in &space.task_parameter_definitions {
+            if let job::TaskParameter::ChunkInt {
+                range: job::TaskParamRange::List(values),
+                ..
+            } = param
+            {
+                if let Some(v) = values
+                    .iter()
+                    .find(|v| v.unsigned_abs() >= openjd_expr::MAX_RANGE_VALUE_MAGNITUDE as u64)
+                {
+                    return Err(ModelError::DecodeValidation(format!(
+                        "Task parameter '{name}': value {v} exceeds the CHUNK[INT] \
+                         range value bound (magnitude must be below 2^62)",
+                    )));
+                }
+            }
+        }
         let names: HashSet<String> = space.task_parameter_definitions.keys().cloned().collect();
 
         if space.task_parameter_definitions.is_empty() {

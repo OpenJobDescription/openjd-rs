@@ -92,20 +92,79 @@ impl From<RangeExprError> for ExpressionError {
 }
 
 /// A single contiguous range of integers with a step.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+///
+/// Fields are private to protect the construction invariants
+/// (`start <= end`, `step > 0`, all magnitudes below
+/// [`MAX_RANGE_VALUE_MAGNITUDE`]) that `len_u64()`, iteration, and
+/// indexing arithmetic rely on; deserialization re-validates through
+/// [`IntRange::new`]. Read access is via the accessor methods.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct IntRange {
-    pub start: i64,
-    pub end: i64,
-    pub step: i64,
+    start: i64,
+    end: i64,
+    step: i64,
 }
 
+impl<'de> serde::Deserialize<'de> for IntRange {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct IntRangeHelper {
+            start: i64,
+            end: i64,
+            step: i64,
+        }
+        let h = IntRangeHelper::deserialize(deserializer)?;
+        IntRange::new(h.start, h.end, h.step).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Maximum magnitude of a range endpoint or step: 2^62, exclusive.
+///
+/// Every value in a range (and its step) must satisfy `|v| < 2^62`. This
+/// deliberately narrows the language surface below the full i64 domain so
+/// that *all* derived arithmetic stays comfortably inside i64: the widest
+/// possible endpoint span is below 2^63, so element counts, index products
+/// (`i * step`), normalization intermediates, and cumulative length sums
+/// are all representable in i64 with 2x headroom — no widened (i128/u128)
+/// arithmetic, no saturating lengths, and no exact-vs-saturating split
+/// anywhere downstream. Inputs at or beyond the bound raise
+/// `ExpressionErrorKind::IntegerOverflow` at construction.
+///
+/// The Python reference accepts arbitrary-precision endpoints; this is a
+/// documented divergence (see `specs/expr/range-expr.md`, Value bounds).
+/// 2^62 ≈ 4.6e18 is nine orders of magnitude beyond any realistic frame
+/// range or task index.
+pub const MAX_RANGE_VALUE_MAGNITUDE: i64 = 1 << 62;
+
+/// Validate one range endpoint or step magnitude against
+/// [`MAX_RANGE_VALUE_MAGNITUDE`].
+fn check_range_value(v: i64) -> Result<(), ExpressionError> {
+    // |i64::MIN| overflows i64, but unsigned_abs is total.
+    if v.unsigned_abs() >= MAX_RANGE_VALUE_MAGNITUDE as u64 {
+        Err(ExpressionError::integer_overflow())
+    } else {
+        Ok(())
+    }
+}
+
+// With endpoints and steps bounded to |v| < 2^62 (checked at every
+// construction path), all derived arithmetic below — spans, counts, index
+// products — fits in i64 without widening.
 impl IntRange {
     /// Create a range, normalizing descending ranges to ascending form.
-    /// After construction, `start <= end` and `step > 0` always hold.
+    /// After construction, `start <= end` and `step > 0` always hold, and
+    /// `|start|`, `|end|`, `|step|` are all below
+    /// [`MAX_RANGE_VALUE_MAGNITUDE`].
+    ///
+    /// Returns an error for a zero step, a direction/step mismatch, or any
+    /// endpoint/step at or beyond the value bound (integer overflow).
     pub fn new(start: i64, end: i64, step: i64) -> Result<Self, ExpressionError> {
         if step == 0 {
             return Err(ExpressionError::parse_error("Range: step must not be zero"));
         }
+        check_range_value(start)?;
+        check_range_value(end)?;
+        check_range_value(step)?;
         if step > 0 && start > end {
             return Err(ExpressionError::parse_error(
                 "Range: a descending range must have a negative step",
@@ -117,16 +176,17 @@ impl IntRange {
             ));
         }
         if step < 0 {
-            // Normalize descending to ascending form (matching Python _IntRange)
-            let count = ((start - end) / (-step)) + 1;
-            let last = start + (count - 1) * step; // smallest value
+            // Normalize descending to ascending form (matching Python
+            // _IntRange). Values are bounded, so the span (< 2^63), the
+            // count, and the product all fit in i64.
+            let count = (start - end) / (-step) + 1;
+            let last = start + (count - 1) * step;
             Ok(Self {
                 start: last,
                 end: start,
                 step: -step,
             })
         } else {
-            // Normalize end to actual last value in the range
             let count = (end - start) / step + 1;
             let actual_end = start + (count - 1) * step;
             Ok(Self {
@@ -138,14 +198,25 @@ impl IntRange {
     }
 
     /// Number of integers in this range.
+    ///
+    /// Exact: with values bounded by [`MAX_RANGE_VALUE_MAGNITUDE`], the
+    /// count is below 2^63 and always fits. (On 32-bit targets a count
+    /// above usize::MAX cannot occur for materialized use — such ranges
+    /// exceed every evaluation budget long before — but the u64 count is
+    /// still exact for symbolic arithmetic.)
     pub fn len(&self) -> usize {
-        // After normalization, start <= end and step > 0 always
-        ((self.end - self.start) / self.step + 1) as usize
+        usize::try_from(self.len_u64()).unwrap_or(usize::MAX)
+    }
+
+    /// Number of integers in this range as an exact u64 (never saturates;
+    /// the bounded value domain keeps counts below 2^63).
+    pub(crate) fn len_u64(&self) -> u64 {
+        ((self.end - self.start) / self.step + 1) as u64
     }
 
     /// Returns `true` if the range contains no elements.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len_u64() == 0
     }
 
     /// Test whether `value` is a member of this range.
@@ -156,15 +227,43 @@ impl IntRange {
         (value - self.start) % self.step == 0
     }
 
+    /// Value at zero-based index `k`. The caller is responsible for `k`
+    /// being in bounds; bounded values keep the product in i64.
+    fn nth(&self, k: u64) -> i64 {
+        self.start + k as i64 * self.step
+    }
+
     /// Iterate over all values in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = i64> + '_ {
-        (0..self.len() as i64).map(move |i| self.start + i * self.step)
+        (0..self.len_u64()).map(move |i| self.nth(i))
+    }
+
+    /// First value in the range (`start <= end` after normalization).
+    pub fn start(&self) -> i64 {
+        self.start
+    }
+
+    /// Last value in the range, inclusive.
+    pub fn end(&self) -> i64 {
+        self.end
+    }
+
+    /// Step between values (always positive after normalization).
+    pub fn step(&self) -> i64 {
+        self.step
     }
 
     /// Get element by zero-based index, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<i64> {
-        if index < self.len() {
-            Some(self.start + index as i64 * self.step)
+        self.value_at(index as u64)
+    }
+
+    /// Get element by zero-based u64 index, or `None` if out of bounds.
+    /// (u64 rather than usize so symbolic offsets beyond the pointer
+    /// width still resolve on 32-bit targets.)
+    pub(crate) fn value_at(&self, index: u64) -> Option<i64> {
+        if index < self.len_u64() {
+            Some(self.nth(index))
         } else {
             None
         }
@@ -190,19 +289,27 @@ impl std::fmt::Display for IntRange {
 #[derive(Debug, Clone, Eq, serde::Serialize)]
 pub struct RangeExpr {
     ranges: Vec<IntRange>,
-    /// Cumulative length indices for O(log n) getitem. Entry i = total elements in ranges[0..=i].
-    cumulative_lengths: Vec<usize>,
+    /// Exact cumulative length indices for O(log n) getitem (mirrors the
+    /// Python reference's `_range_length_indices` bisect table). Entry i =
+    /// total elements in ranges[0..=i]. u64 is exact: chunks are
+    /// non-overlapping within the value domain bounded by
+    /// [`MAX_RANGE_VALUE_MAGNITUDE`], so the total element count can never
+    /// exceed the domain size (< 2^63) — it also always fits the packed
+    /// length field below.
+    cumulative_lengths: Vec<u64>,
     /// Packed: lower 63 bits = length, MSB = contiguous display flag.
-    /// Contiguous flag only affects Display; not preserved through constructors.
+    /// Contiguous flag only affects Display; not preserved through
+    /// constructors. u64 (not usize) so the packing is identical on
+    /// 32-bit targets.
     #[serde(serialize_with = "serialize_length")]
-    length: usize,
+    length: u64,
 }
 
-const CONTIGUOUS_BIT: usize = 1 << (usize::BITS - 1);
-const LENGTH_MASK: usize = !CONTIGUOUS_BIT;
+const CONTIGUOUS_BIT: u64 = 1 << 63;
+const LENGTH_MASK: u64 = !CONTIGUOUS_BIT;
 
-fn serialize_length<S: serde::Serializer>(length: &usize, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_u64((length & LENGTH_MASK) as u64)
+fn serialize_length<S: serde::Serializer>(length: &u64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_u64(length & LENGTH_MASK)
 }
 
 impl<'de> serde::Deserialize<'de> for RangeExpr {
@@ -250,28 +357,48 @@ impl RangeExpr {
     }
 
     /// Create a RangeExpr from a list of individual values.
-    pub fn from_values(mut values: Vec<i64>) -> Self {
+    ///
+    /// Returns an integer-overflow error if any value's magnitude is at or
+    /// beyond [`MAX_RANGE_VALUE_MAGNITUDE`].
+    pub fn from_values(mut values: Vec<i64>) -> Result<Self, ExpressionError> {
         if values.is_empty() {
-            return Self {
+            return Ok(Self {
                 ranges: Vec::new(),
                 cumulative_lengths: Vec::new(),
                 length: 0,
-            };
+            });
+        }
+        for v in &values {
+            check_range_value(*v)?;
         }
         // Sort and deduplicate (matching Python from_list)
         values.sort();
         values.dedup();
-        let length = values.len();
+        let length = values.len() as u64;
         let mut ranges = Vec::new();
         let mut i = 0;
         while i < values.len() {
             let start = values[i];
-            // Detect step: check if next values form an arithmetic sequence
+            // Detect step: check if next values form an arithmetic
+            // sequence. Values are bounded to |v| < 2^62 (validated
+            // above), but the gap between two sorted values spans up to
+            // just under 2^63 — within i64 for the subtraction, while
+            // the chunk-step invariant (|step| < 2^62) can still be
+            // exceeded. Such far-apart values stay singleton chunks.
             if i + 1 < values.len() {
                 let step = values[i + 1] - values[i];
-                if step != 0 {
+                if step != 0 && step.unsigned_abs() < MAX_RANGE_VALUE_MAGNITUDE as u64 {
                     let mut j = i + 1;
-                    while j < values.len() && values[j] == start + (j - i) as i64 * step {
+                    // Bounded extrapolation: values are sorted and
+                    // in-domain, so overflow in start + k*step means the
+                    // sequence has ended (checked_* returns None).
+                    while j < values.len()
+                        && Some(values[j])
+                            == i64::try_from(j - i)
+                                .ok()
+                                .and_then(|k| k.checked_mul(step))
+                                .and_then(|prod| start.checked_add(prod))
+                    {
                         j += 1;
                     }
                     if j > i + 1 {
@@ -290,18 +417,24 @@ impl RangeExpr {
             i += 1;
         }
         let cumulative_lengths = build_cumulative(&ranges);
-        Self {
+        Ok(Self {
             ranges,
             cumulative_lengths,
             length,
-        }
+        })
     }
 
     /// Create from pre-built `IntRange`s. Sorts, merges adjacent ranges, and validates no overlaps.
     ///
     /// Returns an error if the number of input ranges exceeds
-    /// [`MAX_RANGE_EXPR_CHUNKS`].
-    pub fn from_ranges(mut ranges: Vec<IntRange>) -> Result<Self, ExpressionError> {
+    /// [`MAX_RANGE_EXPR_CHUNKS`], or if any range violates the
+    /// `IntRange::new` invariants (value bound, non-zero step,
+    /// direction/step agreement). Each input is re-normalized through
+    /// `IntRange::new` as defense in depth. `IntRange`'s fields are private
+    /// and its `Deserialize` implementation already re-validates, but
+    /// `from_ranges` is public API, so it independently preserves the
+    /// invariants required by indexing and length arithmetic.
+    pub fn from_ranges(ranges: Vec<IntRange>) -> Result<Self, ExpressionError> {
         if ranges.is_empty() {
             return Err(ExpressionError::parse_error(
                 "Range expression cannot be empty",
@@ -314,9 +447,14 @@ impl RangeExpr {
                 MAX_RANGE_EXPR_CHUNKS,
             )));
         }
+        let mut ranges = ranges
+            .into_iter()
+            .map(|r| IntRange::new(r.start, r.end, r.step))
+            .collect::<Result<Vec<_>, _>>()?;
         // Sort by start
         ranges.sort_by_key(|r| (r.start, r.end));
-        // Merge adjacent ranges with same step
+        // Merge adjacent ranges with same step (bounded values keep
+        // `end + step` in i64)
         let mut merged = vec![ranges[0].clone()];
         for r in &ranges[1..] {
             let last = merged.last().unwrap();
@@ -343,16 +481,10 @@ impl RangeExpr {
                 )));
             }
         }
-        // Use saturating arithmetic when summing per-chunk lengths so that a
-        // multi-chunk range whose combined logical length exceeds `usize`
-        // capacity saturates at `usize::MAX` rather than wrapping to a small
-        // value that would corrupt `len()`/`is_empty()`. `RangeExpr` stores
-        // chunks symbolically, so an enormous logical length is not itself a
-        // DoS vector — only the chunk count is capped via
-        // [`MAX_RANGE_EXPR_CHUNKS`].
-        let length: usize = merged
-            .iter()
-            .fold(0usize, |acc, r| acc.saturating_add(r.len()));
+        // Non-overlapping chunks within the bounded value domain: the
+        // total element count is at most the domain size (< 2^63), so the
+        // sum is exact and always fits the packed length field.
+        let length = sum_lengths(&merged);
         let cumulative_lengths = build_cumulative(&merged);
         Ok(Self {
             ranges: merged,
@@ -362,7 +494,17 @@ impl RangeExpr {
     }
 
     /// Total number of integers across all sub-ranges.
+    ///
+    /// Exact on 64-bit targets. (On 32-bit targets a count above
+    /// usize::MAX clamps; index arithmetic internally uses the exact
+    /// u64 count via the crate-private `len_u64`.)
     pub fn len(&self) -> usize {
+        usize::try_from(self.length & LENGTH_MASK).unwrap_or(usize::MAX)
+    }
+
+    /// Exact total number of integers across all sub-ranges as u64
+    /// (always exact; the bounded value domain keeps counts below 2^63).
+    pub(crate) fn len_u64(&self) -> u64 {
         self.length & LENGTH_MASK
     }
 
@@ -378,21 +520,34 @@ impl RangeExpr {
         idx < self.ranges.len() && self.ranges[idx].contains(value)
     }
 
-    /// Get element by index (supports negative indexing like Python).
-    pub fn get(&self, index: i64) -> Option<i64> {
-        let len = self.length & LENGTH_MASK;
-        let idx = if index < 0 { len as i64 + index } else { index } as usize;
-        if idx >= len {
+    /// Value at flattened index `idx`, or `None` if out of bounds.
+    /// O(log m) via the cumulative table (mirrors Python's bisect on
+    /// `_range_length_indices`).
+    pub(crate) fn value_at(&self, idx: u64) -> Option<i64> {
+        if idx >= self.len_u64() {
             return None;
         }
-        // Binary search on cumulative lengths (mirrors Python's bisect on _range_length_indices)
         let range_idx = self.cumulative_lengths.partition_point(|&cum| cum <= idx);
         let offset = if range_idx == 0 {
             idx
         } else {
             idx - self.cumulative_lengths[range_idx - 1]
         };
-        self.ranges[range_idx].get(offset)
+        self.ranges[range_idx].value_at(offset)
+    }
+
+    /// Get element by index (supports negative indexing like Python).
+    pub fn get(&self, index: i64) -> Option<i64> {
+        // Counts are < 2^63, so len_u64 as i64 is exact.
+        let idx = if index < 0 {
+            index + self.len_u64() as i64
+        } else {
+            index
+        };
+        if idx < 0 {
+            return None;
+        }
+        self.value_at(idx as u64)
     }
 
     /// The underlying sub-ranges (sorted, non-overlapping).
@@ -401,7 +556,7 @@ impl RangeExpr {
     }
 
     /// Cumulative element counts per sub-range (for index mapping).
-    pub fn cumulative_lengths(&self) -> &[usize] {
+    pub fn cumulative_lengths(&self) -> &[u64] {
         &self.cumulative_lengths
     }
 
@@ -433,10 +588,15 @@ impl RangeExpr {
                 "RangeExpr::slice requires a positive step",
             ));
         }
-        let total_len = self.len() as i64;
-        // Clamp to valid range
-        let start = start.max(0).min(total_len);
-        let stop = stop.max(0).min(total_len);
+        // Index-space arithmetic is u64: global indices are non-negative
+        // and bounded by the total element count (< 2^63), but sums like
+        // `offset + step` can reach ~2^64 for a user-supplied step near
+        // i64::MAX. A step beyond total_len selects only the start index,
+        // so clamp it — that also keeps `new_step` products bounded.
+        let total_len = self.len_u64() as i64;
+        let start = start.clamp(0, total_len) as u64;
+        let stop = stop.clamp(0, total_len) as u64;
+        let step = step.min(total_len.max(1)) as u64;
         if start >= stop {
             return Ok(RangeExpr {
                 ranges: Vec::new(),
@@ -446,10 +606,10 @@ impl RangeExpr {
         }
 
         let mut result_ranges = Vec::new();
-        let mut cum_start: i64 = 0; // global index where current sub-range begins
+        let mut cum_start: u64 = 0; // global index where current sub-range begins
 
         for r in &self.ranges {
-            let r_len = r.len() as i64;
+            let r_len = r.len_u64();
             let cum_end = cum_start + r_len; // exclusive end of this sub-range's global indices
 
             // The slice selects global indices: start, start+step, start+2*step, ...
@@ -463,7 +623,7 @@ impl RangeExpr {
             } else {
                 // First multiple of step at or after cum_start
                 let offset = cum_start - start;
-                let k = (offset + step - 1) / step; // ceil division
+                let k = offset.div_ceil(step);
                 start + k * step
             };
 
@@ -475,31 +635,50 @@ impl RangeExpr {
             }
 
             // Verify it's aligned to the slice stride
-            debug_assert!((first_global - start) % step == 0);
+            debug_assert!((first_global - start).is_multiple_of(step));
 
-            // Local offset within this IntRange
-            let first_local = (first_global - cum_start) as usize;
-            // How many slice-selected indices fall in this sub-range?
+            let first_local = first_global - cum_start;
             let count = (range_stop - first_global - 1) / step + 1;
-            let last_local = first_local + (count as usize - 1) * step as usize;
+            let last_local = first_local + (count - 1) * step;
+            let new_start = r.nth(first_local);
+            let new_end = r.nth(last_local);
+            // Selected values live in the bounded domain, so for count >= 2
+            // their spacing |new_end - new_start| / (count - 1) is below
+            // the domain width (2^63) and fits i64 — but it can exceed the
+            // per-chunk step bound (2^62), in which case at most two values
+            // fit in the domain and we store them as singleton chunks.
+            let new_step = (r.step as u64).checked_mul(step);
 
-            // Map local indices to values: value = r.start + local * r.step
-            let new_start = r.start + first_local as i64 * r.step;
-            let new_end = r.start + last_local as i64 * r.step;
-            let new_step = r.step * step;
-
-            if count == 1 {
-                result_ranges.push(IntRange {
-                    start: new_start,
-                    end: new_start,
-                    step: 1,
-                });
-            } else {
-                result_ranges.push(IntRange {
-                    start: new_start,
-                    end: new_end,
-                    step: new_step,
-                });
+            match new_step {
+                _ if count == 1 => {
+                    result_ranges.push(IntRange {
+                        start: new_start,
+                        end: new_start,
+                        step: 1,
+                    });
+                }
+                Some(ns) if ns < MAX_RANGE_VALUE_MAGNITUDE as u64 => {
+                    result_ranges.push(IntRange {
+                        start: new_start,
+                        end: new_end,
+                        step: ns as i64,
+                    });
+                }
+                _ => {
+                    // Spacing at or beyond the value bound: at most two
+                    // selected values fit in the bounded domain.
+                    debug_assert_eq!(count, 2);
+                    result_ranges.push(IntRange {
+                        start: new_start,
+                        end: new_start,
+                        step: 1,
+                    });
+                    result_ranges.push(IntRange {
+                        start: new_end,
+                        end: new_end,
+                        step: 1,
+                    });
+                }
             }
 
             cum_start = cum_end;
@@ -512,7 +691,7 @@ impl RangeExpr {
                 length: 0,
             });
         }
-        let length = result_ranges.iter().map(|r| r.len()).sum();
+        let length = sum_lengths(&result_ranges);
         let cumulative_lengths = build_cumulative(&result_ranges);
         Ok(RangeExpr {
             ranges: result_ranges,
@@ -525,15 +704,21 @@ impl RangeExpr {
     pub fn heap_size(&self) -> usize {
         use std::mem::size_of;
         self.ranges.capacity() * size_of::<IntRange>()
-            + self.cumulative_lengths.capacity() * size_of::<usize>()
+            + self.cumulative_lengths.capacity() * size_of::<u64>()
     }
 }
 
-fn build_cumulative(ranges: &[IntRange]) -> Vec<usize> {
+/// Sum per-chunk lengths. Exact: non-overlapping chunks in the bounded
+/// value domain total below 2^63 elements.
+fn sum_lengths(ranges: &[IntRange]) -> u64 {
+    ranges.iter().map(|r| r.len_u64()).sum()
+}
+
+fn build_cumulative(ranges: &[IntRange]) -> Vec<u64> {
     let mut cum = Vec::with_capacity(ranges.len());
-    let mut total = 0;
+    let mut total = 0u64;
     for r in ranges {
-        total += r.len();
+        total += r.len_u64();
         cum.push(total);
     }
     cum
@@ -918,6 +1103,18 @@ mod tests {
     // ── Defensive caps (SEC-2026-4) ──
 
     #[test]
+    fn from_ranges_revalidates_inputs_as_defense_in_depth() {
+        let err = RangeExpr::from_ranges(vec![IntRange {
+            start: 0,
+            end: 1,
+            step: 0,
+        }])
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "Range: step must not be zero");
+    }
+
+    #[test]
     fn reject_too_many_chunks_from_str() {
         // MAX_RANGE_EXPR_CHUNKS + 1 single values: 0,1,2,...
         let expr = (0..=MAX_RANGE_EXPR_CHUNKS as i64)
@@ -997,5 +1194,48 @@ mod tests {
             "parser took too long on 100k-chunk input: {:?}",
             start.elapsed(),
         );
+    }
+
+    #[test]
+    fn values_at_or_beyond_bound_rejected() {
+        // 2^62 is the exclusive bound for endpoints and steps.
+        assert!("4611686018427387904".parse::<RangeExpr>().is_err());
+        assert!("-4611686018427387904".parse::<RangeExpr>().is_err());
+        assert!("0-4611686018427387904".parse::<RangeExpr>().is_err());
+        assert!("0-10:4611686018427387904".parse::<RangeExpr>().is_err());
+        assert!(IntRange::new(0, 0, 1 << 62).is_err());
+        assert!(RangeExpr::from_values(vec![1 << 62]).is_err());
+    }
+
+    #[test]
+    fn values_just_inside_bound_accepted() {
+        // 2^62 - 1 is the largest legal magnitude.
+        let max = (1i64 << 62) - 1;
+        let range: RangeExpr = format!("{}-{}", -max, max).parse().unwrap();
+        assert_eq!(range.get(0), Some(-max));
+        assert_eq!(range.get(-1), Some(max));
+        // Exact span: 2 * (2^62 - 1) + 1 elements.
+        assert_eq!(range.len_u64(), 2 * max as u64 + 1);
+    }
+
+    #[test]
+    fn max_magnitude_step_iteration_and_slice() {
+        let max = (1i64 << 62) - 1;
+        // Widest legal step: exactly two elements.
+        let range: RangeExpr = format!("{}-{}:{}", -max, max, max).parse().unwrap();
+        assert_eq!(range.iter().collect::<Vec<_>>(), vec![-max, 0, max]);
+        let sliced = range.slice(1, 3, 1).unwrap();
+        assert_eq!(sliced.iter().collect::<Vec<_>>(), vec![0, max]);
+    }
+
+    #[test]
+    fn slice_step_product_beyond_bound_uses_singleton_chunks() {
+        // The selected values' spacing (chunk_step * slice_step) exceeds
+        // the per-chunk step bound, so the result stores singletons.
+        let max = (1i64 << 62) - 1;
+        let range: RangeExpr = format!("{}-{}:{}", -max, max, max).parse().unwrap();
+        let sliced = range.slice(0, 3, 2).unwrap();
+        assert_eq!(sliced.iter().collect::<Vec<_>>(), vec![-max, max]);
+        assert_eq!(sliced.ranges().len(), 2);
     }
 }

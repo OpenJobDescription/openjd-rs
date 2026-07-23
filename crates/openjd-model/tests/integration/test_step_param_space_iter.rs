@@ -1354,3 +1354,40 @@ fn test_contains_rejects_invalid_nested_values() {
         "Parameter 'Param1' value '3' is not in the parameter space range."
     );
 }
+
+#[test]
+fn directly_constructed_space_with_out_of_bound_chunk_values_rejected() {
+    // StepParameterSpace is publicly constructible (and deserializable),
+    // bypassing create_job's validation. The iterator constructor must
+    // re-validate CHUNK[INT] list values against the RangeExpr value
+    // bound rather than panicking when a chunk is built mid-iteration.
+    use indexmap::IndexMap;
+    use openjd_model::job;
+    use openjd_model::template::RangeConstraint;
+
+    let mut defs = IndexMap::new();
+    defs.insert(
+        "Frame".to_string(),
+        job::TaskParameter::ChunkInt {
+            range: job::TaskParamRange::List(vec![1, 2, 1i64 << 62]),
+            chunks: job::ResolvedChunks {
+                default_task_count: 2,
+                target_runtime_seconds: None,
+                range_constraint: RangeConstraint::Noncontiguous,
+            },
+        },
+    );
+    let space = job::StepParameterSpace {
+        task_parameter_definitions: defs,
+        combination: None,
+    };
+    let err = match StepParameterSpaceIterator::new(&space) {
+        Err(e) => e,
+        Ok(_) => panic!("expected out-of-bound chunk value to be rejected"),
+    };
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'Frame': value 4611686018427387904 \
+         exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}

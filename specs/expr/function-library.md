@@ -159,8 +159,17 @@ Operators are registered as dunder-named functions:
 | `>` | `__gt__` | `(T1, T2) -> bool` |
 | `>=` | `__ge__` | `(T1, T2) -> bool` |
 | `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
-| `in` | `__contains__` | `(list[T1], T1) -> bool`, `(string, string) -> bool`, `(range_expr, int) -> bool` |
+| `in` | `__contains__` | `(list[T1], T2) -> bool`, `(string, string) -> bool`, `(range_expr, T1) -> bool` |
 | `not in` | `__not_contains__` | Same as `__contains__` |
+
+Containment item types are deliberately unconstrained (`T2`/`T1` rather than
+binding to the container's element type): membership is decided by value
+equality, matching Python, so `'1' in [1, 2, 3]` and `'a' in range_expr('1-3')`
+evaluate to `false` rather than failing type resolution, and `1.0 in
+range_expr('1-3')` is `true` (integral floats compare equal to ints). Note the
+trade-off: a template whose containment item type can never match the
+container's element type passes static validation and always evaluates false
+at job time.
 
 ## Property Access
 

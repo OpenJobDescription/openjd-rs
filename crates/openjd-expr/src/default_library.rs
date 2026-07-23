@@ -300,21 +300,21 @@ fn comparison() -> FunctionLibrary {
     lib.register_sig("__ge__", "(T1, T2) -> bool", ge_generic)
         .expect("bad builtin signature");
     // Containment — container first, item second
-    lib.register_sig("__contains__", "(list[T1], T1) -> bool", contains_list)
+    lib.register_sig("__contains__", "(list[T1], T2) -> bool", contains_list)
         .expect("bad builtin signature");
-    lib.register_sig("__contains__", "(range_expr, int) -> bool", contains_range)
+    lib.register_sig("__contains__", "(range_expr, T1) -> bool", contains_range)
         .expect("bad builtin signature");
     lib.register_sig("__contains__", "(string, string) -> bool", contains_string)
         .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
-        "(list[T1], T1) -> bool",
+        "(list[T1], T2) -> bool",
         not_contains_list,
     )
     .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
-        "(range_expr, int) -> bool",
+        "(range_expr, T1) -> bool",
         not_contains_range,
     )
     .expect("bad builtin signature");

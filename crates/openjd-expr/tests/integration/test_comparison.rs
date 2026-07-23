@@ -419,3 +419,24 @@ fn float_gt_string_errors() {
         "got:\n{e}"
     );
 }
+
+#[test]
+fn list_containment_uses_cross_type_range_equality() {
+    assert_eq!(
+        eval("[1, 2, 3] in [range_expr('1-3')]").to_display_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("range_expr('1-3') in [[1, 2, 3]]").to_display_string(),
+        "true"
+    );
+    assert_eq!(
+        eval("[1, 2, 4] not in [range_expr('1-3')]").to_display_string(),
+        "true"
+    );
+}
+
+#[test]
+fn list_containment_with_different_types_returns_false() {
+    assert_eq!(eval("'1' in [1, 2, 3]").to_display_string(), "false");
+}

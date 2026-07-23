@@ -763,7 +763,8 @@ fn match_t_and_t1_are_distinct() {
 
 #[test]
 fn match_contains_signature() {
-    // __contains__(list[T1], T1) -> bool
+    // A (list[T1], T1)-shaped generic signature (the registered __contains__
+    // uses (list[T1], T2); this exercises same-var binding consistency)
     // Match list[T1] against list[int] => T1=int
     // Then match T1 against int => T1=int (consistent)
     let list_t1 = ExprType::list(ExprType::T1);
@@ -1166,7 +1167,8 @@ fn match_call_getitem() {
 
 #[test]
 fn match_call_contains_consistent() {
-    // __contains__(list[T1], T1) -> bool
+    // A (list[T1], T1)-shaped generic signature (the registered __contains__
+    // uses (list[T1], T2); this exercises same-var binding consistency)
     let sig = p("(list[T1], T1) -> bool");
     let b = sig
         .match_call(&[ExprType::list(ExprType::INT), ExprType::INT])
@@ -1176,7 +1178,8 @@ fn match_call_contains_consistent() {
 
 #[test]
 fn match_call_contains_conflict() {
-    // __contains__(list[T1], T1) -> bool with list[int] and string -> conflict
+    // A (list[T1], T1)-shaped signature with list[int] and string -> conflict
+    // (note: the registered __contains__ uses (list[T1], T2), which accepts this)
     let sig = p("(list[T1], T1) -> bool");
     assert!(sig
         .match_call(&[ExprType::list(ExprType::INT), ExprType::STRING])

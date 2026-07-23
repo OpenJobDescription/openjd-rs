@@ -33,16 +33,23 @@ a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
 ```rust
 pub struct RangeExpr {
     ranges: Vec<IntRange>,
-    length: usize,                    // total element count across all ranges
-    cumulative_lengths: Vec<usize>,   // cumulative lengths for binary search indexing
+    length: u64,                    // packed: low 63 bits = exact element count,
+                                    // MSB = contiguous display flag
+    cumulative_lengths: Vec<u64>,   // exact cumulative lengths for binary
+                                    // search indexing (mirrors the Python
+                                    // reference's _range_length_indices)
 }
 
 struct IntRange {
-    start: i64,
-    end: i64,   // inclusive, actual last value
-    step: i64,  // always positive after construction
+    start: i64,  // |start| < 2^62 (see Value Bounds)
+    end: i64,    // inclusive, actual last value; |end| < 2^62
+    step: i64,   // always positive after construction; step < 2^62
 }
 ```
+
+All lengths and counts are exact u64 values — with the value bounds
+below, no count can reach 2^63, so nothing saturates and all index
+arithmetic is plain i64/u64.
 
 Ranges are stored in ascending order with positive steps regardless of how they were
 specified. Descending ranges like `"10-1:-1"` are normalized to ascending form during
@@ -91,10 +98,39 @@ materialization. Downstream conversion (`list(range_expr)`, comprehensions
 over the range) is already bounded by the evaluator's per-element operation
 charge and memory limit.
 
-`from_ranges` uses `saturating_add` when summing per-chunk lengths, so a
-multi-chunk range whose combined logical length exceeds `usize::MAX`
-produces a `RangeExpr` with `len() == usize::MAX` rather than a wrapped
-smaller value.
+## Value Bounds
+
+Range endpoints and steps are restricted to magnitudes **strictly below
+2^62** (`MAX_RANGE_VALUE_MAGNITUDE`). Inputs at or beyond the bound —
+through parsing, `IntRange::new`, `RangeExpr::from_values`, or
+`RangeExpr::from_ranges` — are rejected with an integer overflow error
+(`ExpressionErrorKind::IntegerOverflow`) at construction time.
+
+This is a deliberate narrowing of the language surface chosen so that
+**every derived quantity is exactly representable in 64 bits**:
+
+- The widest possible endpoint span is below 2^63, so element counts fit
+  i64/u64 exactly — `len()` never saturates, and the cumulative index
+  table used for O(log m) `get()` is always exact.
+- Index products (`i * step`), normalization intermediates
+  (`start + (count - 1) * step`), adjacency checks (`end + step`), and
+  `from_values` gap detection all stay within i64 with 2x headroom.
+- No widened (i128/u128) arithmetic and no saturating-vs-exact length
+  split exists anywhere in the implementation; the element count can
+  never collide with the contiguous-display flag packed into the length
+  field's high bit.
+
+The total element count across all chunks is also below 2^63: chunks are
+non-overlapping subsets of the bounded value domain, so the sum cannot
+exceed the domain size.
+
+**Divergence from the Python reference:** Python's implementation uses
+arbitrary-precision integers and accepts any endpoint. 2^62 ≈ 4.6×10^18 is
+nine orders of magnitude beyond any realistic frame range or task index,
+so the restriction is not expected to affect real templates. One slicing
+edge case remains: a slice whose selected-value spacing
+(`chunk_step × slice_step`) reaches the step bound stores the (at most
+two) selected values as singleton chunks rather than a stepped chunk.
 
 This cap is orders of magnitude above any realistic render-farm frame
 range: real multi-chunk inputs select frames from a handful of shots, well
@@ -156,6 +192,11 @@ The algorithm operates in O(m) time where m is the number of sub-ranges, by walk
 the sub-ranges and computing intersections with the requested index range. No element
 vector is allocated — the result is a new `RangeExpr` built directly from computed
 sub-ranges. Step must be positive.
+
+When a slice selects exactly two values from one sub-range and their spacing
+(`chunk_step × slice_step`) reaches the value bound, the result is
+represented as two singleton chunks, since the combined step would violate
+the bounded step domain of the stored `IntRange` (see Value Bounds).
 
 ## Containment
 

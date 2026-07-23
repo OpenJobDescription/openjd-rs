@@ -351,6 +351,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - Creates a local scope per iteration (loop variable doesn't leak)
 - Handles unresolved iterables by evaluating the body once with an unresolved loop variable
 - Operation count: +1 per iteration
+- Iterates lists without copying and symbolic ranges lazily
+- Pre-checks the growing result vector's values and projected capacity against the memory limit
 
 ### Subscript (`eval_subscript`)
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
