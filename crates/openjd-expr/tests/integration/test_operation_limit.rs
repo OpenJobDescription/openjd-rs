@@ -291,15 +291,26 @@ fn flatten_iterations_count() {
 
 #[test]
 fn repr_sh_list_iterations_count() {
-    let e = eval_op("repr_sh(range(1000))", 100)
+    let mut st = SymbolTable::new();
+    st.set(
+        "Args",
+        ExprValue::ListString(vec!["x".to_string(); 1000], 0),
+    )
+    .unwrap();
+    let e = ParsedExpression::new("repr_sh(Args)")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
         .unwrap_err()
         .to_string();
     assert!(
         e.contains(
             &[
-                "Expression operation count (101) exceeded limit (100)\n",
-                "  repr_sh(range(1000))\n",
-                "          ^~~~~~~~~~~"
+                "Expression operation count (1001) exceeded limit (100)\n",
+                "  repr_sh(Args)\n",
+                "  ^~~~~~~~~~~~~"
             ]
             .concat()
         ),
@@ -956,5 +967,38 @@ fn mixed_list_mismatch_at_head_cheap() {
         r.operation_count <= 10,
         "operation_count={} should reflect comparisons performed",
         r.operation_count
+    );
+}
+
+#[test]
+fn repr_json_counts_nested_elements_and_string_work() {
+    let inner = ExprValue::make_list(
+        (0..32)
+            .map(|_| ExprValue::String("\u{1}".repeat(100)))
+            .collect(),
+        ExprType::STRING,
+    )
+    .unwrap();
+    let value =
+        ExprValue::make_list(vec![inner.clone(), inner], ExprType::list(ExprType::STRING)).unwrap();
+    let mut st = SymbolTable::new();
+    st.set("Param.Items", value).unwrap();
+
+    let e = ParsedExpression::new("repr_json(Param.Items)")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(100)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression operation count (220) exceeded limit (100)\n",
+            "  repr_json(Param.Items)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
     );
 }

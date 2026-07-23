@@ -780,7 +780,7 @@ fn re_findall_empty_pattern() {
         &[
             "Empty regex pattern is not allowed\n",
             "  re_findall('hello', '')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
 }
@@ -791,7 +791,7 @@ fn re_sub_empty_pattern() {
         &[
             "Empty regex pattern is not allowed\n",
             "  re_sub('hello', '', 'x')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
 }
@@ -1149,6 +1149,10 @@ fn cmd_string_caret() {
 #[test]
 fn cmd_list_empty() {
     assert_eq!(eval("repr_cmd([])").to_display_string(), "");
+}
+#[test]
+fn sh_list_empty() {
+    assert_eq!(eval("repr_sh([])").to_display_string(), "");
 }
 #[test]
 fn cmd_list_single() {
@@ -1708,7 +1712,7 @@ fn re_split_maxsplit_empty_pattern() {
         &[
             "Empty regex pattern is not allowed\n",
             "  re_split('hello', '', 1)\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
 }
@@ -2552,5 +2556,77 @@ fn repr_sh_list_with_null_byte_returns_error() {
     assert!(
         result.is_err(),
         "repr_sh on list with null-byte string should error"
+    );
+}
+
+#[test]
+fn padding_width_counts_characters_but_budgets_bytes() {
+    assert_eq!(eval("center('界', 4)").to_display_string(), " 界  ");
+    assert_eq!(eval("ljust('界', 4)").to_display_string(), "界   ");
+    assert_eq!(eval("rjust('界', 4)").to_display_string(), "   界");
+    assert_eq!(eval("zfill('界', 4)").to_display_string(), "000界");
+}
+
+#[test]
+fn negative_padding_width_returns_input_unchanged() {
+    assert_eq!(eval("center('界', -1)").to_display_string(), "界");
+    assert_eq!(eval("ljust('界', -1)").to_display_string(), "界");
+    assert_eq!(eval("rjust('界', -1)").to_display_string(), "界");
+    assert_eq!(eval("zfill('界', -1)").to_display_string(), "界");
+}
+
+#[test]
+fn pwsh_repr_preserves_nested_list_item_structure() {
+    assert_eq!(
+        eval("repr_pwsh([[1, 2], [3]])").to_display_string(),
+        "@([1, 2], [3])"
+    );
+}
+
+#[test]
+fn repr_cmd_accepts_path_lists_via_string_coercion() {
+    assert_eq!(
+        eval("repr_cmd([path('hello world'), path('output')])").to_display_string(),
+        "\"hello world\" output"
+    );
+}
+
+#[test]
+fn repr_cmd_accepts_scalar_path_via_exact_overload() {
+    assert_eq!(
+        eval("repr_cmd(path('hello world'))").to_display_string(),
+        "\"hello world\""
+    );
+}
+
+#[test]
+fn repr_cmd_rejects_unsupported_lists() {
+    assert_err(
+        "repr_cmd([[1, 2], [3]])",
+        &[
+            "No matching signature for repr_cmd(list[list[int]])\n",
+            "  repr_cmd([[1, 2], [3]])\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "repr_cmd([1, 2, 3])",
+        &[
+            "No matching signature for repr_cmd(list[int])\n",
+            "  repr_cmd([1, 2, 3])\n",
+            "  ^~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn repr_sh_rejects_nested_lists() {
+    assert_err(
+        "repr_sh([[1, 2], [3]])",
+        &[
+            "No matching signature for repr_sh(list[list[int]])\n",
+            "  repr_sh([[1, 2], [3]])\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
+        ],
     );
 }

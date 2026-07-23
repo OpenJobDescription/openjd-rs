@@ -4,6 +4,7 @@
 
 //! String function implementations.
 
+use super::StringOutputBudget;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::types::ExprType;
@@ -100,11 +101,16 @@ pub fn replace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let old = get_str(&a[1])?;
     let new = get_str(&a[2])?;
-    ctx.count_string_ops(s.len())?;
     if old.is_empty() {
         return Err(ExpressionError::new("replace failed: empty old string"));
     }
-    Ok(ExprValue::String(s.replace(old, new)))
+    let replacements = s.len() / old.len();
+    let growth_per_replacement = new.len().saturating_sub(old.len());
+    let output_bytes = s
+        .len()
+        .saturating_add(replacements.saturating_mul(growth_per_replacement));
+    let budget = StringOutputBudget::reserve(ctx, s.len().max(output_bytes), output_bytes)?;
+    Ok(budget.finish(s.replace(old, new)))
 }
 
 pub fn startswith_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -342,44 +348,71 @@ pub fn capitalize_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(result))
 }
 
+pub(super) fn preflight_padding(
+    ctx: Ctx,
+    s: &str,
+    requested_width: i64,
+) -> Result<(StringOutputBudget, usize, usize, usize), ExpressionError> {
+    // Charge the full input traversal before counting Unicode scalar values.
+    ctx.count_string_ops(s.len())?;
+    let width = usize::try_from(requested_width.max(0)).unwrap_or(usize::MAX);
+    let char_len = s.chars().count();
+    let padding_bytes = width.saturating_sub(char_len);
+    let output_bytes = s.len().saturating_add(padding_bytes);
+    let budget = StringOutputBudget::reserve(ctx, padding_bytes, output_bytes)?;
+    Ok((budget, width, char_len, output_bytes))
+}
+
 pub fn center_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
-    let width = match &a[1] {
-        ExprValue::Int(w) => *w as usize,
+    let requested_width = match &a[1] {
+        ExprValue::Int(w) => *w,
         _ => return Err(ExpressionError::new("center() width must be int")),
     };
-    ctx.count_string_ops(width.max(s.len()))?;
-    let clen = s.chars().count();
-    if clen >= width {
-        return Ok(ExprValue::String(s.to_string()));
+    let (budget, width, char_len, output_bytes) = preflight_padding(ctx, s, requested_width)?;
+    if char_len >= width {
+        return Ok(budget.finish(s.to_string()));
     }
-    let pad = width - clen;
+    let pad = width - char_len;
     let left = pad / 2;
     let right = pad - left;
-    Ok(ExprValue::String(format!(
-        "{}{}{}",
-        " ".repeat(left),
-        s,
-        " ".repeat(right)
-    )))
+    let mut result = String::with_capacity(output_bytes);
+    for _ in 0..left {
+        result.push(' ');
+    }
+    result.push_str(s);
+    for _ in 0..right {
+        result.push(' ');
+    }
+    Ok(budget.finish(result))
 }
 
 pub fn ljust_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
-    let width = match &a[1] {
-        ExprValue::Int(w) => *w as usize,
+    let requested_width = match &a[1] {
+        ExprValue::Int(w) => *w,
         _ => return Err(ExpressionError::new("ljust() width must be int")),
     };
-    ctx.count_string_ops(width.max(s.len()))?;
-    Ok(ExprValue::String(format!("{:<width$}", s, width = width)))
+    let (budget, width, char_len, output_bytes) = preflight_padding(ctx, s, requested_width)?;
+    let mut result = String::with_capacity(output_bytes);
+    result.push_str(s);
+    for _ in char_len..width {
+        result.push(' ');
+    }
+    Ok(budget.finish(result))
 }
 
 pub fn rjust_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
-    let width = match &a[1] {
-        ExprValue::Int(w) => *w as usize,
+    let requested_width = match &a[1] {
+        ExprValue::Int(w) => *w,
         _ => return Err(ExpressionError::new("rjust() width must be int")),
     };
-    ctx.count_string_ops(width.max(s.len()))?;
-    Ok(ExprValue::String(format!("{:>width$}", s, width = width)))
+    let (budget, width, char_len, output_bytes) = preflight_padding(ctx, s, requested_width)?;
+    let mut result = String::with_capacity(output_bytes);
+    for _ in char_len..width {
+        result.push(' ');
+    }
+    result.push_str(s);
+    Ok(budget.finish(result))
 }

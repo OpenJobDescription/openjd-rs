@@ -309,7 +309,7 @@ fn exact_regex_search() {
 #[test]
 fn exact_repr_sh_string() {
     let r = eval_bounded("repr_sh('a' * 500)", 100_000_000, 10_000_000).unwrap();
-    assert_eq!(r.operation_count, 6);
+    assert_eq!(r.operation_count, 16);
 }
 #[test]
 fn exact_len_does_not_count_string_ops() {
@@ -539,12 +539,12 @@ fn precise_repr_pwsh() {
 #[test]
 fn precise_join_method() {
     let r = eval_bounded("['a','b','c'].join(',')", 100_000_000, 10_000_000).unwrap();
-    assert_eq!(r.operation_count, 4);
+    assert_eq!(r.operation_count, 5);
 }
 #[test]
 fn precise_zfill() {
     let r = eval_bounded("('a' * 300).zfill(500)", 100_000_000, 10_000_000).unwrap();
-    assert_eq!(r.operation_count, 6);
+    assert_eq!(r.operation_count, 7);
 }
 
 #[test]
