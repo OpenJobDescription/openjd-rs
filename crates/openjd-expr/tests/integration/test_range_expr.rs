@@ -693,12 +693,9 @@ fn from_values_far_apart_values_stay_singletons() {
 }
 
 #[test]
-fn from_ranges_normalizes_malformed_public_int_ranges() {
-    // IntRange's fields are public (and it derives Deserialize), so
-    // from_ranges must re-validate: a zero step previously reached
-    // len_u64()'s division.
-    // Fields are now private, so a malformed IntRange can only arrive
-    // through deserialization — which must re-validate via IntRange::new.
+fn int_range_deserialize_revalidates_invariants() {
+    // Fields are private, and the manual Deserialize implementation
+    // re-validates serialized input through IntRange::new.
     let err = serde_json::from_str::<openjd_expr::range_expr::IntRange>(
         r#"{"start": 0, "end": 1, "step": 0}"#,
     )

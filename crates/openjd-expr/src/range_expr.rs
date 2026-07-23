@@ -430,10 +430,10 @@ impl RangeExpr {
     /// [`MAX_RANGE_EXPR_CHUNKS`], or if any range violates the
     /// `IntRange::new` invariants (value bound, non-zero step,
     /// direction/step agreement). Each input is re-normalized through
-    /// `IntRange::new`: `IntRange`'s fields are public and it derives
-    /// `Deserialize`, so downstream input can construct values that were
-    /// never validated (e.g. a zero step, which would make `len_u64()`
-    /// divide by zero).
+    /// `IntRange::new` as defense in depth. `IntRange`'s fields are private
+    /// and its `Deserialize` implementation already re-validates, but
+    /// `from_ranges` is public API, so it independently preserves the
+    /// invariants required by indexing and length arithmetic.
     pub fn from_ranges(ranges: Vec<IntRange>) -> Result<Self, ExpressionError> {
         if ranges.is_empty() {
             return Err(ExpressionError::parse_error(
@@ -1101,6 +1101,18 @@ mod tests {
     }
 
     // ── Defensive caps (SEC-2026-4) ──
+
+    #[test]
+    fn from_ranges_revalidates_inputs_as_defense_in_depth() {
+        let err = RangeExpr::from_ranges(vec![IntRange {
+            start: 0,
+            end: 1,
+            step: 0,
+        }])
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "Range: step must not be zero");
+    }
 
     #[test]
     fn reject_too_many_chunks_from_str() {
