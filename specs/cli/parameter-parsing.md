@@ -8,7 +8,7 @@ and the rationale for supporting each format.
 
 ## Job Parameters (`-p` / `--parameter`)
 
-`parse_cli_parameters()` in `run.rs` handles the `-p`/`--parameter` argument, which is
+`parse_cli_parameters()` in `run/params.rs` handles the `-p`/`--parameter` argument, which is
 used by both the `summary` and `run` commands. It accepts three input formats and returns
 a `HashMap<String, ExprValue>`.
 
@@ -189,13 +189,12 @@ Three cases:
 - `--extensions "A,B"` → Only the listed extensions
 - (not provided) → All supported extensions
 
-No validation is performed on extension names at the CLI level — invalid names are caught
-by the model crate during template decoding.
+The CLI validates extension names against `ModelExtension::ALL` before template decoding.
 
 ## Cross-Module Dependency
 
-`parse_cli_parameters()` is the only function shared between modules. It lives in `run.rs`
-(which is `pub mod`) and is called by `summary.rs` via `crate::run::parse_cli_parameters()`.
+`parse_cli_parameters()` lives in `run/params.rs`, is re-exported by the public `run`
+module, and is called by `summary.rs` via `crate::run::parse_cli_parameters()`.
 
 This cross-module dependency exists because both `summary` and `run` need to parse `-p`
 arguments identically. The function could be extracted to a shared module, but with only

@@ -1216,6 +1216,7 @@ mod run_command {
         assert_ne!(code, 0, "should fail when task exits 1");
         assert!(stdout.contains("Env1 Enter"), "stdout: {stdout}");
         assert!(stdout.contains("DoTask"), "stdout: {stdout}");
+        assert!(stdout.contains("Env1 Exit"), "stdout: {stdout}");
     }
 
     #[test]
@@ -3202,9 +3203,10 @@ mod python_compat {
 
     #[test]
     fn test_task_param_tp_short_flag() {
-        // Python uses -tp; Rust should accept it
+        // Python uses -tp; Rust should recognize it as --task-param before
+        // rejecting the selected step's missing parameter space.
         let tdir = templates_dir();
-        let (_code, _stdout, stderr) = run_cli(&[
+        let (code, _stdout, stderr) = run_cli(&[
             "run",
             tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
             "--step",
@@ -3214,11 +3216,30 @@ mod python_compat {
             "--extensions",
             "",
         ]);
-        // BareStep has no task params, so this may fail for a different reason,
-        // but it should NOT fail with "unrecognized argument -tp"
-        assert!(
-            !stderr.contains("unrecognized") && !stderr.contains("unexpected argument"),
-            "-tp should be recognized as task-param flag. stderr: {stderr}"
+        assert_ne!(code, 0);
+        assert_eq!(
+            stderr.trim(),
+            "ERROR: Step 'BareStep' does not define a parameterSpace; --task-param cannot be used."
+        );
+    }
+
+    #[test]
+    fn test_tasks_rejected_for_step_without_parameter_space() {
+        let tdir = templates_dir();
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--tasks",
+            "[]",
+            "--extensions",
+            "",
+        ]);
+        assert_ne!(code, 0);
+        assert_eq!(
+            stderr.trim(),
+            "ERROR: Step 'BareStep' does not define a parameterSpace; --tasks cannot be used."
         );
     }
 

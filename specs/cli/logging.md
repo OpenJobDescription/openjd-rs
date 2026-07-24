@@ -109,10 +109,9 @@ These are set once by `run::execute()` and read by `format_log_timestamp()` on e
 call. `OnceLock` ensures thread-safe initialization without runtime overhead after the
 first write.
 
-The `run` command also creates a local `fmt_elapsed` closure that duplicates the timestamp
-formatting logic for its own status messages (e.g., "Session start", "Running step 'X'").
-This duplication exists because the status messages are printed directly by `run.rs`, not
-through the `log` facade.
+`RunContext::timestamp()` delegates to the same `format_log_timestamp()` function for
+directly printed status messages (for example, "Session start" and "Running step 'X'").
+Logger output and command status output therefore use identical timestamp formatting.
 
 ## Log Level Control
 

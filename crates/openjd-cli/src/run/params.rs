@@ -31,14 +31,9 @@ pub fn parse_cli_parameters(
                 },
                 || format!("Cannot read parameter file '{}'", path.display()),
             )?;
-            let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                openjd_model::template::parse::DocumentType::Json
-            } else {
-                openjd_model::template::parse::DocumentType::Yaml
-            };
             let value = openjd_model::template::parse::document_string_to_object(
                 &content,
-                doc_type,
+                crate::common::document_type(&path),
                 &openjd_model::CallerLimits::default(),
             )
             .map_err(|_| format!("Job parameter file '{}' should contain a dictionary.", arg))?;
@@ -125,7 +120,7 @@ pub fn parse_tasks_arg(
             || format!("Provided tasks file '{}' does not exist.", path.display()),
             || format!("Cannot read tasks file '{}'", path.display()),
         )?;
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        if crate::common::document_type(path) == openjd_model::template::parse::DocumentType::Json {
             serde_json::from_str(&content)?
         } else {
             let v: serde_json::Value = serde_saphyr::from_str(&content)?;

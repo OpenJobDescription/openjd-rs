@@ -1189,7 +1189,7 @@ impl Session {
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_env_enter.as_ref())
                     .cloned()
-                    .map(|action| (outer.clone(), action))
+                    .map(|action| (WrapEnvironmentScope::from(outer), action))
             });
 
             let lib = self.library.clone();
@@ -1356,14 +1356,12 @@ impl Session {
             });
         }
 
-        // Validate identifier exists
-        let env = self
-            .environments
-            .get(identifier)
-            .ok_or_else(|| SessionError::UnknownEnvironment {
+        // Validate identifier exists before doing any setup work.
+        if !self.environments.contains_key(identifier) {
+            return Err(SessionError::UnknownEnvironment {
                 identifier: identifier.to_string(),
-            })?
-            .clone();
+            });
+        }
 
         // Validate LIFO order
         if self.environments_entered.last() != Some(identifier) {
@@ -1392,7 +1390,11 @@ impl Session {
         // Remove environment from tracking BEFORE running the exit script.
         // This matches the Python session behavior — a failed exit is still an exit,
         // and subsequent exits must be able to proceed in LIFO order.
-        self.environments.remove(identifier);
+        let env = self.environments.remove(identifier).ok_or_else(|| {
+            SessionError::UnknownEnvironment {
+                identifier: identifier.to_string(),
+            }
+        })?;
         self.environments_entered.pop();
 
         let output = if env
@@ -1433,7 +1435,7 @@ impl Session {
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_env_exit.as_ref())
                     .cloned()
-                    .map(|action| (outer.clone(), action))
+                    .map(|action| (WrapEnvironmentScope::from(outer), action))
             });
 
             let lib = self.library.clone();
@@ -1646,7 +1648,7 @@ impl Session {
                     .script
                     .as_ref()
                     .and_then(|s| s.actions.on_wrap_task_run.clone())
-                    .map(|action| (wrap_env.clone(), action))
+                    .map(|action| (WrapEnvironmentScope::from(wrap_env), action))
             })
             .map(|(wrap_env, action)| {
                 // Seed WrappedAction.* / WrappedStep.Name from the step's own
@@ -2525,6 +2527,28 @@ fn env_has_any_wrap_hook(env: &Environment) -> bool {
         .unwrap_or(false)
 }
 
+/// The wrapper-owned data needed after wrap dispatch releases its borrow of
+/// the Session environment stack. Deliberately excludes embedded files and
+/// other potentially large Environment fields.
+struct WrapEnvironmentScope {
+    name: String,
+    resolved_symtab: Option<openjd_expr::SerializedSymbolTable>,
+    let_bindings: Option<Vec<String>>,
+}
+
+impl From<&Environment> for WrapEnvironmentScope {
+    fn from(env: &Environment) -> Self {
+        Self {
+            name: env.name.clone(),
+            resolved_symtab: env.resolved_symtab.clone(),
+            let_bindings: env
+                .script
+                .as_ref()
+                .and_then(|script| script.let_bindings.clone()),
+        }
+    }
+}
+
 /// The wrap-hook context variable available in addition to
 /// `WrappedAction.*` (RFC 0008).
 pub(crate) enum WrappedContext<'a> {
@@ -2568,7 +2592,7 @@ pub(crate) enum WrappedContext<'a> {
 #[allow(clippy::too_many_arguments)]
 fn seed_wrapped_action_symbols(
     action_symtab: &mut SymbolTable,
-    wrap_env: &Environment,
+    wrap_env: &WrapEnvironmentScope,
     inner_symtab: &SymbolTable,
     wrapped_action: &openjd_model::job::Action,
     context: WrappedContext<'_>,
@@ -2600,11 +2624,7 @@ fn seed_wrapped_action_symbols(
     // time, because the session does not persist per-environment evaluated
     // let scopes. The bindings only reference environment-scope symbols
     // (Param.*, Session.*), so re-evaluation is deterministic.
-    if let Some(bindings) = wrap_env
-        .script
-        .as_ref()
-        .and_then(|s| s.let_bindings.as_deref())
-    {
+    if let Some(bindings) = wrap_env.let_bindings.as_deref() {
         let with_lets = crate::let_bindings::evaluate_let_bindings(
             bindings,
             action_symtab,

@@ -22,7 +22,11 @@ src/
 ├── main.rs       # Entry point: Cli/Commands structs, SessionLogger, tokio::main
 ├── check.rs      # CheckArgs + execute(): template validation
 ├── summary.rs    # SummaryArgs + execute(): job/step summary output
-├── run.rs        # RunArgs + execute(): full session lifecycle, helper functions
+├── run/
+│   ├── mod.rs    # RunArgs, RunContext, lifecycle primitives
+│   ├── execution.rs # Preflight, step/task execution, reporting phases
+│   ├── params.rs # Job/task parameter and path mapping parsing
+│   └── result.rs # Structured run result
 └── help.rs       # Context-aware help: template-driven --help for run command
 ```
 
@@ -34,11 +38,11 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 | Dependency | Purpose |
 |------------|---------|
 | `openjd-model` | `parse::*` (template decoding), `create_job`, `preprocess_job_parameters`, `StepParameterSpaceIterator`, job/template types |
-| `openjd-sessions` | `Session`, `SessionConfig`, `ActionState`, `PathMappingRule`, `embedded_files::write_embedded_file` |
-| `openjd-expr` | `ExprValue`, `SymbolTable`, `Evaluator`, `ParsedExpression`, `FunctionLibrary`, `path_mapping::apply_rules`, `default_library` |
+| `openjd-sessions` | `Session`, `SessionConfig`, `ActionState`, `PathMappingRule` |
+| `openjd-expr` | `ExprValue`, `SymbolTable`, serialized symbol tables, host path format |
 | `clap` | Argument parsing via derive macros (`Parser`, `Subcommand`, `Args`) |
 | `serde_json` | JSON output formatting, inline JSON parameter parsing, path mapping rule loading |
-| `serde_yaml` | YAML output formatting, YAML parameter file loading |
+| `serde-saphyr` | YAML output formatting and YAML parameter/task file loading |
 | `tokio` | Async runtime (`rt-multi-thread`, `macros`) for session execution |
 | `log` | Logging facade; custom `Log` impl for subprocess output |
 | `chrono` | Timestamp formatting (local, UTC) for session logs |
@@ -46,11 +50,12 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 ## Public API Surface
 
 The crate is a binary (`[[bin]] name = "openjd"`), so it has no library API. However,
-`run.rs` is `pub mod` to allow `summary.rs` to call `parse_cli_parameters()` — the only
-cross-module dependency within the crate.
+`run/mod.rs` is `pub mod` because `summary.rs` reuses parameter parsing and Windows path
+normalization from the run module.
 
-**Exported from `run.rs` (crate-internal):**
+**Exported from `run/mod.rs` (crate-internal):**
 - `parse_cli_parameters(&[String]) -> Result<HashMap<String, ExprValue>>` — Parses `-p`/`--parameter` arguments
+- `strip_extended_prefix(&Path) -> PathBuf` — Removes Windows extended-length path prefixes
 
 ## Entry Point Flow
 
@@ -85,25 +90,25 @@ which generate the parser from struct definitions. This eliminates the manual wi
 and makes the argument structure self-documenting in the type system.
 
 The tradeoff is that clap derive is less flexible for dynamic argument generation. The
-Python CLI's `@print_cli_result` decorator pattern (which wraps command functions to handle
-output formatting uniformly) has no direct equivalent — each Rust command handles its own
-output formatting inline.
+shared `common::print_cli_result()` helper provides the JSON/YAML/human-readable rendering
+role of Python's `@print_cli_result` decorator, while each command constructs its own result
+value.
 
 ### Direct Session API vs LocalSession Wrapper
 
 The Python CLI wraps the sessions library in a `LocalSession` context manager that handles
 signal registration, environment enter/exit ordering, and cleanup. The Rust CLI calls the
-`Session` API directly in `run::execute()`, managing the lifecycle inline.
+`Session` API directly through `RunContext`, which owns lifecycle state and exposes the
+enter, exit, task, and formatting operations used by the execution phases.
 
-This was a deliberate simplification. The Python `LocalSession` exists partly to manage
-Python's signal handling complexity (registering/restoring `SIGINT`/`SIGTERM` handlers,
-coordinating cancellation across threads). Rust's tokio handles cancellation more naturally
-through async task dropping, and the CLI's single-threaded command flow doesn't need the
-abstraction layer.
+This was a deliberate simplification. A Tokio signal task handles SIGINT/SIGTERM and
+cancels the session token; `RunContext` then unwinds the environment ledger. The CLI does
+not need a reusable context-manager abstraction around that command-specific flow.
 
-The cost is that `run.rs` is the largest file in the crate (~580 lines) because it contains
-the full session lifecycle inline. If the CLI grows more commands that need session
-management, extracting a `LocalSession` equivalent would be warranted.
+The command-specific orchestration remains in `run/execution.rs`, split into preparation,
+preflight, environment lifecycle, step/task execution, adaptive chunking, and reporting
+helpers. This keeps cleanup state centralized without introducing a reusable session
+abstraction that no other command needs.
 
 ### Async Main
 

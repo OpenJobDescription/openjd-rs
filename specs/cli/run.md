@@ -88,7 +88,9 @@ pub struct RunArgs {
 
 ## Execution Pipeline
 
-The `execute()` function is async and runs the full session lifecycle:
+The async `execute()` entry point delegates to cohesive execution phases. A
+`RunContext` owns the `Session`, entered-environment ledger, failure state,
+interruption flag, task count, and session start time.
 
 ```
 execute(args).await
@@ -103,35 +105,45 @@ execute(args).await
   │   ├── preprocess_job_parameters() → param_values
   │   └── create_job() → Job
   │
-  ├── 2. SESSION CREATION
-  │   ├── Build host-context function library (with path mapping)
-  │   ├── Build ValidationContext from job's declared extensions
-  │   ├── Create SessionConfig
-  │   └── Session::with_config() + with_library()
+  ├── 2. SELECTION AND PREFLIGHT
+  │   ├── Resolve step selection (explicit / auto-select / all)
+  │   ├── Parse explicit task params and require a parameter space
+  │   ├── Determine step execution order
+  │   └── Validate RFC 0008's single-wrap-layer rule for every selected stack
   │
-  ├── 3. ENVIRONMENT ENTRY
+  ├── 3. SESSION CREATION
+  │   ├── Create SessionConfig from parameters, path rules, and model profile
+  │   └── Session::with_config()
+  │
+  ├── 4. ENVIRONMENT ENTRY
   │   ├── Enter environment template environments (--environment files)
   │   └── Enter job environments (from template's jobEnvironments)
   │
-  ├── 4. STEP EXECUTION
-  │   ├── Resolve step selection (explicit / auto-select / all)
-  │   ├── Parse explicit task params if provided
-  │   ├── Determine step execution order (with dependency resolution if requested)
+  ├── 5. STEP EXECUTION
   │   └── For each step:
   │       ├── Enter step environments
-  │       ├── Prepare embedded file paths
   │       ├── Execute tasks (explicit, lazy iteration, or no-param single task)
   │       └── Exit step environments (reverse order)
   │
-  ├── 5. ENVIRONMENT EXIT
+  ├── 6. ENVIRONMENT EXIT
   │   └── Exit every entered environment (LIFO), including any whose
   │       enter action failed (cleanup guarantee)
   │
-  └── 6. RESULTS
+  └── 7. RESULTS
+      ├── Treat any observed interruption as a failed run
+      ├── Capture run duration (before filesystem cleanup)
       ├── Print session summary (format depends on --output)
       ├── Cleanup session (unless --preserve)
       └── Exit with code 1 if any action failed
 ```
+
+The environment ledger is manipulated only through `RunContext` methods.
+Each step unwinds to its pre-step baseline before propagating an error, and
+the outer execution phase always unwinds the remaining environments. Thus a
+`Session::run_task()` error cannot bypass environment cleanup.
+
+Selection and RFC 0008 preflight happen before session creation. Invalid runs
+therefore do not create a working directory or print session-start banners.
 
 ## Step Selection Logic
 
@@ -154,8 +166,8 @@ Within a selected step, tasks execute in one of three modes:
 
 ### No Parameter Space
 
-If the step has no `parameterSpace`, a single task runs with no task parameters. Let
-bindings and embedded files are evaluated against the step's symbol table only.
+If the step has no `parameterSpace`, a single task runs with no task parameters.
+Supplying `--task-param` or `--tasks` for such a step is rejected during preflight.
 
 ### Explicit Task Parameters
 
@@ -173,12 +185,9 @@ that would exhaust memory if materialized.
 
 For each task:
 1. Get the next parameter set from the iterator
-2. Build a task symbol table with `Task.Param.*` and `Task.RawParam.*` entries
-3. Apply path mapping to PATH-typed parameters
-4. Evaluate let bindings against the task symbol table
-5. Write embedded files with resolved content
-6. Call `session.run_task()`
-7. Check result; stop on failure
+2. Copy it into a `TaskParameterSet`
+3. Call `Session::run_task()`; the sessions crate builds symbols and materializes the script
+4. Check the result and stop on failure
 
 `--maximum-tasks` limits the iteration count. A value of -1 (default) means no limit.
 
@@ -243,9 +252,9 @@ run. The session's enter-time check (`SessionError::MultipleWrapEnvironments`)
 remains as defense in depth for library callers.
 
 Every entered environment — template, job, and step scoped — is tracked in an
-`entered_envs` list of `(identifier, name, step_symtab)` tuples as it is
-entered. A failed enter action marks the session failed but still records the
-environment (the session keeps a failed-enter environment on its stack),
+`entered_envs` list of `EnteredEnvironment` values containing its identifier,
+name, and optional step symbol table. A failed enter action marks the session
+failed but still records the environment (the session keeps a failed-enter environment on its stack),
 prints the failing action's `Process exited with code: N` line, and skips
 entering further environments and running tasks. Step environments are
 unwound to the pre-step baseline at the end of each step (or after a step-env
@@ -256,52 +265,19 @@ entered or attempted has its `onExit` (or substituted `onWrapEnvExit`) run
 before the session ends. An environment rejected before entry is not recorded
 and not exited.
 
-## Embedded File Handling
+## Script Runtime Delegation
 
-For each step, embedded file paths are pre-computed before task iteration:
-
-1. Filenames are plain strings per the 2023-09 schema (not `@fmtstring`) and
-   are used literally
-2. File paths are constructed relative to the session working directory
-3. For each task, file contents are resolved against the task symbol table and written
-   via `openjd_sessions::embedded_files::write_embedded_file()`
-4. If `end_of_line` is `"CRLF"`, newlines are converted after resolution
-
-Files are re-written for each task because their content may contain task parameter
-references that change per-task.
-
-## Let Binding Evaluation
-
-Script-level let bindings are evaluated per-task using `eval_with_lib()`, a helper that
-creates a `ParsedExpression`, constructs an `Evaluator` with the host library, and
-evaluates the AST. Results are inserted into the task symbol table for use by subsequent
-bindings, embedded files, and action argument resolution.
-
-```rust
-fn eval_with_lib(
-    expr: &str,
-    symtab: &SymbolTable,
-    lib: &FunctionLibrary,
-) -> Result<ExprValue, ExpressionError>
-```
-
-This function exists in `run.rs` because the CLI needs to evaluate let bindings with the
-host-context library (which includes path mapping functions). The model crate's
-`evaluate_let_bindings()` doesn't accept a custom library, so the CLI reimplements the
-evaluation loop.
+The CLI passes the instantiated `StepScript`, task parameter values, and the step's
+serialized symbol table to `Session::run_task()`. The sessions crate owns script-level
+`let` evaluation, embedded-file allocation and materialization, action format-string
+resolution, subprocess execution, and path-mapping symbol materialization. The CLI only
+selects and sequences tasks.
 
 ## Host-Context Function Library
 
-The `run` command builds a function library that extends the default library with
-host-context functions (path mapping). This library is passed to:
-
-- `eval_with_lib()` for let binding evaluation
-- `FormatString::resolve_string()` for embedded file content resolution
-- `Session::with_library()` for action argument resolution during subprocess execution
-
-The library is obtained from
-`openjd_expr::FunctionLibrary::for_profile(&profile)`, where `profile` is
-an `ExprProfile` carrying `HostContext::with_rules(path_mapping_rules)`.
+The CLI passes the instantiated job's `ModelProfile` and path-mapping rules through
+`SessionConfig`. `Session::with_config()` derives the matching expression profile and
+host-context function library used by environment and task actions.
 
 ## Session Configuration
 
@@ -317,7 +293,7 @@ The `SessionConfig` struct is populated with:
 | `os_env_vars` | `None` (inherit current environment) |
 | `session_root_directory` | `None` (use system temp) |
 | `user` | `None` (run as current user) |
-| `revision_extensions` | `ValidationContext` built from job's declared extensions |
+| `profile` | `ModelProfile` built from the job template's declared extensions |
 
 ## Result Output
 
@@ -364,11 +340,15 @@ tasks_run: 100
 ## Error Handling and Exit Codes
 
 - Exit code 0: All actions completed successfully
-- Exit code 1: Any action failed, or a setup error occurred
+- Exit code 1: Any action failed, setup failed, or interruption was observed
 
 On action failure, the session continues to exit environments (cleanup) but skips
 remaining tasks. The `session_failed` flag tracks whether any action returned a
 non-`Success` state.
+
+SIGINT/SIGTERM cancels the active session action. An interruption observed between
+actions also marks the run failed, so stopping between environment entries cannot
+produce a successful zero-task result.
 
 Setup errors (file not found, parse failure, invalid parameters) return immediately
 via `Result::Err`, which `main()` prints to stderr before exiting with code 1.
@@ -378,8 +358,8 @@ via `Result::Err`, which `main()` prints to stderr before exiting with code 1.
 | Aspect | Python | Rust |
 |--------|--------|------|
 | Session wrapper | `LocalSession` context manager | Direct `Session` API calls |
-| Signal handling | SIGINT/SIGTERM handlers with `cancel()` | Not implemented (tokio task dropping) |
+| Signal handling | SIGINT/SIGTERM handlers with `cancel()` | Tokio signal task cancels the session token |
 | Adaptive chunking | In `LocalSession._run_tasks_adaptive_chunking()` | Inline in task iteration loop |
-| Step ordering | `StepDependencyGraph` topological sort for all-steps mode | Index order (0..N) for all-steps mode |
-| Environment conversion | Implicit (Python sessions accept template types) | Explicit `convert_environment()` call |
+| Step ordering | `StepDependencyGraph` topological sort for all-steps mode | `StepDependencyGraph` topological sort |
+| Environment conversion | Implicit (Python sessions accept template types) | Explicit `convert_environment_with_symtab()` call |
 | Callback | `LocalSession._action_callback()` handles states | No callback; result checked after each await |
