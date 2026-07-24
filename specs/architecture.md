@@ -50,6 +50,10 @@ openjd-rs/
 │           ├── summary.rs
 │           ├── run.rs
 │           └── help.rs
+├── fuzz/                       # cargo-fuzz suite (own workspace; see fuzz/README.md)
+│   ├── fuzz_targets/           # One libFuzzer target per untrusted entry point
+│   ├── seeds/                  # Curated starter corpora, committed
+│   └── fuzz_coverage.toml      # Untrusted-input classification manifest (CI-gated)
 └── specs/                      # Design specs
     ├── architecture.md
     ├── model/                  # openjd-model crate specs
@@ -106,6 +110,14 @@ Commands: `check` (validate templates), `summary` (job/step summary), `run` (exe
 - **Validation**: Post-deserialization validation pass (not inline with serde)
 - **Error handling**: `thiserror`-based enums throughout
 - **Workspace layout**: `crates/` directory (rattler convention)
+- **Fuzzing**: coverage-guided libFuzzer targets (`fuzz/`, via cargo-fuzz) over
+  every crate that parses or evaluates untrusted input (`openjd-expr`,
+  `openjd-model`, `openjd-snapshots`), asserting the never-panic invariant.
+  The fuzz crate sits outside the root workspace (nightly + sanitizer only)
+  and runs in its own CI workflow; a manifest gate
+  (`scripts/check_fuzz_coverage.py` + `fuzz/fuzz_coverage.toml`) requires
+  every input-shaped public fn to be mapped to a fuzz target or classified
+  as not-untrusted. See [../fuzz/README.md](../fuzz/README.md).
 
 ## Crate Status
 
