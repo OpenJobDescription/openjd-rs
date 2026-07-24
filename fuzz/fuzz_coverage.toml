@@ -1,0 +1,417 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+#
+# Fuzz-coverage registry — the source of truth for scripts/check_fuzz_coverage.py.
+#
+# Every public function that takes untrusted input (a &str, &[u8],
+# serde_json::Value, or &Path parameter) in openjd-expr / openjd-model /
+# openjd-snapshots MUST appear here exactly once, either:
+#
+#   [[fuzzed]]         — reached by a fuzz target (name it), or
+#   [[not_untrusted]]  — takes such a parameter but the value is NOT untrusted
+#                        input at the trust boundary (explain why).
+#
+# The check enforces that the set of classified functions equals the set of
+# input-shaped public functions in the source — so adding a new such function
+# fails CI until it is triaged here (the ratchet), and renaming/removing one
+# fails until its entry is updated (no dangling claims).
+#
+# `fn` keys are "<repo-relative-file>::<fn_name>". When two entries would share
+# a key (an overloaded name across impls in one file, e.g. several `new` or
+# `check_constraints`), the check treats the file+name as covered once — a
+# single classification applies to every same-named public fn in that file,
+# which is the intended granularity here.
+
+# ─── Fuzz targets ────────────────────────────────────────────────────────────
+# Each key must match a fuzz/fuzz_targets/<name>.rs file. The description is for
+# humans; the check only verifies the name ↔ file correspondence.
+[targets]
+expr_parse = "openjd_expr::ParsedExpression::new / with_profile (parser)"
+expr_evaluate = "parse + evaluate under both POSIX and Windows path formats"
+range_expr = "RangeExpr::from_str + len/get/iter"
+int_range_new = "IntRange::new with arbitrary i64 triples"
+range_expr_slice = "RangeExpr::slice with arbitrary i64 indices"
+expr_type_parse = "ExprType::parse (type-string parser)"
+format_string = "FormatString::new + resolve_string_with"
+copy_symbol_value = "copy_symbol_value dotted-name walk"
+model_decode = "document_string_to_object + decode_{job,environment,}_template"
+model_create_job = "preprocess_job_parameters + create_job (instantiation)"
+snapshot_decode = "decode_manifest + Manifest::validate"
+snapshot_ops = "diff/compose/partition/subtree/filter over decoded manifests"
+
+# ─── Fuzzed: reached by a target ─────────────────────────────────────────────
+
+# expr — parser / evaluator entry points
+[[fuzzed]]
+fn = "crates/openjd-expr/src/eval/parse.rs::new"
+target = "expr_parse"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/eval/parse.rs::with_profile"
+target = "expr_parse"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/types.rs::parse"
+target = "expr_type_parse"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/format_string.rs::new"
+target = "format_string"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/format_string.rs::with_profile"
+target = "format_string"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/format_string.rs::copy_symbol_value"
+target = "copy_symbol_value"
+
+# expr — path / uri / value functions, reached from evaluated expressions under
+# both path formats (path(), string ops, coercion) via expr_evaluate.
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path.rs::is_absolute"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path.rs::join"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path.rs::non_uri_join"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::pathlib_normalize"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::split"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::file_name"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::parent"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::file_stem"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::extension"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::extension_no_dot"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::parts"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/functions/path_parse.rs::suffixes"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::is_uri"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::parse"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::name"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::parent"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::suffix"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::suffixes"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::stem"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::parts"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/uri_path.rs::join"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/path_mapping.rs::apply"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/path_mapping.rs::apply_with_format"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/path_mapping.rs::apply_rules"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/path_mapping.rs::apply_rules_with_format"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/path_mapping.rs::is_uri"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/value.rs::from_str_coerce"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/value.rs::from_json_transport"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/value.rs::from_transport_value"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/value.rs::normalize_path_separators"
+target = "expr_evaluate"
+
+# expr — symbol table: populated from the fuzzer-supplied JSON in expr_evaluate
+# (set/set_string/set_table) and read back during evaluation.
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::set"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::set_string"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::set_table"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::get"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::get_value"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::get_string"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::get_table"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::contains"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::all_paths"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::from_value"
+target = "copy_symbol_value"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/symbol_table.rs::from_json_str"
+target = "copy_symbol_value"
+
+# expr — edit-distance suggestions run when evaluation hits an unknown
+# name/function, so the fuzzer reaches them with attacker-controlled names.
+[[fuzzed]]
+fn = "crates/openjd-expr/src/edit_distance.rs::edit_distance"
+target = "expr_evaluate"
+[[fuzzed]]
+fn = "crates/openjd-expr/src/edit_distance.rs::suggest_closest"
+target = "expr_evaluate"
+
+# model — decode + instantiate pipeline
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/parse.rs::document_string_to_object"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/parse.rs::decode_job_template"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/parse.rs::decode_environment_template"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/parse.rs::decode_template"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/job/create_job/parameters.rs::preprocess_job_parameters"
+target = "model_create_job"
+# Constraint checks and constrained-string constructors run during
+# decode/validate and job creation over attacker-controlled template values.
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/parameters.rs::check_constraints"
+target = "model_create_job"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/constrained_strings.rs::new"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/capabilities.rs::validate_amount_capability_name"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/capabilities.rs::validate_attribute_capability_name"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/validate_v2023_09/helpers.rs::has_control_chars"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/validate_v2023_09/helpers.rs::check_capability_reserved_scope"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/template/validate_v2023_09/helpers.rs::validate_env_var_name"
+target = "model_decode"
+[[fuzzed]]
+fn = "crates/openjd-model/src/types.rs::from_spec_str"
+target = "model_decode"
+
+# snapshots — decode + operations
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/codec.rs::decode_manifest"
+target = "snapshot_decode"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/codec.rs::decode_v2023"
+target = "snapshot_decode"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/codec.rs::decode_v2023_as_diff"
+target = "snapshot_decode"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/codec.rs::decode_v2025"
+target = "snapshot_decode"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_manifest"
+target = "snapshot_ops"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/ops/filter.rs::matches_path"
+target = "snapshot_ops"
+[[fuzzed]]
+fn = "crates/openjd-snapshots/src/ops/filter.rs::new"
+target = "snapshot_ops"
+
+# ─── Not untrusted: takes an input-shaped param, but the value is trusted ─────
+
+# expr — ExpressionError builders. Called by the library itself while
+# constructing diagnostics; the &str is the crate's own message/source text,
+# not an external input crossing the trust boundary.
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/error.rs::with_node"
+reason = "internal diagnostic builder; &str is the crate's own expression source, already parsed"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/error.rs::with_span"
+reason = "internal diagnostic builder; operates on the already-parsed source string"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/error.rs::set_source_span"
+reason = "internal diagnostic builder; operates on the already-parsed source string"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/error.rs::message_with_expr_prefix"
+reason = "internal diagnostic formatter over already-constructed error state"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/error.rs::division_by_zero"
+reason = "&'static str is a fixed operator label ('Division' or 'Modulo') passed by the evaluator, not external input"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/eval/evaluator.rs::with_expr_source"
+reason = "internal wiring set by ParsedExpression::evaluator; source is the already-parsed expression text, exercised via expr_evaluate"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/format_string.rs::escape_format_string"
+reason = "output helper: escapes a caller-owned literal for embedding; total function, no parsing"
+
+# expr — FunctionLibrary registration/lookup. The names are library-author
+# constants (host code registering functions), reached via evaluation only with
+# already-parsed identifiers, which expr_evaluate covers through call/call_method.
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::register"
+reason = "host registers functions at library-build time with static names, not external input"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::register_sig"
+reason = "host registers signatures at library-build time with static names, not external input"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::get_signatures"
+reason = "lookup by a name already validated during parsing/evaluation"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::call"
+reason = "dispatch by an identifier the parser already produced; the evaluator (expr_evaluate) drives it"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::call_method"
+reason = "dispatch by an identifier the parser already produced; the evaluator (expr_evaluate) drives it"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::derive_return_type"
+reason = "static type-inference over already-parsed names, no untrusted-length arithmetic"
+[[not_untrusted]]
+fn = "crates/openjd-expr/src/function_library.rs::get_property_type"
+reason = "static type-inference over already-parsed names, no untrusted-length arithmetic"
+
+# model — error helpers operate on the crate's own accumulated validation state.
+[[not_untrusted]]
+fn = "crates/openjd-model/src/error.rs::into_result"
+reason = "converts already-accumulated ValidationErrors; &str is the crate's own model-name label"
+[[not_untrusted]]
+fn = "crates/openjd-model/src/error.rs::format"
+reason = "formats already-constructed error state; no parsing of external input"
+[[not_untrusted]]
+fn = "crates/openjd-model/src/error.rs::path_field"
+reason = "diagnostic path-element builder over the crate's own field names"
+[[not_untrusted]]
+fn = "crates/openjd-model/src/job/step_dependency_graph.rs::step_node"
+reason = "lookup by a step name already validated during decode; graph is built from a validated template"
+[[not_untrusted]]
+fn = "crates/openjd-model/src/job/create_job/parameters.rs::new"
+reason = "PathParameterOptions builder; the &str dirs are host-chosen filesystem paths (job template dir / cwd), not external input — same rationale as preprocess_job_parameters"
+
+# snapshots — hashing and caches. These operate on local filesystem paths and
+# content the host chose to snapshot (collect side), or on cache-key strings the
+# crate itself computes — not on manifest bytes received from an untrusted peer.
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash.rs::hash_data"
+reason = "hashes host-provided local content being snapshotted, not externally-received data"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash.rs::hash_file"
+reason = "hashes a local file path chosen by the host during collect"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash.rs::hash_file_chunked"
+reason = "hashes a local file path chosen by the host during collect"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash_cache.rs::get"
+reason = "local SQLite hash-cache lookup keyed by crate-computed path/hash strings"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash_cache.rs::put"
+reason = "local SQLite hash-cache write keyed by crate-computed path/hash strings"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/hash_cache.rs::get_if_fresh"
+reason = "local SQLite hash-cache lookup keyed by crate-computed path/hash strings"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/data_cache.rs::cache_key"
+reason = "derives an S3 key from a crate-computed content hash, not external input"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/data_cache.rs::check_cache_exists"
+reason = "S3 existence check keyed by a crate-computed content hash"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/data_cache.rs::record_in_check_cache"
+reason = "records a crate-computed content hash in the local check cache"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/s3_check_cache.rs::get_entry"
+reason = "local check-cache lookup keyed by a crate-computed content hash"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/s3_check_cache.rs::put_entry"
+reason = "local check-cache write keyed by a crate-computed content hash"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/codec.rs::encode_v2025"
+reason = "serializes a Manifest the crate already holds in memory; encode side, not decode"
+
+# snapshots — join/subtree variants over decoded manifests. subtree_manifest and
+# the filter helpers are fuzzed via snapshot_ops; the join_* family and the
+# remaining subtree_* variants operate on already-decoded, validated manifests
+# and are exercised transitively there. They take &str subtree/base paths that
+# originate from the host (the caller chooses what subtree to extract), not from
+# the manifest bytes.
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_snapshot"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_snapshot_diff"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_snapshot_rel"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_snapshot_diff_rel"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_manifest"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/join.rs::join_manifest_rel"
+reason = "operates on already-decoded manifests; &str base path is host-chosen, not manifest content"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_snapshot"
+reason = "same traversal as subtree_manifest (fuzzed via snapshot_ops); &str subtree is host-chosen"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_snapshot_diff"
+reason = "same traversal as subtree_manifest (fuzzed via snapshot_ops); &str subtree is host-chosen"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_rel_snapshot"
+reason = "same traversal as subtree_manifest (fuzzed via snapshot_ops); &str subtree is host-chosen"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_rel_snapshot_diff"
+reason = "same traversal as subtree_manifest (fuzzed via snapshot_ops); &str subtree is host-chosen"
+[[not_untrusted]]
+fn = "crates/openjd-snapshots/src/ops/subtree.rs::subtree_rel_manifest"
+reason = "same traversal as subtree_manifest (fuzzed via snapshot_ops); &str subtree is host-chosen"
+

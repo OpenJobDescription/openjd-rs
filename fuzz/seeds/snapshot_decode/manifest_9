@@ -1,0 +1,1 @@
+{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"bbbb","mtime":2000,"path":"alpha.txt","size":20},{"hash":"cccc","mtime":3000,"path":"middle.txt","size":30},{"hash":"aaaa","mtime":1000,"path":"zebra.txt","size":10}],"totalSize":60}

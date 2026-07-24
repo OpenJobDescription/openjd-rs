@@ -1,0 +1,11 @@
+target
+corpus
+artifacts
+coverage
+
+# libFuzzer writes discovered inputs as 40-hex-char SHA1-named files. When you
+# run a target with `fuzz/seeds/<t>` as the corpus dir, it drops those into the
+# seed dir. They are not curated seeds and must not be committed — ignore them
+# so an accidental `git add` can't sweep them in. Curated seeds use readable
+# names (expr_0, mb_1, tpl_2, …), which this pattern never matches.
+seeds/*/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
