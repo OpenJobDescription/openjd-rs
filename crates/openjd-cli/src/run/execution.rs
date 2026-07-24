@@ -312,7 +312,22 @@ fn install_signal_handler(cancel_token: CancellationToken) -> Arc<AtomicBool> {
                 _ = sigterm.recv() => {}
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            // Ctrl+Break is the only console event another process can
+            // target at this process group alone (CTRL_C_EVENT is
+            // broadcast to every process on the console), so listening
+            // for it gives worker tooling a graceful interruption channel.
+            let mut ctrl_c =
+                tokio::signal::windows::ctrl_c().expect("failed to install Ctrl+C handler");
+            let mut ctrl_break =
+                tokio::signal::windows::ctrl_break().expect("failed to install Ctrl+Break handler");
+            tokio::select! {
+                _ = ctrl_c.recv() => {}
+                _ = ctrl_break.recv() => {}
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = tokio::signal::ctrl_c().await;
         }

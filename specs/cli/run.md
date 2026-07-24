@@ -346,9 +346,15 @@ On action failure, the session continues to exit environments (cleanup) but skip
 remaining tasks. The `session_failed` flag tracks whether any action returned a
 non-`Success` state.
 
-SIGINT/SIGTERM cancels the active session action. An interruption observed between
-actions also marks the run failed, so stopping between environment entries cannot
-produce a successful zero-task result.
+An interruption signal cancels the active session action. On Unix the handled
+signals are SIGINT and SIGTERM; on Windows they are Ctrl+C and Ctrl+Break
+(Ctrl+Break matters because a process started with CREATE_NEW_PROCESS_GROUP —
+as worker tooling typically does — cannot receive Ctrl+C, making
+CTRL_BREAK_EVENT the only console event another process can deliver to the
+CLI alone). An interruption observed between actions also marks the run
+failed, so stopping between environment entries cannot produce a successful
+zero-task result. The run prints "Interruption signal received.", reports the
+session as failed, and exits with code 1.
 
 Setup errors (file not found, parse failure, invalid parameters) return immediately
 via `Result::Err`, which `main()` prints to stderr before exiting with code 1.

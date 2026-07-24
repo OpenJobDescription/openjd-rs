@@ -2074,6 +2074,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "windows",
 ]
 
 [[package]]

@@ -101,8 +101,9 @@ signal registration, environment enter/exit ordering, and cleanup. The Rust CLI 
 `Session` API directly through `RunContext`, which owns lifecycle state and exposes the
 enter, exit, task, and formatting operations used by the execution phases.
 
-This was a deliberate simplification. A Tokio signal task handles SIGINT/SIGTERM and
-cancels the session token; `RunContext` then unwinds the environment ledger. The CLI does
+This was a deliberate simplification. A Tokio signal task handles SIGINT/SIGTERM
+(Unix) or Ctrl+C/Ctrl+Break (Windows) and cancels the session token; `RunContext`
+then unwinds the environment ledger. The CLI does
 not need a reusable context-manager abstraction around that command-specific flow.
 
 The command-specific orchestration remains in `run/execution.rs`, split into preparation,
