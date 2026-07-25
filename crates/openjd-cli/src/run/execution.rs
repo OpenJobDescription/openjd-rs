@@ -537,6 +537,28 @@ fn adaptive_target_runtime(step: &Step, is_adaptive: bool) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn calculate_adaptive_chunk_size(
+    current_chunk_size: usize,
+    completed_task_count: usize,
+    completed_task_duration: f64,
+    target_runtime_seconds: f64,
+) -> Option<usize> {
+    if completed_task_count == 0
+        || completed_task_duration <= 0.0
+        || !completed_task_duration.is_finite()
+    {
+        return None;
+    }
+
+    let duration_per_task = completed_task_duration / completed_task_count as f64;
+    let mut adaptive_chunk_size = target_runtime_seconds / duration_per_task;
+    if completed_task_count < 10 && adaptive_chunk_size > current_chunk_size as f64 {
+        adaptive_chunk_size = 0.75 * current_chunk_size as f64 + 0.25 * adaptive_chunk_size;
+    }
+
+    Some((adaptive_chunk_size as usize).max(1))
+}
+
 fn adjust_adaptive_chunk_size(
     ctx: &RunContext,
     iter: &mut openjd_model::StepParameterSpaceIterator,
@@ -544,16 +566,16 @@ fn adjust_adaptive_chunk_size(
     completed_task_duration: f64,
     target_runtime_seconds: f64,
 ) {
-    let duration_per_task = completed_task_duration / completed_task_count as f64;
-    let mut adaptive_chunk_size = target_runtime_seconds / duration_per_task;
-    if completed_task_count < 10 {
-        let current = iter.chunks_default_task_count().unwrap_or(1) as f64;
-        if adaptive_chunk_size > current {
-            adaptive_chunk_size = 0.75 * current + 0.25 * adaptive_chunk_size;
-        }
-    }
+    let current_chunk_size = iter.chunks_default_task_count().unwrap_or(1);
+    let Some(adaptive_chunk_size) = calculate_adaptive_chunk_size(
+        current_chunk_size,
+        completed_task_count,
+        completed_task_duration,
+        target_runtime_seconds,
+    ) else {
+        return;
+    };
 
-    let adaptive_chunk_size = (adaptive_chunk_size as usize).max(1);
     if Some(adaptive_chunk_size) != iter.chunks_default_task_count() {
         println!(
             "{}\tAdjusting chunk size to {adaptive_chunk_size}",
@@ -602,4 +624,19 @@ fn report_result(ctx: &mut RunContext, args: &RunArgs, job: &Job, working_dir: &
         chunks_run: ctx.tasks_run,
     };
     crate::common::print_cli_result(&result, &args.output);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::calculate_adaptive_chunk_size;
+
+    #[test]
+    fn zero_duration_defers_adaptive_chunk_adjustment() {
+        assert_eq!(calculate_adaptive_chunk_size(1, 1, 0.0, 60.0), None);
+    }
+
+    #[test]
+    fn measurable_duration_preserves_early_sample_blending() {
+        assert_eq!(calculate_adaptive_chunk_size(1, 1, 1.0, 9.0), Some(3));
+    }
 }

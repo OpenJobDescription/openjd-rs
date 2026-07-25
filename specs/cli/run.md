@@ -199,17 +199,21 @@ dynamically adjust chunk sizes toward a target runtime:
 
 ```
 For each completed task:
-  1. Count items in the chunk (from the RangeExpr value)
-  2. Accumulate total items and total duration
-  3. Compute duration_per_task = total_duration / total_items
-  4. Compute ideal_chunk_size = target_runtime_seconds / duration_per_task
-  5. For the first 10 tasks, blend: 75% current + 25% ideal (conservative ramp)
-  6. Clamp to minimum of 1
-  7. Update iterator's default task count if changed
+1. Count items in the chunk (from the RangeExpr value)
+2. Accumulate total items and total duration
+3. If the cumulative duration is zero or non-finite, keep the current chunk size and wait
+   for a measurable sample
+4. Compute duration_per_task = total_duration / total_items
+5. Compute ideal_chunk_size = target_runtime_seconds / duration_per_task
+6. For the first 10 tasks, blend: 75% current + 25% ideal (conservative ramp)
+7. Clamp to minimum of 1
+8. Update iterator's default task count if changed
 ```
 
-The blending in step 5 prevents wild oscillation when early tasks have atypical durations.
-After 10 tasks, the estimate stabilizes and the ideal size is used directly.
+Deferring adjustment when elapsed time is not measurable prevents a zero duration from
+producing an infinite ideal size that would saturate to `usize::MAX`. The blending in step 6
+prevents wild oscillation when early tasks have atypical durations. After 10 tasks, the
+estimate stabilizes and the ideal size is used directly.
 
 `target_runtime_seconds` comes from the step's CHUNK[INT] parameter definition. If not
 specified or zero, the model layer's `StepParameterSpaceIterator` sets `chunks_adaptive()`
