@@ -168,21 +168,27 @@ action lifecycle through `&mut self` methods. The `drive_action` method holds `&
 while concurrently processing messages from the channel, which is safe because the
 subprocess runs in a separate future joined via `tokio::select!`.
 
-### POSIX-first, Windows partially implemented
+### Windows support
 
 The Python library supports both POSIX and Windows with extensive platform-specific code
 (ACLs, `CreateProcessWithLogonW`, `PopenWindowsAsUser`, etc.). The Rust crate implements
-POSIX/Linux as the primary target since Linux workers are the primary deployment.
+both platforms:
 
-Windows has partial support:
-- Same-user subprocess execution: implemented (`subprocess.rs` Windows platform module)
-- Cross-user subprocess execution: partially implemented (`WindowsSessionUser` with
-  `CreateProcessWithLogonW`/`CreateProcessAsUserW`, process tree kill via
-  `CreateToolhelp32Snapshot`)
-- Win32 helpers: `win32.rs` (logon, user lookup), `win32_permissions.rs` (ACL management),
-  `win32_locate.rs` (executable resolution, not yet integrated)
+- Same-user subprocess execution: implemented (`subprocess.rs` Windows platform module),
+  with pre-spawn executable resolution (`win32_locate.rs` — PATHEXT-aware,
+  working-directory-first, no fallback to the worker's own PATH)
+- Cross-user subprocess execution: implemented end-to-end — `WindowsSessionUser`
+  (password and logon-token modes), the embedded helper binary spawned via
+  `CreateProcessWithLogonW`/`CreateProcessAsUserW` (`win32.rs`), CTRL_BREAK notify and
+  Job-Object/`CreateToolhelp32Snapshot` process-tree termination inside the helper
+  (`helper/src/runner_win.rs`)
+- Win32 helpers: `win32.rs` (logon, user lookup, environment blocks),
+  `win32_permissions.rs` (ACL management), `win32_locate.rs` (executable resolution,
+  called from both spawn paths)
 - Temp directory and embedded file permissions: Windows ACL paths implemented
-- Integration testing on Windows: pending
+- Integration testing on Windows: dedicated CI job (`cross-user-windows`) runs the
+  cross-user and permissions suites on `windows-latest` with a temporary test user,
+  and the standard test matrix includes Windows
 
 ## Python-vs-Rust Design Comparison
 

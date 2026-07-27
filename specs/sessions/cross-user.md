@@ -12,8 +12,8 @@ actions as a different user (the job's designated user). This is required for pr
 deployments where the worker agent runs as root or a service account but actions must
 run with the job submitter's permissions.
 
-Currently fully implemented for POSIX/Linux (including the embedded cross-user helper).
-Windows has partial support — see the Windows section below.
+Fully implemented for POSIX/Linux and Windows, both via the embedded cross-user
+helper binary. See the Windows section below for the Windows specifics.
 
 ## SessionUser Trait
 
@@ -131,7 +131,10 @@ The Python library supports Windows cross-user execution via:
 - `WindowsPermissionHelper` for ACL management
 - `PopenWindowsAsUser` subclass of `Popen`
 
-The Rust crate has partial Windows support implemented:
+The Rust crate implements full Windows cross-user support. Unlike Python
+(which spawns each action directly as the target user), the Rust crate uses
+the same architecture as POSIX: a persistent helper binary running as the
+target user executes the actions.
 
 ### WindowsSessionUser (`session_user.rs`)
 
@@ -141,19 +144,46 @@ The Rust crate has partial Windows support implemented:
 
 If the user matches the process owner, neither password nor token is needed.
 
-### Process spawning (`win32.rs`)
+### Helper spawning (`win32.rs`, `cross_user_helper.rs`)
 
-`spawn_as_user()` creates a cross-user process via `CreateProcessWithLogonW` (password
-mode) or `CreateProcessAsUserW` (token mode). Environment variables are passed as a
-Win32 environment block. Stdout and stderr are merged via a shared anonymous pipe
-(mirroring the POSIX `dup2` approach).
+`CrossUserHelperWin::spawn()` launches the embedded helper binary as the target
+user via `spawn_as_user_with_stdin()`, which uses `CreateProcessWithLogonW`
+(password mode) or `CreateProcessAsUserW` (token mode). The target user's base
+environment comes from `CreateEnvironmentBlock` on the user's token, merged
+with OpenJD-managed variables under uppercase key normalization (Windows env
+var names are case-insensitive). Stdout and stderr are merged via a shared
+anonymous pipe (mirroring the POSIX `dup2` approach). The cancel channel is a
+pipe write-end duplicated into the helper via `DuplicateHandle`.
 
-### Signal delivery (`subprocess.rs`)
+Individual actions are dispatched to the helper over the same stdin JSON
+protocol as POSIX. Inside the helper — i.e. as the target user — the
+action's command is resolved to an absolute path before spawn (see
+[win32-locate.md](win32-locate.md)): the helper can probe directories only
+the target user can read, and `CreateProcessW`'s legacy fallback search is
+bypassed. Resolution searches an action-supplied PATH exclusively when one
+is set; only when the action defines no PATH does it use the target user's
+own environment PATH instead (matching the environment the workload
+inherits in each case — never a union of the two). Resolution failures
+return over the protocol as an error response.
 
-- **Notify**: `CTRL_BREAK_EVENT` via `GenerateConsoleCtrlEvent` with console
-  attach/detach dance (mirrors Python's `_signal_win_subprocess.py`)
+### Workload execution and signal delivery (`helper/src/runner_win.rs`)
+
+The helper places itself in a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so if the helper dies, the kernel
+reaps the whole workload tree. Workloads are spawned with
+`CREATE_NEW_PROCESS_GROUP` and explicitly re-asserted into the job.
+
+- **Notify**: `CTRL_BREAK_EVENT` via `GenerateConsoleCtrlEvent` to the
+  workload's process group (CTRL_BREAK is used because CTRL_C is disabled by
+  `CREATE_NEW_PROCESS_GROUP`), followed by escalation to tree termination
+  after the notify period.
 - **Terminate**: `TerminateProcess` on the entire process tree via
-  `CreateToolhelp32Snapshot` traversal (mirrors Python's `_windows_process_killer.py`)
+  `CreateToolhelp32Snapshot` traversal (mirrors Python's
+  `_windows_process_killer.py`), with the Job Object as the backstop.
+
+Because signals are delivered by the helper — which runs as the target user —
+no cross-user signal permissions are needed, the same property the POSIX
+helper provides.
 
 ### Permissions (`win32_permissions.rs`)
 
@@ -173,7 +203,19 @@ Two entry points:
   Modify ACE on the session working directory from granting write or
   delete access to the helper binary.
 
-### Not yet implemented
+### Testing
 
-- Cross-user helper binary (Windows equivalent of the POSIX embedded helper)
-- Full integration testing (no Windows Docker test infrastructure yet)
+Windows cross-user behavior is integration-tested in
+`tests/integration/test_cross_user_windows.rs` (spawn, exit codes, env vars,
+terminate, notify-then-terminate, process-tree kill, cancel handles, cleanup,
+helper-binary DACL protection, bad credentials) and
+`tests/integration/test_windows_permissions.rs` (ACLs). CI runs both suites
+on `windows-latest` with a temporary test user created via `net user`
+(the `cross-user-windows` job in `.github/workflows/ci.yml`); the tests run
+with `--test-threads=1` because concurrent `CreateProcessWithLogonW` logons
+for the same account can fail transiently.
+
+### Known limitations
+
+- Password authentication is unsupported in Windows Session 0 (services);
+  a logon token must be used instead. This matches the Python library.

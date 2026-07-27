@@ -561,6 +561,15 @@ pub(crate) async fn run_via_helper(
     message_tx: tokio::sync::mpsc::UnboundedSender<ActionMessage>,
     cancel_writer: Option<&std::fs::File>,
 ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
+    // Windows note: executable resolution happens inside the helper
+    // (helper/src/runner_win.rs::locate_executable), which runs as the
+    // target user — it can resolve executables in directories only that
+    // user can read, and its PATH fallback is the target user's own
+    // environment (matching what the workload actually runs under).
+    // Resolution failures come back over the protocol as an error response
+    // and are mapped to SessionError::SubprocessStart below.
+    let args = &config.args;
+
     // Build the env map (only set values; unsets are excluded).
     let env: serde_json::Map<String, serde_json::Value> = config
         .env_vars
@@ -572,8 +581,8 @@ pub(crate) async fn run_via_helper(
         .collect();
 
     let cmd = serde_json::json!({
-        "command": config.args[0],
-        "args": &config.args[1..],
+        "command": args[0],
+        "args": &args[1..],
         "env": env,
         "cwd": config.working_dir,
     });
@@ -586,7 +595,7 @@ pub(crate) async fn run_via_helper(
         session_id,
         LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
         "Running command {}",
-        crate::subprocess::format_command_for_log(&config.args)
+        crate::subprocess::format_command_for_log(args)
     );
 
     // Timeout as async future instead of OS thread
@@ -682,7 +691,7 @@ pub(crate) async fn run_via_helper(
 
                 if let Some(msg) = resp.get("error").and_then(|v| v.as_str()) {
                     return Err(SessionError::SubprocessStart {
-                        command: config.args[0].clone(),
+                        command: args[0].clone(),
                         source: std::io::Error::other(msg.to_string()),
                     });
                 }

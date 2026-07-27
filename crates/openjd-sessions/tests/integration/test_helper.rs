@@ -495,6 +495,228 @@ fn test_helper_crash_during_execution_windows() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Windows executable resolution inside the helper (runner_win.rs::
+// locate_executable). Same-user spawn of the helper binary; mirrors the
+// host-side test_win32_locate.rs suite for the cross-user spawn path.
+// ────────────────────────────────────────────────────────────────────
+
+/// Build a run-command JSON with an explicit PATH env var.
+#[cfg(windows)]
+fn run_with_path_json(command: &str, path_value: &str, cwd: &str) -> String {
+    format!(
+        r#"{{"token": "{TEST_TOKEN}", "command": "{}", "args": [], "env": {{"PATH": "{}"}}, "cwd": "{}"}}"#,
+        command,
+        path_value.replace('\\', "\\\\"),
+        cwd.replace('\\', "\\\\")
+    )
+}
+
+/// Write a `.bat` that prints `marker` (CRLF line endings).
+#[cfg(windows)]
+fn write_bat(path: &std::path::Path, marker: &str) {
+    std::fs::write(path, format!("@echo off\r\necho {marker}\r\n")).unwrap();
+}
+
+/// A `.bat` in an earlier PATH directory must beat an `.exe` in a later
+/// one — the helper resolves PATHEXT-aware before spawning.
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_bat_earlier_in_path_beats_exe_later() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("dirA");
+    let dir_b = tmp.path().join("dirB");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::create_dir_all(&dir_b).unwrap();
+    write_bat(&dir_a.join("pick.bat"), "HELPER-BAT-A");
+    let system32 = PathBuf::from(std::env::var("SYSTEMROOT").unwrap()).join("System32");
+    std::fs::copy(system32.join("whoami.exe"), dir_b.join("pick.exe")).unwrap();
+
+    let path_value = format!("{};{}", dir_a.display(), dir_b.display());
+    let mut h = Helper::spawn();
+    h.send(&run_with_path_json(
+        "pick",
+        &path_value,
+        &tmp.path().to_string_lossy(),
+    ));
+    let resp = h.read_until_done();
+    assert!(
+        resp.iter()
+            .any(|v| v.get("out").and_then(|o| o.as_str()) == Some("HELPER-BAT-A")),
+        "expected the .bat in the earlier PATH directory to win; responses: {resp:?}"
+    );
+    h.shutdown();
+}
+
+/// The working directory (the session dir, in production) is searched
+/// first, before PATH.
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_cwd_searched_first() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("dirA");
+    let cwd = tmp.path().join("cwd");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    write_bat(&dir_a.join("dup.bat"), "FROM-PATH");
+    write_bat(&cwd.join("dup.bat"), "FROM-CWD");
+
+    let mut h = Helper::spawn();
+    h.send(&run_with_path_json(
+        "dup",
+        &dir_a.to_string_lossy(),
+        &cwd.to_string_lossy(),
+    ));
+    let resp = h.read_until_done();
+    assert!(
+        resp.iter()
+            .any(|v| v.get("out").and_then(|o| o.as_str()) == Some("FROM-CWD")),
+        "expected the cwd match to win over PATH; responses: {resp:?}"
+    );
+    h.shutdown();
+}
+
+/// A command absent from the run's PATH is a protocol error with the
+/// Python-parity message — the helper must not fall back to its own PATH
+/// or CreateProcessW's legacy search. `whoami` exists in System32, so
+/// success here would prove a fallback leak.
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_absent_command_is_error() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+
+    let mut h = Helper::spawn();
+    h.send(&run_with_path_json(
+        "whoami",
+        &empty.to_string_lossy(),
+        &empty.to_string_lossy(),
+    ));
+    let resp = h.read_until_done();
+    let err = resp
+        .iter()
+        .find_map(|v| v.get("error").and_then(|e| e.as_str()))
+        .unwrap_or_else(|| panic!("expected an error response; responses: {resp:?}"));
+    assert_eq!(err, "Could not find executable file: whoami");
+    h.shutdown();
+}
+
+/// The action's PATHEXT restricts candidates in the helper too: with
+/// PATHEXT=.EXE, a `.bat` earlier in PATH is not runnable and the `.exe`
+/// later in PATH must win (the helper must honor the run command's
+/// PATHEXT, not its own process environment's).
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_action_pathext_restricts_candidates() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("dirA");
+    let dir_b = tmp.path().join("dirB");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::create_dir_all(&dir_b).unwrap();
+    write_bat(&dir_a.join("pickext.bat"), "SHOULD-NOT-RUN");
+    let system32 = PathBuf::from(std::env::var("SYSTEMROOT").unwrap()).join("System32");
+    std::fs::copy(system32.join("whoami.exe"), dir_b.join("pickext.exe")).unwrap();
+
+    let path_value = format!("{};{}", dir_a.display(), dir_b.display());
+    let mut h = Helper::spawn();
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "command": "pickext", "args": [], "env": {{"PATH": "{}", "PATHEXT": ".EXE"}}, "cwd": "{}"}}"#,
+        path_value.replace('\\', "\\\\"),
+        tmp.path().to_string_lossy().replace('\\', "\\\\")
+    ));
+    let resp = h.read_until_done();
+    assert!(
+        resp.iter().any(|v| v.get("exited").is_some()),
+        "expected a clean exit; responses: {resp:?}"
+    );
+    assert!(
+        !resp
+            .iter()
+            .any(|v| v.get("out").and_then(|o| o.as_str()) == Some("SHOULD-NOT-RUN")),
+        "PATHEXT=.EXE must exclude the earlier .bat; responses: {resp:?}"
+    );
+    h.shutdown();
+}
+
+/// An explicit extension outside PATHEXT is not runnable through the
+/// helper either: `.ps1` with a default PATHEXT is a protocol not-found
+/// error, matching shutil.which — not a later spawn failure.
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_explicit_extension_outside_pathext_not_found() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("dirA");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::write(dir_a.join("script.ps1"), "Write-Output 'hi'\r\n").unwrap();
+
+    let mut h = Helper::spawn();
+    // Pin PATHEXT explicitly: some hosts add .PS1 to their machine-wide
+    // PATHEXT, which would legitimately make the .ps1 runnable.
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "command": "script.ps1", "args": [], "env": {{"PATH": "{}", "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"}}, "cwd": "{}"}}"#,
+        dir_a.to_string_lossy().replace('\\', "\\\\"),
+        tmp.path().to_string_lossy().replace('\\', "\\\\")
+    ));
+    let resp = h.read_until_done();
+    let err = resp
+        .iter()
+        .find_map(|v| v.get("error").and_then(|e| e.as_str()))
+        .unwrap_or_else(|| panic!("expected an error response; responses: {resp:?}"));
+    assert_eq!(err, "Could not find executable file: script.ps1");
+    h.shutdown();
+}
+
+/// A `.bat` invoked through the helper with an argument containing a
+/// newline must fail with a protocol error, not run with a truncated
+/// argument: the helper's spawn uses std::process::Command, whose
+/// BatBadBut mitigation (CVE-2024-24576) refuses arguments it cannot
+/// safely escape for cmd.exe — an embedded newline has no escape and
+/// cmd.exe would silently truncate the argument there.
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_bat_with_newline_arg_is_error() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir_a = tmp.path().join("dirA");
+    std::fs::create_dir_all(&dir_a).unwrap();
+    std::fs::write(dir_a.join("nltool.bat"), "@echo off\r\necho %1\r\n").unwrap();
+
+    let mut h = Helper::spawn();
+    // args contains a JSON-escaped newline (\n) inside the argument string.
+    h.send(&format!(
+        r#"{{"token": "{TEST_TOKEN}", "command": "nltool", "args": ["line one\nline two"], "env": {{"PATH": "{}"}}, "cwd": "{}"}}"#,
+        dir_a.to_string_lossy().replace('\\', "\\\\"),
+        tmp.path().to_string_lossy().replace('\\', "\\\\")
+    ));
+    let resp = h.read_until_done();
+    let err = resp
+        .iter()
+        .find_map(|v| v.get("error").and_then(|e| e.as_str()))
+        .unwrap_or_else(|| panic!("expected an error response; responses: {resp:?}"));
+    assert!(
+        err.contains("batch file arguments are invalid"),
+        "expected std's batch-argument rejection over the protocol; got: {err}"
+    );
+    h.shutdown();
+}
+
+/// When the run's env has no PATH, the helper falls back to its own
+/// environment's PATH (the target user's PATH in production).
+#[cfg(windows)]
+#[test]
+fn test_helper_windows_falls_back_to_helper_path() {
+    // echo_cmd sends env: {} — "cmd" resolves via the helper's own PATH.
+    let mut h = Helper::spawn();
+    h.send(&echo_cmd("fallback-ok"));
+    let resp = h.read_until_done();
+    assert!(
+        resp.iter()
+            .any(|v| v.get("out").and_then(|o| o.as_str()) == Some("fallback-ok")),
+        "expected cmd to resolve via the helper's own PATH; responses: {resp:?}"
+    );
+    h.shutdown();
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Windows helpers for the tests above.
 // ────────────────────────────────────────────────────────────────────
 

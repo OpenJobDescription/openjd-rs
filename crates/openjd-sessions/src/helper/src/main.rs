@@ -9,6 +9,8 @@ mod protocol;
 mod runner;
 #[cfg(windows)]
 mod runner_win;
+#[cfg(windows)]
+mod win32_which;
 
 use protocol::{constant_time_eq, send, Command, Response, AUTH_TOKEN_LEN};
 use std::io::{BufRead, Read};
