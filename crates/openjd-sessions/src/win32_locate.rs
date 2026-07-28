@@ -35,11 +35,16 @@ mod win32_which;
 /// - PATH and PATHEXT each come from exactly one source, chosen before
 ///   searching: a key in `os_env_vars` (case-insensitive) is used
 ///   exclusively — the process environment is never consulted then, even
-///   if the search finds nothing. Only when `os_env_vars` defines no such
-///   key at all is the process environment's value used, matching the
+///   if the search finds nothing. An explicit unset (`Some(None)`, which
+///   the spawn merge turns into a removed variable) counts as present:
+///   PATH resolves as empty (working directory only) and PATHEXT as the
+///   default extension list. Only when `os_env_vars` defines no such key
+///   at all is the process environment's value used, matching the
 ///   environment merge applied at spawn (an action-supplied value
-///   overwrites the inherited one) and the Python implementation's
-///   `_get_path_var_for_shutil_which`.
+///   overwrites the inherited one; an unset removes it). Note: Python's
+///   `_get_path_var_for_shutil_which` conflates unset with absent and
+///   falls back to the process PATH; we intentionally diverge so
+///   resolution matches what the spawned child actually sees.
 /// - Resolution failure is an `Err` with the Python-parity message
 ///   `Could not find executable file: <command>`.
 ///
@@ -62,16 +67,30 @@ pub(crate) fn locate_windows_executable(
         return Ok(args.to_vec());
     }
 
-    let env_var = |name: &str| -> Option<String> {
+    // Three states per key, and they must not be conflated: absent (outer
+    // None → the child inherits the process value, so resolution uses it),
+    // set (Some(Some(v)) → used exclusively), and explicitly unset
+    // (Some(None) → the spawn merge removes the variable from the child, so
+    // resolution must treat it as empty — falling back to the process value
+    // here would resolve against a PATH the action deliberately dropped).
+    let env_var = |name: &str| -> Option<Option<String>> {
         os_env_vars.and_then(|env| {
             env.iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .and_then(|(_, v)| v.clone())
+                .map(|(_, v)| v.clone())
         })
     };
-    let path_var = env_var("PATH").unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
-    let pathext =
-        env_var("PATHEXT").unwrap_or_else(|| std::env::var("PATHEXT").unwrap_or_default());
+    let path_var = match env_var("PATH") {
+        Some(set_or_unset) => set_or_unset.unwrap_or_default(),
+        None => std::env::var("PATH").unwrap_or_default(),
+    };
+    // An explicitly unset PATHEXT maps to "" which selects the default
+    // extension list — matching how cmd.exe and shutil.which behave in a
+    // child that has no PATHEXT variable.
+    let pathext = match env_var("PATHEXT") {
+        Some(set_or_unset) => set_or_unset.unwrap_or_default(),
+        None => std::env::var("PATHEXT").unwrap_or_default(),
+    };
     let search_path = format!("{};{}", working_dir.display(), path_var);
 
     match win32_which::locate_in(&args[0], &search_path, &pathext, working_dir) {
@@ -192,6 +211,61 @@ mod tests {
         let a = args(r"C:\Windows\System32\whoami.exe");
         let resolved = locate_windows_executable(&a, None, Path::new(".")).unwrap();
         assert_eq!(resolved, a);
+    }
+
+    /// An explicitly unset PATH (`Some(None)` — the spawn merge removes
+    /// the variable from the child) must resolve as an empty PATH, not
+    /// fall back to the process environment: the process PATH points at
+    /// directories the action deliberately dropped. `whoami` is on the
+    /// real PATH, so success here would prove the leak.
+    #[test]
+    fn explicitly_unset_path_does_not_fall_back_to_process_path() {
+        let env: HashMap<String, Option<String>> = HashMap::from([("PATH".to_string(), None)]);
+        let err =
+            locate_windows_executable(&args("whoami"), Some(&env), Path::new(".")).unwrap_err();
+        assert_eq!(err, "Could not find executable file: whoami");
+    }
+
+    /// With PATH explicitly unset, the working directory is still
+    /// searched — an unset PATH means "working dir only", not "nothing".
+    #[test]
+    fn explicitly_unset_path_still_searches_working_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        touch(&tmp.path().join("wdonly.bat"));
+        let env: HashMap<String, Option<String>> = HashMap::from([("PATH".to_string(), None)]);
+        let resolved = locate_windows_executable(&args("wdonly"), Some(&env), tmp.path()).unwrap();
+        assert_eq!(
+            resolved[0].to_lowercase(),
+            tmp.path()
+                .join("wdonly.bat")
+                .to_string_lossy()
+                .to_lowercase()
+        );
+    }
+
+    /// An explicitly unset PATHEXT selects the default extension list
+    /// (like a child with no PATHEXT variable), not the process's
+    /// PATHEXT. A `.ps1` must stay not-runnable even if the process
+    /// PATHEXT were to include .PS1.
+    #[test]
+    fn explicitly_unset_pathext_uses_default_list() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        touch(&tmp.path().join("tool.exe"));
+        std::fs::write(tmp.path().join("script.ps1"), "").unwrap();
+        let env: HashMap<String, Option<String>> = HashMap::from([
+            (
+                "PATH".to_string(),
+                Some(tmp.path().to_string_lossy().into_owned()),
+            ),
+            ("PATHEXT".to_string(), None),
+        ]);
+        // Default list finds the .exe...
+        let resolved = locate_windows_executable(&args("tool"), Some(&env), tmp.path()).unwrap();
+        assert!(resolved[0].to_lowercase().ends_with("tool.exe"));
+        // ...and excludes the .ps1.
+        let err =
+            locate_windows_executable(&args("script.ps1"), Some(&env), tmp.path()).unwrap_err();
+        assert_eq!(err, "Could not find executable file: script.ps1");
     }
 
     /// Without action env vars (or without PATH in them), resolution falls

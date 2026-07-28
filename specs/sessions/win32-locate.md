@@ -80,12 +80,25 @@ Python implementation raises. The error surfaces as
      used **exclusively** — for PATH, even if it is empty, in which case
      only the working directory is searched. The process environment is
      never consulted.
+   - An **explicit unset** (`Some(None)` in the same-user path's
+     `HashMap<String, Option<String>>` — e.g. from an
+     `openjd_unset_env: PATH` directive; the spawn merge removes the
+     variable from the child) counts as *present*: PATH resolves as
+     empty (working directory only) and PATHEXT as the default
+     extension list. Falling back to the process value here would
+     resolve against directories the action deliberately dropped.
+     (The helper path is unaffected: its protocol env map is
+     `String → String` with unsets already filtered out before
+     dispatch.)
    - Only when `os_env_vars` has no such key at all is the process
      environment's value used instead.
 
    This mirrors the environment merge applied at spawn: an
-   action-supplied value *overwrites* the base value for the child, so
-   resolution searches exactly what the child will see.
+   action-supplied value *overwrites* the base value for the child, an
+   unset *removes* it, so resolution searches exactly what the child
+   will see. Note: Python's `_get_path_var_for_shutil_which` conflates
+   unset with absent and falls back to the process PATH; this is an
+   intentional divergence in favor of the merge semantics.
 
 5. **Not found** — a hard error (Python parity), never a fallthrough to
    `CreateProcessW`'s legacy search.
