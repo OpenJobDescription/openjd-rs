@@ -34,6 +34,8 @@ mod test_session_env_step;
 mod test_session_scenarios;
 #[path = "integration/test_tempdir_os.rs"]
 mod test_tempdir_os;
+#[path = "integration/test_win32_locate.rs"]
+mod test_win32_locate;
 #[path = "integration/test_windows_permissions.rs"]
 mod test_windows_permissions;
 #[path = "integration/test_wrap_actions.rs"]

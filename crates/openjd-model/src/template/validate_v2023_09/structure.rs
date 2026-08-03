@@ -292,7 +292,15 @@ pub fn validate_structure(
             };
             for fs in &all_fs {
                 for name in fs.expression_names() {
-                    if let Some(file_name) = name.strip_prefix("Task.File.") {
+                    if let Some(tail) = name.strip_prefix("Task.File.") {
+                        // Only the first dotted segment is the embedded-file
+                        // key. `Task.File.<name>` is `path` typed, so any
+                        // further segments are property access on that value —
+                        // RFC 0005 uses `{{Task.File.Run.name}}` directly.
+                        // Embedded file names are identifiers (no dots, see
+                        // the name validation below), so the first segment is
+                        // unambiguous.
+                        let file_name = tail.split_once('.').map_or(tail, |(key, _)| key);
                         if !file_names.contains(file_name) {
                             errors.add(
                                 &script_path,

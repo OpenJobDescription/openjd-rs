@@ -6,7 +6,7 @@
 
 use clap::Args;
 use openjd_model::job;
-use openjd_model::template::parse::{self, DocumentType};
+use openjd_model::template::parse;
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -38,14 +38,9 @@ pub struct SummaryArgs {
 pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = &args.path;
     let content = crate::common::read_input_file(path)?;
-    let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
-        DocumentType::Json
-    } else {
-        DocumentType::Yaml
-    };
     let template_value = parse::document_string_to_object(
         &content,
-        doc_type,
+        crate::common::document_type(path),
         &openjd_model::CallerLimits::default(),
     )?;
 
@@ -74,14 +69,9 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut env_templates = Vec::new();
     for env_path in &args.environments {
         let env_content = std::fs::read_to_string(env_path)?;
-        let env_doc_type = if env_path.extension().and_then(|e| e.to_str()) == Some("json") {
-            DocumentType::Json
-        } else {
-            DocumentType::Yaml
-        };
         let env_value = parse::document_string_to_object(
             &env_content,
-            env_doc_type,
+            crate::common::document_type(env_path),
             &openjd_model::CallerLimits::default(),
         )?;
         env_templates.push(parse::decode_environment_template(

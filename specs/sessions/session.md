@@ -170,6 +170,12 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 5. Processes `ActionMessage` values via `drive_action()`
 6. On completion: state → `Ready` or `ReadyEnding` based on result
 
+When a wrap hook is dispatched, the borrow of the active environment stack is
+released by copying only the wrapper data needed for symbol seeding: its name,
+frozen resolved symbol table, script `let` bindings, and selected hook action.
+The wrapper's embedded files and other environment fields are not cloned per
+task.
+
 ## Ad-hoc Subprocess
 
 ```rust

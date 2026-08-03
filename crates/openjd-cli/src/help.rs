@@ -4,7 +4,7 @@
 
 //! Context-aware help for `openjd run <template> --help`.
 
-use openjd_model::template::parse::{self, DocumentType};
+use openjd_model::template::parse;
 use openjd_model::template::{JobParameterDefinition, JobTemplate};
 use std::path::Path;
 
@@ -58,14 +58,9 @@ fn generate_template_help(
     extensions_arg: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let content = crate::common::read_input_file(path)?;
-    let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
-        DocumentType::Json
-    } else {
-        DocumentType::Yaml
-    };
     let template_value = parse::document_string_to_object(
         &content,
-        doc_type,
+        crate::common::document_type(path),
         &openjd_model::CallerLimits::default(),
     )?;
 

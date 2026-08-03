@@ -4,6 +4,8 @@
 
 //! Miscellaneous function implementations (fail).
 
+use std::borrow::Cow;
+
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::ExprValue;
@@ -25,28 +27,39 @@ pub fn zfill_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Err(ExpressionError::new("zfill() takes exactly 2 arguments"));
     }
     let s = match &a[0] {
-        ExprValue::String(s) => s.clone(),
-        ExprValue::Int(i) => i.to_string(),
-        _ => a[0].to_display_string(),
+        ExprValue::String(s) => Cow::Borrowed(s.as_str()),
+        ExprValue::Int(i) => Cow::Owned(i.to_string()),
+        ExprValue::Float(f) => f.display_cow(),
+        _ => {
+            return Err(ExpressionError::new(
+                "zfill() argument must be string or number",
+            ))
+        }
     };
-    ctx.count_string_ops(s.len())?;
-    let width = match &a[1] {
-        ExprValue::Int(w) => *w as usize,
+    let requested_width = match &a[1] {
+        ExprValue::Int(w) => *w,
         _ => return Err(ExpressionError::new("zfill() width must be int")),
     };
-    let clen = s.chars().count();
-    let result = if clen >= width {
-        s
+    let (budget, width, char_len, output_bytes) =
+        super::string::preflight_padding(ctx, &s, requested_width)?;
+    let result = if char_len >= width {
+        s.into_owned()
     } else {
         let (sign, num) = if s.starts_with('-') || s.starts_with('+') {
             (&s[..1], &s[1..])
         } else {
-            ("", s.as_str())
+            ("", s.as_ref())
         };
-        let zeros = width - clen;
-        format!("{}{}{}", sign, "0".repeat(zeros), num)
+        let zeros = width - char_len;
+        let mut buf = String::with_capacity(output_bytes);
+        buf.push_str(sign);
+        for _ in 0..zeros {
+            buf.push('0');
+        }
+        buf.push_str(num);
+        buf
     };
-    Ok(ExprValue::String(result))
+    Ok(budget.finish(result))
 }
 
 pub fn any_fn(ctx: Ctx, a: &[ExprValue]) -> R {

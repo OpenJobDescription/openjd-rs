@@ -8,6 +8,8 @@ use std::fmt;
 use std::io::Read;
 use std::path::Path;
 
+use openjd_model::template::parse::DocumentType;
+
 /// Maximum size, in bytes, of a `file://`-referenced input read by the CLI
 /// (job parameter files, task files, path-mapping rule files).
 ///
@@ -18,6 +20,15 @@ use std::path::Path;
 /// 10 MiB is large enough for any reasonable parameter / task / path-mapping
 /// document and small enough to prevent runaway allocation.
 pub const MAX_FILE_INPUT_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Infer the template document format from its filename extension.
+pub fn document_type(path: &Path) -> DocumentType {
+    if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+        DocumentType::Json
+    } else {
+        DocumentType::Yaml
+    }
+}
 
 /// Read a file's contents as a UTF-8 string, mapping I/O errors to descriptive
 /// CLI error messages and optionally enforcing a maximum file size.

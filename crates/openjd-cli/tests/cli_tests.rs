@@ -54,7 +54,14 @@ fn python_shim_dir() -> Option<PathBuf> {
         // If the interpreter is literally named `python` we don't need a shim —
         // its parent directory is already on `PATH` (that's how `which` found
         // it, transitively). Detect this by comparing the file-name component.
-        if target.file_name().and_then(|n| n.to_str()) == Some("python") {
+        let fname = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // On Windows, `python.exe` is the canonical name.
+        let is_canonical = if cfg!(windows) {
+            fname.eq_ignore_ascii_case("python.exe")
+        } else {
+            fname == "python"
+        };
+        if is_canonical {
             return None;
         }
         let shim_dir =
@@ -65,7 +72,7 @@ fn python_shim_dir() -> Option<PathBuf> {
         std::fs::create_dir_all(&shim_dir)
             .unwrap_or_else(|e| panic!("Failed to create shim_dir {shim_dir:?}: {e}"));
         let shim_path = shim_dir.join(if cfg!(windows) {
-            "python.cmd"
+            "python.exe"
         } else {
             "python"
         });
@@ -89,11 +96,16 @@ fn python_shim_dir() -> Option<PathBuf> {
         }
         #[cfg(windows)]
         {
-            // On Windows a .cmd wrapper works for anything spawned via
-            // CreateProcess with a bare name lookup.
-            let script = format!("@echo off\r\n{} %*\r\n", target.display());
-            std::fs::write(&shim_path, script)
-                .unwrap_or_else(|e| panic!("Failed to write python shim {shim_path:?}: {e}"));
+            // On Windows, hard-link the real interpreter as `python.exe` so
+            // it resolves correctly under PATHEXT semantics without the
+            // argument-mangling issues of a .cmd/.bat wrapper. Hard link
+            // avoids a ~5 MB copy and works as long as source and dest are on
+            // the same volume (both are under %TEMP% / %LOCALAPPDATA%).
+            std::fs::hard_link(&target, &shim_path).unwrap_or_else(|_| {
+                std::fs::copy(&target, &shim_path).unwrap_or_else(|e| {
+                    panic!("Failed to copy python interpreter to {shim_path:?}: {e}")
+                });
+            });
         }
         Some(shim_dir)
     });
@@ -138,7 +150,7 @@ fn resolve_python_interpreter() -> Option<PathBuf> {
     None
 }
 
-fn run_cli(args: &[&str]) -> (i32, String, String) {
+fn cli_command(args: &[&str]) -> Command {
     let mut cmd = Command::new(openjd_bin());
     cmd.args(args).env("RUSTUP_TOOLCHAIN", "1.94.1");
     if let Some(shim) = python_shim_dir() {
@@ -153,7 +165,13 @@ fn run_cli(args: &[&str]) -> (i32, String, String) {
             cmd.env("PATH", joined);
         }
     }
-    let output = cmd.output().expect("failed to execute openjd");
+    cmd
+}
+
+fn run_cli(args: &[&str]) -> (i32, String, String) {
+    let output = cli_command(args)
+        .output()
+        .expect("failed to execute openjd");
     let exit_code = output.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1216,6 +1234,7 @@ mod run_command {
         assert_ne!(code, 0, "should fail when task exits 1");
         assert!(stdout.contains("Env1 Enter"), "stdout: {stdout}");
         assert!(stdout.contains("DoTask"), "stdout: {stdout}");
+        assert!(stdout.contains("Env1 Exit"), "stdout: {stdout}");
     }
 
     #[test]
@@ -3202,9 +3221,10 @@ mod python_compat {
 
     #[test]
     fn test_task_param_tp_short_flag() {
-        // Python uses -tp; Rust should accept it
+        // Python uses -tp; Rust should recognize it as --task-param before
+        // rejecting the selected step's missing parameter space.
         let tdir = templates_dir();
-        let (_code, _stdout, stderr) = run_cli(&[
+        let (code, _stdout, stderr) = run_cli(&[
             "run",
             tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
             "--step",
@@ -3214,11 +3234,30 @@ mod python_compat {
             "--extensions",
             "",
         ]);
-        // BareStep has no task params, so this may fail for a different reason,
-        // but it should NOT fail with "unrecognized argument -tp"
-        assert!(
-            !stderr.contains("unrecognized") && !stderr.contains("unexpected argument"),
-            "-tp should be recognized as task-param flag. stderr: {stderr}"
+        assert_ne!(code, 0);
+        assert_eq!(
+            stderr.trim(),
+            "ERROR: Step 'BareStep' does not define a parameterSpace; --task-param cannot be used."
+        );
+    }
+
+    #[test]
+    fn test_tasks_rejected_for_step_without_parameter_space() {
+        let tdir = templates_dir();
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+            "--step",
+            "BareStep",
+            "--tasks",
+            "[]",
+            "--extensions",
+            "",
+        ]);
+        assert_ne!(code, 0);
+        assert_eq!(
+            stderr.trim(),
+            "ERROR: Step 'BareStep' does not define a parameterSpace; --tasks cannot be used."
         );
     }
 
@@ -3298,6 +3337,155 @@ mod python_compat {
         assert!(
             stdout.contains("--job-param"),
             "Context help should show --job-param. stdout: {stdout}"
+        );
+    }
+}
+
+// ============================================================
+// Group: Interruption (SIGINT / Ctrl+Break) handling
+// ============================================================
+
+mod interruption {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Deliver an interruption to the CLI process only (not the whole
+    /// test-process group).
+    ///
+    /// Unix: SIGINT via `kill`. Windows: CTRL_BREAK_EVENT via
+    /// `GenerateConsoleCtrlEvent` — the CLI is spawned with
+    /// CREATE_NEW_PROCESS_GROUP so the event reaches only its group, and
+    /// because that flag disables Ctrl+C for the child, Ctrl+Break is the
+    /// only console event that can interrupt it.
+    fn send_interrupt(child: &std::process::Child) -> bool {
+        #[cfg(unix)]
+        {
+            Command::new("kill")
+                .args(["-INT", &child.id().to_string()])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+        #[cfg(windows)]
+        {
+            use windows::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
+            unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()).is_ok() }
+        }
+    }
+
+    /// End-to-end coverage for the RESULTS-phase rule "treat any observed
+    /// interruption as a failed run" (specs/cli/run.md): an interrupted run
+    /// must cancel the in-flight task, print the interruption message and
+    /// failure summary, and exit with code 1.
+    #[test]
+    fn test_interrupt_during_task_fails_run() {
+        let tdir = templates_dir();
+        let template = tdir.join("job_interruptible_sleep.yaml");
+        let mut cmd = cli_command(&["run", template.to_str().unwrap()]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn openjd");
+
+        // Stream stdout from a thread so the wait below can time out instead
+        // of blocking forever if the interruption is never acted on.
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let (tx, rx) = mpsc::channel::<String>();
+        let reader_thread = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+
+        /// Collect lines until the marker appears (`Marker`), the sender
+        /// disconnects because the CLI exited and closed stdout (`Eof`),
+        /// or 60s pass without a line (`TimedOut`).
+        #[derive(PartialEq, Debug)]
+        enum RecvEnd {
+            Marker,
+            Eof,
+            TimedOut,
+        }
+        fn recv_until(
+            rx: &mpsc::Receiver<String>,
+            collected: &mut String,
+            marker: Option<&str>,
+        ) -> RecvEnd {
+            loop {
+                match rx.recv_timeout(Duration::from_secs(60)) {
+                    Ok(line) => {
+                        collected.push_str(&line);
+                        collected.push('\n');
+                        if marker.is_some_and(|m| line.contains(m)) {
+                            return RecvEnd::Marker;
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return RecvEnd::Eof,
+                    Err(mpsc::RecvTimeoutError::Timeout) => return RecvEnd::TimedOut,
+                }
+            }
+        }
+
+        // Interrupt only once the task subprocess is demonstrably running:
+        // the signal handler is installed before any action starts.
+        let mut collected = String::new();
+        assert_eq!(
+            recv_until(&rx, &mut collected, Some("READY_FOR_SIGNAL")),
+            RecvEnd::Marker,
+            "task never signaled readiness. output so far:\n{collected}"
+        );
+        if !send_interrupt(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            // On Windows, console ctrl events cannot be generated without a
+            // console (e.g. some service contexts). Skip rather than fail.
+            #[cfg(windows)]
+            {
+                eprintln!("SKIPPED: no console available to deliver CTRL_BREAK_EVENT");
+                return;
+            }
+            #[cfg(not(windows))]
+            panic!("failed to deliver SIGINT to the CLI process");
+        }
+
+        // Drain the remaining output; EOF means the process closed stdout.
+        if recv_until(&rx, &mut collected, None) != RecvEnd::Eof {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("CLI did not exit within 60s of interruption. output:\n{collected}");
+        }
+        reader_thread.join().expect("reader thread panicked");
+        let status = child.wait().expect("failed to wait for openjd");
+
+        assert_eq!(
+            status.code(),
+            Some(1),
+            "an interrupted run must exit with code 1. output:\n{collected}"
+        );
+        assert!(
+            collected.contains("Interruption signal received."),
+            "missing interruption message. output:\n{collected}"
+        );
+        assert!(
+            collected.contains("Session ended with errors."),
+            "an interrupted run must report failure. output:\n{collected}"
+        );
+        assert!(
+            !collected.contains("EXIT_NORMAL"),
+            "the task must be canceled, not run to completion. output:\n{collected}"
         );
     }
 }

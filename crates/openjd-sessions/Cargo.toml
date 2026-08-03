@@ -45,7 +45,6 @@ futures-util = "0.3.32"
 nix = { version = "0.31", features = ["signal", "process", "user", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
-which = "8.0.2"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security",

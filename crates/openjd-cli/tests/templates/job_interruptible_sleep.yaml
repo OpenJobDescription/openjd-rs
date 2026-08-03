@@ -1,0 +1,15 @@
+specificationVersion: 'jobtemplate-2023-09'
+name: InterruptTest
+steps:
+  - name: SleepStep
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+            - '-c'
+            # Obfuscate "EXIT_NORMAL" so it doesn't appear in the log when
+            # Windows prints the command that's run.
+            - "import time,sys; print('READY_FOR_SIGNAL'); sys.stdout.flush(); time.sleep(60); print(chr(69)+'XIT_NORMAL')"
+          cancelation:
+            mode: TERMINATE

@@ -70,9 +70,16 @@ pub trait EvalContext {
     fn count_op(&mut self) -> Result<(), ExpressionError>;
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError>;
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError>;
+    /// Pre-check that an allocation of `bytes` would not exceed the memory
+    /// limit. Call before large allocations to avoid temporarily exceeding
+    /// the limit.
+    fn check_memory(&self, bytes: usize) -> Result<(), ExpressionError>;
     fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
         // Default: compile without caching
-        regex::Regex::new(pattern).map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
+        regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .build()
+            .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
     }
 }
 ```
@@ -86,6 +93,49 @@ is per-evaluation, not global.
 The evaluator implements `EvalContext` directly. This trait boundary prevents function
 implementations from calling evaluation methods (like `evaluate` or `dispatch`),
 enforcing the separation between evaluation control flow and pure function logic.
+
+### Preflighting Output Budgets
+
+Functions that can substantially amplify their inputs preflight a conservative
+output-size bound so an over-limit call fails before building the result:
+
+1. Compute the exact output size or a conservative upper bound.
+2. Charge `count_ops` / `count_string_ops` for work proportional to that size.
+3. Call `check_memory` for the projected allocation. This is a stateless
+   pre-check; `dispatch` still tracks the actual returned value.
+4. Only then build the result.
+
+String-producing functions use the internal `StringOutputBudget` guard for
+steps 2 through 4. `reserve` charges the work and checks the byte bound before
+construction; `finish` debug-asserts that the rendered string fits that bound
+before returning it for normal dispatch tracking.
+
+The following function families use this pattern:
+
+- **Padded strings** (`zfill`, `center`, `ljust`, `rjust`) use the shared
+  `preflight_padding` helper in `string.rs`. It charges input traversal before
+  counting characters, clamps negative widths to zero (matching Python), then
+  charges generated padding bytes and checks the exact output byte count.
+  `zfill` borrows string and preserved-float input text until this preflight
+  succeeds, and calls the same crate-visible helper from `misc.rs`.
+- **Representation functions** (`repr_py`, `repr_json`, `repr_sh`,
+  `repr_cmd`, `repr_pwsh`) use `preflight_repr`. It first charges the recursive
+  list item count from `count_list_items`, then obtains a byte bound from
+  `output_bound`. Escaped strings use one deliberately broad six-times
+  expansion ceiling plus structural delimiter overhead; the estimator does
+  not duplicate any renderer escape table. Unit tests render adversarial
+  strings and nested lists and assert that every bound covers the result, and
+  debug builds repeat that assertion at each function boundary. `repr_sh`
+  accepts only the canonical `string`, `path`, `list[string]`, and `list[path]`
+  inputs, plus an internal `list[nulltype]` overload for an empty list literal.
+  `repr_cmd` accepts `string` and `list[string]`; internal exact `path`,
+  `list[path]`, and `list[nulltype]` overloads implement standard path-to-string
+  and empty-list behavior without allocating a scalar path coercion before the
+  output preflight. Unsupported lists are rejected during signature dispatch.
+- **Amplifying string operations** (`replace`, `join`) compute their projected
+  output from a worst-case non-overlapping replacement count or from
+  element/separator lengths, then reserve the bound before constructing the
+  output.
 
 ## Registration
 

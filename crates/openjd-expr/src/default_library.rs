@@ -675,8 +675,6 @@ fn repr_ops() -> FunctionLibrary {
                     -> Result<crate::value::ExprValue, crate::error::ExpressionError>,
         ),
         ("repr_json", repr_json_fn),
-        ("repr_sh", repr_sh_fn),
-        ("repr_cmd", repr_cmd_fn),
         ("repr_pwsh", repr_pwsh_fn),
     ] {
         lib.register_sig(f.0, "(int) -> string", f.1)
@@ -694,6 +692,26 @@ fn repr_ops() -> FunctionLibrary {
         lib.register_sig(f.0, "(list[T1]) -> string", f.1)
             .expect("bad builtin signature");
         lib.register_sig(f.0, "(range_expr) -> string", f.1)
+            .expect("bad builtin signature");
+    }
+    for signature in [
+        "(string) -> string",
+        "(path) -> string",
+        "(list[string]) -> string",
+        "(list[path]) -> string",
+        "(list[nulltype]) -> string",
+    ] {
+        lib.register_sig("repr_sh", signature, repr_sh_fn)
+            .expect("bad builtin signature");
+    }
+    for signature in [
+        "(string) -> string",
+        "(path) -> string",
+        "(list[string]) -> string",
+        "(list[path]) -> string",
+        "(list[nulltype]) -> string",
+    ] {
+        lib.register_sig("repr_cmd", signature, repr_cmd_fn)
             .expect("bad builtin signature");
     }
     lib

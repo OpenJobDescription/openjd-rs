@@ -479,6 +479,34 @@ pub async fn run_subprocess(
         ));
     }
 
+    // Windows: resolve the command to an absolute path with canonical
+    // search semantics (PATHEXT-aware, working_dir first, action PATH) so
+    // the spawn below cannot fall back to CreateProcessW's legacy search.
+    // See win32_locate.rs. Mirrors Python's locate_windows_executable call
+    // in _runner_base.py.
+    #[cfg(windows)]
+    let args = &{
+        let wd = config
+            .working_dir
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        crate::win32_locate::locate_windows_executable(args, Some(&config.env_vars), &wd).map_err(
+            |msg| {
+                session_log!(
+                    info,
+                    session_id,
+                    LogContent::EXCEPTION_INFO | LogContent::PROCESS_CONTROL,
+                    "{}",
+                    msg
+                );
+                SessionError::SubprocessStart {
+                    command: args[0].clone(),
+                    source: std::io::Error::new(std::io::ErrorKind::NotFound, msg),
+                }
+            },
+        )?
+    };
+
     // Build merged environment
     let mut merged: HashMap<String, String> = std::env::vars().collect();
     for (k, v) in &config.env_vars {

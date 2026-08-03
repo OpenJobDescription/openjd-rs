@@ -50,6 +50,20 @@ interior mutability. Instead, the subprocess sends `ActionMessage` values throug
 channel, and the `Session::drive_action()` method receives them with `&mut self`. This
 avoids shared mutable state entirely.
 
+### Windows executable resolution
+
+On Windows, `run_subprocess` resolves `args[0]` to an absolute path before
+spawning, via `win32_locate::locate_windows_executable` (see
+[win32-locate.md](win32-locate.md)): PATHEXT-aware search over
+`{working_dir};{action PATH}`, earliest directory wins, hard
+`SubprocessStart` error ("Could not find executable file: …") when there is
+no match. This gives canonical Windows search semantics (a `.bat` earlier in
+PATH beats an `.exe` later) and prevents `CreateProcessW`'s legacy fallback
+search from silently resolving commands through the worker process's own
+PATH, application directory, or system directories. The cross-user path
+performs the same resolution inside the helper — as the target user — see
+[win32-locate.md](win32-locate.md).
+
 ### Process Group Isolation
 
 On POSIX, the subprocess is placed in its own process group via `setsid` in a `pre_exec`

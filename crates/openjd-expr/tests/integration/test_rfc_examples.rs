@@ -88,7 +88,10 @@ fn rfc_repr_sh_string() {
 }
 #[test]
 fn rfc_repr_sh_list() {
-    assert_eq!(eval("repr_sh([1, 2, 3])").to_display_string(), "1 2 3");
+    assert_eq!(
+        eval("repr_sh(['echo', 'hello world'])").to_display_string(),
+        "echo 'hello world'"
+    );
 }
 #[test]
 fn rfc_gpu_flag_true() {

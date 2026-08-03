@@ -5,7 +5,7 @@
 //! `openjd check` command — validate a template file.
 
 use clap::Args;
-use openjd_model::template::parse::{self, DocumentType};
+use openjd_model::template::parse;
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -21,15 +21,9 @@ pub struct CheckArgs {
 pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let path = &args.path;
     let content = crate::common::read_input_file(path)?;
-    let doc_type = if path.extension().and_then(|e| e.to_str()) == Some("json") {
-        DocumentType::Json
-    } else {
-        DocumentType::Yaml
-    };
-
     let template_value = parse::document_string_to_object(
         &content,
-        doc_type,
+        crate::common::document_type(path),
         &openjd_model::CallerLimits::default(),
     )?;
 
