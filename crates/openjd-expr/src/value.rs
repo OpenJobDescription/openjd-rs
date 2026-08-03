@@ -727,6 +727,9 @@ impl ExprValue {
     /// Coercion is non-destructive: only conversions that don't lose
     /// information are attempted (`int → float`, `int → string`, etc).
     ///
+    /// An `any` target is unconstrained: every value is returned
+    /// unchanged.
+    ///
     /// For union targets, the rules are:
     ///
     /// 1. **Match first** — if the value's type is already one of the
@@ -741,6 +744,11 @@ impl ExprValue {
     /// satisfies RFC 0005 §"Implicit Type Coercion": `int | string`
     /// accepts an `int` value as-is rather than rejecting it.
     pub fn coerce(self, target: &ExprType, path_format: PathFormat) -> Result<Self, String> {
+        // `any` is the unconstrained type: every value satisfies it, so
+        // coercion is a no-op (RFC 0005 §"Type System").
+        if target.code() == TypeCode::Any {
+            return Ok(self);
+        }
         // Match-first: also accepts the case where the target is a union
         // and the value's type is one of its members. Falls back to the
         // existing strict-equality behavior for non-union targets.
