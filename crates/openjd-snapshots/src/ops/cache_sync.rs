@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct CacheSyncOptions {
     pub max_workers: Option<usize>,
     pub max_memory_bytes: Option<usize>,
@@ -18,11 +22,13 @@ pub struct CacheSyncOptions {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct CacheSyncResult {
     pub statistics: CacheSyncStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct CacheSyncStatistics {
     pub total_objects: usize,
     pub total_bytes: u64,

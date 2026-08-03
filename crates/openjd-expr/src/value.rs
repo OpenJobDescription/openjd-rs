@@ -1399,6 +1399,10 @@ impl From<crate::types::ExprType> for ExprValue {
 }
 
 /// Zero-allocation iterator over list elements.
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "structural mirror of another type; not independently extensible"
+)]
 pub enum ListIter<'a> {
     Bool(std::slice::Iter<'a, bool>),
     Int(std::slice::Iter<'a, i64>),

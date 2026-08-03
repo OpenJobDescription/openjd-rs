@@ -1234,3 +1234,21 @@ Enums that are marked `#[non_exhaustive]` today:
 they represent decidable logical concepts (newline mode, filesystem
 entity kind, data direction) whose sets of variants are not expected
 to change.
+
+The `clippy::exhaustive_enums` and `clippy::exhaustive_structs` lints
+(configured in the workspace `Cargo.toml`) now make this an explicit,
+reviewed decision for every public type. The full decision rule — and
+why the `template::*` deserialize types are marked `#[non_exhaustive]`
+while the `job::*` instantiated types stay closed — is documented in
+[`specs/non-exhaustive-policy.md`](../non-exhaustive-policy.md). In
+brief: `template::*` types (`JobTemplate`, `HostRequirements`, the
+parameter-definition types, and their `UserInterface` companions) grow
+by extension RFC and are gated by the decode-time allowlist, so they
+are `#[non_exhaustive]`; `job::*` types are constructed and exhaustively
+matched by the sessions runtime with no allowlist in front of them, so
+a new field must be a compile error and they stay closed. Additional
+enums now marked `#[non_exhaustive]`: `PathFormat`, `HostContext`
+(openjd-expr), and the template growth-axis enums
+(`JobParameterDefinition`, `TaskParameterDefinition`, `IntRange`,
+`FloatRange`, `StringRange`, `IntOrFormatString`, and the template
+`CancelationMode`).

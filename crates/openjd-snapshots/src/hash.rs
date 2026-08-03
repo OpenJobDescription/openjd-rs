@@ -13,6 +13,10 @@ pub const WHOLE_FILE_CHUNK_SIZE: i64 = -1;
 pub const DEFAULT_S3_MULTIPART_PART_SIZE: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum HashAlgorithm {
     #[serde(rename = "xxh128")]
     Xxh128,

@@ -95,6 +95,7 @@ impl ExprExtension {
 /// the previous split between `FunctionLibrary::with_host_context` and
 /// `FunctionLibrary::with_unresolved_host_context`.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub enum HostContext {
     /// No host-context functions are registered. Default.
     #[default]

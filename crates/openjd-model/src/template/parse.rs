@@ -19,6 +19,10 @@ use crate::types::{
 
 /// Document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum DocumentType {
     Json,
     Yaml,
@@ -298,6 +302,10 @@ pub fn decode_environment_template(
 // Both variants are large structs only used as return values, not stored in collections.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum DecodedTemplate {
     Job(JobTemplate),
     Environment(EnvironmentTemplate),

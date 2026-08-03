@@ -15,6 +15,7 @@ use serde::Deserialize;
 /// User interface definition for BOOL parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct BoolUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -24,6 +25,7 @@ pub struct BoolUserInterface {
 /// User interface definition for RANGE_EXPR parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct RangeExprUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -33,6 +35,7 @@ pub struct RangeExprUserInterface {
 /// User interface definition for `LIST[STRING]` and `LIST[BOOL]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListSimpleUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -42,6 +45,7 @@ pub struct ListSimpleUserInterface {
 /// User interface definition for `LIST[PATH]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListPathUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -53,6 +57,7 @@ pub struct ListPathUserInterface {
 /// User interface definition for `LIST[INT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListIntUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -63,6 +68,7 @@ pub struct ListIntUserInterface {
 /// User interface definition for `LIST[FLOAT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListFloatUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -74,6 +80,7 @@ pub struct ListFloatUserInterface {
 /// User interface definition for `LIST[LIST[INT]]` parameters (HIDDEN only).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct HiddenOnlyUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -83,6 +90,7 @@ pub struct HiddenOnlyUserInterface {
 /// §2.9 JobBoolParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobBoolParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -173,6 +181,7 @@ impl JobBoolParameterDefinition {
 /// §2.10 JobRangeExprParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobRangeExprParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -255,6 +264,7 @@ impl JobRangeExprParameterDefinition {
 /// §2.11 JobListStringParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListStringParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -267,6 +277,7 @@ pub struct JobListStringParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListStringItemConstraints {
     pub allowed_values: Option<Vec<String>>,
     pub min_length: Option<usize>,
@@ -325,6 +336,7 @@ impl JobListStringParameterDefinition {
 /// §2.12 JobListPathParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListPathParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -394,6 +406,7 @@ impl JobListPathParameterDefinition {
 /// §2.13 JobListIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -406,6 +419,7 @@ pub struct JobListIntParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListIntItemConstraints {
     pub allowed_values: Option<Vec<FlexInt>>,
     pub min_value: Option<FlexInt>,
@@ -464,6 +478,7 @@ impl JobListIntParameterDefinition {
 /// §2.14 JobListFloatParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListFloatParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -476,6 +491,7 @@ pub struct JobListFloatParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListFloatItemConstraints {
     pub allowed_values: Option<Vec<super::parameters::FlexFloat>>,
     pub min_value: Option<super::parameters::FlexFloat>,
@@ -576,6 +592,7 @@ impl JobListFloatParameterDefinition {
 /// §2.15 JobListBoolParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListBoolParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -631,6 +648,7 @@ impl JobListBoolParameterDefinition {
 /// §2.16 JobListListIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobListListIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -643,6 +661,7 @@ pub struct JobListListIntParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ListListIntItemConstraints {
     pub min_length: Option<usize>,
     pub max_length: Option<usize>,

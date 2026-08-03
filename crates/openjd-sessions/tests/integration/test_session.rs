@@ -2357,26 +2357,15 @@ async fn test_extend_path_mapping_rules_appends_and_sorts() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 
     let tmp = TempDir::new().unwrap();
-    let mut s =
-        Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/short".into(),
-            destination_path: "/s".into(),
-        }]);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(vec![
+        PathMappingRule::new(PathFormat::Posix, "/short", "/s"),
+    ]);
 
     assert_eq!(s.path_mapping_rules().len(), 1);
 
     s.extend_path_mapping_rules(vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/much/longer/path".into(),
-            destination_path: "/m".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/med".into(),
-            destination_path: "/d".into(),
-        },
+        PathMappingRule::new(PathFormat::Posix, "/much/longer/path", "/m"),
+        PathMappingRule::new(PathFormat::Posix, "/med", "/d"),
     ]);
 
     let rules = s.path_mapping_rules();

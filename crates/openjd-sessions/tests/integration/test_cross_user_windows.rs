@@ -1405,6 +1405,9 @@ fn test_with_password_wrong_password_returns_logon_failure() {
              Check `WindowsSessionUser::validate_credentials` — the \
              ERROR_LOGON_FAILURE (0x8007052E) branch must remain reachable."
         ),
+        // `BadCredentialsError` is `#[non_exhaustive]`; a new variant
+        // must not silently satisfy this assertion.
+        Err(e) => panic!("expected LogonFailure, got {e:?}"),
         Ok(_) => panic!(
             "with_password({user:?}, wrong_password) must reject. \
              Did the test password accidentally match?"
@@ -1442,6 +1445,9 @@ fn test_with_password_nonexistent_user_returns_logon_failure() {
              (LogonUserW returns ERROR_LOGON_FAILURE for unknown accounts \
              to avoid leaking account existence). got Other({msg:?})."
         ),
+        // `BadCredentialsError` is `#[non_exhaustive]`; a new variant
+        // must not silently satisfy this assertion.
+        Err(e) => panic!("expected LogonFailure, got {e:?}"),
         Ok(_) => panic!(
             "with_password({nonexistent_user:?}, ...) must reject — \
              did the test pick a username that happens to exist?"

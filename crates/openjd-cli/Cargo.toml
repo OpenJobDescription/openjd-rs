@@ -37,3 +37,10 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Console",
 ] }
+
+# Exempt: a binary crate: its `pub` items are clap argument structs and internal
+# helpers, not a library API any downstream crate can depend on.
+# See specs/non-exhaustive-policy.md.
+[lints.clippy]
+exhaustive_enums = "allow"
+exhaustive_structs = "allow"

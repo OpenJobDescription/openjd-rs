@@ -14,6 +14,7 @@ use serde::Deserialize;
 /// §1.1 JobTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobTemplate {
     pub specification_version: String,
     #[serde(rename = "$schema")]
