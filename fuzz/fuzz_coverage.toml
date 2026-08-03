@@ -191,14 +191,11 @@ target = "copy_symbol_value"
 fn = "crates/openjd-expr/src/symbol_table.rs::from_json_str"
 target = "copy_symbol_value"
 
-# expr — edit-distance suggestions run when evaluation hits an unknown
-# name/function, so the fuzzer reaches them with attacker-controlled names.
-[[fuzzed]]
-fn = "crates/openjd-expr/src/edit_distance.rs::edit_distance"
-target = "expr_evaluate"
-[[fuzzed]]
-fn = "crates/openjd-expr/src/edit_distance.rs::suggest_closest"
-target = "expr_evaluate"
+# NOTE: `edit_distance` / `suggest_closest` are not listed here. They live in
+# `pub(crate) mod edit_distance`, so they are not public API and the gate does
+# not scan them. They are still reached with attacker-controlled names whenever
+# evaluation hits an unknown name/function, so the `expr_evaluate` target
+# exercises them transitively — just not as a classified entry point.
 
 # model — decode + instantiate pipeline
 [[fuzzed]]

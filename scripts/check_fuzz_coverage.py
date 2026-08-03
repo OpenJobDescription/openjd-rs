@@ -56,18 +56,29 @@ FN_START = re.compile(r"\bpub\s+fn\s+([a-z_][a-z0-9_]*)")
 def public_module_files(crate_src: Path) -> list[Path]:
     """Return .rs files reachable through `pub mod` from lib.rs.
 
-    A `pub fn` inside a private top-level module (e.g. snapshots' `mod
-    path_util`) is not public API, so its functions must not count toward the
-    untrusted surface. We resolve visibility at the top level (the common case,
-    and the one that has actually bitten us) by reading lib.rs's module
-    declarations; files under a private top-level module are excluded.
+    A `pub fn` inside a module that is not itself fully public (e.g. snapshots'
+    `mod path_util`, or expr's `pub(crate) mod edit_distance`) is not public
+    API, so its functions must not count toward the untrusted surface. We
+    resolve visibility at the top level (the common case, and the one that has
+    actually bitten us) by reading lib.rs's module declarations; files under a
+    non-public top-level module are excluded.
+
+    Only a bare `pub mod foo;` counts as public. Any restricted visibility —
+    `pub(crate)`, `pub(super)`, `pub(in path)` — is narrower than `pub` and so
+    is treated as private. Matching the restriction explicitly matters: a
+    `(pub\\s+)?` prefix would fail to match `pub(crate) mod foo;` at all
+    (there is no whitespace after `pub`), leaving the module out of
+    `private_tops` and silently pulling its crate-internal `pub fn`s into the
+    scanned surface.
     """
     lib = crate_src / "lib.rs"
     text = lib.read_text(encoding="utf-8", errors="replace")
     private_tops = set()
-    for m in re.finditer(r"^\s*(pub\s+)?mod\s+([a-z_][a-z0-9_]*)\s*;", text, re.M):
-        if not m.group(1):  # `mod foo;` without `pub`
-            private_tops.add(m.group(2))
+    mod_decl = re.compile(r"^\s*(pub\s*(\([^)]*\))?\s+)?mod\s+([a-z_][a-z0-9_]*)\s*;", re.M)
+    for m in mod_decl.finditer(text):
+        # No `pub` at all, or a `pub(...)` visibility restriction → private.
+        if not m.group(1) or m.group(2):
+            private_tops.add(m.group(3))
 
     files = []
     for rs in sorted(crate_src.rglob("*.rs")):
