@@ -460,17 +460,19 @@ fn call_arguments_not_constrained_by_caller_target() {
 }
 
 #[test]
-fn call_arguments_get_signature_derived_targets() {
-    // RFC 0005: argument targets are computed from candidate signatures.
-    // `sorted: (list[T1]) -> list[T1]` against a `list[string]` target
-    // binds T1=string, so the argument evaluates toward `list[string]`
-    // and sorting is lexicographic — matching the Python reference.
+fn generic_call_arguments_stay_unconstrained() {
+    // RFC 0005: argument targets come from the candidates' parameter
+    // types as written; the caller's target filters candidates but is
+    // not bound through the return type into the parameters. `sorted:
+    // (list[T1]) -> list[T1]` has a symbolic parameter, so the argument
+    // evaluates unconstrained: the sort is numeric and only the *result*
+    // coerces to strings. A target must never change the computation.
     assert_eq!(
         eval_target("sorted([10, 2])", "list[string]"),
         ExprValue::make_list(
             vec![
-                ExprValue::String("10".to_string()),
-                ExprValue::String("2".to_string())
+                ExprValue::String("2".to_string()),
+                ExprValue::String("10".to_string())
             ],
             ExprType::STRING
         )

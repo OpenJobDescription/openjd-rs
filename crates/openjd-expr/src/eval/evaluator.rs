@@ -929,15 +929,31 @@ impl<'a> Evaluator<'a> {
     /// candidate signatures).
     ///
     /// A signature is a candidate when its arity matches and its return
-    /// type matches the caller's target (binding type variables through
-    /// the return type, so `sorted: (list[T1]) -> list[T1]` against a
-    /// `list[string]` target constrains the argument to `list[string]`).
+    /// type matches the caller's target. Per the RFC pseudo-code
+    /// (`arg_ts = {sig.param_types[i] for sig in candidates}`), each
+    /// argument's target is built from the candidates' parameter types
+    /// **as written in the signature** — the caller's target is used for
+    /// candidate filtering only and is never bound through the return
+    /// type into the parameters. `sorted: (list[T1]) -> list[T1]` with a
+    /// `list[string]` caller target therefore evaluates its argument with
+    /// no target at all: `sorted([10, 2])` sorts numerically and the
+    /// *result* coerces to `["2", "10"]`. A target that reached into the
+    /// argument would flip the sort order — targets guide coercion of
+    /// results, they must not change the computation. (The current Python
+    /// release gets this wrong via the same operand-leak bug this module
+    /// fixes; it is not a reference for this behavior.)
+    ///
     /// Per argument position, one candidate type becomes the target
     /// directly; several become a union (satisfied match-first, like the
-    /// RFC's typesets). With no caller target, no matching candidates, a
-    /// method call (the RFC pseudo-code evaluates method arguments
-    /// unconstrained), or an operator dunder, every argument is
-    /// unconstrained.
+    /// RFC's typesets); a symbolic candidate type unconstrains the
+    /// position. `list[T1]` constrains the argument to any list type,
+    /// which is not a type [`ExprValue::coerce`] can coerce toward, and
+    /// dispatch enforces it anyway: `sorted('abc')` fails either way, and
+    /// `range_expr` → `list[int]` still happens there.
+    ///
+    /// With no caller target, no matching candidates, a method call (the
+    /// RFC pseudo-code evaluates method arguments unconstrained), or an
+    /// operator dunder, every argument is unconstrained.
     fn call_arg_targets(
         &self,
         name: Option<&str>,
@@ -953,8 +969,9 @@ impl<'a> Evaluator<'a> {
             return unconstrained;
         }
         // Per position: collected candidate types, or None once any
-        // candidate contributes a still-symbolic type (an unbound type
-        // variable accepts anything, so the position is unconstrained).
+        // candidate contributes a symbolic type. `list[T1]` means any
+        // list type — nothing to coerce toward, and dispatch enforces it
+        // regardless — so the position is left unconstrained here.
         let mut per_pos: Vec<Option<Vec<ExprType>>> = vec![Some(Vec::new()); n_args];
         let mut any_candidate = false;
         for entry in self.library.get_signatures(name) {
@@ -962,17 +979,18 @@ impl<'a> Evaluator<'a> {
             if params.len() != n_args {
                 continue;
             }
-            let Some(bindings) = entry.signature.sig_return().match_type(target) else {
+            // The caller's target filters candidates by return type; it
+            // is NOT bound through the return type into the parameters.
+            if entry.signature.sig_return().match_type(target).is_none() {
                 continue;
-            };
+            }
             any_candidate = true;
             for (i, p) in params.iter().enumerate() {
-                let t = p.substitute(&bindings);
-                if t.is_symbolic() {
+                if p.is_symbolic() {
                     per_pos[i] = None;
                 } else if let Some(types) = &mut per_pos[i] {
-                    if !types.contains(&t) {
-                        types.push(t);
+                    if !types.contains(p) {
+                        types.push(p.clone());
                     }
                 }
             }
@@ -1027,10 +1045,9 @@ impl<'a> Evaluator<'a> {
         // Evaluate arguments with signature-derived targets (RFC 0005) —
         // never the caller's target itself, which describes the call's
         // result (`len('abc')` with an `int` target must not try to
-        // convert 'abc' to int). When the target constrains a generic
-        // return type, the binding flows into the arguments: `sorted`
-        // with a `list[string]` target evaluates its argument toward
-        // `list[string]`, matching the reference implementation.
+        // convert 'abc' to int). See `call_arg_targets` for how the
+        // targets are computed; generic parameters like `sorted`'s
+        // `list[T1]` stay unconstrained.
         let arg_targets = self.call_arg_targets(
             func_name.as_deref(),
             is_method_call,

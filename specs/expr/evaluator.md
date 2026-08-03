@@ -146,7 +146,7 @@ Rules"](https://github.com/OpenJobDescription/openjd-specifications/blob/main/rf
 | `Compare` (`<`, `>`, `==`, `in`, …) | All operands: `None` (unconstrained) |
 | `IfExp` (`x if c else y`) | `test`: `None`; `body` / `orelse`: parent target |
 | `BoolOp` (`and`, `or`) | All operands: `None` (value-returning — the parent target applies to the returned operand via the node's own result coercion, see RFC 0006) |
-| `Call` (function) | Arguments: computed from candidate signatures whose return type matches the caller's target, binding type variables through the return type (`sorted: (list[T1]) -> list[T1]` against a `list[string]` target evaluates its argument toward `list[string]`); `None` when there is no caller target, no candidates, or the bound parameter type is still symbolic |
+| `Call` (function) | Arguments: computed from candidate signatures (arity match + return type matches the caller's target) using the parameter types **as written** — the caller's target filters candidates but is never bound through the return type into the parameters, so a generic like `sorted: (list[T1]) -> list[T1]` evaluates its argument with no target and only the *result* coerces (`sorted([10, 2])` with `list[string]` → numeric sort, then `["2", "10"]`); `None` when there is no caller target, no candidates, or the parameter type is symbolic (see note below) |
 | `Call` (method) | Receiver and arguments: `None` (per the RFC pseudo-code; coercion is signature-driven inside `dispatch`) |
 | `List` | Elements: element type extracted from `list[T]` parent target; `None` otherwise |
 | `ListComp` | Element expr: element type extracted from `list[T]` parent target (same rule as `List`); iter: `None`; conditions: `None` |
@@ -169,11 +169,20 @@ This is realized structurally: recursion goes through
 explicit parameter, applies it to that node's result only (via
 `ExprValue::coerce`), and passes `None` to all children by default.
 Only the slots the table marks as inheriting or deriving a target
-(`IfExp.body`/`orelse`, `List` elements) forward a non-`None` value.
-The `target_type` configured on the evaluator is consumed once, at the
-root `evaluate` entry point. A node kind added later is therefore
-unconstrained-by-default rather than inheriting the caller's target by
-accident.
+(`IfExp.body`/`orelse`, `List`/`ListComp` elements, `Call` arguments)
+forward a non-`None` value. The `target_type` configured on the
+evaluator is consumed once, at the root `evaluate` entry point. A node
+kind added later is therefore unconstrained-by-default rather than
+inheriting the caller's target by accident.
+
+**Symbolic parameter types unconstrain their position.** `sorted:
+(list[T1]) -> list[T1]` constrains its argument to any list type, which
+is not a type `ExprValue::coerce` can coerce toward, so the position gets
+no target. Dispatch still enforces it: `sorted('abc')` fails with "No
+matching signature for sorted(string)" with or without a target, and
+`sorted(range(3))` still gets its `range_expr` → `list[int]` coercion.
+Only the element type is left open — the part a caller's target could
+otherwise have used to reorder the sort.
 
 Three slots deviate from RFC 0005's nominal table, all in favor of
 better diagnostics, and all backed by explicit type checks that enforce
