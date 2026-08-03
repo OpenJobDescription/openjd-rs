@@ -248,8 +248,10 @@ impl<'a> Evaluator<'a> {
     /// default — a caller's `target_type=string` request must not leak
     /// into operand evaluation. The only slots that receive a non-`None`
     /// target are the ones RFC 0005 lists as inheriting or deriving one:
-    /// `IfExp.body`/`orelse` (parent target) and `List` elements (element
-    /// type extracted from a `list[T]` parent target).
+    /// `IfExp.body`/`orelse` (parent target), `List` and `ListComp`
+    /// elements (element type extracted from a `list[T]` parent target),
+    /// and function-call arguments (targets computed from candidate
+    /// signatures — see [`Self::call_arg_targets`]).
     ///
     /// RFC 0005 nominally says `IfExp.test` should be evaluated with
     /// `{BOOL}`, subscript indices with `{INT}`, and comprehension
@@ -313,9 +315,11 @@ impl<'a> Evaluator<'a> {
     ///
     /// `target` is forwarded only to the node kinds whose children inherit
     /// or derive a target per RFC 0005: `If` (branches inherit the parent
-    /// target) and `List` (elements derive the element type of a `list[T]`
-    /// target). Every other node evaluates its children unconstrained; the
-    /// caller ([`Self::eval_node`]) coerces the node's own result.
+    /// target), `List`/`ListComp` (elements derive the element type of a
+    /// `list[T]` target), and `Call` (arguments derive targets from
+    /// candidate signatures). Every other node evaluates its children
+    /// unconstrained; the caller ([`Self::eval_node`]) coerces the node's
+    /// own result.
     fn evaluate_inner(
         &mut self,
         node: &ast::Expr,
@@ -333,10 +337,10 @@ impl<'a> Evaluator<'a> {
             ast::Expr::BoolOp(b) => self.eval_boolop(b),
             ast::Expr::Compare(c) => self.eval_compare(c),
             ast::Expr::If(i) => self.eval_ifexp(i, target),
-            ast::Expr::Call(c) => self.eval_call(c),
+            ast::Expr::Call(c) => self.eval_call(c, target),
             ast::Expr::List(l) => self.eval_list(l, target),
             ast::Expr::Subscript(s) => self.eval_subscript(s),
-            ast::Expr::ListComp(lc) => self.eval_listcomp(lc),
+            ast::Expr::ListComp(lc) => self.eval_listcomp(lc, target),
             ast::Expr::Slice(s) => self.eval_slice(s),
             ast::Expr::Starred(_) => Err(ExpressionError::unsupported(
                 "Star unpacking is not supported",
@@ -919,7 +923,81 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_call(&mut self, c: &ast::ExprCall) -> Result<ExprValue, ExpressionError> {
+    /// Compute the target type for each argument of a function call from
+    /// the candidate signatures, per RFC 0005 §"Target Type Propagation
+    /// Rules" (`Call (function)`: arguments get typesets computed from
+    /// candidate signatures).
+    ///
+    /// A signature is a candidate when its arity matches and its return
+    /// type matches the caller's target (binding type variables through
+    /// the return type, so `sorted: (list[T1]) -> list[T1]` against a
+    /// `list[string]` target constrains the argument to `list[string]`).
+    /// Per argument position, one candidate type becomes the target
+    /// directly; several become a union (satisfied match-first, like the
+    /// RFC's typesets). With no caller target, no matching candidates, a
+    /// method call (the RFC pseudo-code evaluates method arguments
+    /// unconstrained), or an operator dunder, every argument is
+    /// unconstrained.
+    fn call_arg_targets(
+        &self,
+        name: Option<&str>,
+        is_method_call: bool,
+        target: Option<&crate::types::ExprType>,
+        n_args: usize,
+    ) -> Vec<Option<crate::types::ExprType>> {
+        let unconstrained = vec![None; n_args];
+        let (Some(name), Some(target)) = (name, target) else {
+            return unconstrained;
+        };
+        if is_method_call || (name.starts_with("__") && name.ends_with("__")) {
+            return unconstrained;
+        }
+        // Per position: collected candidate types, or None once any
+        // candidate contributes a still-symbolic type (an unbound type
+        // variable accepts anything, so the position is unconstrained).
+        let mut per_pos: Vec<Option<Vec<ExprType>>> = vec![Some(Vec::new()); n_args];
+        let mut any_candidate = false;
+        for entry in self.library.get_signatures(name) {
+            let params = entry.signature.sig_params();
+            if params.len() != n_args {
+                continue;
+            }
+            let Some(bindings) = entry.signature.sig_return().match_type(target) else {
+                continue;
+            };
+            any_candidate = true;
+            for (i, p) in params.iter().enumerate() {
+                let t = p.substitute(&bindings);
+                if t.is_symbolic() {
+                    per_pos[i] = None;
+                } else if let Some(types) = &mut per_pos[i] {
+                    if !types.contains(&t) {
+                        types.push(t);
+                    }
+                }
+            }
+        }
+        if !any_candidate {
+            return unconstrained;
+        }
+        per_pos
+            .into_iter()
+            .map(|types| {
+                let mut types = types?;
+                match types.len() {
+                    0 => None,
+                    1 => Some(types.pop().unwrap()),
+                    _ => Some(ExprType::union(types)),
+                }
+            })
+            .collect()
+    }
+
+    fn eval_call(
+        &mut self,
+        c: &ast::ExprCall,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         // Reject keyword args and **kwargs
         if !c.arguments.keywords.is_empty() {
@@ -946,13 +1024,22 @@ impl<'a> Evaluator<'a> {
                 None
             }
         };
-        // Evaluate arguments unconstrained (RFC 0005): argument coercion
-        // is signature-driven inside `dispatch`, so the caller's target
-        // must not leak into them (`len('abc')` with an `int` target must
-        // not try to convert 'abc' to int).
+        // Evaluate arguments with signature-derived targets (RFC 0005) —
+        // never the caller's target itself, which describes the call's
+        // result (`len('abc')` with an `int` target must not try to
+        // convert 'abc' to int). When the target constrains a generic
+        // return type, the binding flows into the arguments: `sorted`
+        // with a `list[string]` target evaluates its argument toward
+        // `list[string]`, matching the reference implementation.
+        let arg_targets = self.call_arg_targets(
+            func_name.as_deref(),
+            is_method_call,
+            target,
+            c.arguments.args.len(),
+        );
         let mut args = Vec::new();
-        for arg in &c.arguments.args {
-            args.push(self.eval_node(arg, None)?);
+        for (arg, arg_target) in c.arguments.args.iter().zip(&arg_targets) {
+            args.push(self.eval_node(arg, arg_target.as_ref())?);
         }
 
         // Normalize call convention: receiver (if any) becomes args[0].
@@ -1299,7 +1386,11 @@ impl<'a> Evaluator<'a> {
         self.operation_count = child.operation_count;
     }
 
-    fn eval_listcomp(&mut self, lc: &ast::ExprListComp) -> Result<ExprValue, ExpressionError> {
+    fn eval_listcomp(
+        &mut self,
+        lc: &ast::ExprListComp,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         // Validate restrictions
         if lc.generators.len() != 1 {
             return Err(ExpressionError::unsupported(
@@ -1327,12 +1418,17 @@ impl<'a> Evaluator<'a> {
             }
         }
 
-        // RFC 0005: the iterable evaluates unconstrained. The element
-        // expression is also evaluated unconstrained (in the child
-        // evaluator below); a `list[T]` parent target is satisfied by the
-        // final-result coercion of the completed list, which coerces
-        // element-wise. Filter conditions use an explicit bool check
-        // instead of a `{BOOL}` target for friendlier errors.
+        // RFC 0005: the iterable evaluates unconstrained; the element
+        // expression derives its target from a `list[T]` parent target
+        // (same rule as list literals). Filter conditions use an explicit
+        // bool check instead of a `{BOOL}` target for friendlier errors.
+        let elem_target = target.and_then(|tt| {
+            if tt.code() == crate::types::TypeCode::List && tt.params().len() == 1 {
+                Some(tt.params()[0].clone())
+            } else {
+                None
+            }
+        });
         let iterable = self.eval_node(&gen.iter, None)?;
         let var_name = match &gen.target {
             ast::Expr::Name(n) => n.id.to_string(),
@@ -1431,7 +1527,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
             if include {
-                let elt = child.evaluate(&lc.elt)?;
+                let elt = child.eval_node(&lc.elt, elem_target.as_ref())?;
                 result.push(self, elt)?;
             }
             self.absorb_counters(&child);

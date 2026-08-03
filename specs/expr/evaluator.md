@@ -146,9 +146,10 @@ Rules"](https://github.com/OpenJobDescription/openjd-specifications/blob/main/rf
 | `Compare` (`<`, `>`, `==`, `in`, …) | All operands: `None` (unconstrained) |
 | `IfExp` (`x if c else y`) | `test`: `None`; `body` / `orelse`: parent target |
 | `BoolOp` (`and`, `or`) | All operands: `None` (value-returning — the parent target applies to the returned operand via the node's own result coercion, see RFC 0006) |
-| `Call` | Receiver and arguments: `None` (signature-driven coercion happens inside `dispatch`) |
+| `Call` (function) | Arguments: computed from candidate signatures whose return type matches the caller's target, binding type variables through the return type (`sorted: (list[T1]) -> list[T1]` against a `list[string]` target evaluates its argument toward `list[string]`); `None` when there is no caller target, no candidates, or the bound parameter type is still symbolic |
+| `Call` (method) | Receiver and arguments: `None` (per the RFC pseudo-code; coercion is signature-driven inside `dispatch`) |
 | `List` | Elements: element type extracted from `list[T]` parent target; `None` otherwise |
-| `ListComp` | Element expr: `None`; iter: `None`; conditions: `None` (a `list[T]` parent target is satisfied by the final element-wise coercion of the completed list) |
+| `ListComp` | Element expr: element type extracted from `list[T]` parent target (same rule as `List`); iter: `None`; conditions: `None` |
 | `Subscript` | Value: `None`; index/slice bounds: `None` |
 | `Attribute` / `Name` / `Constant` | N/A (leaf) |
 
@@ -350,9 +351,12 @@ Handles both function calls (`len(x)`) and method calls (`x.upper()`).
 Method calls are transformed to function calls via UFCS (Uniform Function Call Syntax):
 `obj.method(args)` → `method(obj, args)`.
 
-The receiver and all arguments are evaluated unconstrained (see [Target
-Type Propagation](#target-type-propagation)); argument coercion is
-signature-driven inside `dispatch`.
+Function-call arguments are evaluated with targets computed from the
+candidate signatures (see [Target Type
+Propagation](#target-type-propagation)) — never the caller's own target,
+which describes the call's result. Method-call receivers and arguments
+are evaluated unconstrained; coercion is signature-driven inside
+`dispatch` in both cases.
 
 Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
