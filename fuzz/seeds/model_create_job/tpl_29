@@ -1,0 +1,23 @@
+# RFC 0008: a wrap environment template parameterized via its own
+# parameterDefinitions. The hooks reference {{Param.WrapPrefix}}, which must
+# resolve from the environment's frozen resolved_symtab even though the
+# wrapped step's own symbol table knows nothing about it (audit finding F11).
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR]
+parameterDefinitions:
+  - name: WrapPrefix
+    type: STRING
+    default: FROM_ENV_PARAM
+environment:
+  name: WrapParam
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: python
+        args: ["-c", "print('WrapParam Enter {{Param.WrapPrefix}}')"]
+      onWrapTaskRun:
+        command: python
+        args: ["-c", "print('WrapParam Task {{Param.WrapPrefix}}')"]
+      onWrapEnvExit:
+        command: python
+        args: ["-c", "print('WrapParam Exit {{Param.WrapPrefix}}')"]

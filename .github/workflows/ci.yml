@@ -68,6 +68,11 @@ jobs:
       - uses: actions/checkout@v7
       - name: Check copyright headers
         run: bash scripts/check_copyright_headers.sh
+      # Hard gate: every public fn taking untrusted input (&str/&[u8]/Value/&Path)
+      # must be classified in fuzz/fuzz_coverage.toml as fuzzed or not-untrusted.
+      # Pure source+manifest analysis on stable Python — no Rust build, no nightly.
+      - name: Check fuzz coverage registry
+        run: python3 scripts/check_fuzz_coverage.py
 
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same
