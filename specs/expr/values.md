@@ -478,7 +478,9 @@ through the entire expression, catching type mismatches at validation time.
 Unresolved values are **type-only placeholders**: they carry an `ExprType` but no
 concrete data. Because they're wrapped values, they can pass through the evaluator's
 memory tracking and dispatch without a special code path. `Display` on an unresolved
-value renders as `unresolved[T]` for debug/error output. Calling the `.coerce()`
-target-type path on an unresolved value is a no-op (the unresolved wrapper is
-preserved through coercion), so validation-time format string resolution can still
-exercise the full coercion chain symbolically.
+value renders as `unresolved[T]` for debug/error output.
+
+Target-type coercion preserves `unresolved[T]` unchanged when `T` already
+satisfies the target type. It rejects an incompatible target, such as
+`unresolved[list[int]]` against `int`. Coercions that depend on a concrete
+payload are deferred until the value is resolved.

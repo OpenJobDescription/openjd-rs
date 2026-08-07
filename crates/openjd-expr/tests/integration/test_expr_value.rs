@@ -148,6 +148,22 @@ fn coerce_list_elements() {
     assert_eq!(v.expr_type().to_string(), "list[int]");
 }
 
+#[test]
+fn coerce_compatible_unresolved_preserves_constraint() {
+    let value = ExprValue::unresolved(ExprType::INT)
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_incompatible_unresolved_errors() {
+    let error = ExprValue::unresolved(ExprType::list(ExprType::INT))
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap_err();
+    assert_eq!(error, "Cannot coerce list[int] to int");
+}
+
 // ══════════════════════════════════════════════════════════════
 // repr_python
 // ══════════════════════════════════════════════════════════════
