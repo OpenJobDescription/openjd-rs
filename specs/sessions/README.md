@@ -28,7 +28,7 @@ replaces all of that with async/await, channels, and cancellation tokens.
 | [tempdir.md](tempdir.md) | Secure temp directory creation, sticky bit validation, cleanup |
 | [logging.md](logging.md) | LogContent bitflags, structured kv metadata, session_log! macro, banners |
 | [error-handling.md](error-handling.md) | SessionError enum, error propagation patterns |
-| [win32-locate.md](win32-locate.md) | Windows executable resolution (not yet integrated) |
+| [win32-locate.md](win32-locate.md) | Windows executable resolution (PATHEXT-aware pre-spawn command search) |
 
 ## How the Worker Agent Uses Sessions
 

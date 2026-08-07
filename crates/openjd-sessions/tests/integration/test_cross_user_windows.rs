@@ -571,6 +571,104 @@ async fn test_cross_user_session_run_subprocess() {
     session.cleanup();
 }
 
+// === Session-level: executable resolution through the helper ===
+
+/// A `.bat` materialized into the session working directory is runnable by
+/// bare name through the cross-user helper — the helper searches the cwd
+/// first, then the action's PATH (see runner_win.rs::locate_executable).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_bat_in_working_dir_resolves() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+    std::fs::write(
+        session.working_directory().join("wdtool.bat"),
+        "@echo off\r\necho CROSS-USER-WD-BAT\r\n",
+    )
+    .unwrap();
+
+    let r = session
+        .run_subprocess("wdtool", None, None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success);
+    assert!(
+        r.stdout.contains("CROSS-USER-WD-BAT"),
+        "expected the working-directory .bat to resolve via the helper; stdout: {}",
+        r.stdout
+    );
+    session.cleanup();
+}
+
+/// A command that is not on the action's PATH fails with the Python-parity
+/// error, surfaced from the helper over the protocol — no fallback to the
+/// helper's own PATH or CreateProcessW's legacy search.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_absent_command_fails() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+    let empty = session.working_directory().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+
+    let env = HashMap::from([("PATH".to_string(), empty.to_string_lossy().into_owned())]);
+    let err = session
+        .run_subprocess("whoami", None, None, Some(&env), false, None)
+        .await
+        .expect_err("whoami is not on the action's PATH and must not resolve via fallback");
+    assert!(
+        err.to_string()
+            .contains("Could not find executable file: whoami"),
+        "expected Python-parity not-found error; got: {err}"
+    );
+    session.cleanup();
+}
+
+/// Resolution runs as the target user: an executable in a directory the
+/// target user can read resolves even when that directory's DACL is
+/// protected (no inherited ACEs). Host-side resolution as the service user
+/// would be the wrong vantage point; helper-side resolution is what makes
+/// this correct by construction.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_resolves_in_user_readable_dir() {
+    let user = require_windows_user();
+    let user_name = windows_user_name();
+    let proc_user = process_user_bare();
+    let mut session = make_session(user);
+
+    // A tool directory outside the working dir, readable by the target
+    // user (and the process user, so the test can create/clean it).
+    let tool_dir = test_session_root().join("tools");
+    std::fs::create_dir_all(&tool_dir).unwrap();
+    openjd_sessions::win32_permissions::set_permissions(
+        tool_dir.to_str().unwrap(),
+        &[&proc_user],
+        &[],
+        &[&user_name],
+    )
+    .unwrap();
+    std::fs::write(
+        tool_dir.join("usertool.bat"),
+        "@echo off\r\necho USER-DIR-TOOL\r\n",
+    )
+    .unwrap();
+
+    let env = HashMap::from([("PATH".to_string(), tool_dir.to_string_lossy().into_owned())]);
+    let r = session
+        .run_subprocess("usertool", None, None, Some(&env), false, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success);
+    assert!(
+        r.stdout.contains("USER-DIR-TOOL"),
+        "expected the tool in the user-readable dir to resolve; stdout: {}",
+        r.stdout
+    );
+    session.cleanup();
+    let _ = std::fs::remove_dir_all(&tool_dir);
+}
+
 // === Session-level: SessionCancelHandle cancels a helper-routed subprocess ===
 
 /// The session working directory must carry an explicit DACL granting the

@@ -389,6 +389,37 @@ line warning to stderr and continues without the guard. The helper
 remains functional; it just loses the descendant-cleanup guarantee on
 crash, matching the pre-Job-Object behaviour.
 
+### Windows runner: executable resolution
+
+Before spawning a workload, `runner_win::locate_executable` resolves
+the command to an absolute path with `shutil.which` semantics via
+`win32_which::locate_in` (a source file shared with the session
+crate's same-user resolution — see [win32-locate.md](win32-locate.md)
+"Shared search implementation"), searching `{cwd};{PATH}` with the
+action's PATHEXT. PATH and PATHEXT are each selected from exactly one
+source, chosen before searching: a key in the run command's env map
+(case-insensitive) is used exclusively — the helper's own value is
+never consulted, even when the search then finds nothing — and only
+when the env map defines no such key at all does the helper use its
+own environment, which is the target user's environment block, i.e.
+the exact base environment the workload inherits in that case. This
+matches the `.envs()` merge at spawn (an action-supplied value
+overwrites the inherited one), so resolution always searches with what
+the child actually sees, never a union of the two. Absolute paths pass
+through unchanged. A not-found result — including a command whose
+explicit extension is outside PATHEXT, e.g. `script.ps1` under the
+default PATHEXT — is returned over the protocol as
+`{"error": "Could not find executable file: <command>"}` (the same
+message Python's `_locate_executable` raises), which the session maps
+to `SessionError::SubprocessStart`.
+
+Doing this inside the helper — as the target user — means executables
+in directories only the target user can read resolve correctly, and
+`CreateProcessW`'s legacy fallback search (application directory,
+system directories, parent PATH) is bypassed. See
+[win32-locate.md](win32-locate.md) for the full rationale and the
+matching same-user resolution in the session process.
+
 ## Session Integration
 
 ### CrossUserHelper struct

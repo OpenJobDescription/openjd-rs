@@ -54,7 +54,14 @@ fn python_shim_dir() -> Option<PathBuf> {
         // If the interpreter is literally named `python` we don't need a shim —
         // its parent directory is already on `PATH` (that's how `which` found
         // it, transitively). Detect this by comparing the file-name component.
-        if target.file_name().and_then(|n| n.to_str()) == Some("python") {
+        let fname = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // On Windows, `python.exe` is the canonical name.
+        let is_canonical = if cfg!(windows) {
+            fname.eq_ignore_ascii_case("python.exe")
+        } else {
+            fname == "python"
+        };
+        if is_canonical {
             return None;
         }
         let shim_dir =
@@ -65,7 +72,7 @@ fn python_shim_dir() -> Option<PathBuf> {
         std::fs::create_dir_all(&shim_dir)
             .unwrap_or_else(|e| panic!("Failed to create shim_dir {shim_dir:?}: {e}"));
         let shim_path = shim_dir.join(if cfg!(windows) {
-            "python.cmd"
+            "python.exe"
         } else {
             "python"
         });
@@ -89,11 +96,16 @@ fn python_shim_dir() -> Option<PathBuf> {
         }
         #[cfg(windows)]
         {
-            // On Windows a .cmd wrapper works for anything spawned via
-            // CreateProcess with a bare name lookup.
-            let script = format!("@echo off\r\n{} %*\r\n", target.display());
-            std::fs::write(&shim_path, script)
-                .unwrap_or_else(|e| panic!("Failed to write python shim {shim_path:?}: {e}"));
+            // On Windows, hard-link the real interpreter as `python.exe` so
+            // it resolves correctly under PATHEXT semantics without the
+            // argument-mangling issues of a .cmd/.bat wrapper. Hard link
+            // avoids a ~5 MB copy and works as long as source and dest are on
+            // the same volume (both are under %TEMP% / %LOCALAPPDATA%).
+            std::fs::hard_link(&target, &shim_path).unwrap_or_else(|_| {
+                std::fs::copy(&target, &shim_path).unwrap_or_else(|e| {
+                    panic!("Failed to copy python interpreter to {shim_path:?}: {e}")
+                });
+            });
         }
         Some(shim_dir)
     });

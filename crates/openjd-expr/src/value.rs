@@ -172,13 +172,30 @@ impl Float64 {
     pub fn value(&self) -> f64 {
         self.value
     }
+    /// Byte length of the preserved display representation without allocating.
+    pub(crate) fn display_len(&self) -> usize {
+        self.original.as_ref().map_or_else(
+            || {
+                // `format_float` uses Rust's shortest finite-f64 rendering;
+                // 32 bytes is a conservative upper bound including sign,
+                // decimal point, and exponent.
+                32
+            },
+            |s| s.len(),
+        )
+    }
+
+    /// Borrow the preserved display representation, formatting only when needed.
+    pub(crate) fn display_cow(&self) -> std::borrow::Cow<'_, str> {
+        self.original.as_ref().map_or_else(
+            || std::borrow::Cow::Owned(format_float(self.value)),
+            |s| std::borrow::Cow::Borrowed(s.as_ref()),
+        )
+    }
+
     /// Display string: the original literal if preserved, otherwise formatted.
     pub fn to_display_string(&self) -> String {
-        if let Some(s) = &self.original {
-            s.to_string()
-        } else {
-            format_float(self.value)
-        }
+        self.display_cow().into_owned()
     }
 }
 
@@ -710,6 +727,9 @@ impl ExprValue {
     /// Coercion is non-destructive: only conversions that don't lose
     /// information are attempted (`int → float`, `int → string`, etc).
     ///
+    /// An `any` target is unconstrained: every value is returned
+    /// unchanged.
+    ///
     /// For union targets, the rules are:
     ///
     /// 1. **Match first** — if the value's type is already one of the
@@ -724,6 +744,11 @@ impl ExprValue {
     /// satisfies RFC 0005 §"Implicit Type Coercion": `int | string`
     /// accepts an `int` value as-is rather than rejecting it.
     pub fn coerce(self, target: &ExprType, path_format: PathFormat) -> Result<Self, String> {
+        // `any` is the unconstrained type: every value satisfies it, so
+        // coercion is a no-op (RFC 0005 §"Type System").
+        if target.code() == TypeCode::Any {
+            return Ok(self);
+        }
         // Match-first: also accepts the case where the target is a union
         // and the value's type is one of its members. Falls back to the
         // existing strict-equality behavior for non-union targets.

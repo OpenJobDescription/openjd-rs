@@ -4,6 +4,7 @@
 
 //! List function implementations (sorted, reversed, unique, flatten, range).
 
+use super::StringOutputBudget;
 use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
@@ -132,19 +133,40 @@ pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 }
 
 pub fn join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
-    let iter = a[0]
-        .list_iter()
+    let len = a[0]
+        .list_len()
         .ok_or_else(|| ExpressionError::new("join() argument must be a list"))?;
     let sep = match a.get(1) {
         Some(ExprValue::String(s)) => s.as_str(),
         _ => "",
     };
-    let mut parts = Vec::new();
-    for e in iter {
+    for _ in 0..len {
         ctx.count_op()?;
-        parts.push(e.to_display_string());
     }
-    Ok(ExprValue::String(parts.join(sep)))
+
+    let values = match &a[0] {
+        ExprValue::ListString(values, _) | ExprValue::ListPath(values, _, _) => values,
+        _ if len == 0 => {
+            let budget = StringOutputBudget::reserve(ctx, 0, 0)?;
+            return Ok(budget.finish(String::new()));
+        }
+        _ => return Err(ExpressionError::new("join() argument must contain strings")),
+    };
+    let output_bytes = values
+        .iter()
+        .map(String::len)
+        .fold(0usize, usize::saturating_add)
+        .saturating_add(sep.len().saturating_mul(len.saturating_sub(1)));
+    let budget = StringOutputBudget::reserve(ctx, output_bytes, output_bytes)?;
+
+    let mut result = String::with_capacity(output_bytes);
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            result.push_str(sep);
+        }
+        result.push_str(value);
+    }
+    Ok(budget.finish(result))
 }
 
 pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {

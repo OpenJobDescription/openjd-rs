@@ -96,6 +96,10 @@ pub struct Evaluator<'a> {
     recursion_depth: usize,
     keyword_renames: &'a std::collections::HashMap<String, String>,
     library: &'a crate::function_library::FunctionLibrary,
+    /// Target type for the expression's final result. Consumed only at the
+    /// root [`evaluate`](Self::evaluate) entry point; recursion threads the
+    /// target explicitly through `eval_node` so a caller's target can never
+    /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
 }
@@ -222,43 +226,48 @@ impl<'a> Evaluator<'a> {
         self.operation_count
     }
 
-    /// Evaluate `node` with `target` temporarily replacing
-    /// `self.target_type`, restoring the previous value afterward.
+    /// Evaluate the root AST expression node.
     ///
-    /// This is the per-node target-type propagation primitive defined by
-    /// RFC 0005 §"Target Type Propagation Rules". Operators like `BinOp`,
-    /// `UnaryOp`, `Compare`, and the `test` slot of `IfExp` evaluate
-    /// their operands with `target = None` so that a
-    /// `target_type=string` request from the caller does not leak into
-    /// operand evaluation. `IfExp.body` and `IfExp.orelse` keep using
-    /// [`evaluate`] because they inherit the parent target type.
-    ///
-    /// `target_type` coercion is applied uniformly inside
-    /// [`evaluate`]; this helper just controls what coercion sees when
-    /// the recursive call returns. RFC 0005 nominally says
-    /// `IfExp.test` should be evaluated with `{BOOL}`, but the
-    /// evaluator already enforces bool-ness via an explicit type check
-    /// in `eval_ifexp` whose error message is friendlier than the
-    /// equivalent coercion failure, so we use `None` for that slot.
-    fn evaluate_with_target(
-        &mut self,
-        node: &ast::Expr,
-        target: Option<crate::types::ExprType>,
-    ) -> Result<ExprValue, ExpressionError> {
-        let saved = std::mem::replace(&mut self.target_type, target);
-        let result = self.evaluate(node);
-        self.target_type = saved;
-        result
+    /// The configured `target_type` (if any) applies to this root node's
+    /// result. Recursion into child nodes goes through [`Self::eval_node`]
+    /// with an explicit target, which is `None` (unconstrained) unless the
+    /// RFC 0005 propagation rules say the child inherits or derives one.
+    pub fn evaluate(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
+        let target = self.target_type.clone();
+        self.eval_node(node, target.as_ref())
     }
 
-    /// Evaluate an AST expression node.
-    pub fn evaluate(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
+    /// Evaluate `node` with an explicit target type for its result.
+    ///
+    /// This is the per-node target-type propagation primitive defined by
+    /// RFC 0005 §"Target Type Propagation Rules". The target applies to
+    /// **this node's result only**: after `evaluate_inner` returns, the
+    /// value is coerced toward `target` via [`ExprValue::coerce`].
+    ///
+    /// Children are evaluated with `target = None` (unconstrained) by
+    /// default — a caller's `target_type=string` request must not leak
+    /// into operand evaluation. The only slots that receive a non-`None`
+    /// target are the ones RFC 0005 lists as inheriting or deriving one:
+    /// `IfExp.body`/`orelse` (parent target), `List` and `ListComp`
+    /// elements (element type extracted from a `list[T]` parent target),
+    /// and function-call arguments (targets computed from candidate
+    /// signatures — see [`Self::call_arg_targets`]).
+    ///
+    /// RFC 0005 nominally says `IfExp.test` should be evaluated with
+    /// `{BOOL}`, subscript indices with `{INT}`, and comprehension
+    /// conditions with `{BOOL}`, but the evaluator enforces those with
+    /// explicit type checks whose error messages are friendlier than the
+    /// equivalent coercion failures, so those slots use `None` too.
+    fn eval_node(
+        &mut self,
+        node: &ast::Expr,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         // Bound recursion depth so deep ASTs (e.g., left-associative
         // binop chains produced from short sources like "1+1+1+...+1")
         // cannot exhaust the stack. This is the single chokepoint: every
-        // sub-node evaluation goes through `evaluate` (or `evaluate_inner`
-        // via the top-level `evaluate`), so incrementing here covers all
-        // recursive descent paths.
+        // sub-node evaluation goes through `eval_node`, so incrementing
+        // here covers all recursive descent paths.
         //
         // See `specs/expr/evaluator.md` (Depth limit) for the rationale.
         self.recursion_depth += 1;
@@ -273,7 +282,7 @@ impl<'a> Evaluator<'a> {
                 None => err,
             });
         }
-        let result = self.evaluate_inner(node);
+        let result = self.evaluate_inner(node, target);
         self.recursion_depth -= 1;
         // Attach caret context to any error that doesn't already have it
         match result {
@@ -285,7 +294,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Ok(val) => {
-                if let Some(ref tt) = self.target_type {
+                if let Some(tt) = target {
                     val.coerce(tt, self.path_format).map_err(|msg| {
                         let e = ExpressionError::new(msg);
                         if let Some(src) = &self.expr_source {
@@ -302,7 +311,20 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn evaluate_inner(&mut self, node: &ast::Expr) -> Result<ExprValue, ExpressionError> {
+    /// Dispatch on AST node type.
+    ///
+    /// `target` is forwarded only to the node kinds whose children inherit
+    /// or derive a target per RFC 0005: `If` (branches inherit the parent
+    /// target), `List`/`ListComp` (elements derive the element type of a
+    /// `list[T]` target), and `Call` (arguments derive targets from
+    /// candidate signatures). Every other node evaluates its children
+    /// unconstrained; the caller ([`Self::eval_node`]) coerces the node's
+    /// own result.
+    fn evaluate_inner(
+        &mut self,
+        node: &ast::Expr,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         match node {
             ast::Expr::NumberLiteral(n) => self.eval_number(n),
             ast::Expr::StringLiteral(s) => self.eval_string(s),
@@ -314,11 +336,11 @@ impl<'a> Evaluator<'a> {
             ast::Expr::UnaryOp(u) => self.eval_unaryop(u),
             ast::Expr::BoolOp(b) => self.eval_boolop(b),
             ast::Expr::Compare(c) => self.eval_compare(c),
-            ast::Expr::If(i) => self.eval_ifexp(i),
-            ast::Expr::Call(c) => self.eval_call(c),
-            ast::Expr::List(l) => self.eval_list(l),
+            ast::Expr::If(i) => self.eval_ifexp(i, target),
+            ast::Expr::Call(c) => self.eval_call(c, target),
+            ast::Expr::List(l) => self.eval_list(l, target),
             ast::Expr::Subscript(s) => self.eval_subscript(s),
-            ast::Expr::ListComp(lc) => self.eval_listcomp(lc),
+            ast::Expr::ListComp(lc) => self.eval_listcomp(lc, target),
             ast::Expr::Slice(s) => self.eval_slice(s),
             ast::Expr::Starred(_) => Err(ExpressionError::unsupported(
                 "Star unpacking is not supported",
@@ -582,7 +604,7 @@ impl<'a> Evaluator<'a> {
         // Fall back: evaluate the value, then access the attribute via library.
         // If the base evaluation fails (e.g., "Param" is a subtable not a value),
         // and we had a dotted path, report the dotted path as undefined with suggestions.
-        let value = match self.evaluate(&a.value) {
+        let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(_) if dotted_path.is_some() => {
                 let path = dotted_path.as_ref().unwrap();
@@ -662,8 +684,8 @@ impl<'a> Evaluator<'a> {
         // Reject unsupported operators early
         let op_name = OperatorTable::current().binop(b.op)?;
 
-        let left = self.evaluate_with_target(&b.left, None)?;
-        let right = self.evaluate_with_target(&b.right, None)?;
+        let left = self.eval_node(&b.left, None)?;
+        let right = self.eval_node(&b.right, None)?;
         self.dispatch_with_node(
             op_name,
             vec![left, right],
@@ -697,7 +719,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
         }
-        let operand = self.evaluate_with_target(&u.operand, None)?;
+        let operand = self.eval_node(&u.operand, None)?;
         self.dispatch_with_node(op_name, vec![operand], Some(&ast::Expr::UnaryOp(u.clone())))
     }
 
@@ -713,7 +735,7 @@ impl<'a> Evaluator<'a> {
                 // After an unresolved operand, suppress errors in subsequent operands
                 // (the unresolved value might short-circuit at runtime).
                 // But if a subsequent operand determines the result, return it.
-                match self.evaluate(node) {
+                match self.eval_node(node, None) {
                     Ok(val) => match b.op {
                         ast::BoolOp::And => {
                             if matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
@@ -730,7 +752,13 @@ impl<'a> Evaluator<'a> {
                 }
                 continue;
             }
-            last = self.evaluate(node)?;
+            // RFC 0005: and/or operands evaluate unconstrained. The
+            // operator returns one of its operands, so the parent target
+            // applies to the *returned* value via this node's own
+            // coercion in `eval_node` — not to each operand, which
+            // would fail on the discarded ones (`true and 0` with an
+            // `int` target must not try to coerce the `true`).
+            last = self.eval_node(node, None)?;
             if last.is_unresolved() {
                 seen_unresolved = true;
                 continue;
@@ -762,9 +790,9 @@ impl<'a> Evaluator<'a> {
         for op in &c.ops {
             table.cmpop(*op)?;
         }
-        let mut left = self.evaluate_with_target(&c.left, None)?;
+        let mut left = self.eval_node(&c.left, None)?;
         for (op, right_node) in c.ops.iter().zip(c.comparators.iter()) {
-            let right = self.evaluate_with_target(right_node, None)?;
+            let right = self.eval_node(right_node, None)?;
             if left.is_unresolved() || right.is_unresolved() {
                 self.release(&left);
                 self.release(&right);
@@ -801,13 +829,18 @@ impl<'a> Evaluator<'a> {
         self.track(ExprValue::Bool(true))
     }
 
-    fn eval_ifexp(&mut self, i: &ast::ExprIf) -> Result<ExprValue, ExpressionError> {
+    fn eval_ifexp(
+        &mut self,
+        i: &ast::ExprIf,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         // Per RFC 0005, the test of an IfExp is evaluated unconstrained.
         // The explicit bool-compatibility check below validates the type
         // and produces a friendlier "Condition must be a boolean, got X"
-        // error than a generic coercion failure would.
-        let test = self.evaluate_with_target(&i.test, None)?;
+        // error than a generic coercion failure would. The branches
+        // inherit the parent target.
+        let test = self.eval_node(&i.test, None)?;
         if test.is_unresolved() {
             // Check that the unresolved type is compatible with bool
             let inner = unwrap_unresolved(&test.expr_type());
@@ -828,8 +861,8 @@ impl<'a> Evaluator<'a> {
             }
             self.release(&test);
             // Try both branches, catching errors (e.g. fail() in one branch)
-            let body = self.evaluate(&i.body);
-            let orelse = self.evaluate(&i.orelse);
+            let body = self.eval_node(&i.body, target);
+            let orelse = self.eval_node(&i.orelse, target);
             match (body, orelse) {
                 (Err(be), Err(oe)) => {
                     let mut msg = format!(
@@ -882,15 +915,107 @@ impl<'a> Evaluator<'a> {
             // Condition is already validated as Bool above; match directly.
             if matches!(test, ExprValue::Bool(true)) {
                 self.release(&test);
-                self.evaluate(&i.body)
+                self.eval_node(&i.body, target)
             } else {
                 self.release(&test);
-                self.evaluate(&i.orelse)
+                self.eval_node(&i.orelse, target)
             }
         }
     }
 
-    fn eval_call(&mut self, c: &ast::ExprCall) -> Result<ExprValue, ExpressionError> {
+    /// Compute the target type for each argument of a function call from
+    /// the candidate signatures, per RFC 0005 §"Target Type Propagation
+    /// Rules" (`Call (function)`: arguments get typesets computed from
+    /// candidate signatures).
+    ///
+    /// A signature is a candidate when its arity matches and its return
+    /// type matches the caller's target. Per the RFC pseudo-code
+    /// (`arg_ts = {sig.param_types[i] for sig in candidates}`), each
+    /// argument's target is built from the candidates' parameter types
+    /// **as written in the signature** — the caller's target is used for
+    /// candidate filtering only and is never bound through the return
+    /// type into the parameters. `sorted: (list[T1]) -> list[T1]` with a
+    /// `list[string]` caller target therefore evaluates its argument with
+    /// no target at all: `sorted([10, 2])` sorts numerically and the
+    /// *result* coerces to `["2", "10"]`. A target that reached into the
+    /// argument would flip the sort order — targets guide coercion of
+    /// results, they must not change the computation. (The current Python
+    /// release gets this wrong via the same operand-leak bug this module
+    /// fixes; it is not a reference for this behavior.)
+    ///
+    /// Per argument position, one candidate type becomes the target
+    /// directly; several become a union (satisfied match-first, like the
+    /// RFC's typesets); a symbolic candidate type unconstrains the
+    /// position. `list[T1]` constrains the argument to any list type,
+    /// which is not a type [`ExprValue::coerce`] can coerce toward, and
+    /// dispatch enforces it anyway: `sorted('abc')` fails either way, and
+    /// `range_expr` → `list[int]` still happens there.
+    ///
+    /// With no caller target, no matching candidates, a method call (the
+    /// RFC pseudo-code evaluates method arguments unconstrained), or an
+    /// operator dunder, every argument is unconstrained.
+    fn call_arg_targets(
+        &self,
+        name: Option<&str>,
+        is_method_call: bool,
+        target: Option<&crate::types::ExprType>,
+        n_args: usize,
+    ) -> Vec<Option<crate::types::ExprType>> {
+        let unconstrained = vec![None; n_args];
+        let (Some(name), Some(target)) = (name, target) else {
+            return unconstrained;
+        };
+        if is_method_call || (name.starts_with("__") && name.ends_with("__")) {
+            return unconstrained;
+        }
+        // Per position: collected candidate types, or None once any
+        // candidate contributes a symbolic type. `list[T1]` means any
+        // list type — nothing to coerce toward, and dispatch enforces it
+        // regardless — so the position is left unconstrained here.
+        let mut per_pos: Vec<Option<Vec<ExprType>>> = vec![Some(Vec::new()); n_args];
+        let mut any_candidate = false;
+        for entry in self.library.get_signatures(name) {
+            let params = entry.signature.sig_params();
+            if params.len() != n_args {
+                continue;
+            }
+            // The caller's target filters candidates by return type; it
+            // is NOT bound through the return type into the parameters.
+            if entry.signature.sig_return().match_type(target).is_none() {
+                continue;
+            }
+            any_candidate = true;
+            for (i, p) in params.iter().enumerate() {
+                if p.is_symbolic() {
+                    per_pos[i] = None;
+                } else if let Some(types) = &mut per_pos[i] {
+                    if !types.contains(p) {
+                        types.push(p.clone());
+                    }
+                }
+            }
+        }
+        if !any_candidate {
+            return unconstrained;
+        }
+        per_pos
+            .into_iter()
+            .map(|types| {
+                let mut types = types?;
+                match types.len() {
+                    0 => None,
+                    1 => Some(types.pop().unwrap()),
+                    _ => Some(ExprType::union(types)),
+                }
+            })
+            .collect()
+    }
+
+    fn eval_call(
+        &mut self,
+        c: &ast::ExprCall,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         // Reject keyword args and **kwargs
         if !c.arguments.keywords.is_empty() {
@@ -907,7 +1032,7 @@ impl<'a> Evaluator<'a> {
                 Some(n.id.to_string())
             }
             ast::Expr::Attribute(a) => {
-                let receiver = self.evaluate(&a.value)?;
+                let receiver = self.eval_node(&a.value, None)?;
                 receiver_value = Some(receiver);
                 is_method_call = true;
                 Some(a.attr.to_string())
@@ -917,10 +1042,21 @@ impl<'a> Evaluator<'a> {
                 None
             }
         };
-        // Evaluate arguments
+        // Evaluate arguments with signature-derived targets (RFC 0005) —
+        // never the caller's target itself, which describes the call's
+        // result (`len('abc')` with an `int` target must not try to
+        // convert 'abc' to int). See `call_arg_targets` for how the
+        // targets are computed; generic parameters like `sorted`'s
+        // `list[T1]` stay unconstrained.
+        let arg_targets = self.call_arg_targets(
+            func_name.as_deref(),
+            is_method_call,
+            target,
+            c.arguments.args.len(),
+        );
         let mut args = Vec::new();
-        for arg in &c.arguments.args {
-            args.push(self.evaluate(arg)?);
+        for (arg, arg_target) in c.arguments.args.iter().zip(&arg_targets) {
+            args.push(self.eval_node(arg, arg_target.as_ref())?);
         }
 
         // Normalize call convention: receiver (if any) becomes args[0].
@@ -973,9 +1109,15 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_list(&mut self, l: &ast::ExprList) -> Result<ExprValue, ExpressionError> {
-        // Extract element target type from list[T] target
-        let list_elem_target = self.target_type.as_ref().and_then(|tt| {
+    fn eval_list(
+        &mut self,
+        l: &ast::ExprList,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
+        // RFC 0005: elements derive their target from a `list[T]` parent
+        // target (the element type T); any other target shape gives the
+        // elements no constraint.
+        let list_elem_target = target.and_then(|tt| {
             if tt.code() == crate::types::TypeCode::List && tt.params().len() == 1 {
                 Some(tt.params()[0].clone())
             } else {
@@ -983,24 +1125,14 @@ impl<'a> Evaluator<'a> {
             }
         });
 
-        // Thread element target type down for nested list evaluation
-        let saved_target = self.target_type.take();
-        if let Some(ref elem_t) = list_elem_target {
-            self.target_type = Some(elem_t.clone());
-        }
-
         let mut elements = Vec::new();
         for elt in &l.elts {
-            let val = self.evaluate(elt)?;
+            let val = self.eval_node(elt, list_elem_target.as_ref())?;
             if matches!(&val, ExprValue::Null) {
-                self.target_type = saved_target;
                 return Err(ExpressionError::new("null is not allowed in list literals"));
             }
             elements.push(val);
         }
-
-        // Restore target type
-        self.target_type = saved_target;
 
         // Check nesting depth — max 2 levels (list[list[T]] ok, list[list[list[T]]] not)
         for e in &elements {
@@ -1135,7 +1267,11 @@ impl<'a> Evaluator<'a> {
 
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
-        let value = self.evaluate(&s.value)?;
+        // RFC 0005: the receiver and the index/slice bounds evaluate
+        // unconstrained. The caller's target describes the subscript's
+        // *result* (`[10, 20, 30][0]` with an `int` target must not try
+        // to coerce the `list[int]` receiver or the index to int).
+        let value = self.eval_node(&s.value, None)?;
 
         // Reject subscript on path type
         if matches!(&value, ExprValue::Path { .. }) {
@@ -1146,15 +1282,30 @@ impl<'a> Evaluator<'a> {
 
         // Handle slice syntax: value[start:stop:step]
         if let ast::Expr::Slice(sl) = &*s.slice {
-            let start = match sl.lower.as_ref().map(|e| self.evaluate(e)).transpose()? {
+            let start = match sl
+                .lower
+                .as_ref()
+                .map(|e| self.eval_node(e, None))
+                .transpose()?
+            {
                 Some(v) => v,
                 None => ExprValue::Null,
             };
-            let stop = match sl.upper.as_ref().map(|e| self.evaluate(e)).transpose()? {
+            let stop = match sl
+                .upper
+                .as_ref()
+                .map(|e| self.eval_node(e, None))
+                .transpose()?
+            {
                 Some(v) => v,
                 None => ExprValue::Null,
             };
-            let step = match sl.step.as_ref().map(|e| self.evaluate(e)).transpose()? {
+            let step = match sl
+                .step
+                .as_ref()
+                .map(|e| self.eval_node(e, None))
+                .transpose()?
+            {
                 Some(v) => v,
                 None => ExprValue::Null,
             };
@@ -1192,7 +1343,7 @@ impl<'a> Evaluator<'a> {
             );
         }
 
-        let slice = self.evaluate(&s.slice)?;
+        let slice = self.eval_node(&s.slice, None)?;
 
         // Check index type for unresolved values
         if slice.is_unresolved() {
@@ -1252,7 +1403,11 @@ impl<'a> Evaluator<'a> {
         self.operation_count = child.operation_count;
     }
 
-    fn eval_listcomp(&mut self, lc: &ast::ExprListComp) -> Result<ExprValue, ExpressionError> {
+    fn eval_listcomp(
+        &mut self,
+        lc: &ast::ExprListComp,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
         // Validate restrictions
         if lc.generators.len() != 1 {
             return Err(ExpressionError::unsupported(
@@ -1280,7 +1435,18 @@ impl<'a> Evaluator<'a> {
             }
         }
 
-        let iterable = self.evaluate(&gen.iter)?;
+        // RFC 0005: the iterable evaluates unconstrained; the element
+        // expression derives its target from a `list[T]` parent target
+        // (same rule as list literals). Filter conditions use an explicit
+        // bool check instead of a `{BOOL}` target for friendlier errors.
+        let elem_target = target.and_then(|tt| {
+            if tt.code() == crate::types::TypeCode::List && tt.params().len() == 1 {
+                Some(tt.params()[0].clone())
+            } else {
+                None
+            }
+        });
+        let iterable = self.eval_node(&gen.iter, None)?;
         let var_name = match &gen.target {
             ast::Expr::Name(n) => n.id.to_string(),
             _ => unreachable!(),
@@ -1378,7 +1544,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
             if include {
-                let elt = child.evaluate(&lc.elt)?;
+                let elt = child.eval_node(&lc.elt, elem_target.as_ref())?;
                 result.push(self, elt)?;
             }
             self.absorb_counters(&child);
@@ -1418,7 +1584,7 @@ impl<'a> Evaluator<'a> {
 
     fn eval_slice(&mut self, s: &ast::ExprSlice) -> Result<ExprValue, ExpressionError> {
         if let Some(step) = &s.step {
-            let step_val = self.evaluate(step)?;
+            let step_val = self.eval_node(step, None)?;
             if let ExprValue::Int(0) = step_val {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }

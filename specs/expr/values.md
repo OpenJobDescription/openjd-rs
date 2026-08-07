@@ -360,6 +360,10 @@ Applied when the evaluation result needs to match an expected type:
 - RANGE_EXPR → LIST[INT]
 - LIST[T] → LIST[U] (element-wise coercion)
 
+An **`any`** target is unconstrained (RFC 0005 lists it as "matches
+anything"): every value is returned unchanged, so an `any` target can
+never be the reason a coercion fails (issue #291, case C).
+
 For **union** targets (e.g., `int | string`, `T?` which is sugar for
 `T | nulltype`), `coerce` follows two steps:
 

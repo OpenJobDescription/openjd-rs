@@ -595,3 +595,146 @@ fn comprehension_over_string_list_no_double_footprint() {
         r.peak_memory
     );
 }
+
+#[test]
+fn repr_json_preflights_nested_string_output_memory() {
+    let inner = ExprValue::make_list(
+        (0..32)
+            .map(|_| ExprValue::String("\u{1}".repeat(100)))
+            .collect(),
+        openjd_expr::ExprType::STRING,
+    )
+    .unwrap();
+    let value = ExprValue::make_list(
+        vec![inner.clone(), inner],
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    let mut st = SymbolTable::new();
+    st.set("Param.Items", value).unwrap();
+
+    let e = ParsedExpression::new("repr_json(Param.Items)")
+        .and_then(|p| {
+            p.with_memory_limit(10_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (38660 bytes) exceeded limit (10000 bytes)\n",
+            "  repr_json(Param.Items)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn multibyte_padding_preflights_output_bytes() {
+    // ljust on a 3000-byte / 1000-char string to width 1500 produces 3500
+    // output bytes (3000 original + 500 spaces). check_memory(3500) is
+    // called before the allocation, so a tight limit trips the preflight.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("界".repeat(1000)))
+        .unwrap();
+    let expr = "ljust(Param.S, 1500)";
+    let e = ParsedExpression::new(expr)
+        .and_then(|p| {
+            p.with_memory_limit(3_500)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (3564 bytes) exceeded limit (3500 bytes)\n",
+            "  ljust(Param.S, 1500)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn repr_sh_preflights_expanded_output_memory() {
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("\\".repeat(1000)))
+        .unwrap();
+    let e = ParsedExpression::new("repr_sh(Param.S)")
+        .and_then(|p| {
+            p.with_memory_limit(3_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (6002 bytes) exceeded limit (3000 bytes)\n",
+            "  repr_sh(Param.S)\n",
+            "  ^~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn replace_preflights_amplified_output_memory() {
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("a".repeat(1000)))
+        .unwrap();
+    st.set("Param.New", ExprValue::String("x".repeat(1000)))
+        .unwrap();
+    let e = ParsedExpression::new("replace(Param.S, 'a', Param.New)")
+        .and_then(|p| {
+            p.with_memory_limit(100_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (1000000 bytes) exceeded limit (100000 bytes)\n",
+            "  replace(Param.S, 'a', Param.New)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn join_preflights_large_separator_output_memory() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Param.Items",
+        ExprValue::ListString(vec!["a".to_string(); 100], 0),
+    )
+    .unwrap();
+    st.set("Param.Sep", ExprValue::String("x".repeat(1000)))
+        .unwrap();
+    let e = ParsedExpression::new("join(Param.Items, Param.Sep)")
+        .and_then(|p| {
+            p.with_memory_limit(50_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (99100 bytes) exceeded limit (50000 bytes)\n",
+            "  join(Param.Items, Param.Sep)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}

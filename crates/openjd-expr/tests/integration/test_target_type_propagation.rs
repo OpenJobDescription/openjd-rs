@@ -392,3 +392,166 @@ fn outer_target_string_subtraction_with_param() {
     let r = eval_with_target_type("Param.End - 1", &ExprType::STRING, &st).unwrap();
     assert_eq!(r, ExprValue::String("99".to_string()));
 }
+
+// === Operand-leak regressions ===
+//
+// The caller's target_type leaked into operands of node kinds that RFC
+// 0005 says must evaluate their children unconstrained: Subscript
+// (receiver + index/slice bounds), BoolOp operands, and Call arguments.
+// An explicit `any` target was also rejected by `ExprValue::coerce`.
+// Every expression below evaluates correctly without a target_type; the
+// target must not change the outcome (beyond coercing the final result).
+
+fn eval_target(expr: &str, target: &str) -> ExprValue {
+    let tt = ExprType::parse(target).unwrap();
+    eval_with_target_type(expr, &tt, &SymbolTable::new()).unwrap()
+}
+
+#[test]
+fn subscript_receiver_not_constrained_by_int_target() {
+    // The target `int` describes the subscript's result, not the
+    // `list[int]` receiver or the index.
+    assert_eq!(eval_target("[10, 20, 30][0]", "int"), ExprValue::Int(10));
+}
+
+#[test]
+fn string_subscript_index_not_constrained_by_string_target() {
+    // With a `string` target, the index `0` must stay an int so
+    // `__getitem__(string, int)` matches.
+    assert_eq!(
+        eval_target("'hello'[0]", "string"),
+        ExprValue::String("h".to_string())
+    );
+}
+
+#[test]
+fn boolop_and_returns_operand_then_coerces() {
+    // `and` returns `0`; the discarded `true` must not be coerced to int.
+    assert_eq!(eval_target("true and 0", "int"), ExprValue::Int(0));
+}
+
+#[test]
+fn boolop_or_null_coalescing_with_int_target() {
+    // `or` returns `7`; the discarded `null` must not be coerced to int.
+    assert_eq!(eval_target("null or 7", "int"), ExprValue::Int(7));
+}
+
+#[test]
+fn any_target_is_noop_for_int() {
+    // `any` matches anything; it must never cause a coercion failure.
+    assert_eq!(eval_target("1", "any"), ExprValue::Int(1));
+}
+
+#[test]
+fn any_target_is_noop_for_string() {
+    assert_eq!(
+        eval_target("'x'", "any"),
+        ExprValue::String("x".to_string())
+    );
+}
+
+#[test]
+fn call_arguments_not_constrained_by_caller_target() {
+    // The caller's target applies to the call's result; arguments get
+    // signature-derived targets, and `len`/`min` place no string
+    // constraint on theirs.
+    assert_eq!(eval_target("len('abc')", "int"), ExprValue::Int(3));
+    assert_eq!(eval_target("min([5, 3])", "int"), ExprValue::Int(3));
+}
+
+#[test]
+fn generic_call_arguments_stay_unconstrained() {
+    // RFC 0005: argument targets come from the candidates' parameter
+    // types as written; the caller's target filters candidates but is
+    // not bound through the return type into the parameters. `sorted:
+    // (list[T1]) -> list[T1]` has a symbolic parameter, so the argument
+    // evaluates unconstrained: the sort is numeric and only the *result*
+    // coerces to strings. A target must never change the computation.
+    assert_eq!(
+        eval_target("sorted([10, 2])", "list[string]"),
+        ExprValue::make_list(
+            vec![
+                ExprValue::String("2".to_string()),
+                ExprValue::String("10".to_string())
+            ],
+            ExprType::STRING
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn listcomp_element_derives_target_from_list_target() {
+    // RFC 0005: the comprehension's element expression derives its
+    // target from a `list[T]` parent target, same as list literals.
+    // The inner literal `[x, '2']` gets a `list[int]` target, so its
+    // elements coerce to int instead of failing the homogeneity check.
+    assert_eq!(
+        eval_target("[[x, '2'] for x in [1]]", "list[list[int]]"),
+        ExprValue::make_list(
+            vec![ExprValue::ListInt(vec![1, 2])],
+            ExprType::list(ExprType::INT)
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn slice_bounds_not_constrained_by_target() {
+    // Slice bounds are ints regardless of the parent target.
+    assert_eq!(
+        eval_target("[1, 2, 3][0:2]", "list[int]"),
+        ExprValue::ListInt(vec![1, 2])
+    );
+    assert_eq!(
+        eval_target("'hello'[1:3]", "string"),
+        ExprValue::String("el".to_string())
+    );
+}
+
+#[test]
+fn boolop_result_still_coerced_toward_target() {
+    // The returned operand does go through final coercion: an int result
+    // with a string target becomes a string.
+    assert_eq!(
+        eval_target("null or 7", "string"),
+        ExprValue::String("7".to_string())
+    );
+}
+
+#[test]
+fn args_style_union_target_with_subscript() {
+    // The template `args` item target `T? | list[T]` combined with a
+    // subscript — the shape a host hits in ordinary use.
+    assert_eq!(
+        eval_target("[10, 20, 30][1]", "int? | list[int]"),
+        ExprValue::Int(20)
+    );
+}
+
+#[test]
+fn args_style_union_target_with_or_fallback() {
+    // `Param.X or "fallback"` null-coalescing (the wiki §2.1.6 example)
+    // under the `args` item target.
+    let st = symtab(&[("Param.X", ExprValue::Null)]);
+    let tt = ExprType::parse("string? | list[string]").unwrap();
+    let r = eval_with_target_type("Param.X or 'fallback'", &tt, &st).unwrap();
+    assert_eq!(r, ExprValue::String("fallback".to_string()));
+}
+
+#[test]
+fn uncoercible_result_still_errors_with_caret() {
+    // The final result must still satisfy the target: a genuinely
+    // uncoercible result reports a full-message error against the root
+    // expression. Asserted as one concatenated string per the repo's
+    // error-test standard (message + expression line + caret line).
+    let tt = ExprType::parse("int").unwrap();
+    let err = eval_with_target_type("'abc' and 'def'", &tt, &SymbolTable::new()).unwrap_err();
+    let msg = err.to_string();
+    let expected = concat!(
+        "Cannot convert 'def' to int: invalid digit found in string\n",
+        "  'abc' and 'def'\n",
+        "  ^~~~~~~~~~~~~~~"
+    );
+    assert!(msg.contains(expected), "got:\n{msg}\nexpected:\n{expected}");
+}

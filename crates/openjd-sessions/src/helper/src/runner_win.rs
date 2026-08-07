@@ -40,7 +40,9 @@ pub fn run_command(
     use windows::Win32::Foundation::HANDLE;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
-    let mut child = Command::new(&cmd.command)
+    let command = locate_executable(&cmd.command, &cmd.env, &cmd.cwd)?;
+
+    let mut child = Command::new(&command)
         .args(&cmd.args)
         .envs(&cmd.env)
         .current_dir(&cmd.cwd)
@@ -181,6 +183,52 @@ fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Ins
                 )
             }
         }
+    }
+}
+
+/// Resolve `command` to an absolute path with canonical Windows search
+/// semantics (PATHEXT-aware, earliest PATH directory wins), searching the
+/// working directory first: `{cwd};{PATH}`.
+///
+/// Runs in the helper — i.e. **as the target user** — so it can resolve
+/// executables in directories only the target user can read.
+///
+/// PATH and PATHEXT are each taken from exactly one source, chosen before
+/// searching: a key in the action's env vars (case-insensitive) is used
+/// exclusively — the helper's own value is never consulted then, even if
+/// the search finds nothing. Only when the env map defines no such key at
+/// all is the helper's own environment used (the target user's
+/// environment block, inherited from `CreateEnvironmentBlock` at spawn).
+/// This matches the `.envs()` merge at spawn — an action-supplied value
+/// overwrites the inherited one — so resolution always searches with the
+/// values the workload actually sees, never a union of the two.
+///
+/// Absolute paths pass through unchanged (the OS resolves the extension).
+/// A not-found result is a hard error with the same message the Python
+/// implementation raises — resolving here, before `Command::new`, prevents
+/// `CreateProcessW`'s legacy fallback search (application directory, system
+/// directories, the helper's own PATH lookup for `.exe` only).
+fn locate_executable(
+    command: &str,
+    env: &std::collections::HashMap<String, String>,
+    cwd: &str,
+) -> Result<String, String> {
+    if std::path::Path::new(command).is_absolute() {
+        return Ok(command.to_string());
+    }
+    let env_var = |name: &str| -> Option<String> {
+        env.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+    };
+    let path_var = env_var("PATH").unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+    let pathext =
+        env_var("PATHEXT").unwrap_or_else(|| std::env::var("PATHEXT").unwrap_or_default());
+    let search_path = format!("{cwd};{path_var}");
+    match crate::win32_which::locate_in(command, &search_path, &pathext, std::path::Path::new(cwd))
+    {
+        Some(found) => Ok(found.to_string_lossy().into_owned()),
+        None => Err(format!("Could not find executable file: {command}")),
     }
 }
 

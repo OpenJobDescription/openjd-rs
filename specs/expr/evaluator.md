@@ -145,34 +145,53 @@ Rules"](https://github.com/OpenJobDescription/openjd-specifications/blob/main/rf
 | `UnaryOp` (`-x`, `+x`, `not x`) | Operand: `None` (unconstrained) |
 | `Compare` (`<`, `>`, `==`, `in`, …) | All operands: `None` (unconstrained) |
 | `IfExp` (`x if c else y`) | `test`: `None`; `body` / `orelse`: parent target |
-| `BoolOp` (`and`, `or`) | All operands: parent target (value-returning, see RFC 0006) |
-| `Call` | Arguments: parent target (signature-driven coercion happens inside `dispatch`) |
-| `List` | Elements: element type extracted from `list[T]` parent target |
-| `ListComp` | Element expr: element type from parent; iter: parent; conditions: parent |
-| `Subscript` | Value: parent; index/slice: parent |
+| `BoolOp` (`and`, `or`) | All operands: `None` (value-returning — the parent target applies to the returned operand via the node's own result coercion, see RFC 0006) |
+| `Call` (function) | Arguments: computed from candidate signatures (arity match + return type matches the caller's target) using the parameter types **as written** — the caller's target filters candidates but is never bound through the return type into the parameters, so a generic like `sorted: (list[T1]) -> list[T1]` evaluates its argument with no target and only the *result* coerces (`sorted([10, 2])` with `list[string]` → numeric sort, then `["2", "10"]`); `None` when there is no caller target, no candidates, or the parameter type is symbolic (see note below) |
+| `Call` (method) | Receiver and arguments: `None` (per the RFC pseudo-code; coercion is signature-driven inside `dispatch`) |
+| `List` | Elements: element type extracted from `list[T]` parent target; `None` otherwise |
+| `ListComp` | Element expr: element type extracted from `list[T]` parent target (same rule as `List`); iter: `None`; conditions: `None` |
+| `Subscript` | Value: `None`; index/slice bounds: `None` |
 | `Attribute` / `Name` / `Constant` | N/A (leaf) |
 
-The "unconstrained" rule for `BinOp` / `UnaryOp` / `Compare` is the load-bearing
-piece: it stops a `target_type=string` request from collapsing
-`Param.Count - 1` into `"100" - "1"` and erroring out — instead, both
-operands evaluate as integers, `__sub__` runs in integer land, and the
-final coercion converts the resulting `Int(99)` into `String("99")`.
-RFC 0005 calls this out by name in its rationale, with the exact same
-example.
+The "unconstrained" rule is the load-bearing piece: it stops a
+`target_type=string` request from collapsing `Param.Count - 1` into
+`"100" - "1"` and erroring out — instead, both operands evaluate as
+integers, `__sub__` runs in integer land, and the final coercion
+converts the resulting `Int(99)` into `String("99")`. RFC 0005 calls
+this out by name in its rationale, with the exact same example. The
+same rule is why `[10, 20, 30][0]` with `target_type=int` coerces the
+subscript's *result* rather than its `list[int]` receiver, and why
+`Param.X or "fallback"` with a string target coerces the operand `or`
+*returns* rather than the one it discards (issue #291).
 
-This is currently realized via a single
-`Evaluator::evaluate_with_target(node, target)` helper that swaps the
-field for the duration of one recursive call, then restores the saved
-value. Operators that need to clear the target call it with `None`;
-`eval_list` uses the same primitive (open-coded) to push the element
-type down.
+This is realized structurally: recursion goes through
+`Evaluator::eval_node(node, target)`, which takes the target as an
+explicit parameter, applies it to that node's result only (via
+`ExprValue::coerce`), and passes `None` to all children by default.
+Only the slots the table marks as inheriting or deriving a target
+(`IfExp.body`/`orelse`, `List`/`ListComp` elements, `Call` arguments)
+forward a non-`None` value. The `target_type` configured on the
+evaluator is consumed once, at the root `evaluate` entry point. A node
+kind added later is therefore unconstrained-by-default rather than
+inheriting the caller's target by accident.
 
-The `IfExp.test` slot is a per-node `None` rather than `Some(BOOL)`.
-Pushing `BOOL` would invoke `coerce` on the test result, and that path
-loses the friendlier "Condition must be a boolean, got X" message
-that `eval_ifexp` produces from its explicit type check. Because the
-explicit check enforces bool-ness, the unconstrained recursion is
-strictly better for diagnostics.
+**Symbolic parameter types unconstrain their position.** `sorted:
+(list[T1]) -> list[T1]` constrains its argument to any list type, which
+is not a type `ExprValue::coerce` can coerce toward, so the position gets
+no target. Dispatch still enforces it: `sorted('abc')` fails with "No
+matching signature for sorted(string)" with or without a target, and
+`sorted(range(3))` still gets its `range_expr` → `list[int]` coercion.
+Only the element type is left open — the part a caller's target could
+otherwise have used to reorder the sort.
+
+Three slots deviate from RFC 0005's nominal table, all in favor of
+better diagnostics, and all backed by explicit type checks that enforce
+the same constraint: `IfExp.test` uses `None` rather than `{BOOL}`
+(the explicit check produces "Condition must be a boolean, got X"
+instead of a generic coercion failure), subscript indices use `None`
+rather than `{INT}` ("Index must be an integer"), and list
+comprehension conditions use `None` rather than `{BOOL}` ("List
+comprehension filter must be a boolean, got X").
 
 ## AST Node Evaluation
 
@@ -316,6 +335,12 @@ an empty string.
 This enables null-coalescing patterns like `Param.X or "default"` while still
 letting `Param.Flag or true` yield `true` when the flag is `false`.
 
+Operands are evaluated unconstrained (see [Target Type
+Propagation](#target-type-propagation)): because the operator returns one
+of its operands, the parent's target applies to the returned value via
+the node's own result coercion — never to the operands themselves, which
+would fail on the discarded ones (issue #291, case B).
+
 When an earlier operand is unresolved, subsequent operands are still evaluated (to
 catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
 subsequent concrete operand proves the result by short-circuiting (e.g.,
@@ -334,6 +359,13 @@ Handles both function calls (`len(x)`) and method calls (`x.upper()`).
 
 Method calls are transformed to function calls via UFCS (Uniform Function Call Syntax):
 `obj.method(args)` → `method(obj, args)`.
+
+Function-call arguments are evaluated with targets computed from the
+candidate signatures (see [Target Type
+Propagation](#target-type-propagation)) — never the caller's own target,
+which describes the call's result. Method-call receivers and arguments
+are evaluated unconstrained; coercion is signature-driven inside
+`dispatch` in both cases.
 
 Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
@@ -360,6 +392,11 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
+- The receiver and the index/slice bounds are evaluated unconstrained (see
+  [Target Type Propagation](#target-type-propagation)): the caller's
+  target describes the subscript's *result*, so `[10, 20, 30][0]` with
+  `target_type=int` must not coerce the `list[int]` receiver or the index
+  (issue #291, case A)
 
 ## Dispatch Flow
 
