@@ -749,6 +749,17 @@ impl ExprValue {
         if target.code() == TypeCode::Any {
             return Ok(self);
         }
+        // Unresolved values have no concrete payload to convert. Preserve
+        // the placeholder when its constraint already satisfies the target,
+        // and otherwise report the same incompatibility a concrete value
+        // would. Value-dependent coercions must wait until resolution.
+        if let ExprValue::Unresolved(constraint) = &self {
+            return if target.match_type(constraint).is_some() {
+                Ok(self)
+            } else {
+                Err(format!("Cannot coerce {constraint} to {target}"))
+            };
+        }
         // Match-first: also accepts the case where the target is a union
         // and the value's type is one of its members. Falls back to the
         // existing strict-equality behavior for non-union targets.
