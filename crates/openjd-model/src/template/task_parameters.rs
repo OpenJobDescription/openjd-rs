@@ -13,6 +13,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
+#[non_exhaustive]
 pub enum TaskParameterDefinition {
     INT(IntTaskParameterDefinition),
     FLOAT(FloatTaskParameterDefinition),
@@ -47,6 +48,7 @@ impl TaskParameterDefinition {
 
 /// Int range: either a list of values or a range expression string.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum IntRange {
     List(Vec<FlexInt>),
     Expression(FormatString),
@@ -77,6 +79,7 @@ impl<'de> Deserialize<'de> for IntRange {
 /// Concrete types to avoid derive conflicts with FormatString.
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum StringRange {
     List(Vec<FormatString>),
     Expression(FormatString),
@@ -103,6 +106,7 @@ impl<'de> Deserialize<'de> for StringRange {
 
 /// A float range list item: either a literal float or a format string.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FloatRangeItem {
     Float(f64),
     FormatString(FormatString),
@@ -130,6 +134,7 @@ impl<'de> Deserialize<'de> for FloatRangeItem {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FloatRange {
     List(Vec<FloatRangeItem>),
     Expression(FormatString),
@@ -157,6 +162,7 @@ impl<'de> Deserialize<'de> for FloatRange {
 /// §3.4.1.1 IntTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct IntTaskParameterDefinition {
     pub name: Identifier,
     pub range: IntRange,
@@ -165,6 +171,7 @@ pub struct IntTaskParameterDefinition {
 /// §3.4.1.2 FloatTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct FloatTaskParameterDefinition {
     pub name: Identifier,
     pub range: FloatRange,
@@ -173,6 +180,7 @@ pub struct FloatTaskParameterDefinition {
 /// §3.4.1.3 StringTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StringTaskParameterDefinition {
     pub name: Identifier,
     pub range: StringRange,
@@ -181,6 +189,7 @@ pub struct StringTaskParameterDefinition {
 /// §3.4.1.4 PathTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct PathTaskParameterDefinition {
     pub name: Identifier,
     pub range: StringRange,
@@ -189,6 +198,7 @@ pub struct PathTaskParameterDefinition {
 /// §3.4.1.5 ChunkIntTaskParameterDefinition (TASK_CHUNKING extension)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ChunkIntTaskParameterDefinition {
     pub name: Identifier,
     pub range: IntRange,
@@ -203,6 +213,10 @@ pub struct ChunkIntTaskParameterDefinition {
 /// - String containing `{{…}}` → `IntOrFormatString::FormatString(fs)`
 /// - Boolean/null → error
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum IntOrFormatString {
     Int(i64),
     FormatString(FormatString),
@@ -262,6 +276,7 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
 /// Chunks configuration for `CHUNK[INT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ChunksDefinition {
     pub default_task_count: IntOrFormatString,
     pub target_runtime_seconds: Option<IntOrFormatString>,
@@ -270,6 +285,10 @@ pub struct ChunksDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, serde::Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum RangeConstraint {
     Contiguous,
     Noncontiguous,
@@ -278,6 +297,7 @@ pub enum RangeConstraint {
 /// §3.4 StepParameterSpaceDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StepParameterSpaceDefinition {
     pub task_parameter_definitions: Vec<TaskParameterDefinition>,
     pub combination: Option<String>,

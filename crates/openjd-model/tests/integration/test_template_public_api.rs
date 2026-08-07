@@ -221,6 +221,8 @@ fn step_template_full_surface() {
         CancelationMode::Terminate | CancelationMode::DeferredMode { .. } => {
             panic!("expected NotifyThenTerminate")
         }
+        #[allow(unreachable_patterns)]
+        _ => panic!("unexpected cancelation mode variant"),
     }
 
     let ef: &EmbeddedFile = &script.embedded_files.as_ref().unwrap()[0];
@@ -605,6 +607,8 @@ fn task_parameter_definition_int_variant_field_access() {
                     assert_eq!(nums, vec![1, 2, 3]);
                 }
                 IntRange::Expression(_) => panic!("expected List, got Expression"),
+                #[allow(unreachable_patterns)]
+                _ => panic!("unexpected IntRange variant"),
             }
         }
         other => panic!("expected INT, got {other:?}"),
@@ -639,6 +643,8 @@ fn task_parameter_definition_int_range_expression() {
                 assert_eq!(fs.raw(), "1-10:2");
             }
             IntRange::List(_) => panic!("expected Expression, got List"),
+            #[allow(unreachable_patterns)]
+            _ => panic!("unexpected IntRange variant"),
         },
         _ => unreachable!(),
     }
@@ -679,6 +685,8 @@ fn task_parameter_definition_float_variant_field_access() {
                     assert!(matches!(items[2], FloatRangeItem::Float(f) if f == 3.5));
                 }
                 FloatRange::Expression(_) => panic!("expected List"),
+                #[allow(unreachable_patterns)]
+                _ => panic!("unexpected FloatRange variant"),
             }
         }
         _ => unreachable!(),
@@ -717,6 +725,8 @@ fn task_parameter_definition_string_path_variants() {
                     assert_eq!(strs, vec!["red", "blue"]);
                 }
                 StringRange::Expression(_) => panic!("expected List"),
+                #[allow(unreachable_patterns)]
+                _ => panic!("unexpected StringRange variant"),
             }
         }
         _ => unreachable!(),
@@ -730,6 +740,8 @@ fn task_parameter_definition_string_path_variants() {
                     assert_eq!(strs, vec!["/tmp/a", "/tmp/b"]);
                 }
                 StringRange::Expression(_) => panic!("expected List"),
+                #[allow(unreachable_patterns)]
+                _ => panic!("unexpected StringRange variant"),
             }
         }
         _ => unreachable!(),

@@ -7,6 +7,10 @@ use crate::ops::subtree::{subtree_rel_snapshot, subtree_snapshot};
 use crate::path_util::{is_absolute_path, normalize_path};
 use tracing::debug;
 
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct PartitionOptions {
     pub roots: Option<Vec<String>>,
     pub referenced_paths: Option<Vec<String>>,

@@ -36,11 +36,7 @@ fn eval_with_rules_fmt(
 // === TestPathMappingRuleFromPosix ===
 #[test]
 fn posix_to_windows_basic() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".to_string(),
-        destination_path: "Z:\\shared".to_string(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "Z:\\shared");
     let mut st = SymbolTable::new();
     st.set(
         "P",
@@ -54,11 +50,7 @@ fn posix_to_windows_basic() {
 // === TestPathMappingRuleValidation ===
 #[test]
 fn path_mapping_preserves_type() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/old".to_string(),
-        destination_path: "/new".to_string(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/old", "/new");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/old/file.txt".to_string()))
         .unwrap();
@@ -69,11 +61,7 @@ fn path_mapping_preserves_type() {
 // === TestPathMappingRuleFromPosix ===
 #[test]
 fn posix_exact_match() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/mnt/shared".into()))
         .unwrap();
@@ -82,11 +70,7 @@ fn posix_exact_match() {
 }
 #[test]
 fn posix_trailing_slash_preserved() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/mnt/shared/".into()))
         .unwrap();
@@ -95,11 +79,7 @@ fn posix_trailing_slash_preserved() {
 }
 #[test]
 fn posix_no_match_different_path() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/other/path".into()))
         .unwrap();
@@ -110,11 +90,7 @@ fn posix_no_match_different_path() {
 #[test]
 fn unmapped_posix_path_normalized_to_windows_format() {
     // When no rule matches and format is Windows, separators should be normalized
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/other/path/file.txt".into()))
         .unwrap();
@@ -129,11 +105,7 @@ fn unmapped_posix_path_normalized_to_windows_format() {
 
 #[test]
 fn posix_no_match_same_prefix() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/mnt/sharedextra/file".into()))
         .unwrap();
@@ -142,11 +114,7 @@ fn posix_no_match_same_prefix() {
 }
 #[test]
 fn posix_with_subpath() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/new/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/shared");
     let mut st = SymbolTable::new();
     st.set(
         "P",
@@ -160,11 +128,7 @@ fn posix_with_subpath() {
 // === TestPathMappingRuleFromWindows ===
 #[test]
 fn windows_with_subpath() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "Z:\\shared".into(),
-        destination_path: "/mnt/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "Z:\\shared", "/mnt/shared");
     let mut st = SymbolTable::new();
     st.set(
         "P",
@@ -181,11 +145,7 @@ fn windows_with_subpath() {
 }
 #[test]
 fn windows_exact_match() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "Z:\\shared".into(),
-        destination_path: "/mnt/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "Z:\\shared", "/mnt/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("Z:\\shared".into())).unwrap();
     let r = eval_with_rules_fmt(
@@ -198,11 +158,7 @@ fn windows_exact_match() {
 }
 #[test]
 fn windows_no_match() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "Z:\\shared".into(),
-        destination_path: "/mnt/shared".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "Z:\\shared", "/mnt/shared");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("C:\\other".into())).unwrap();
     let r = eval_with_rules_fmt(
@@ -217,11 +173,7 @@ fn windows_no_match() {
 // === TestPathMappingRuleFromUri ===
 #[test]
 fn uri_with_subpath() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("s3://bucket/prefix/file.txt".into()))
         .unwrap();
@@ -230,11 +182,7 @@ fn uri_with_subpath() {
 }
 #[test]
 fn uri_nested_subpath() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set(
         "P",
@@ -246,11 +194,7 @@ fn uri_nested_subpath() {
 }
 #[test]
 fn uri_exact_match() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("s3://bucket/prefix".into()))
         .unwrap();
@@ -259,11 +203,7 @@ fn uri_exact_match() {
 }
 #[test]
 fn uri_no_match_different_bucket() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("s3://other/prefix/file.txt".into()))
         .unwrap();
@@ -272,11 +212,7 @@ fn uri_no_match_different_bucket() {
 }
 #[test]
 fn uri_no_match_prefix_overlap() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set(
         "P",
@@ -288,11 +224,7 @@ fn uri_no_match_prefix_overlap() {
 }
 #[test]
 fn uri_no_match_different_scheme() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("gs://bucket/prefix/file.txt".into()))
         .unwrap();
@@ -301,11 +233,7 @@ fn uri_no_match_different_scheme() {
 }
 #[test]
 fn uri_no_match_filesystem() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/local/file.txt".into()))
         .unwrap();
@@ -314,11 +242,7 @@ fn uri_no_match_filesystem() {
 }
 #[test]
 fn uri_https_scheme() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "https://host/path".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "https://host/path", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("https://host/path/file.txt".into()))
         .unwrap();
@@ -327,11 +251,7 @@ fn uri_https_scheme() {
 }
 #[test]
 fn uri_custom_scheme() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "fsx://vol/path".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "fsx://vol/path", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("fsx://vol/path/file.txt".into()))
         .unwrap();
@@ -340,11 +260,7 @@ fn uri_custom_scheme() {
 }
 #[test]
 fn uri_trailing_slash() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local/data".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local/data");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("s3://bucket/prefix/".into()))
         .unwrap();
@@ -356,11 +272,7 @@ fn uri_trailing_slash() {
 
 #[test]
 fn posix_trailing_slash_exact_output() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/src".into(),
-        destination_path: "/dst".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/src", "/dst");
     // No trailing slash → no trailing slash
     assert_eq!(
         rule.apply_with_format("/src", PathFormat::Posix),
@@ -383,11 +295,7 @@ fn posix_trailing_slash_exact_output() {
 
 #[test]
 fn uri_trailing_slash_exact_output() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Uri,
-        source_path: "s3://bucket/prefix".into(),
-        destination_path: "/local".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/prefix", "/local");
     // No trailing slash → no trailing slash
     assert_eq!(
         rule.apply_with_format("s3://bucket/prefix", PathFormat::Posix),
@@ -421,25 +329,13 @@ mod apply_unit {
     use openjd_expr::path_mapping::PathFormat;
     use openjd_expr::PathMappingRule;
     fn posix_rule(src: &str, dst: &str) -> PathMappingRule {
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: src.into(),
-            destination_path: dst.into(),
-        }
+        PathMappingRule::new(PathFormat::Posix, src, dst)
     }
     fn windows_rule(src: &str, dst: &str) -> PathMappingRule {
-        PathMappingRule {
-            source_path_format: PathFormat::Windows,
-            source_path: src.into(),
-            destination_path: dst.into(),
-        }
+        PathMappingRule::new(PathFormat::Windows, src, dst)
     }
     fn uri_rule(src: &str, dst: &str) -> PathMappingRule {
-        PathMappingRule {
-            source_path_format: PathFormat::Uri,
-            source_path: src.into(),
-            destination_path: dst.into(),
-        }
+        PathMappingRule::new(PathFormat::Uri, src, dst)
     }
 
     // ── POSIX ──
@@ -805,11 +701,7 @@ mod serde_tests {
 
     #[test]
     fn posix_to_dict() {
-        let rule = PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/mnt/shared".into(),
-            destination_path: "/new/prefix".into(),
-        };
+        let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "/new/prefix");
         let val = serde_json::to_value(&rule).unwrap();
         assert_eq!(val["source_path_format"], "POSIX");
         assert_eq!(val["source_path"], "/mnt/shared");
@@ -829,11 +721,7 @@ mod serde_tests {
 
     #[test]
     fn windows_to_dict() {
-        let rule = PathMappingRule {
-            source_path_format: PathFormat::Windows,
-            source_path: "C:\\projects".into(),
-            destination_path: "/mnt/projects".into(),
-        };
+        let rule = PathMappingRule::new(PathFormat::Windows, "C:\\projects", "/mnt/projects");
         let val = serde_json::to_value(&rule).unwrap();
         assert_eq!(val["source_path_format"], "WINDOWS");
         assert_eq!(val["source_path"], "C:\\projects");
@@ -853,11 +741,7 @@ mod serde_tests {
 
     #[test]
     fn uri_to_dict() {
-        let rule = PathMappingRule {
-            source_path_format: PathFormat::Uri,
-            source_path: "s3://bucket/assets".into(),
-            destination_path: "/local".into(),
-        };
+        let rule = PathMappingRule::new(PathFormat::Uri, "s3://bucket/assets", "/local");
         let val = serde_json::to_value(&rule).unwrap();
         assert_eq!(val["source_path_format"], "URI");
         assert_eq!(val["source_path"], "s3://bucket/assets");
@@ -866,11 +750,7 @@ mod serde_tests {
 
     #[test]
     fn uri_roundtrip_dict() {
-        let original = PathMappingRule {
-            source_path_format: PathFormat::Uri,
-            source_path: "s3://bucket/assets".into(),
-            destination_path: "/local".into(),
-        };
+        let original = PathMappingRule::new(PathFormat::Uri, "s3://bucket/assets", "/local");
         let json = serde_json::to_string(&original).unwrap();
         let restored: PathMappingRule = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.source_path_format, original.source_path_format);
@@ -930,11 +810,7 @@ mod serde_tests {
 
 #[test]
 fn windows_no_match_same_prefix_eval() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "C:\\projects".into(),
-        destination_path: "/mnt/projects".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "C:\\projects", "/mnt/projects");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("C:\\projects2\\file.txt".into()))
         .unwrap();
@@ -949,11 +825,7 @@ fn windows_no_match_same_prefix_eval() {
 
 #[test]
 fn windows_trailing_backslash_preserved_eval() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "C:\\projects".into(),
-        destination_path: "/mnt/projects".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "C:\\projects", "/mnt/projects");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("C:\\projects\\subdir\\".into()))
         .unwrap();
@@ -968,11 +840,7 @@ fn windows_trailing_backslash_preserved_eval() {
 
 #[test]
 fn windows_trailing_forward_slash_preserved_eval() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: "C:\\projects".into(),
-        destination_path: "/mnt/projects".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Windows, "C:\\projects", "/mnt/projects");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("C:\\projects\\subdir/".into()))
         .unwrap();
@@ -988,11 +856,7 @@ fn windows_trailing_forward_slash_preserved_eval() {
 // === apply_path_mapping only accepts string, not path (spec §2.2.6) ===
 #[test]
 fn apply_path_mapping_rejects_path_input() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/src".into(),
-        destination_path: "/dst".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/src", "/dst");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::new_path("/src/file.txt", PathFormat::Posix))
         .unwrap();
@@ -1016,11 +880,7 @@ mod uri_case_sensitivity {
     use openjd_expr::{PathFormat, PathMappingRule};
 
     fn uri_rule(src: &str, dst: &str) -> PathMappingRule {
-        PathMappingRule {
-            source_path_format: PathFormat::Uri,
-            source_path: src.into(),
-            destination_path: dst.into(),
-        }
+        PathMappingRule::new(PathFormat::Uri, src, dst)
     }
 
     #[test]

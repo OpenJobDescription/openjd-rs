@@ -275,14 +275,13 @@ async fn delete_via_diff_manifest() {
                 keep_entry,
                 FileEntry::deleted(remove_path.to_string_lossy().to_string()),
             ])
-            .with_dirs(vec![openjd_snapshots::DirEntry {
-                path: work_dir
+            .with_dirs(vec![openjd_snapshots::DirEntry::deleted(
+                work_dir
                     .path()
                     .join("empty_dir")
                     .to_string_lossy()
                     .to_string(),
-                deleted: true,
-            }]);
+            )]);
 
     download_abs_manifest(
         &AbsManifest::Diff(diff),

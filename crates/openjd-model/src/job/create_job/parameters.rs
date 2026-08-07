@@ -783,6 +783,10 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
 }
 
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "internal mechanics, publicly reachable but not a spec surface"
+)]
 pub struct PathParameterOptions<'a> {
     /// Directory containing the job template. Relative PATH defaults are joined to this.
     pub job_template_dir: &'a str,
@@ -1079,7 +1083,9 @@ fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat)
     use openjd_expr::path_mapping::PathFormat;
     let sep = match format {
         PathFormat::Windows => '\\',
-        PathFormat::Posix | PathFormat::Uri => '/',
+        // `PathFormat` is `#[non_exhaustive]`; POSIX-style `/` is the correct
+        // default for any future non-Windows path flavor.
+        _ => '/',
     };
 
     // Detect and preserve the root prefix
@@ -1128,7 +1134,9 @@ fn path_is_within(path: &str, base: &str, format: openjd_expr::path_mapping::Pat
     use openjd_expr::path_mapping::PathFormat;
     let sep = match format {
         PathFormat::Windows => '\\',
-        PathFormat::Posix | PathFormat::Uri => '/',
+        // `PathFormat` is `#[non_exhaustive]`; POSIX-style `/` is the correct
+        // default for any future non-Windows path flavor.
+        _ => '/',
     };
     // Exact match — the path resolves to the base directory itself.
     if path == base {

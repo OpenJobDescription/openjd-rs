@@ -9,6 +9,10 @@ use std::time::SystemTime;
 
 /// Status of the currently running or most recently completed action.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct ActionStatus {
     pub state: ActionState,
     pub progress: Option<f64>,

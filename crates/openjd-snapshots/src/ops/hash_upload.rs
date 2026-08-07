@@ -74,6 +74,10 @@ async fn dedup_upload(
 }
 
 #[derive(Default)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct HashUploadOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
@@ -84,12 +88,14 @@ pub struct HashUploadOptions {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct UploadResult {
     pub manifest: AbsManifest,
     pub statistics: UploadStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct UploadStatistics {
     pub total_files: usize,
     pub total_bytes: u64,

@@ -92,3 +92,6 @@ windows = { version = "0.62", features = [
     "Win32_Security_Authorization",
     "Win32_System_Threading",
 ] }
+
+[lints]
+workspace = true

@@ -18,11 +18,11 @@ fn fs(s: &str) -> FormatString {
 #[tokio::test]
 async fn test_path_mapping_file_created_with_rules() {
     let tmp = TempDir::new().unwrap();
-    let rules = vec![PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt/shared".into(),
-        destination_path: "/local/shared".into(),
-    }];
+    let rules = vec![PathMappingRule::new(
+        PathFormat::Posix,
+        "/mnt/shared",
+        "/local/shared",
+    )];
     let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
         let_bindings: None,
@@ -77,11 +77,7 @@ async fn test_path_mapping_file_created_empty_when_no_rules() {
 #[tokio::test]
 async fn test_has_path_mapping_rules_true() {
     let tmp = TempDir::new().unwrap();
-    let rules = vec![PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/src".into(),
-        destination_path: "/dst".into(),
-    }];
+    let rules = vec![PathMappingRule::new(PathFormat::Posix, "/src", "/dst")];
     let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {
         let_bindings: None,
@@ -129,16 +125,8 @@ async fn test_has_path_mapping_rules_false() {
 async fn test_path_mapping_multiple_rules() {
     let tmp = TempDir::new().unwrap();
     let rules = vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/mnt/a".into(),
-            destination_path: "/local/a".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Windows,
-            source_path: "C:\\share".into(),
-            destination_path: "/local/share".into(),
-        },
+        PathMappingRule::new(PathFormat::Posix, "/mnt/a", "/local/a"),
+        PathMappingRule::new(PathFormat::Windows, "C:\\share", "/local/share"),
     ];
     let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
     let script = StepScript {

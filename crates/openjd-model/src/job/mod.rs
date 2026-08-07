@@ -21,6 +21,25 @@
 //! `to_bits()` after normalizing `-0.0` to `0.0`, consistent with
 //! `-0.0 == 0.0`. Types with `f64` fields implement `PartialEq` but not
 //! `Eq`.
+//!
+//! # Exhaustiveness
+//!
+//! Every type in this module is deliberately left exhaustive (no
+//! `#[non_exhaustive]`), unlike the `crate::template` types. These are the
+//! resolved, post-decode model: the `openjd-sessions` runtime constructs and
+//! exhaustively matches them across the crate boundary, and the decode-time
+//! extension allowlist no longer stands between a new field and the code
+//! (extensions are already resolved by the time a value here exists). A new
+//! field is therefore runtime behavior the runner must handle — as
+//! `WRAP_ACTIONS` added `on_wrap_env_enter` to `EnvironmentActions` — so a
+//! compile error is the desired signal rather than a silently ignored `_`
+//! arm. Same rationale as the runtime state machines. See
+//! `specs/non-exhaustive-policy.md`.
+#![expect(
+    clippy::exhaustive_structs,
+    clippy::exhaustive_enums,
+    reason = "see the module-level Exhaustiveness note above"
+)]
 
 pub mod create_job;
 pub mod step_dependency_graph;

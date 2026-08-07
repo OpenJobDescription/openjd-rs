@@ -59,6 +59,10 @@ pub const MAX_SYMBOL_TABLE_ENTRIES: usize = 100_000;
 ///
 /// For example, setting `"A.B.C"` when `"A.B"` is already a scalar value.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct SymbolTableError {
     pub key: String,
     pub conflict: String,
@@ -90,6 +94,10 @@ impl From<SymbolTableError> for crate::error::ExpressionError {
 
 /// Entry in a symbol table: either a nested table or a value.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum SymbolTableEntry {
     Table(SymbolTable),
     Value(ExprValue),

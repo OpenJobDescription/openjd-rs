@@ -10,6 +10,10 @@
 
 /// Parsed URI: authority (`scheme://host`) and path segments.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "internal mechanics, publicly reachable but not a spec surface"
+)]
 pub struct UriParts {
     pub authority: String,
     pub path_parts: Vec<String>,
