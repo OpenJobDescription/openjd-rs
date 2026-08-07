@@ -98,8 +98,10 @@ async fn test_cross_user_subprocess_basic() {
     session.cleanup();
 }
 
-/// Run long_running.sh (traps SIGTERM) with a timeout — process should be killed
-/// before completing all iterations, and the trap handler should fire.
+/// Run long_running.sh (traps SIGTERM) with a timeout — the process should be
+/// killed before completing all iterations. The trap handler does NOT fire: the
+/// timeout path kills the process group with SIGKILL directly (see the NOTE
+/// below), so this test asserts a mid-flight kill, not graceful trap handling.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_notify() {
@@ -141,8 +143,18 @@ async fn test_cross_user_subprocess_notify() {
     session.cleanup();
 }
 
-/// Run long_running_ignore.sh with timeout — the workload traps SIGTERM but does
-/// not exit, so the runner must escalate to SIGKILL (which cannot be trapped).
+/// Run long_running_ignore.sh with a timeout — the workload traps SIGTERM and
+/// never exits on it, so only an untrappable signal can stop it.
+///
+/// NOTE: there is no SIGTERM->SIGKILL escalation on this path. `run_subprocess`'s
+/// timeout uses `CancelMethod::Terminate`, which sends SIGKILL to the process
+/// group directly (subprocess.rs: "Action timed out, sending SIGKILL to process
+/// group"), so the workload's TERM trap never fires. That makes the outcome here
+/// identical to long_running.sh; this test's value is proving that a workload
+/// which *ignores* SIGTERM is still reaped cross-user, which is the property that
+/// would regress if the timeout path ever switched to a trappable signal without
+/// a follow-up kill. Genuine SIGTERM delivery is covered by
+/// test_cross_user_notify_delivers_sigterm.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_terminate() {
