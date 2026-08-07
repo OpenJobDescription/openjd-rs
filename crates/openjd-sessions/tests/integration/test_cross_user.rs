@@ -217,12 +217,17 @@ async fn test_cross_user_subprocess_terminate_tree() {
         "Expected Timeout or Failed, got {:?}",
         r.state
     );
-    // spawn_child.sh launches long_running.sh as a child ("Log from test N")
-    // then runs its own loop ("Log from runner N"). Seeing the child's early
-    // output confirms the whole tree launched; neither loop completing confirms
-    // the process-GROUP kill reached both parent and child, rather than only the
-    // parent dying and the child being orphaned (which is the failure mode a
-    // pgid-based kill exists to prevent).
+    // spawn_child.sh launches long_running.sh ("Log from test N") and runs its
+    // own loop ("Log from runner N") CONCURRENTLY -- it does not `wait` first.
+    // That concurrency is what makes these assertions meaningful: both processes
+    // are mid-loop when the kill lands, so each "did not reach iteration 19"
+    // check is real evidence that process died rather than a side effect of it
+    // never having started.
+    //
+    // The child assertions carry the actual tree-kill property: if a kill reaped
+    // only the parent and orphaned the child, the child would keep printing and
+    // reach "Log from test 19". That is the failure mode a pgid-based kill exists
+    // to prevent, and it is directly observable here.
     assert!(
         r.stdout.contains("Log from test 0"),
         "Child process should have produced early output; stdout: {:?}",
@@ -230,7 +235,12 @@ async fn test_cross_user_subprocess_terminate_tree() {
     );
     assert!(
         !r.stdout.contains("Log from test 19"),
-        "Child should have been killed with the group, not completed; stdout: {:?}",
+        "Child should have been killed with the group, not orphaned to completion; stdout: {:?}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("Log from runner 0"),
+        "Parent should have produced early output concurrently with the child; stdout: {:?}",
         r.stdout
     );
     assert!(
