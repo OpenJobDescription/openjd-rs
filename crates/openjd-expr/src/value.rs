@@ -727,6 +727,11 @@ impl ExprValue {
     /// Coercion is non-destructive: only conversions that don't lose
     /// information are attempted (`int → float`, `int → string`, etc).
     ///
+    /// Unresolved values apply the same table at the type level and return
+    /// an unresolved value constrained to the result type. Checks that need
+    /// a concrete payload, such as parsing a string as an integer, are
+    /// deferred until resolution.
+    ///
     /// An `any` target is unconstrained: every value is returned
     /// unchanged.
     ///
@@ -748,6 +753,17 @@ impl ExprValue {
         // coercion is a no-op (RFC 0005 §"Type System").
         if target.code() == TypeCode::Any {
             return Ok(self);
+        }
+        // Unresolved values have no payload, so apply the concrete coercion
+        // table at the type level and defer payload-dependent checks until
+        // resolution. The result constraint must satisfy the target just as
+        // a concrete result's type would.
+        if let ExprValue::Unresolved(constraint) = &self {
+            return if let Some(result_type) = Self::unresolved_coercion_result(constraint, target) {
+                Ok(ExprValue::unresolved(result_type))
+            } else {
+                Err(format!("Cannot coerce {constraint} to {target}"))
+            };
         }
         // Match-first: also accepts the case where the target is a union
         // and the value's type is one of its members. Falls back to the
@@ -843,6 +859,104 @@ impl ExprValue {
                 }
             }
             _ => Err(format!("Cannot coerce {} to {target}", self.expr_type())),
+        }
+    }
+
+    fn unresolved_coercion_result(source: &ExprType, target: &ExprType) -> Option<ExprType> {
+        if target.code() == TypeCode::Any {
+            return Some(source.clone());
+        }
+        if source.code() == TypeCode::Unresolved {
+            return source
+                .params()
+                .first()
+                .and_then(|inner| Self::unresolved_coercion_result(inner, target));
+        }
+        if source.code() == TypeCode::Union {
+            let result_types = source
+                .params()
+                .iter()
+                .map(|member| Self::unresolved_coercion_result(member, target))
+                .collect::<Option<Vec<_>>>()?;
+            return Some(ExprType::union(result_types));
+        }
+        if source.code() == TypeCode::Any
+            || matches!(
+                source.code(),
+                TypeCode::TypeVarT
+                    | TypeCode::TypeVarT1
+                    | TypeCode::TypeVarT2
+                    | TypeCode::TypeVarT3
+            )
+        {
+            return Some(target.clone());
+        }
+        if target.code() == TypeCode::Union {
+            if target.match_type(source).is_some() {
+                return Some(source.clone());
+            }
+            for member in target.params() {
+                if matches!(
+                    member.code(),
+                    TypeCode::NullType | TypeCode::List | TypeCode::Union
+                ) {
+                    continue;
+                }
+                if let Some(result_type) = Self::unresolved_coercion_result(source, member) {
+                    return Some(result_type);
+                }
+            }
+            return None;
+        }
+        if matches!(
+            target.code(),
+            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+        ) || source == target
+        {
+            return Some(source.clone());
+        }
+        if source.code() == TypeCode::List
+            && source.params().len() == 1
+            && target.code() == TypeCode::List
+            && target.params().len() == 1
+        {
+            let source_elem = &source.params()[0];
+            if source_elem == &ExprType::NULLTYPE
+                || Self::unresolved_coercion_result(source_elem, &target.params()[0]).is_some()
+            {
+                return Some(target.clone());
+            }
+            return None;
+        }
+
+        let has_scalar_rule = matches!(
+            (source.code(), target.code()),
+            (TypeCode::Int, TypeCode::Float)
+                | (TypeCode::Float, TypeCode::Int)
+                | (
+                    TypeCode::Bool
+                        | TypeCode::Int
+                        | TypeCode::Float
+                        | TypeCode::Path
+                        | TypeCode::RangeExpr,
+                    TypeCode::String
+                )
+                | (
+                    TypeCode::String,
+                    TypeCode::NullType
+                        | TypeCode::Bool
+                        | TypeCode::Int
+                        | TypeCode::Float
+                        | TypeCode::Path
+                        | TypeCode::RangeExpr
+                )
+        );
+        if has_scalar_rule
+            || (source.code() == TypeCode::RangeExpr && target == &ExprType::list(ExprType::INT))
+        {
+            Some(target.clone())
+        } else {
+            None
         }
     }
 
