@@ -157,6 +157,53 @@ fn coerce_compatible_unresolved_preserves_constraint() {
 }
 
 #[test]
+fn coerce_unresolved_applies_type_level_rules() {
+    let cases = [
+        (ExprType::INT, ExprType::STRING),
+        (ExprType::INT, ExprType::FLOAT),
+        (ExprType::PATH, ExprType::STRING),
+        (
+            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::FLOAT),
+        ),
+        (ExprType::RANGE_EXPR, ExprType::list(ExprType::INT)),
+    ];
+    for (source, target) in cases {
+        let value = ExprValue::unresolved(source)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::unresolved(target));
+    }
+}
+
+#[test]
+fn coerce_unresolved_defers_payload_checks() {
+    let value = ExprValue::unresolved(ExprType::STRING)
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_narrows_union_constraint() {
+    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]))
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_does_not_broaden_for_union_target() {
+    let value = ExprValue::unresolved(ExprType::INT)
+        .coerce(
+            &ExprType::union(vec![ExprType::INT, ExprType::STRING]),
+            PathFormat::Posix,
+        )
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
 fn coerce_incompatible_unresolved_errors() {
     let error = ExprValue::unresolved(ExprType::list(ExprType::INT))
         .coerce(&ExprType::INT, PathFormat::Posix)

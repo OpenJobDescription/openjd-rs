@@ -480,7 +480,14 @@ concrete data. Because they're wrapped values, they can pass through the evaluat
 memory tracking and dispatch without a special code path. `Display` on an unresolved
 value renders as `unresolved[T]` for debug/error output.
 
-Target-type coercion preserves `unresolved[T]` unchanged when `T` already
-satisfies the target type. It rejects an incompatible target, such as
-`unresolved[list[int]]` against `int`. Coercions that depend on a concrete
-payload are deferred until the value is resolved.
+Target-type coercion applies the same conversion table to unresolved types that
+it applies to concrete values. The payload remains unresolved, but its type is
+narrowed to the coercion result. For example, `unresolved[int]` against a
+`string` target becomes `unresolved[string]`, and
+`unresolved[int | string]` against an `int` target becomes `unresolved[int]`.
+
+Checks that require a concrete payload are deferred until runtime. For example,
+`unresolved[string]` can narrow to `unresolved[int]`; once resolved, the string
+must still parse as an integer. A source and target with no type-level coercion
+rule, such as `unresolved[list[int]]` against `int`, is rejected during
+validation.

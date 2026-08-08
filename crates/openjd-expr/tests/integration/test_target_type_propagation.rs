@@ -458,16 +458,19 @@ fn compatible_scalar_target_preserves_unresolved_result() {
 }
 
 #[test]
+fn coercible_scalar_target_narrows_unresolved_result() {
+    let st = symtab(&[("X", ExprValue::unresolved(ExprType::INT))]);
+    let result = eval_with_target_type("X + 1", &ExprType::STRING, &st).unwrap();
+    assert_eq!(result, ExprValue::unresolved(ExprType::STRING));
+}
+
+#[test]
 fn incompatible_scalar_target_rejects_unresolved_result() {
     let st = symtab(&[("X", ExprValue::unresolved(ExprType::list(ExprType::INT)))]);
     let err = eval_with_target_type("X", &ExprType::INT, &st)
         .unwrap_err()
         .to_string();
-    let expected = concat!(
-        "Cannot coerce list[int] to int\n",
-        "  X\n",
-        "  ^"
-    );
+    let expected = concat!("Cannot coerce list[int] to int\n", "  X\n", "  ^");
     assert!(err.contains(expected), "got:\n{err}\nexpected:\n{expected}");
 }
 
