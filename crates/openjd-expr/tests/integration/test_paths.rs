@@ -1534,6 +1534,54 @@ fn join_uri_left_normalizes_backslashes_posix_format() {
     );
 }
 
+#[test]
+fn join_uri_left_absolute_right_replaces() {
+    assert_eq!(
+        path_join("s3://bucket/prefix", "/foo", PathFormat::Posix),
+        "/foo"
+    );
+    assert_eq!(
+        path_join("s3://bucket/prefix", "/foo", PathFormat::Uri),
+        "/foo"
+    );
+    assert_eq!(
+        eval_posix("P / '/foo'", &posix_st("P", "s3://bucket/prefix")).to_display_string(),
+        "/foo"
+    );
+}
+
+#[test]
+fn join_uri_left_root_relative_windows_preserves_authority() {
+    assert_eq!(
+        path_join("s3://bucket/prefix", "/foo", PathFormat::Windows),
+        "s3://bucket/foo"
+    );
+    assert_eq!(
+        path_join("s3://bucket/prefix", "\\foo", PathFormat::Windows),
+        "s3://bucket/foo"
+    );
+    assert_eq!(
+        eval_windows(r"P / r'\foo'", &windows_st("P", "s3://bucket/prefix")).to_display_string(),
+        "s3://bucket/foo"
+    );
+}
+
+#[test]
+fn join_uri_left_drive_relative_windows_replaces_uri() {
+    assert_eq!(
+        path_join("s3://bucket/prefix", "C:", PathFormat::Windows),
+        "C:"
+    );
+    assert_eq!(
+        path_join("s3://bucket/prefix", "C:foo", PathFormat::Windows),
+        "C:foo"
+    );
+    assert_eq!(
+        eval_windows("P / 'C:'", &windows_st("P", "s3://bucket/prefix")).to_display_string(),
+        "C:"
+    );
+}
+
 // --- Absolute right (URI) ---
 
 #[test]

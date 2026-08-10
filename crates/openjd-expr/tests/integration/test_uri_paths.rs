@@ -432,7 +432,6 @@ fn uri_from_parts_bare() {
 }
 #[test]
 fn uri_join_absolute_replaces() {
-    // Joining an absolute path replaces the left side
     assert_eq!(
         eval_with("P / '/new/path'", &uri_st("P", "s3://bucket/old")).to_display_string(),
         "/new/path"
@@ -878,11 +877,13 @@ fn join_multi_four_segments() {
     );
 }
 
-// TestUriPathOperators: join with path() object (Python test_join_absolute_replaces)
+// TestUriPathOperators: absolute path objects replace the URI.
 #[test]
 fn join_absolute_path_object_replaces() {
-    let r = eval("path('s3://bucket/dir') / path('/local/path')");
-    assert!(r.to_display_string().ends_with("/local/path"));
+    assert_eq!(
+        eval("path('s3://bucket/dir') / path('/local/path')").to_display_string(),
+        "/local/path"
+    );
 }
 
 // TestUriPathOperators: join_string with sub/file.obj (Python exact)

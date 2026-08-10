@@ -221,9 +221,17 @@ Path-related operations in the expression language:
 | `/` | `(path, path) -> path` | Join paths |
 | `+` | `(path, string) -> path` | Append to last component |
 
-On Windows, a root-relative right operand (for example, `\renders`) replaces the
-left path below its root. A drive or UNC root from the left operand is retained; if
-the left operand has no drive or UNC root, the right operand replaces it entirely.
+On Windows filesystem paths, a root-relative right operand (for example,
+`\renders`) replaces the left path below its root. A drive or UNC root from the
+left operand is retained; if the left operand has no drive or UNC root, the right
+operand replaces it entirely. The same absolute-right rule applies to URI left
+operands, so `/renders` replaces the URI entirely under POSIX and URI formats.
+Under Windows, a single leading `/` or `\` is root-relative rather than absolute;
+for a URI left operand it replaces only the path below the authority. For example,
+`path("s3://bucket/prefix") / "/renders"` produces `s3://bucket/renders` under
+Windows and `/renders` under POSIX. A Windows drive-relative right operand replaces
+a URI left operand entirely, so `path("s3://bucket/prefix") / "C:render.exr"`
+produces `C:render.exr`.
 
 ### apply_path_mapping
 

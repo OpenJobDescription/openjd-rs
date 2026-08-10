@@ -421,13 +421,36 @@ pub fn is_absolute(path_str: &str, fmt: PathFormat) -> bool {
 
 /// Join two path strings using the separator and absoluteness rules for `fmt`.
 ///
-/// If `right` is absolute (according to `fmt`), it replaces `left` entirely.
-/// On Windows, if `right` starts with a single `/` or `\` (root-relative),
-/// the drive letter from `left` is preserved (matching `ntpath.join` behavior).
+/// An absolute `right` replaces `left` entirely. For URI left operands, a
+/// non-absolute leading path separator resets the path below the existing
+/// authority; this is the Windows root-relative case. A Windows drive-relative
+/// `right` replaces a URI left operand entirely.
+/// On Windows filesystem paths, if `right` starts with a single `/` or `\`
+/// (root-relative), the drive or UNC root from `left` is preserved; if `left`
+/// has no root, `right` replaces it entirely (matching `ntpath.join` behavior).
 /// Otherwise, `right` is appended to `left` with the appropriate separator.
 pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
     if is_absolute(right, fmt) {
         return right.to_string();
+    }
+    if let Some(uri) = crate::uri_path::parse(left) {
+        let right_bytes = right.as_bytes();
+        if fmt == PathFormat::Windows
+            && right_bytes.len() >= 2
+            && right_bytes[0].is_ascii_alphabetic()
+            && right_bytes[1] == b':'
+        {
+            return right.to_string();
+        }
+        let right = if fmt == PathFormat::Windows {
+            std::borrow::Cow::Owned(right.replace('\\', "/"))
+        } else {
+            std::borrow::Cow::Borrowed(right)
+        };
+        if right.starts_with('/') {
+            return format!("{}{right}", uri.authority);
+        }
+        return format!("{}/{}", left.trim_end_matches('/'), right);
     }
     // Windows root-relative: /foo or \foo (but not \\server) replaces the path
     // but keeps the root from left. Matches ntpath.join behavior.
@@ -448,25 +471,13 @@ pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
             return right.to_string();
         }
     }
-    let left_is_uri = crate::uri_path::is_uri(left);
-    let (sep, trim_chars): (&str, &[char]) = if left_is_uri {
-        ("/", &['/'])
-    } else {
-        match fmt {
-            // On Windows, both / and \ are separators
-            PathFormat::Windows => ("\\", &['/', '\\']),
-            // On POSIX, only / is a separator (\ is a valid filename char)
-            PathFormat::Posix | PathFormat::Uri => ("/", &['/']),
-        }
+    let (sep, trim_chars): (&str, &[char]) = match fmt {
+        // On Windows, both / and \ are separators
+        PathFormat::Windows => ("\\", &['/', '\\']),
+        // On POSIX, only / is a separator (\ is a valid filename char)
+        PathFormat::Posix | PathFormat::Uri => ("/", &['/']),
     };
     let left = left.trim_end_matches(trim_chars);
-    // When appending to a URI from a Windows context, normalize backslashes to forward slashes.
-    // In POSIX context, backslashes are valid filename characters and must not be converted.
-    let right = if left_is_uri && fmt == PathFormat::Windows {
-        std::borrow::Cow::Owned(right.replace('\\', "/"))
-    } else {
-        std::borrow::Cow::Borrowed(right)
-    };
     format!("{left}{sep}{right}")
 }
 
@@ -477,7 +488,7 @@ pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
 /// `is_absolute` without URI recognition). This prevents `scheme://...` strings
 /// from being treated as absolute when URI support is disabled.
 pub fn non_uri_join(left: &str, right: &str, fmt: PathFormat) -> String {
-    // Windows root-relative: /foo or \foo keeps the root from left
+    // Windows root-relative: keep a drive/UNC root, or replace a rootless left path.
     if fmt == PathFormat::Windows {
         let rb = right.as_bytes();
         if rb.first() == Some(&b'/') || rb.first() == Some(&b'\\') {
