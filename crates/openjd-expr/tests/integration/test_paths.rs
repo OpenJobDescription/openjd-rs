@@ -1402,7 +1402,7 @@ fn relative_to_component_boundary_error() {
 // path::join — unit tests for the format-aware join function
 // ══════════════════════════════════════════════════════════════
 
-use openjd_expr::functions::path::join as path_join;
+use openjd_expr::functions::path::{join as path_join, non_uri_join};
 
 // --- POSIX format ---
 
@@ -1580,6 +1580,22 @@ fn join_windows_backslash_root_relative() {
     assert_eq!(
         path_join("C:\\base", "\\foo", PathFormat::Windows),
         "C:\\foo"
+    );
+}
+
+#[test]
+fn join_windows_root_relative_replaces_drive_less_left() {
+    assert_eq!(path_join("a\\b", "\\foo", PathFormat::Windows), "\\foo");
+    assert_eq!(path_join("a\\b", "/foo", PathFormat::Windows), "/foo");
+    assert_eq!(non_uri_join("a\\b", "\\foo", PathFormat::Windows), "\\foo");
+    assert_eq!(non_uri_join("a\\b", "/foo", PathFormat::Windows), "/foo");
+    assert_eq!(
+        non_uri_join("C:\\base", "\\foo", PathFormat::Windows),
+        "C:\\foo"
+    );
+    assert_eq!(
+        eval_windows(r"P / r'\x'", &windows_st("P", r"a\b")).to_display_string(),
+        r"\x"
     );
 }
 

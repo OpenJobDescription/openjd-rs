@@ -445,6 +445,7 @@ pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
             if let Some(unc_root) = extract_unc_root(left) {
                 return format!("{unc_root}{right}");
             }
+            return right.to_string();
         }
     }
     let left_is_uri = crate::uri_path::is_uri(left);
@@ -487,6 +488,7 @@ pub fn non_uri_join(left: &str, right: &str, fmt: PathFormat) -> String {
             if let Some(unc_root) = extract_unc_root(left) {
                 return format!("{unc_root}{right}");
             }
+            return right.to_string();
         }
     }
     let (sep, trim_chars): (&str, &[char]) = match fmt {

@@ -221,6 +221,10 @@ Path-related operations in the expression language:
 | `/` | `(path, path) -> path` | Join paths |
 | `+` | `(path, string) -> path` | Append to last component |
 
+On Windows, a root-relative right operand (for example, `\renders`) replaces the
+left path below its root. A drive or UNC root from the left operand is retained; if
+the left operand has no drive or UNC root, the right operand replaces it entirely.
+
 ### apply_path_mapping
 
 `apply_path_mapping(path_string)` is a host-context-only function that applies
