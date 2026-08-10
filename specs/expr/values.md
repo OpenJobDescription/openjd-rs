@@ -357,14 +357,17 @@ Applied when the evaluation result needs to match an expected type:
 - STRING → FLOAT (parse)
 - INT → FLOAT
 - RANGE_EXPR → STRING
-- RANGE_EXPR → LIST[T] (materialize to `LIST[INT]`, then widen element-wise)
+- RANGE_EXPR → LIST[INT] (the only list type; see below)
 - LIST[T] → LIST[U] (element-wise coercion)
 
 Coercion is type-directed: when it succeeds, the resulting value's type
-satisfies the requested target. A `range_expr` coerced to `list[float]`
-therefore yields a `list[float]`, not the `list[int]` it materializes
-into first; a target whose element type `int` cannot reach, such as
-`list[bool]`, is rejected instead.
+satisfies the requested target. Implicit rules do not chain: `list[int]`
+is the only list type a `range_expr` implicitly coerces to (RFC 0005), so
+a `list[T]` target with any other element type — `list[float]`,
+`list[string]`, `list[bool]` — is rejected rather than materialized and
+widened element-wise. Templates that want the widened list chain the
+explicit `list()` conversion (RFC 0006), whose `list[int]` result the
+`LIST[T] → LIST[U]` rule then applies to.
 
 A **type variable** target (`T`, `T1`, `T2`, `T3`) has no coercion rule.
 Type variables are placeholders in generic function signatures, resolved
@@ -524,5 +527,5 @@ the deciding information is a payload the placeholder does not carry. It must
 never reject a pair the concrete value would accept: doing so fails a template at
 validation time that would have run correctly, which no later stage can recover
 from. Any such case is a bug in the type-level table, not a deliberate
-narrowing — the `range_expr → list[T]` and type-variable-target rules above apply
+narrowing — the `range_expr → list[int]` and type-variable-target rules above apply
 identically on both paths for this reason.

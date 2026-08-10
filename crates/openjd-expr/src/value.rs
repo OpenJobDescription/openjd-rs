@@ -832,6 +832,20 @@ impl ExprValue {
             }
             (ExprValue::RangeExpr(r), TypeCode::String) => Ok(ExprValue::String(r.to_string())),
             (ExprValue::RangeExpr(r), TypeCode::List) => {
+                // RFC 0005: `list[int]` is the only list type a range_expr
+                // implicitly coerces to. Implicit rules do not chain, so the
+                // materialized `list[int]` is never widened element-wise
+                // toward another target; templates use the explicit `list()`
+                // conversion (RFC 0006) when they want that.
+                if let Some(elem) = target.params().first() {
+                    if elem != &ExprType::INT {
+                        return Err(format!(
+                            "Cannot coerce range_expr to {target}: a range \
+                             expression only implicitly coerces to list[int] \
+                             (use list() for an explicit conversion)"
+                        ));
+                    }
+                }
                 // coerce() runs outside any EvalContext (post-evaluation
                 // target-type hook, public API), so no operation or memory
                 // budget applies here. Cap the materialization at the
@@ -846,17 +860,7 @@ impl ExprValue {
                         crate::eval::DEFAULT_OPERATION_LIMIT
                     ));
                 }
-                let materialized = ExprValue::ListInt(r.to_vec());
-                match target.params().first() {
-                    // A `list[int]` target (or a bare `list`) is satisfied by
-                    // the materialized range. Any other element type needs the
-                    // element-wise pass below, or the result would not satisfy
-                    // the target it was coerced to.
-                    Some(elem) if elem != &ExprType::INT => {
-                        materialized.coerce(target, path_format)
-                    }
-                    _ => Ok(materialized),
-                }
+                Ok(ExprValue::ListInt(r.to_vec()))
             }
             _ if target.code() == TypeCode::List && target.params().len() == 1 => {
                 let elem_type = &target.params()[0];
@@ -968,13 +972,13 @@ impl ExprValue {
                         | TypeCode::RangeExpr
                 )
         );
-        // A `range_expr` materializes to `list[int]`, which then satisfies a
-        // `list[T]` target whenever `int` itself coerces to `T` — mirroring
-        // the concrete path's materialize-then-widen behavior.
+        // `list[int]` is the only list type a `range_expr` implicitly
+        // coerces to (RFC 0005); implicit rules do not chain, so no
+        // element-wise widening applies — mirroring the concrete path.
         let has_range_list_rule = source.code() == TypeCode::RangeExpr
             && target.code() == TypeCode::List
             && match target.params().first() {
-                Some(elem) => Self::unresolved_coercion_result(&ExprType::INT, elem).is_some(),
+                Some(elem) => elem == &ExprType::INT,
                 None => true,
             };
         if has_scalar_rule || has_range_list_rule {

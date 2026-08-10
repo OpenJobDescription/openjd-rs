@@ -280,49 +280,52 @@ fn coerce_unresolved_errors_when_no_union_member_succeeds() {
     assert_eq!(error, format!("Cannot coerce {source} to int"));
 }
 
-/// A coerced value must satisfy the target it was coerced to. A
-/// `range_expr` materializes to `list[int]`, so a `list[T]` target needs
-/// the elements widened to `T` rather than handed back as ints.
+/// RFC 0005: `list[int]` is the only list type a `range_expr` implicitly
+/// coerces to, and a coerced value must satisfy the target it was coerced
+/// to — so the coercion yields a `list[int]`, never a widened list.
 #[test]
-fn coerce_range_expr_to_list_widens_elements() {
+fn coerce_range_expr_to_list_int_only() {
     let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
-    for target in ["list[int]", "list[float]", "list[string]"] {
+    let target = ExprType::list(ExprType::INT);
+    let value = ExprValue::RangeExpr(range)
+        .coerce(&target, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::ListInt(vec![1, 2, 3]));
+}
+
+/// Implicit coercion rules do not chain: a `list[T]` target with any
+/// element type other than `int` is rejected on both the concrete and
+/// unresolved paths, rather than materializing and widening element-wise.
+/// Templates use the explicit `list()` conversion for that.
+#[test]
+fn coerce_range_expr_to_other_list_errors_on_both_paths() {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[float]", "list[string]", "list[bool]"] {
         let target = ExprType::parse(target).unwrap();
-        let value = ExprValue::RangeExpr(range.clone())
-            .coerce(&target, PathFormat::Posix)
-            .unwrap();
-        assert_eq!(value.expr_type(), target, "target={target}");
+        assert!(
+            ExprValue::RangeExpr(range.clone())
+                .coerce(&target, PathFormat::Posix)
+                .is_err(),
+            "concrete should reject {target}"
+        );
+        assert_eq!(
+            ExprValue::unresolved(ExprType::RANGE_EXPR)
+                .coerce(&target, PathFormat::Posix)
+                .unwrap_err(),
+            format!("Cannot coerce range_expr to {target}")
+        );
     }
 }
 
-/// The unresolved table must agree with the concrete one: accepting a
-/// `list[T]` target only when `int` itself coerces to `T`.
+/// The unresolved table must agree with the concrete one, accepting only
+/// the `list[int]` target.
 #[test]
 fn coerce_unresolved_range_expr_to_list_matches_concrete() {
-    for target in ["list[int]", "list[float]", "list[string]"] {
-        let target = ExprType::parse(target).unwrap();
-        let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
-            .coerce(&target, PathFormat::Posix)
-            .unwrap();
-        assert_eq!(value, ExprValue::unresolved(target));
-    }
-}
-
-/// `list[bool]` has no `int → bool` rule, so both paths must reject it
-/// rather than one silently yielding a `list[int]`.
-#[test]
-fn coerce_range_expr_to_incompatible_list_errors_on_both_paths() {
-    let target = ExprType::list(ExprType::BOOL);
-    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
-    assert!(ExprValue::RangeExpr(range)
+    let target = ExprType::list(ExprType::INT);
+    let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
         .coerce(&target, PathFormat::Posix)
-        .is_err());
-    assert_eq!(
-        ExprValue::unresolved(ExprType::RANGE_EXPR)
-            .coerce(&target, PathFormat::Posix)
-            .unwrap_err(),
-        "Cannot coerce range_expr to list[bool]"
-    );
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(target));
 }
 
 /// A concrete value never coerces to a type variable, so an unresolved
