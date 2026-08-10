@@ -2560,6 +2560,13 @@ fn repr_sh_list_with_null_byte_returns_error() {
 }
 
 #[test]
+fn center_odd_padding_matches_python_bias() {
+    assert_eq!(eval("center('ab', 5)").to_display_string(), "  ab ");
+    assert_eq!(eval("center('abc', 6)").to_display_string(), " abc  ");
+    assert_eq!(eval("center('a', 4)").to_display_string(), " a  ");
+}
+
+#[test]
 fn padding_width_counts_characters_but_budgets_bytes() {
     assert_eq!(eval("center('界', 4)").to_display_string(), " 界  ");
     assert_eq!(eval("ljust('界', 4)").to_display_string(), "界   ");

@@ -374,7 +374,7 @@ pub fn center_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Ok(budget.finish(s.to_string()));
     }
     let pad = width - char_len;
-    let left = pad / 2;
+    let left = pad / 2 + (pad & width & 1);
     let right = pad - left;
     let mut result = String::with_capacity(output_bytes);
     for _ in 0..left {
