@@ -357,8 +357,19 @@ Applied when the evaluation result needs to match an expected type:
 - STRING → FLOAT (parse)
 - INT → FLOAT
 - RANGE_EXPR → STRING
-- RANGE_EXPR → LIST[INT]
+- RANGE_EXPR → LIST[T] (materialize to `LIST[INT]`, then widen element-wise)
 - LIST[T] → LIST[U] (element-wise coercion)
+
+Coercion is type-directed: when it succeeds, the resulting value's type
+satisfies the requested target. A `range_expr` coerced to `list[float]`
+therefore yields a `list[float]`, not the `list[int]` it materializes
+into first; a target whose element type `int` cannot reach, such as
+`list[bool]`, is rejected instead.
+
+A **type variable** target (`T`, `T1`, `T2`, `T3`) has no coercion rule.
+Type variables are placeholders in generic function signatures, resolved
+by signature matching before any value is coerced, so reaching coercion
+with one still unbound is always an error.
 
 An **`any`** target is unconstrained (RFC 0005 lists it as "matches
 anything"): every value is returned unchanged, so an `any` target can
@@ -506,3 +517,12 @@ Checks that require a concrete payload are deferred until runtime. For example,
 must still parse as an integer. A source and target with no type-level coercion
 rule, such as `unresolved[list[int]]` against `int`, is rejected during
 validation.
+
+The two directions are deliberately asymmetric, and only in one direction.
+Unresolved coercion may accept a pair the concrete value later rejects, because
+the deciding information is a payload the placeholder does not carry. It must
+never reject a pair the concrete value would accept: doing so fails a template at
+validation time that would have run correctly, which no later stage can recover
+from. Any such case is a bug in the type-level table, not a deliberate
+narrowing — the `range_expr → list[T]` and type-variable-target rules above apply
+identically on both paths for this reason.

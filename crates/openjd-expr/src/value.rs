@@ -730,7 +730,10 @@ impl ExprValue {
     /// Unresolved values apply the same table at the type level and return
     /// an unresolved value constrained to the result type. Checks that need
     /// a concrete payload, such as parsing a string as an integer, are
-    /// deferred until resolution.
+    /// deferred until resolution. The type-level table may therefore accept
+    /// a pair that the concrete value later rejects, but it must never
+    /// reject one the concrete value would accept — that would fail a
+    /// template during validation that would have run correctly.
     ///
     /// An `any` target is unconstrained: every value is returned
     /// unchanged.
@@ -843,7 +846,17 @@ impl ExprValue {
                         crate::eval::DEFAULT_OPERATION_LIMIT
                     ));
                 }
-                Ok(ExprValue::ListInt(r.to_vec()))
+                let materialized = ExprValue::ListInt(r.to_vec());
+                match target.params().first() {
+                    // A `list[int]` target (or a bare `list`) is satisfied by
+                    // the materialized range. Any other element type needs the
+                    // element-wise pass below, or the result would not satisfy
+                    // the target it was coerced to.
+                    Some(elem) if elem != &ExprType::INT => {
+                        materialized.coerce(target, path_format)
+                    }
+                    _ => Ok(materialized),
+                }
             }
             _ if target.code() == TypeCode::List && target.params().len() == 1 => {
                 let elem_type = &target.params()[0];
@@ -912,11 +925,11 @@ impl ExprValue {
             }
             return None;
         }
-        if matches!(
-            target.code(),
-            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
-        ) || source == target
-        {
+        // Note there is deliberately no rule for a type-variable *target*:
+        // the concrete table has no arm for one either, so a concrete value
+        // always fails against it. Accepting the unresolved case would let
+        // validation pass an expression that can only fail at runtime.
+        if source == target {
             return Some(source.clone());
         }
         if source.code() == TypeCode::List
@@ -955,9 +968,16 @@ impl ExprValue {
                         | TypeCode::RangeExpr
                 )
         );
-        if has_scalar_rule
-            || (source.code() == TypeCode::RangeExpr && target == &ExprType::list(ExprType::INT))
-        {
+        // A `range_expr` materializes to `list[int]`, which then satisfies a
+        // `list[T]` target whenever `int` itself coerces to `T` — mirroring
+        // the concrete path's materialize-then-widen behavior.
+        let has_range_list_rule = source.code() == TypeCode::RangeExpr
+            && target.code() == TypeCode::List
+            && match target.params().first() {
+                Some(elem) => Self::unresolved_coercion_result(&ExprType::INT, elem).is_some(),
+                None => true,
+            };
+        if has_scalar_rule || has_range_list_rule {
             Some(target.clone())
         } else {
             None

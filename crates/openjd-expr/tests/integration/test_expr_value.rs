@@ -280,6 +280,73 @@ fn coerce_unresolved_errors_when_no_union_member_succeeds() {
     assert_eq!(error, format!("Cannot coerce {source} to int"));
 }
 
+/// A coerced value must satisfy the target it was coerced to. A
+/// `range_expr` materializes to `list[int]`, so a `list[T]` target needs
+/// the elements widened to `T` rather than handed back as ints.
+#[test]
+fn coerce_range_expr_to_list_widens_elements() {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[int]", "list[float]", "list[string]"] {
+        let target = ExprType::parse(target).unwrap();
+        let value = ExprValue::RangeExpr(range.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value.expr_type(), target, "target={target}");
+    }
+}
+
+/// The unresolved table must agree with the concrete one: accepting a
+/// `list[T]` target only when `int` itself coerces to `T`.
+#[test]
+fn coerce_unresolved_range_expr_to_list_matches_concrete() {
+    for target in ["list[int]", "list[float]", "list[string]"] {
+        let target = ExprType::parse(target).unwrap();
+        let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::unresolved(target));
+    }
+}
+
+/// `list[bool]` has no `int → bool` rule, so both paths must reject it
+/// rather than one silently yielding a `list[int]`.
+#[test]
+fn coerce_range_expr_to_incompatible_list_errors_on_both_paths() {
+    let target = ExprType::list(ExprType::BOOL);
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    assert!(ExprValue::RangeExpr(range)
+        .coerce(&target, PathFormat::Posix)
+        .is_err());
+    assert_eq!(
+        ExprValue::unresolved(ExprType::RANGE_EXPR)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap_err(),
+        "Cannot coerce range_expr to list[bool]"
+    );
+}
+
+/// A concrete value never coerces to a type variable, so an unresolved
+/// placeholder must not either — otherwise validation would accept an
+/// expression that can only fail once the value is known.
+#[test]
+fn coerce_unresolved_rejects_type_var_target() {
+    for target in ["T", "T1", "T2", "T3"] {
+        let target = ExprType::parse(target).unwrap();
+        assert!(
+            ExprValue::Int(42)
+                .coerce(&target, PathFormat::Posix)
+                .is_err(),
+            "concrete should reject {target}"
+        );
+        assert_eq!(
+            ExprValue::unresolved(ExprType::INT)
+                .coerce(&target, PathFormat::Posix)
+                .unwrap_err(),
+            format!("Cannot coerce int to {target}")
+        );
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // repr_python
 // ══════════════════════════════════════════════════════════════
