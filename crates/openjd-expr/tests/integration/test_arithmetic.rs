@@ -156,6 +156,22 @@ fn floordiv_float_truncates_negative() {
 }
 
 #[test]
+fn floordiv_float_accounts_for_rounded_quotients() {
+    assert_eq!(eval("205.0 // 0.1").to_display_string(), "2049");
+    assert_eq!(eval("-205.0 // 0.1").to_display_string(), "-2050");
+    assert_eq!(eval("205.0 // (-0.1)").to_display_string(), "-2050");
+    assert_eq!(eval("-205.0 // (-0.1)").to_display_string(), "2049");
+    assert_eq!(
+        eval("4.485645604145502e-49 // -4.340298580774782e-64").to_display_string(),
+        "-1033487793677267"
+    );
+    assert_eq!(
+        eval("-1.609523844009722e-76 // -5.270510475043238e-92").to_display_string(),
+        "3053829134067924"
+    );
+}
+
+#[test]
 fn floordiv_by_zero_int() {
     assert_err(
         "10 // 0",

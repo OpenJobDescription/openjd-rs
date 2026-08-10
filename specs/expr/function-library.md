@@ -458,6 +458,8 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
 - **Float modulo** starts from the truncating floating-point remainder and corrects
   its sign to match the divisor. It does not reconstruct the remainder from a rounded
   quotient, which would lose precision for large quotients.
+- **Float floor division** derives its quotient from that remainder before rounding
+  toward negative infinity. This avoids flooring an already-rounded direct quotient.
 - **`round()`** uses banker's rounding / round-half-even (§2.2.2)
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
   Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
