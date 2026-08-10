@@ -193,6 +193,66 @@ fn coerce_unresolved_narrows_union_constraint() {
 }
 
 #[test]
+fn coerce_unresolved_keeps_successful_union_members() {
+    let value = ExprValue::unresolved(ExprType::union(vec![
+        ExprType::INT,
+        ExprType::list(ExprType::INT),
+    ]))
+    .coerce(&ExprType::INT, PathFormat::Posix)
+    .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_nullable_and_nested_union_sources() {
+    let cases = [
+        ("int?", "string", "string"),
+        ("int?", "int", "int"),
+        ("int?", "int | string", "int"),
+        ("string?", "int | string", "string"),
+        ("int?", "int? | list[int]", "int?"),
+        ("int? | list[int]", "int | list[int]", "int | list[int]"),
+        ("string? | list[string]", "string?", "string?"),
+    ];
+
+    for (source, target, expected) in cases {
+        let value = ExprValue::unresolved(ExprType::parse(source).unwrap())
+            .coerce(&ExprType::parse(target).unwrap(), PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            value,
+            ExprValue::unresolved(ExprType::parse(expected).unwrap()),
+            "source={source}, target={target}"
+        );
+    }
+}
+
+#[test]
+fn coerce_unresolved_empty_list_to_typed_list() {
+    let value = ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))
+        .coerce(&ExprType::list(ExprType::STRING), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        value,
+        ExprValue::unresolved(ExprType::list(ExprType::STRING))
+    );
+}
+
+#[test]
+fn coerce_unresolved_unions_successful_result_types() {
+    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::BOOL, ExprType::INT]))
+        .coerce(
+            &ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]),
+            PathFormat::Posix,
+        )
+        .unwrap();
+    assert_eq!(
+        value,
+        ExprValue::unresolved(ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]))
+    );
+}
+
+#[test]
 fn coerce_unresolved_does_not_broaden_for_union_target() {
     let value = ExprValue::unresolved(ExprType::INT)
         .coerce(
@@ -209,6 +269,15 @@ fn coerce_incompatible_unresolved_errors() {
         .coerce(&ExprType::INT, PathFormat::Posix)
         .unwrap_err();
     assert_eq!(error, "Cannot coerce list[int] to int");
+}
+
+#[test]
+fn coerce_unresolved_errors_when_no_union_member_succeeds() {
+    let source = ExprType::union(vec![ExprType::PATH, ExprType::list(ExprType::INT)]);
+    let error = ExprValue::unresolved(source.clone())
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap_err();
+    assert_eq!(error, format!("Cannot coerce {source} to int"));
 }
 
 // ══════════════════════════════════════════════════════════════

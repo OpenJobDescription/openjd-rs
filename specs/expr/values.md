@@ -471,20 +471,35 @@ let result = evaluate_expression("Param.Frame + Param.Name", &symtab);
 // → TypeError: cannot add int and string
 ```
 
-When any argument to a function is unresolved, the function returns
-`Unresolved(return_type)` instead of computing a value. This propagates type information
-through the entire expression, catching type mismatches at validation time.
-
 Unresolved values are **type-only placeholders**: they carry an `ExprType` but no
 concrete data. Because they're wrapped values, they can pass through the evaluator's
 memory tracking and dispatch without a special code path. `Display` on an unresolved
 value renders as `unresolved[T]` for debug/error output.
+
+All operations involving unresolved values use existential validation. For an
+`unresolved[T]` operand, `T` describes the set of concrete values and types to which
+that operand could resolve. With multiple unresolved operands, the possibilities are
+all combinations of their permitted resolutions.
+
+An operation succeeds symbolically if at least one possible combination would
+succeed. Possibilities that would fail are discarded. If no combination can succeed,
+the operation fails immediately. Otherwise, unless evaluation can prove a concrete
+result independent of the unresolved inputs, the result is unresolved and its
+constraint is the union of the result types from all successful possibilities.
+
+As expression processing progresses and unresolved operands become narrower or
+concrete, the same operation is evaluated with fewer possibilities. It may then
+produce a concrete result or report a value-dependent error that could not be proven
+at an earlier stage.
 
 Target-type coercion applies the same conversion table to unresolved types that
 it applies to concrete values. The payload remains unresolved, but its type is
 narrowed to the coercion result. For example, `unresolved[int]` against a
 `string` target becomes `unresolved[string]`, and
 `unresolved[int | string]` against an `int` target becomes `unresolved[int]`.
+Likewise, coercing `unresolved[int | list[int]]` to `int` succeeds as
+`unresolved[int]`: the `int` possibility succeeds even though the `list[int]`
+possibility cannot.
 
 Checks that require a concrete payload are deferred until runtime. For example,
 `unresolved[string]` can narrow to `unresolved[int]`; once resolved, the string

@@ -217,6 +217,72 @@ fn optional_string_accepts_null() {
 }
 
 #[test]
+fn unresolved_nullable_sources_keep_successful_possibilities() {
+    let cases = [
+        ("WrappedAction.Timeout", "int?", "int", "int"),
+        ("WrappedAction.Timeout", "int?", "int | string", "int"),
+        (
+            "WrappedAction.Cancelation.Mode",
+            "string?",
+            "int | string",
+            "string",
+        ),
+        ("U.IntOpt", "int?", "int? | list[int]", "int?"),
+        (
+            "U.IntOptOrList",
+            "int? | list[int]",
+            "int | list[int]",
+            "int | list[int]",
+        ),
+        (
+            "U.StringOptOrList",
+            "string? | list[string]",
+            "string?",
+            "string?",
+        ),
+    ];
+
+    for (name, source, target, expected) in cases {
+        let mut st = SymbolTable::new();
+        st.set(name, ExprValue::unresolved(parse_type(source)))
+            .unwrap();
+        let result = eval_with_target_type(name, &parse_type(target), &st).unwrap();
+        assert_eq!(
+            result,
+            ExprValue::unresolved(parse_type(expected)),
+            "symbol={name}, source={source}, target={target}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_action_timeout_format_string_accepts_union_target() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "WrappedAction.Timeout",
+        ExprValue::unresolved(parse_type("int?")),
+    )
+    .unwrap();
+    let target = parse_type("int | string");
+    let options = FormatStringOptions::default().with_target_type(&target);
+    let result = FormatString::new("{{ WrappedAction.Timeout }}")
+        .unwrap()
+        .resolve_with(&st, &options)
+        .unwrap();
+    assert_eq!(result, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn nullable_list_elements_narrow_from_list_target() {
+    let mut st = SymbolTable::new();
+    st.set("U.IntOpt", ExprValue::unresolved(parse_type("int?")))
+        .unwrap();
+    let result =
+        eval_with_target_type("[U.IntOpt, U.IntOpt]", &parse_type("list[int]"), &st).unwrap();
+    assert_eq!(result, ExprValue::unresolved(parse_type("list[int]")));
+}
+
+#[test]
 fn optional_int_coerces_string_to_int() {
     // `int?` is `int | nulltype`. A string value matches neither
     // member directly. The per-member loop then tries `int` and `string`

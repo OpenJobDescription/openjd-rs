@@ -873,12 +873,16 @@ impl ExprValue {
                 .and_then(|inner| Self::unresolved_coercion_result(inner, target));
         }
         if source.code() == TypeCode::Union {
-            let result_types = source
+            let result_types: Vec<_> = source
                 .params()
                 .iter()
-                .map(|member| Self::unresolved_coercion_result(member, target))
-                .collect::<Option<Vec<_>>>()?;
-            return Some(ExprType::union(result_types));
+                .filter_map(|member| Self::unresolved_coercion_result(member, target))
+                .collect();
+            return if result_types.is_empty() {
+                None
+            } else {
+                Some(ExprType::union(result_types))
+            };
         }
         if source.code() == TypeCode::Any
             || matches!(
