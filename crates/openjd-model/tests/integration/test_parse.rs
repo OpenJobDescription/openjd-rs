@@ -87,6 +87,19 @@ fn doc_string_to_object_yaml_success() {
     assert_eq!(result["key"].as_str().unwrap(), "value");
 }
 
+#[test]
+fn yaml_non_finite_floats_remain_available_for_model_validation() {
+    let result = document_string_to_object(
+        "nan: .nan\npositive_inf: .inf\nnegative_inf: -.inf\n",
+        DocumentType::Yaml,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result["nan"].as_str(), Some(".nan"));
+    assert_eq!(result["positive_inf"].as_str(), Some(".inf"));
+    assert_eq!(result["negative_inf"].as_str(), Some("-.inf"));
+}
 // ══════════════════════════════════════════════════════════════
 // document_string_to_object — not a dict
 // ══════════════════════════════════════════════════════════════

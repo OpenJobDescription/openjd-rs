@@ -11,7 +11,10 @@ use openjd_model::decode_job_template;
 use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_json::Value {
-    serde_saphyr::from_str(s).unwrap()
+    let options = serde_saphyr::options! {
+        reject_non_finite_typeless_float: false,
+    };
+    serde_saphyr::from_str_with_options(s, options).unwrap()
 }
 
 fn job_with_param(param_json: &str) -> String {

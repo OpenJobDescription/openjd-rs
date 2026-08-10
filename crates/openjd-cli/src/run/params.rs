@@ -123,7 +123,11 @@ pub fn parse_tasks_arg(
         if crate::common::document_type(path) == openjd_model::template::parse::DocumentType::Json {
             serde_json::from_str(&content)?
         } else {
-            let v: serde_json::Value = serde_saphyr::from_str(&content)?;
+            // Preserve non-finite scalars for downstream task-parameter validation.
+            let options = serde_saphyr::options! {
+                reject_non_finite_typeless_float: false,
+            };
+            let v: serde_json::Value = serde_saphyr::from_str_with_options(&content, options)?;
             v
         }
     } else {
