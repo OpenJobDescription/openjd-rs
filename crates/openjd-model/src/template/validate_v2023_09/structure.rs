@@ -580,14 +580,24 @@ fn validate_host_requirements(
                     }
                 }
             }
-            let min_val = amt
-                .min
-                .as_ref()
-                .and_then(|fs| fs.raw().trim().parse::<f64>().ok());
-            let max_val = amt
-                .max
-                .as_ref()
-                .and_then(|fs| fs.raw().trim().parse::<f64>().ok());
+            let mut parse_literal_amount =
+                |field: &str, value: &Option<openjd_expr::FormatString>| -> Option<f64> {
+                    let fs = value.as_ref()?;
+                    if !fs.is_literal() {
+                        return None;
+                    }
+                    let Ok(value) = fs.raw().trim().parse::<f64>() else {
+                        errors.add(&path_field(&amt_path, field), "must be a number.");
+                        return None;
+                    };
+                    if !value.is_finite() {
+                        errors.add(&path_field(&amt_path, field), "must be a finite number.");
+                        return None;
+                    }
+                    Some(value)
+                };
+            let min_val = parse_literal_amount("min", &amt.min);
+            let max_val = parse_literal_amount("max", &amt.max);
             if let Some(min) = min_val {
                 if min < 0.0 {
                     errors.add(&path_field(&amt_path, "min"), "must be non-negative.");

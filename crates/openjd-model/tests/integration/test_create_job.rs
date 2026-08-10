@@ -3478,6 +3478,87 @@ fn test_create_job_float_range_expr_int_promotion() {
 }
 
 #[test]
+fn test_create_job_float_range_string_non_finite() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "steps": [{{
+                "name": "S",
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{"name": "Weight", "type": "FLOAT", "range": ["{value}"]}}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+            }}]
+        }}"#
+        );
+        let err = parse_and_create_err(&template, &[]);
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+            )
+        );
+    }
+}
+
+#[test]
+fn test_create_job_float_range_resolved_string_non_finite() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let err = parse_and_create_err(
+            r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "parameterDefinitions": [{"name": "Value", "type": "STRING"}],
+            "steps": [{
+                "name": "S",
+                "parameterSpace": {
+                    "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": ["{{Param.Value}}"]}]
+                },
+                "script": {"actions": {"onRun": {"command": "render"}}}
+            }]
+        }"#,
+            &[("Value", value)],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+            )
+        );
+    }
+}
+
+#[test]
+fn test_create_job_float_range_string_trims_whitespace() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": [" 2.5 "]}]
+            },
+            "script": {"actions": {"onRun": {"command": "render"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let range = match &job.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions["Weight"]
+    {
+        openjd_model::job::TaskParameter::Float { range } => range,
+        other => panic!("Expected Float, got {other:?}"),
+    };
+    assert_eq!(range, &[2.5]);
+}
+
+#[test]
 fn test_create_job_float_range_expr_not_list() {
     let err = parse_and_create_err(
         r#"{
@@ -3757,6 +3838,34 @@ fn test_create_job_host_req_amount_non_numeric() {
         &[("Mem", "notanumber")],
     );
     assert!(err.contains("not a valid number"), "got: {err}");
+}
+
+#[test]
+fn test_create_job_host_req_amount_non_finite() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let err = parse_and_create_err(
+            r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["FEATURE_BUNDLE_1"],
+            "name": "Test",
+            "parameterDefinitions": [{"name": "Mem", "type": "STRING"}],
+            "steps": [{
+                "name": "S",
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.memory", "min": "{{Param.Mem}}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "foo"}}}
+            }]
+        }"#,
+            &[("Mem", value)],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: hostRequirements amount min: '{value}' is not a finite number"
+            )
+        );
+    }
 }
 
 #[test]

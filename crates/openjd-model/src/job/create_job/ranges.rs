@@ -34,11 +34,17 @@ pub(super) fn resolve_to_f64(
             start: None,
             end: None,
         })?;
-    resolved.trim().parse::<f64>().map_err(|_| {
+    let value = resolved.trim().parse::<f64>().map_err(|_| {
         ModelError::Expression(ExpressionError::new(format!(
             "{context}: '{resolved}' is not a valid number"
         )))
-    })
+    })?;
+    if !value.is_finite() {
+        return Err(ModelError::Expression(ExpressionError::new(format!(
+            "{context}: '{resolved}' is not a finite number"
+        ))));
+    }
+    Ok(value)
 }
 
 /// Resolve a list of FormatStrings to strings.
@@ -280,12 +286,18 @@ fn resolve_float_range(
                                 .with_path_format(PathFormat::Posix),
                         )
                         .map_err(ModelError::Expression)?;
-                    resolved.parse::<f64>().map_err(|_| {
+                    let value = resolved.trim().parse::<f64>().map_err(|_| {
                         ModelError::Expression(ExpressionError::new(format!(
                             "Cannot parse '{}' as float",
                             resolved
                         )))
-                    })
+                    })?;
+                    if !value.is_finite() {
+                        return Err(ModelError::Expression(ExpressionError::new(format!(
+                            "FLOAT parameter '{param_name}' range value '{resolved}' is not finite"
+                        ))));
+                    }
+                    Ok(value)
                 }
             })
             .collect::<Result<Vec<_>, _>>()?,

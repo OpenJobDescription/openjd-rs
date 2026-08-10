@@ -108,7 +108,9 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Dependencies: no self-dependency, target must exist, no duplicates
 - Host requirements: amounts/attributes validation, capability name patterns,
   reserved scope checks (reserved scopes: `worker`, `job`, `step`, `task`),
-  standard capability value validation
+  standard capability value validation. Expression-free amount `min`/`max` values must
+  parse as finite numbers; validation of values containing expressions is deferred until
+  job creation.
 - Parameter space: ≤16 task parameters, no duplicate names, type allowed,
   range validation per type, combination expression validation
 - Script actions: command non-empty, length limits, `Task.File.*` references

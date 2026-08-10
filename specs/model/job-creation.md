@@ -115,8 +115,10 @@ calling this function.
 2. Resolve template-scope fields:
    - Job name (evaluate FormatString)
    - Step names
-   - Host requirement values (amounts min/max, attribute values)
-   - Parameter space ranges (evaluate range expressions, resolve FormatString ranges)
+   - Host requirement values (amounts min/max, attribute values). Resolved amount bounds
+     must be finite `f64` values; non-numeric, NaN, and infinite results are rejected.
+   - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
+     String-backed FLOAT range elements are trimmed and must resolve to finite `f64` values.
    - Step-level let bindings
 3. Carry forward session/task-scope fields as FormatString (plus action
    `timeout`/`notifyPeriodInSeconds`, which validate in template scope but

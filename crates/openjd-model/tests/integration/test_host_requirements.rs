@@ -500,6 +500,30 @@ fn test_amount_max_zero() {
 }
 
 #[test]
+fn test_amount_non_finite_literals() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let requirement =
+            format!(r#"{{"amounts": [{{"name": "amount.custom", "min": "{value}"}}]}}"#);
+        check_err(
+            &job_with_host_req(&requirement),
+            &["steps[0] -> hostRequirements -> amounts[0] -> min:\n\tmust be a finite number."],
+        );
+    }
+}
+
+#[test]
+fn test_amount_invalid_number_literals() {
+    for value in [".nan", ".inf", "-.inf", "not-a-number"] {
+        let requirement =
+            format!(r#"{{"amounts": [{{"name": "amount.custom", "max": "{value}"}}]}}"#);
+        check_err(
+            &job_with_host_req(&requirement),
+            &["steps[0] -> hostRequirements -> amounts[0] -> max:\n\tmust be a number."],
+        );
+    }
+}
+
+#[test]
 fn test_amount_reserved_scope() {
     check_err(&job_with_host_req(r#"{"amounts": [{"name": "amount.worker.custom", "min": 1}]}"#), &[
         "steps[0] -> hostRequirements -> amounts[0]:\n\tcapability 'amount.worker.custom' uses reserved scope 'worker'. Only spec-defined capabilities may use this scope.",

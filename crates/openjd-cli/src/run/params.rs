@@ -125,6 +125,7 @@ pub fn parse_tasks_arg(
         } else {
             // Preserve non-finite scalars for downstream task-parameter validation.
             let options = serde_saphyr::options! {
+                strict_booleans: true,
                 reject_non_finite_typeless_float: false,
             };
             let v: serde_json::Value = serde_saphyr::from_str_with_options(&content, options)?;
@@ -298,4 +299,26 @@ pub fn load_path_mapping_rules(
         .iter()
         .map(|r| serde_json::from_value(r.clone()).map_err(|e| e.into()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn yaml_tasks_preserve_boolean_shorthands_as_strings() {
+        let mut file = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        for value in ["yes", "no", "on", "off", "y", "n"] {
+            writeln!(file, "- Value: {value}").unwrap();
+        }
+        let arg = format!("file://{}", file.path().display());
+
+        let tasks = parse_tasks_arg(&arg).unwrap();
+
+        assert_eq!(tasks.len(), 6);
+        for (task, expected) in tasks.iter().zip(["yes", "no", "on", "off", "y", "n"]) {
+            assert_eq!(task["Value"], expected);
+        }
+    }
 }
