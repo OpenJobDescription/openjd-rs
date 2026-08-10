@@ -849,6 +849,26 @@ fn mod_float_small_negative() {
     assert_eq!(eval("-0.5 % 1.0").to_display_string(), "0.5");
 }
 
+#[test]
+fn mod_float_large_quotient_preserves_remainder() {
+    assert_eq!(
+        eval("9.2e18 % 0.1").to_display_string(),
+        "0.09740867242801976"
+    );
+    assert_eq!(
+        eval("-9.2e18 % 0.1").to_display_string(),
+        "0.0025913275719802453"
+    );
+    assert_eq!(
+        eval("9.2e18 % (-0.1)").to_display_string(),
+        "-0.0025913275719802453"
+    );
+    assert_eq!(
+        eval("-9.2e18 % (-0.1)").to_display_string(),
+        "-0.09740867242801976"
+    );
+}
+
 // Floored division/modulo invariant: a == (a // b) * b + (a % b)
 #[test]
 fn floordiv_mod_invariant_negative() {

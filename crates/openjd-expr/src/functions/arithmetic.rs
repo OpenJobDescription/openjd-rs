@@ -197,8 +197,13 @@ pub fn mod_float(_: Ctx, a: &[ExprValue]) -> R {
     if r == 0.0 {
         return Err(ExpressionError::division_by_zero("Modulo"));
     }
-    // Python uses floored modulo: l - r * floor(l / r)
-    Ok(ExprValue::Float(Float64::new(l - r * (l / r).floor())?))
+    // Start with truncating remainder to avoid cancellation at large quotients,
+    // then adjust its sign to match Python's floored modulo.
+    let mut rem = l % r;
+    if rem != 0.0 && rem.is_sign_negative() != r.is_sign_negative() {
+        rem += r;
+    }
+    Ok(ExprValue::Float(Float64::new(rem)?))
 }
 
 pub fn pow_float(_: Ctx, a: &[ExprValue]) -> R {
