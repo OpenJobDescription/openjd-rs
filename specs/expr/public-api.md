@@ -784,8 +784,8 @@ Accessible as `openjd_expr::value::ListIter` (not re-exported at the crate root)
 ```rust
 /// Format an `f64` in the canonical spec form used by
 /// `Float64::to_display_string`. Exponent notation outside the range
-/// `[1e-4, 1e16)`; "0.0" for zero; preserves exact decimal where
-/// possible.
+/// `[1e-4, 1e16)`, with an explicit sign and at least two exponent digits;
+/// "0.0" for zero; preserves exact decimal where possible.
 pub fn value::format_float(f: f64) -> String;
 ```
 

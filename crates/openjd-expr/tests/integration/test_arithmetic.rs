@@ -93,6 +93,14 @@ fn float_precision_display() {
 }
 
 #[test]
+fn computed_float_display_pads_negative_exponents() {
+    assert_eq!(eval("1e-7 + 0.0").to_display_string(), "1e-07");
+    assert_eq!(eval("1e-8 + 0.0").to_display_string(), "1e-08");
+    assert_eq!(eval("-1e-7 + 0.0").to_display_string(), "-1e-07");
+    assert_eq!(eval("1e16 + 0.0").to_display_string(), "1e+16");
+}
+
+#[test]
 fn float_passthrough_preserves_original() {
     let mut st = SymbolTable::new();
     st.set(

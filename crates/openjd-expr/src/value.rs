@@ -1594,12 +1594,13 @@ pub fn format_float(f: f64) -> String {
     }
     let abs = f.abs();
     if !(1e-4..1e16).contains(&abs) {
-        format!("{:e}", f)
-            .replace("e-0", "e-")
-            .replace("e0", "e+0")
-            .replace("e", "e+")
-            .replace("e+-", "e-")
-            .replace("e++", "e+")
+        let rendered = format!("{f:e}");
+        if let Some((mantissa, exponent)) = rendered.split_once('e') {
+            if let Ok(exponent) = exponent.parse::<i32>() {
+                return format!("{mantissa}e{exponent:+03}");
+            }
+        }
+        rendered
     } else if f.fract() == 0.0 {
         format!("{}.0", f as i64)
     } else {
