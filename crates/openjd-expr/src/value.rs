@@ -1479,8 +1479,8 @@ impl ExprValue {
             (Self::Bool(a), Self::Bool(b)) => Ok(a.cmp(b)),
             (Self::String(a), Self::String(b)) => Ok(a.cmp(b)),
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => Ok(a.cmp(b)),
-            (Self::String(a), Self::Path { value: b, .. })
-            | (Self::Path { value: b, .. }, Self::String(a)) => Ok(a.cmp(b)),
+            (Self::String(a), Self::Path { value: b, .. }) => Ok(a.cmp(b)),
+            (Self::Path { value: a, .. }, Self::String(b)) => Ok(a.cmp(b)),
             _ if self.is_list() && other.is_list() => {
                 let (a_iter, b_iter) = match (self.list_iter(), other.list_iter()) {
                     (Some(a), Some(b)) => (a, b),

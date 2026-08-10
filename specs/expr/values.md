@@ -303,6 +303,10 @@ tie-break. This keeps `<`/`<=`/`>`/`>=` consistent with equality —
 `i64::MAX < float(2**63)` is true, where a widening comparison would call
 them equal while `==` says they differ.
 
+String↔Path ordering compares the path's string value while preserving operand order.
+For example, `path("/a") < "/z"` is the same comparison as `"/a" < "/z"`.
+This rule also applies recursively during lexicographic list ordering.
+
 ### Tag-Based Hashing Strategy
 
 The `Hash` implementation must satisfy the contract that `a == b` implies

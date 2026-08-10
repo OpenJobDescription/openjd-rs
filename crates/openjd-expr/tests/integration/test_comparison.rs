@@ -27,6 +27,15 @@ fn eval_posix(expr: &str, st: &SymbolTable) -> ExprValue {
         .unwrap()
 }
 
+fn eval_windows(expr: &str, st: &SymbolTable) -> ExprValue {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let symtabs = [st];
+    parsed
+        .with_path_format(PathFormat::Windows)
+        .evaluate(&symtabs)
+        .unwrap()
+}
+
 #[allow(dead_code)]
 fn eval_err(expr: &str) -> String {
     ParsedExpression::new(expr)
@@ -317,6 +326,60 @@ fn string_lt_path() {
     st.set("p", ExprValue::new_path("/tmp/bbb", PathFormat::Posix))
         .unwrap();
     assert_eq!(eval_posix("s < p", &st).to_display_string(), "true");
+}
+
+#[test]
+fn mixed_path_string_ordering_preserves_operand_order_posix() {
+    let st = SymbolTable::new();
+    for (expr, expected) in [
+        ("path('/a') < '/z'", "true"),
+        ("path('/a') <= '/z'", "true"),
+        ("path('/a') > '/z'", "false"),
+        ("path('/a') >= '/z'", "false"),
+        ("'/a' < path('/z')", "true"),
+        ("'/a' <= path('/z')", "true"),
+        ("'/a' > path('/z')", "false"),
+        ("'/a' >= path('/z')", "false"),
+        ("[path('/a')] < ['/z']", "true"),
+        ("['/a'] < [path('/z')]", "true"),
+    ] {
+        assert_eq!(
+            eval_posix(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn mixed_path_string_ordering_preserves_operand_order_windows() {
+    let st = SymbolTable::new();
+    for (expr, expected) in [
+        (r"path(r'C:\a') < r'C:\z'", "true"),
+        (r"path(r'C:\a') <= r'C:\z'", "true"),
+        (r"path(r'C:\a') > r'C:\z'", "false"),
+        (r"path(r'C:\a') >= r'C:\z'", "false"),
+        (r"r'C:\a' < path(r'C:\z')", "true"),
+        (r"r'C:\a' <= path(r'C:\z')", "true"),
+        (r"r'C:\a' > path(r'C:\z')", "false"),
+        (r"r'C:\a' >= path(r'C:\z')", "false"),
+        (r"[path(r'C:\a')] < [r'C:\z']", "true"),
+        (r"[r'C:\a'] < [path(r'C:\z')]", "true"),
+        (r"path(r'C:/dir\z') > r'C:\dir\a'", "true"),
+        (r"path(r'C:\dir/z') > r'C:\dir\a'", "true"),
+        (r"r'C:\dir\a' < path(r'C:/dir\z')", "true"),
+        (r"r'C:\dir\a' < path(r'C:\dir/z')", "true"),
+        (r"[path(r'C:/dir\z')] > [r'C:\dir\a']", "true"),
+        (r"[path(r'C:\dir/z')] > [r'C:\dir\a']", "true"),
+        (r"[r'C:\dir\a'] < [path(r'C:/dir\z')]", "true"),
+        (r"[r'C:\dir\a'] < [path(r'C:\dir/z')]", "true"),
+    ] {
+        assert_eq!(
+            eval_windows(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
 }
 
 // === TestCrossTypeOrderingErrors ===
