@@ -1253,8 +1253,13 @@ impl ExprValue {
             (Self::Float(a), Self::Int(b)) => int_float_eq(*b, a.value),
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => a == b,
-            (Self::String(a), Self::Path { value: b, .. })
-            | (Self::Path { value: b, .. }, Self::String(a)) => a == b,
+            // Split into two arms with position-consistent bindings so `a` is
+            // always the left operand. Equality is symmetric so a combined
+            // or-pattern with swapped bindings gives the same answer here, but
+            // the identical pattern in an ordering context silently reverses
+            // the comparison (see `compare`).
+            (Self::String(a), Self::Path { value: b, .. }) => a == b,
+            (Self::Path { value: a, .. }, Self::String(b)) => a == b,
             // Same-variant typed lists: primitive element comparison (no
             // per-element ExprValue construction), charged per comparison
             // actually performed after the O(1) length check — a mismatch
