@@ -365,9 +365,11 @@ satisfies the requested target. Implicit rules do not chain: `list[int]`
 is the only list type a `range_expr` implicitly coerces to (RFC 0005), so
 a `list[T]` target with any other element type — `list[float]`,
 `list[string]`, `list[bool]` — is rejected rather than materialized and
-widened element-wise. Templates that want the widened list chain the
-explicit `list()` conversion (RFC 0006), whose `list[int]` result the
-`LIST[T] → LIST[U]` rule then applies to.
+widened element-wise. (A `list[any]` target is accepted, since a
+`list[int]` value already satisfies it — no widening involved.) Templates
+that want the widened list chain the explicit `list()` conversion
+(RFC 0006), whose `list[int]` result the `LIST[T] → LIST[U]` rule then
+applies to.
 
 A **type variable** target (`T`, `T1`, `T2`, `T3`) has no coercion rule.
 Type variables are placeholders in generic function signatures, resolved
@@ -517,9 +519,12 @@ possibility cannot.
 
 Checks that require a concrete payload are deferred until runtime. For example,
 `unresolved[string]` can narrow to `unresolved[int]`; once resolved, the string
-must still parse as an integer. A source and target with no type-level coercion
-rule, such as `unresolved[list[int]]` against `int`, is rejected during
-validation.
+must still parse as an integer. Any `unresolved[list[S]]` against any `list[U]`
+target is accepted for the same reason: the value could resolve to the empty
+list, which coerces to every list type, so element compatibility can only be
+checked once the payload is known. A source and target with no type-level
+coercion rule at all, such as `unresolved[list[int]]` against `int`, is
+rejected during validation.
 
 The two directions are deliberately asymmetric, and only in one direction.
 Unresolved coercion may accept a pair the concrete value later rejects, because

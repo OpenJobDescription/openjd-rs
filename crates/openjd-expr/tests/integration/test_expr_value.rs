@@ -238,6 +238,38 @@ fn coerce_unresolved_empty_list_to_typed_list() {
     );
 }
 
+/// Any list/list pair is accepted at the type level, even when the
+/// element types have no coercion rule: an `unresolved[list[S]]` could
+/// resolve to the empty list, which the concrete path coerces to any
+/// `list[U]`. Rejecting the pair would fail a template during validation
+/// that could have run correctly. The element check defers to resolution.
+#[test]
+fn coerce_unresolved_list_pair_accepted_unconditionally() {
+    for (source, target) in [
+        ("list[int]", "list[bool]"),
+        ("list[int]", "list[path]"),
+        ("list[string]", "list[list[int]]"),
+    ] {
+        let source = ExprType::parse(source).unwrap();
+        let target = ExprType::parse(target).unwrap();
+        // The concrete empty list coerces to the target...
+        let empty = ExprValue::make_list(vec![], source.params()[0].clone()).unwrap();
+        assert!(
+            empty.coerce(&target, PathFormat::Posix).is_ok(),
+            "concrete [] as {source} should coerce to {target}"
+        );
+        // ...so the unresolved pair must be accepted too.
+        let value = ExprValue::unresolved(source.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            value,
+            ExprValue::unresolved(target.clone()),
+            "unresolved[{source}] should coerce to {target}"
+        );
+    }
+}
+
 #[test]
 fn coerce_unresolved_unions_successful_result_types() {
     let value = ExprValue::unresolved(ExprType::union(vec![ExprType::BOOL, ExprType::INT]))
@@ -282,15 +314,19 @@ fn coerce_unresolved_errors_when_no_union_member_succeeds() {
 
 /// RFC 0005: `list[int]` is the only list type a `range_expr` implicitly
 /// coerces to, and a coerced value must satisfy the target it was coerced
-/// to — so the coercion yields a `list[int]`, never a widened list.
+/// to — so the coercion yields a `list[int]`, never a widened list. A
+/// `list[any]` target is also satisfied by a `list[int]` value (no
+/// widening involved), so it is accepted too.
 #[test]
 fn coerce_range_expr_to_list_int_only() {
     let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
-    let target = ExprType::list(ExprType::INT);
-    let value = ExprValue::RangeExpr(range)
-        .coerce(&target, PathFormat::Posix)
-        .unwrap();
-    assert_eq!(value, ExprValue::ListInt(vec![1, 2, 3]));
+    for target in ["list[int]", "list[any]"] {
+        let target = ExprType::parse(target).unwrap();
+        let value = ExprValue::RangeExpr(range.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::ListInt(vec![1, 2, 3]), "target={target}");
+    }
 }
 
 /// Implicit coercion rules do not chain: a `list[T]` target with any
@@ -317,15 +353,17 @@ fn coerce_range_expr_to_other_list_errors_on_both_paths() {
     }
 }
 
-/// The unresolved table must agree with the concrete one, accepting only
-/// the `list[int]` target.
+/// The unresolved table must agree with the concrete one, accepting the
+/// `list[int]` and `list[any]` targets.
 #[test]
 fn coerce_unresolved_range_expr_to_list_matches_concrete() {
-    let target = ExprType::list(ExprType::INT);
-    let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
-        .coerce(&target, PathFormat::Posix)
-        .unwrap();
-    assert_eq!(value, ExprValue::unresolved(target));
+    for target in ["list[int]", "list[any]"] {
+        let target = ExprType::parse(target).unwrap();
+        let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::unresolved(target));
+    }
 }
 
 /// A concrete value never coerces to a type variable, so an unresolved

@@ -836,9 +836,11 @@ impl ExprValue {
                 // implicitly coerces to. Implicit rules do not chain, so the
                 // materialized `list[int]` is never widened element-wise
                 // toward another target; templates use the explicit `list()`
-                // conversion (RFC 0006) when they want that.
+                // conversion (RFC 0006) when they want that. An `any`
+                // element target is accepted because a `list[int]` value
+                // already satisfies `list[any]` — no widening involved.
                 if let Some(elem) = target.params().first() {
-                    if elem != &ExprType::INT {
+                    if elem != &ExprType::INT && elem.code() != TypeCode::Any {
                         return Err(format!(
                             "Cannot coerce range_expr to {target}: a range \
                              expression only implicitly coerces to list[int] \
@@ -941,13 +943,13 @@ impl ExprValue {
             && target.code() == TypeCode::List
             && target.params().len() == 1
         {
-            let source_elem = &source.params()[0];
-            if source_elem == &ExprType::NULLTYPE
-                || Self::unresolved_coercion_result(source_elem, &target.params()[0]).is_some()
-            {
-                return Some(target.clone());
-            }
-            return None;
+            // Any list/list pair is accepted: an `unresolved[list[S]]`
+            // could resolve to the empty list, which the concrete path
+            // coerces to any `list[U]` (element-wise over zero elements).
+            // Rejecting here would fail a template during validation that
+            // could have run correctly. The element compatibility check is
+            // deferred until the value resolves with a non-empty payload.
+            return Some(target.clone());
         }
 
         let has_scalar_rule = matches!(
@@ -975,10 +977,12 @@ impl ExprValue {
         // `list[int]` is the only list type a `range_expr` implicitly
         // coerces to (RFC 0005); implicit rules do not chain, so no
         // element-wise widening applies — mirroring the concrete path.
+        // An `any` element target is accepted because a `list[int]` value
+        // already satisfies `list[any]`.
         let has_range_list_rule = source.code() == TypeCode::RangeExpr
             && target.code() == TypeCode::List
             && match target.params().first() {
-                Some(elem) => elem == &ExprType::INT,
+                Some(elem) => elem == &ExprType::INT || elem.code() == TypeCode::Any,
                 None => true,
             };
         if has_scalar_rule || has_range_list_rule {
