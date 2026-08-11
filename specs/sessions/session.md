@@ -173,8 +173,10 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 When a wrap hook is dispatched, the borrow of the active environment stack is
 released by copying only the wrapper data needed for symbol seeding: its name,
 frozen resolved symbol table, script `let` bindings, and selected hook action.
-The wrapper's embedded files and other environment fields are not cloned per
-task.
+The wrapper's embedded files are handled separately via a per-wrap-environment
+cache (see [embedded-files.md](embedded-files.md#wrap-environment-file-path-caching)):
+file paths are allocated once and reused across invocations; file contents are
+re-written each time so `data` expressions resolve against the current scope.
 
 ## Ad-hoc Subprocess
 

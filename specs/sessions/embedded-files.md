@@ -163,3 +163,54 @@ This is what makes `Env.File.*` / `Task.File.*` available to `let` bindings
 while letting file `data` reference let-bound values. It is only possible
 because `filename` is a plain string (2023-09 schema, not `@fmtstring`), so
 path allocation never depends on `let` values.
+
+## Wrap Environment File Path Caching
+
+Wrap hooks (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`) may reference
+the wrap environment's `Env.File.*` symbols. Unlike normal environment/step
+scripts where each action invocation has a fresh `EmbeddedFiles` instance, wrap
+hooks fire repeatedly (once per inner environment enter/exit, once per task) and
+must present stable file paths across invocations.
+
+### Design
+
+The `Session` maintains a per-wrap-environment cache
+(`wrap_env_file_records: HashMap<EnvironmentIdentifier, EmbeddedFiles>`):
+
+- **First invocation (cache miss):** `allocate_file_paths()` allocates paths
+  and writes empty files (unnamed) or validates filenames (named). The
+  `EmbeddedFiles` instance is stored in the cache.
+- **Subsequent invocations (cache hit):** `register_file_paths()` re-registers
+  the previously allocated paths into the current action's symbol table without
+  allocating new paths or creating files on disk.
+- **Every invocation:** `write_file_contents()` is called AFTER
+  `seed_wrapped_action_symbols()` so file `data` resolves against the post-lets
+  symbol table. This means each invocation starts from the authored content,
+  which may reference values that change between invocations.
+
+### Ordering
+
+The ordering at each wrap-hook dispatch site is:
+
+```
+register/allocate file paths → seed_wrapped_action_symbols (evaluates lets) → write file contents
+```
+
+This matches the standard two-phase flow (`allocate → lets → write`) and
+ensures the wrap env's `let` bindings can reference `{{Env.File.*}}`.
+
+### Eviction
+
+The cache entry is removed when the wrap environment itself is exited
+(`exit_environment`). The on-disk files are NOT deleted — they reside in the
+session's files directory and are cleaned up with it at session end.
+
+### `register_file_paths`
+
+```rust
+pub(crate) fn register_file_paths(&self, symtab: &mut SymbolTable) -> Result<(), SessionError>;
+```
+
+Iterates the previously allocated `FileRecord`s and sets each record's symbol
+to its filename path in the symbol table. Does not allocate paths, create files,
+or mutate `self.records`. Logs a "Reusing embedded file paths" message.

@@ -213,7 +213,7 @@ fn validate_resolved_filename(resolved: &str) -> Result<(), String> {
 }
 
 struct FileRecord {
-    _symbol: String,
+    symbol: String,
     filename: PathBuf,
     file: EmbeddedFile,
 }
@@ -311,10 +311,45 @@ impl EmbeddedFiles {
                 )
                 .map_err(|e| SessionError::Runtime(format!("Failed to set {symbol}: {e}")))?;
             self.records.push(FileRecord {
-                _symbol: symbol,
+                symbol,
                 filename,
                 file: file.clone(),
             });
+        }
+        Ok(())
+    }
+
+    /// Re-register previously allocated file paths into a symbol table.
+    ///
+    /// This is used when a wrap environment's embedded file paths have already
+    /// been allocated (on the first wrap-hook invocation) and need to be made
+    /// visible in subsequent wrap-hook scopes without re-allocating paths or
+    /// creating files on disk. Contents are NOT written — call
+    /// `write_file_contents` separately after the scope is fully built.
+    pub(crate) fn register_file_paths(&self, symtab: &mut SymbolTable) -> Result<(), SessionError> {
+        let scope_name = match self.scope {
+            EmbeddedFilesScope::Step => "Task",
+            EmbeddedFilesScope::Env => "Environment",
+        };
+        session_log!(
+            info,
+            &self.session_id,
+            LogContent::FILE_PATH,
+            "Reusing embedded file paths for {} scope.",
+            scope_name
+        );
+        for record in &self.records {
+            symtab
+                .set(
+                    &record.symbol,
+                    ExprValue::new_path(
+                        record.filename.to_string_lossy().to_string(),
+                        PathFormat::host(),
+                    ),
+                )
+                .map_err(|e| {
+                    SessionError::Runtime(format!("Failed to set {}: {e}", record.symbol))
+                })?;
         }
         Ok(())
     }

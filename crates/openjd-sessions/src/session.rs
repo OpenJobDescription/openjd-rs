@@ -474,6 +474,12 @@ pub struct Session {
     // Environment tracking
     environments: HashMap<EnvironmentIdentifier, Environment>,
     environments_entered: Vec<EnvironmentIdentifier>,
+    /// Cached embedded-file records for wrap environments. Paths are allocated
+    /// once per wrap environment and reused for every subsequent wrap-hook
+    /// invocation so `Env.File.*` paths stay stable across tasks and unnamed
+    /// files do not accumulate on disk; contents are re-written per invocation
+    /// so each invocation starts from the authored content.
+    wrap_env_file_records: HashMap<EnvironmentIdentifier, EmbeddedFiles>,
     // Env var tracking
     env_vars: HashMap<String, String>,
     process_env: HashMap<String, String>,
@@ -521,6 +527,7 @@ impl Session {
             _files_dir: None,
             environments: HashMap::new(),
             environments_entered: Vec::new(),
+            wrap_env_file_records: HashMap::new(),
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
@@ -724,6 +731,7 @@ impl Session {
             _files_dir: Some(files_dir),
             environments: HashMap::new(),
             environments_entered: Vec::new(),
+            wrap_env_file_records: HashMap::new(),
             env_vars: HashMap::new(),
             process_env,
             created_env_vars: HashMap::new(),
@@ -1194,6 +1202,19 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // Register wrap env's embedded file paths BEFORE seed so the
+                // wrap env's let bindings can reference Env.File.*.
+                let wrap_env_id = self.wrap_env_id_excluding(&identifier).cloned();
+                if let Some(ref wid) = wrap_env_id {
+                    let files = self
+                        .environments
+                        .get(wid)
+                        .and_then(|e| e.script.as_ref())
+                        .and_then(|s| s.embedded_files.clone());
+                    self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
+
                 // The wrapped onEnter resolves against the INNER env's own
                 // scope (its embedded files and lets) — the same scope
                 // `runner.enter` would have built had the action run
@@ -1221,6 +1242,13 @@ impl Session {
                     "onEnter",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
+
+                // Write wrap env file contents AFTER seed (so data resolves
+                // against the post-lets symbol table).
+                if let Some(ref wid) = wrap_env_id {
+                    self.write_wrap_env_file_contents(wid, &action_symtab, Some(&lib))
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
             }
 
             // The effective action is now resolved (wrap hook or the env's
@@ -1440,6 +1468,19 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // Register wrap env's embedded file paths BEFORE seed so the
+                // wrap env's let bindings can reference Env.File.*.
+                let wrap_env_id = self.active_wrap_env_id().cloned();
+                if let Some(ref wid) = wrap_env_id {
+                    let files = self
+                        .environments
+                        .get(wid)
+                        .and_then(|e| e.script.as_ref())
+                        .and_then(|s| s.embedded_files.clone());
+                    self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
+
                 // See the onEnter path: the wrapped onExit resolves against
                 // the INNER env's own scope.
                 let inner_symtab = self
@@ -1464,6 +1505,13 @@ impl Session {
                     "onExit",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
+
+                // Write wrap env file contents AFTER seed (so data resolves
+                // against the post-lets symbol table).
+                if let Some(ref wid) = wrap_env_id {
+                    self.write_wrap_env_file_contents(wid, &action_symtab, Some(&lib))
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
             }
 
             // See the onEnter path: record the effective action's declared
@@ -1581,6 +1629,13 @@ impl Session {
             String::new()
         };
 
+        // Evict the wrap-env file cache when the wrap environment itself is
+        // exited. The on-disk files are intentionally NOT deleted — they live
+        // in the session files directory and are cleaned up with it.
+        if env_has_any_wrap_hook(&env) {
+            self.wrap_env_file_records.remove(identifier);
+        }
+
         Ok(output)
     }
 
@@ -1632,15 +1687,37 @@ impl Session {
         // step script runs exactly as before — this keeps the non-WRAP_ACTIONS
         // path a zero-cost addition.
         //
-        // Scope note: this pass does NOT re-materialize the wrap environment's
-        // embedded files. Wrap actions that reference `{{Env.File.*}}` will
-        // see only the names registered when the wrap env was entered, which
-        // are not persisted across action runs. Inline wrap scripts
-        // (`command: bash, args: ["-c", "..."]`) work without this. Re-running
-        // `allocate_file_paths` against the wrap env's embedded_files at task
-        // dispatch time is the follow-up to enable `Env.File.*` inside wrap
-        // hooks end-to-end.
+        // Wrap environment embedded files: paths are allocated once per wrap
+        // env (on the first hook invocation that triggers a cache miss) and
+        // reused for every subsequent invocation. File contents are re-written
+        // per invocation so each hook execution starts from the authored data.
+        // Registration happens BEFORE seed_wrapped_action_symbols so the wrap
+        // env's let bindings can reference `{{Env.File.*}}`; writing happens
+        // AFTER so file data resolves against the post-lets symbol table.
         let lib = self.library.clone();
+
+        // Hoist wrap-env identity and embedded files BEFORE the closure that
+        // borrows `self` immutably, so we can call `&mut self` methods for
+        // the embedded-file cache.
+        let wrap_env_id_and_files: Option<(
+            EnvironmentIdentifier,
+            Option<Vec<openjd_model::job::EmbeddedFile>>,
+        )> = self.active_wrap_env_id().and_then(|id| {
+            let env = self.environments.get(id)?;
+            if env.script.as_ref()?.actions.on_wrap_task_run.is_some() {
+                let files = env.script.as_ref().and_then(|s| s.embedded_files.clone());
+                Some((id.clone(), files))
+            } else {
+                None
+            }
+        });
+
+        // Register wrap env file paths BEFORE seed (so lets can reference Env.File.*).
+        if let Some((ref wrap_id, ref files)) = wrap_env_id_and_files {
+            self.ensure_wrap_env_files(wrap_id, files.as_deref(), &mut action_symtab)
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
         let wrap_action: Option<openjd_model::job::Action> = self
             .active_wrap_env()
             .and_then(|wrap_env| {
@@ -1679,6 +1756,12 @@ impl Session {
             })
             .transpose()
             .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
 
         // Box large locals so they live on the heap instead of inflating
         // this async fn's state machine. Without this, the combined future
@@ -2514,6 +2597,85 @@ impl Session {
             }
         }
         None
+    }
+
+    /// Like `wrap_env_excluding` but returns the identifier instead of a
+    /// reference to the environment, avoiding borrow conflicts when `&mut self`
+    /// is needed after the lookup.
+    fn wrap_env_id_excluding(&self, self_id: &str) -> Option<&EnvironmentIdentifier> {
+        for id in self.environments_entered.iter().rev() {
+            if id == self_id {
+                continue;
+            }
+            if let Some(env) = self.environments.get(id) {
+                if env_has_any_wrap_hook(env) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Return the `EnvironmentIdentifier` of the active wrap environment, if
+    /// one exists. Like `active_wrap_env` but returns the id rather than a
+    /// reference, avoiding borrow conflicts when mutation is needed.
+    fn active_wrap_env_id(&self) -> Option<&EnvironmentIdentifier> {
+        for id in self.environments_entered.iter().rev() {
+            if let Some(env) = self.environments.get(id) {
+                if env_has_any_wrap_hook(env) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Ensure the wrap environment's embedded file paths are allocated and
+    /// registered in `symtab`. On the first call for a given wrap env
+    /// (cache miss), allocates paths and creates the cache entry. On
+    /// subsequent calls (cache hit), re-registers the previously allocated
+    /// paths without allocating new ones.
+    ///
+    /// No-op when `files` is `None` or empty.
+    fn ensure_wrap_env_files(
+        &mut self,
+        wrap_env_id: &EnvironmentIdentifier,
+        files: Option<&[openjd_model::job::EmbeddedFile]>,
+        symtab: &mut SymbolTable,
+    ) -> Result<(), SessionError> {
+        let files = match files {
+            Some(f) if !f.is_empty() => f,
+            _ => return Ok(()),
+        };
+        if let Some(cached) = self.wrap_env_file_records.get(wrap_env_id) {
+            // Cache hit: re-register paths without allocating.
+            cached.register_file_paths(symtab)?;
+        } else {
+            // Cache miss: allocate paths and insert into cache.
+            let mut ef = EmbeddedFiles::new(
+                EmbeddedFilesScope::Env,
+                self.files_directory.clone(),
+                &self.session_id,
+            )
+            .with_user(self.cross_user.user.clone());
+            ef.allocate_file_paths(files, symtab)?;
+            self.wrap_env_file_records.insert(wrap_env_id.clone(), ef);
+        }
+        Ok(())
+    }
+
+    /// Write the cached wrap environment's embedded file contents into the
+    /// symtab's resolved scope. No-op if no cache entry exists for the id.
+    fn write_wrap_env_file_contents(
+        &self,
+        wrap_env_id: &EnvironmentIdentifier,
+        symtab: &SymbolTable,
+        lib: Option<&FunctionLibrary>,
+    ) -> Result<(), SessionError> {
+        if let Some(cached) = self.wrap_env_file_records.get(wrap_env_id) {
+            cached.write_file_contents(symtab, lib)?;
+        }
+        Ok(())
     }
 }
 
