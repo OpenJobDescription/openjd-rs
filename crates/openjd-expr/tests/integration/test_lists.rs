@@ -1714,3 +1714,41 @@ fn empty_listcomp_type_is_nulltype() {
         "list[nulltype]"
     );
 }
+
+#[test]
+fn flatten_empty_comprehension_has_nulltype() {
+    // Regression: flatten over an empty comprehension result must yield list[nulltype],
+    // not list[int], so that functions like repr_sh (which has a list[nulltype] overload)
+    // accept the result.
+    let mut st = SymbolTable::new();
+    st.set(
+        "Env",
+        ExprValue::make_list(vec![], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    let parsed =
+        openjd_expr::ParsedExpression::new("repr_sh(flatten([[\"-e\", e] for e in Env]))").unwrap();
+    let result = parsed.evaluate(&st).unwrap();
+    // repr_sh of an empty list produces an empty string
+    assert_eq!(result.to_display_string(), "");
+}
+
+#[test]
+fn flatten_nonempty_comprehension_has_string_type() {
+    // Non-empty case: flatten over a string comprehension must still yield list[string].
+    let mut st = SymbolTable::new();
+    st.set(
+        "Env",
+        ExprValue::make_list(vec![ExprValue::String("A=1".to_string())], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    let parsed =
+        openjd_expr::ParsedExpression::new("repr_sh(flatten([[\"-e\", e] for e in Env]))").unwrap();
+    let result = parsed.evaluate(&st).unwrap();
+    // repr_sh on a list of strings should produce shell-escaped space-separated values
+    assert!(
+        result.to_display_string().contains("-e"),
+        "expected repr_sh output to contain -e, got: {}",
+        result.to_display_string()
+    );
+}

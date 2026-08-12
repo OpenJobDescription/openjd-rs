@@ -67,7 +67,10 @@ pub fn flatten_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         }
     }
     let et = if result.is_empty() {
-        ExprType::INT
+        // An empty flatten result has no elements to infer a type from.
+        // Use NULLTYPE (the bottom type for lists) so the result is accepted by
+        // any function that declares a list[nulltype] overload (e.g. repr_sh).
+        ExprType::NULLTYPE
     } else {
         result[0].expr_type()
     };
