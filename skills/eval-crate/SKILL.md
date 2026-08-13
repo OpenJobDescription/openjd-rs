@@ -108,12 +108,16 @@ Findings MUST be verified in a pass separate from the one that generated them.
    `WITHDRAWN` are removed and counted in the run summary.
 5. Claims that would change a maintainer's decision MUST be verified by
    execution, not by another subagent round.
-6. Subagents that mutate the tree MUST restore it and clear build caches between
-   mutations.
+6. Mutation subagents MUST run **one at a time**. They share one working tree and
+   one `target/`, so concurrent mutations compile against each other and "the
+   suite did not fail" means nothing. The other angles may run in parallel.
+7. Each MUST restore the tree before finishing: `git checkout -- <path>` for an
+   edited file, `rm` for one it created, then `git status --short` to confirm.
+   Re-run the suite after restoring to be sure the result was not a stale build.
 
 ### Evaluation Procedure
 
-1. **Clean slate**: Delete `reports/<crate-name>-quality-evaluation-report.md` if it exists, without reading it.
+1. **Clean slate**: Do not read the previous `reports/<crate-name>-quality-evaluation-report.md` or `-eval-summary.json`; write both with `Write`, which truncates. Overwrite rather than delete first, so an interrupted run leaves the previous report in place instead of nothing.
 2. **Read and understand the specs** in `specs/<crate-name>/`.
 3. **Read and understand the implementation** in `crates/openjd-<crate-name>/src/`.
 4. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
