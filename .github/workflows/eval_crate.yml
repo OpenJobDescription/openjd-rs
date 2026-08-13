@@ -283,8 +283,15 @@ jobs:
             Procedure in full -- this is a comprehensive evaluation, not a skim.
             That includes the Python comparison, the exploratory testing, the
             subagent verification pass, the report at
-            reports/${{ matrix.crate }}-quality-evaluation-report.md, and the
-            summary at reports/${{ matrix.crate }}-eval-summary.json.
+            reports/${{ matrix.crate }}-quality-evaluation-report.new.md, and the
+            summary at reports/${{ matrix.crate }}-eval-summary.new.json.
+
+            Write those two `.new` paths, then rename each over the final name
+            (without the `.new`) as your last action, per the skill's steps 1 and
+            11. Write the `.new` paths and nothing else: `Write` refuses to
+            overwrite a file it has not read this session, so a direct write to
+            the final path would fail on every crate that has a committed report,
+            and reading that report first is the anchoring step 1 forbids.
 
             The skill's "Claim Verification" and "Verification with Subagents"
             sections are requirements, not suggestions. Concretely:
@@ -342,12 +349,35 @@ jobs:
           #     what mutation testing actually needs.
           #   - `rm` under reports/: for the same reason. Scratch-file deletion
           #     is scoped to crates/ and /tmp, so the agent can undo a mutation
-          #     but cannot reach its own output.
+          #     but cannot reach its own output. This is also why the skill has
+          #     the agent write `*.new.md`/`*.new.json` and rename them at the
+          #     end: `Write` refuses to overwrite a file it has not read this
+          #     session, and with no `rm` here the only other way to satisfy it
+          #     would be to Read the previous report -- the anchoring the clean
+          #     slate exists to prevent. `mv` covers the rename.
           claude_args: |
             --model us.anthropic.claude-opus-5
             --allowedTools "Task,Read,Glob,Grep,Write,Edit,Bash(cd openjd-rs:*),Bash(cargo build:*),Bash(cargo test:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(python3:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ls:*),Bash(diff:*),Bash(cp:*),Bash(mv:*),Bash(find:*),Bash(rm crates/:*),Bash(rm -f crates/:*),Bash(rm openjd-rs/crates/:*),Bash(rm -f openjd-rs/crates/:*),Bash(rm /tmp/:*),Bash(rm -f /tmp/:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git checkout --:*),Bash(git -C openjd-rs status:*),Bash(git -C openjd-rs diff:*),Bash(git -C openjd-rs log:*),Bash(git -C openjd-rs checkout --:*)"
 
       # ---- outputs ------------------------------------------------------------
+
+      # The agent writes `*.new.md`/`*.new.json` and renames them as its last
+      # action (see the allowedTools comment above). If it ran out of wall clock
+      # first, promote them here so the run publishes what it produced instead of
+      # the committed baseline it never overwrote.
+      - name: Promote a report the agent did not rename
+        if: always()
+        working-directory: openjd-rs
+        env:
+          CRATE: ${{ matrix.crate }}
+        run: |
+          set -euo pipefail
+          for new in "reports/$CRATE-quality-evaluation-report.new.md" \
+                     "reports/$CRATE-eval-summary.new.json"; do
+            [ -f "$new" ] || continue
+            echo "::warning::promoting $new; the run ended before renaming it"
+            mv "$new" "${new/.new./.}"
+          done
 
       # `error`, not `warn`: the report is the job's only deliverable, so a run
       # that produced nothing must be visibly red rather than green-with-a-notice.

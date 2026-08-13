@@ -119,7 +119,7 @@ Findings MUST be verified in a pass separate from the one that generated them.
 
 ### Evaluation Procedure
 
-1. **Clean slate**: Do not read the previous `reports/<crate-name>-quality-evaluation-report.md` or `-eval-summary.json`; write both with `Write`, which truncates. Overwrite rather than delete first, so an interrupted run leaves the previous report in place instead of nothing.
+1. **Clean slate**: Do not read the previous `reports/<crate-name>-quality-evaluation-report.md` or `-eval-summary.json`. Write this run's output to the `.new` paths in steps 9 and 10, then rename both over the final names in step 11. `Write` refuses to overwrite a file it has not read in this session, so writing the final path directly would force exactly the `Read` this step exists to prevent; a path that does not yet exist has no such guard. The late rename also means an interrupted run leaves the previous report in place rather than nothing.
 2. **Read and understand the specs** in `specs/<crate-name>/`.
 3. **Read and understand the implementation** in `crates/openjd-<crate-name>/src/`.
 4. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
@@ -127,8 +127,8 @@ Findings MUST be verified in a pass separate from the one that generated them.
 6. **Build and test**: Run `cargo build -p openjd-<crate-name>` and `cargo test -p openjd-<crate-name>`. Confirm clean compilation (no errors or warnings) and all tests pass.
 7. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Write failing tests that demonstrate any issues found. Include these in the report.
 8. **Verify every finding** per "Claim Verification" and "Verification with Subagents". Drop the withdrawn and label the plausible before writing.
-9. **Write the report** to `reports/<crate-name>-quality-evaluation-report.md`.
-10. **Write the run summary** to `reports/<crate-name>-eval-summary.json`:
+9. **Write the report** to `reports/<crate-name>-quality-evaluation-report.new.md`.
+10. **Write the run summary** to `reports/<crate-name>-eval-summary.new.json`:
 
     ```json
     {
@@ -147,6 +147,20 @@ Findings MUST be verified in a pass separate from the one that generated them.
     split from step 8 — a flat total reads as though everything were verified.
     `sections_incomplete` names any section cut short, so a truncated run is not
     mistaken for a clean one.
+
+11. **Rename both into place**, as the last thing the run does:
+
+    ```bash
+    mv reports/<crate-name>-quality-evaluation-report.new.md reports/<crate-name>-quality-evaluation-report.md
+    mv reports/<crate-name>-eval-summary.new.json reports/<crate-name>-eval-summary.json
+    ```
+
+    One `mv` per call, no line continuations: the tool allowlist matches on the
+    command prefix.
+
+    `mv` replaces the destination without reading it, which is what keeps step 1
+    honest. Do not do this earlier: until it runs, the previous report is still
+    the one on disk, which is the correct thing to publish if the run is cut off.
 
 ### Report Structure
 
