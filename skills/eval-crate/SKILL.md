@@ -111,9 +111,11 @@ Findings MUST be verified in a pass separate from the one that generated them.
 6. Mutation subagents MUST run **one at a time**. They share one working tree and
    one `target/`, so concurrent mutations compile against each other and "the
    suite did not fail" means nothing. The other angles may run in parallel.
-7. Each MUST restore the tree before finishing: `git checkout -- <path>` for an
-   edited file, `rm` for one it created, then `git status --short` to confirm.
-   Re-run the suite after restoring to be sure the result was not a stale build.
+7. Each MUST undo its mutation before the next one: `git checkout -- <path>` for
+   an edited file, `rm` for one it created under the crate, then
+   `git status --short` to confirm. A leftover file under the crate compiles into
+   the next run and makes its result meaningless. Never `git clean` — a report
+   that is not yet committed is untracked, and `git clean` deletes it.
 
 ### Evaluation Procedure
 
