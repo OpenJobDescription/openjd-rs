@@ -69,6 +69,20 @@ jobs:
       - name: Check copyright headers
         run: bash scripts/check_copyright_headers.sh
 
+  # Shell in a `run:` block is invisible to every other check here -- rustfmt,
+  # clippy and cargo-deny do not read YAML. These tests extract the real script
+  # out of the workflow and run it under `bash -e`, so a regression in it fails
+  # a PR rather than a scheduled run.
+  workflow-script-tests:
+    name: Workflow script tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the extractor's dependency
+        run: python3 -m pip install --disable-pip-version-check 'pyyaml==6.0.2'
+      - name: Test the eval-crate PR-comment step
+        run: bash .github/workflows/tests/test_eval_crate_comment_step.sh
+
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same
   # workspace and keeps the total cache footprint well under 10 GB.

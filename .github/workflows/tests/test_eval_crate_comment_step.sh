@@ -38,6 +38,8 @@ say() { echo "$@" >> "$R"; }
 fails=0
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null \
+    || { echo "python3 with pyyaml is required to extract the step" >&2; exit 2; }
 
 # Pull the `run:` block of the "Comment on the PR" step out of the YAML.
 SCRIPT=$(python3 - "$WF" <<'PY'
@@ -48,7 +50,12 @@ for s in d["jobs"]["eval"]["steps"]:
         sys.stdout.write(s["run"]); break
 PY
 )
-[ -n "$SCRIPT" ] || { echo "could not extract the step" >&2; exit 2; }
+[ -n "$SCRIPT" ] || {
+    echo "could not find a step named 'Comment on the PR…' in the eval job of" >&2
+    echo "$WF -- this test locates the step by name, so renaming it silently" >&2
+    echo "un-tests the script. Update the prefix above to match." >&2
+    exit 2
+}
 
 # A `gh api` stub faithful in the three ways this step depends on:
 #   * `--paginate` applies `--jq` to each page SEPARATELY and concatenates the
