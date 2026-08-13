@@ -276,8 +276,8 @@ jobs:
             Run the `eval-crate` skill for the crate `${{ matrix.crate }}`.
 
             Your cwd is the workspace root, NOT the crate. `cd openjd-rs` first;
-            every path below is relative to that directory, as are all cargo and
-            lizard invocations.
+            every path below is relative to that directory, as are all cargo
+            invocations.
 
             The skill is at skills/eval-crate/SKILL.md. Follow its Evaluation
             Procedure in full -- this is a comprehensive evaluation, not a skim.
@@ -345,7 +345,7 @@ jobs:
           #     but cannot reach its own output.
           claude_args: |
             --model us.anthropic.claude-opus-5
-            --allowedTools "Task,Read,Glob,Grep,Write,Edit,Bash(cd openjd-rs:*),Bash(cargo build:*),Bash(cargo test:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(lizard:*),Bash(python3:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ls:*),Bash(diff:*),Bash(cp:*),Bash(mv:*),Bash(find:*),Bash(rm crates/:*),Bash(rm -f crates/:*),Bash(rm openjd-rs/crates/:*),Bash(rm -f openjd-rs/crates/:*),Bash(rm /tmp/:*),Bash(rm -f /tmp/:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git checkout --:*),Bash(git -C openjd-rs status:*),Bash(git -C openjd-rs diff:*),Bash(git -C openjd-rs log:*),Bash(git -C openjd-rs checkout --:*)"
+            --allowedTools "Task,Read,Glob,Grep,Write,Edit,Bash(cd openjd-rs:*),Bash(cargo build:*),Bash(cargo test:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(python3:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ls:*),Bash(diff:*),Bash(cp:*),Bash(mv:*),Bash(find:*),Bash(rm crates/:*),Bash(rm -f crates/:*),Bash(rm openjd-rs/crates/:*),Bash(rm -f openjd-rs/crates/:*),Bash(rm /tmp/:*),Bash(rm -f /tmp/:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git checkout --:*),Bash(git -C openjd-rs status:*),Bash(git -C openjd-rs diff:*),Bash(git -C openjd-rs log:*),Bash(git -C openjd-rs checkout --:*)"
 
       # ---- outputs ------------------------------------------------------------
 
