@@ -36,11 +36,13 @@ The Python repo MUST be on the correct branch for the crate being evaluated:
 
 | Crate | Repo | GitHub org/user | Branch |
 |-------|------|-----------------|--------|
-| expr | openjd-model-for-python | mwiebe (fork) | `expr` |
+| expr | openjd-model-for-python | OpenJobDescription | `mainline` |
 | model | openjd-model-for-python | OpenJobDescription | `mainline` |
 | sessions | openjd-sessions-for-python | OpenJobDescription | `mainline` |
 | cli | openjd-cli | OpenJobDescription | `mainline` |
 | snapshots | deadline-cloud | mwiebe (fork) | `manifest-format-2-prototype` |
+
+`snapshots` is beta: evaluated on request only, and excluded from the weekly workflow.
 
 ### Specification References
 
@@ -71,21 +73,68 @@ The evaluation checks that all three artifacts are aligned:
 1. **Specs ↔ Implementation**: Specs MUST accurately and completely describe what the code does, including goals and design rationale. Every significant part of the implementation SHOULD be covered at an appropriate level of abstraction.
 2. **Public API**: Specs MUST include a full and accurate description of the crate's public API. The implementation MUST implement precisely and only the public API specified. The API SHOULD be ergonomic.
 3. **Implementation ↔ Specs**: Code MUST faithfully implement what the specs say. Error messages MUST be high quality. Naming MUST be consistent within the crate and across other openjd crates.
-3. **Tests ↔ Specs**: Tests MUST confirm the implementation does what the specs say. Tests SHOULD cover both happy path and edge cases, and be clearly organized for review.
-4. **Specification compliance**: For `expr`, `model`, and `sessions`, the implementation MUST comply with the formal specifications and conformance tests in `openjd-specifications` (see Specification References table). Review the relevant specification documents and verify the implementation conforms.
-5. **Rust best practices**: Follow Rust idioms where it makes sense. No `O(N²)` algorithms when `O(N)` is possible. Balance performance with readability.
-6. **Python comparison**: Where the crate has a Python equivalent (see branch table above), compare both implementation algorithms and tests. Note meaningful divergences in behavior, error messages, and API design. Check whether there are Rust tests covering every Python test case.
+4. **Tests ↔ Specs**: Tests MUST confirm the implementation does what the specs say. Tests SHOULD cover both happy path and edge cases, and be clearly organized for review.
+5. **Specification compliance**: For `expr`, `model`, and `sessions`, the implementation MUST comply with the formal specifications and conformance tests in `openjd-specifications` (see Specification References table). Review the relevant specification documents and verify the implementation conforms.
+6. **Rust best practices**: Follow Rust idioms where it makes sense. No `O(N²)` algorithms when `O(N)` is possible. Balance performance with readability.
+7. **Python comparison**: Where the crate has a Python equivalent (see branch table above), compare both implementation algorithms and tests. Note meaningful divergences in behavior, error messages, and API design. Check whether there are Rust tests covering every Python test case.
+
+### Claim Verification
+
+No claim reaches the report on the strength of having been generated. Required
+evidence, by kind of claim:
+
+| Claim | Evidence |
+|-------|----------|
+| "the spec says X" | file + section in `specs/` or `openjd-specifications` |
+| "the code does Y" | `file:line` |
+| "behaviour is Z" | an executed command and its output |
+| "this is a bug" | a test that fails on current code |
+| "this is untested" | a mutation the suite fails to catch |
+| "Python diverges" | the same input run through both, both outputs |
+
+The last three MUST be executed rather than reasoned. Dead code MUST be shown
+unreachable before being called dead.
+
+### Verification with Subagents
+
+Findings MUST be verified in a pass separate from the one that generated them.
+
+1. Subagents MUST get disjoint slices and different angles — spec fidelity,
+   implementation correctness, test adequacy by mutation, Python divergence.
+2. Each MUST be told it is one of several and will not see the others' results.
+3. Each finding returns `CONFIRMED` (with the repro and its output), `PLAUSIBLE`,
+   or `WITHDRAWN` (with the reason).
+4. Only `CONFIRMED` claims are stated as fact. `PLAUSIBLE` MUST be labelled.
+   `WITHDRAWN` are removed and counted in the run summary.
+5. Claims that would change a maintainer's decision MUST be verified by
+   execution, not by another subagent round.
+6. Subagents that mutate the tree MUST restore it and clear build caches between
+   mutations.
 
 ### Evaluation Procedure
 
 1. **Clean slate**: Delete `reports/<crate-name>-quality-evaluation-report.md` if it exists, without reading it.
 2. **Read and understand the specs** in `specs/<crate-name>/`.
-2. **Read and understand the implementation** in `crates/openjd-<crate-name>/src/`.
-3. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
-4. **Compare with the Python reference** (see Python Reference Branch table) where applicable.
-5. **Build and test**: Run `cargo build -p openjd-<crate-name>` and `cargo test -p openjd-<crate-name>`. Confirm clean compilation (no errors or warnings) and all tests pass.
-6. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Write failing tests that demonstrate any issues found. Include these in the report.
-7. **Write the report** to `reports/<crate-name>-quality-evaluation-report.md`.
+3. **Read and understand the implementation** in `crates/openjd-<crate-name>/src/`.
+4. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
+5. **Compare with the Python reference** (see Python Reference Branch table) where applicable.
+6. **Build and test**: Run `cargo build -p openjd-<crate-name>` and `cargo test -p openjd-<crate-name>`. Confirm clean compilation (no errors or warnings) and all tests pass.
+7. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Write failing tests that demonstrate any issues found. Include these in the report.
+8. **Verify every finding** per "Claim Verification" and "Verification with Subagents". Drop the withdrawn and label the plausible before writing.
+9. **Write the report** to `reports/<crate-name>-quality-evaluation-report.md`.
+10. **Write the run summary** to `reports/<crate-name>-eval-summary.json`:
+
+    ```json
+    {
+      "crate": "expr", "date": "YYYY-MM-DD", "commit": "<sha evaluated>",
+      "findings": { "high": 0, "medium": 0, "low": 0 }, "withdrawn": 0,
+      "build_clean": true, "tests_pass": true, "sections_incomplete": [],
+      "headline": "One sentence, used as the commit message body."
+    }
+    ```
+
+    Counts MUST match the report body. `sections_incomplete` names any section cut
+    short, so a truncated run is not mistaken for a clean one.
 
 ### Report Structure
 
@@ -121,9 +170,17 @@ Compilation output, test results, any warnings.
 ## 7. Exploratory Findings
 Bugs found, failing tests written, undefined behavior discovered.
 
-## 8. Recommendations
+## 8. Verification
+How findings were verified: the subagent slices and angles used, and per finding
+its label (CONFIRMED with the repro / PLAUSIBLE / WITHDRAWN with the reason).
+State the withdrawn count and what could not be verified, and why.
+
+## 9. Recommendations
 Prioritized list of improvements.
 ```
+
+Every finding in sections 1–7 MUST be tagged `[CONFIRMED]` or `[PLAUSIBLE]`.
+An untagged finding is a defect in the report.
 
 ## Quick Reference
 
