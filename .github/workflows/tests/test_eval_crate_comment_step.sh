@@ -33,6 +33,8 @@
 set -uo pipefail
 WF="$(cd "$(dirname "$0")/../.." && pwd)/workflows/eval_crate.yml"
 R=/tmp/comment-step-test.txt
+LAST_BODY=/tmp/comment-step-last-body.md
+export LAST_BODY
 : > "$R"
 say() { echo "$@" >> "$R"; }
 fails=0
@@ -76,7 +78,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -X)         method="${2:-}"; shift 2 ;;
     --jq)       filter="${2:-}"; shift 2 ;;
-    -F|-f|-H)   shift 2 ;;
+    -F|-f|-H)
+      # Keep the rendered comment so a test can assert on what a reader sees,
+      # not merely that some request was made.
+      case "${2:-}" in body=@*) cp "${2#body=@}" "$GH_BODY" 2>/dev/null ;; esac
+      shift 2 ;;
     --paginate) paginate=1; shift ;;
     --slurp)    slurp=1; shift ;;
     -*)         shift ;;
@@ -131,7 +137,8 @@ _run() {  # lines, summary, track_baseline, page1_id, page2_id
     write_gh_stub bin/gh
     write_pages "$wd/pages" "$p1" "$p2"
     export PATH="$wd/bin:$PATH" GH_LOG="$wd/gh.log" GH_PAGES_DIR="$wd/pages"
-    : > "$GH_LOG"
+    export GH_BODY="$wd/body.md"
+    : > "$GH_LOG"; : > "$GH_BODY"
 
     # A report with `lines` changed lines, optionally with a committed baseline.
     pad=$(printf 'x%.0s' $(seq 1 40))
@@ -148,6 +155,8 @@ _run() {  # lines, summary, track_baseline, page1_id, page2_id
     printf '%s' "$SCRIPT" > step.sh
     bash -e step.sh >/dev/null 2>&1
     echo "exit=$?"
+    # Hand the rendered comment back out; $wd is removed below.
+    cp "$GH_BODY" "$LAST_BODY" 2>/dev/null
     echo "posted=$(grep -c GH_CALL "$GH_LOG")"
     echo "method=$(sed -n '1s/^GH_CALL:\([A-Z]*\):.*/\1/p' "$GH_LOG")"
     # Keep the endpoint on one line so an embedded newline is visible as a gap.
@@ -167,6 +176,24 @@ run_case() {  # name, report_lines, summary_content, track_baseline
     say "  PASS  $1 (exit 0, comment posted)"
   else
     say "  FAIL  $1 (exit=${code:-?}, posted=${posted:-0})"
+    fails=$((fails + 1))
+  fi
+}
+
+# Part 1b: the rendered comment must say what the summary actually said.
+run_render_case() {  # name, summary_content, expected substring...
+  local name="$1" summary="$2"; shift 2
+  local out; out=$(_run 10 "$summary" yes "" "")
+  local code; code=$(field "$out" exit)
+  local missing=""
+  local want
+  for want in "$@"; do
+    grep -qF -- "$want" "$LAST_BODY" 2>/dev/null || missing="$missing '$want'"
+  done
+  if [ "${code:-1}" = 0 ] && [ -z "$missing" ]; then
+    say "  PASS  $name"
+  else
+    say "  FAIL  $name (exit=${code:-?}, comment missing:$missing)"
     fails=$((fails + 1))
   fi
 }
@@ -198,6 +225,23 @@ run_case "summary missing findings key"               10 '{"headline":"h"}'     
 run_case "sections_incomplete is a string not array"  10 '{"headline":"h","sections_incomplete":"api"}' yes
 run_case "no summary at all"                          10 ""                         yes
 run_case "no committed baseline"                      10 "$GOOD"                    no
+
+say " must report the summary's real values, not placeholders:"
+# jq's `//` takes its right-hand side for `false` as well as `null`, so a broken
+# build would have rendered as "?" -- reporting the failure as unknown. These
+# are the two fields where `false` is the whole point of the comment.
+run_render_case "build_clean=false renders as false, not ?" \
+  '{"headline":"broken","findings":{"high":0,"medium":0,"low":0},"withdrawn":0,"build_clean":false,"tests_pass":false,"sections_incomplete":[]}' \
+  "build clean: false" "tests pass: false"
+# Negative control: a genuine zero must not be mistaken for missing either, and
+# real values must still come through when nothing is falsy.
+run_render_case "zero counts and true booleans render literally" \
+  '{"headline":"clean","findings":{"high":0,"medium":0,"low":0},"withdrawn":0,"build_clean":true,"tests_pass":true,"sections_incomplete":[]}' \
+  "high 0, medium 0, low 0" "withdrawn by verification: 0" "build clean: true"
+# A truly absent field is the only case that should show a placeholder.
+run_render_case "absent booleans still fall back to ?" \
+  '{"headline":"partial","findings":{"high":1,"medium":2,"low":3}}' \
+  "build clean: ?" "tests pass: ?" "withdrawn by verification: n/a"
 
 say " must edit the existing comment rather than stack a new one:"
 run_upsert_case "match on page 1"          111 ""    PATCH 111

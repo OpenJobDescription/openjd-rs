@@ -402,12 +402,16 @@ jobs:
           # jq exit non-zero.
           summary_md=""
           if [ -f "$summary" ] && jq -e . "$summary" >/dev/null 2>&1; then
+            # `orelse` rather than jq's `//`: `//` takes its right-hand side for
+            # `false` as well as `null`, so `build_clean: false` -- the single
+            # most important thing this comment can say -- would render as "?".
             summary_md=$(jq -r '
-              "**\(.headline // "no headline")**\n\n"
-              + "- findings: high \(.findings.high // "?"), medium \(.findings.medium // "?"), low \(.findings.low // "?")\n"
-              + "- withdrawn by verification: \(.withdrawn // "n/a")\n"
-              + "- build clean: \(.build_clean // "?") | tests pass: \(.tests_pass // "?")"
-              + (try ((.sections_incomplete // []) | if length > 0 then "\n\n> Incomplete sections: " + join(", ") else "" end) catch "")
+              def orelse(alt): if . == null then alt else . end;
+              "**\(.headline | orelse("no headline"))**\n\n"
+              + "- findings: high \(.findings.high | orelse("?")), medium \(.findings.medium | orelse("?")), low \(.findings.low | orelse("?"))\n"
+              + "- withdrawn by verification: \(.withdrawn | orelse("n/a"))\n"
+              + "- build clean: \(.build_clean | orelse("?")) | tests pass: \(.tests_pass | orelse("?"))"
+              + (try ((.sections_incomplete | orelse([])) | if length > 0 then "\n\n> Incomplete sections: " + join(", ") else "" end) catch "")
             ' "$summary" 2>/dev/null)
           fi
           if [ -z "$summary_md" ]; then
