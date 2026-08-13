@@ -5,6 +5,26 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.4.0...openjd-sessions-v0.5.0) - 2026-08-13
+
+### Bug fixes
+
+- Resolve Env.File.* inside wrap action hooks ([#315](https://github.com/OpenJobDescription/openjd-rs/pull/315))
+
+- Escape undecodable subprocess output bytes ([#298](https://github.com/OpenJobDescription/openjd-rs/pull/298))
+
+- PATHEXT-aware Windows executable resolution on both spawn paths ([#286](https://github.com/OpenJobDescription/openjd-rs/pull/286))
+
+- [**breaking**] Enforce memory and operation limits before building large string outputs ([#284](https://github.com/OpenJobDescription/openjd-rs/pull/284))
+
+- Close remaining RFC 0008 wrap-action gaps in hook scoping, cleanup, and preflight
+
+
+### Refactor
+
+- Simplify run lifecycle and wrap dispatch ([#280](https://github.com/OpenJobDescription/openjd-rs/pull/280))
+
+
 ## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.3.2...openjd-sessions-v0.4.0) - 2026-07-22
 
 ### Bug fixes

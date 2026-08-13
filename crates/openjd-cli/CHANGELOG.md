@@ -5,6 +5,27 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.8...openjd-cli-v0.1.9) - 2026-08-13
+
+### Bug fixes
+
+- PATHEXT-aware Windows executable resolution on both spawn paths ([#286](https://github.com/OpenJobDescription/openjd-rs/pull/286))
+
+- Defer zero-duration chunk adjustment ([#282](https://github.com/OpenJobDescription/openjd-rs/pull/282))
+
+- Close remaining RFC 0008 wrap-action gaps in hook scoping, cleanup, and preflight
+
+
+### Miscellaneous
+
+- Update serde-saphyr to 1.0.1 ([#304](https://github.com/OpenJobDescription/openjd-rs/pull/304))
+
+
+### Refactor
+
+- Simplify run lifecycle and wrap dispatch ([#280](https://github.com/OpenJobDescription/openjd-rs/pull/280))
+
+
 ## [0.1.8](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.7...openjd-cli-v0.1.8) - 2026-07-22
 
 ### Bug fixes
