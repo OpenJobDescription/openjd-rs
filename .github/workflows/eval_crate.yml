@@ -407,8 +407,16 @@ jobs:
             # most important thing this comment can say -- would render as "?".
             summary_md=$(jq -r '
               def orelse(alt): if . == null then alt else . end;
+              def triple: "high \(.high | orelse("?")), medium \(.medium | orelse("?")), low \(.low | orelse("?"))";
               "**\(.headline | orelse("no headline"))**\n\n"
-              + "- findings: high \(.findings.high | orelse("?")), medium \(.findings.medium | orelse("?")), low \(.findings.low | orelse("?"))\n"
+              # Keep the CONFIRMED/PLAUSIBLE split the skill requires: a flat
+              # total reads as though every finding had been verified. Still
+              # render a flat `findings` if the agent wrote one, rather than
+              # dropping the numbers entirely.
+              + (if (.findings.confirmed // .findings.plausible) != null
+                 then "- confirmed: \((.findings.confirmed | orelse({})) | triple)\n"
+                    + "- plausible: \((.findings.plausible | orelse({})) | triple)\n"
+                 else "- findings (unsplit): \((.findings | orelse({})) | triple)\n" end)
               + "- withdrawn by verification: \(.withdrawn | orelse("n/a"))\n"
               + "- build clean: \(.build_clean | orelse("?")) | tests pass: \(.tests_pass | orelse("?"))"
               + (try ((.sections_incomplete | orelse([])) | if length > 0 then "\n\n> Incomplete sections: " + join(", ") else "" end) catch "")

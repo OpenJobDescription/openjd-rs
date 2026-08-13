@@ -214,7 +214,10 @@ run_upsert_case() {  # name, page1_id, page2_id, expect_method, expect_id
   fi
 }
 
-GOOD='{"headline":"ok","findings":{"high":1,"medium":2,"low":3},"withdrawn":0,"build_clean":true,"tests_pass":false,"sections_incomplete":[]}'
+F='{"confirmed":{"high":1,"medium":2,"low":3},"plausible":{"high":0,"medium":0,"low":0}}'
+GOOD="{\"headline\":\"ok\",\"findings\":$F,\"withdrawn\":0,\"build_clean\":true,\"tests_pass\":true,\"sections_incomplete\":[]}"
+BROKEN="{\"headline\":\"broken\",\"findings\":$F,\"withdrawn\":0,\"build_clean\":false,\"tests_pass\":false,\"sections_incomplete\":[]}"
+SPLIT='{"headline":"h","findings":{"confirmed":{"high":1,"medium":0,"low":0},"plausible":{"high":0,"medium":4,"low":0}},"withdrawn":2,"build_clean":true,"tests_pass":true,"sections_incomplete":[]}'
 
 say "PR-comment step, run under bash -e as Actions does:"
 say " must always post a comment and exit 0:"
@@ -231,17 +234,29 @@ say " must report the summary's real values, not placeholders:"
 # build would have rendered as "?" -- reporting the failure as unknown. These
 # are the two fields where `false` is the whole point of the comment.
 run_render_case "build_clean=false renders as false, not ?" \
-  '{"headline":"broken","findings":{"high":0,"medium":0,"low":0},"withdrawn":0,"build_clean":false,"tests_pass":false,"sections_incomplete":[]}' \
-  "build clean: false" "tests pass: false"
+  "$BROKEN" "build clean: false" "tests pass: false"
 # Negative control: a genuine zero must not be mistaken for missing either, and
 # real values must still come through when nothing is falsy.
 run_render_case "zero counts and true booleans render literally" \
-  '{"headline":"clean","findings":{"high":0,"medium":0,"low":0},"withdrawn":0,"build_clean":true,"tests_pass":true,"sections_incomplete":[]}' \
-  "high 0, medium 0, low 0" "withdrawn by verification: 0" "build clean: true"
+  "$GOOD" "withdrawn by verification: 0" "build clean: true"
 # A truly absent field is the only case that should show a placeholder.
 run_render_case "absent booleans still fall back to ?" \
-  '{"headline":"partial","findings":{"high":1,"medium":2,"low":3}}' \
+  '{"headline":"partial"}' \
   "build clean: ?" "tests pass: ?" "withdrawn by verification: n/a"
+
+say " must not report plausible findings as confirmed:"
+# The skill requires every finding to be tagged CONFIRMED or PLAUSIBLE. A flat
+# total in the comment silently promotes the unverified ones to fact.
+run_render_case "confirmed and plausible are reported separately" \
+  "$SPLIT" "confirmed: high 1, medium 0, low 0" "plausible: high 0, medium 4, low 0"
+run_render_case "a confirmed-only summary still shows plausible zeros" \
+  '{"headline":"h","findings":{"confirmed":{"high":2,"medium":0,"low":0}}}' \
+  "confirmed: high 2, medium 0, low 0" "plausible: high ?, medium ?, low ?"
+# Tolerate an agent that ignores the schema rather than losing its numbers, but
+# label the total so nobody reads it as verified.
+run_render_case "a flat findings object is labelled unsplit" \
+  '{"headline":"h","findings":{"high":7,"medium":0,"low":0}}' \
+  "findings (unsplit): high 7, medium 0, low 0"
 
 say " must edit the existing comment rather than stack a new one:"
 run_upsert_case "match on page 1"          111 ""    PATCH 111

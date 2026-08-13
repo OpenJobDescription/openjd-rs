@@ -133,14 +133,20 @@ Findings MUST be verified in a pass separate from the one that generated them.
     ```json
     {
       "crate": "expr", "date": "YYYY-MM-DD", "commit": "<sha evaluated>",
-      "findings": { "high": 0, "medium": 0, "low": 0 }, "withdrawn": 0,
+      "findings": {
+        "confirmed": { "high": 0, "medium": 0, "low": 0 },
+        "plausible": { "high": 0, "medium": 0, "low": 0 }
+      },
+      "withdrawn": 0,
       "build_clean": true, "tests_pass": true, "sections_incomplete": [],
       "headline": "One sentence, used as the commit message body."
     }
     ```
 
-    Counts MUST match the report body. `sections_incomplete` names any section cut
-    short, so a truncated run is not mistaken for a clean one.
+    Counts MUST match the report body, and MUST keep the `CONFIRMED`/`PLAUSIBLE`
+    split from step 8 — a flat total reads as though everything were verified.
+    `sections_incomplete` names any section cut short, so a truncated run is not
+    mistaken for a clean one.
 
 ### Report Structure
 
