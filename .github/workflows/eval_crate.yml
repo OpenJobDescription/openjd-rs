@@ -446,11 +446,15 @@ jobs:
           } > "$body"
           # Upsert so repeated runs edit one comment instead of stacking, and
           # paginate since the default page is 30 and a re-labelled PR exceeds it.
-          # --slurp is required: with --paginate alone, gh applies --jq to each
-          # page separately and concatenates, so `| last` yields one id PER PAGE
-          # and $existing becomes multi-line, producing a 404 PATCH URL.
-          existing=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
-                      --jq "[.[][] | select(.body | startswith(\"<!-- eval-crate:$CRATE -->\")) | .id] | last // empty" \
+          # `--paginate` applies --jq per page and concatenates, so the filter
+          # emits one id per line across all pages; `tail -1` reduces that to the
+          # most recent (the API returns comments oldest-first). Do NOT add
+          # `--slurp` to get a single document -- gh rejects it outright with
+          # "the --slurp option is not supported with --jq", which under the
+          # `2>/dev/null` below would silently leave $existing empty and POST a
+          # new comment every run.
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+                      --jq ".[] | select(.body | startswith(\"<!-- eval-crate:$CRATE -->\")) | .id" \
                       2>/dev/null | tail -1)
           if [ -n "$existing" ]; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$body"

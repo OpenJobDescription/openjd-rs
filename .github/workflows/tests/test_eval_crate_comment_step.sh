@@ -8,7 +8,7 @@
 # runs it under `bash -e` -- the shell Actions actually uses -- so a regression
 # in any of these reproduces here rather than in a live run.
 #
-# Cases:
+# Part 1, "must always post" -- a reporting step may never be fatal:
 #   1. diff > 64KB        (was: SIGPIPE -> 141 -> -e aborts, no comment posted)
 #                         The trigger is the pipe buffer, not a line count: a
 #                         41KB diff exits 0, a 168KB diff exits 141.
@@ -16,12 +16,28 @@
 #   3. missing summary    (must degrade gracefully)
 #   4. no baseline        (untracked report must not read as "no change")
 #   5. healthy case       (all fields render)
+#
+# Part 2, "must upsert" -- the comment lookup must find an existing comment and
+# PATCH it, rather than stacking a new one every run. These cases exist because
+# two separate bugs both silently degraded to "always POST", and the earlier
+# version of this test could not see either: it stubbed the lookup as a fixed
+# empty result, so the PATCH branch was never once executed.
+#   6. match on page 1        -> PATCH
+#   7. match only on page 2   -> PATCH  (a lookup without --paginate misses it)
+#   8. match on both pages    -> PATCH exactly one id, not a newline-joined pair
+#                                (--paginate applies --jq per page, so an
+#                                 unreduced filter yields one id PER PAGE and
+#                                 the PATCH URL 404s)
+#   9. no match anywhere      -> POST   (negative control: do not over-correct
+#                                 into always-PATCH)
 set -uo pipefail
 WF="$(cd "$(dirname "$0")/../.." && pwd)/workflows/eval_crate.yml"
 R=/tmp/comment-step-test.txt
 : > "$R"
 say() { echo "$@" >> "$R"; }
 fails=0
+
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 # Pull the `run:` block of the "Comment on the PR" step out of the YAML.
 SCRIPT=$(python3 - "$WF" <<'PY'
@@ -34,22 +50,80 @@ PY
 )
 [ -n "$SCRIPT" ] || { echo "could not extract the step" >&2; exit 2; }
 
-run_case() {  # name, report_lines, summary_content, track_baseline
-  local name="$1" lines="$2" summary="$3" track="$4"
+# A `gh api` stub faithful in the three ways this step depends on:
+#   * `--paginate` applies `--jq` to each page SEPARATELY and concatenates the
+#     results -- it does not build one document. This is what makes an unreduced
+#     filter emit one id per page.
+#   * `--slurp` is rejected outright when combined with `--jq`, with gh's own
+#     message and a non-zero exit. The step sends the lookup's stderr to
+#     /dev/null, so an unsupported flag combination is invisible at run time and
+#     merely leaves the result empty.
+#   * `-X <METHOD>` calls are recorded with their endpoint, so a test can tell a
+#     PATCH from a POST and check the URL the id was interpolated into.
+write_gh_stub() {
+  cat > "$1" <<'EOF'
+#!/bin/bash
+method=""; endpoint=""; filter=""; paginate=0; slurp=0
+[ "${1:-}" = api ] && shift   # the subcommand, not the endpoint
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X)         method="${2:-}"; shift 2 ;;
+    --jq)       filter="${2:-}"; shift 2 ;;
+    -F|-f|-H)   shift 2 ;;
+    --paginate) paginate=1; shift ;;
+    --slurp)    slurp=1; shift ;;
+    -*)         shift ;;
+    *)          [ -z "$endpoint" ] && endpoint="$1"; shift ;;
+  esac
+done
+if [ -n "$method" ]; then
+  # Render an embedded newline as a literal \n. An unreduced lookup puts two ids
+  # in the URL, and the resulting 404 is far clearer as `.../111\n222` than as a
+  # log record that silently wraps onto a second line.
+  printf 'GH_CALL:%s:%s\n' "$method" "${endpoint//$'\n'/\\n}" >> "$GH_LOG"
+  exit 0
+fi
+if [ "$slurp" = 1 ] && [ -n "$filter" ]; then
+  echo 'the `--slurp` option is not supported with `--jq` or `--template`' >&2
+  exit 1
+fi
+emit() { if [ -n "$filter" ]; then jq -r "$filter" < "$1"; else cat "$1"; fi; }
+if [ "$paginate" = 1 ]; then
+  for p in "$GH_PAGES_DIR"/page*.json; do [ -f "$p" ] && emit "$p"; done
+else
+  [ -f "$GH_PAGES_DIR/page1.json" ] && emit "$GH_PAGES_DIR/page1.json"
+fi
+exit 0
+EOF
+  chmod +x "$1"
+}
+
+# Build the two lookup pages. $1/$2 are the ids to mark as OUR comment on page
+# 1 / page 2 ("" for none); every page also carries an unrelated comment so the
+# filter has something it must reject.
+write_pages() {
+  local dir="$1" p1="$2" p2="$3" n=1
+  for spec in "$p1" "$p2"; do
+    {
+      printf '[{"id":90%d,"body":"unrelated chatter"}' "$n"
+      [ -n "$spec" ] && printf ',{"id":%s,"body":"<!-- eval-crate:x -->\\nprevious"}' "$spec"
+      printf ']'
+    } > "$dir/page$n.json"
+    n=$((n + 1))
+  done
+}
+
+# Core runner. Writes `exit=`, `posted=`, `method=`, `endpoint=` to stdout.
+_run() {  # lines, summary, track_baseline, page1_id, page2_id
+  local lines="$1" summary="$2" track="$3" p1="$4" p2="$5"
   local wd; wd=$(mktemp -d)
   (
     cd "$wd" || exit 9
     git init -q .; git config user.email t@t; git config user.name t
-    mkdir -p reports bin
-    # Stub `gh` so we can observe whether the comment was posted.
-    cat > bin/gh <<'EOF'
-#!/bin/bash
-for a in "$@"; do case "$a" in -X) shift; echo "GH_CALL:$1" >> "$GH_LOG"; exit 0;; esac; done
-# `gh api --paginate --slurp ...` (the lookup): return two empty pages.
-echo "[[],[]]"
-EOF
-    chmod +x bin/gh
-    export PATH="$wd/bin:$PATH" GH_LOG="$wd/gh.log"
+    mkdir -p reports bin pages
+    write_gh_stub bin/gh
+    write_pages "$wd/pages" "$p1" "$p2"
+    export PATH="$wd/bin:$PATH" GH_LOG="$wd/gh.log" GH_PAGES_DIR="$wd/pages"
     : > "$GH_LOG"
 
     # A report with `lines` changed lines, optionally with a committed baseline.
@@ -66,25 +140,50 @@ EOF
     # bash -e is what Actions uses; the step must survive it.
     printf '%s' "$SCRIPT" > step.sh
     bash -e step.sh >/dev/null 2>&1
-    echo "exit=$?" > result
-    echo "posted=$(grep -c GH_CALL "$GH_LOG")" >> result
-    cat result
+    echo "exit=$?"
+    echo "posted=$(grep -c GH_CALL "$GH_LOG")"
+    echo "method=$(sed -n '1s/^GH_CALL:\([A-Z]*\):.*/\1/p' "$GH_LOG")"
+    # Keep the endpoint on one line so an embedded newline is visible as a gap.
+    echo "endpoint=$(sed -n '1s/^GH_CALL:[A-Z]*://p' "$GH_LOG" | tr '\n' ' ')"
   ) > "$wd/out" 2>&1
-  local code posted
-  code=$(grep -o 'exit=[0-9]*' "$wd/out" | cut -d= -f2)
-  posted=$(grep -o 'posted=[0-9]*' "$wd/out" | cut -d= -f2)
+  cat "$wd/out"
+  rm -rf "$wd"
+}
+
+field() { grep -o "^$2=.*" <<<"$1" | head -1 | cut -d= -f2- ; }
+
+# Part 1: the step must exit 0 and post something, whatever the inputs.
+run_case() {  # name, report_lines, summary_content, track_baseline
+  local out; out=$(_run "$2" "$3" "$4" "" "")
+  local code posted; code=$(field "$out" exit); posted=$(field "$out" posted)
   if [ "${code:-1}" = 0 ] && [ "${posted:-0}" -ge 1 ]; then
-    say "  PASS  $name (exit 0, comment posted)"
+    say "  PASS  $1 (exit 0, comment posted)"
   else
-    say "  FAIL  $name (exit=${code:-?}, posted=${posted:-0})"
+    say "  FAIL  $1 (exit=${code:-?}, posted=${posted:-0})"
     fails=$((fails + 1))
   fi
-  rm -rf "$wd"
+}
+
+# Part 2: the step must reuse an existing comment when one exists.
+run_upsert_case() {  # name, page1_id, page2_id, expect_method, expect_id
+  local out; out=$(_run 10 "$GOOD" yes "$2" "$3")
+  local code method endpoint
+  code=$(field "$out" exit); method=$(field "$out" method)
+  endpoint=$(field "$out" endpoint)
+  local want_ep="repos/o/r/issues/comments/$5 "
+  [ "$4" = POST ] && want_ep="repos/o/r/issues/1/comments "
+  if [ "${code:-1}" = 0 ] && [ "$method" = "$4" ] && [ "$endpoint" = "$want_ep" ]; then
+    say "  PASS  $1 ($4 $endpoint)"
+  else
+    say "  FAIL  $1 (exit=${code:-?}, want $4 '$want_ep', got ${method:-none} '${endpoint:-}')"
+    fails=$((fails + 1))
+  fi
 }
 
 GOOD='{"headline":"ok","findings":{"high":1,"medium":2,"low":3},"withdrawn":0,"build_clean":true,"tests_pass":false,"sections_incomplete":[]}'
 
 say "PR-comment step, run under bash -e as Actions does:"
+say " must always post a comment and exit 0:"
 run_case "diff over the 64KB pipe buffer (SIGPIPE)"  3000 "$GOOD"                    yes
 run_case "diff of 10 lines"                          10 "$GOOD"                    yes
 run_case "malformed summary (truncated JSON)"         10 '{"headline":"oops",'      yes
@@ -93,11 +192,17 @@ run_case "sections_incomplete is a string not array"  10 '{"headline":"h","secti
 run_case "no summary at all"                          10 ""                         yes
 run_case "no committed baseline"                      10 "$GOOD"                    no
 
+say " must edit the existing comment rather than stack a new one:"
+run_upsert_case "match on page 1"          111 ""    PATCH 111
+run_upsert_case "match only on page 2"     ""  222   PATCH 222
+run_upsert_case "match on both pages"      111 222   PATCH 222
+run_upsert_case "no match anywhere"        ""  ""    POST  ""
+
 say ""
 if [ "$fails" -eq 0 ]; then
-  say "all cases posted a comment and exited 0"
+  say "all cases exited 0, posted a comment, and upserted correctly"
 else
-  say "$fails case(s) would have produced NO comment and a red job"
+  say "$fails case(s) would misbehave in a live run"
 fi
 cat "$R"
 exit "$fails"
