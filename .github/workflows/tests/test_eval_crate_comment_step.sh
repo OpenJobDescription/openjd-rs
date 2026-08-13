@@ -1,11 +1,17 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+#
 # Exercise the PR-comment step's shell against the failure modes that static
 # checks missed. Extracts the real script out of the workflow, stubs `gh`, and
 # runs it under `bash -e` -- the shell Actions actually uses -- so a regression
 # in any of these reproduces here rather than in a live run.
 #
 # Cases:
-#   1. diff > 200 lines   (was: SIGPIPE -> 141 -> -e aborts, no comment posted)
+#   1. diff > 64KB        (was: SIGPIPE -> 141 -> -e aborts, no comment posted)
+#                         The trigger is the pipe buffer, not a line count: a
+#                         41KB diff exits 0, a 168KB diff exits 141.
 #   2. malformed summary  (was: jq non-zero -> -e aborts, no comment posted)
 #   3. missing summary    (must degrade gracefully)
 #   4. no baseline        (untracked report must not read as "no change")
