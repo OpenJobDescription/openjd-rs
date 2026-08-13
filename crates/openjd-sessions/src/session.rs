@@ -1202,6 +1202,21 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // Build inner_symtab BEFORE registering wrap env files so the
+                // inner scope is derived from a symtab that does NOT contain
+                // the wrapper's Env.File.* entries — preventing scope leak.
+                let inner_symtab = self
+                    .build_wrapped_inner_scope(
+                        EmbeddedFilesScope::Env,
+                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
+                        env.script
+                            .as_ref()
+                            .and_then(|s| s.embedded_files.as_deref()),
+                        &action_symtab,
+                        Some(&lib),
+                    )
+                    .map_err(|e| self.fail_action_setup(e))?;
+
                 // Register wrap env's embedded file paths BEFORE seed so the
                 // wrap env's let bindings can reference Env.File.*.
                 let wrap_env_id = self.wrap_env_id_excluding(&identifier).cloned();
@@ -1214,23 +1229,6 @@ impl Session {
                     self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
                         .map_err(|e| self.fail_action_setup(e))?;
                 }
-
-                // The wrapped onEnter resolves against the INNER env's own
-                // scope (its embedded files and lets) — the same scope
-                // `runner.enter` would have built had the action run
-                // unwrapped. The hook itself resolves against the wrap
-                // env's scope built in seed_wrapped_action_symbols.
-                let inner_symtab = self
-                    .build_wrapped_inner_scope(
-                        EmbeddedFilesScope::Env,
-                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
-                        env.script
-                            .as_ref()
-                            .and_then(|s| s.embedded_files.as_deref()),
-                        &action_symtab,
-                        Some(&lib),
-                    )
-                    .map_err(|e| self.fail_action_setup(e))?;
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
                     wrap_env,
@@ -1425,6 +1423,14 @@ impl Session {
         })?;
         self.environments_entered.pop();
 
+        // Evict the wrap-env file cache unconditionally alongside other
+        // environment teardown. This runs before the exit script so the
+        // cache is cleared even when the exit script fails — a re-entered
+        // environment always gets fresh allocations.
+        if env_has_any_wrap_hook(&env) {
+            self.wrap_env_file_records.remove(identifier);
+        }
+
         let output = if env
             .script
             .as_ref()
@@ -1468,6 +1474,21 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
+                // Build inner_symtab BEFORE registering wrap env files so the
+                // inner scope is derived from a symtab that does NOT contain
+                // the wrapper's Env.File.* entries — preventing scope leak.
+                let inner_symtab = self
+                    .build_wrapped_inner_scope(
+                        EmbeddedFilesScope::Env,
+                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
+                        env.script
+                            .as_ref()
+                            .and_then(|s| s.embedded_files.as_deref()),
+                        &action_symtab,
+                        Some(&lib),
+                    )
+                    .map_err(|e| self.fail_action_setup(e))?;
+
                 // Register wrap env's embedded file paths BEFORE seed so the
                 // wrap env's let bindings can reference Env.File.*.
                 let wrap_env_id = self.active_wrap_env_id().cloned();
@@ -1480,20 +1501,6 @@ impl Session {
                     self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
                         .map_err(|e| self.fail_action_setup(e))?;
                 }
-
-                // See the onEnter path: the wrapped onExit resolves against
-                // the INNER env's own scope.
-                let inner_symtab = self
-                    .build_wrapped_inner_scope(
-                        EmbeddedFilesScope::Env,
-                        env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
-                        env.script
-                            .as_ref()
-                            .and_then(|s| s.embedded_files.as_deref()),
-                        &action_symtab,
-                        Some(&lib),
-                    )
-                    .map_err(|e| self.fail_action_setup(e))?;
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
                     wrap_env,
@@ -1629,13 +1636,6 @@ impl Session {
             String::new()
         };
 
-        // Evict the wrap-env file cache when the wrap environment itself is
-        // exited. The on-disk files are intentionally NOT deleted — they live
-        // in the session files directory and are cleaned up with it.
-        if env_has_any_wrap_hook(&env) {
-            self.wrap_env_file_records.remove(identifier);
-        }
-
         Ok(output)
     }
 
@@ -1712,6 +1712,15 @@ impl Session {
             }
         });
 
+        // Snapshot the symtab BEFORE registering wrap env files so that the
+        // inner scope (WrappedAction.* resolution) does not see the wrapper's
+        // Env.File.* entries — preventing scope leak. Only cloned when a wrap
+        // env is active; when `None` the original action_symtab is used
+        // directly at the call site, keeping the non-wrap path zero-cost.
+        let pre_registration_symtab = wrap_env_id_and_files
+            .as_ref()
+            .map(|_| action_symtab.clone());
+
         // Register wrap env file paths BEFORE seed (so lets can reference Env.File.*).
         if let Some((ref wrap_id, ref files)) = wrap_env_id_and_files {
             self.ensure_wrap_env_files(wrap_id, files.as_deref(), &mut action_symtab)
@@ -1739,7 +1748,7 @@ impl Session {
                     EmbeddedFilesScope::Step,
                     script.let_bindings.as_deref(),
                     script.embedded_files.as_deref(),
-                    &action_symtab,
+                    pre_registration_symtab.as_ref().unwrap_or(&action_symtab),
                     Some(&lib),
                 )?;
                 seed_wrapped_action_symbols(

@@ -201,8 +201,11 @@ ensures the wrap env's `let` bindings can reference `{{Env.File.*}}`.
 
 ### Eviction
 
-The cache entry is removed when the wrap environment itself is exited
-(`exit_environment`). The on-disk files are NOT deleted — they reside in the
+The cache entry is removed unconditionally alongside other environment teardown
+(the `environments.remove` and `environments_entered.pop` calls) in
+`exit_environment`, before the exit script runs. This ensures the cache is
+cleared even when the exit script fails, so a re-entered environment always gets
+fresh allocations. The on-disk files are NOT deleted — they reside in the
 session's files directory and are cleaned up with it at session end.
 
 ### `register_file_paths`

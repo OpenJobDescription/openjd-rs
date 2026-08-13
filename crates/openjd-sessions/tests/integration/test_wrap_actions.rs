@@ -1858,3 +1858,497 @@ echo "U={{{{Env.File.unnamed_f}}}}" >> '{path}'"#,
         unnamed_paths
     );
 }
+
+/// ISOLATION: when a wrap env and an inner env both declare an embedded file
+/// named `config`, the inner env's `onEnter` sees its OWN file (the inner's
+/// `Env.File.config` shadows the wrapper's). This proves that the wrap env's
+/// cached `Env.File.*` entries do not leak into the inner environment's
+/// standard execution scope.
+#[tokio::test]
+async fn wrap_env_file_same_name_inner_shadows_correctly() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env declares an embedded file named "config" with wrap-specific content.
+    // It also defines onWrapEnvEnter that forwards the inner's onEnter via
+    // WrappedAction.Command / WrappedAction.Args — exercising the wrapped path.
+    let wrap_embedded = openjd_model::job::EmbeddedFile {
+        name: "config".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("wrap-config.txt".to_string()),
+        data: Some(fs("wrap-content")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let wrap_enter_hook = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs("{{WrappedAction.Command}} \"$@\""),
+            fs("--"),
+            fs("{{WrappedAction.Args}}"),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        Some(wrap_enter_hook),
+        None,
+        None,
+        vec![wrap_embedded],
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env ALSO declares an embedded file named "config" — same symbol
+    // name, different content. Its onEnter cats the file to prove which one
+    // the WrappedAction resolution sees.
+    let inner_enter_cmd = format!("cat \"{{{{Env.File.config}}}}\" >> '{}'", trace.display());
+    let inner_embedded = openjd_model::job::EmbeddedFile {
+        name: "config".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("inner-config.txt".to_string()),
+        data: Some(fs("inner-content")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let inner = Environment {
+        name: "Inner".to_string(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: fs("bash"),
+                    args: Some(vec![fs("-c"), fs(&inner_enter_cmd)]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: None,
+            },
+            embedded_files: Some(vec![inner_embedded]),
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("inner-content"),
+        "inner env's onEnter must see its OWN Env.File.config, not the wrapper's; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("wrap-content"),
+        "wrapper's Env.File.config must NOT leak into the inner env's scope; got:\n{contents}"
+    );
+}
+
+/// ISOLATION: when a wrap env declares an embedded file named `wrapper_only`,
+/// an inner environment that does NOT declare that file cannot reference
+/// `{{Env.File.wrapper_only}}` — the symbol is undefined in the inner's scope.
+/// This proves that the wrap env's `Env.File.*` entries are scoped to the wrap
+/// hooks only and do not pollute inner environments' execution.
+/// The wrap hook sets `onWrapEnvEnter` to exercise the actual wrapped path.
+#[tokio::test]
+async fn wrap_env_file_different_name_inner_cannot_reference_wrapper_file() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env declares an embedded file named "wrapper_only" and sets
+    // onWrapEnvEnter to forward the inner's onEnter — exercising the
+    // wrapped dispatch path where build_wrapped_inner_scope runs.
+    let wrap_embedded = openjd_model::job::EmbeddedFile {
+        name: "wrapper_only".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("secret.txt".to_string()),
+        data: Some(fs("secret")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let wrap_enter_hook = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs("{{WrappedAction.Command}} \"$@\""),
+            fs("--"),
+            fs("{{WrappedAction.Args}}"),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        Some(wrap_enter_hook),
+        None,
+        None,
+        vec![wrap_embedded],
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env does NOT declare any embedded files but its onEnter attempts
+    // to reference {{Env.File.wrapper_only}}. Since onWrapEnvEnter is set,
+    // the wrapped dispatch path runs build_wrapped_inner_scope which must
+    // fail because the symbol is not defined in the inner env's scope.
+    let inner = Environment {
+        name: "Inner".to_string(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: fs("bash"),
+                    args: Some(vec![fs("-c"), fs("cat {{Env.File.wrapper_only}}")]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: None,
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let result = session.enter_environment(&inner, None, None, None).await;
+    assert!(
+        result.is_err(),
+        "referencing Env.File.wrapper_only from the inner env must fail; \
+         the wrap env's embedded files must not leak into inner scope"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Env.File.wrapper_only"),
+        "error must name the undefined symbol; got: {err_msg}"
+    );
+}
+
+/// EVICTION: exiting a wrap env evicts its cached file paths; re-entering
+/// the same wrap env allocates fresh paths. This pins the
+/// `wrap_env_file_records.remove()` call — without it the test would see
+/// the same path on both invocations.
+#[tokio::test]
+async fn wrap_env_file_eviction_on_exit_gives_fresh_path() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env with an unnamed embedded file (no `filename` field) and an
+    // onWrapTaskRun hook that records Env.File.data's resolved path.
+    let wrap_script = format!(
+        r#"echo "PATH={{{{Env.File.data}}}}" >> '{}'"#,
+        trace.display(),
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let embedded = openjd_model::job::EmbeddedFile {
+        name: "data".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: None,
+        data: Some(fs("payload")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let env = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        None,
+        Some(wrap_task),
+        None,
+        vec![embedded.clone()],
+    );
+
+    // First enter + task → record path. Use a stable identifier so both
+    // enters share the same cache key — without this, the test is vacuous.
+    let env_id = session
+        .enter_environment(&env, None, Some("env-1"), None)
+        .await
+        .unwrap();
+    let task_cmd = format!("echo first >> '{}'", trace.display());
+    let s = step("sh", vec!["-c", &task_cmd]);
+    session
+        .run_task("step1", &s, None, None, None)
+        .await
+        .unwrap();
+
+    // Exit evicts the cache.
+    session
+        .exit_environment(&env_id, None, true, None)
+        .await
+        .unwrap();
+
+    // Re-enter the same wrap env with the same identifier → new allocation
+    // because exit evicted the cached paths.
+    let env_id2 = session
+        .enter_environment(&env, None, Some("env-1"), None)
+        .await
+        .unwrap();
+    // The returned ids must be equal — proving the same cache key was used.
+    assert_eq!(
+        env_id, env_id2,
+        "stable identifier must produce equal env ids; got {env_id} vs {env_id2}"
+    );
+    let task_cmd2 = format!("echo second >> '{}'", trace.display());
+    let s2 = step("sh", vec!["-c", &task_cmd2]);
+    session
+        .run_task("step2", &s2, None, None, None)
+        .await
+        .unwrap();
+
+    // Cleanup.
+    session
+        .exit_environment(&env_id2, None, true, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    let paths: Vec<&str> = contents
+        .lines()
+        .filter_map(|l| l.strip_prefix("PATH="))
+        .collect();
+    assert_eq!(paths.len(), 2, "expected two PATH= lines; got:\n{contents}");
+    assert_ne!(
+        paths[0], paths[1],
+        "after eviction, re-entered wrap env must allocate a fresh path; \
+         both were: {}",
+        paths[0]
+    );
+}
+
+/// CONTENT WRITE: `write_wrap_env_file_contents` actually writes authored
+/// data to the allocated paths. If that call were removed, the files would
+/// exist but be empty. This test pins that behavior for both named and
+/// unnamed embedded files.
+#[tokio::test]
+async fn wrap_hook_reads_authored_file_content() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Two embedded files: one named (with filename), one unnamed (no filename).
+    let named = openjd_model::job::EmbeddedFile {
+        name: "config".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("config.txt".to_string()),
+        data: Some(fs("NAMED-CONTENT")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let unnamed = openjd_model::job::EmbeddedFile {
+        name: "scratch".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: None,
+        data: Some(fs("UNNAMED-CONTENT")),
+        runnable: None,
+        end_of_line: None,
+    };
+
+    let wrap_script = format!(
+        r#"cat "{{{{Env.File.config}}}}" >> '{}' && cat "{{{{Env.File.scratch}}}}" >> '{}'"#,
+        trace.display(),
+        trace.display(),
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let env = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        None,
+        Some(wrap_task),
+        None,
+        vec![named, unnamed],
+    );
+    session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    // Run a task to trigger onWrapTaskRun.
+    let task_cmd = format!("echo task >> '{}'", trace.display());
+    let s = step("sh", vec!["-c", &task_cmd]);
+    session
+        .run_task("step", &s, None, None, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("NAMED-CONTENT"),
+        "hook must read authored data from the named file; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("UNNAMED-CONTENT"),
+        "hook must read authored data from the unnamed file; got:\n{contents}"
+    );
+}
+
+/// SCOPE LEAK (task path): A step's `onRun` must NOT be able to reference
+/// the wrapper's `Env.File.*` entries. The wrapped inner scope is built from
+/// the pre-registration symtab, so the wrapper's file symbols are invisible.
+#[tokio::test]
+async fn wrap_env_file_does_not_leak_into_wrapped_step_scope() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env with an embedded file and onWrapTaskRun that forwards the step.
+    let wrap_embedded = openjd_model::job::EmbeddedFile {
+        name: "wrapper_only".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("secret.txt".to_string()),
+        data: Some(fs("secret")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let wrap_task_hook = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs("{{WrappedAction.Command}} \"$@\""),
+            fs("--"),
+            fs("{{WrappedAction.Args}}"),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        None,
+        Some(wrap_task_hook),
+        None,
+        vec![wrap_embedded],
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Step whose onRun references the wrapper's embedded file — must fail.
+    let s = step("bash", vec!["-c", "cat {{Env.File.wrapper_only}}"]);
+    let result = session.run_task("step", &s, None, None, None).await;
+    assert!(
+        result.is_err(),
+        "referencing Env.File.wrapper_only from the step must fail; \
+         the wrap env's embedded files must not leak into step scope"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Env.File.wrapper_only"),
+        "error must name the undefined symbol; got: {err_msg}"
+    );
+}
+
+/// SCOPE LEAK (exit path): An inner env's `onExit` must NOT be able to
+/// reference the wrapper's `Env.File.*` entries. The wrapped inner scope
+/// is built BEFORE the wrapper's file registration, so the wrapper's file
+/// symbols are invisible to the inner env's exit script.
+#[tokio::test]
+async fn wrap_env_file_does_not_leak_into_wrapped_inner_exit_scope() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("embedded_files")).unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env with an embedded file and onWrapEnvExit.
+    let wrap_embedded = openjd_model::job::EmbeddedFile {
+        name: "wrapper_only".to_string(),
+        file_type: openjd_model::types::FileType::Text,
+        filename: Some("secret.txt".to_string()),
+        data: Some(fs("secret")),
+        runnable: None,
+        end_of_line: None,
+    };
+    let wrap_exit_hook = Action {
+        command: fs("bash"),
+        args: Some(vec![
+            fs("-c"),
+            fs("{{WrappedAction.Command}} \"$@\""),
+            fs("--"),
+            fs("{{WrappedAction.Args}}"),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env_with_files(
+        "Wrapper",
+        Some(action_with_command("true", vec![])),
+        None,
+        None,
+        Some(wrap_exit_hook),
+        vec![wrap_embedded],
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env enters successfully (onEnter does NOT reference the file),
+    // but its onExit references the wrapper's embedded file — must fail.
+    let inner = Environment {
+        name: "Inner".to_string(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            actions: EnvironmentActions {
+                on_enter: Some(action_with_command("true", vec![])),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: Some(Action {
+                    command: fs("bash"),
+                    args: Some(vec![fs("-c"), fs("cat {{Env.File.wrapper_only}}")]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let inner_id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+
+    let result = session.exit_environment(&inner_id, None, true, None).await;
+    assert!(
+        result.is_err(),
+        "referencing Env.File.wrapper_only from the inner env's onExit must fail; \
+         the wrap env's embedded files must not leak into inner exit scope"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Env.File.wrapper_only"),
+        "error must name the undefined symbol; got: {err_msg}"
+    );
+}
