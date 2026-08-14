@@ -1053,18 +1053,15 @@ fn validate_task_param_range(
                 }
             }
             IntRange::Expression(expr) => {
+                // Grammar only. `max_task_param_range_len` deliberately does not
+                // apply to an expression's expansion — see its doc comment.
                 let raw = expr.raw();
                 if !raw.contains("{{") {
-                    match raw.parse::<openjd_expr::RangeExpr>() {
-                        Ok(range) => {
-                            if range.len() > limits.max_task_param_range_len {
-                                errors.add(path, format!("INT parameter '{}' range expression expands to {} elements (max {}).", tp.name, range.len(), limits.max_task_param_range_len));
-                            }
-                        }
-                        Err(e) => errors.add(
+                    if let Err(e) = raw.parse::<openjd_expr::RangeExpr>() {
+                        errors.add(
                             path,
                             format!("INT parameter '{}' range expression error: {e}", tp.name),
-                        ),
+                        );
                     }
                 }
             }

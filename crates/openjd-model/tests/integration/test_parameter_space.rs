@@ -739,3 +739,57 @@ fn combination_expr_leading_star_rejected() {
         "Leading star in combination should be rejected"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Task parameter range length — §3.4 caps the list forms only
+// ══════════════════════════════════════════════════════════════
+
+/// §3.4.1.1.1 `<IntRangeExpr>` states no element cap, so the expansion of a
+/// range expression must not be bounded by `max_task_param_range_len`. The
+/// form exists to express frame ranges, which routinely exceed 1024 values.
+#[test]
+fn int_range_expression_expansion_is_not_capped() {
+    for range in ["1-1024", "1-1025", "1-5000", "1-100000:2"] {
+        decode_ok(&job_with_param_space(&format!(
+            r#"{{"taskParameterDefinitions": [{{"name": "Frame", "type": "INT", "range": "{range}"}}]}}"#
+        )));
+    }
+}
+
+/// A malformed range expression is still rejected — dropping the length cap
+/// must not drop grammar validation.
+#[test]
+fn int_range_expression_grammar_is_still_validated() {
+    check_err(
+        &job_with_param_space(
+            r#"{"taskParameterDefinitions": [{"name": "Frame", "type": "INT", "range": "1-10,5-15"}]}"#,
+        ),
+        &["range expression error"],
+    );
+}
+
+/// §3.4.1.1 item 4 caps `<IntRangeList>` at 1024 elements. That cap stays.
+#[test]
+fn int_range_list_is_still_capped() {
+    let values: Vec<String> = (0..1025).map(|v| v.to_string()).collect();
+    check_err(
+        &job_with_param_space(&format!(
+            r#"{{"taskParameterDefinitions": [{{"name": "Frame", "type": "INT", "range": [{}]}}]}}"#,
+            values.join(",")
+        )),
+        &["range exceeds 1024 elements"],
+    );
+}
+
+/// §3.4.1.3 caps `<StringRangeList>` too.
+#[test]
+fn string_range_list_is_still_capped() {
+    let values: Vec<String> = (0..1025).map(|v| format!("\"v{v}\"")).collect();
+    check_err(
+        &job_with_param_space(&format!(
+            r#"{{"taskParameterDefinitions": [{{"name": "S", "type": "STRING", "range": [{}]}}]}}"#,
+            values.join(",")
+        )),
+        &["range exceeds 1024 elements"],
+    );
+}

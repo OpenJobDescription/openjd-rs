@@ -905,7 +905,6 @@ fn test_single_param_getitem() {
 
 #[test]
 fn lazy_param_space_range_expr_within_limit() {
-    // max_task_param_range_len is 1024 for all configs (not raised by FB1)
     let template = yaml_val(
         r#"
         specificationVersion: "jobtemplate-2023-09"

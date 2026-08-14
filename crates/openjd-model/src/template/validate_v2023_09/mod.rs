@@ -38,6 +38,16 @@ pub struct EffectiveLimits {
     /// raises the job-template limit to 200.
     pub max_env_template_param_count: usize,
     pub max_filename_len: usize,
+    /// Maximum elements in a task parameter's *list*-form range —
+    /// `<IntRangeList>` (§3.4.1.1), `<FloatRangeList>` (§3.4.1.2) and
+    /// `<StringRangeList>` (§3.4.1.3).
+    ///
+    /// Do not apply this to an `<IntRangeExpr>` expansion. §3.4.1.1.1
+    /// constrains that form only by "no two ranges may overlap", and its stated
+    /// purpose is expressing frame ranges succinctly — capping the expansion
+    /// rejects the form's primary use case and pre-empts the host service's own
+    /// task-count limits, which it may raise per account. A host that wants to
+    /// bound fan-out has `CallerLimits::max_task_count`.
     pub max_task_param_range_len: usize,
     pub max_task_param_string_len: usize,
     pub max_job_param_string_len: usize,

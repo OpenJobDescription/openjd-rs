@@ -209,15 +209,9 @@ fn resolve_int_range(
                 &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
             ) {
                 match val {
+                    // Range expressions are not length-capped; only the list
+                    // forms are. See `EffectiveLimits::max_task_param_range_len`.
                     ExprValue::RangeExpr(r) => {
-                        if r.len() > limits.max_task_param_range_len {
-                            return Err(ModelError::DecodeValidation(format!(
-                                "Task parameter '{}' range exceeds {} elements ({} elements)",
-                                param_name,
-                                limits.max_task_param_range_len,
-                                r.len()
-                            )));
-                        }
                         return Ok(job::TaskParamRange::RangeExpr(r));
                     }
                     val if val.is_list() => {
@@ -254,14 +248,6 @@ fn resolve_int_range(
             let range_expr: RangeExpr = resolved
                 .parse()
                 .map_err(|e: openjd_expr::ExpressionError| ModelError::Expression(e))?;
-            if range_expr.len() > limits.max_task_param_range_len {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Task parameter '{}' range exceeds {} elements ({} elements)",
-                    param_name,
-                    limits.max_task_param_range_len,
-                    range_expr.len()
-                )));
-            }
             Ok(job::TaskParamRange::RangeExpr(range_expr))
         }
     }

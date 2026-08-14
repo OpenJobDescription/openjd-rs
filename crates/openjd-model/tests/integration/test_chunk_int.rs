@@ -856,3 +856,31 @@ fn chunks_parameter_name() {
     let tasks: Vec<_> = iter.collect();
     assert_eq!(tasks.len(), 2);
 }
+
+// ══════════════════════════════════════════════════════════════
+// Range length — §3.4 caps the list form only
+// ══════════════════════════════════════════════════════════════
+
+/// §3.4.1.1.1 `<IntRangeExpr>` states no element cap, so a CHUNK[INT] range
+/// expression may expand past `max_task_param_range_len`.
+#[test]
+fn range_expression_expansion_is_not_capped() {
+    for range in ["1-1025", "1-5000", "1-100000:2"] {
+        decode_ok(&chunk_job(&format!(
+            r#"{{"name": "foo", "type": "CHUNK[INT]", "range": "{range}", "chunks": {{"defaultTaskCount": 10, "rangeConstraint": "CONTIGUOUS"}}}}"#
+        )));
+    }
+}
+
+/// §3.4.1.1 item 4 caps the list form at 1024 elements. That cap stays.
+#[test]
+fn range_list_is_still_capped() {
+    let values: Vec<String> = (0..1025).map(|v| v.to_string()).collect();
+    check_err(
+        &chunk_job(&format!(
+            r#"{{"name": "foo", "type": "CHUNK[INT]", "range": [{}], "chunks": {{"defaultTaskCount": 10, "rangeConstraint": "CONTIGUOUS"}}}}"#,
+            values.join(",")
+        )),
+        &["range exceeds 1024 elements"],
+    );
+}
