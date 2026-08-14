@@ -34,7 +34,8 @@ set -uo pipefail
 WF="$(cd "$(dirname "$0")/../.." && pwd)/workflows/eval_crate.yml"
 R=/tmp/comment-step-test.txt
 LAST_BODY=/tmp/comment-step-last-body.md
-export LAST_BODY
+DATE=2026-08-14          # the run date the workflow stamps and passes in
+export LAST_BODY DATE
 : > "$R"
 say() { echo "$@" >> "$R"; }
 fails=0
@@ -127,8 +128,8 @@ write_pages() {
 }
 
 # Core runner. Writes `exit=`, `posted=`, `method=`, `endpoint=` to stdout.
-_run() {  # lines, summary, track_baseline, page1_id, page2_id
-  local lines="$1" summary="$2" track="$3" p1="$4" p2="$5"
+_run() {  # lines, summary, track_baseline, page1_id, page2_id, [write_report]
+  local lines="$1" summary="$2" track="$3" p1="$4" p2="$5" wrote="${6:-yes}"
   local wd; wd=$(mktemp -d)
   (
     cd "$wd" || exit 9
@@ -140,17 +141,24 @@ _run() {  # lines, summary, track_baseline, page1_id, page2_id
     export GH_BODY="$wd/body.md"
     : > "$GH_LOG"; : > "$GH_BODY"
 
-    # A report with `lines` changed lines, optionally with a committed baseline.
+    # Mirror the real layout: this run writes a DATED path (untracked, new), and
+    # the baseline it is compared against is the committed UNDATED one. The step
+    # has to diff across the two names, not within one.
     pad=$(printf 'x%.0s' $(seq 1 40))
-    seq 1 "$lines" | sed "s/\$/ original $pad/" > reports/x-quality-evaluation-report.md
-    if [ "$track" = yes ]; then
-      git add reports/x-quality-evaluation-report.md
+    prev=reports/x-quality-evaluation-report.md
+    new=reports/x-quality-evaluation-report-$DATE.md
+    if [ "$track" = yes ] || [ "$track" = deleted ]; then
+      seq 1 "$lines" | sed "s/\$/ original $pad/" > "$prev"
+      git add "$prev"
       git commit -qm base
-      seq 1 "$lines" | sed "s/\$/ CHANGED $pad/" > reports/x-quality-evaluation-report.md
+      # `deleted`: tracked at HEAD but gone from the worktree, which is what a PR
+      # that removes the baseline looks like.
+      [ "$track" = deleted ] && rm -f "$prev"
     fi
-    [ -n "$summary" ] && printf '%s' "$summary" > reports/x-eval-summary.json
+    [ "$wrote" = yes ] && seq 1 "$lines" | sed "s/\$/ CHANGED $pad/" > "$new"
+    [ -n "$summary" ] && printf '%s' "$summary" > "reports/x-eval-summary-$DATE.json"
 
-    export CRATE=x PR=1 RUN_URL=http://run GH_TOKEN=t GITHUB_REPOSITORY=o/r
+    export CRATE=x RUN_DATE="$DATE" PR=1 RUN_URL=http://run GH_TOKEN=t GITHUB_REPOSITORY=o/r
     # bash -e is what Actions uses; the step must survive it.
     printf '%s' "$SCRIPT" > step.sh
     bash -e step.sh >/dev/null 2>&1
@@ -181,9 +189,11 @@ run_case() {  # name, report_lines, summary_content, track_baseline
 }
 
 # Part 1b: the rendered comment must say what the summary actually said.
-run_render_case() {  # name, summary_content, expected substring...
-  local name="$1" summary="$2"; shift 2
-  local out; out=$(_run 10 "$summary" yes "" "")
+run_render_case() {  # name, summary, track_baseline, [--no-report], expected...
+  local name="$1" summary="$2" track="$3"; shift 3
+  local wrote=yes
+  [ "${1:-}" = --no-report ] && { wrote=no; shift; }
+  local out; out=$(_run 10 "$summary" "$track" "" "" "$wrote")
   local code; code=$(field "$out" exit)
   local missing=""
   local want
@@ -229,33 +239,54 @@ run_case "sections_incomplete is a string not array"  10 '{"headline":"h","secti
 run_case "no summary at all"                          10 ""                         yes
 run_case "no committed baseline"                      10 "$GOOD"                    no
 
+say " must diff the dated report against the undated committed baseline:"
+# The agent writes `…-report-<date>.md` so `Write` never overwrites a file it
+# would first have to read; the baseline is still the committed `…-report.md`.
+# If the step diffed one path against itself the comment would silently claim no
+# change, so assert the changed content actually reaches the reader.
+run_render_case "a changed report shows its diff" "$GOOD" yes \
+  "Diff vs the committed baseline report" "CHANGED"
+run_render_case "no committed baseline says so" "$GOOD" no \
+  "New report; no committed baseline to diff against"
+# A run that produced nothing must not be described as a run that changed
+# nothing. With a committed baseline present, an empty diff is indistinguishable
+# from "no findings moved" unless the missing report is detected first.
+run_render_case "a run that wrote no report says so" "$GOOD" yes --no-report \
+  "This run produced no report"
+# `git ls-files --error-unmatch` proves tracked, not present. A PR that deletes
+# the baseline leaves it tracked at HEAD but absent from the worktree, and
+# diffing against a missing file yields nothing -- which would read as "no
+# change" for what is in fact an entirely new report.
+run_render_case "a deleted baseline is not reported as no change" "$GOOD" deleted \
+  "New report; no committed baseline to diff against"
+
 say " must report the summary's real values, not placeholders:"
 # jq's `//` takes its right-hand side for `false` as well as `null`, so a broken
 # build would have rendered as "?" -- reporting the failure as unknown. These
 # are the two fields where `false` is the whole point of the comment.
 run_render_case "build_clean=false renders as false, not ?" \
-  "$BROKEN" "build clean: false" "tests pass: false"
+  "$BROKEN" yes "build clean: false" "tests pass: false"
 # Negative control: a genuine zero must not be mistaken for missing either, and
 # real values must still come through when nothing is falsy.
 run_render_case "zero counts and true booleans render literally" \
-  "$GOOD" "withdrawn by verification: 0" "build clean: true"
+  "$GOOD" yes "withdrawn by verification: 0" "build clean: true"
 # A truly absent field is the only case that should show a placeholder.
 run_render_case "absent booleans still fall back to ?" \
-  '{"headline":"partial"}' \
+  '{"headline":"partial"}' yes \
   "build clean: ?" "tests pass: ?" "withdrawn by verification: n/a"
 
 say " must not report plausible findings as confirmed:"
 # The skill requires every finding to be tagged CONFIRMED or PLAUSIBLE. A flat
 # total in the comment silently promotes the unverified ones to fact.
 run_render_case "confirmed and plausible are reported separately" \
-  "$SPLIT" "confirmed: high 1, medium 0, low 0" "plausible: high 0, medium 4, low 0"
+  "$SPLIT" yes "confirmed: high 1, medium 0, low 0" "plausible: high 0, medium 4, low 0"
 run_render_case "a confirmed-only summary still shows plausible zeros" \
-  '{"headline":"h","findings":{"confirmed":{"high":2,"medium":0,"low":0}}}' \
+  '{"headline":"h","findings":{"confirmed":{"high":2,"medium":0,"low":0}}}' yes \
   "confirmed: high 2, medium 0, low 0" "plausible: high ?, medium ?, low ?"
 # Tolerate an agent that ignores the schema rather than losing its numbers, but
 # label the total so nobody reads it as verified.
 run_render_case "a flat findings object is labelled unsplit" \
-  '{"headline":"h","findings":{"high":7,"medium":0,"low":0}}' \
+  '{"headline":"h","findings":{"high":7,"medium":0,"low":0}}' yes \
   "findings (unsplit): high 7, medium 0, low 0"
 
 say " must edit the existing comment rather than stack a new one:"

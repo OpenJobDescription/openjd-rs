@@ -119,7 +119,7 @@ Findings MUST be verified in a pass separate from the one that generated them.
 
 ### Evaluation Procedure
 
-1. **Clean slate**: Do not read the previous `reports/<crate-name>-quality-evaluation-report.md` or `-eval-summary.json`. Write this run's output to the `.new` paths in steps 9 and 10, then rename both over the final names in step 11. `Write` refuses to overwrite a file it has not read in this session, so writing the final path directly would force exactly the `Read` this step exists to prevent; a path that does not yet exist has no such guard. The late rename also means an interrupted run leaves the previous report in place rather than nothing.
+1. **Clean slate**: Do not read a previous report or summary. Both of this run's files carry today's date in the name, so `Write` creates them and never has to overwrite something you would first have to read. Last week's conclusions must not anchor this week's.
 2. **Read and understand the specs** in `specs/<crate-name>/`.
 3. **Read and understand the implementation** in `crates/openjd-<crate-name>/src/`.
 4. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
@@ -127,8 +127,8 @@ Findings MUST be verified in a pass separate from the one that generated them.
 6. **Build and test**: Run `cargo build -p openjd-<crate-name>` and `cargo test -p openjd-<crate-name>`. Confirm clean compilation (no errors or warnings) and all tests pass.
 7. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Write failing tests that demonstrate any issues found. Include these in the report.
 8. **Verify every finding** per "Claim Verification" and "Verification with Subagents". Drop the withdrawn and label the plausible before writing.
-9. **Write the report** to `reports/<crate-name>-quality-evaluation-report.new.md`.
-10. **Write the run summary** to `reports/<crate-name>-eval-summary.new.json`:
+9. **Write the report** to `reports/<crate-name>-quality-evaluation-report-<YYYY-MM-DD>.md`.
+10. **Write the run summary** to `reports/<crate-name>-eval-summary-<YYYY-MM-DD>.json`:
 
     ```json
     {
@@ -148,19 +148,10 @@ Findings MUST be verified in a pass separate from the one that generated them.
     `sections_incomplete` names any section cut short, so a truncated run is not
     mistaken for a clean one.
 
-11. **Rename both into place**, as the last thing the run does:
-
-    ```bash
-    mv reports/<crate-name>-quality-evaluation-report.new.md reports/<crate-name>-quality-evaluation-report.md
-    mv reports/<crate-name>-eval-summary.new.json reports/<crate-name>-eval-summary.json
-    ```
-
-    One `mv` per call, no line continuations: the tool allowlist matches on the
-    command prefix.
-
-    `mv` replaces the destination without reading it, which is what keeps step 1
-    honest. Do not do this earlier: until it runs, the previous report is still
-    the one on disk, which is the correct thing to publish if the run is cut off.
+    `date` MUST match the date in both filenames. Under the workflow you are
+    given the date and have no `date` command, so use the one you were given
+    verbatim. Run by hand, take it from `date -u +%Y-%m-%d`. Either way it is
+    observed, never guessed.
 
 ### Report Structure
 
@@ -210,10 +201,13 @@ An untagged finding is a defect in the report.
 
 ## Quick Reference
 
+`<date>` below is the run date, `YYYY-MM-DD`. Writing under it is what keeps
+`Write` creating rather than overwriting — see step 1.
+
 | Input | Specs | Source | Tests | Report |
 |-------|-------|--------|-------|--------|
-| `expr` | `specs/expr/` | `crates/openjd-expr/src/` | `crates/openjd-expr/tests/` | `reports/expr-quality-evaluation-report.md` |
-| `model` | `specs/model/` | `crates/openjd-model/src/` | `crates/openjd-model/tests/` | `reports/model-quality-evaluation-report.md` |
-| `sessions` | `specs/sessions/` | `crates/openjd-sessions/src/` | `crates/openjd-sessions/tests/` | `reports/sessions-quality-evaluation-report.md` |
-| `cli` | `specs/cli/` | `crates/openjd-cli/src/` | `crates/openjd-cli/tests/` | `reports/cli-quality-evaluation-report.md` |
-| `snapshots` | `specs/snapshots/` | `crates/openjd-snapshots/src/` | `crates/openjd-snapshots/tests/` | `reports/snapshots-quality-evaluation-report.md` |
+| `expr` | `specs/expr/` | `crates/openjd-expr/src/` | `crates/openjd-expr/tests/` | `reports/expr-quality-evaluation-report-<date>.md` |
+| `model` | `specs/model/` | `crates/openjd-model/src/` | `crates/openjd-model/tests/` | `reports/model-quality-evaluation-report-<date>.md` |
+| `sessions` | `specs/sessions/` | `crates/openjd-sessions/src/` | `crates/openjd-sessions/tests/` | `reports/sessions-quality-evaluation-report-<date>.md` |
+| `cli` | `specs/cli/` | `crates/openjd-cli/src/` | `crates/openjd-cli/tests/` | `reports/cli-quality-evaluation-report-<date>.md` |
+| `snapshots` | `specs/snapshots/` | `crates/openjd-snapshots/src/` | `crates/openjd-snapshots/tests/` | `reports/snapshots-quality-evaluation-report-<date>.md` |
