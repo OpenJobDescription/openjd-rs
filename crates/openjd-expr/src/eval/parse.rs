@@ -495,7 +495,11 @@ fn parse_inner(
     let mut source = expr_str.to_string();
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
 
-    // Wrap multi-line expressions in parentheses for implicit line continuation
+    // Wrap multi-line expressions in parentheses for implicit line continuation.
+    // NOTE: the wrap shifts every AST offset by +1 relative to the unwrapped
+    // expression text. Each consumer of AST ranges compensates independently
+    // (error.rs caret rendering, evaluator.rs float passthrough) — if a third
+    // consumer appears, centralize the adjustment instead of copying it again.
     let is_multiline = source.contains('\n');
 
     loop {
@@ -534,6 +538,13 @@ fn parse_inner(
             }
             Err(e) => {
                 // Try to find a keyword after '.' that caused the error
+                //
+                // MAINTAINABILITY: this retry scans raw source text with no
+                // string-literal awareness, and is known to rewrite keyword-like
+                // text inside literals (e.g. 'a.class'). Fixing that here means
+                // teaching this loop lexical structure; prefer restructuring the
+                // retry around the parser's error location instead of adding
+                // more string scanning.
                 let mut found = false;
                 for kw in PYTHON_KEYWORDS {
                     let pattern = format!(".{kw}");

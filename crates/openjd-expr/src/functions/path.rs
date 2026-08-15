@@ -539,7 +539,8 @@ fn path_starts_with(path: &str, base: &str, fmt: PathFormat) -> bool {
         // Compare as bytes: string slicing panicked when base.len() fell
         // inside a multibyte char of `path`. ASCII case folding on bytes is
         // equivalent, and a mid-char boundary simply compares unequal.
-        path.len() >= base.len() && path.as_bytes()[..base.len()].eq_ignore_ascii_case(base.as_bytes())
+        path.len() >= base.len()
+            && path.as_bytes()[..base.len()].eq_ignore_ascii_case(base.as_bytes())
     } else {
         path.starts_with(base)
     }
