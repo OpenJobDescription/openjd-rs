@@ -159,17 +159,11 @@ fn split_path_parts(path: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Whether a path is anchored: starts with a separator, or (Windows) with a
-/// drive letter like `C:`. Mirrors the anchor pathlib encodes in `.parts`.
+/// Whether a path is anchored at a root separator. Drive-anchored Windows
+/// paths need no special case here: `split_path_parts` keeps `C:` as the
+/// first segment, so drive mismatches already fail the segment comparison.
 fn is_rooted(path: &str, windows: bool) -> bool {
-    if path.starts_with('/') || (windows && path.starts_with('\\')) {
-        return true;
-    }
-    if windows {
-        let b = path.as_bytes();
-        return b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';
-    }
-    false
+    path.starts_with('/') || (windows && path.starts_with('\\'))
 }
 
 /// Check if a path has a trailing slash.
