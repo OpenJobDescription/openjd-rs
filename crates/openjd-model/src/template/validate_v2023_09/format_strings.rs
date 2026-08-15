@@ -13,7 +13,6 @@ use std::collections::HashSet;
 
 use openjd_expr::eval::ParsedExpression;
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 use openjd_expr::types::ExprType;
 use openjd_expr::value::ExprValue;
@@ -509,57 +508,52 @@ pub fn validate_format_strings(
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
 
+        // Template-scope symtab for the step's job-creation-stage fields:
+        // Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name,
+        // and step-level let bindings — no Session.*, no Task.*. Built once
+        // and shared by parameterSpace range expressions, step let-binding
+        // validation, and `timeout`/`notifyPeriodInSeconds`.
+        let mut step_template_symtab =
+            build_template_scope_symtab(jt.parameter_definitions.as_deref());
+        if expr_active {
+            step_template_symtab
+                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+                .expect("symtab");
+            step_template_symtab
+                .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+                .expect("symtab");
+        }
+
+        // Let bindings: validate and evaluate into the symtab if EXPR, reject
+        // if not. Step-level let bindings are TEMPLATE scope (template_lib,
+        // no Session.*, no PATH Param.*), and are visible in parameterSpace
+        // range expressions below. This is the single validation path for
+        // step-level bindings; it replaces a hand-rolled duplicate that
+        // skipped name/duplicate/shadowing/self-reference/cap checks.
+        let mut step_let_names = HashSet::new();
+        if let Some(bindings) = &step.let_bindings {
+            let let_path = path_field(&step_path, "let");
+            if !expr_active {
+                errors.add(&let_path, "'let' requires the EXPR extension.");
+            } else {
+                validate_let_bindings(
+                    bindings,
+                    &let_path,
+                    &HashSet::new(),
+                    &mut step_let_names,
+                    &mut step_template_symtab,
+                    &template_lib,
+                    &template_profile,
+                    errors,
+                );
+            }
+        }
+
         // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                range_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                range_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                // Step-level let bindings are in template scope and must be
-                // visible in parameterSpace range expressions.
-                if let Some(bindings) = &step.let_bindings {
-                    for binding in bindings {
-                        if let Some(eq_pos) = binding.find('=') {
-                            let name = binding[..eq_pos].trim();
-                            let expr_str = binding[eq_pos + 1..].trim();
-                            if !name.is_empty() && !expr_str.is_empty() {
-                                match openjd_expr::eval::ParsedExpression::with_profile(
-                                    expr_str,
-                                    &template_profile,
-                                ) {
-                                    Ok(parsed) => {
-                                        match parsed
-                                            .with_path_format(PathFormat::Posix)
-                                            .with_library(&template_lib)
-                                            .evaluate(&[&range_symtab as &SymbolTable])
-                                        {
-                                            Ok(val) => {
-                                                let _ = range_symtab.set(name, val);
-                                            }
-                                            Err(e) => {
-                                                errors.add(
-                                                    &step_path,
-                                                    format!("let binding '{name}': {e}"),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        errors
-                                            .add(&step_path, format!("let binding '{name}': {e}"));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let range_symtab = &step_template_symtab;
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
                 match tp {
@@ -567,7 +561,7 @@ pub fn validate_format_strings(
                         if let crate::template::IntRange::Expression(expr) = &t.range {
                             validate_fs(
                                 expr,
-                                &range_symtab,
+                                range_symtab,
                                 &template_lib,
                                 &path_field(&p_path, "range"),
                                 errors,
@@ -579,7 +573,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     errors,
@@ -592,7 +586,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     errors,
@@ -604,7 +598,7 @@ pub fn validate_format_strings(
                         if let crate::template::IntRange::Expression(expr) = &t.range {
                             validate_fs(
                                 expr,
-                                &range_symtab,
+                                range_symtab,
                                 &template_lib,
                                 &path_field(&p_path, "range"),
                                 errors,
@@ -618,48 +612,11 @@ pub fn validate_format_strings(
 
         let mut task_symtab = build_task_scope_symtab(jt, step, expr_active);
 
-        // Template-scope symtab for the step's job-creation-stage fields:
-        // Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name,
-        // and step-level let bindings — no Session.*, no Task.*. Used for
-        // step let bindings and for `timeout`/`notifyPeriodInSeconds`
-        // (plain @fmtstring: resolved at job creation, before any session
-        // exists).
-        let mut step_template_symtab =
-            build_template_scope_symtab(jt.parameter_definitions.as_deref());
-        if expr_active {
-            step_template_symtab
-                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-            step_template_symtab
-                .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-        }
-
-        // Let bindings: validate and evaluate into symtab if EXPR, reject if not.
-        // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
-        // Script-level let bindings are TASK scope (host_lib).
-        if let Some(bindings) = &step.let_bindings {
-            let let_path = path_field(&step_path, "let");
-            if !expr_active {
-                errors.add(&let_path, "'let' requires the EXPR extension.");
-            } else {
-                let mut step_let_names = HashSet::new();
-                validate_let_bindings(
-                    bindings,
-                    &let_path,
-                    &HashSet::new(),
-                    &mut step_let_names,
-                    &mut step_template_symtab,
-                    &template_lib,
-                    &template_profile,
-                    errors,
-                );
-                // Copy evaluated let bindings into task_symtab so script-level code can use them
-                for name in &step_let_names {
-                    if let Some(val) = step_template_symtab.get_value(name) {
-                        let _ = task_symtab.set(name, val.clone());
-                    }
-                }
+        // Copy evaluated step-level let bindings (validated above) into
+        // task_symtab so script-level code can use them.
+        for name in &step_let_names {
+            if let Some(val) = step_template_symtab.get_value(name) {
+                let _ = task_symtab.set(name, val.clone());
             }
         }
 
