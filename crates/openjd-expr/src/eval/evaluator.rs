@@ -501,29 +501,10 @@ impl<'a> Evaluator<'a> {
                     return Err(ExpressionError::float_error("Float operation produced NaN"));
                 }
                 // Preserve original source text for passthrough (e.g., "1.5e3", "3.500")
-                let original = self.expr_source.as_ref().and_then(|src| {
-                    // AST offsets are relative to the parsed text; multi-line
-                    // sources were wrapped in "(...)" before parsing, shifting
-                    // every offset by 1 (same compensation as error.rs carets).
-                    let shift = usize::from(src.contains('\n'));
-                    let start = n.range.start().to_usize().checked_sub(shift)?;
-                    let end = n.range.end().to_usize().checked_sub(shift)?;
-                    let s = src.get(start..end)?;
-                    // Don't preserve malformed forms like "3." or ".5" or
-                    // underscore-containing. Requiring the slice to round-trip
-                    // to the value is a backstop against any offset mismatch:
-                    // a bad slice falls back to default formatting instead of
-                    // silently displaying the wrong text.
-                    if s.ends_with('.')
-                        || s.starts_with('.')
-                        || s.contains('_')
-                        || s.parse::<f64>().ok() != Some(*f)
-                    {
-                        None
-                    } else {
-                        Some(s.to_string())
-                    }
-                });
+                let original = self
+                    .expr_source
+                    .as_ref()
+                    .and_then(|src| float_passthrough_text(src, n.range, *f));
                 self.track(ExprValue::Float(if let Some(s) = original {
                     Float64::with_str(*f, s)?
                 } else {
@@ -1674,6 +1655,28 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.
+/// Recover a float literal's original source text for display passthrough
+/// (e.g. `"1.5e3"`, `"3.500"`), or `None` to use default formatting.
+///
+/// AST offsets are relative to the parsed text; multi-line sources were
+/// wrapped in `"(...)"` before parsing, shifting every offset by 1 (same
+/// compensation as the caret rendering in `error.rs`). Malformed forms
+/// (`"3."`, `".5"`, underscores) are rejected, and the slice must round-trip
+/// to the value — a backstop so any future offset mismatch falls back to
+/// default formatting instead of silently displaying the wrong text.
+fn float_passthrough_text(src: &str, range: ruff_text_size::TextRange, f: f64) -> Option<String> {
+    let shift = usize::from(src.contains('\n'));
+    let start = range.start().to_usize().checked_sub(shift)?;
+    let end = range.end().to_usize().checked_sub(shift)?;
+    let s = src.get(start..end)?;
+    if s.ends_with('.') || s.starts_with('.') || s.contains('_') || s.parse::<f64>().ok() != Some(f)
+    {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 fn unwrap_unresolved(t: &ExprType) -> ExprType {
     if t.code() == crate::types::TypeCode::Unresolved && !t.params().is_empty() {
         t.params()[0].clone()
