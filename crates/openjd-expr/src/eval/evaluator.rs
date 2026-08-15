@@ -514,7 +514,9 @@ impl<'a> Evaluator<'a> {
                     // to the value is a backstop against any offset mismatch:
                     // a bad slice falls back to default formatting instead of
                     // silently displaying the wrong text.
-                    if s.ends_with('.') || s.starts_with('.') || s.contains('_')
+                    if s.ends_with('.')
+                        || s.starts_with('.')
+                        || s.contains('_')
                         || s.parse::<f64>().ok() != Some(*f)
                     {
                         None

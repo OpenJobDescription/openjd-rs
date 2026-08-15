@@ -166,10 +166,7 @@ fn multiline_float_passthrough_not_misaligned() {
     // Regression: multi-line sources are wrapped in "(...)" before parsing,
     // shifting AST offsets by 1; float passthrough sliced the unwrapped
     // source with the shifted range, displaying "2.5 " instead of "12.5".
-    assert_eq!(
-        eval("12.5 if True else\n0.0").to_display_string(),
-        "12.5"
-    );
+    assert_eq!(eval("12.5 if True else\n0.0").to_display_string(), "12.5");
     assert_eq!(
         eval("12.5 if False else\n30.25").to_display_string(),
         "30.25"
@@ -178,10 +175,7 @@ fn multiline_float_passthrough_not_misaligned() {
 #[test]
 fn multiline_float_passthrough_preserves_formatting() {
     // The passthrough must still preserve source formatting once aligned.
-    assert_eq!(
-        eval("3.500 if True else\n1.0").to_display_string(),
-        "3.500"
-    );
+    assert_eq!(eval("3.500 if True else\n1.0").to_display_string(), "3.500");
 }
 
 // === TestSyntaxErrors ===
