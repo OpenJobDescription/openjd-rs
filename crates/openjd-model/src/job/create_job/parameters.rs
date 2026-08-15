@@ -652,7 +652,20 @@ impl MergedParameterDefinition {
                     }
                 }
             }
-            _ => {} // BOOL, RANGE_EXPR — no cross-template mergeable constraints
+            // No cross-template mergeable constraints for these.
+            openjd_expr::ExprValue::Null
+            | openjd_expr::ExprValue::Bool(_)
+            | openjd_expr::ExprValue::RangeExpr(_)
+            | openjd_expr::ExprValue::Unresolved(_) => {}
+            // ExprValue is #[non_exhaustive], so the compiler cannot reject a
+            // future variant here; fail closed instead of silently accepting.
+            other => {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Parameter '{}': cannot check constraints for unsupported value type {}",
+                    self.name,
+                    other.expr_type()
+                )));
+            }
         }
         Ok(())
     }
