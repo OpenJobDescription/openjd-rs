@@ -343,7 +343,6 @@ fn validate_action_fs(
 /// every format-string validation pass. Built once per template.
 struct FsValidationScopes {
     expr_active: bool,
-    fb1_active: bool,
     template_profile: openjd_expr::ExprProfile,
     host_profile: openjd_expr::ExprProfile,
     template_lib: std::sync::Arc<openjd_expr::FunctionLibrary>,
@@ -363,7 +362,6 @@ impl FsValidationScopes {
         let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
         Self {
             expr_active: ctx.profile.has_extension(ModelExtension::Expr),
-            fb1_active: ctx.profile.has_extension(ModelExtension::FeatureBundle1),
             template_profile,
             host_profile,
             template_lib,
@@ -520,6 +518,76 @@ fn validate_job_environments_fs(
     }
 }
 
+/// Task parameter range expressions: TEMPLATE scope (no PATH Param.*), with
+/// step-level let bindings visible via the caller's step template symtab.
+fn validate_step_param_space_ranges(
+    step: &crate::template::StepTemplate,
+    range_symtab: &SymbolTable,
+    sc: &FsValidationScopes,
+    step_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let Some(ps) = &step.parameter_space else {
+        return;
+    };
+    let ps_path = path_field(step_path, "parameterSpace");
+    let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
+    for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
+        let p_path = path_index(&tpd_path, j);
+        match tp {
+            TaskParameterDefinition::INT(t) => {
+                if let crate::template::IntRange::Expression(expr) = &t.range {
+                    validate_fs(
+                        expr,
+                        range_symtab,
+                        &sc.template_lib,
+                        &path_field(&p_path, "range"),
+                        errors,
+                    );
+                }
+            }
+            TaskParameterDefinition::STRING(t) => {
+                if let crate::template::StringRange::List(items) = &t.range {
+                    for (k, item) in items.iter().enumerate() {
+                        validate_fs(
+                            item,
+                            range_symtab,
+                            &sc.template_lib,
+                            &path_index(&path_field(&p_path, "range"), k),
+                            errors,
+                        );
+                    }
+                }
+            }
+            TaskParameterDefinition::PATH(t) => {
+                if let crate::template::StringRange::List(items) = &t.range {
+                    for (k, item) in items.iter().enumerate() {
+                        validate_fs(
+                            item,
+                            range_symtab,
+                            &sc.template_lib,
+                            &path_index(&path_field(&p_path, "range"), k),
+                            errors,
+                        );
+                    }
+                }
+            }
+            TaskParameterDefinition::CHUNK_INT(t) => {
+                if let crate::template::IntRange::Expression(expr) = &t.range {
+                    validate_fs(
+                        expr,
+                        range_symtab,
+                        &sc.template_lib,
+                        &path_field(&p_path, "range"),
+                        errors,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn validate_format_strings(
     jt: &JobTemplate,
     ctx: &ValidationContext,
@@ -528,13 +596,10 @@ pub fn validate_format_strings(
     let scopes = FsValidationScopes::new(ctx);
     let expr_active = scopes.expr_active;
     let template_profile = &scopes.template_profile;
-    let host_profile = &scopes.host_profile;
     let template_lib = &scopes.template_lib;
-    let host_lib = &scopes.host_lib;
 
     validate_job_name_fs(jt, &scopes, errors);
     validate_host_requirements_fs(jt, &scopes, errors);
-
     validate_job_environments_fs(jt, &scopes, errors);
 
     // ── Steps ──
@@ -582,66 +647,7 @@ pub fn validate_format_strings(
             }
         }
 
-        // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
-        if let Some(ps) = &step.parameter_space {
-            let ps_path = path_field(&step_path, "parameterSpace");
-            let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            let range_symtab = &step_template_symtab;
-            for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
-                let p_path = path_index(&tpd_path, j);
-                match tp {
-                    TaskParameterDefinition::INT(t) => {
-                        if let crate::template::IntRange::Expression(expr) = &t.range {
-                            validate_fs(
-                                expr,
-                                range_symtab,
-                                &template_lib,
-                                &path_field(&p_path, "range"),
-                                errors,
-                            );
-                        }
-                    }
-                    TaskParameterDefinition::STRING(t) => {
-                        if let crate::template::StringRange::List(items) = &t.range {
-                            for (k, item) in items.iter().enumerate() {
-                                validate_fs(
-                                    item,
-                                    range_symtab,
-                                    &template_lib,
-                                    &path_index(&path_field(&p_path, "range"), k),
-                                    errors,
-                                );
-                            }
-                        }
-                    }
-                    TaskParameterDefinition::PATH(t) => {
-                        if let crate::template::StringRange::List(items) = &t.range {
-                            for (k, item) in items.iter().enumerate() {
-                                validate_fs(
-                                    item,
-                                    range_symtab,
-                                    &template_lib,
-                                    &path_index(&path_field(&p_path, "range"), k),
-                                    errors,
-                                );
-                            }
-                        }
-                    }
-                    TaskParameterDefinition::CHUNK_INT(t) => {
-                        if let crate::template::IntRange::Expression(expr) = &t.range {
-                            validate_fs(
-                                expr,
-                                range_symtab,
-                                &template_lib,
-                                &path_field(&p_path, "range"),
-                                errors,
-                            );
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        validate_step_param_space_ranges(step, &step_template_symtab, &scopes, &step_path, errors);
 
         let mut task_symtab = build_task_scope_symtab(jt, step, expr_active);
 
@@ -654,7 +660,58 @@ pub fn validate_format_strings(
         }
 
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
+            validate_step_script_fs(
+                step,
+                script,
+                &mut task_symtab,
+                &step_template_symtab,
+                &scopes,
+                &step_path,
+                errors,
+            );
+        }
+
+        validate_step_environments_fs(
+            jt,
+            step,
+            &task_symtab,
+            &step_template_symtab,
+            &scopes,
+            &step_path,
+            errors,
+        );
+        validate_simple_action_lets(step, &mut task_symtab, ctx, &scopes, &step_path, errors);
+    }
+
+    // Environment script comprehension validation (EXPR only)
+    if expr_active {
+        validate_env_comprehensions(&jt.job_environments, errors);
+        for step in &jt.steps {
+            validate_env_comprehensions(&step.step_environments, errors);
+        }
+    }
+}
+
+/// Step script: let bindings, EXPR gating for complex expressions, onRun
+/// action format strings, timeout/cancelation (template scope), embedded
+/// files, and comprehension-variable validation.
+#[allow(clippy::too_many_arguments)]
+fn validate_step_script_fs(
+    step: &StepTemplate,
+    script: &StepScript,
+    task_symtab: &mut SymbolTable,
+    step_template_symtab: &SymbolTable,
+    sc: &FsValidationScopes,
+    step_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let expr_active = sc.expr_active;
+    let host_lib = &sc.host_lib;
+    let host_profile = &sc.host_profile;
+    let template_lib = &sc.template_lib;
+    {
+        {
+            let script_path = path_field(step_path, "script");
 
             // Script-level let bindings (TASK scope — host_lib). Task.File.*
             // is in scope: file paths are allocated before `let` evaluation
@@ -680,9 +737,9 @@ pub fn validate_format_strings(
                         &let_path,
                         &enclosing,
                         &mut script_let_names,
-                        &mut task_symtab,
-                        &host_lib,
-                        &host_profile,
+                        task_symtab,
+                        host_lib,
+                        host_profile,
                         errors,
                     );
                 }
@@ -818,11 +875,28 @@ pub fn validate_format_strings(
                 }
             }
         }
+    }
+}
 
-        // Step environments: session scope + step let bindings
-        // (timeouts: template scope, via step_template_symtab)
+/// Step environments: session scope + step let bindings
+/// (timeouts: template scope, via the step template symtab).
+#[allow(clippy::too_many_arguments)]
+fn validate_step_environments_fs(
+    jt: &JobTemplate,
+    step: &StepTemplate,
+    task_symtab: &SymbolTable,
+    step_template_symtab: &SymbolTable,
+    sc: &FsValidationScopes,
+    step_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let expr_active = sc.expr_active;
+    let host_lib = &sc.host_lib;
+    let host_profile = &sc.host_profile;
+    let template_lib = &sc.template_lib;
+    {
         if let Some(envs) = &step.step_environments {
-            let envs_path = path_field(&step_path, "stepEnvironments");
+            let envs_path = path_field(step_path, "stepEnvironments");
             for (j, env) in envs.iter().enumerate() {
                 let mut env_symtab = build_session_scope_symtab(
                     jt.parameter_definitions.as_deref(),
@@ -897,9 +971,24 @@ pub fn validate_format_strings(
                 );
             }
         }
+    }
+}
 
-        // SimpleAction let bindings (requires both FB1 and EXPR)
-        if expr_active {
+/// SimpleAction (`bash`/`python`/`cmd`/`powershell`/`node`) let bindings —
+/// requires both FEATURE_BUNDLE_1 and EXPR — plus comprehension-variable
+/// validation of the SimpleAction script and args.
+fn validate_simple_action_lets(
+    step: &StepTemplate,
+    task_symtab: &mut SymbolTable,
+    ctx: &ValidationContext,
+    sc: &FsValidationScopes,
+    step_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let host_lib = &sc.host_lib;
+    let host_profile = &sc.host_profile;
+    {
+        if sc.expr_active {
             for sa in [
                 &step.bash,
                 &step.python,
@@ -937,7 +1026,7 @@ pub fn validate_format_strings(
                             &step_path,
                             &enclosing,
                             &mut new_names,
-                            &mut task_symtab,
+                            task_symtab,
                             &host_lib,
                             &host_profile,
                             errors,
@@ -965,14 +1054,6 @@ pub fn validate_format_strings(
                     }
                 }
             }
-        }
-    }
-
-    // Environment script comprehension validation (EXPR only)
-    if expr_active {
-        validate_env_comprehensions(&jt.job_environments, errors);
-        for step in &jt.steps {
-            validate_env_comprehensions(&step.step_environments, errors);
         }
     }
 }
