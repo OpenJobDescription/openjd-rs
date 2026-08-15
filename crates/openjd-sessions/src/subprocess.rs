@@ -574,13 +574,11 @@ pub async fn run_subprocess(
     );
 
     // Spawn the process via tokio::process::Command (same-user only;
-    // cross-user was rejected above).
-    #[cfg(windows)]
-    let win32_process_handle: Option<windows::Win32::Foundation::HANDLE> = None;
-
-    #[allow(unused_mut)]
+    // cross-user was rejected above, so a child always exists here —
+    // this used to be Option<Child> with an unreachable Windows
+    // cross-user wait branch behind a never-assigned handle).
     let (mut child, pid, stdout_for_reading): (
-        Option<tokio::process::Child>,
+        tokio::process::Child,
         i32,
         Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>>,
     ) = {
@@ -617,7 +615,7 @@ pub async fn run_subprocess(
                 .take()
                 .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)
         });
-        (Some(c), p, stdout)
+        (c, p, stdout)
     };
 
     session_log!(
@@ -760,48 +758,27 @@ pub async fn run_subprocess(
         }
     }
 
-    // Wait for process to exit
-    let exit_status = if let Some(ref mut c) = child {
-        // If we already issued `send_terminate` from inside the read loop
-        // (timeout, urgent cancel, or Terminate cancel), the child should
-        // be dead and `c.wait()` just needs to reap it — a short bound
-        // is plenty. Otherwise give the full 5s to accommodate graceful
-        // shutdown (natural EOF or `NotifyThenTerminate`).
-        let grace = if terminate_sent {
-            STDOUT_GRACE_TIME_POST_TERMINATE
-        } else {
-            STDOUT_GRACE_TIME
-        };
-        match tokio::time::timeout(grace, c.wait()).await {
-            Ok(Ok(s)) => Some(s),
-            Ok(Err(_)) => {
-                send_terminate(pid);
-                None
-            }
-            Err(_) => {
-                send_terminate(pid);
-                c.wait().await.ok()
-            }
-        }
+    // Wait for process to exit.
+    //
+    // If we already issued `send_terminate` from inside the read loop
+    // (timeout, urgent cancel, or Terminate cancel), the child should
+    // be dead and `child.wait()` just needs to reap it — a short bound
+    // is plenty. Otherwise give the full 5s to accommodate graceful
+    // shutdown (natural EOF or `NotifyThenTerminate`).
+    let grace = if terminate_sent {
+        STDOUT_GRACE_TIME_POST_TERMINATE
     } else {
-        // Windows cross-user: wait on the raw process handle
-        #[cfg(windows)]
-        {
-            win32_process_handle.map(|h| {
-                use std::os::windows::process::ExitStatusExt;
-                use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
-                unsafe {
-                    let _ = WaitForSingleObject(h, 60000);
-                    let mut code = 0u32;
-                    let _ = GetExitCodeProcess(h, &mut code);
-                    let _ = windows::Win32::Foundation::CloseHandle(h);
-                    std::process::ExitStatus::from_raw(code)
-                }
-            })
-        }
-        #[cfg(not(windows))]
-        {
+        STDOUT_GRACE_TIME
+    };
+    let exit_status = match tokio::time::timeout(grace, child.wait()).await {
+        Ok(Ok(s)) => Some(s),
+        Ok(Err(_)) => {
+            send_terminate(pid);
             None
+        }
+        Err(_) => {
+            send_terminate(pid);
+            child.wait().await.ok()
         }
     };
 
