@@ -51,6 +51,51 @@ fn posix_to_windows_basic() {
     assert!(r.to_display_string().contains("shared") && r.to_display_string().contains("project"));
 }
 
+// Regression: split_path_parts drops the leading separator, so a relative
+// input matched an absolute rule (and vice versa). Python's pathlib
+// is_relative_to never matches across the absolute/relative boundary.
+#[test]
+fn relative_path_does_not_match_absolute_rule() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    assert_eq!(rule.apply("home/user/f"), None);
+}
+
+#[test]
+fn absolute_path_does_not_match_relative_rule() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "home/user".to_string(),
+        destination_path: "mapped".to_string(),
+    };
+    assert_eq!(rule.apply("/home/user/f"), None);
+}
+
+#[test]
+fn relative_path_does_not_match_windows_drive_rule() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\projects".to_string(),
+        destination_path: "D:\\work".to_string(),
+    };
+    assert_eq!(rule.apply("projects\\file.txt"), None);
+}
+
+#[test]
+fn relative_rule_still_matches_relative_path() {
+    // Negative control: same-rootedness matching must keep working.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    let mapped = rule.apply_with_format("home/user/f", PathFormat::Posix);
+    assert_eq!(mapped.as_deref(), Some("/mnt/x/f"));
+}
+
 // === TestPathMappingRuleValidation ===
 #[test]
 fn path_mapping_preserves_type() {
