@@ -193,9 +193,11 @@ pub fn count_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Int(s.matches(sub).count() as i64))
 }
 
-/// Extract the optional third `maxsplit` argument for split-family functions.
-/// Negative values mean "no limit", matching Python's `str.split`/`re.split`.
-pub(crate) fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
+/// Extract the optional third `maxsplit` argument for split()/rsplit().
+/// Negative values mean "no limit", matching Python's `str.split`.
+/// (`re_split` deliberately differs: Python's `re.split` treats negative as
+/// "no splits" and 0 as unlimited — see `functions/regex.rs`.)
+fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
     a.get(2).and_then(|v| match v {
         ExprValue::Int(n) if *n >= 0 => Some(*n as usize),
         _ => None,
