@@ -138,6 +138,23 @@ impl FormatString {
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError> {
+        self.resolve_string_spanned(symtab, opts)
+            .map_err(|e| match e.expression_error {
+                Some(boxed) => *boxed,
+                None => ExpressionError::new(e.message),
+            })
+    }
+
+    /// Like [`resolve_string_with`](Self::resolve_string_with), but on failure
+    /// reports which `{{...}}` interpolation failed: the returned
+    /// [`FormatStringValidationError`] carries the byte span of the failing
+    /// segment within the raw format string, the raw input, and the original
+    /// [`ExpressionError`].
+    pub fn resolve_string_spanned(
+        &self,
+        symtab: &SymbolTable,
+        opts: &FormatStringOptions<'_>,
+    ) -> Result<String, FormatStringValidationError> {
         let FormatStringOptions {
             library,
             path_format,
@@ -147,8 +164,16 @@ impl FormatString {
         for seg in &self.segments {
             match seg {
                 Segment::Literal(s) => result.push_str(s),
-                Segment::Expression { parsed, .. } => {
-                    let val = self.eval_parsed(parsed, symtab, library, path_format, None)?;
+                Segment::Expression { start, end, parsed } => {
+                    let val = self
+                        .eval_parsed(parsed, symtab, library, path_format, None)
+                        .map_err(|e| FormatStringValidationError {
+                            message: e.to_string(),
+                            input: self.raw.clone(),
+                            start: *start,
+                            end: *end,
+                            expression_error: Some(Box::new(e)),
+                        })?;
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
                         result.push_str(&val.to_display_string());

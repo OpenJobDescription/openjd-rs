@@ -24,15 +24,15 @@ pub(super) fn resolve_to_f64(
     context: &str,
 ) -> Result<f64, ModelError> {
     let resolved = fs
-        .resolve_string_with(
+        .resolve_string_spanned(
             symtab,
             &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
         )
         .map_err(|e| ModelError::FormatStringError {
-            message: format!("{context}: {e}"),
-            input: Some(fs.raw().to_string()),
-            start: None,
-            end: None,
+            message: format!("{context}: {}", e.message),
+            input: Some(e.input),
+            start: Some(e.start),
+            end: Some(e.end),
         })?;
     let value = resolved.trim().parse::<f64>().map_err(|_| {
         ModelError::Expression(ExpressionError::new(format!(
@@ -54,15 +54,15 @@ pub(super) fn resolve_string_list(
 ) -> Result<Vec<String>, ModelError> {
     vals.iter()
         .map(|fs| {
-            fs.resolve_string_with(
+            fs.resolve_string_spanned(
                 symtab,
                 &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
             )
             .map_err(|e| ModelError::FormatStringError {
-                message: e.to_string(),
-                input: Some(fs.raw().to_string()),
-                start: None,
-                end: None,
+                message: e.message,
+                input: Some(e.input),
+                start: Some(e.start),
+                end: Some(e.end),
             })
         })
         .collect()

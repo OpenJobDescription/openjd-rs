@@ -68,15 +68,15 @@ pub fn create_job(
 
     let job_name = job_template
         .name
-        .resolve_string_with(
+        .resolve_string_spanned(
             &symtab,
             &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
         )
         .map_err(|e| ModelError::FormatStringError {
-            message: format!("Failed to resolve job name: {e}"),
-            input: Some(job_template.name.raw().to_string()),
-            start: None,
-            end: None,
+            message: format!("Failed to resolve job name: {}", e.message),
+            input: Some(e.input),
+            start: Some(e.start),
+            end: Some(e.end),
         })?;
 
     if job_name.len() > limits.max_job_name_len {
