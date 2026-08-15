@@ -339,170 +339,203 @@ fn validate_action_fs(
     }
 }
 
+/// Expression profiles, function libraries, and extension flags shared by
+/// every format-string validation pass. Built once per template.
+struct FsValidationScopes {
+    expr_active: bool,
+    fb1_active: bool,
+    template_profile: openjd_expr::ExprProfile,
+    host_profile: openjd_expr::ExprProfile,
+    template_lib: std::sync::Arc<openjd_expr::FunctionLibrary>,
+    host_lib: std::sync::Arc<openjd_expr::FunctionLibrary>,
+}
+
+impl FsValidationScopes {
+    fn new(ctx: &ValidationContext) -> Self {
+        // Template/task-range validation uses HostContext::None (host
+        // functions are not available in those scopes). Session/task scopes
+        // use HostContext::Unresolved so apply_path_mapping type-checks.
+        let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+        let host_profile = ctx
+            .profile
+            .to_expr_profile(openjd_expr::HostContext::Unresolved);
+        let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
+        let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+        Self {
+            expr_active: ctx.profile.has_extension(ModelExtension::Expr),
+            fb1_active: ctx.profile.has_extension(ModelExtension::FeatureBundle1),
+            template_profile,
+            host_profile,
+            template_lib,
+            host_lib,
+        }
+    }
+}
+
+/// Job name: template scope (Param/RawParam only).
+fn validate_job_name_fs(jt: &JobTemplate, sc: &FsValidationScopes, errors: &mut ValidationErrors) {
+    let template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    validate_fs(
+        &jt.name,
+        &template_symtab,
+        &sc.template_lib,
+        &path_field(&[], "name"),
+        errors,
+    );
+}
+
+/// Host requirements: template scope + step let bindings.
+fn validate_host_requirements_fs(
+    jt: &JobTemplate,
+    sc: &FsValidationScopes,
+    errors: &mut ValidationErrors,
+) {
+    for (i, step) in jt.steps.iter().enumerate() {
+        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        let Some(hr) = &step.host_requirements else {
+            continue;
+        };
+        // Build a symtab with Param/RawParam + step let bindings
+        let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+        if sc.expr_active {
+            hr_symtab
+                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+                .expect("symtab");
+            hr_symtab
+                .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+                .expect("symtab");
+            if let Some(bindings) = &step.let_bindings {
+                let let_path = path_field(&step_path, "let");
+                let mut hr_let_names = HashSet::new();
+                validate_let_bindings(
+                    bindings,
+                    &let_path,
+                    &HashSet::new(),
+                    &mut hr_let_names,
+                    &mut hr_symtab,
+                    &sc.template_lib,
+                    &sc.template_profile,
+                    errors,
+                );
+            }
+        }
+        let hr_path = path_field(&step_path, "hostRequirements");
+        if let Some(amounts) = &hr.amounts {
+            for (j, amt) in amounts.iter().enumerate() {
+                let amt_path = path_index(&path_field(&hr_path, "amounts"), j);
+                for (fs, field) in [(&amt.min, "min"), (&amt.max, "max")] {
+                    if let Some(fs) = fs {
+                        validate_fs(
+                            fs,
+                            &hr_symtab,
+                            &sc.template_lib,
+                            &path_field(&amt_path, field),
+                            errors,
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(attrs) = &hr.attributes {
+            for (j, attr) in attrs.iter().enumerate() {
+                let attr_path = path_index(&path_field(&hr_path, "attributes"), j);
+                for (list, field) in [(&attr.any_of, "anyOf"), (&attr.all_of, "allOf")] {
+                    if let Some(values) = list {
+                        for (k, v) in values.iter().enumerate() {
+                            validate_fs(
+                                v,
+                                &hr_symtab,
+                                &sc.template_lib,
+                                &path_index(&path_field(&attr_path, field), k),
+                                errors,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Job environments: session scope for the environment body, template scope
+/// for `timeout`/`notifyPeriodInSeconds`.
+fn validate_job_environments_fs(
+    jt: &JobTemplate,
+    sc: &FsValidationScopes,
+    errors: &mut ValidationErrors,
+) {
+    let Some(envs) = &jt.job_environments else {
+        return;
+    };
+    let envs_path = path_field(&[], "jobEnvironments");
+    // Job-creation-scope symtab for env `timeout`/`notifyPeriodInSeconds`:
+    // Param.* (non-PATH), RawParam.*, and Job.Name with EXPR. No
+    // Step.Name (job envs are not attached to a step) and no env-script
+    // let bindings (those are evaluated at session time).
+    let mut env_template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    if sc.expr_active {
+        env_template_symtab
+            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+    }
+    for (i, env) in envs.iter().enumerate() {
+        let mut env_symtab = build_session_scope_symtab(
+            jt.parameter_definitions.as_deref(),
+            env,
+            false,
+            sc.expr_active,
+        );
+        // Env script let bindings: validate and evaluate into the symtab
+        // if EXPR, reject if not.
+        if let Some(script) = &env.script {
+            if let Some(bindings) = &script.let_bindings {
+                let let_path = path_field(&path_field(&path_index(&envs_path, i), "script"), "let");
+                if !sc.expr_active {
+                    errors.add(&let_path, "'let' requires the EXPR extension.");
+                } else {
+                    let mut env_let_names = HashSet::new();
+                    validate_let_bindings(
+                        bindings,
+                        &let_path,
+                        &HashSet::new(),
+                        &mut env_let_names,
+                        &mut env_symtab,
+                        &sc.host_lib,
+                        &sc.host_profile,
+                        errors,
+                    );
+                }
+            }
+        }
+        validate_env_format_strings(
+            env,
+            &env_symtab,
+            &sc.host_lib,
+            &env_template_symtab,
+            &sc.template_lib,
+            &path_index(&envs_path, i),
+            sc.expr_active,
+            errors,
+        );
+    }
+}
+
 pub fn validate_format_strings(
     jt: &JobTemplate,
     ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
-    let expr_active = ctx.profile.has_extension(ModelExtension::Expr);
-    // Template/task-range validation uses HostContext::None (host functions
-    // are not available in those scopes). Session/task scopes use
-    // HostContext::Unresolved so apply_path_mapping type-checks.
-    let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
-    let host_profile = ctx
-        .profile
-        .to_expr_profile(openjd_expr::HostContext::Unresolved);
-    let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
-    let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+    let scopes = FsValidationScopes::new(ctx);
+    let expr_active = scopes.expr_active;
+    let template_profile = &scopes.template_profile;
+    let host_profile = &scopes.host_profile;
+    let template_lib = &scopes.template_lib;
+    let host_lib = &scopes.host_lib;
 
-    // ── Job name: template scope (Param/RawParam only) ──
-    let template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-    validate_fs(
-        &jt.name,
-        &template_symtab,
-        &template_lib,
-        &path_field(&[], "name"),
-        errors,
-    );
+    validate_job_name_fs(jt, &scopes, errors);
+    validate_host_requirements_fs(jt, &scopes, errors);
 
-    // ── Host requirements: template scope + step let bindings ──
-    for (i, step) in jt.steps.iter().enumerate() {
-        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
-        if let Some(hr) = &step.host_requirements {
-            // Build a symtab with Param/RawParam + step let bindings
-            let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                hr_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                hr_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                if let Some(bindings) = &step.let_bindings {
-                    let let_path = path_field(&step_path, "let");
-                    let mut hr_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &HashSet::new(),
-                        &mut hr_let_names,
-                        &mut hr_symtab,
-                        &template_lib,
-                        &template_profile,
-                        errors,
-                    );
-                }
-            }
-            let hr_path = path_field(&step_path, "hostRequirements");
-            if let Some(amounts) = &hr.amounts {
-                for (j, amt) in amounts.iter().enumerate() {
-                    let amt_path = path_index(&path_field(&hr_path, "amounts"), j);
-                    if let Some(min) = &amt.min {
-                        validate_fs(
-                            min,
-                            &hr_symtab,
-                            &template_lib,
-                            &path_field(&amt_path, "min"),
-                            errors,
-                        );
-                    }
-                    if let Some(max) = &amt.max {
-                        validate_fs(
-                            max,
-                            &hr_symtab,
-                            &template_lib,
-                            &path_field(&amt_path, "max"),
-                            errors,
-                        );
-                    }
-                }
-            }
-            if let Some(attrs) = &hr.attributes {
-                for (j, attr) in attrs.iter().enumerate() {
-                    let attr_path = path_index(&path_field(&hr_path, "attributes"), j);
-                    if let Some(any_of) = &attr.any_of {
-                        for (k, v) in any_of.iter().enumerate() {
-                            validate_fs(
-                                v,
-                                &hr_symtab,
-                                &template_lib,
-                                &path_index(&path_field(&attr_path, "anyOf"), k),
-                                errors,
-                            );
-                        }
-                    }
-                    if let Some(all_of) = &attr.all_of {
-                        for (k, v) in all_of.iter().enumerate() {
-                            validate_fs(
-                                v,
-                                &hr_symtab,
-                                &template_lib,
-                                &path_index(&path_field(&attr_path, "allOf"), k),
-                                errors,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Job environments: session scope (timeouts: template scope) ──
-    if let Some(envs) = &jt.job_environments {
-        let envs_path = path_field(&[], "jobEnvironments");
-        // Job-creation-scope symtab for env `timeout`/`notifyPeriodInSeconds`:
-        // Param.* (non-PATH), RawParam.*, and Job.Name with EXPR. No
-        // Step.Name (job envs are not attached to a step) and no env-script
-        // let bindings (those are evaluated at session time).
-        let mut env_template_symtab =
-            build_template_scope_symtab(jt.parameter_definitions.as_deref());
-        if expr_active {
-            env_template_symtab
-                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-        }
-        for (i, env) in envs.iter().enumerate() {
-            let mut env_symtab = build_session_scope_symtab(
-                jt.parameter_definitions.as_deref(),
-                env,
-                false,
-                expr_active,
-            );
-            // Env script let bindings: validate and evaluate into the symtab
-            // if EXPR, reject if not.
-            if let Some(script) = &env.script {
-                if let Some(bindings) = &script.let_bindings {
-                    let let_path =
-                        path_field(&path_field(&path_index(&envs_path, i), "script"), "let");
-                    if !expr_active {
-                        errors.add(&let_path, "'let' requires the EXPR extension.");
-                    } else {
-                        let mut env_let_names = HashSet::new();
-                        validate_let_bindings(
-                            bindings,
-                            &let_path,
-                            &HashSet::new(),
-                            &mut env_let_names,
-                            &mut env_symtab,
-                            &host_lib,
-                            &host_profile,
-                            errors,
-                        );
-                    }
-                }
-            }
-            validate_env_format_strings(
-                env,
-                &env_symtab,
-                &host_lib,
-                &env_template_symtab,
-                &template_lib,
-                &path_index(&envs_path, i),
-                expr_active,
-                errors,
-            );
-        }
-    }
+    validate_job_environments_fs(jt, &scopes, errors);
 
     // ── Steps ──
     for (i, step) in jt.steps.iter().enumerate() {
