@@ -2001,6 +2001,46 @@ fn rsplit_maxsplit_method_exact() {
         r#"["a/b/c", "d"]"#
     );
 }
+
+// Regression: negative maxsplit wrapped through `as usize`, then `n + 1`
+// overflowed (debug panic; release returned []). Python treats any
+// negative maxsplit as "no limit".
+#[test]
+fn split_negative_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("split('a b c', ' ', -1)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("split('a,b,c,d', ',', -9223372036854775808)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn rsplit_negative_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("rsplit('a b c', ' ', -1)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a,b,c,d', ',', -2)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn split_zero_maxsplit_no_splits() {
+    // Boundary of the negative-maxsplit fix: 0 must still mean "no splits".
+    assert_eq!(
+        eval("split('a b c', ' ', 0)").to_display_string(),
+        r#"["a b c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 0)").to_display_string(),
+        r#"["a b c"]"#
+    );
+}
 #[test]
 fn rsplit_no_match_exact() {
     assert_eq!(eval("rsplit('abc', ',')").to_display_string(), r#"["abc"]"#);

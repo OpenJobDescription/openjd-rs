@@ -193,6 +193,15 @@ pub fn count_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Int(s.matches(sub).count() as i64))
 }
 
+/// Extract the optional third `maxsplit` argument for split-family functions.
+/// Negative values mean "no limit", matching Python's `str.split`/`re.split`.
+pub(crate) fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
+    a.get(2).and_then(|v| match v {
+        ExprValue::Int(n) if *n >= 0 => Some(*n as usize),
+        _ => None,
+    })
+}
+
 pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
@@ -209,10 +218,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Err(ExpressionError::new("split failed: empty separator"));
     }
     ctx.count_string_ops(s.len())?;
-    let maxsplit = a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) => Some(*n as usize),
-        _ => None,
-    });
+    let maxsplit = maxsplit_arg(a);
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => s
             .splitn(n + 1, sep)
@@ -241,10 +247,7 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Err(ExpressionError::new("split failed: empty separator"));
     }
     ctx.count_string_ops(s.len())?;
-    let maxsplit = a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) => Some(*n as usize),
-        _ => None,
-    });
+    let maxsplit = maxsplit_arg(a);
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => {
             let mut v: Vec<_> = s
