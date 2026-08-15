@@ -167,6 +167,16 @@ fn range_expr_sum() {
 }
 
 #[test]
+fn range_expr_sum_negative_overflow_is_error() {
+    // Opposite-sign branch of the checked accumulation: summing large
+    // negative values must underflow to a clean error, not a panic.
+    assert_err(
+        "sum(range_expr('-4611686018427387900--4611686018427387000'))",
+        &["Integer overflow: result is outside the 64-bit signed range"],
+    );
+}
+
+#[test]
 fn range_expr_sum_overflow_is_error() {
     // Regression: the RangeExpr branch of sum() used an unchecked
     // `r.iter().sum::<i64>()` (debug panic "attempt to add with overflow").

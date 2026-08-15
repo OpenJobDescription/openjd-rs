@@ -173,6 +173,19 @@ fn multiline_float_passthrough_not_misaligned() {
     );
 }
 #[test]
+#[ignore = "known bug: the contextual-keyword retry in eval/parse.rs rewrites \
+            keyword-like text inside string literals; see the MAINTAINABILITY \
+            note in parse_inner. Un-ignore when the retry is fixed."]
+fn known_bug_keyword_retry_corrupts_string_literals() {
+    let mut st = SymbolTable::new();
+    st.set("X.class", "c1").unwrap();
+    assert_eq!(
+        eval_with("'a.class' + X.class", &st).to_display_string(),
+        "a.classc1"
+    );
+}
+
+#[test]
 fn multiline_float_passthrough_preserves_formatting() {
     // The passthrough must still preserve source formatting once aligned.
     assert_eq!(eval("3.500 if True else\n1.0").to_display_string(), "3.500");

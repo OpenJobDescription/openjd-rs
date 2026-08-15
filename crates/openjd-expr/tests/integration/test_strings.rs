@@ -2030,7 +2030,7 @@ fn rsplit_negative_maxsplit_means_no_limit() {
 }
 
 #[test]
-fn split_zero_maxsplit_no_splits() {
+fn split_zero_maxsplit_means_no_splits() {
     // Boundary of the negative-maxsplit fix: 0 must still mean "no splits".
     assert_eq!(
         eval("split('a b c', ' ', 0)").to_display_string(),
