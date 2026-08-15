@@ -75,13 +75,28 @@ fn absolute_path_does_not_match_relative_rule() {
 }
 
 #[test]
+fn relative_path_does_not_match_windows_rooted_rule() {
+    // Pins the Windows backslash-root arm of the rootedness check: without
+    // it, segments ["projects"] vs ["projects", "file.txt"] would match.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "\\projects".to_string(),
+        destination_path: "D:\\work".to_string(),
+    };
+    assert_eq!(rule.apply("projects\\file.txt"), None);
+}
+
+#[test]
 fn relative_path_does_not_match_windows_drive_rule() {
+    // Drive anchors need no rootedness special case: "C:" stays a path
+    // segment, so it can never equal "projects" (matches PureWindowsPath).
     let rule = PathMappingRule {
         source_path_format: PathFormat::Windows,
         source_path: "C:\\projects".to_string(),
         destination_path: "D:\\work".to_string(),
     };
     assert_eq!(rule.apply("projects\\file.txt"), None);
+    assert_eq!(rule.apply("C:projects\\file.txt"), None);
 }
 
 #[test]
