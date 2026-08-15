@@ -39,6 +39,12 @@ impl StepScriptRunner {
         }
     }
 
+    /// Construct from a pre-built base (see `Session::build_runner_base`),
+    /// which carries all session-level configuration in one place.
+    pub(crate) fn from_base(base: ScriptRunnerBase) -> Self {
+        Self { base }
+    }
+
     pub fn with_redactions(mut self, enabled: bool) -> Self {
         self.base.redactions_enabled = enabled;
         self
@@ -75,39 +81,17 @@ impl StepScriptRunner {
         self
     }
 
-    #[cfg(unix)]
-    pub(crate) fn with_helper(mut self, helper: crate::cross_user_helper::CrossUserHelper) -> Self {
-        self.base.helper = Some(helper);
-        self
-    }
-
+    // Helper/cancel-writer/helpers-directory wiring happens on the base via
+    // `Session::build_runner_base`; only take_helper remains so the session
+    // can reclaim the persistent cross-user helper after each action.
     #[cfg(unix)]
     pub(crate) fn take_helper(&mut self) -> Option<crate::cross_user_helper::CrossUserHelper> {
         self.base.helper.take()
     }
 
     #[cfg(windows)]
-    pub(crate) fn with_helper(
-        mut self,
-        helper: crate::cross_user_helper::CrossUserHelperWin,
-    ) -> Self {
-        self.base.helper = Some(helper);
-        self
-    }
-
-    #[cfg(windows)]
     pub(crate) fn take_helper(&mut self) -> Option<crate::cross_user_helper::CrossUserHelperWin> {
         self.base.helper.take()
-    }
-
-    pub(crate) fn with_cancel_writer(mut self, writer: std::fs::File) -> Self {
-        self.base.cancel_writer = Some(writer);
-        self
-    }
-
-    pub(crate) fn with_helpers_directory(mut self, dir: PathBuf) -> Self {
-        self.base.helpers_directory = Some(dir);
-        self
     }
 
     /// Run the step script's onRun action.

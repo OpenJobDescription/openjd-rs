@@ -901,6 +901,44 @@ impl Session {
         }
     }
 
+    /// Build the shared [`ScriptRunnerBase`] for an action runner, wiring the
+    /// session's redaction, stdout-collection, directive-echo, cross-user, and
+    /// cancellation configuration in one place. Single source of truth for the
+    /// enter/exit/run_task runner setup — a new `SessionConfig` knob is wired
+    /// here once instead of three times.
+    ///
+    /// Takes the cross-user helper out of the session; after driving the
+    /// action, callers must return it via `self.cross_user.helper =
+    /// runner.take_helper()`.
+    fn build_runner_base(
+        &mut self,
+        cancel_token: CancellationToken,
+        cancel_rx: tokio::sync::watch::Receiver<Option<Duration>>,
+    ) -> crate::runner::ScriptRunnerBase {
+        let mut base = crate::runner::ScriptRunnerBase::new(
+            &self.session_id,
+            self.working_directory.clone(),
+            self.files_directory.clone(),
+            self.cross_user.user.clone(),
+        );
+        base.redactions_enabled = self.redactions_enabled();
+        base.debug_collect_stdout = self.debug_collect_stdout;
+        base.echo_openjd_directives = self.echo_openjd_directives;
+        base.initial_redacted_values = self.redacted_values.iter().cloned().collect();
+        base.cancel_token = cancel_token;
+        base.cancel_request_rx = Some(cancel_rx);
+        base.helpers_directory = self.cross_user.helpers_dir.clone();
+        if let Some(helper) = self.cross_user.helper.take() {
+            base.helper = Some(helper);
+            base.cancel_writer = self
+                .cross_user
+                .cancel_writer
+                .as_ref()
+                .and_then(|f| f.try_clone().ok());
+        }
+        base
+    }
+
     /// Cancel the currently running async action.
     pub fn cancel_action(
         &mut self,
@@ -1267,37 +1305,8 @@ impl Session {
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
             let env_vars = Box::new(env_vars);
-            #[allow(unused_mut)]
-            let mut runner = EnvironmentScriptRunner::new(
-                &self.session_id,
-                self.working_directory.clone(),
-                self.files_directory.clone(),
-                self.cross_user.user.clone(),
-            )
-            .with_redactions(self.redactions_enabled())
-            .with_debug_collect_stdout(self.debug_collect_stdout)
-            .with_echo_openjd_directives(self.echo_openjd_directives)
-            .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-            .with_cancel_token(cancel_token)
-            .with_cancel_request_rx(cancel_rx);
-            if let Some(ref hdir) = self.cross_user.helpers_dir {
-                runner = runner.with_helpers_directory(hdir.clone());
-            }
-            let mut runner = match self.cross_user.helper.take() {
-                Some(h) => {
-                    let r = runner.with_helper(h);
-                    match self
-                        .cross_user
-                        .cancel_writer
-                        .as_ref()
-                        .and_then(|f| f.try_clone().ok())
-                    {
-                        Some(w) => r.with_cancel_writer(w),
-                        None => r,
-                    }
-                }
-                None => runner,
-            };
+            let mut runner =
+                EnvironmentScriptRunner::from_base(self.build_runner_base(cancel_token, cancel_rx));
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -1536,37 +1545,8 @@ impl Session {
 
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
-            #[allow(unused_mut)]
-            let mut runner = EnvironmentScriptRunner::new(
-                &self.session_id,
-                self.working_directory.clone(),
-                self.files_directory.clone(),
-                self.cross_user.user.clone(),
-            )
-            .with_redactions(self.redactions_enabled())
-            .with_debug_collect_stdout(self.debug_collect_stdout)
-            .with_echo_openjd_directives(self.echo_openjd_directives)
-            .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-            .with_cancel_token(cancel_token)
-            .with_cancel_request_rx(cancel_rx);
-            if let Some(ref hdir) = self.cross_user.helpers_dir {
-                runner = runner.with_helpers_directory(hdir.clone());
-            }
-            let mut runner = match self.cross_user.helper.take() {
-                Some(h) => {
-                    let r = runner.with_helper(h);
-                    match self
-                        .cross_user
-                        .cancel_writer
-                        .as_ref()
-                        .and_then(|f| f.try_clone().ok())
-                    {
-                        Some(w) => r.with_cancel_writer(w),
-                        None => r,
-                    }
-                }
-                None => runner,
-            };
+            let mut runner =
+                EnvironmentScriptRunner::from_base(self.build_runner_base(cancel_token, cancel_rx));
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -1778,37 +1758,8 @@ impl Session {
         // 1 MB thread stack in release builds.
         let action_symtab = Box::new(action_symtab);
         let env_vars = Box::new(env_vars);
-        #[allow(unused_mut)]
-        let mut runner = StepScriptRunner::new(
-            &self.session_id,
-            self.working_directory.clone(),
-            self.files_directory.clone(),
-            self.cross_user.user.clone(),
-        )
-        .with_redactions(self.redactions_enabled())
-        .with_debug_collect_stdout(self.debug_collect_stdout)
-        .with_echo_openjd_directives(self.echo_openjd_directives)
-        .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
-        .with_cancel_token(cancel_token)
-        .with_cancel_request_rx(cancel_rx);
-        if let Some(ref hdir) = self.cross_user.helpers_dir {
-            runner = runner.with_helpers_directory(hdir.clone());
-        }
-        let mut runner = match self.cross_user.helper.take() {
-            Some(h) => {
-                let r = runner.with_helper(h);
-                match self
-                    .cross_user
-                    .cancel_writer
-                    .as_ref()
-                    .and_then(|f| f.try_clone().ok())
-                {
-                    Some(w) => r.with_cancel_writer(w),
-                    None => r,
-                }
-            }
-            None => runner,
-        };
+        let mut runner =
+            StepScriptRunner::from_base(self.build_runner_base(cancel_token, cancel_rx));
 
         let step_identifier = format!("{}:step:{}", self.session_id, uuid::Uuid::new_v4().simple());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
