@@ -2221,6 +2221,29 @@ fn re_split_maxsplit_exact() {
     );
 }
 #[test]
+fn re_split_negative_maxsplit_means_no_splits() {
+    // Regression: negative maxsplit wrapped via `as usize`, then `n + 1`
+    // panicked in debug builds. Python's re.split (unlike str.split) treats
+    // negative maxsplit as "no splits at all".
+    assert_eq!(
+        eval("re_split('a b c', ' ', -1)").to_display_string(),
+        r#"["a b c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a b c', ' ', -9223372036854775808)").to_display_string(),
+        r#"["a b c"]"#
+    );
+}
+#[test]
+fn re_split_zero_maxsplit_means_unlimited() {
+    // Python re.split parity: maxsplit=0 means unlimited (str.split's 0 means
+    // no splits). Previously Rust returned ["a b c"] here.
+    assert_eq!(
+        eval("re_split('a b c', ' ', 0)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+}
+#[test]
 fn re_split_kv_exact() {
     assert_eq!(
         eval(r"re_split('key1=val1,key2=val2', r'[=,]')").to_display_string(),
