@@ -61,7 +61,10 @@ fn relative_path_does_not_match_absolute_rule() {
         source_path: "/home/user".to_string(),
         destination_path: "/mnt/x".to_string(),
     };
-    assert_eq!(rule.apply("home/user/f"), None);
+    assert_eq!(
+        rule.apply_with_format("home/user/f", PathFormat::Posix),
+        None
+    );
 }
 
 #[test]
@@ -71,7 +74,10 @@ fn absolute_path_does_not_match_relative_rule() {
         source_path: "home/user".to_string(),
         destination_path: "mapped".to_string(),
     };
-    assert_eq!(rule.apply("/home/user/f"), None);
+    assert_eq!(
+        rule.apply_with_format("/home/user/f", PathFormat::Posix),
+        None
+    );
 }
 
 #[test]
@@ -83,7 +89,10 @@ fn relative_path_does_not_match_windows_rooted_rule() {
         source_path: "\\projects".to_string(),
         destination_path: "D:\\work".to_string(),
     };
-    assert_eq!(rule.apply("projects\\file.txt"), None);
+    assert_eq!(
+        rule.apply_with_format("projects\\file.txt", PathFormat::Windows),
+        None
+    );
 }
 
 #[test]
@@ -95,8 +104,14 @@ fn relative_path_does_not_match_windows_drive_rule() {
         source_path: "C:\\projects".to_string(),
         destination_path: "D:\\work".to_string(),
     };
-    assert_eq!(rule.apply("projects\\file.txt"), None);
-    assert_eq!(rule.apply("C:projects\\file.txt"), None);
+    assert_eq!(
+        rule.apply_with_format("projects\\file.txt", PathFormat::Windows),
+        None
+    );
+    assert_eq!(
+        rule.apply_with_format("C:projects\\file.txt", PathFormat::Windows),
+        None
+    );
 }
 
 #[test]
