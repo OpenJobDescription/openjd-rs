@@ -274,10 +274,14 @@ pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
             Ok(ExprValue::Int(int_sum))
         }
     } else if let ExprValue::RangeExpr(r) = &a[0] {
-        for _ in r.iter() {
+        let mut sum: i64 = 0;
+        for v in r.iter() {
             ctx.count_op()?;
+            sum = sum
+                .checked_add(v)
+                .ok_or_else(ExpressionError::integer_overflow)?;
         }
-        Ok(ExprValue::Int(r.iter().sum()))
+        Ok(ExprValue::Int(sum))
     } else {
         Err(ExpressionError::new("sum() requires list or range_expr"))
     }
