@@ -340,6 +340,36 @@ impl MergedParameterDefinition {
     }
 
     /// Check a coerced value against the merged constraints.
+    /// Shared length-bounds check for `check_constraints`. `what` names the
+    /// measured quantity in the error message ("value length", "list length",
+    /// "item[N] length"). `len` is bytes for scalar strings and element/char
+    /// counts elsewhere — pre-existing behavior, preserved verbatim.
+    fn check_len_bounds(
+        &self,
+        len: usize,
+        min: Option<usize>,
+        max: Option<usize>,
+        what: &str,
+    ) -> Result<(), ModelError> {
+        if let Some(min) = min {
+            if len < min {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Parameter '{}': {what} {len} is less than minimum {min}",
+                    self.name
+                )));
+            }
+        }
+        if let Some(max) = max {
+            if len > max {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Parameter '{}': {what} {len} exceeds maximum {max}",
+                    self.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub fn check_constraints(&self, value: &openjd_expr::ExprValue) -> Result<(), ModelError> {
         match value {
             openjd_expr::ExprValue::Int(v) => {
@@ -396,24 +426,9 @@ impl MergedParameterDefinition {
                 }
             }
             openjd_expr::ExprValue::String(v) | openjd_expr::ExprValue::Path { value: v, .. } => {
-                if let Some(min) = self.min_length {
-                    if v.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} is less than minimum {min}",
-                            self.name,
-                            v.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if v.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} exceeds maximum {max}",
-                            self.name,
-                            v.len()
-                        )));
-                    }
-                }
+                // NOTE: byte length (pre-existing; the byte-vs-char
+                // divergence from the survey is a separate behavior change).
+                self.check_len_bounds(v.len(), self.min_length, self.max_length, "value length")?;
                 if let Some(allowed) = &self.allowed_values_str {
                     if !allowed.iter().any(|a| a == v) {
                         return Err(ModelError::DecodeValidation(format!(
@@ -424,44 +439,20 @@ impl MergedParameterDefinition {
                 }
             }
             openjd_expr::ExprValue::ListBool(items) => {
-                if let Some(min) = self.min_length {
-                    if items.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} is less than minimum {min}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if items.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} exceeds maximum {max}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
+                self.check_len_bounds(
+                    items.len(),
+                    self.min_length,
+                    self.max_length,
+                    "list length",
+                )?;
             }
             openjd_expr::ExprValue::ListInt(items) => {
-                if let Some(min) = self.min_length {
-                    if items.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} is less than minimum {min}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if items.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} exceeds maximum {max}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
+                self.check_len_bounds(
+                    items.len(),
+                    self.min_length,
+                    self.max_length,
+                    "list length",
+                )?;
                 for (i, v) in items.iter().enumerate() {
                     if let Some(min) = self.item_min_value_i64 {
                         if *v < min {
@@ -490,24 +481,12 @@ impl MergedParameterDefinition {
                 }
             }
             openjd_expr::ExprValue::ListFloat(items) => {
-                if let Some(min) = self.min_length {
-                    if items.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} is less than minimum {min}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if items.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} exceeds maximum {max}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
+                self.check_len_bounds(
+                    items.len(),
+                    self.min_length,
+                    self.max_length,
+                    "list length",
+                )?;
                 for (i, v) in items.iter().enumerate() {
                     let f = v.value();
                     if let Some(min) = self.item_min_value_f64 {
@@ -538,42 +517,20 @@ impl MergedParameterDefinition {
             }
             openjd_expr::ExprValue::ListString(items, _)
             | openjd_expr::ExprValue::ListPath(items, _, _) => {
-                if let Some(min) = self.min_length {
-                    if items.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} is less than minimum {min}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if items.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} exceeds maximum {max}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
+                self.check_len_bounds(
+                    items.len(),
+                    self.min_length,
+                    self.max_length,
+                    "list length",
+                )?;
                 for (i, s) in items.iter().enumerate() {
                     let char_len = s.chars().count();
-                    if let Some(min) = self.item_min_length {
-                        if char_len < min {
-                            return Err(ModelError::DecodeValidation(format!(
-                                "Parameter '{}': item[{i}] length {char_len} is less than minimum {min}",
-                                self.name
-                            )));
-                        }
-                    }
-                    if let Some(max) = self.item_max_length {
-                        if char_len > max {
-                            return Err(ModelError::DecodeValidation(format!(
-                                "Parameter '{}': item[{i}] length {char_len} exceeds maximum {max}",
-                                self.name
-                            )));
-                        }
-                    }
+                    self.check_len_bounds(
+                        char_len,
+                        self.item_min_length,
+                        self.item_max_length,
+                        &format!("item[{i}] length"),
+                    )?;
                     if let Some(allowed) = &self.item_allowed_values_str {
                         if !allowed.iter().any(|a| a == s) {
                             return Err(ModelError::DecodeValidation(format!(
@@ -585,44 +542,20 @@ impl MergedParameterDefinition {
                 }
             }
             openjd_expr::ExprValue::ListList(items, _, _) => {
-                if let Some(min) = self.min_length {
-                    if items.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} is less than minimum {min}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if items.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': list length {} exceeds maximum {max}",
-                            self.name,
-                            items.len()
-                        )));
-                    }
-                }
+                self.check_len_bounds(
+                    items.len(),
+                    self.min_length,
+                    self.max_length,
+                    "list length",
+                )?;
                 for (i, inner) in items.iter().enumerate() {
                     if let openjd_expr::ExprValue::ListInt(ints) = inner {
-                        if let Some(min) = self.item_min_length {
-                            if ints.len() < min {
-                                return Err(ModelError::DecodeValidation(format!(
-                                    "Parameter '{}': item[{i}] length {} is less than minimum {min}",
-                                    self.name,
-                                    ints.len()
-                                )));
-                            }
-                        }
-                        if let Some(max) = self.item_max_length {
-                            if ints.len() > max {
-                                return Err(ModelError::DecodeValidation(format!(
-                                    "Parameter '{}': item[{i}] length {} exceeds maximum {max}",
-                                    self.name,
-                                    ints.len()
-                                )));
-                            }
-                        }
+                        self.check_len_bounds(
+                            ints.len(),
+                            self.item_min_length,
+                            self.item_max_length,
+                            &format!("item[{i}] length"),
+                        )?;
                         for (j, v) in ints.iter().enumerate() {
                             if let Some(min) = self.item_item_min_value_i64 {
                                 if *v < min {

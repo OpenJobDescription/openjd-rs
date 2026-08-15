@@ -73,128 +73,12 @@ pub(super) fn instantiate_step(
     let script_template = st.resolve_syntax_sugar()?.or_else(|| st.script.clone());
     let script = script_template.as_ref().map(convert_step_script);
 
-    // Type-check script-level let bindings with unresolved host context
+    // Type-check script-level let bindings with unresolved host context.
+    // The check symtab is built and discarded inside the helper: the pass
+    // only proves the bindings type-check; nothing downstream reads it.
     if has_expr {
         if let Some(s) = &script_template {
-            if let Some(bindings) = &s.let_bindings {
-                let mut check_symtab = step_symtab.clone();
-
-                // PATH Param.* are excluded from the template-scope symtab (they
-                // require session-time path mapping). Add them as Unresolved with
-                // the correct type so script-level let bindings can reference them
-                // for type-checking.
-                if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
-                    for name in raw_param_table.keys() {
-                        let param_key = format!("Param.{name}");
-                        if !step_symtab.contains(&param_key) {
-                            // Derive the Param type from the RawParam value: if it's
-                            // a list, use list(PATH); otherwise use PATH.
-                            let raw_key = format!("RawParam.{name}");
-                            let unresolved_type = match step_symtab.get_value(&raw_key) {
-                                Some(
-                                    openjd_expr::ExprValue::ListPath(..)
-                                    | openjd_expr::ExprValue::ListString(..),
-                                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
-                                _ => openjd_expr::ExprType::PATH,
-                            };
-                            let _ = check_symtab.set(
-                                &param_key,
-                                openjd_expr::ExprValue::Unresolved(unresolved_type),
-                            );
-                        }
-                    }
-                }
-
-                let _ = check_symtab.set(
-                    "Session.WorkingDirectory",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-                let _ = check_symtab.set(
-                    "Session.HasPathMappingRules",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
-                );
-                let _ = check_symtab.set(
-                    "Session.PathMappingRulesFile",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-
-                if let Some(ps) = &st.parameter_space {
-                    for tp in &ps.task_parameter_definitions {
-                        let tp_type = match tp {
-                            crate::template::TaskParameterDefinition::INT(_) => {
-                                openjd_expr::ExprType::INT
-                            }
-                            crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
-                                openjd_expr::ExprType::RANGE_EXPR
-                            }
-                            crate::template::TaskParameterDefinition::FLOAT(_) => {
-                                openjd_expr::ExprType::FLOAT
-                            }
-                            crate::template::TaskParameterDefinition::STRING(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::PATH
-                            }
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.Param.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(tp_type.clone()),
-                        );
-                        let raw_type = match tp {
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            _ => tp_type,
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.RawParam.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(raw_type),
-                        );
-                    }
-                }
-
-                if let Some(files) = &s.embedded_files {
-                    for f in files {
-                        let _ = check_symtab.set(
-                            &format!("Task.File.{}", f.name),
-                            openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                        );
-                    }
-                }
-
-                let host_profile = ctx
-                    .profile
-                    .to_expr_profile(openjd_expr::HostContext::Unresolved);
-                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
-                for binding in bindings {
-                    if let Some(eq_pos) = binding.find('=') {
-                        let name = binding[..eq_pos].trim();
-                        let expr = binding[eq_pos + 1..].trim();
-                        if !name.is_empty() && !expr.is_empty() {
-                            let parsed = openjd_expr::eval::ParsedExpression::with_profile(
-                                expr,
-                                &host_profile,
-                            )
-                            .map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "script let binding '{name}': {e}"
-                                )))
-                            })?;
-                            let val = parsed
-                                .with_path_format(PathFormat::Posix)
-                                .with_library(&host_lib)
-                                .evaluate(&[&check_symtab as &SymbolTable])
-                                .map_err(|e| {
-                                    ModelError::Expression(ExpressionError::new(format!(
-                                        "script let binding '{name}': {e}"
-                                    )))
-                                })?;
-                            check_symtab.set(name, val)?;
-                        }
-                    }
-                }
-            }
+            typecheck_script_let_bindings(st, s, &step_symtab, ctx)?;
         }
     }
 
@@ -250,6 +134,128 @@ pub(super) fn instantiate_step(
             &filtered_symtab,
         )),
     })
+}
+
+/// Type-check a step script's let bindings against an unresolved host
+/// context (Session.*, Task.Param.*, Task.File.* as typed Unresolved
+/// values). Proves the bindings evaluate cleanly at job-creation time;
+/// the symbol table built here is deliberately discarded.
+fn typecheck_script_let_bindings(
+    st: &template::StepTemplate,
+    s: &template::StepScript,
+    step_symtab: &SymbolTable,
+    ctx: &crate::types::ValidationContext,
+) -> Result<(), ModelError> {
+    let Some(bindings) = &s.let_bindings else {
+        return Ok(());
+    };
+    let mut check_symtab = step_symtab.clone();
+
+    // PATH Param.* are excluded from the template-scope symtab (they
+    // require session-time path mapping). Add them as Unresolved with
+    // the correct type so script-level let bindings can reference them
+    // for type-checking.
+    if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
+        for name in raw_param_table.keys() {
+            let param_key = format!("Param.{name}");
+            if !step_symtab.contains(&param_key) {
+                // Derive the Param type from the RawParam value: if it's
+                // a list, use list(PATH); otherwise use PATH.
+                let raw_key = format!("RawParam.{name}");
+                let unresolved_type = match step_symtab.get_value(&raw_key) {
+                    Some(
+                        openjd_expr::ExprValue::ListPath(..)
+                        | openjd_expr::ExprValue::ListString(..),
+                    ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+                    _ => openjd_expr::ExprType::PATH,
+                };
+                let _ = check_symtab.set(
+                    &param_key,
+                    openjd_expr::ExprValue::Unresolved(unresolved_type),
+                );
+            }
+        }
+    }
+
+    let _ = check_symtab.set(
+        "Session.WorkingDirectory",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    );
+    let _ = check_symtab.set(
+        "Session.HasPathMappingRules",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
+    );
+    let _ = check_symtab.set(
+        "Session.PathMappingRulesFile",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    );
+
+    if let Some(ps) = &st.parameter_space {
+        for tp in &ps.task_parameter_definitions {
+            let tp_type = match tp {
+                crate::template::TaskParameterDefinition::INT(_) => openjd_expr::ExprType::INT,
+                crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
+                    openjd_expr::ExprType::RANGE_EXPR
+                }
+                crate::template::TaskParameterDefinition::FLOAT(_) => openjd_expr::ExprType::FLOAT,
+                crate::template::TaskParameterDefinition::STRING(_) => {
+                    openjd_expr::ExprType::STRING
+                }
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::PATH,
+            };
+            let _ = check_symtab.set(
+                &format!("Task.Param.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(tp_type.clone()),
+            );
+            let raw_type = match tp {
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::STRING,
+                _ => tp_type,
+            };
+            let _ = check_symtab.set(
+                &format!("Task.RawParam.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(raw_type),
+            );
+        }
+    }
+
+    if let Some(files) = &s.embedded_files {
+        for f in files {
+            let _ = check_symtab.set(
+                &format!("Task.File.{}", f.name),
+                openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+            );
+        }
+    }
+
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+    for binding in bindings {
+        if let Some(eq_pos) = binding.find('=') {
+            let name = binding[..eq_pos].trim();
+            let expr = binding[eq_pos + 1..].trim();
+            if !name.is_empty() && !expr.is_empty() {
+                let parsed = openjd_expr::eval::ParsedExpression::with_profile(expr, &host_profile)
+                    .map_err(|e| {
+                        ModelError::Expression(ExpressionError::new(format!(
+                            "script let binding '{name}': {e}"
+                        )))
+                    })?;
+                let val = parsed
+                    .with_path_format(PathFormat::Posix)
+                    .with_library(&host_lib)
+                    .evaluate(&[&check_symtab as &SymbolTable])
+                    .map_err(|e| {
+                        ModelError::Expression(ExpressionError::new(format!(
+                            "script let binding '{name}': {e}"
+                        )))
+                    })?;
+                check_symtab.set(name, val)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn convert_action(a: &template::Action) -> job::Action {
