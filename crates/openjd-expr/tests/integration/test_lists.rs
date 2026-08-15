@@ -262,6 +262,25 @@ fn range_negative_step() {
     );
 }
 
+#[test]
+fn range_step_overflow_near_i64_max_terminates() {
+    // Regression: `v += step` overflowed i64 when the next value passed i64::MAX
+    // (debug panic "attempt to add with overflow"). Overflow implies the range ended.
+    assert_eq!(
+        eval("range(9223372036854775806, 9223372036854775807, 2)").to_display_string(),
+        "[9223372036854775806]"
+    );
+}
+
+#[test]
+fn range_step_underflow_near_i64_min_terminates() {
+    // Same defect, negative-step branch: underflow past i64::MIN implies the range ended.
+    assert_eq!(
+        eval("range(-9223372036854775807, -9223372036854775808, -2)").to_display_string(),
+        "[-9223372036854775807]"
+    );
+}
+
 // === TestListMultiplication ===
 #[test]
 fn list_mul() {
