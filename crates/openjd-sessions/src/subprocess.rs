@@ -633,24 +633,121 @@ pub async fn run_subprocess(
     );
 
     // Read merged stdout+stderr from the child
+    let out = match stdout_for_reading {
+        Some(stdout) => {
+            stream_output(
+                stdout,
+                &config,
+                filter,
+                session_id,
+                &message_tx,
+                &cancel_token,
+                pid,
+            )
+            .await
+        }
+        None => StreamOutcome::default(),
+    };
+    let StreamOutcome {
+        cancel_requested,
+        timed_out,
+        terminate_sent,
+        stdout_collected,
+        saw_fail,
+    } = out;
+
+    // Wait for process to exit.
+    //
+    // If we already issued `send_terminate` from inside the read loop
+    // (timeout, urgent cancel, or Terminate cancel), the child should
+    // be dead and `child.wait()` just needs to reap it — a short bound
+    // is plenty. Otherwise give the full 5s to accommodate graceful
+    // shutdown (natural EOF or `NotifyThenTerminate`).
+    let grace = if terminate_sent {
+        STDOUT_GRACE_TIME_POST_TERMINATE
+    } else {
+        STDOUT_GRACE_TIME
+    };
+    let exit_status = match tokio::time::timeout(grace, child.wait()).await {
+        Ok(Ok(s)) => Some(s),
+        Ok(Err(_)) => {
+            send_terminate(pid);
+            None
+        }
+        Err(_) => {
+            send_terminate(pid);
+            child.wait().await.ok()
+        }
+    };
+
+    let exit_code = exit_status.and_then(|s| s.code());
+    session_log!(
+        info,
+        session_id,
+        LogContent::PROCESS_CONTROL,
+        "Process exit code: {}",
+        exit_code.map_or("N/A".to_string(), |c| c.to_string())
+    );
+
+    let state = if timed_out {
+        ActionState::Timeout
+    } else if cancel_requested || cancel_token.is_cancelled() {
+        ActionState::Canceled
+    } else if saw_fail {
+        ActionState::Failed
+    } else if exit_status.is_some_and(|s| s.success()) {
+        ActionState::Success
+    } else {
+        ActionState::Failed
+    };
+
+    Ok(SubprocessResult {
+        state,
+        exit_code,
+        stdout: stdout_collected,
+    })
+}
+
+/// Aggregated outcome of [`stream_output`]: the flags run_subprocess needs
+/// to pick the reap grace period and classify the final ActionState.
+#[derive(Default)]
+struct StreamOutcome {
+    cancel_requested: bool,
+    timed_out: bool,
+    /// True once we've issued `send_terminate` on the process tree from
+    /// inside the stdout read loop (timeout path, urgent cancel, or
+    /// `CancelMethod::Terminate`). `send_terminate` is the crate's
+    /// platform-agnostic "kill now" — SIGKILL on Unix, `TerminateProcess`
+    /// via `kill_process_tree` on Windows.
+    ///
+    /// Stays false for `NotifyThenTerminate` cancel — there the terminate
+    /// is only scheduled (via `spawn_delayed_terminate`), so the process
+    /// may still be winding down gracefully in response to the notify
+    /// signal when the loop exits and needs the longer `STDOUT_GRACE_TIME`
+    /// on the final `child.wait()`.
+    terminate_sent: bool,
+    stdout_collected: String,
+    saw_fail: bool,
+}
+
+/// Stream the child's merged stdout to the log and action filter,
+/// servicing cancellation, timeout, and the post-kill drain deadline.
+/// The `select!` arm ordering and `biased;` are load-bearing.
+async fn stream_output(
+    stdout: Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+    config: &SubprocessConfig,
+    filter: &mut ActionFilter,
+    session_id: &str,
+    message_tx: &mpsc::UnboundedSender<ActionMessage>,
+    cancel_token: &CancellationToken,
+    pid: i32,
+) -> StreamOutcome {
     let mut cancel_requested = false;
     let mut timed_out = false;
-    // True once we've issued `send_terminate` on the process tree from
-    // inside the stdout read loop (timeout path, urgent cancel, or
-    // `CancelMethod::Terminate`). `send_terminate` is the crate's
-    // platform-agnostic "kill now" — SIGKILL on Unix, `TerminateProcess`
-    // via `kill_process_tree` on Windows.
-    //
-    // Stays false for `NotifyThenTerminate` cancel — there the terminate
-    // is only scheduled (via `spawn_delayed_terminate`), so the process
-    // may still be winding down gracefully in response to the notify
-    // signal when the loop exits and needs the longer `STDOUT_GRACE_TIME`
-    // on the final `c.wait()`.
     let mut terminate_sent = false;
     let mut stdout_collected = String::new();
     let mut saw_fail = false;
-
-    if let Some(stdout) = stdout_for_reading {
+    {
         let mut reader = BufReader::new(stdout);
         let mut line_buf = Vec::new();
 
@@ -757,57 +854,13 @@ pub async fn run_subprocess(
             }
         }
     }
-
-    // Wait for process to exit.
-    //
-    // If we already issued `send_terminate` from inside the read loop
-    // (timeout, urgent cancel, or Terminate cancel), the child should
-    // be dead and `child.wait()` just needs to reap it — a short bound
-    // is plenty. Otherwise give the full 5s to accommodate graceful
-    // shutdown (natural EOF or `NotifyThenTerminate`).
-    let grace = if terminate_sent {
-        STDOUT_GRACE_TIME_POST_TERMINATE
-    } else {
-        STDOUT_GRACE_TIME
-    };
-    let exit_status = match tokio::time::timeout(grace, child.wait()).await {
-        Ok(Ok(s)) => Some(s),
-        Ok(Err(_)) => {
-            send_terminate(pid);
-            None
-        }
-        Err(_) => {
-            send_terminate(pid);
-            child.wait().await.ok()
-        }
-    };
-
-    let exit_code = exit_status.and_then(|s| s.code());
-    session_log!(
-        info,
-        session_id,
-        LogContent::PROCESS_CONTROL,
-        "Process exit code: {}",
-        exit_code.map_or("N/A".to_string(), |c| c.to_string())
-    );
-
-    let state = if timed_out {
-        ActionState::Timeout
-    } else if cancel_requested || cancel_token.is_cancelled() {
-        ActionState::Canceled
-    } else if saw_fail {
-        ActionState::Failed
-    } else if exit_status.is_some_and(|s| s.success()) {
-        ActionState::Success
-    } else {
-        ActionState::Failed
-    };
-
-    Ok(SubprocessResult {
-        state,
-        exit_code,
-        stdout: stdout_collected,
-    })
+    StreamOutcome {
+        cancel_requested,
+        timed_out,
+        terminate_sent,
+        stdout_collected,
+        saw_fail,
+    }
 }
 
 pub(crate) fn process_line(
