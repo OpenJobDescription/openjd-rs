@@ -444,7 +444,7 @@ impl ExprValue {
     /// intermediate list fails the evaluator's memory limit before the
     /// allocation happens.
     pub fn make_list(
-        mut elements: Vec<ExprValue>,
+        elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
         // Reject 3+ nesting levels: if any element is itself a ListList with a
@@ -458,77 +458,14 @@ impl ExprValue {
                 "Lists may be nested at most 2 levels deep",
             ));
         }
-        // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
-        // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
-        let has_empty_listlist = elements.iter().any(
-            |e| matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE),
-        );
-        if has_empty_listlist {
-            // Find the first typed list sibling to determine the target variant
-            let sibling_code = elements.iter().find_map(|e| match e {
-                Self::ListBool(v) if !v.is_empty() => Some(crate::types::TypeCode::Bool),
-                Self::ListInt(v) if !v.is_empty() => Some(crate::types::TypeCode::Int),
-                Self::ListFloat(_) => Some(crate::types::TypeCode::Float),
-                Self::ListString(v, _) if !v.is_empty() => Some(crate::types::TypeCode::String),
-                Self::ListPath(v, _, _) if !v.is_empty() => Some(crate::types::TypeCode::Path),
-                _ => None,
-            });
-            if let Some(code) = sibling_code {
-                for e in &mut elements {
-                    if matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE)
-                    {
-                        *e = match code {
-                            crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
-                            crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
-                            crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
-                            crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
-                            crate::types::TypeCode::Path => {
-                                Self::make_list_path(Vec::new(), PathFormat::host())
-                            }
-                            _ => continue,
-                        };
-                    }
-                }
-            }
-        }
+        let elements = Self::retype_empty_nested_lists(elements);
         if elements.is_empty() {
-            // Empty lists are list[nulltype], compatible with any list type.
-            // When a concrete hint is provided, use the matching typed variant
-            // so that subsequent operations (e.g. append) preserve the type.
-            // Otherwise (Null or unknown hint), use ListList with NULLTYPE as the
-            // canonical empty list representation, compatible with any list type.
-            return Ok(match hint_type.code() {
-                crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
-                crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
-                crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
-                crate::types::TypeCode::Path => {
-                    Self::make_list_path(Vec::new(), PathFormat::host())
-                }
-                crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
-                crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
-                crate::types::TypeCode::NullType => {
-                    Self::ListList(Vec::new(), ExprType::NULLTYPE, 0)
-                }
-                _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
-            });
+            return Ok(Self::empty_list_from_hint(hint_type));
         }
         let has_int = elements.iter().any(|e| matches!(e, Self::Int(_)));
         let has_float = elements.iter().any(|e| matches!(e, Self::Float(_)));
         if has_int && has_float {
-            for e in &mut elements {
-                if let Self::Int(i) = e {
-                    *e = Self::Float(Float64::new(*i as f64).unwrap());
-                }
-            }
-            return Ok(Self::ListFloat(
-                elements
-                    .into_iter()
-                    .map(|e| match e {
-                        Self::Float(f) => f,
-                        _ => unreachable!("all elements promoted to Float above"),
-                    })
-                    .collect(),
-            ));
+            return Ok(Self::list_float_from_mixed_int_float(elements));
         }
         let has_list_int = elements
             .iter()
@@ -537,18 +474,8 @@ impl ExprValue {
             .iter()
             .any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::FLOAT));
         if has_list_int && has_list_float {
-            for e in &mut elements {
-                if let Self::ListInt(ints) = e {
-                    *e = Self::ListFloat(
-                        ints.iter()
-                            .map(|i| Float64::new(*i as f64).unwrap())
-                            .collect(),
-                    );
-                }
-            }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::nested_lists_int_to_float(elements));
         }
-        // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements
             .iter()
             .any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::PATH));
@@ -556,27 +483,130 @@ impl ExprValue {
             .iter()
             .any(|e| e.is_list() && e.list_elem_type() == Some(ExprType::STRING));
         if has_list_path && has_list_string {
-            for e in &mut elements {
-                if let Self::ListPath(paths, _, _) = e {
-                    *e = Self::make_list_string(std::mem::take(paths));
-                }
-            }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::nested_lists_path_to_string(elements));
         }
-        // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
         let has_string = elements.iter().any(|e| matches!(e, Self::String(_)));
         if has_path && has_string {
-            return Ok(Self::make_list_string(
-                elements
-                    .into_iter()
-                    .map(|e| match e {
-                        Self::String(s) | Self::Path { value: s, .. } => s,
-                        _ => e.to_display_string(),
-                    })
-                    .collect(),
-            ));
+            return Ok(Self::list_string_from_mixed_path_string(elements));
         }
+        Self::homogeneous_list(elements)
+    }
+
+    /// Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
+    /// e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
+    fn retype_empty_nested_lists(mut elements: Vec<ExprValue>) -> Vec<ExprValue> {
+        let has_empty_listlist = elements.iter().any(
+            |e| matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE),
+        );
+        if !has_empty_listlist {
+            return elements;
+        }
+        // Find the first typed list sibling to determine the target variant
+        let sibling_code = elements.iter().find_map(|e| match e {
+            Self::ListBool(v) if !v.is_empty() => Some(crate::types::TypeCode::Bool),
+            Self::ListInt(v) if !v.is_empty() => Some(crate::types::TypeCode::Int),
+            Self::ListFloat(_) => Some(crate::types::TypeCode::Float),
+            Self::ListString(v, _) if !v.is_empty() => Some(crate::types::TypeCode::String),
+            Self::ListPath(v, _, _) if !v.is_empty() => Some(crate::types::TypeCode::Path),
+            _ => None,
+        });
+        if let Some(code) = sibling_code {
+            for e in &mut elements {
+                if matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE)
+                {
+                    *e = match code {
+                        crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
+                        crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
+                        crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
+                        crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
+                        crate::types::TypeCode::Path => {
+                            Self::make_list_path(Vec::new(), PathFormat::host())
+                        }
+                        _ => continue,
+                    };
+                }
+            }
+        }
+        elements
+    }
+
+    /// Empty lists are list[nulltype], compatible with any list type.
+    /// When a concrete hint is provided, use the matching typed variant
+    /// so that subsequent operations (e.g. append) preserve the type.
+    /// Otherwise (Null or unknown hint), use ListList with NULLTYPE as the
+    /// canonical empty list representation, compatible with any list type.
+    fn empty_list_from_hint(hint_type: ExprType) -> Self {
+        match hint_type.code() {
+            crate::types::TypeCode::Bool => Self::ListBool(Vec::new()),
+            crate::types::TypeCode::Int => Self::ListInt(Vec::new()),
+            crate::types::TypeCode::Float => Self::ListFloat(Vec::new()),
+            crate::types::TypeCode::Path => Self::make_list_path(Vec::new(), PathFormat::host()),
+            crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
+            crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
+            crate::types::TypeCode::NullType => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
+            _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
+        }
+    }
+
+    /// Int/float promotion: a mix of int and float elements → list[float].
+    fn list_float_from_mixed_int_float(mut elements: Vec<ExprValue>) -> Self {
+        for e in &mut elements {
+            if let Self::Int(i) = e {
+                *e = Self::Float(Float64::new(*i as f64).unwrap());
+            }
+        }
+        Self::ListFloat(
+            elements
+                .into_iter()
+                .map(|e| match e {
+                    Self::Float(f) => f,
+                    _ => unreachable!("all elements promoted to Float above"),
+                })
+                .collect(),
+        )
+    }
+
+    /// Nested list int/float promotion: list[int] + list[float] → list[float] elements.
+    fn nested_lists_int_to_float(mut elements: Vec<ExprValue>) -> Self {
+        for e in &mut elements {
+            if let Self::ListInt(ints) = e {
+                *e = Self::ListFloat(
+                    ints.iter()
+                        .map(|i| Float64::new(*i as f64).unwrap())
+                        .collect(),
+                );
+            }
+        }
+        Self::make_list_list(elements, ExprType::NULLTYPE)
+    }
+
+    /// Nested list path/string promotion: list[path] + list[string] → list[string]
+    fn nested_lists_path_to_string(mut elements: Vec<ExprValue>) -> Self {
+        for e in &mut elements {
+            if let Self::ListPath(paths, _, _) = e {
+                *e = Self::make_list_string(std::mem::take(paths));
+            }
+        }
+        Self::make_list_list(elements, ExprType::NULLTYPE)
+    }
+
+    /// Path/string promotion: mix of path and string → string
+    fn list_string_from_mixed_path_string(elements: Vec<ExprValue>) -> Self {
+        Self::make_list_string(
+            elements
+                .into_iter()
+                .map(|e| match e {
+                    Self::String(s) | Self::Path { value: s, .. } => s,
+                    _ => e.to_display_string(),
+                })
+                .collect(),
+        )
+    }
+
+    /// Construct a typed list from elements assumed homogeneous with the first
+    /// element's type (promotion cases handled by the caller).
+    fn homogeneous_list(elements: Vec<ExprValue>) -> Result<Self, crate::error::ExpressionError> {
         Ok(match &elements[0] {
             Self::Bool(_) => Self::ListBool(
                 elements

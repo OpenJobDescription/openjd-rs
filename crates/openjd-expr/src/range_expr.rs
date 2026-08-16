@@ -764,111 +764,14 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
                 "Range expression has too many sub-ranges (> {MAX_RANGE_EXPR_CHUNKS}): '{expr}'",
             )));
         }
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
+        pos = skip_whitespace(bytes, pos);
         if pos >= bytes.len() {
-            // If we got here after a comma, that's a trailing comma error
-            if !ranges.is_empty() && pos > 0 {
-                // Check if the last non-whitespace char before end was a comma
-                let last_content = expr.trim_end();
-                if last_content.ends_with(',') {
-                    return Err(ExpressionError::parse_error(format!(
-                        "Trailing comma in range expression: '{expr}'"
-                    )));
-                }
-            }
+            check_no_trailing_comma(expr, !ranges.is_empty(), pos)?;
             break;
         }
-
-        // Parse integer (possibly negative)
-        let start = parse_integer(expr, &mut pos)?;
-
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        if pos >= bytes.len() || bytes[pos] == b',' {
-            // Single value
-            ranges.push(IntRange::new(start, start, 1)?);
-            if pos < bytes.len() {
-                pos += 1;
-            } // skip comma
-            continue;
-        }
-
-        if bytes[pos] != b'-' {
-            return Err(ExpressionError::parse_error(format!(
-                "Unexpected '{}' in '{expr}'",
-                bytes[pos] as char
-            )));
-        }
-        pos += 1; // skip '-'
-
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        let end = parse_integer(expr, &mut pos)?;
-
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        if pos >= bytes.len() || bytes[pos] == b',' {
-            // Range without step
-            if start <= end {
-                ranges.push(IntRange::new(start, end, 1)?);
-            } else {
-                // Descending range without step is invalid per spec
-                return Err(ExpressionError::parse_error(format!(
-                    "Descending range {start}-{end} requires a negative step"
-                )));
-            }
-            if pos < bytes.len() {
-                pos += 1;
-            } // skip comma
-            continue;
-        }
-
-        if bytes[pos] != b':' {
-            return Err(ExpressionError::parse_error(format!(
-                "Expected ':' or ',' in '{expr}'"
-            )));
-        }
-        pos += 1; // skip ':'
-
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        let step = parse_integer(expr, &mut pos)?;
-        if step == 0 {
-            return Err(ExpressionError::parse_error("Step must not be zero"));
-        }
-
-        ranges.push(IntRange::new(start, end, step)?);
-
-        // Skip whitespace
-        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        if pos < bytes.len() {
-            if bytes[pos] == b',' {
-                pos += 1;
-            } else {
-                return Err(ExpressionError::parse_error(format!(
-                    "Unexpected '{}' in '{expr}'",
-                    bytes[pos] as char
-                )));
-            }
-        }
+        let (range, new_pos) = parse_range_chunk(expr, pos)?;
+        ranges.push(range);
+        pos = new_pos;
     }
 
     if ranges.is_empty() {
@@ -876,6 +779,106 @@ fn parse_range_expr(expr: &str) -> Result<RangeExpr, ExpressionError> {
     }
 
     RangeExpr::from_ranges(ranges)
+}
+
+/// Return the first index at or after `pos` that is not ASCII whitespace.
+fn skip_whitespace(bytes: &[u8], mut pos: usize) -> usize {
+    while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
+/// If we reached the end of input after a comma, that's a trailing comma error.
+fn check_no_trailing_comma(
+    expr: &str,
+    has_ranges: bool,
+    pos: usize,
+) -> Result<(), ExpressionError> {
+    if has_ranges && pos > 0 {
+        // Check if the last non-whitespace char before end was a comma
+        let last_content = expr.trim_end();
+        if last_content.ends_with(',') {
+            return Err(ExpressionError::parse_error(format!(
+                "Trailing comma in range expression: '{expr}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Parse one sub-range chunk (`N`, `A-B`, or `A-B:S`) starting at `pos`,
+/// consuming a trailing comma if present. Returns the parsed range and the
+/// position after the chunk.
+fn parse_range_chunk(expr: &str, mut pos: usize) -> Result<(IntRange, usize), ExpressionError> {
+    let bytes = expr.as_bytes();
+
+    // Parse integer (possibly negative)
+    let start = parse_integer(expr, &mut pos)?;
+    pos = skip_whitespace(bytes, pos);
+
+    if pos >= bytes.len() || bytes[pos] == b',' {
+        // Single value
+        let range = IntRange::new(start, start, 1)?;
+        if pos < bytes.len() {
+            pos += 1; // skip comma
+        }
+        return Ok((range, pos));
+    }
+
+    if bytes[pos] != b'-' {
+        return Err(ExpressionError::parse_error(format!(
+            "Unexpected '{}' in '{expr}'",
+            bytes[pos] as char
+        )));
+    }
+    pos += 1; // skip '-'
+    pos = skip_whitespace(bytes, pos);
+
+    let end = parse_integer(expr, &mut pos)?;
+    pos = skip_whitespace(bytes, pos);
+
+    if pos >= bytes.len() || bytes[pos] == b',' {
+        // Range without step; a descending range without a step is invalid per spec
+        if start > end {
+            return Err(ExpressionError::parse_error(format!(
+                "Descending range {start}-{end} requires a negative step"
+            )));
+        }
+        let range = IntRange::new(start, end, 1)?;
+        if pos < bytes.len() {
+            pos += 1; // skip comma
+        }
+        return Ok((range, pos));
+    }
+
+    if bytes[pos] != b':' {
+        return Err(ExpressionError::parse_error(format!(
+            "Expected ':' or ',' in '{expr}'"
+        )));
+    }
+    pos += 1; // skip ':'
+    pos = skip_whitespace(bytes, pos);
+
+    let step = parse_integer(expr, &mut pos)?;
+    if step == 0 {
+        return Err(ExpressionError::parse_error("Step must not be zero"));
+    }
+
+    let range = IntRange::new(start, end, step)?;
+
+    pos = skip_whitespace(bytes, pos);
+    if pos < bytes.len() {
+        if bytes[pos] == b',' {
+            pos += 1;
+        } else {
+            return Err(ExpressionError::parse_error(format!(
+                "Unexpected '{}' in '{expr}'",
+                bytes[pos] as char
+            )));
+        }
+    }
+    Ok((range, pos))
 }
 
 fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
