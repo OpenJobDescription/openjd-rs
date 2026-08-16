@@ -839,7 +839,7 @@ async fn stream_output(
                             let line = decode_backslashreplace(&line_buf);
                             let line = truncate_line(&line).to_string();
                             line_buf.clear();
-                            let (display, pass_through) = process_line(&line, filter, session_id, &message_tx, &mut saw_fail);
+                            let (display, pass_through) = process_line(&line, filter, session_id, message_tx, &mut saw_fail);
                             if pass_through && filter.min_log_level() <= 20 {
                                 session_log!(info, session_id, LogContent::COMMAND_OUTPUT, "{}", display);
                             }

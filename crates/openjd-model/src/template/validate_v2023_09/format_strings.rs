@@ -640,8 +640,8 @@ pub fn validate_format_strings(
                     &HashSet::new(),
                     &mut step_let_names,
                     &mut step_template_symtab,
-                    &template_lib,
-                    &template_profile,
+                    template_lib,
+                    template_profile,
                     errors,
                 );
             }
@@ -771,8 +771,8 @@ fn validate_step_script_fs(
             let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
             validate_action_fs(
                 &script.actions.on_run,
-                &task_symtab,
-                &host_lib,
+                task_symtab,
+                host_lib,
                 &action_path,
                 errors,
             );
@@ -784,8 +784,8 @@ fn validate_step_script_fs(
             if let Some(timeout) = &script.actions.on_run.timeout {
                 validate_fs(
                     timeout,
-                    &step_template_symtab,
-                    &template_lib,
+                    step_template_symtab,
+                    template_lib,
                     &path_field(&action_path, "timeout"),
                     errors,
                 );
@@ -803,8 +803,8 @@ fn validate_step_script_fs(
             if let Some(mode) = mode_fs {
                 validate_fs(
                     mode,
-                    &step_template_symtab,
-                    &template_lib,
+                    step_template_symtab,
+                    template_lib,
                     &path_field(&action_path, "cancelation"),
                     errors,
                 );
@@ -812,8 +812,8 @@ fn validate_step_script_fs(
             if let Some(notify) = notify_fs {
                 validate_fs(
                     notify,
-                    &step_template_symtab,
-                    &template_lib,
+                    step_template_symtab,
+                    template_lib,
                     &path_field(&action_path, "cancelation"),
                     errors,
                 );
@@ -827,8 +827,8 @@ fn validate_step_script_fs(
                     if let Some(data) = &f.data {
                         validate_fs(
                             data,
-                            &task_symtab,
-                            &host_lib,
+                            task_symtab,
+                            host_lib,
                             &path_field(&f_path, "data"),
                             errors,
                         );
@@ -949,8 +949,8 @@ fn validate_step_environments_fs(
                                 &enclosing,
                                 &mut env_let_names,
                                 &mut env_symtab,
-                                &host_lib,
-                                &host_profile,
+                                host_lib,
+                                host_profile,
                                 errors,
                             );
                         }
@@ -962,9 +962,9 @@ fn validate_step_environments_fs(
                 validate_env_format_strings(
                     env,
                     &env_symtab,
-                    &host_lib,
-                    &step_template_symtab,
-                    &template_lib,
+                    host_lib,
+                    step_template_symtab,
+                    template_lib,
                     &path_index(&envs_path, j),
                     expr_active,
                     errors,
@@ -1023,12 +1023,12 @@ fn validate_simple_action_lets(
                         let mut new_names = HashSet::new();
                         validate_let_bindings(
                             let_bindings,
-                            &step_path,
+                            step_path,
                             &enclosing,
                             &mut new_names,
                             task_symtab,
-                            &host_lib,
-                            &host_profile,
+                            host_lib,
+                            host_profile,
                             errors,
                         );
                         sa_let_names.extend(new_names);
@@ -1038,17 +1038,17 @@ fn validate_simple_action_lets(
                     match FormatString::new(&sa.script) {
                         Ok(fs) => {
                             if let Err(e) = fs.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
+                                errors.add(step_path, e.to_string());
                             }
                         }
                         Err(e) => {
-                            errors.add(&step_path, format!("SimpleAction script: {e}"));
+                            errors.add(step_path, format!("SimpleAction script: {e}"));
                         }
                     }
                     if let Some(args) = &sa.args {
                         for arg in args {
                             if let Err(e) = arg.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
+                                errors.add(step_path, e.to_string());
                             }
                         }
                     }

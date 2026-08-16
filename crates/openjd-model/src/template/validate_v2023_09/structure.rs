@@ -237,22 +237,22 @@ fn validate_single_step_structure(
     let name = step.name.clone();
     {
         if name.is_empty() {
-            errors.add(&path_field(&step_path, "name"), "must not be empty.");
+            errors.add(&path_field(step_path, "name"), "must not be empty.");
         }
         if name.chars().any(|c| c.is_control()) {
             errors.add(
-                &path_field(&step_path, "name"),
+                &path_field(step_path, "name"),
                 "contains control characters.",
             );
         }
         if name.contains("{{") {
             errors.add(
-                &path_field(&step_path, "name"),
+                &path_field(step_path, "name"),
                 "must not contain format string expressions.",
             );
         }
         if let Some(desc) = &step.description {
-            let dp = path_field(&step_path, "description");
+            let dp = path_field(step_path, "description");
             if desc.0.chars().count() > limits.max_description_len {
                 errors.add(
                     &dp,
@@ -271,12 +271,12 @@ fn validate_single_step_structure(
             && step.powershell.is_none()
             && step.node.is_none()
         {
-            errors.add(&step_path, "must have 'script' or a simple action field.");
+            errors.add(step_path, "must have 'script' or a simple action field.");
         }
 
         // Dependencies
         if let Some(deps) = &step.dependencies {
-            let deps_path = path_field(&step_path, "dependencies");
+            let deps_path = path_field(step_path, "dependencies");
             if deps.is_empty() {
                 errors.add(&deps_path, "must not be empty.");
             }
@@ -306,7 +306,7 @@ fn validate_single_step_structure(
 
         // Host requirements
         if let Some(hr) = &step.host_requirements {
-            let hr_path = path_field(&step_path, "hostRequirements");
+            let hr_path = path_field(step_path, "hostRequirements");
             match (
                 capabilities::standard_amount_capability_names(
                     ctx.profile.revision(),
@@ -349,7 +349,7 @@ fn validate_single_step_structure(
         if let Some(ps) = &step.parameter_space {
             validate_step_param_space(
                 ps,
-                &path_field(&step_path, "parameterSpace"),
+                &path_field(step_path, "parameterSpace"),
                 limits,
                 rules,
                 errors,
@@ -358,7 +358,7 @@ fn validate_single_step_structure(
 
         // Script actions
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
+            let script_path = path_field(step_path, "script");
             let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
             validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
 
@@ -645,22 +645,22 @@ fn validate_amount_requirement(
         {
             if amt.name.len() > 100 {
                 errors.add(
-                    &amt_path,
+                    amt_path,
                     format!("name '{}' exceeds 100 characters.", amt.name),
                 );
             }
             if !AMOUNT_CAP_RE.is_match(&amt.name) {
                 errors.add(
-                    &amt_path,
+                    amt_path,
                     format!(
                         "name '{}' does not match capability name pattern.",
                         amt.name
                     ),
                 );
             }
-            check_capability_reserved_scope(&amt.name, standard_amounts, &amt_path, errors);
+            check_capability_reserved_scope(&amt.name, standard_amounts, amt_path, errors);
             if amt.min.is_none() && amt.max.is_none() {
-                errors.add(&amt_path, "must have at least one of min or max.");
+                errors.add(amt_path, "must have at least one of min or max.");
             }
             for (field, fs) in [("min", &amt.min), ("max", &amt.max)] {
                 if let Some(fs) = fs {
@@ -668,7 +668,7 @@ fn validate_amount_requirement(
                         && !rules.allow_fmtstring_in_numeric_fields
                     {
                         errors.add(
-                            &path_field(&amt_path, field),
+                            &path_field(amt_path, field),
                             "format strings are not allowed.",
                         );
                     }
@@ -681,11 +681,11 @@ fn validate_amount_requirement(
                         return None;
                     }
                     let Ok(value) = fs.raw().trim().parse::<f64>() else {
-                        errors.add(&path_field(&amt_path, field), "must be a number.");
+                        errors.add(&path_field(amt_path, field), "must be a number.");
                         return None;
                     };
                     if !value.is_finite() {
-                        errors.add(&path_field(&amt_path, field), "must be a finite number.");
+                        errors.add(&path_field(amt_path, field), "must be a finite number.");
                         return None;
                     }
                     Some(value)
@@ -694,17 +694,17 @@ fn validate_amount_requirement(
             let max_val = parse_literal_amount("max", &amt.max);
             if let Some(min) = min_val {
                 if min < 0.0 {
-                    errors.add(&path_field(&amt_path, "min"), "must be non-negative.");
+                    errors.add(&path_field(amt_path, "min"), "must be non-negative.");
                 }
             }
             if let Some(max) = max_val {
                 if max <= 0.0 {
-                    errors.add(&path_field(&amt_path, "max"), "must be positive.");
+                    errors.add(&path_field(amt_path, "max"), "must be positive.");
                 }
             }
             if let (Some(min), Some(max)) = (min_val, max_val) {
                 if min > max {
-                    errors.add(&amt_path, format!("min ({min}) > max ({max})."));
+                    errors.add(amt_path, format!("min ({min}) > max ({max})."));
                 }
             }
         }
@@ -746,26 +746,26 @@ fn validate_attribute_requirement(
         {
             if attr.name.len() > 100 {
                 errors.add(
-                    &attr_path,
+                    attr_path,
                     format!("name '{}' exceeds 100 characters.", attr.name),
                 );
             }
             if !ATTR_CAP_RE.is_match(&attr.name) {
                 errors.add(
-                    &attr_path,
+                    attr_path,
                     format!(
                         "name '{}' does not match capability name pattern.",
                         attr.name
                     ),
                 );
             }
-            check_capability_reserved_scope(&attr.name, standard_attrs, &attr_path, errors);
+            check_capability_reserved_scope(&attr.name, standard_attrs, attr_path, errors);
             if attr.any_of.is_none() && attr.all_of.is_none() {
-                errors.add(&attr_path, "must have at least one of anyOf or allOf.");
+                errors.add(attr_path, "must have at least one of anyOf or allOf.");
             }
             for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
                 if let Some(vals) = vals {
-                    let field_path = path_field(&attr_path, field);
+                    let field_path = path_field(attr_path, field);
                     if vals.is_empty() {
                         errors.add(&field_path, "must not be empty.");
                     }
@@ -798,7 +798,7 @@ fn validate_attribute_requirement(
                 if let Some(vals) = &attr.all_of {
                     if vals.len() > 1 {
                         errors.add(
-                            &path_field(&attr_path, "allOf"),
+                            &path_field(attr_path, "allOf"),
                             "single-valued attribute cannot have more than 1 element.",
                         );
                     }
