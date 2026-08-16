@@ -19,6 +19,66 @@ pub mod subtree;
 /// Progress callback type used across operations.
 pub type ProgressFn<S> = dyn Fn(&S) -> bool + Send + Sync;
 
+/// Reject manifests whose regular (non-symlink, non-deleted) files already
+/// carry a whole-file hash or chunk hashes.
+pub(crate) fn validate_files_not_hashed(files: &[crate::manifest::FileEntry]) -> crate::Result<()> {
+    for file in files {
+        if file.symlink_target.is_none()
+            && !file.deleted
+            && (file.hash.is_some() || file.chunk_hashes.is_some())
+        {
+            return Err(crate::SnapshotError::Validation(format!(
+                "file already has hashes set, cannot re-hash: {}",
+                file.path
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Look up the cached per-chunk hashes for a file, returning them only when
+/// every chunk is fresh in the cache and the file has at least one chunk.
+pub(crate) fn cached_chunk_hashes(
+    cache: &crate::hash_cache::HashCache,
+    path: &std::path::Path,
+    alg: &str,
+    chunk_size: u64,
+    file_size: u64,
+    mtime: u64,
+) -> Option<Vec<String>> {
+    let mut hashes = Vec::new();
+    let mut offset: u64 = 0;
+    while offset < file_size {
+        let end = std::cmp::min(offset + chunk_size, file_size);
+        let h = cache.get_if_fresh(path, alg, offset as i64, end as i64, mtime)?;
+        hashes.push(h);
+        offset = end;
+    }
+    if hashes.is_empty() {
+        return None;
+    }
+    Some(hashes)
+}
+
+/// Record per-chunk hashes for a file in the hash cache (best effort:
+/// individual cache write failures are ignored).
+pub(crate) fn put_chunk_hashes(
+    cache: &crate::hash_cache::HashCache,
+    path: &std::path::Path,
+    alg: &str,
+    chunk_size: u64,
+    file_size: u64,
+    hashes: &[String],
+    mtime: u64,
+) {
+    let mut offset: u64 = 0;
+    for h in hashes {
+        let end = std::cmp::min(offset + chunk_size, file_size);
+        let _ = cache.put(path, alg, offset as i64, end as i64, h, mtime);
+        offset = end;
+    }
+}
+
 pub use cache_sync::{cache_sync_manifest, CacheSyncOptions, CacheSyncResult, CacheSyncStatistics};
 pub use collect::{collect_abs_snapshot, CollectOptions};
 pub use compose::{compose_diffs, compose_snapshot_with_diffs};

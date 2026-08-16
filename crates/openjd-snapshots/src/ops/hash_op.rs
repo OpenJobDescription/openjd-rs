@@ -135,17 +135,7 @@ fn hash_manifest<P: Clone, K: Clone>(
     let start_time = std::time::Instant::now();
 
     // Validate no regular files already have hashes
-    for file in &manifest.files {
-        if file.symlink_target.is_none()
-            && !file.deleted
-            && (file.hash.is_some() || file.chunk_hashes.is_some())
-        {
-            return Err(crate::SnapshotError::Validation(format!(
-                "file already has hashes set, cannot re-hash: {}",
-                file.path
-            )));
-        }
-    }
+    super::validate_files_not_hashed(&manifest.files)?;
 
     let chunk_size = options
         .file_chunk_size_bytes
@@ -154,92 +144,11 @@ fn hash_manifest<P: Clone, K: Clone>(
     let mut result = manifest.clone();
 
     // Build work list and do cache lookups sequentially (fast SQLite reads)
-    struct WorkItem {
-        index: usize,
-        path: String,
-        use_chunks: bool,
-        file_size: u64,
-    }
-
-    let mut work_items = Vec::new();
-    let mut stats = HashStatistics::default();
-
-    for (i, file) in result.files.iter_mut().enumerate() {
-        if file.symlink_target.is_some() || file.deleted {
-            continue;
-        }
-
-        let file_size = file.size.unwrap_or(0);
-        let mtime = file.mtime.unwrap_or(0);
-        let path = file.path.clone();
-        let use_chunks = chunk_size > 0 && file_size as i64 > chunk_size;
-
-        stats.total_files += 1;
-        stats.total_bytes += file_size;
-
-        // Try cache lookup
-        if let Some(ref cache) = options.hash_cache {
-            if !options.force_rehash {
-                if use_chunks {
-                    let cs = chunk_size as u64;
-                    let mut all_cached = true;
-                    let mut cached_hashes = Vec::new();
-                    let mut offset: u64 = 0;
-                    while offset < file_size {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        if let Some(h) = cache.get_if_fresh(
-                            Path::new(&path),
-                            alg_str,
-                            offset as i64,
-                            end as i64,
-                            mtime,
-                        ) {
-                            cached_hashes.push(h);
-                        } else {
-                            all_cached = false;
-                            break;
-                        }
-                        offset = end;
-                    }
-                    if all_cached && !cached_hashes.is_empty() {
-                        file.chunk_hashes = Some(cached_hashes);
-                        stats.skipped_files += 1;
-                        stats.skipped_bytes += file_size;
-                        continue;
-                    }
-                } else if let Some(h) =
-                    cache.get_if_fresh(Path::new(&path), alg_str, 0, WHOLE_FILE_RANGE_END, mtime)
-                {
-                    file.hash = Some(h);
-                    stats.skipped_files += 1;
-                    stats.skipped_bytes += file_size;
-                    continue;
-                }
-            }
-        }
-
-        work_items.push(WorkItem {
-            index: i,
-            path,
-            use_chunks,
-            file_size,
-        });
-    }
+    let (work_items, mut stats) =
+        build_hash_work_list(&mut result.files, options, chunk_size, alg_str);
 
     if work_items.is_empty() {
-        if stats.total_bytes > 0 {
-            stats.progress = 100.0;
-        }
-        if let Some(ref cb) = options.on_progress {
-            let _ = cb(&stats);
-        }
-        let unit = if chunk_size <= 0 { "files" } else { "chunks" };
-        stats.progress_message = format!(
-            "Hashed {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes),
-            stats.total_files,
-            unit
-        );
+        finish_empty_hash(&mut stats, &options.on_progress, chunk_size);
         return Ok((result, stats));
     }
 
@@ -268,42 +177,15 @@ fn hash_manifest<P: Clone, K: Clone>(
                 if cancelled.load(Ordering::Relaxed) {
                     return Err(crate::SnapshotError::Cancelled);
                 }
-
-                let path = Path::new(&item.path);
-                let cr = if item.use_chunks {
-                    let hashes = hash_file_chunked(path, chunk_size as u64, item.file_size)?;
-                    debug!(path = %item.path, chunks = hashes.len(), "hashed (chunked)");
-                    CacheResult::Chunked(hashes)
-                } else {
-                    let h = hash_file(path)?;
-                    debug!(path = %item.path, "hashed");
-                    CacheResult::WholeFile(h)
-                };
-
-                // Update progress
-                {
-                    let mut s = progress_stats.lock().unwrap();
-                    s.hashed_files += 1;
-                    s.hashed_bytes += item.file_size;
-                    let elapsed = start.elapsed().as_secs_f64();
-                    s.total_time = elapsed;
-                    {
-                        let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
-                    }
-                    if s.total_bytes > 0 {
-                        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64
-                            / s.total_bytes as f64)
-                            * 100.0;
-                    }
-                    if let Some(ref cb) = on_progress {
-                        if !cb(&s) {
-                            cancelled.store(true, Ordering::Relaxed);
-                            return Err(crate::SnapshotError::Cancelled);
-                        }
-                    }
-                }
-
+                let cr = hash_one_item(item, chunk_size)?;
+                record_hashed_progress(
+                    &progress_stats,
+                    &rate_calc,
+                    on_progress,
+                    &cancelled,
+                    item.file_size,
+                    start,
+                )?;
                 Ok((item.index, cr))
             })
             .collect()
@@ -312,34 +194,208 @@ fn hash_manifest<P: Clone, K: Clone>(
     // Apply results back and write cache entries sequentially
     for r in hash_results {
         let (index, cache_result) = r?;
-        let file = &mut result.files[index];
-        let path = Path::new(&file.path);
-        let mtime = file.mtime.unwrap_or(0);
-        let file_size = file.size.unwrap_or(0);
-
-        match cache_result {
-            CacheResult::WholeFile(h) => {
-                if let Some(ref cache) = options.hash_cache {
-                    let _ = cache.put(path, alg_str, 0, WHOLE_FILE_RANGE_END, &h, mtime);
-                }
-                file.hash = Some(h);
-            }
-            CacheResult::Chunked(hashes) => {
-                if let Some(ref cache) = options.hash_cache {
-                    let cs = chunk_size as u64;
-                    let mut offset: u64 = 0;
-                    for h in &hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(path, alg_str, offset as i64, end as i64, h, mtime);
-                        offset = end;
-                    }
-                }
-                file.chunk_hashes = Some(hashes);
-            }
-        }
+        apply_hash_result(
+            &mut result.files[index],
+            cache_result,
+            &options.hash_cache,
+            alg_str,
+            chunk_size,
+        );
     }
 
-    stats = progress_stats.lock().unwrap().clone();
+    let stats = finalize_hash_stats(&progress_stats, &rate_calc, start_time, chunk_size);
+
+    if let Some(ref cb) = options.on_progress {
+        let _ = cb(&stats);
+    }
+
+    Ok((result, stats))
+}
+
+/// Inputs describing one file that needs hashing.
+struct HashWorkItem {
+    index: usize,
+    path: String,
+    use_chunks: bool,
+    file_size: u64,
+}
+
+/// Build the work item list for all regular (non-symlink, non-deleted)
+/// files, resolving hash-cache hits in place (storing the cached hashes on
+/// the entry and counting the file as skipped) so only cache misses remain.
+fn build_hash_work_list(
+    files: &mut [crate::manifest::FileEntry],
+    options: &HashOptions,
+    chunk_size: i64,
+    alg_str: &str,
+) -> (Vec<HashWorkItem>, HashStatistics) {
+    let mut work_items = Vec::new();
+    let mut stats = HashStatistics::default();
+
+    for (i, file) in files.iter_mut().enumerate() {
+        if file.symlink_target.is_some() || file.deleted {
+            continue;
+        }
+
+        let file_size = file.size.unwrap_or(0);
+        let mtime = file.mtime.unwrap_or(0);
+        let path = file.path.clone();
+        let use_chunks = chunk_size > 0 && file_size as i64 > chunk_size;
+
+        stats.total_files += 1;
+        stats.total_bytes += file_size;
+
+        // Try cache lookup
+        if let Some(ref cache) = options.hash_cache {
+            if !options.force_rehash {
+                if use_chunks {
+                    if let Some(cached_hashes) = super::cached_chunk_hashes(
+                        cache,
+                        Path::new(&path),
+                        alg_str,
+                        chunk_size as u64,
+                        file_size,
+                        mtime,
+                    ) {
+                        file.chunk_hashes = Some(cached_hashes);
+                        stats.skipped_files += 1;
+                        stats.skipped_bytes += file_size;
+                        continue;
+                    }
+                } else if let Some(h) =
+                    cache.get_if_fresh(Path::new(&path), alg_str, 0, WHOLE_FILE_RANGE_END, mtime)
+                {
+                    file.hash = Some(h);
+                    stats.skipped_files += 1;
+                    stats.skipped_bytes += file_size;
+                    continue;
+                }
+            }
+        }
+
+        work_items.push(HashWorkItem {
+            index: i,
+            path,
+            use_chunks,
+            file_size,
+        });
+    }
+
+    (work_items, stats)
+}
+
+/// Finish statistics for the fast path where nothing needs hashing.
+fn finish_empty_hash(
+    stats: &mut HashStatistics,
+    on_progress: &Option<Box<super::ProgressFn<HashStatistics>>>,
+    chunk_size: i64,
+) {
+    if stats.total_bytes > 0 {
+        stats.progress = 100.0;
+    }
+    if let Some(ref cb) = on_progress {
+        let _ = cb(stats);
+    }
+    let unit = if chunk_size <= 0 { "files" } else { "chunks" };
+    stats.progress_message = format!(
+        "Hashed {} ({} {}) in 0.00s",
+        crate::hash::human_readable_file_size(stats.total_bytes),
+        stats.total_files,
+        unit
+    );
+}
+
+/// Hash one file, either whole or chunk-by-chunk.
+fn hash_one_item(item: &HashWorkItem, chunk_size: i64) -> crate::Result<CacheResult> {
+    let path = Path::new(&item.path);
+    if item.use_chunks {
+        let hashes = hash_file_chunked(path, chunk_size as u64, item.file_size)?;
+        debug!(path = %item.path, chunks = hashes.len(), "hashed (chunked)");
+        Ok(CacheResult::Chunked(hashes))
+    } else {
+        let h = hash_file(path)?;
+        debug!(path = %item.path, "hashed");
+        Ok(CacheResult::WholeFile(h))
+    }
+}
+
+/// Record one hashed file in the shared statistics and invoke the progress
+/// callback, flagging cancellation if the callback returns false.
+fn record_hashed_progress(
+    progress_stats: &Mutex<HashStatistics>,
+    rate_calc: &Mutex<SlidingWindowRate>,
+    on_progress: &Option<Box<super::ProgressFn<HashStatistics>>>,
+    cancelled: &AtomicBool,
+    file_size: u64,
+    start: std::time::Instant,
+) -> crate::Result<()> {
+    let mut s = progress_stats.lock().unwrap();
+    s.hashed_files += 1;
+    s.hashed_bytes += file_size;
+    let elapsed = start.elapsed().as_secs_f64();
+    s.total_time = elapsed;
+    {
+        let mut rc = rate_calc.lock().unwrap();
+        s.rate = rc.update(elapsed, s.hashed_bytes + s.skipped_bytes);
+    }
+    if s.total_bytes > 0 {
+        s.progress = ((s.hashed_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+    }
+    if let Some(ref cb) = on_progress {
+        if !cb(&s) {
+            cancelled.store(true, Ordering::Relaxed);
+            return Err(crate::SnapshotError::Cancelled);
+        }
+    }
+    Ok(())
+}
+
+/// Store a hashing result into the manifest entry and record the resulting
+/// hashes in the hash cache.
+fn apply_hash_result(
+    file: &mut crate::manifest::FileEntry,
+    cache_result: CacheResult,
+    hash_cache: &Option<Arc<HashCache>>,
+    alg_str: &str,
+    chunk_size: i64,
+) {
+    let path = Path::new(&file.path);
+    let mtime = file.mtime.unwrap_or(0);
+    let file_size = file.size.unwrap_or(0);
+
+    match cache_result {
+        CacheResult::WholeFile(h) => {
+            if let Some(ref cache) = hash_cache {
+                let _ = cache.put(path, alg_str, 0, WHOLE_FILE_RANGE_END, &h, mtime);
+            }
+            file.hash = Some(h);
+        }
+        CacheResult::Chunked(hashes) => {
+            if let Some(ref cache) = hash_cache {
+                super::put_chunk_hashes(
+                    cache,
+                    path,
+                    alg_str,
+                    chunk_size as u64,
+                    file_size,
+                    &hashes,
+                    mtime,
+                );
+            }
+            file.chunk_hashes = Some(hashes);
+        }
+    }
+}
+
+/// Fold the shared progress state into final statistics: total time, rate,
+/// percentage, and the human-readable summary message.
+fn finalize_hash_stats(
+    progress_stats: &Mutex<HashStatistics>,
+    rate_calc: &Mutex<SlidingWindowRate>,
+    start_time: std::time::Instant,
+    chunk_size: i64,
+) -> HashStatistics {
+    let mut stats = progress_stats.lock().unwrap().clone();
 
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
@@ -367,12 +423,7 @@ fn hash_manifest<P: Clone, K: Clone>(
         ));
     }
     stats.progress_message = parts.join(" ");
-
-    if let Some(ref cb) = options.on_progress {
-        let _ = cb(&stats);
-    }
-
-    Ok((result, stats))
+    stats
 }
 
 #[cfg(test)]

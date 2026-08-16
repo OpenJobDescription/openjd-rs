@@ -7,7 +7,7 @@ use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
 use crate::hash::hash_data;
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
-use crate::manifest::{AbsManifest, FileEntry, Manifest, SymlinkPolicy};
+use crate::manifest::{AbsManifest, DirEntry, FileEntry, Manifest, SymlinkPolicy};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -261,7 +261,6 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     let start_time = std::time::Instant::now();
     let alg_str = manifest.hash_alg.extension();
     let mut result = manifest.clone();
-    let mut stats = DownloadStatistics::default();
 
     // Extract options fields up front so we can move on_progress into an Arc later
     let hash_cache = options.hash_cache;
@@ -271,9 +270,236 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     let max_workers = options.max_workers;
     let max_memory_bytes = options.max_memory_bytes;
 
+    // Handle deleted entries
+    if apply_deletes {
+        apply_delete_entries(&manifest.files, &manifest.dirs);
+    }
+
+    // Create symlinks in topological order
+    for idx in symlink_creation_order(&result.files) {
+        handle_symlink(&mut result.files[idx], symlink_policy)?;
+    }
+
+    // Create target directories and evaluate each file for skip/download
+    let (work_items, mut stats) = build_download_work_list(
+        &result.files,
+        &manifest.dirs,
+        manifest.file_chunk_size_bytes,
+        alg_str,
+        &hash_cache,
+        conflict_res,
+    )?;
+
+    // Separate skipped from needing download
+    let download_items: Vec<DownloadWorkItem> = work_items
+        .iter()
+        .filter(|(_, skipped, _)| !skipped)
+        .map(|(i, _, _)| DownloadWorkItem {
+            index: *i,
+            file_size: result.files[*i].size.unwrap_or(0),
+        })
+        .collect();
+
+    // Apply skipped mtime updates
+    for &(i, skipped, mtime) in &work_items {
+        if skipped && mtime != 0 {
+            result.files[i].mtime = Some(mtime);
+        }
+    }
+
+    let on_progress: Option<Arc<super::ProgressFn<DownloadStatistics>>> =
+        options.on_progress.map(|f| Arc::from(f));
+
+    if download_items.is_empty() {
+        finish_empty_download(&mut stats, &on_progress, manifest.file_chunk_size_bytes);
+        return Ok((result, stats));
+    }
+
+    // Download files in parallel using tokio
+    let max_memory = max_memory_bytes.unwrap_or_else(default_max_memory_bytes);
+    let num_workers = max_workers.unwrap_or(10);
+    let ctx = Arc::new(DownloadCtx {
+        data_cache,
+        memory_pool: Arc::new(MemoryPool::new(max_memory)),
+        worker_semaphore: Arc::new(tokio::sync::Semaphore::new(num_workers)),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        // std::sync::Mutex is intentional here: the lock is held only for nanosecond-scale
+        // field updates and never across .await points, so it's cheaper than tokio::sync::Mutex
+        // which would yield to the scheduler even when uncontended.
+        progress_stats: Arc::new(Mutex::new(stats.clone())),
+        rate_calc: Arc::new(Mutex::new(SlidingWindowRate::new())),
+        on_progress: on_progress.clone(),
+        alg: alg_str.to_string(),
+        conflict_res,
+        manifest_chunk_size: result.file_chunk_size_bytes,
+        start: start_time,
+    });
+
+    let download_results = run_download_tasks(&ctx, &result.files, download_items).await;
+
+    // Apply mtime restoration and cache writes sequentially
+    for r in download_results {
+        let (index, target_path) = r?;
+        finalize_downloaded_file(
+            &mut result.files[index],
+            &target_path,
+            &hash_cache,
+            alg_str,
+            result.file_chunk_size_bytes,
+        )?;
+    }
+
+    let stats = finalize_download_stats(
+        &ctx.progress_stats,
+        &ctx.rate_calc,
+        start_time,
+        manifest.file_chunk_size_bytes,
+    );
+
+    if let Some(ref cb) = on_progress {
+        let _ = cb(&stats);
+    }
+
+    Ok((result, stats))
+}
+
+/// A file that still needs downloading: its manifest index and size in bytes.
+struct DownloadWorkItem {
+    index: usize,
+    file_size: u64,
+}
+
+/// Shared, per-operation state used by every download worker task.
+struct DownloadCtx {
+    data_cache: Arc<dyn AsyncDataCache>,
+    memory_pool: Arc<MemoryPool>,
+    worker_semaphore: Arc<tokio::sync::Semaphore>,
+    cancelled: Arc<AtomicBool>,
+    progress_stats: Arc<Mutex<DownloadStatistics>>,
+    rate_calc: Arc<Mutex<SlidingWindowRate>>,
+    on_progress: Option<Arc<super::ProgressFn<DownloadStatistics>>>,
+    alg: String,
+    conflict_res: FileConflictResolution,
+    manifest_chunk_size: i64,
+    start: std::time::Instant,
+}
+
+/// Per-file inputs for one download task, cloned out of the manifest so the
+/// spawned task owns its data.
+struct FileDownloadSpec {
+    index: usize,
+    path: String,
+    hash: Option<String>,
+    chunk_hashes: Option<Vec<String>>,
+    size: u64,
+}
+
+/// Remove deleted files, then deleted directories (deepest first), from the
+/// local filesystem. Removal failures are ignored (best effort).
+fn apply_delete_entries(files: &[FileEntry], dirs: &[DirEntry]) {
+    for file in files {
+        if file.deleted {
+            let path = Path::new(&file.path);
+            if path.exists() {
+                if path.is_symlink() {
+                    debug!(path = %file.path, "deleting symlink");
+                } else {
+                    debug!(path = %file.path, "deleting file");
+                }
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    let mut del_dirs: Vec<&str> = dirs
+        .iter()
+        .filter(|d| d.deleted)
+        .map(|d| d.path.as_str())
+        .collect();
+    del_dirs.sort();
+    del_dirs.reverse();
+    for dir_path in del_dirs {
+        debug!(path = dir_path, "deleting directory");
+        let _ = std::fs::remove_dir(dir_path);
+    }
+}
+
+/// Order symlink entry indices so that targets which are themselves symlinks
+/// are created before the links that point at them (Kahn's algorithm).
+/// Entries participating in a cycle are appended in manifest order.
+fn symlink_creation_order(files: &[FileEntry]) -> Vec<usize> {
+    let symlink_indices: Vec<usize> = files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !f.deleted && f.symlink_target.is_some())
+        .map(|(i, _)| i)
+        .collect();
+
+    let symlink_paths: std::collections::HashSet<&str> = symlink_indices
+        .iter()
+        .map(|&i| files[i].path.as_str())
+        .collect();
+
+    let mut in_degree: HashMap<usize, usize> = symlink_indices.iter().map(|&i| (i, 0)).collect();
+    let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
+    let path_to_idx: HashMap<&str, usize> = symlink_indices
+        .iter()
+        .map(|&i| (files[i].path.as_str(), i))
+        .collect();
+
+    for &i in &symlink_indices {
+        let target = files[i].symlink_target.as_deref().unwrap();
+        if symlink_paths.contains(target) {
+            let &dep = path_to_idx.get(target).unwrap();
+            *in_degree.entry(i).or_default() += 1;
+            dependents.entry(dep).or_default().push(i);
+        }
+    }
+
+    let mut queue: std::collections::VecDeque<usize> = symlink_indices
+        .iter()
+        .filter(|&&i| in_degree[&i] == 0)
+        .copied()
+        .collect();
+    let mut sorted = Vec::with_capacity(symlink_indices.len());
+    let mut sorted_set = std::collections::HashSet::with_capacity(symlink_indices.len());
+    while let Some(idx) = queue.pop_front() {
+        sorted.push(idx);
+        sorted_set.insert(idx);
+        if let Some(deps) = dependents.get(&idx) {
+            for &d in deps {
+                let deg = in_degree.get_mut(&d).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    queue.push_back(d);
+                }
+            }
+        }
+    }
+    for &i in &symlink_indices {
+        if !sorted_set.contains(&i) {
+            sorted.push(i);
+        }
+    }
+    sorted
+}
+
+/// Skip-evaluation outcome for one file: `(manifest index, skipped, mtime)`.
+type SkipEvaluation = (usize, bool, u64);
+
+/// Create target directories and evaluate every regular file for
+/// skip-or-download, interleaving each directory's creation with the
+/// evaluation of the files inside it. Returns `(index, skipped, mtime)`
+/// work tuples plus the initial statistics.
+fn build_download_work_list(
+    files: &[FileEntry],
+    dirs: &[DirEntry],
+    file_chunk_size_bytes: i64,
+    alg_str: &str,
+    hash_cache: &Option<Arc<HashCache>>,
+    conflict_res: FileConflictResolution,
+) -> crate::Result<(Vec<SkipEvaluation>, DownloadStatistics)> {
     // Collect manifest directories (sorted so parents come before children)
-    let mut dir_paths: Vec<&str> = manifest
-        .dirs
+    let mut dir_paths: Vec<&str> = dirs
         .iter()
         .filter(|d| !d.deleted)
         .map(|d| d.path.as_str())
@@ -286,7 +512,7 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     // Group file indices by parent directory for interleaved creation
     let mut files_by_parent: std::collections::BTreeMap<String, Vec<usize>> =
         std::collections::BTreeMap::new();
-    for (i, file) in manifest.files.iter().enumerate() {
+    for (i, file) in files.iter().enumerate() {
         if file.deleted || file.symlink_target.is_some() {
             continue;
         }
@@ -297,105 +523,7 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         files_by_parent.entry(parent).or_default().push(i);
     }
 
-    // Handle deleted entries
-    if apply_deletes {
-        for file in &manifest.files {
-            if file.deleted {
-                let path = Path::new(&file.path);
-                if path.exists() {
-                    if path.is_symlink() {
-                        debug!(path = %file.path, "deleting symlink");
-                    } else {
-                        debug!(path = %file.path, "deleting file");
-                    }
-                    let _ = std::fs::remove_file(path);
-                }
-            }
-        }
-        let mut del_dirs: Vec<&str> = manifest
-            .dirs
-            .iter()
-            .filter(|d| d.deleted)
-            .map(|d| d.path.as_str())
-            .collect();
-        del_dirs.sort();
-        del_dirs.reverse();
-        for dir_path in del_dirs {
-            debug!(path = dir_path, "deleting directory");
-            let _ = std::fs::remove_dir(dir_path);
-        }
-    }
-
-    // Create symlinks in topological order
-    {
-        let symlink_indices: Vec<usize> = result
-            .files
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| !f.deleted && f.symlink_target.is_some())
-            .map(|(i, _)| i)
-            .collect();
-
-        let symlink_paths: std::collections::HashSet<&str> = symlink_indices
-            .iter()
-            .map(|&i| result.files[i].path.as_str())
-            .collect();
-
-        let mut in_degree: HashMap<usize, usize> =
-            symlink_indices.iter().map(|&i| (i, 0)).collect();
-        let mut dependents: HashMap<usize, Vec<usize>> = HashMap::new();
-        let path_to_idx: HashMap<&str, usize> = symlink_indices
-            .iter()
-            .map(|&i| (result.files[i].path.as_str(), i))
-            .collect();
-
-        for &i in &symlink_indices {
-            let target = result.files[i].symlink_target.as_deref().unwrap();
-            if symlink_paths.contains(target) {
-                let &dep = path_to_idx.get(target).unwrap();
-                *in_degree.entry(i).or_default() += 1;
-                dependents.entry(dep).or_default().push(i);
-            }
-        }
-
-        let mut queue: std::collections::VecDeque<usize> = symlink_indices
-            .iter()
-            .filter(|&&i| in_degree[&i] == 0)
-            .copied()
-            .collect();
-        let mut sorted = Vec::with_capacity(symlink_indices.len());
-        let mut sorted_set = std::collections::HashSet::with_capacity(symlink_indices.len());
-        while let Some(idx) = queue.pop_front() {
-            sorted.push(idx);
-            sorted_set.insert(idx);
-            if let Some(deps) = dependents.get(&idx) {
-                for &d in deps {
-                    let deg = in_degree.get_mut(&d).unwrap();
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push_back(d);
-                    }
-                }
-            }
-        }
-        for &i in &symlink_indices {
-            if !sorted_set.contains(&i) {
-                sorted.push(i);
-            }
-        }
-
-        for idx in sorted {
-            handle_symlink(&mut result.files[idx], symlink_policy)?;
-        }
-    }
-
-    // Build work list with interleaved directory creation.
-    // Create each directory once, then immediately queue files within it.
-    struct WorkItem {
-        index: usize,
-        file_size: u64,
-    }
-
+    let mut stats = DownloadStatistics::default();
     let mut work_items = Vec::new();
 
     // Helper: ensure a directory exists, deduplicating calls
@@ -414,10 +542,10 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
             for i in indices {
                 collect_work_item(
                     i,
-                    &result.files[i],
-                    manifest.file_chunk_size_bytes,
+                    &files[i],
+                    file_chunk_size_bytes,
                     alg_str,
-                    &hash_cache,
+                    hash_cache,
                     conflict_res,
                     &mut stats,
                     &mut work_items,
@@ -427,15 +555,15 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     }
 
     // Process remaining files whose parent wasn't a manifest directory
-    for (_parent, indices) in files_by_parent {
-        ensure_dir(&_parent, &mut created_dirs)?;
+    for (parent, indices) in files_by_parent {
+        ensure_dir(&parent, &mut created_dirs)?;
         for i in indices {
             collect_work_item(
                 i,
-                &result.files[i],
-                manifest.file_chunk_size_bytes,
+                &files[i],
+                file_chunk_size_bytes,
                 alg_str,
-                &hash_cache,
+                hash_cache,
                 conflict_res,
                 &mut stats,
                 &mut work_items,
@@ -443,354 +571,388 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         }
     }
 
-    // Separate skipped from needing download
-    let download_items: Vec<WorkItem> = work_items
-        .iter()
-        .filter(|(_, skipped, _)| !skipped)
-        .map(|(i, _, _)| WorkItem {
-            index: *i,
-            file_size: result.files[*i].size.unwrap_or(0),
-        })
-        .collect();
+    Ok((work_items, stats))
+}
 
-    // Apply skipped mtime updates
-    for &(i, skipped, mtime) in &work_items {
-        if skipped && mtime != 0 {
-            result.files[i].mtime = Some(mtime);
-        }
+/// Finish statistics for the fast path where nothing needs downloading.
+fn finish_empty_download(
+    stats: &mut DownloadStatistics,
+    on_progress: &Option<Arc<super::ProgressFn<DownloadStatistics>>>,
+    chunk_size: i64,
+) {
+    if stats.total_bytes > 0 {
+        stats.progress = 100.0;
     }
+    if let Some(ref cb) = on_progress {
+        let _ = cb(stats);
+    }
+    let unit = if chunk_size <= 0 { "files" } else { "chunks" };
+    stats.progress_message = format!(
+        "Downloaded {} ({} {}) in 0.00s",
+        crate::hash::human_readable_file_size(stats.total_bytes),
+        stats.total_files,
+        unit
+    );
+}
 
-    let on_progress: Option<Arc<super::ProgressFn<DownloadStatistics>>> =
-        options.on_progress.map(|f| Arc::from(f));
-
-    if download_items.is_empty() {
-        if stats.total_bytes > 0 {
-            stats.progress = 100.0;
-        }
-        if let Some(ref cb) = on_progress {
-            let _ = cb(&stats);
-        }
-        let unit = if manifest.file_chunk_size_bytes <= 0 {
-            "files"
-        } else {
-            "chunks"
+/// Spawn one download task per work item and await them all, preserving
+/// spawn order in the returned results.
+async fn run_download_tasks(
+    ctx: &Arc<DownloadCtx>,
+    files: &[FileEntry],
+    download_items: Vec<DownloadWorkItem>,
+) -> Vec<crate::Result<(usize, PathBuf)>> {
+    let mut handles = Vec::new();
+    for item in download_items {
+        let file = &files[item.index];
+        let spec = FileDownloadSpec {
+            index: item.index,
+            path: file.path.clone(),
+            hash: file.hash.clone(),
+            chunk_hashes: file.chunk_hashes.clone(),
+            size: item.file_size,
         };
-        stats.progress_message = format!(
-            "Downloaded {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes),
-            stats.total_files,
-            unit
-        );
-        return Ok((result, stats));
+        handles.push(tokio::spawn(download_one_file(ctx.clone(), spec)));
     }
 
-    // Download files in parallel using tokio
-    let max_memory = max_memory_bytes.unwrap_or_else(default_max_memory_bytes);
-    let memory_pool = Arc::new(MemoryPool::new(max_memory));
-    let num_workers = max_workers.unwrap_or(10);
-    let worker_semaphore = Arc::new(tokio::sync::Semaphore::new(num_workers));
-    let cancelled = Arc::new(AtomicBool::new(false));
-    // std::sync::Mutex is intentional here: the lock is held only for nanosecond-scale
-    // field updates and never across .await points, so it's cheaper than tokio::sync::Mutex
-    // which would yield to the scheduler even when uncontended.
-    let progress_stats = Arc::new(Mutex::new(stats.clone()));
-    let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(r) => results.push(r),
+            Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
+        }
+    }
+    results
+}
 
-    let start = start_time;
+/// Download one file end to end: acquire worker and memory permits, fetch it
+/// with the appropriate strategy (chunked, multipart, or whole), write it to
+/// disk, and record progress. Returns the manifest index and target path.
+async fn download_one_file(
+    ctx: Arc<DownloadCtx>,
+    spec: FileDownloadSpec,
+) -> crate::Result<(usize, PathBuf)> {
+    let _worker_permit = ctx
+        .worker_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
 
-    let download_results: Vec<crate::Result<(usize, std::path::PathBuf)>> = async {
-        let mut handles = Vec::new();
+    if ctx.cancelled.load(Ordering::Relaxed) {
+        return Err(crate::SnapshotError::Cancelled);
+    }
 
-        for item in download_items {
-            let dc = data_cache.clone();
-            let pool = memory_pool.clone();
-            let worker_sem = worker_semaphore.clone();
-            let cancelled = cancelled.clone();
-            let progress_stats = progress_stats.clone();
-            let rate_calc = rate_calc.clone();
-            let on_progress = on_progress.clone();
-            let alg = alg_str.to_string();
+    let _mem_permit = ctx.memory_pool.acquire(spec.size as usize).await;
 
-            let file_path = result.files[item.index].path.clone();
-            let file_hash = result.files[item.index].hash.clone();
-            let file_chunk_hashes = result.files[item.index].chunk_hashes.clone();
-            let file_size = item.file_size;
-            let manifest_chunk_size = result.file_chunk_size_bytes;
-            let index = item.index;
+    let target_path = resolve_target_path(&spec.path, ctx.conflict_res);
 
-            let handle = tokio::spawn(async move {
-                let _worker_permit = worker_sem
-                    .acquire_owned()
-                    .await
-                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
+    let part_size = ctx.data_cache.multipart_part_size();
+    let multipart_threshold = 2 * part_size as u64;
+    let supports_range = ctx.data_cache.as_range_read().is_some();
 
-                if cancelled.load(Ordering::Relaxed) {
-                    return Err(crate::SnapshotError::Cancelled);
-                }
+    if let Some(chunk_hashes) = spec.chunk_hashes {
+        download_chunks_to_file(
+            &ctx,
+            chunk_hashes,
+            spec.size,
+            &target_path,
+            part_size,
+            multipart_threshold,
+            supports_range,
+        )
+        .await?;
+    } else if let Some(ref hash) = spec.hash {
+        if spec.size >= multipart_threshold && supports_range {
+            download_multipart_to_file(
+                &ctx.data_cache,
+                hash,
+                &ctx.alg,
+                spec.size,
+                part_size,
+                target_path.clone(),
+            )
+            .await?;
+        } else {
+            let data = fetch_verified_whole(&ctx.data_cache, hash, &ctx.alg, &spec.path).await?;
+            write_file_atomically(target_path.clone(), data).await?;
+        }
+    } else {
+        return Err(crate::SnapshotError::Validation(format!(
+            "file has no hash or chunk_hashes: {}",
+            spec.path
+        )));
+    }
 
-                let _mem_permit = pool.acquire(file_size as usize).await;
+    record_downloaded_file(&ctx, spec.size)?;
 
-                // Async download from data cache
-                let target_path = {
-                    let path = Path::new(&file_path);
-                    if path.exists() && conflict_res == FileConflictResolution::CreateCopy {
-                        create_copy_path(path)
-                    } else {
-                        path.to_path_buf()
-                    }
-                };
+    Ok((spec.index, target_path))
+}
 
-                let part_size = dc.multipart_part_size();
-                let multipart_threshold = 2 * part_size as u64;
-                let supports_range = dc.as_range_read().is_some();
+/// Choose the on-disk target path, diverting to a `name (N).ext` copy when
+/// the file already exists and the policy is [`FileConflictResolution::CreateCopy`].
+fn resolve_target_path(file_path: &str, conflict_res: FileConflictResolution) -> PathBuf {
+    let path = Path::new(file_path);
+    if path.exists() && conflict_res == FileConflictResolution::CreateCopy {
+        create_copy_path(path)
+    } else {
+        path.to_path_buf()
+    }
+}
 
-                // For multipart files, write directly to file at offsets
-                let already_written;
-                let data = if let Some(chunk_hashes) = file_chunk_hashes {
-                    // Write chunks to a temp file, then atomic rename
-                    let tmp_path = temp_download_path(&target_path);
-                    let tp = tmp_path.clone();
-                    let fs = file_size;
-                    tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
-                        .await
-                        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                        .map_err(crate::SnapshotError::Io)?;
+/// Download a chunked file: preallocate a temp file, fetch every chunk in
+/// parallel (splitting large chunks into byte-range parts when supported),
+/// then atomically rename the temp file onto the target.
+async fn download_chunks_to_file(
+    ctx: &DownloadCtx,
+    chunk_hashes: Vec<String>,
+    file_size: u64,
+    target_path: &Path,
+    part_size: usize,
+    multipart_threshold: u64,
+    supports_range: bool,
+) -> crate::Result<()> {
+    // Write chunks to a temp file, then atomic rename
+    let tmp_path = temp_download_path(target_path);
+    let tp = tmp_path.clone();
+    let fs = file_size;
+    tokio::task::spawn_blocking(move || preallocate_file(&tp, fs))
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+        .map_err(crate::SnapshotError::Io)?;
 
-                    let mut file_offset: u64 = 0;
-                    let mut chunk_handles: Vec<tokio::task::JoinHandle<std::io::Result<u64>>> =
-                        Vec::new();
-                    for h in chunk_hashes {
-                        let cs = manifest_chunk_size as u64;
-                        let remaining = file_size - file_offset;
-                        let this_chunk_size = remaining.min(cs);
+    let mut file_offset: u64 = 0;
+    let mut chunk_handles: Vec<tokio::task::JoinHandle<std::io::Result<u64>>> = Vec::new();
+    for h in chunk_hashes {
+        let cs = ctx.manifest_chunk_size as u64;
+        let remaining = file_size - file_offset;
+        let this_chunk_size = remaining.min(cs);
 
-                        if this_chunk_size >= multipart_threshold && supports_range {
-                            // Split large chunk into parallel byte-range parts
-                            let num_parts = (this_chunk_size as usize).div_ceil(part_size);
-                            for part_idx in 0..num_parts {
-                                let part_start = part_idx as u64 * part_size as u64;
-                                let part_end = std::cmp::min(
-                                    part_start + part_size as u64 - 1,
-                                    this_chunk_size - 1,
-                                );
-                                let write_offset = file_offset + part_start;
-                                let dc = dc.clone();
-                                let alg = alg.clone();
-                                let h = h.clone();
-                                let tp = tmp_path.clone();
-                                chunk_handles.push(tokio::spawn(async move {
-                                    dc.as_range_read()
-                                        .expect("RangeReadDataCache support verified above")
-                                        .stream_range_to_file_at_offset(
-                                            &h,
-                                            &alg,
-                                            part_start,
-                                            part_end,
-                                            &tp,
-                                            write_offset,
-                                        )
-                                        .await
-                                }));
-                            }
-                        } else {
-                            // Small chunk - single GetObject with inline hash verification
-                            let dc = dc.clone();
-                            let alg = alg.clone();
-                            let tp = tmp_path.clone();
-                            let off = file_offset;
-                            let expected_hash = h.clone();
-                            chunk_handles.push(tokio::spawn(async move {
-                                let data = dc.get_object(&expected_hash, &alg).await?;
-                                let actual_hash = hash_data(&data);
-                                if actual_hash != expected_hash {
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        format!(
-                                            "hash mismatch for chunk at offset {off}: expected {expected_hash}, got {actual_hash}"
-                                        ),
-                                    ));
-                                }
-                                let len = data.len() as u64;
-                                let tp2 = tp.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    use std::io::{Seek, SeekFrom, Write};
-                                    let mut f = std::fs::OpenOptions::new().write(true).open(&tp2)?;
-                                    f.seek(SeekFrom::Start(off))?;
-                                    f.write_all(&data)?;
-                                    Ok::<_, std::io::Error>(len)
-                                })
-                                .await
-                                .map_err(std::io::Error::other)?
-                            }));
-                        }
-                        file_offset += this_chunk_size;
-                    }
-                    for handle in chunk_handles {
-                        handle
-                            .await
-                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                            .map_err(crate::SnapshotError::Io)?;
-                    }
-                    // Atomic rename from temp to target
-                    let tmp = tmp_path.clone();
-                    let tgt = target_path.clone();
-                    tokio::task::spawn_blocking(move || atomic_replace(&tmp, &tgt))
-                        .await
-                        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                        .map_err(crate::SnapshotError::Io)?;
-                    already_written = true;
-                    Vec::new()
-                } else if let Some(ref hash) = file_hash {
-                    if file_size >= multipart_threshold && supports_range {
-                        download_multipart_to_file(
-                            &dc,
-                            hash,
+        if this_chunk_size >= multipart_threshold && supports_range {
+            // Split large chunk into parallel byte-range parts
+            let num_parts = (this_chunk_size as usize).div_ceil(part_size);
+            for part_idx in 0..num_parts {
+                let part_start = part_idx as u64 * part_size as u64;
+                let part_end =
+                    std::cmp::min(part_start + part_size as u64 - 1, this_chunk_size - 1);
+                let write_offset = file_offset + part_start;
+                let dc = ctx.data_cache.clone();
+                let alg = ctx.alg.clone();
+                let h = h.clone();
+                let tp = tmp_path.clone();
+                chunk_handles.push(tokio::spawn(async move {
+                    dc.as_range_read()
+                        .expect("RangeReadDataCache support verified above")
+                        .stream_range_to_file_at_offset(
+                            &h,
                             &alg,
-                            file_size,
-                            part_size,
-                            target_path.clone(),
+                            part_start,
+                            part_end,
+                            &tp,
+                            write_offset,
                         )
-                        .await?;
-                        already_written = true;
-                        Vec::new()
-                    } else {
-                        // Small whole file - get_object with inline hash verification
-                        let data = dc
-                            .get_object(hash, &alg)
-                            .await
-                            .map_err(crate::SnapshotError::Io)?;
-                        let actual_hash = hash_data(&data);
-                        if actual_hash != *hash {
-                            return Err(crate::SnapshotError::Io(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "hash mismatch for {}: expected {hash}, got {actual_hash}",
-                                    file_path
-                                ),
-                            )));
-                        }
-                        already_written = false;
-                        data
-                    }
-                } else {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "file has no hash or chunk_hashes: {}",
-                        file_path
-                    )));
-                };
-
-                // Blocking file write (skip if multipart already wrote directly)
-                if !already_written {
-                    let tp = target_path.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let tmp = temp_download_path(&tp);
-                        if let Err(e) = std::fs::write(&tmp, &data) {
-                            let _ = std::fs::remove_file(&tmp);
-                            return Err(e);
-                        }
-                        atomic_replace(&tmp, &tp)
-                    })
-                    .await
-                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                    .map_err(crate::SnapshotError::Io)?;
-                }
-
-                // Update progress
-                {
-                    let mut s = progress_stats.lock().unwrap();
-                    s.downloaded_files += 1;
-                    s.downloaded_bytes += file_size;
-                    let elapsed = start.elapsed().as_secs_f64();
-                    s.total_time = elapsed;
-                    {
-                        let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.downloaded_bytes + s.skipped_bytes);
-                    }
-                    if s.total_bytes > 0 {
-                        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64
-                            / s.total_bytes as f64)
-                            * 100.0;
-                    }
-                    if let Some(ref cb) = on_progress {
-                        if !cb(&s) {
-                            cancelled.store(true, Ordering::Relaxed);
-                            return Err(crate::SnapshotError::Cancelled);
-                        }
-                    }
-                }
-
-                Ok((index, target_path))
-            });
-
-            handles.push(handle);
-        }
-
-        let mut results = Vec::new();
-        for handle in handles {
-            match handle.await {
-                Ok(r) => results.push(r),
-                Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
+                        .await
+                }));
             }
+        } else {
+            // Small chunk - single GetObject with inline hash verification
+            let dc = ctx.data_cache.clone();
+            let alg = ctx.alg.clone();
+            let tp = tmp_path.clone();
+            let off = file_offset;
+            let expected_hash = h.clone();
+            chunk_handles.push(tokio::spawn(fetch_chunk_and_write(
+                dc,
+                expected_hash,
+                alg,
+                tp,
+                off,
+            )));
         }
-        results
+        file_offset += this_chunk_size;
     }
-    .await;
-
-    // Apply mtime restoration and cache writes sequentially
-    for r in download_results {
-        let (index, target_path) = r?;
-        let file = &mut result.files[index];
-
-        // 1. Set the file's mtime to the manifest value
-        if let Some(manifest_mtime) = file.mtime {
-            let system_time = UNIX_EPOCH + std::time::Duration::from_micros(manifest_mtime);
-            // Opening with write(true) is required on Windows for set_modified to succeed.
-            let _ = std::fs::OpenOptions::new()
-                .write(true)
-                .open(&target_path)
-                .and_then(|f| f.set_modified(system_time));
-        }
-
-        // 2. Read back the actual mtime (filesystem precision may have adjusted it)
-        let actual_mtime = get_mtime(&target_path)?;
-
-        // 3. Store the read-back mtime so the returned manifest matches disk exactly
-        file.mtime = Some(actual_mtime);
-
-        if let Some(ref cache) = hash_cache {
-            if let Some(ref hash) = file.hash {
-                let _ = cache.put(
-                    &target_path,
-                    alg_str,
-                    0,
-                    WHOLE_FILE_RANGE_END,
-                    hash,
-                    actual_mtime,
-                );
-            }
-            if let Some(ref chunk_hashes) = file.chunk_hashes {
-                let cs = result.file_chunk_size_bytes as u64;
-                if cs > 0 {
-                    let file_size = file.size.unwrap_or(0);
-                    let mut offset: u64 = 0;
-                    for h in chunk_hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(
-                            &target_path,
-                            alg_str,
-                            offset as i64,
-                            end as i64,
-                            h,
-                            actual_mtime,
-                        );
-                        offset = end;
-                    }
-                }
-            }
-        }
+    for handle in chunk_handles {
+        handle
+            .await
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+            .map_err(crate::SnapshotError::Io)?;
     }
 
-    stats = progress_stats.lock().unwrap().clone();
+    // Atomic rename from temp to target
+    let tmp = tmp_path.clone();
+    let tgt = target_path.to_path_buf();
+    tokio::task::spawn_blocking(move || atomic_replace(&tmp, &tgt))
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+        .map_err(crate::SnapshotError::Io)?;
+    Ok(())
+}
+
+/// Fetch one small chunk, verify its hash, and write it into the temp file
+/// at the given offset. Returns the number of bytes written.
+async fn fetch_chunk_and_write(
+    dc: Arc<dyn AsyncDataCache>,
+    expected_hash: String,
+    alg: String,
+    tmp_path: PathBuf,
+    off: u64,
+) -> std::io::Result<u64> {
+    let data = dc.get_object(&expected_hash, &alg).await?;
+    let actual_hash = hash_data(&data);
+    if actual_hash != expected_hash {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "hash mismatch for chunk at offset {off}: expected {expected_hash}, got {actual_hash}"
+            ),
+        ));
+    }
+    let len = data.len() as u64;
+    tokio::task::spawn_blocking(move || {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(&tmp_path)?;
+        f.seek(SeekFrom::Start(off))?;
+        f.write_all(&data)?;
+        Ok::<_, std::io::Error>(len)
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
+/// Fetch a whole small file via `get_object` and verify its hash against
+/// the manifest entry, returning the file contents.
+async fn fetch_verified_whole(
+    dc: &Arc<dyn AsyncDataCache>,
+    hash: &str,
+    alg: &str,
+    file_path: &str,
+) -> crate::Result<Vec<u8>> {
+    let data = dc
+        .get_object(hash, alg)
+        .await
+        .map_err(crate::SnapshotError::Io)?;
+    let actual_hash = hash_data(&data);
+    if actual_hash != hash {
+        return Err(crate::SnapshotError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "hash mismatch for {}: expected {hash}, got {actual_hash}",
+                file_path
+            ),
+        )));
+    }
+    Ok(data)
+}
+
+/// Write file data to a temp path on a blocking thread, then atomically
+/// rename it onto the target.
+async fn write_file_atomically(target_path: PathBuf, data: Vec<u8>) -> crate::Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let tmp = temp_download_path(&target_path);
+        if let Err(e) = std::fs::write(&tmp, &data) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        atomic_replace(&tmp, &target_path)
+    })
+    .await
+    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
+    .map_err(crate::SnapshotError::Io)
+}
+
+/// Record one completed file in the shared statistics and invoke the
+/// progress callback, flagging cancellation if the callback returns false.
+fn record_downloaded_file(ctx: &DownloadCtx, file_size: u64) -> crate::Result<()> {
+    let mut s = ctx.progress_stats.lock().unwrap();
+    s.downloaded_files += 1;
+    s.downloaded_bytes += file_size;
+    let elapsed = ctx.start.elapsed().as_secs_f64();
+    s.total_time = elapsed;
+    {
+        let mut rc = ctx.rate_calc.lock().unwrap();
+        s.rate = rc.update(elapsed, s.downloaded_bytes + s.skipped_bytes);
+    }
+    if s.total_bytes > 0 {
+        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+    }
+    if let Some(ref cb) = ctx.on_progress {
+        if !cb(&s) {
+            ctx.cancelled.store(true, Ordering::Relaxed);
+            return Err(crate::SnapshotError::Cancelled);
+        }
+    }
+    Ok(())
+}
+
+/// Restore the downloaded file's mtime from the manifest, read back the
+/// actual on-disk mtime into the entry, and record its hashes in the
+/// hash cache.
+fn finalize_downloaded_file(
+    file: &mut FileEntry,
+    target_path: &Path,
+    hash_cache: &Option<Arc<HashCache>>,
+    alg_str: &str,
+    chunk_size: i64,
+) -> crate::Result<()> {
+    // 1. Set the file's mtime to the manifest value
+    if let Some(manifest_mtime) = file.mtime {
+        let system_time = UNIX_EPOCH + std::time::Duration::from_micros(manifest_mtime);
+        // Opening with write(true) is required on Windows for set_modified to succeed.
+        let _ = std::fs::OpenOptions::new()
+            .write(true)
+            .open(target_path)
+            .and_then(|f| f.set_modified(system_time));
+    }
+
+    // 2. Read back the actual mtime (filesystem precision may have adjusted it)
+    let actual_mtime = get_mtime(target_path)?;
+
+    // 3. Store the read-back mtime so the returned manifest matches disk exactly
+    file.mtime = Some(actual_mtime);
+
+    if let Some(ref cache) = hash_cache {
+        if let Some(ref hash) = file.hash {
+            let _ = cache.put(
+                target_path,
+                alg_str,
+                0,
+                WHOLE_FILE_RANGE_END,
+                hash,
+                actual_mtime,
+            );
+        }
+        if let Some(ref chunk_hashes) = file.chunk_hashes {
+            let cs = chunk_size as u64;
+            if cs > 0 {
+                let file_size = file.size.unwrap_or(0);
+                let mut offset: u64 = 0;
+                for h in chunk_hashes {
+                    let end = std::cmp::min(offset + cs, file_size);
+                    let _ = cache.put(
+                        target_path,
+                        alg_str,
+                        offset as i64,
+                        end as i64,
+                        h,
+                        actual_mtime,
+                    );
+                    offset = end;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Fold the shared progress state into final statistics: total time, rate,
+/// percentage, and the human-readable summary message.
+fn finalize_download_stats(
+    progress_stats: &Mutex<DownloadStatistics>,
+    rate_calc: &Mutex<SlidingWindowRate>,
+    start_time: std::time::Instant,
+    chunk_size: i64,
+) -> DownloadStatistics {
+    let mut stats = progress_stats.lock().unwrap().clone();
 
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
@@ -806,11 +968,7 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
             * 100.0;
     }
 
-    let unit = if manifest.file_chunk_size_bytes <= 0 {
-        "files"
-    } else {
-        "chunks"
-    };
+    let unit = if chunk_size <= 0 { "files" } else { "chunks" };
     let mut parts = vec![
         format!(
             "Downloaded {}",
@@ -826,12 +984,7 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         ));
     }
     stats.progress_message = parts.join(" ");
-
-    if let Some(ref cb) = on_progress {
-        let _ = cb(&stats);
-    }
-
-    Ok((result, stats))
+    stats
 }
 
 async fn download_multipart_to_file(

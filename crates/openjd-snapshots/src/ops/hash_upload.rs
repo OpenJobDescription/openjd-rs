@@ -160,24 +160,13 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
     let start_time = std::time::Instant::now();
 
     // Validate no regular files already have hashes
-    for file in &manifest.files {
-        if file.symlink_target.is_none()
-            && !file.deleted
-            && (file.hash.is_some() || file.chunk_hashes.is_some())
-        {
-            return Err(crate::SnapshotError::Validation(format!(
-                "file already has hashes set, cannot re-hash: {}",
-                file.path
-            )));
-        }
-    }
+    super::validate_files_not_hashed(&manifest.files)?;
 
     let chunk_size = options
         .file_chunk_size_bytes
         .unwrap_or(manifest.file_chunk_size_bytes);
     let alg_str = manifest.hash_alg.extension();
     let mut result = manifest.clone();
-    let mut stats = UploadStatistics::default();
 
     let on_progress: Option<Arc<super::ProgressFn<UploadStatistics>>> =
         options.on_progress.map(|f| Arc::from(f));
@@ -187,17 +176,92 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         .max_memory_bytes
         .unwrap_or_else(default_max_memory_bytes);
 
-    struct WorkItem {
-        index: usize,
-        path: String,
-        mtime: u64,
-        use_chunks: bool,
-        file_size: u64,
+    // Build work items for all regular files — cache checks happen inside each worker task
+    let (work_items, mut stats) = build_upload_work_list(&result.files, chunk_size);
+
+    if work_items.is_empty() {
+        finish_empty_upload(&mut stats, &on_progress, chunk_size);
+        return Ok((result, stats));
     }
 
-    // Build work items for all regular files — cache checks happen inside each worker task
+    // Process work items in parallel using tokio — each task does its own cache checks
+    let ctx = Arc::new(UploadCtx {
+        data_cache,
+        memory_pool: Arc::new(MemoryPool::new(max_memory)),
+        worker_semaphore: Arc::new(tokio::sync::Semaphore::new(num_workers)),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        // std::sync::Mutex is intentional here: the lock is held only for nanosecond-scale
+        // field updates and never across .await points, so it's cheaper than tokio::sync::Mutex
+        // which would yield to the scheduler even when uncontended.
+        progress_stats: Arc::new(Mutex::new(stats.clone())),
+        rate_calc: Arc::new(Mutex::new(SlidingWindowRate::new())),
+        on_progress: on_progress.clone(),
+        alg: alg_str.to_string(),
+        chunk_size,
+        start: start_time,
+        dedup: Arc::new(Mutex::new(HashMap::new())),
+        hash_cache: options.hash_cache.clone(),
+        force_rehash: options.force_rehash,
+    });
+
+    let file_results = run_upload_tasks(&ctx, work_items).await;
+
+    // Apply results and write cache entries sequentially
+    for r in file_results {
+        let (index, fr) = r?;
+        apply_file_result(
+            &mut result.files[index],
+            fr,
+            &options.hash_cache,
+            alg_str,
+            chunk_size,
+        );
+    }
+
+    let stats = finalize_upload_stats(&ctx.progress_stats, &ctx.rate_calc, start_time, chunk_size);
+
+    if let Some(ref cb) = on_progress {
+        let _ = cb(&stats);
+    }
+
+    Ok((result, stats))
+}
+
+/// Inputs describing one file to hash and (possibly) upload.
+struct UploadWorkItem {
+    index: usize,
+    path: String,
+    mtime: u64,
+    use_chunks: bool,
+    file_size: u64,
+}
+
+/// Shared, per-operation state used by every hash+upload worker task.
+struct UploadCtx {
+    data_cache: Arc<dyn AsyncDataCache>,
+    memory_pool: Arc<MemoryPool>,
+    worker_semaphore: Arc<tokio::sync::Semaphore>,
+    cancelled: Arc<AtomicBool>,
+    progress_stats: Arc<Mutex<UploadStatistics>>,
+    rate_calc: Arc<Mutex<SlidingWindowRate>>,
+    on_progress: Option<Arc<super::ProgressFn<UploadStatistics>>>,
+    alg: String,
+    chunk_size: i64,
+    start: std::time::Instant,
+    dedup: UploadDedup,
+    hash_cache: Option<Arc<HashCache>>,
+    force_rehash: bool,
+}
+
+/// Build the work item list for all regular (non-symlink, non-deleted)
+/// files, tallying total file and byte counts into fresh statistics.
+fn build_upload_work_list(
+    files: &[crate::manifest::FileEntry],
+    chunk_size: i64,
+) -> (Vec<UploadWorkItem>, UploadStatistics) {
+    let mut stats = UploadStatistics::default();
     let mut work_items = Vec::new();
-    for (i, file) in result.files.iter().enumerate() {
+    for (i, file) in files.iter().enumerate() {
         if file.symlink_target.is_some() || file.deleted {
             continue;
         }
@@ -206,7 +270,7 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         stats.total_bytes += file_size;
         let use_chunks =
             chunk_size > 0 && chunk_size != WHOLE_FILE_CHUNK_SIZE && file_size as i64 > chunk_size;
-        work_items.push(WorkItem {
+        work_items.push(UploadWorkItem {
             index: i,
             path: file.path.clone(),
             mtime: file.mtime.unwrap_or(0),
@@ -214,223 +278,249 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             file_size,
         });
     }
+    (work_items, stats)
+}
 
-    if work_items.is_empty() {
-        if stats.total_bytes > 0 {
-            stats.progress = 100.0;
-        }
-        if let Some(ref cb) = on_progress {
-            let _ = cb(&stats);
-        }
-        let unit = if chunk_size <= 0 { "files" } else { "chunks" };
-        stats.progress_message = format!(
-            "Hashed/uploaded {} ({} {}) in 0.00s",
-            crate::hash::human_readable_file_size(stats.total_bytes),
-            stats.total_files,
-            unit
-        );
-        return Ok((result, stats));
+/// Finish statistics for the fast path where nothing needs hashing.
+fn finish_empty_upload(
+    stats: &mut UploadStatistics,
+    on_progress: &Option<Arc<super::ProgressFn<UploadStatistics>>>,
+    chunk_size: i64,
+) {
+    if stats.total_bytes > 0 {
+        stats.progress = 100.0;
+    }
+    if let Some(ref cb) = on_progress {
+        let _ = cb(stats);
+    }
+    let unit = if chunk_size <= 0 { "files" } else { "chunks" };
+    stats.progress_message = format!(
+        "Hashed/uploaded {} ({} {}) in 0.00s",
+        crate::hash::human_readable_file_size(stats.total_bytes),
+        stats.total_files,
+        unit
+    );
+}
+
+/// Spawn one hash+upload task per work item and await them all, preserving
+/// spawn order in the returned results.
+async fn run_upload_tasks(
+    ctx: &Arc<UploadCtx>,
+    work_items: Vec<UploadWorkItem>,
+) -> Vec<crate::Result<(usize, FileResult)>> {
+    let mut handles = Vec::new();
+    for item in work_items {
+        handles.push(tokio::spawn(hash_upload_one_file(ctx.clone(), item)));
     }
 
-    // Process work items in parallel using tokio — each task does its own cache checks
-    let cancelled = Arc::new(AtomicBool::new(false));
-    // std::sync::Mutex is intentional here: the lock is held only for nanosecond-scale
-    // field updates and never across .await points, so it's cheaper than tokio::sync::Mutex
-    // which would yield to the scheduler even when uncontended.
-    let progress_stats = Arc::new(Mutex::new(stats.clone()));
-    let rate_calc = Arc::new(Mutex::new(SlidingWindowRate::new()));
-    let memory_pool = Arc::new(MemoryPool::new(max_memory));
-    let worker_semaphore = Arc::new(tokio::sync::Semaphore::new(num_workers));
-    let upload_dedup: UploadDedup = Arc::new(Mutex::new(HashMap::new()));
-    let hash_cache_arc: Option<Arc<HashCache>> = options.hash_cache.clone();
-    let force_rehash = options.force_rehash;
-
-    let file_results: Vec<crate::Result<(usize, FileResult)>> = async {
-        let mut handles = Vec::new();
-
-        for item in work_items {
-            let dc = data_cache.clone();
-            let pool = memory_pool.clone();
-            let cancelled = cancelled.clone();
-            let progress_stats = progress_stats.clone();
-            let rate_calc = rate_calc.clone();
-            let on_progress = on_progress.clone();
-            let worker_sem = worker_semaphore.clone();
-            let alg = alg_str.to_string();
-            let cs = chunk_size;
-            let start = start_time;
-            let dedup = upload_dedup.clone();
-            let hc = hash_cache_arc.clone();
-
-            let handle = tokio::spawn(async move {
-                let _worker_permit = worker_sem
-                    .acquire_owned()
-                    .await
-                    .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
-
-                if cancelled.load(Ordering::Relaxed) {
-                    return Err(crate::SnapshotError::Cancelled);
-                }
-
-                // Step 1: Check hash cache (inside the task, parallelized)
-                if let Some(ref cache) = hc {
-                    if !force_rehash {
-                        let path = Path::new(&item.path);
-                        if item.use_chunks {
-                            let csu = cs as u64;
-                            let mut all_cached = true;
-                            let mut cached_hashes = Vec::new();
-                            let mut offset: u64 = 0;
-                            while offset < item.file_size {
-                                let end = std::cmp::min(offset + csu, item.file_size);
-                                if let Some(h) = cache.get_if_fresh(
-                                    path,
-                                    &alg,
-                                    offset as i64,
-                                    end as i64,
-                                    item.mtime,
-                                ) {
-                                    cached_hashes.push(h);
-                                } else {
-                                    all_cached = false;
-                                    break;
-                                }
-                                offset = end;
-                            }
-                            if all_cached && !cached_hashes.is_empty() {
-                                // Step 2: Check if all chunks exist in data cache
-                                let mut all_exist = true;
-                                for h in &cached_hashes {
-                                    if !dc.object_exists(h, &alg).await.unwrap_or(false) {
-                                        all_exist = false;
-                                        break;
-                                    }
-                                }
-                                if all_exist {
-                                    debug!(path = %item.path, "skipped (cache hit)");
-                                    let fr = FileResult::Skipped {
-                                        size: item.file_size,
-                                        whole_hash: None,
-                                        chunk_hashes: Some(cached_hashes),
-                                    };
-                                    update_progress(
-                                        &progress_stats,
-                                        &rate_calc,
-                                        &on_progress,
-                                        &cancelled,
-                                        &fr,
-                                        start,
-                                    )?;
-                                    return Ok((item.index, fr));
-                                }
-                            }
-                        } else if let Some(cached_hash) =
-                            cache.get_if_fresh(path, &alg, 0, WHOLE_FILE_RANGE_END, item.mtime)
-                        {
-                            // Step 2: Check if object exists in data cache
-                            if dc.object_exists(&cached_hash, &alg).await.unwrap_or(false) {
-                                debug!(path = %item.path, "skipped (cache hit)");
-                                let fr = FileResult::Skipped {
-                                    size: item.file_size,
-                                    whole_hash: Some(cached_hash),
-                                    chunk_hashes: None,
-                                };
-                                update_progress(
-                                    &progress_stats,
-                                    &rate_calc,
-                                    &on_progress,
-                                    &cancelled,
-                                    &fr,
-                                    start,
-                                )?;
-                                return Ok((item.index, fr));
-                            }
-                        }
-                    }
-                }
-
-                // Step 3: Need to hash+upload — acquire memory
-                let _mem_permit = pool.acquire(item.file_size as usize).await;
-
-                let part_size = dc.multipart_part_size();
-                let multipart_threshold = 2 * part_size as u64;
-
-                let fr = if item.use_chunks {
-                    process_chunked_async(item.path, cs as u64, alg, dc, dedup).await?
-                } else if item.file_size >= multipart_threshold && dc.as_multipart().is_some() {
-                    process_whole_multipart(item.path, item.file_size, alg, dc, part_size, dedup)
-                        .await?
-                } else {
-                    process_whole_async(item.path, item.file_size, alg, dc, dedup).await?
-                };
-
-                update_progress(
-                    &progress_stats,
-                    &rate_calc,
-                    &on_progress,
-                    &cancelled,
-                    &fr,
-                    start,
-                )?;
-                Ok((item.index, fr))
-            });
-
-            handles.push(handle);
-        }
-
-        let mut results = Vec::new();
-        for handle in handles {
-            match handle.await {
-                Ok(r) => results.push(r),
-                Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
-            }
-        }
-        results
-    }
-    .await;
-
-    // Apply results and write cache entries sequentially
-    for r in file_results {
-        let (index, fr) = r?;
-        let file = &mut result.files[index];
-        let path = Path::new(&file.path);
-        let mtime = file.mtime.unwrap_or(0);
-        let file_size = file.size.unwrap_or(0);
-
-        match fr {
-            FileResult::Whole { hash, .. } => {
-                if let Some(ref cache) = options.hash_cache {
-                    let _ = cache.put(path, alg_str, 0, WHOLE_FILE_RANGE_END, &hash, mtime);
-                }
-                file.hash = Some(hash);
-            }
-            FileResult::Chunked { hashes, .. } => {
-                if let Some(ref cache) = options.hash_cache {
-                    let cs = chunk_size as u64;
-                    let mut offset: u64 = 0;
-                    for h in &hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(path, alg_str, offset as i64, end as i64, h, mtime);
-                        offset = end;
-                    }
-                }
-                file.chunk_hashes = Some(hashes);
-            }
-            FileResult::Skipped {
-                whole_hash,
-                chunk_hashes,
-                ..
-            } => {
-                if let Some(h) = whole_hash {
-                    file.hash = Some(h);
-                } else if let Some(hs) = chunk_hashes {
-                    file.chunk_hashes = Some(hs);
-                }
-            }
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(r) => results.push(r),
+            Err(e) => results.push(Err(crate::SnapshotError::Task(e.to_string()))),
         }
     }
+    results
+}
 
-    stats = progress_stats.lock().unwrap().clone();
+/// Hash and upload one file end to end: acquire a worker permit, try a full
+/// cache skip, otherwise acquire memory and hash+upload with the appropriate
+/// strategy (chunked, multipart, or whole), recording progress either way.
+async fn hash_upload_one_file(
+    ctx: Arc<UploadCtx>,
+    item: UploadWorkItem,
+) -> crate::Result<(usize, FileResult)> {
+    let _worker_permit = ctx
+        .worker_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))?;
+
+    if ctx.cancelled.load(Ordering::Relaxed) {
+        return Err(crate::SnapshotError::Cancelled);
+    }
+
+    // Steps 1+2: check hash cache and data cache for a full skip
+    // (inside the task, parallelized)
+    if let Some(fr) = check_cache_skip(&ctx, &item).await {
+        update_progress(
+            &ctx.progress_stats,
+            &ctx.rate_calc,
+            &ctx.on_progress,
+            &ctx.cancelled,
+            &fr,
+            ctx.start,
+        )?;
+        return Ok((item.index, fr));
+    }
+
+    // Step 3: Need to hash+upload — acquire memory
+    let _mem_permit = ctx.memory_pool.acquire(item.file_size as usize).await;
+
+    let part_size = ctx.data_cache.multipart_part_size();
+    let multipart_threshold = 2 * part_size as u64;
+
+    let fr = if item.use_chunks {
+        process_chunked_async(
+            item.path,
+            ctx.chunk_size as u64,
+            ctx.alg.clone(),
+            ctx.data_cache.clone(),
+            ctx.dedup.clone(),
+        )
+        .await?
+    } else if item.file_size >= multipart_threshold && ctx.data_cache.as_multipart().is_some() {
+        process_whole_multipart(
+            item.path,
+            item.file_size,
+            ctx.alg.clone(),
+            ctx.data_cache.clone(),
+            part_size,
+            ctx.dedup.clone(),
+        )
+        .await?
+    } else {
+        process_whole_async(
+            item.path,
+            item.file_size,
+            ctx.alg.clone(),
+            ctx.data_cache.clone(),
+            ctx.dedup.clone(),
+        )
+        .await?
+    };
+
+    update_progress(
+        &ctx.progress_stats,
+        &ctx.rate_calc,
+        &ctx.on_progress,
+        &ctx.cancelled,
+        &fr,
+        ctx.start,
+    )?;
+    Ok((item.index, fr))
+}
+
+/// Check the hash cache, then the data cache, for a full skip. Returns
+/// `Some(FileResult::Skipped)` only when the file's hashes are fresh in the
+/// hash cache and every referenced object already exists in the data cache.
+async fn check_cache_skip(ctx: &UploadCtx, item: &UploadWorkItem) -> Option<FileResult> {
+    let cache = ctx.hash_cache.as_ref()?;
+    if ctx.force_rehash {
+        return None;
+    }
+    let path = Path::new(&item.path);
+    if item.use_chunks {
+        let cached_hashes = super::cached_chunk_hashes(
+            cache,
+            path,
+            &ctx.alg,
+            ctx.chunk_size as u64,
+            item.file_size,
+            item.mtime,
+        )?;
+        if !all_objects_exist(&ctx.data_cache, &cached_hashes, &ctx.alg).await {
+            return None;
+        }
+        debug!(path = %item.path, "skipped (cache hit)");
+        Some(FileResult::Skipped {
+            size: item.file_size,
+            whole_hash: None,
+            chunk_hashes: Some(cached_hashes),
+        })
+    } else {
+        let cached_hash =
+            cache.get_if_fresh(path, &ctx.alg, 0, WHOLE_FILE_RANGE_END, item.mtime)?;
+        if !ctx
+            .data_cache
+            .object_exists(&cached_hash, &ctx.alg)
+            .await
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        debug!(path = %item.path, "skipped (cache hit)");
+        Some(FileResult::Skipped {
+            size: item.file_size,
+            whole_hash: Some(cached_hash),
+            chunk_hashes: None,
+        })
+    }
+}
+
+/// Return true only when every hash already exists in the data cache;
+/// existence-check errors count as "missing".
+async fn all_objects_exist(
+    data_cache: &Arc<dyn AsyncDataCache>,
+    hashes: &[String],
+    alg: &str,
+) -> bool {
+    for h in hashes {
+        if !data_cache.object_exists(h, alg).await.unwrap_or(false) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Store a task's [`FileResult`] into the manifest entry and record the
+/// resulting hashes in the hash cache (skipped files were cached already).
+fn apply_file_result(
+    file: &mut crate::manifest::FileEntry,
+    fr: FileResult,
+    hash_cache: &Option<Arc<HashCache>>,
+    alg_str: &str,
+    chunk_size: i64,
+) {
+    let path = Path::new(&file.path);
+    let mtime = file.mtime.unwrap_or(0);
+    let file_size = file.size.unwrap_or(0);
+
+    match fr {
+        FileResult::Whole { hash, .. } => {
+            if let Some(ref cache) = hash_cache {
+                let _ = cache.put(path, alg_str, 0, WHOLE_FILE_RANGE_END, &hash, mtime);
+            }
+            file.hash = Some(hash);
+        }
+        FileResult::Chunked { hashes, .. } => {
+            if let Some(ref cache) = hash_cache {
+                super::put_chunk_hashes(
+                    cache,
+                    path,
+                    alg_str,
+                    chunk_size as u64,
+                    file_size,
+                    &hashes,
+                    mtime,
+                );
+            }
+            file.chunk_hashes = Some(hashes);
+        }
+        FileResult::Skipped {
+            whole_hash,
+            chunk_hashes,
+            ..
+        } => {
+            if let Some(h) = whole_hash {
+                file.hash = Some(h);
+            } else if let Some(hs) = chunk_hashes {
+                file.chunk_hashes = Some(hs);
+            }
+        }
+    }
+}
+
+/// Fold the shared progress state into final statistics: total time, rate,
+/// percentage, and the human-readable summary message.
+fn finalize_upload_stats(
+    progress_stats: &Mutex<UploadStatistics>,
+    rate_calc: &Mutex<SlidingWindowRate>,
+    start_time: std::time::Instant,
+    chunk_size: i64,
+) -> UploadStatistics {
+    let mut stats = progress_stats.lock().unwrap().clone();
 
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
@@ -458,12 +548,7 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         ));
     }
     stats.progress_message = parts.join(" ");
-
-    if let Some(ref cb) = on_progress {
-        let _ = cb(&stats);
-    }
-
-    Ok((result, stats))
+    stats
 }
 
 fn update_progress(
