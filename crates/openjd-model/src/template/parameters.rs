@@ -1287,40 +1287,7 @@ impl JobPathParameterDefinition {
         limits: &super::validate_v2023_09::EffectiveLimits,
     ) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        let object_type = self.object_type.unwrap_or(ObjectType::Directory);
-        if let Some(allowed) = self.allowed_values.as_ref() {
-            if allowed.is_empty() {
-                errors.push(format!(
-                    "Parameter '{}': allowedValues must not be empty.",
-                    self.name
-                ));
-            }
-            for (i, v) in allowed.iter().enumerate() {
-                let vlen = v.chars().count();
-                if vlen > limits.max_job_param_string_len {
-                    errors.push(format!(
-                        "Parameter '{}': allowedValues[{i}] exceeds {} characters.",
-                        self.name, limits.max_job_param_string_len
-                    ));
-                }
-                if let Some(min) = self.min_length {
-                    if vlen < min {
-                        errors.push(format!(
-                            "Parameter '{}': allowedValues[{i}] length {vlen} < minLength {min}.",
-                            self.name,
-                        ));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if vlen > max {
-                        errors.push(format!(
-                            "Parameter '{}': allowedValues[{i}] length {vlen} > maxLength {max}.",
-                            self.name,
-                        ));
-                    }
-                }
-            }
-        }
+        errors.extend(self.validate_allowed_values_def(limits));
         if let (Some(min), Some(max)) = (self.min_length, self.max_length) {
             if min > max {
                 errors.push(format!(
@@ -1329,30 +1296,81 @@ impl JobPathParameterDefinition {
                 ));
             }
         }
-        if let Some(default) = &self.default {
-            let dlen = default.chars().count();
-            if dlen > limits.max_job_param_string_len {
+        errors.extend(self.validate_default_def(limits));
+        errors.extend(self.validate_user_interface_def());
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Character-count bounds shared by allowedValues elements and default:
+    /// the hard string-length limit plus minLength/maxLength.
+    fn check_def_string_len(
+        &self,
+        len: usize,
+        what: &str,
+        limits: &super::validate_v2023_09::EffectiveLimits,
+        errors: &mut Vec<String>,
+    ) {
+        if len > limits.max_job_param_string_len {
+            errors.push(format!(
+                "Parameter '{}': {what} exceeds {} characters.",
+                self.name, limits.max_job_param_string_len
+            ));
+        }
+        if let Some(min) = self.min_length {
+            if len < min {
                 errors.push(format!(
-                    "Parameter '{}': default exceeds {} characters.",
-                    self.name, limits.max_job_param_string_len
+                    "Parameter '{}': {what} length {len} < minLength {min}.",
+                    self.name,
                 ));
             }
-            if let Some(min) = self.min_length {
-                if dlen < min {
-                    errors.push(format!(
-                        "Parameter '{}': default length {dlen} < minLength {min}.",
-                        self.name,
-                    ));
-                }
+        }
+        if let Some(max) = self.max_length {
+            if len > max {
+                errors.push(format!(
+                    "Parameter '{}': {what} length {len} > maxLength {max}.",
+                    self.name,
+                ));
             }
-            if let Some(max) = self.max_length {
-                if dlen > max {
-                    errors.push(format!(
-                        "Parameter '{}': default length {dlen} > maxLength {max}.",
-                        self.name,
-                    ));
-                }
+        }
+    }
+
+    /// allowedValues: non-empty, and each element within the length bounds.
+    fn validate_allowed_values_def(
+        &self,
+        limits: &super::validate_v2023_09::EffectiveLimits,
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+        if let Some(allowed) = self.allowed_values.as_ref() {
+            if allowed.is_empty() {
+                errors.push(format!(
+                    "Parameter '{}': allowedValues must not be empty.",
+                    self.name
+                ));
             }
+            for (i, v) in allowed.iter().enumerate() {
+                self.check_def_string_len(
+                    v.chars().count(),
+                    &format!("allowedValues[{i}]"),
+                    limits,
+                    &mut errors,
+                );
+            }
+        }
+        errors
+    }
+
+    /// default: within the length bounds and a member of allowedValues.
+    fn validate_default_def(
+        &self,
+        limits: &super::validate_v2023_09::EffectiveLimits,
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+        if let Some(default) = &self.default {
+            self.check_def_string_len(default.chars().count(), "default", limits, &mut errors);
             if let Some(allowed) = self.allowed_values.as_ref() {
                 if !allowed.contains(default) {
                     errors.push(format!(
@@ -1362,6 +1380,14 @@ impl JobPathParameterDefinition {
                 }
             }
         }
+        errors
+    }
+
+    /// userInterface: labels, control resolution and control-specific rules,
+    /// and file-filter constraints.
+    fn validate_user_interface_def(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let object_type = self.object_type.unwrap_or(ObjectType::Directory);
         if let Some(ui) = &self.user_interface {
             errors.extend(validate_ui_label(&ui.label, "label", self.name.as_str()));
             errors.extend(validate_ui_label(
@@ -1465,11 +1491,7 @@ impl JobPathParameterDefinition {
                 }
             }
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        errors
     }
 }
 

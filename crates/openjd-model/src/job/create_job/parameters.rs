@@ -776,6 +776,87 @@ impl<'a> PathParameterOptions<'a> {
 /// Preconditions that prevent any per-parameter work — a non-absolute
 /// `job_template_dir` and structural failures from
 /// [`merge_job_parameter_definitions`] — still fail fast.
+/// Resolve a caller-provided PATH parameter value: URI gating (EXPR) and
+/// relative-path joining against the current working directory.
+/// `Err` carries the validation message; the caller records it and skips.
+fn resolve_path_input_value(
+    param_name: &str,
+    input_val: &openjd_expr::ExprValue,
+    has_expr: bool,
+    allow_uri_path_values: bool,
+    current_working_dir: &str,
+    path_format: openjd_expr::path_mapping::PathFormat,
+) -> Result<openjd_expr::ExprValue, String> {
+    let s = input_val.as_str_repr();
+    if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
+        // EXPR extension: URI handling depends on allow_uri_path_values
+        if !allow_uri_path_values {
+            return Err(format!(
+                "Parameter '{param_name}': URI path values are not permitted. Got '{s}'"
+            ));
+        }
+        return Ok(input_val.clone());
+    }
+    if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
+        // Relative path: join with current_working_dir if non-empty.
+        if current_working_dir.is_empty() {
+            return Ok(input_val.clone());
+        }
+        return Ok(openjd_expr::ExprValue::String(
+            openjd_expr::functions::path::non_uri_join(current_working_dir, &s, path_format),
+        ));
+    }
+    Ok(input_val.clone())
+}
+
+/// Resolve a PATH parameter's non-empty default: URI gating (EXPR), the
+/// absolute-default rejection, and joining/normalizing against the job
+/// template directory with the walk-up containment policy.
+/// `Err` carries the validation message; the caller records it and skips.
+fn resolve_path_default(
+    param_name: &str,
+    default: &str,
+    has_expr: bool,
+    allow_uri_path_values: bool,
+    allow_job_template_dir_walk_up: bool,
+    job_template_dir: &str,
+    path_format: openjd_expr::path_mapping::PathFormat,
+) -> Result<String, String> {
+    if has_expr && openjd_expr::uri_path::is_uri(default) {
+        if allow_uri_path_values {
+            // EXPR + allow: URI preserved as-is
+            return Ok(default.to_string());
+        }
+        return Err(format!(
+            "Parameter '{param_name}': URI path values are not permitted in defaults. Got '{default}'"
+        ));
+    }
+    if is_absolute_for_format_no_uri(default, path_format) {
+        if !allow_job_template_dir_walk_up {
+            return Err(format!(
+                "The default value of PATH parameter {param_name} is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+            ));
+        }
+        return Ok(default.to_string());
+    }
+    if !allow_job_template_dir_walk_up && is_absolute_for_format(job_template_dir, path_format) {
+        let joined = join_for_format(job_template_dir, default, path_format);
+        let normalized = normalize_path_str(&joined, path_format);
+        let normalized_dir = normalize_path_str(job_template_dir, path_format);
+        if !path_is_within(&normalized, &normalized_dir, path_format) {
+            return Err(format!(
+                "The default value of PATH parameter {param_name} references a path outside of the template directory. Walking up from the template directory is not permitted."
+            ));
+        }
+        return Ok(normalized);
+    }
+    if is_absolute_for_format(job_template_dir, path_format) {
+        let joined = join_for_format(job_template_dir, default, path_format);
+        return Ok(normalize_path_str(&joined, path_format));
+    }
+    Ok(default.to_string())
+}
+
 pub fn preprocess_job_parameters(
     job_template: &JobTemplate,
     input_values: &JobParameterInputValues,
@@ -816,40 +897,24 @@ pub fn preprocess_job_parameters(
     for param in &merged {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
-            let coerced_opt: Option<openjd_expr::ExprValue> =
-                if param.param_type == JobParameterType::Path {
-                    let s = input_val.as_str_repr();
-                    if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
-                        // EXPR extension: URI handling depends on allow_uri_path_values
-                        if !allow_uri_path_values {
-                            errors.push(format!(
-                                "Parameter '{}': URI path values are not permitted. Got '{}'",
-                                param.name, s
-                            ));
-                            None
-                        } else {
-                            Some(input_val.clone())
-                        }
-                    } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
-                        // Relative path: join with current_working_dir if non-empty.
-                        if current_working_dir.is_empty() {
-                            Some(input_val.clone())
-                        } else {
-                            Some(openjd_expr::ExprValue::String(
-                                openjd_expr::functions::path::non_uri_join(
-                                    current_working_dir,
-                                    &s,
-                                    path_format,
-                                ),
-                            ))
-                        }
-                    } else {
-                        Some(input_val.clone())
+            let coerced = if param.param_type == JobParameterType::Path {
+                match resolve_path_input_value(
+                    &param.name,
+                    input_val,
+                    has_expr,
+                    allow_uri_path_values,
+                    current_working_dir,
+                    path_format,
+                ) {
+                    Ok(v) => v,
+                    Err(msg) => {
+                        errors.push(msg);
+                        continue;
                     }
-                } else {
-                    Some(input_val.clone())
-                };
-            let Some(coerced) = coerced_opt else { continue };
+                }
+            } else {
+                input_val.clone()
+            };
             match coerce_to_type(&coerced, param_type) {
                 Ok(expr_value) => {
                     if let Err(e) = param.check_constraints(&expr_value) {
@@ -869,57 +934,24 @@ pub fn preprocess_job_parameters(
                 }
             }
         } else if let Some(default) = &param.default {
-            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path
-                && !default.is_empty()
-            {
-                if has_expr && allow_uri_path_values && openjd_expr::uri_path::is_uri(default) {
-                    // EXPR + allow: URI preserved as-is
-                    Some(default.clone())
-                } else if has_expr
-                    && !allow_uri_path_values
-                    && openjd_expr::uri_path::is_uri(default)
-                {
-                    errors.push(format!(
-                        "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
-                        param.name, default
-                    ));
-                    None
-                } else if is_absolute_for_format_no_uri(default, path_format) {
-                    if !allow_job_template_dir_walk_up {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
-                            param.name
-                        ));
-                        None
-                    } else {
-                        Some(default.clone())
+            let value_str = if param.param_type == JobParameterType::Path && !default.is_empty() {
+                match resolve_path_default(
+                    &param.name,
+                    default,
+                    has_expr,
+                    allow_uri_path_values,
+                    allow_job_template_dir_walk_up,
+                    job_template_dir,
+                    path_format,
+                ) {
+                    Ok(v) => v,
+                    Err(msg) => {
+                        errors.push(msg);
+                        continue;
                     }
-                } else if !allow_job_template_dir_walk_up
-                    && is_absolute_for_format(job_template_dir, path_format)
-                {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    let normalized = normalize_path_str(&joined, path_format);
-                    let normalized_dir = normalize_path_str(job_template_dir, path_format);
-                    if !path_is_within(&normalized, &normalized_dir, path_format) {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
-                            param.name
-                        ));
-                        None
-                    } else {
-                        Some(normalized)
-                    }
-                } else if is_absolute_for_format(job_template_dir, path_format) {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    Some(normalize_path_str(&joined, path_format))
-                } else {
-                    Some(default.clone())
                 }
             } else {
-                Some(default.clone())
-            };
-            let Some(value_str) = value_str_opt else {
-                continue;
+                default.clone()
             };
             match coerce_from_str(&value_str, param_type) {
                 Ok(expr_value) => {
