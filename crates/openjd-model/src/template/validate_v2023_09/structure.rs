@@ -22,8 +22,68 @@ pub fn validate_structure(
     ctx: &ValidationContext,
     errors: &mut ValidationErrors,
 ) {
+    validate_template_level(jt, limits, ctx, errors);
+    validate_parameter_definitions_structure(jt, limits, rules, errors);
+    validate_environment_names(jt, ctx, errors);
+
+    // Step validation: duplicate-name detection needs the running set,
+    // so it stays here; everything per-step lives in the helper.
+    let all_step_names: HashSet<String> = jt.steps.iter().map(|s| s.name.clone()).collect();
+    let mut step_names = HashSet::new();
+    for (i, step) in jt.steps.iter().enumerate() {
+        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        let name = step.name.clone();
+        if !step_names.insert(name.clone()) {
+            errors.add(
+                &path_field(&step_path, "name"),
+                format!("duplicate step name: '{name}'"),
+            );
+        }
+        validate_single_step_structure(
+            step,
+            &step_path,
+            &all_step_names,
+            limits,
+            rules,
+            ctx,
+            errors,
+        );
+    }
+
     let root: Vec<PathElement> = vec![];
 
+    // Cycle detection
+    detect_dependency_cycles(&jt.steps, errors);
+
+    // Environments
+    if let Some(envs) = &jt.job_environments {
+        let envs_path = path_field(&root, "jobEnvironments");
+        for (i, env) in envs.iter().enumerate() {
+            validate_single_environment(env, limits, rules, &path_index(&envs_path, i), errors);
+        }
+    }
+    for (i, step) in jt.steps.iter().enumerate() {
+        if let Some(envs) = &step.step_environments {
+            let envs_path = path_field(
+                &[PathElement::Field("steps".into()), PathElement::Index(i)],
+                "stepEnvironments",
+            );
+            for (j, env) in envs.iter().enumerate() {
+                validate_single_environment(env, limits, rules, &path_index(&envs_path, j), errors);
+            }
+        }
+    }
+}
+
+/// Template-level checks: step presence and caller step-count limit, job
+/// name, and description bounds.
+fn validate_template_level(
+    jt: &JobTemplate,
+    limits: &super::EffectiveLimits,
+    ctx: &ValidationContext,
+    errors: &mut ValidationErrors,
+) {
+    let root: Vec<PathElement> = vec![];
     // Template-level
     if jt.steps.is_empty() {
         errors.add(&root, "must have at least one step.");
@@ -62,7 +122,17 @@ pub fn validate_structure(
             errors.add(&dp, "contains control characters.");
         }
     }
+}
 
+/// Job parameter definitions: non-empty, unique names, allowed types, and
+/// per-definition validation.
+fn validate_parameter_definitions_structure(
+    jt: &JobTemplate,
+    limits: &super::EffectiveLimits,
+    rules: &EffectiveRules,
+    errors: &mut ValidationErrors,
+) {
+    let root: Vec<PathElement> = vec![];
     // Parameter definitions
     if let Some(params) = &jt.parameter_definitions {
         let pd_path = path_field(&root, "parameterDefinitions");
@@ -89,7 +159,16 @@ pub fn validate_structure(
             }
         }
     }
+}
 
+/// Environment name uniqueness across job and step environments, plus the
+/// caller-imposed total (unique-name) environment count limit.
+fn validate_environment_names(
+    jt: &JobTemplate,
+    ctx: &ValidationContext,
+    errors: &mut ValidationErrors,
+) {
+    let root: Vec<PathElement> = vec![];
     // Environment name uniqueness across all environments
     let mut env_names = HashSet::new();
     if let Some(envs) = &jt.job_environments {
@@ -139,19 +218,24 @@ pub fn validate_structure(
             );
         }
     }
+}
 
-    // Step validation
-    let all_step_names: HashSet<String> = jt.steps.iter().map(|s| s.name.clone()).collect();
-    let mut step_names = HashSet::new();
-    for (i, step) in jt.steps.iter().enumerate() {
-        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
-        let name = step.name.clone();
-        if !step_names.insert(name.clone()) {
-            errors.add(
-                &path_field(&step_path, "name"),
-                format!("duplicate step name: '{name}'"),
-            );
-        }
+/// Per-step structural checks: name shape, description, script-or-simple-
+/// action presence, dependencies, host requirements, parameter space, and
+/// script actions/embedded files. Duplicate-name detection stays with the
+/// caller (it needs the running name set).
+#[allow(clippy::too_many_arguments)]
+fn validate_single_step_structure(
+    step: &StepTemplate,
+    step_path: &[PathElement],
+    all_step_names: &HashSet<String>,
+    limits: &super::EffectiveLimits,
+    rules: &EffectiveRules,
+    ctx: &ValidationContext,
+    errors: &mut ValidationErrors,
+) {
+    let name = step.name.clone();
+    {
         if name.is_empty() {
             errors.add(&path_field(&step_path, "name"), "must not be empty.");
         }
@@ -202,9 +286,10 @@ pub fn validate_structure(
                 if dep.depends_on == step.name {
                     errors.add(&dep_path, "cannot depend on itself.");
                 }
-                if !step_names.contains(&dep.depends_on)
-                    && !all_step_names.contains(&dep.depends_on)
-                {
+                // A previous `!step_names.contains(..)` conjunct here was
+                // provably redundant (step_names is a subset of
+                // all_step_names, so it could never decide) and was removed.
+                if !all_step_names.contains(&dep.depends_on) {
                     errors.add(
                         &dep_path,
                         format!("dependency '{}' not found.", dep.depends_on),
@@ -318,28 +403,6 @@ pub fn validate_structure(
                     errors.add(&files_path, "must not be empty.");
                 }
                 validate_embedded_files(files, &files_path, errors);
-            }
-        }
-    }
-
-    // Cycle detection
-    detect_dependency_cycles(&jt.steps, errors);
-
-    // Environments
-    if let Some(envs) = &jt.job_environments {
-        let envs_path = path_field(&root, "jobEnvironments");
-        for (i, env) in envs.iter().enumerate() {
-            validate_single_environment(env, limits, rules, &path_index(&envs_path, i), errors);
-        }
-    }
-    for (i, step) in jt.steps.iter().enumerate() {
-        if let Some(envs) = &step.step_environments {
-            let envs_path = path_field(
-                &[PathElement::Field("steps".into()), PathElement::Index(i)],
-                "stepEnvironments",
-            );
-            for (j, env) in envs.iter().enumerate() {
-                validate_single_environment(env, limits, rules, &path_index(&envs_path, j), errors);
             }
         }
     }
@@ -549,6 +612,37 @@ fn validate_host_requirements(
             if !names.insert(amt.name.to_lowercase()) {
                 errors.add(&amt_path, format!("duplicate amount name '{}'.", amt.name));
             }
+            validate_amount_requirement(amt, &amt_path, rules, standard_amounts, errors);
+        }
+    }
+
+    if let Some(attrs) = &hr.attributes {
+        let attrs_path = path_field(path, "attributes");
+        let mut names = HashSet::new();
+        for (i, attr) in attrs.iter().enumerate() {
+            let attr_path = path_index(&attrs_path, i);
+            if !names.insert(attr.name.to_lowercase()) {
+                errors.add(
+                    &attr_path,
+                    format!("duplicate attribute name '{}'.", attr.name),
+                );
+            }
+            validate_attribute_requirement(attr, &attr_path, standard_attrs, errors);
+        }
+    }
+}
+
+/// One `hostRequirements.amounts[i]` entry: name shape, reserved scope,
+/// min/max presence, format-string gating, and literal numeric bounds.
+fn validate_amount_requirement(
+    amt: &AmountRequirement,
+    amt_path: &[PathElement],
+    rules: &EffectiveRules,
+    standard_amounts: &[&str],
+    errors: &mut ValidationErrors,
+) {
+    {
+        {
             if amt.name.len() > 100 {
                 errors.add(
                     &amt_path,
@@ -615,18 +709,41 @@ fn validate_host_requirements(
             }
         }
     }
+}
 
-    if let Some(attrs) = &hr.attributes {
-        let attrs_path = path_field(path, "attributes");
-        let mut names = HashSet::new();
-        for (i, attr) in attrs.iter().enumerate() {
-            let attr_path = path_index(&attrs_path, i);
-            if !names.insert(attr.name.to_lowercase()) {
-                errors.add(
-                    &attr_path,
-                    format!("duplicate attribute name '{}'.", attr.name),
-                );
+/// Literal anyOf/allOf values of a standard single-choice capability must be
+/// one of `valid` (case-insensitive).
+fn check_standard_attr_values(
+    attr: &AttributeRequirement,
+    attr_path: &[PathElement],
+    cap_name: &str,
+    valid: &[&str],
+    errors: &mut ValidationErrors,
+) {
+    for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
+        if let Some(vals) = vals {
+            for v in vals {
+                if v.is_literal() && !valid.iter().any(|vv| vv.eq_ignore_ascii_case(v.raw())) {
+                    errors.add(
+                        &path_field(attr_path, field),
+                        format!("value '{}' is not valid for {cap_name}.", v.raw()),
+                    );
+                }
             }
+        }
+    }
+}
+
+/// One `hostRequirements.attributes[i]` entry: name shape, reserved scope,
+/// anyOf/allOf shape and element checks, and standard-capability value rules.
+fn validate_attribute_requirement(
+    attr: &AttributeRequirement,
+    attr_path: &[PathElement],
+    standard_attrs: &[&str],
+    errors: &mut ValidationErrors,
+) {
+    {
+        {
             if attr.name.len() > 100 {
                 errors.add(
                     &attr_path,
@@ -688,44 +805,22 @@ fn validate_host_requirements(
                 }
             }
             if attr_lower == "attr.worker.os.family" {
-                let valid = ["linux", "windows", "macos"];
-                for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
-                    if let Some(vals) = vals {
-                        for v in vals {
-                            if v.is_literal()
-                                && !valid.iter().any(|vv| vv.eq_ignore_ascii_case(v.raw()))
-                            {
-                                errors.add(
-                                    &path_field(&attr_path, field),
-                                    format!(
-                                        "value '{}' is not valid for attr.worker.os.family.",
-                                        v.raw()
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                }
+                check_standard_attr_values(
+                    attr,
+                    attr_path,
+                    "attr.worker.os.family",
+                    &["linux", "windows", "macos"],
+                    errors,
+                );
             }
             if attr_lower == "attr.worker.cpu.arch" {
-                let valid = ["x86_64", "arm64"];
-                for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
-                    if let Some(vals) = vals {
-                        for v in vals {
-                            if v.is_literal()
-                                && !valid.iter().any(|vv| vv.eq_ignore_ascii_case(v.raw()))
-                            {
-                                errors.add(
-                                    &path_field(&attr_path, field),
-                                    format!(
-                                        "value '{}' is not valid for attr.worker.cpu.arch.",
-                                        v.raw()
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                }
+                check_standard_attr_values(
+                    attr,
+                    attr_path,
+                    "attr.worker.cpu.arch",
+                    &["x86_64", "arm64"],
+                    errors,
+                );
             }
         }
     }
