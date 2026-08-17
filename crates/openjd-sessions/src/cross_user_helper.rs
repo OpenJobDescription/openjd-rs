@@ -272,7 +272,16 @@ impl CrossUserHelper {
         user: &dyn SessionUser,
     ) -> Result<(Self, std::fs::File), SessionError> {
         let auth_token = generate_auth_token()?;
-        let mut child = std::process::Command::new("sudo")
+        // Resolved from a fixed list of trusted directories rather than through
+        // PATH, which the job influences. Bound once and reused below so the
+        // error message names the same binary that was actually launched.
+        let sudo = crate::system_commands::system_command_path("sudo").map_err(|source| {
+            SessionError::SubprocessStart {
+                command: "sudo".to_string(),
+                source,
+            }
+        })?;
+        let mut child = std::process::Command::new(&sudo)
             .args([
                 "-u",
                 user.user(),
@@ -288,7 +297,8 @@ impl CrossUserHelper {
             .map_err(|source| SessionError::SubprocessStart {
                 // Don't include the token in error messages.
                 command: format!(
-                    "sudo -u {} -i {} --auth-token <redacted>",
+                    "{} -u {} -i {} --auth-token <redacted>",
+                    sudo.display(),
                     user.user(),
                     helper_path.display()
                 ),

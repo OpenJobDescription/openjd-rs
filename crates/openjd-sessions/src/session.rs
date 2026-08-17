@@ -1036,17 +1036,30 @@ impl Session {
                             .filter_map(|e| e.ok())
                             .map(|e| e.path().to_string_lossy().to_string())
                             .collect();
-                        if !files.is_empty() {
+                        // Both resolved from trusted directories rather than
+                        // through PATH. If either is missing we skip this
+                        // best-effort removal and fall through to the TempDir
+                        // cleanup below, rather than falling back to a bare
+                        // name -- a bare name here is the defect this resolver
+                        // exists to remove.
+                        //
+                        // `rm` runs as the job user, so qualifying it is
+                        // hardening rather than a privilege boundary: it stops
+                        // the removal depending on that user's own login-shell
+                        // PATH.
+                        let commands = crate::system_commands::find_system_command("sudo")
+                            .zip(crate::system_commands::find_system_command("rm"));
+                        if let (false, Some((sudo, rm))) = (files.is_empty(), commands) {
                             let mut args = vec![
                                 "-u".to_string(),
                                 user.user().to_string(),
                                 "-i".to_string(),
-                                "rm".to_string(),
+                                rm.to_string_lossy().to_string(),
                                 "-rf".to_string(),
                                 "--".to_string(),
                             ];
                             args.extend(files);
-                            let _ = std::process::Command::new("sudo")
+                            let _ = std::process::Command::new(&sudo)
                                 .args(&args)
                                 .stdin(std::process::Stdio::null())
                                 .stdout(std::process::Stdio::null())
