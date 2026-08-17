@@ -42,6 +42,9 @@ src/
 ├── embedded_files.rs       # Two-phase file materialization
 ├── let_bindings.rs         # Re-exports evaluate_let_bindings from openjd_model
 ├── session_user.rs         # SessionUser trait, PosixSessionUser
+├── system_commands.rs      # Unix only. Resolves system command names (sudo, rm)
+│                           #   against a fixed list of trusted absolute
+│                           #   directories, never via PATH. See cross-user.md.
 ├── tempdir.rs              # Secure temp directory creation
 ├── logging.rs              # LogContent bitflags, session_log! macro, banners
 └── error.rs                # SessionError enum

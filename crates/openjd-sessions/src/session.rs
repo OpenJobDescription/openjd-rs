@@ -1049,6 +1049,23 @@ impl Session {
                         // PATH.
                         let commands = crate::system_commands::find_system_command("sudo")
                             .zip(crate::system_commands::find_system_command("rm"));
+                        if !files.is_empty() && commands.is_none() {
+                            // Skipping silently would be the worst outcome here. The
+                            // fallback below is std::fs::remove_dir_all under a
+                            // `let _ =`, which cannot remove files owned by the job
+                            // user, so the session directory leaks with job data
+                            // still in it and nothing on the record explains why.
+                            session_log!(
+                                warn,
+                                &self.session_id,
+                                LogContent::FILE_PATH,
+                                "Could not locate sudo and rm in a trusted directory; \
+                                 skipping cross-user cleanup of {} file(s) in {}. Files \
+                                 owned by the job user may remain.",
+                                files.len(),
+                                self.working_directory.display()
+                            );
+                        }
                         if let (false, Some((sudo, rm))) = (files.is_empty(), commands) {
                             let mut args = vec![
                                 "-u".to_string(),

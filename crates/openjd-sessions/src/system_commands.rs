@@ -2,12 +2,33 @@
 
 //! Resolution of system command names to absolute paths, without consulting `PATH`.
 //!
-//! This module exists because of CWE-426 (Untrusted Search Path). A session runs
-//! job-supplied actions, and the job influences the environment those actions run
-//! with -- including `PATH`. A bare command name in the argv of one of our *own*
-//! privileged helpers (`sudo`) is therefore resolved through a search path the
-//! job may control, so a job that drops an executable named `sudo` early on
-//! `PATH` gets it run at the session's privilege level.
+//! This addresses CWE-426 (Untrusted Search Path). Be precise about the exposure
+//! in *this* implementation, because an earlier revision of this comment was not:
+//!
+//! In the Python reference implementation the hole is directly exploitable. There,
+//! the job's environment is merged over the parent's and handed to the `Popen`
+//! call that launches `sudo`, so a bare `sudo` is resolved through a `PATH` the job
+//! wrote, and a job that drops an executable named `sudo` early on `PATH` gets it
+//! run at the session's privilege level. That is the reported vulnerability.
+//!
+//! **This crate is not in that position today.** `CrossUserHelper::spawn` sets no
+//! environment on its `Command`, so the child inherits the session process's own
+//! environment, and `Command::new` resolves the program against the *parent's*
+//! `PATH`. The job's environment reaches only the job's own command, in
+//! `subprocess.rs`, and reaches it after `env_clear()`. So no job-supplied variable
+//! influences how `sudo` is located.
+//!
+//! What remains is a latent hazard rather than a live exploit, which is still worth
+//! closing:
+//!
+//! * The safety of the bare name rests on an invariant stated nowhere and enforced
+//!   by nothing -- that no caller ever sets an environment on the helper's
+//!   `Command`. Adding `.env()` or `.envs()` there, for any reason, would silently
+//!   make it the Python bug.
+//! * It presumes the session process's own `PATH` is trustworthy. That is an
+//!   assumption about how the agent is launched, not a property of this crate.
+//! * Parity with the reference implementation: the same audit should reach the same
+//!   conclusion in both, without a reader having to re-derive the difference.
 //!
 //! Every such name is resolved here instead, by scanning a fixed list of trusted
 //! absolute directories.
@@ -39,8 +60,21 @@ use std::path::{Path, PathBuf};
 /// only under `/sbin`.
 pub(crate) const TRUSTED_SYSTEM_DIRECTORIES: &[&str] = &[
     "/run/wrappers/bin",
+    // Paired with the entry above. /run/wrappers/bin holds only the setuid/setcap
+    // wrappers, so on NixOS it resolves `sudo` and nothing else: /usr/bin holds just
+    // `env`, /bin just `sh`, and the sbin directories are absent. `rm` lives in this
+    // symlink farm, which nixos-rebuild manages and root owns, making it
+    // trust-equivalent to /usr/bin there. Without it the ordering above would
+    // resolve `sudo` and then skip the cross-user cleanup for want of `rm`.
+    "/run/current-system/sw/bin",
     "/usr/bin",
     "/bin",
+    // FreeBSD and the other BSDs install sudo from ports into /usr/local/bin and
+    // have no /usr/bin/sudo at all, so omitting this made cross-user sessions
+    // impossible to start there -- a regression from the bare `Command::new("sudo")`
+    // this module replaced, which the login PATH would have resolved.
+    "/usr/local/bin",
+    "/usr/local/sbin",
     "/usr/sbin",
     "/sbin",
 ];
@@ -154,24 +188,56 @@ mod tests {
         assert!(find_system_command_in("openjd-test-cmd", &[dir_s]).is_some());
     }
 
+    /// This module's own source, minus its tests, for [`never_reads_the_environment`].
+    fn production_source() -> &'static str {
+        let source = include_str!("system_commands.rs");
+        // Split off the test module, whose own assertions mention the very tokens
+        // being searched for. Without this the test fails on itself.
+        source
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("this file contains a #[cfg(test)] module")
+    }
+
     #[test]
-    fn ignores_path_even_when_it_contains_a_matching_command() {
-        // Pins "PATH is never read". Without this, adding a PATH fallback for
-        // commands missing from the trusted list would go unnoticed.
+    fn never_reads_the_environment() {
+        // Pins "PATH is never read", which is the property the whole module exists
+        // for and the one a `which`-style rewrite would silently undo.
         //
-        // PATH is process-global, so this test saves and restores it. It is the
-        // only test here that touches the environment.
+        // Asserted against the source rather than by setting PATH and observing the
+        // result. An earlier revision did the latter, and it was wrong twice over:
+        // `std::env::set_var` mutates process-global state while other tests in this
+        // same binary call `std::env::vars()` concurrently (`subprocess.rs`), which
+        // is a data race -- the reason the function is `unsafe` from edition 2024 --
+        // and it could flake unrelated tests that spawn bare commands.
+        //
+        // This form is deterministic, needs no isolation, and still fails on the
+        // realistic mutation: a PATH fallback has to read the environment to work.
+        let production = production_source();
+
+        assert!(
+            !production.contains("std::env"),
+            "system_commands must not read process environment state; PATH resolution \
+             is exactly what this module exists to avoid"
+        );
+        assert!(
+            !production.contains("var_os") && !production.contains("env::var"),
+            "environment lookup found in production source"
+        );
+    }
+
+    #[test]
+    fn a_command_present_only_outside_the_trusted_list_is_not_found() {
+        // The behavioural companion to the assertion above: a real executable that
+        // exists, is executable, and is simply not in a searched directory must not
+        // resolve by any route.
         let dir = dir_with_executable("openjd-test-path-cmd");
-        let original = std::env::var_os("PATH");
+        assert!(
+            dir.path().join("openjd-test-path-cmd").exists(),
+            "precondition: the executable really exists"
+        );
 
-        std::env::set_var("PATH", dir.path());
-        let found = find_system_command("openjd-test-path-cmd");
-        match original {
-            Some(value) => std::env::set_var("PATH", value),
-            None => std::env::remove_var("PATH"),
-        }
-
-        assert_eq!(found, None, "PATH was consulted");
+        assert_eq!(find_system_command("openjd-test-path-cmd"), None);
     }
 
     #[test]
@@ -248,6 +314,26 @@ mod tests {
                 "{directory} is not absolute"
             );
         }
+    }
+
+    #[test]
+    fn the_two_nixos_directories_are_present_as_a_pair() {
+        // /run/wrappers/bin alone supports no complete code path: it holds only the
+        // setuid wrappers, so on NixOS it resolves `sudo` and nothing else. `rm`
+        // lives in the sw/bin symlink farm, so without that entry the ordering
+        // resolves sudo and then skips the cleanup for want of rm.
+        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/run/wrappers/bin"));
+        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/run/current-system/sw/bin"));
+    }
+
+    #[test]
+    fn bsd_local_directories_are_searched() {
+        // FreeBSD and the other BSDs install sudo from ports into /usr/local/bin and
+        // have no /usr/bin/sudo, so omitting this made cross-user sessions
+        // impossible to start there -- a regression from the bare name this module
+        // replaced, which the login PATH resolved.
+        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/usr/local/bin"));
+        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/usr/local/sbin"));
     }
 
     #[test]
