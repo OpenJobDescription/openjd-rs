@@ -2,49 +2,46 @@
 
 //! Resolution of system command names to absolute paths, without consulting `PATH`.
 //!
-//! This addresses CWE-426 (Untrusted Search Path). Be precise about the exposure
-//! in *this* implementation, because an earlier revision of this comment was not:
+//! The problem: `Command::new("sudo")` resolves a bare name through a `PATH`,
+//! which makes correctness depend on whose `PATH` that is. Be precise about the
+//! answer here, because it differs from the Python implementation.
 //!
-//! In the Python reference implementation the hole is directly exploitable. There,
-//! the job's environment is merged over the parent's and handed to the `Popen`
-//! call that launches `sudo`, so a bare `sudo` is resolved through a `PATH` the job
-//! wrote, and a job that drops an executable named `sudo` early on `PATH` gets it
-//! run at the session's privilege level. That is the reported vulnerability.
+//! In `openjd-sessions-for-python`, the job's environment is merged over the
+//! parent's and handed to the `Popen` call that launches `sudo`. A bare name there
+//! resolves through a `PATH` the job wrote, so a job that supplies its own `sudo`
+//! has it run at the session's privilege level.
 //!
-//! **This crate is not in that position today.** `CrossUserHelper::spawn` sets no
-//! environment on its `Command`, so the child inherits the session process's own
-//! environment, and `Command::new` resolves the program against the *parent's*
-//! `PATH`. The job's environment reaches only the job's own command, in
-//! `subprocess.rs`, and reaches it after `env_clear()`. So no job-supplied variable
-//! influences how `sudo` is located.
+//! This crate is not in that position. `CrossUserHelper::spawn` sets no environment
+//! on its `Command`, so the helper inherits the session process's own environment
+//! and `Command::new` resolves against the parent's `PATH`. The job's environment
+//! reaches only the job's own command, in `subprocess.rs`, and reaches it after
+//! `env_clear()`. No job-supplied variable influences how `sudo` is located.
 //!
-//! What remains is a latent hazard rather than a live exploit, which is still worth
-//! closing:
+//! Resolving here is therefore about removing assumptions rather than closing a
+//! reachable hole:
 //!
-//! * The safety of the bare name rests on an invariant stated nowhere and enforced
-//!   by nothing -- that no caller ever sets an environment on the helper's
-//!   `Command`. Adding `.env()` or `.envs()` there, for any reason, would silently
-//!   make it the Python bug.
-//! * It presumes the session process's own `PATH` is trustworthy. That is an
-//!   assumption about how the agent is launched, not a property of this crate.
-//! * Parity with the reference implementation: the same audit should reach the same
-//!   conclusion in both, without a reader having to re-derive the difference.
+//! * The bare name is safe only while no caller sets an environment on the helper's
+//!   `Command`. Nothing states or enforces that, so adding `.env()` or `.envs()`
+//!   later would change the security of a line nobody edited.
+//! * It assumes the session process's own `PATH` is trustworthy, which is a
+//!   property of how the agent is launched, not of this crate.
+//! * It keeps the two implementations answering the same question the same way, so
+//!   a reader does not have to derive the difference to audit either one.
 //!
-//! Every such name is resolved here instead, by scanning a fixed list of trusted
+//! The solution: names are resolved here, by scanning a fixed list of trusted
 //! absolute directories.
 //!
-//! Three properties are load-bearing, and each is pinned by a test below:
+//! Three properties make that work, and all three are easy to undo by accident:
 //!
-//! * **`PATH` is never read.** Not directly, and not indirectly via a `which`
-//!   crate or `command -v`, both of which resolve through `PATH` and so would
-//!   reintroduce the vulnerability while appearing to fix it.
-//! * **Only paths under [`TRUSTED_SYSTEM_DIRECTORIES`] are returned**, and a name
-//!   containing a path separator is rejected -- otherwise joining
-//!   `"/usr/bin"` with `"../../tmp/evil"` would make this module the injection
-//!   point it exists to remove.
-//! * **A missing command is an error, never a fallback to the bare name.** A
-//!   silent fallback would restore the vulnerability while looking fixed, which
-//!   is the worst available failure mode for this class of fix.
+//! * `PATH` is never read. Not directly, and not through a `which` crate or
+//!   `command -v`, which resolve via `PATH` and so would restore the original
+//!   behaviour while looking like a fix.
+//! * Only paths under [`TRUSTED_SYSTEM_DIRECTORIES`] are returned. A name
+//!   containing a path separator is rejected, because joining `"/usr/bin"` with
+//!   `"../../tmp/evil"` would otherwise escape the directory being searched.
+//! * A missing command is an error, never a fallback to the bare name. Falling
+//!   back would put resolution on `PATH` again while the code still read as though
+//!   it did not.
 
 use std::io;
 use std::path::{Path, PathBuf};
