@@ -11,11 +11,19 @@
 //! resolves through a `PATH` the job wrote, so a job that supplies its own `sudo`
 //! has it run at the session's privilege level.
 //!
-//! This crate is not in that position. `CrossUserHelper::spawn` sets no environment
-//! on its `Command`, so the helper inherits the session process's own environment
-//! and `Command::new` resolves against the parent's `PATH`. The job's environment
-//! reaches only the job's own command, in `subprocess.rs`, and reaches it after
-//! `env_clear()`. No job-supplied variable influences how `sudo` is located.
+//! This crate is not in that position, for two reasons that are worth separating
+//! because only the first is about the environment. `CrossUserHelper::spawn` sets
+//! no environment on its `Command`, so the helper inherits the session process's
+//! own and `Command::new` resolves against the parent's `PATH`. And `sudo` is
+//! spawned once when the helper starts, before any job action exists; per-action
+//! environments travel to the helper over its stdin protocol afterwards, so they
+//! cannot reach the argv that located `sudo`.
+//!
+//! Note it is *not* true that job environments are only ever applied after an
+//! `env_clear()`. That holds on the same-user path (`subprocess.rs`), but the
+//! helper's own runner layers the action's environment onto whatever it inherited,
+//! with no `env_clear()` anywhere under `src/helper/`. The conclusion above stands
+//! on ordering and channel, not on clearing.
 //!
 //! Resolving here is therefore about removing assumptions rather than closing a
 //! reachable hole:
@@ -197,19 +205,26 @@ mod tests {
     }
 
     #[test]
-    fn never_reads_the_environment() {
-        // Pins "PATH is never read", which is the property the whole module exists
-        // for and the one a `which`-style rewrite would silently undo.
+    fn production_source_contains_no_environment_lookup() {
+        // A source lint, not a behavioural pin, and worth being honest about which.
         //
-        // Asserted against the source rather than by setting PATH and observing the
-        // result. An earlier revision did the latter, and it was wrong twice over:
-        // `std::env::set_var` mutates process-global state while other tests in this
-        // same binary call `std::env::vars()` concurrently (`subprocess.rs`), which
-        // is a data race -- the reason the function is `unsafe` from edition 2024 --
-        // and it could flake unrelated tests that spawn bare commands.
+        // It catches the mutation that matters in practice -- adding a PATH fallback
+        // for names missing from the trusted list -- because such a fallback has to
+        // read the environment to work, and the behavioural test below cannot see it
+        // (a command absent from the trusted directories is also absent from PATH in
+        // the test, so both return None either way).
         //
-        // This form is deterministic, needs no isolation, and still fails on the
-        // realistic mutation: a PATH fallback has to read the environment to work.
+        // What it does not catch: a `which` crate, or `Command::new(bare_name)`
+        // letting execvp resolve in the child. Neither reads the environment in this
+        // process. Those are visible in review as a new dependency or a changed
+        // spawn, which is the level they belong at.
+        //
+        // Asserted over the source because the obvious alternative is worse. An
+        // earlier revision set PATH and observed the result, which mutates
+        // process-global state while other tests in this binary call
+        // `std::env::vars()` concurrently (`subprocess.rs`). That is a data race,
+        // the reason the function is `unsafe` from edition 2024, and it risked
+        // flaking unrelated tests that spawn bare commands.
         let production = production_source();
 
         assert!(
