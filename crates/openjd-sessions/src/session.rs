@@ -1076,12 +1076,43 @@ impl Session {
                                 "--".to_string(),
                             ];
                             args.extend(files);
-                            let _ = std::process::Command::new(&sudo)
+                            // The status is inspected rather than discarded. Both
+                            // binaries resolving is the common case -- `sudo` was
+                            // already resolved once at helper start -- so the
+                            // failures an operator actually hits happen here, not
+                            // in the branch above: a job user whose login shell is
+                            // nologin, a sudoers rule that does not permit this
+                            // command, or `rm` refusing a path. Discarding the
+                            // status left every one of those silent, and the
+                            // fallback below cannot remove job-user-owned files, so
+                            // the directory leaked with no explanation on the
+                            // record.
+                            match std::process::Command::new(&sudo)
                                 .args(&args)
                                 .stdin(std::process::Stdio::null())
                                 .stdout(std::process::Stdio::null())
                                 .stderr(std::process::Stdio::null())
-                                .status();
+                                .status()
+                            {
+                                Ok(status) if status.success() => {}
+                                Ok(status) => session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH,
+                                    "Cross-user cleanup of {} exited {}; files owned by \
+                                     the job user may remain.",
+                                    self.working_directory.display(),
+                                    status
+                                ),
+                                Err(e) => session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH,
+                                    "Could not run cross-user cleanup of {}: {e}; files \
+                                     owned by the job user may remain.",
+                                    self.working_directory.display()
+                                ),
+                            }
                         }
                     }
                 }

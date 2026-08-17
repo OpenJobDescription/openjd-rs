@@ -1,4 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Resolution of system command names to absolute paths, without consulting `PATH`.
 //!
@@ -329,23 +331,53 @@ mod tests {
     }
 
     #[test]
-    fn the_two_nixos_directories_are_present_as_a_pair() {
-        // /run/wrappers/bin alone supports no complete code path: it holds only the
-        // setuid wrappers, so on NixOS it resolves `sudo` and nothing else. `rm`
-        // lives in the sw/bin symlink farm, so without that entry the ordering
-        // resolves sudo and then skips the cleanup for want of rm.
-        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/run/wrappers/bin"));
-        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/run/current-system/sw/bin"));
+    fn the_list_resolves_real_commands_on_this_host() {
+        // The positive control the shape assertions cannot provide.
+        //
+        // Every other test here either patches the directory list or asserts that a
+        // literal appears in the literal declared above, so all of them pass on a
+        // list whose entries are misspelled, or empty, or point somewhere that does
+        // not exist. This one fails in that case, because it asks the real
+        // filesystem for commands the crate actually resolves.
+        //
+        // `sh` rather than `sudo` as the required one: `sudo` is absent from minimal
+        // containers, and a test that skips on the host it is meant to protect is
+        // not a control.
+        let sh = find_system_command("sh").expect("sh must resolve from the trusted list");
+        assert!(sh.is_absolute());
+        assert!(
+            TRUSTED_SYSTEM_DIRECTORIES
+                .iter()
+                .any(|d| sh.starts_with(Path::new(d))),
+            "{} is not under any trusted directory",
+            sh.display()
+        );
+
+        // rm is resolved by session cleanup, so its absence is a real breakage
+        // rather than a curiosity.
+        assert!(
+            find_system_command("rm").is_some(),
+            "rm must resolve: session cleanup uses it"
+        );
     }
 
     #[test]
-    fn bsd_local_directories_are_searched() {
-        // FreeBSD and the other BSDs install sudo from ports into /usr/local/bin and
-        // have no /usr/bin/sudo, so omitting this made cross-user sessions
-        // impossible to start there -- a regression from the bare name this module
-        // replaced, which the login PATH resolved.
-        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/usr/local/bin"));
-        assert!(TRUSTED_SYSTEM_DIRECTORIES.contains(&"/usr/local/sbin"));
+    fn platform_specific_directories_are_not_silently_dropped() {
+        // These entries exist for hosts CI does not run on, so nothing else in this
+        // file would notice their removal. Kept deliberately narrow: each assertion
+        // names the platform and the command that needs it, so a future reader can
+        // judge whether the entry is still earning its place rather than treating
+        // the list as untouchable.
+        for (directory, why) in [
+            ("/run/wrappers/bin", "NixOS: the only setuid sudo"),
+            ("/run/current-system/sw/bin", "NixOS: setsid, pgrep, rm"),
+            ("/usr/local/bin", "FreeBSD and other BSDs: sudo from ports"),
+        ] {
+            assert!(
+                TRUSTED_SYSTEM_DIRECTORIES.contains(&directory),
+                "{directory} was dropped, needed for {why}"
+            );
+        }
     }
 
     #[test]
