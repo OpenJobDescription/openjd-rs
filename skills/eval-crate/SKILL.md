@@ -42,7 +42,11 @@ The Python repo MUST be on the correct branch for the crate being evaluated:
 | cli | openjd-cli | OpenJobDescription | `mainline` |
 | snapshots | deadline-cloud | mwiebe (fork) | `manifest-format-2-prototype` |
 
-`snapshots` is beta: evaluated on request only, and excluded from the weekly workflow.
+`snapshots` is a manual run only. Its reference is a personal fork of a draft
+manifest format, so `.github/workflows/eval_crate.yml` does not offer it on any
+trigger — automating a personal-fork checkout into a job that holds Bedrock
+credentials is not a trade worth making. Run the skill by hand for that crate
+until the v2025 reference lands in the org.
 
 ### Specification References
 

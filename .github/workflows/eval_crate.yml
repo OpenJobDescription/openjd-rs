@@ -11,15 +11,20 @@
 #   workflow_dispatch          | one, chosen     | artifact (+ evals PR if asked)
 #   pull_request (labeled)     | one, from label | sticky PR comment + artifact
 #
+# THE CRATE LIST LIVES IN FOUR PLACES in this file (the dispatch `options`, the
+# schedule's array, the label validation `case`, and the Python-reference maps).
+# Adding a crate means updating all four; RELEASING.md's "Adding a new crate"
+# steps say so, alongside the README crates table.
+#
 # WEEKLY, NOT DAILY. The report is a 20-50 KB generated document; regenerating it
 # daily produces a large diff every day that is mostly rewording, and a bot PR
 # that changes every day stops being read.
 #
-# SNAPSHOTS IS EXCLUDED from the schedule: the v2025 manifest format is an
-# experimental draft and its Python reference is still a personal fork branch, so
-# it is not a stable thing to trend. It remains available via workflow_dispatch --
-# note that dispatching it checks out fork content into a job holding this repo's
-# Bedrock credentials, which is acceptable only because dispatch is maintainer-only.
+# SNAPSHOTS IS NOT AUTOMATED AT ALL. Its Python reference is a personal fork
+# branch (`mwiebe/deadline-cloud`), and a workflow that checks out a personal
+# fork into a job holding this repo's Bedrock credentials is not something to
+# ship on any trigger. Evaluating `openjd-snapshots` stays a manual run of the
+# skill until the v2025 manifest reference lands somewhere in the org.
 #
 # NO S3. reports/ is already tracked in git, so the PR is the durable record and
 # gives review and history without a bucket, an OIDC role and a lifecycle policy
@@ -62,27 +67,35 @@ on:
   workflow_dispatch:
     inputs:
       crate:
-        description: "Crate to evaluate (snapshots is beta: dispatch only)"
+        description: "Crate to evaluate"
         required: true
         type: choice
-        options: [expr, model, sessions, cli, snapshots]
+        options: [expr, model, sessions, cli]
       open_pr:
         description: "Also refresh the bot-maintained evals PR"
         required: false
         type: boolean
         default: false
   pull_request:
-    # A maintainer opts a PR in by applying `eval-crate:<crate>`.
+    # A maintainer opts a PR in by applying `eval-crate:<crate>`. `on:` cannot
+    # filter by label NAME -- only by activity type -- so every `labeled` event
+    # reaches the workflow and the name is filtered at the job level below. Every
+    # job carries that condition, so an unrelated label produces a run whose jobs
+    # are all skipped: no runner is provisioned, and it is greyed out as
+    # "skipped" in the Actions list rather than sitting there as a green success
+    # that did nothing.
     types: [labeled]
   schedule:
     # Mondays 06:00 UTC.
     - cron: "0 6 * * 1"
 
 concurrency:
-  # One in-flight run per trigger+crate. This does NOT serialize the matrix jobs
-  # within a run (concurrency is per run, not per job) -- it does not need to,
-  # since the single `publish` job is the only writer to the evals branch.
-  group: eval-crate-${{ github.event_name }}-${{ github.event.label.name || github.event.inputs.crate || 'all' }}
+  # One in-flight run per trigger+crate, and in PR mode per PR as well: without
+  # the PR number, labelling two PRs for the same crate would put both runs in
+  # one group. This does NOT serialize the matrix jobs within a run (concurrency
+  # is per run, not per job) -- it does not need to, since the single `publish`
+  # job is the only writer to the evals branch.
+  group: eval-crate-${{ github.event_name }}-${{ github.event.pull_request.number || 'x' }}-${{ github.event.label.name || github.event.inputs.crate || 'all' }}
   cancel-in-progress: false
 
 permissions:
@@ -94,6 +107,10 @@ jobs:
   # of repeating long `if:` expressions on every step.
   # ---------------------------------------------------------------------------
   plan:
+    # The label-name filter `on:` cannot express. Applied to this job and
+    # inherited by the others through `needs`, so a PR labelled anything else
+    # provisions no runner and the run shows as skipped.
+    if: github.event_name != 'pull_request' || startsWith(github.event.label.name, 'eval-crate:')
     runs-on: ubuntu-latest
     outputs:
       crates: ${{ steps.pick.outputs.crates }}
@@ -119,21 +136,21 @@ jobs:
           set -euo pipefail
           case "$EVENT" in
             schedule)
-              # The beta crate is deliberately absent from the sweep.
+              # Every crate this workflow supports. `openjd-snapshots` is absent
+              # deliberately -- see the header -- as is `openjd-for-js`, which
+              # the skill has no evaluation procedure for.
               echo 'crates=["expr","model","sessions","cli"]' >> "$GITHUB_OUTPUT"
               echo "run=true" >> "$GITHUB_OUTPUT"
-              echo "reason=weekly sweep (snapshots excluded: beta)" >> "$GITHUB_OUTPUT" ;;
+              echo "reason=weekly sweep" >> "$GITHUB_OUTPUT" ;;
             workflow_dispatch)
               # `crate` is a choice input, so it is already constrained.
               echo "crates=[\"$INPUT_CRATE\"]" >> "$GITHUB_OUTPUT"
               echo "run=true" >> "$GITHUB_OUTPUT"
               echo "reason=dispatch: $INPUT_CRATE" >> "$GITHUB_OUTPUT" ;;
             pull_request)
+              # The job-level `if` already established the `eval-crate:` prefix.
               crate="${LABEL#eval-crate:}"
-              if [ "$crate" = "$LABEL" ]; then
-                echo "run=false" >> "$GITHUB_OUTPUT"
-                echo "reason=label is not eval-crate:<crate>" >> "$GITHUB_OUTPUT"
-              elif [ "$HEAD_REPO" != "$THIS_REPO" ]; then
+              if [ "$HEAD_REPO" != "$THIS_REPO" ]; then
                 # See the header: cargo + fork content + credentials is RCE.
                 echo "run=false" >> "$GITHUB_OUTPUT"
                 echo "reason=fork PR; eval-crate runs only on same-repo branches" >> "$GITHUB_OUTPUT"
@@ -143,7 +160,7 @@ jobs:
                 # JSON array and fan out to two jobs, and `eval-crate:e.pr` would
                 # match `expr` as a regex and fail 20 minutes later in cargo.
                 case "$crate" in
-                  expr|model|sessions|cli|snapshots)
+                  expr|model|sessions|cli)
                     echo "crates=[\"$crate\"]" >> "$GITHUB_OUTPUT"
                     echo "run=true" >> "$GITHUB_OUTPUT"
                     echo "reason=label opt-in: $crate" >> "$GITHUB_OUTPUT" ;;
@@ -167,13 +184,17 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     name: eval-crate (${{ matrix.crate }})
     runs-on: ubuntu-latest
-    # Generation plus a subagent verification pass over every finding, plus cargo
-    # build/test and mutation checks. The org's diff review runs in 30.
-    # UNVERIFIED: the Bedrock bearer token is minted once at the start of the job
-    # and aws-bedrock-token-generator's TTL has not been confirmed against this
-    # budget. Confirm before enabling the schedule; if the TTL is under two hours,
-    # lower this or re-mint mid-run (which also needs role-duration-seconds).
-    timeout-minutes: 120
+    # Bounded by the credentials, not by how long the eval would like to take.
+    # The bearer token is a SigV4-presigned URL: aws-bedrock-token-generator 1.1.0
+    # signs it for 12 hours (`TOKEN_DURATION = 43200`, default `expiry`), but a
+    # presigned URL signed with STS session credentials dies with the session, and
+    # the session is 3600s (set on the assume-role step below). So the usable
+    # window is one hour, and a 120-minute budget would have meant the agent's
+    # Bedrock calls starting to 403 around minute 60 with no report written.
+    # 55 leaves the run a few minutes to finish the report before the token goes.
+    # To raise this, raise the role's MaxSessionDuration and role-duration-seconds
+    # together; the token generator is not the constraint.
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       # One crate per job, so the sweep parallelises and one crate's failure does
@@ -205,21 +226,23 @@ jobs:
           path: openjd-specifications
           persist-credentials: false
 
-      # Per-crate Python reference, from the skill's branch table. expr and model
-      # share openjd-model-for-python @ mainline: EXPR landed there in #318, so
-      # the old personal-fork branch is no longer the reference.
+      # Per-crate Python reference, from the skill's branch table. Every entry is
+      # an OpenJobDescription repo on `mainline`; expr and model share
+      # openjd-model-for-python, where EXPR support landed in #318. No forks and
+      # no feature branches: this job holds Bedrock credentials, so what it
+      # checks out is a trust decision, not a convenience.
       - name: Check out Python reference
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
         with:
-          repository: ${{ fromJSON('{"expr":"OpenJobDescription/openjd-model-for-python","model":"OpenJobDescription/openjd-model-for-python","sessions":"OpenJobDescription/openjd-sessions-for-python","cli":"OpenJobDescription/openjd-cli","snapshots":"mwiebe/deadline-cloud"}')[matrix.crate] }}
-          ref: ${{ fromJSON('{"expr":"mainline","model":"mainline","sessions":"mainline","cli":"mainline","snapshots":"manifest-format-2-prototype"}')[matrix.crate] }}
-          path: ${{ fromJSON('{"expr":"openjd-model-for-python","model":"openjd-model-for-python","sessions":"openjd-sessions-for-python","cli":"openjd-cli","snapshots":"deadline-cloud"}')[matrix.crate] }}
+          repository: ${{ fromJSON('{"expr":"OpenJobDescription/openjd-model-for-python","model":"OpenJobDescription/openjd-model-for-python","sessions":"OpenJobDescription/openjd-sessions-for-python","cli":"OpenJobDescription/openjd-cli"}')[matrix.crate] }}
+          ref: mainline
+          path: ${{ fromJSON('{"expr":"openjd-model-for-python","model":"openjd-model-for-python","sessions":"openjd-sessions-for-python","cli":"openjd-cli"}')[matrix.crate] }}
           persist-credentials: false
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: openjd-rs
 
@@ -255,16 +278,22 @@ jobs:
           python3 -m pip install --quiet --only-binary :all: \
             -r workflow-tooling/.github/workflows/claude-review-requirements.txt
 
+      # role-duration-seconds is what actually bounds the bearer token, so it is
+      # set explicitly rather than left to the action's default. 3600 is the value
+      # the org's review workflow uses, so it is known to be within this role's
+      # MaxSessionDuration; raising it requires raising the role's cap first.
       - name: Assume role for Bedrock
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.AWS_CLAUDE_PR_REVIEW_ROLE }}
           aws-region: us-west-2
+          role-duration-seconds: 3600
 
-      - name: Mint the Bedrock bearer token
+      - name: Mint the Bedrock bearer token and drop the IAM credentials
         run: |
+          set -euo pipefail
           python3 - <<'PY' > /tmp/bedrock-token
-          from bedrock_token_generator import provide_token
+          from aws_bedrock_token_generator import provide_token
           print(provide_token(region="us-west-2"), end="")
           PY
           # Register with the log filter before putting it in the environment, so
@@ -272,6 +301,13 @@ jobs:
           echo "::add-mask::$(cat /tmp/bedrock-token)"
           echo "AWS_BEARER_TOKEN_BEDROCK=$(cat /tmp/bedrock-token)" >> "$GITHUB_ENV"
           rm -f /tmp/bedrock-token
+          # Clear the role's IAM credentials, as the org's review workflow does.
+          # They are only needed to sign the token above, and the next step hands
+          # the agent a shell -- it must not inherit credentials that can call
+          # anything beyond Bedrock model invocation.
+          echo "AWS_ACCESS_KEY_ID=" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=" >> "$GITHUB_ENV"
+          echo "AWS_SESSION_TOKEN=" >> "$GITHUB_ENV"
 
       - name: Run the eval-crate skill
         uses: anthropics/claude-code-action@0b1b62002952733671bde978d429b50b51c51c85 # v1.0.136
@@ -344,7 +380,9 @@ jobs:
             summary are untracked for most crates, so `git clean` would destroy
             the run's only output.
 
-            You have a hard wall-clock budget. Prefer fewer, verified findings
+            You have a hard wall-clock budget of about 50 minutes -- the job is
+            killed at 55 and the Bedrock token expires at 60, so a run that
+            plans for longer produces nothing at all. Prefer fewer, verified findings
             over many unverified ones: if you run short, finish the report and
             the JSON, and name every section you cut in `sections_incomplete`.
           # The agent's cwd is the workspace root and the prompt has it `cd
@@ -376,7 +414,7 @@ jobs:
       # that produced nothing must be visibly red rather than green-with-a-notice.
       - name: Upload the report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: eval-crate-${{ matrix.crate }}
           path: |
@@ -395,128 +433,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         working-directory: openjd-rs
-        # This step reports on a run that may itself have gone wrong, so nothing
-        # in it may be fatal. Actions runs `bash -e {0}` and `set +e` here is
-        # deliberate: with `-e` active, one non-zero exit inside the `{ ... }`
-        # block below aborts the step mid-write, and the PATCH/POST that posts
-        # the comment never runs -- turning a successful eval into a red job
-        # with no output. Every fragile command is additionally guarded.
-        run: |
-          set +e
-          set -uo pipefail
-          # This run writes to a dated path so the agent's `Write` always creates
-          # rather than overwrites; the committed baseline it should be compared
-          # against still lives at the undated one.
-          report="reports/$CRATE-quality-evaluation-report-$RUN_DATE.md"
-          summary="reports/$CRATE-eval-summary-$RUN_DATE.json"
-          previous="reports/$CRATE-quality-evaluation-report.md"
-
-          # Capture the diff ONCE, in a variable. Piping `git diff | head -200`
-          # gives head's early exit -> SIGPIPE -> git exits 141 -> pipefail
-          # propagates it, which with `-e` killed this step for any diff over
-          # 200 lines -- i.e. the common case for a 20-50 KB report.
-          #
-          # `--no-index` because the two sides are different paths and the new
-          # one is untracked; it exits 1 whenever the files differ, which is the
-          # normal case here and must not read as failure.
-          diff_body=""
-          diff_lines=0
-          if [ ! -f "$report" ]; then
-            # No report at all is a different thing from a report with no
-            # changes. Without this case an empty diff against the previous
-            # committed report reads as "no change", announcing a run that
-            # produced nothing as a run that found nothing new.
-            baseline="missing"
-          elif [ -f "$previous" ] && git ls-files --error-unmatch "$previous" >/dev/null 2>&1; then
-            # Tracked AND present: a PR that deletes the baseline leaves it
-            # tracked at HEAD but absent from the worktree, and diffing against a
-            # missing file yields nothing -- which would read as "no change".
-            baseline="tracked"
-            diff_body=$(git diff --no-index --unified=0 -- "$previous" "$report")
-            diff_lines=$(printf '%s' "$diff_body" | grep -c '' || true)
-          else
-            baseline="none"
-          fi
-
-          # The summary is written freehand by the agent under a wall-clock
-          # squeeze, so treat it as untrusted: truncated JSON, a missing
-          # `findings` key, or a string where an array belongs would each make
-          # jq exit non-zero.
-          summary_md=""
-          if [ -f "$summary" ] && jq -e . "$summary" >/dev/null 2>&1; then
-            # `orelse` rather than jq's `//`: `//` takes its right-hand side for
-            # `false` as well as `null`, so `build_clean: false` -- the single
-            # most important thing this comment can say -- would render as "?".
-            summary_md=$(jq -r '
-              def orelse(alt): if . == null then alt else . end;
-              def triple: "high \(.high | orelse("?")), medium \(.medium | orelse("?")), low \(.low | orelse("?"))";
-              "**\(.headline | orelse("no headline"))**\n\n"
-              # Keep the CONFIRMED/PLAUSIBLE split the skill requires: a flat
-              # total reads as though every finding had been verified. Still
-              # render a flat `findings` if the agent wrote one, rather than
-              # dropping the numbers entirely.
-              + (if (.findings.confirmed // .findings.plausible) != null
-                 then "- confirmed: \((.findings.confirmed | orelse({})) | triple)\n"
-                    + "- plausible: \((.findings.plausible | orelse({})) | triple)\n"
-                 else "- findings (unsplit): \((.findings | orelse({})) | triple)\n" end)
-              + "- withdrawn by verification: \(.withdrawn | orelse("n/a"))\n"
-              + "- build clean: \(.build_clean | orelse("?")) | tests pass: \(.tests_pass | orelse("?"))"
-              + (try ((.sections_incomplete | orelse([])) | if length > 0 then "\n\n> Incomplete sections: " + join(", ") else "" end) catch "")
-            ' "$summary" 2>/dev/null)
-          fi
-          if [ -z "$summary_md" ]; then
-            if [ -f "$summary" ]; then
-              summary_md="_The run produced an unreadable summary; see the log._"
-            else
-              summary_md="_The run did not produce a summary; see the log._"
-            fi
-          fi
-
-          body=$(mktemp)
-          {
-            echo "<!-- eval-crate:$CRATE -->"
-            echo "## eval-crate: \`openjd-$CRATE\`"
-            echo
-            printf '%s\n' "$summary_md"
-            echo
-            # What THIS PR changed relative to the committed baseline is the
-            # reviewable signal; the absolute report is large and mostly stable.
-            if [ "$baseline" = "missing" ]; then
-              echo "_This run produced no report at \`$report\`; see the log._"
-            elif [ "$baseline" = "none" ]; then
-              echo "_New report; no committed baseline to diff against._"
-            elif [ "$diff_lines" -eq 0 ]; then
-              echo "_No change vs the committed baseline report._"
-            else
-              echo "<details><summary>Diff vs the committed baseline report</summary>"
-              echo; echo '```diff'
-              printf '%s\n' "$diff_body" | head -200
-              echo '```'
-              if [ "$diff_lines" -gt 200 ]; then
-                echo; echo "_Diff truncated at 200 of $diff_lines lines; see the artifact for the full report._"
-              fi
-              echo "</details>"
-            fi
-            echo
-            echo "[Full report artifact]($RUN_URL) · advisory only, not a merge gate."
-          } > "$body"
-          # Upsert so repeated runs edit one comment instead of stacking, and
-          # paginate since the default page is 30 and a re-labelled PR exceeds it.
-          # `--paginate` applies --jq per page and concatenates, so the filter
-          # emits one id per line across all pages; `tail -1` reduces that to the
-          # most recent (the API returns comments oldest-first). Do NOT add
-          # `--slurp` to get a single document -- gh rejects it outright with
-          # "the --slurp option is not supported with --jq", which under the
-          # `2>/dev/null` below would silently leave $existing empty and POST a
-          # new comment every run.
-          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
-                      --jq ".[] | select(.body | startswith(\"<!-- eval-crate:$CRATE -->\")) | .id" \
-                      2>/dev/null | tail -1)
-          if [ -n "$existing" ]; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@"$body"
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$body"
-          fi
+        run: bash .github/workflows/scripts/eval_crate_pr_comment.sh
 
   # ---------------------------------------------------------------------------
   # One writer for the evals branch. Collecting the matrix's artifacts here means
@@ -549,90 +466,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download every crate's report
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: eval-crate-*
         continue-on-error: true # a fully failed sweep leaves nothing to download
 
       - name: Commit the reports onto the evals branch
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          found=(artifacts/eval-crate-*/*-quality-evaluation-report-*.md)
-          if [ ${#found[@]} -eq 0 ]; then
-            echo "::warning::no reports were produced; nothing to publish"; exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Branch off the DEFAULT branch, not whatever ref dispatched this run:
-          # a dispatch from a feature branch would otherwise create the evals
-          # branch there and open a PR carrying that branch's commits.
-          if git fetch origin "$BRANCH:$BRANCH" 2>/dev/null; then
-            git checkout "$BRANCH"
-            git rebase "origin/$DEFAULT_BRANCH" || {
-              echo "::warning::evals branch would not rebase; recreating from $DEFAULT_BRANCH"
-              git rebase --abort || true
-              git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
-            }
-          else
-            git checkout -b "$BRANCH" "origin/$DEFAULT_BRANCH"
-          fi
-
-          mkdir -p reports
-          landed=()
-          for report in "${found[@]}"; do
-            # `<crate>-quality-evaluation-report-<date>.md`. Strip the whole
-            # known middle in ONE pattern rather than peeling the date off
-            # separately: the date contains dashes, so `${base%-*}` removes only
-            # `-14` and nothing matches afterwards. This form also leaves a
-            # dashed crate name intact.
-            base=$(basename "$report" .md)
-            crate=${base%-quality-evaluation-report-*}
-            if [ "$crate" = "$base" ]; then
-              echo "::warning::cannot parse a crate out of $report; skipping"
-              continue
-            fi
-            date_part=${base##*-quality-evaluation-report-}
-            summary="$(dirname "$report")/$crate-eval-summary-$date_part.json"
-            # Committed under the undated name: the evals branch carries the
-            # current report per crate and git carries the history, so the weekly
-            # sweep does not accumulate a file per run. The dated name exists so
-            # the agent's `Write` never has to overwrite a file it has not read.
-            cp "$report" "reports/$crate-quality-evaluation-report.md"
-            # A missing summary must be visible, not papered over with the
-            # previous run's file: remove the committed one so the absence shows.
-            rm -f "reports/$crate-eval-summary.json"
-            if [ -f "$summary" ]; then
-              cp "$summary" "reports/$crate-eval-summary.json"
-            else
-              echo "::warning::$crate produced no summary; its stale summary was removed"
-            fi
-            landed+=("$crate")
-          done
-
-          git add -A reports
-          if git diff --cached --quiet; then
-            echo "no report changed; nothing to push"; exit 0
-          fi
-          body=$(for c in "${landed[@]}"; do
-                   jq -r --arg c "$c" '"- \($c): \(.headline)"' \
-                     "reports/$c-eval-summary.json" 2>/dev/null || echo "- $c: report refreshed"
-                 done)
-          git commit -s -m "chore(reports): Refresh crate quality evaluations" \
-                        -m "$body" \
-                        -m "Generated by the eval-crate skill from ${{ github.sha }}."
-          # Single writer, so no retry loop is needed -- but force-with-lease
-          # rather than force, so an unexpected concurrent writer is not clobbered.
-          git push --force-with-lease origin "$BRANCH"
-
-          # Gate on an OPEN PR: `gh pr view` also succeeds for closed and merged
-          # ones, which would mean no PR is ever reopened after a merge.
-          open=$(gh pr list --head "$BRANCH" --state open --json number --jq length)
-          if [ "$open" -eq 0 ]; then
-            gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
-              --title "chore(reports): Refresh crate quality evaluations" \
-              --body "Automated \`eval-crate\` output, refreshed by the weekly sweep. Findings are tagged CONFIRMED or PLAUSIBLE by the skill's verification pass; each summary JSON records how many were withdrawn. Advisory -- review the findings, do not merge blindly."
-          fi
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: bash .github/workflows/scripts/eval_crate_publish.sh

@@ -103,9 +103,24 @@ Yanks are not automated by release-plz.
    `cargo publish -p <new-crate>` in dependency order, then register Trusted
    Publishing for it on crates.io pointing at this repo and the
    `release-plz.yml` workflow.
+4. Add the crate to the two hand-maintained crate lists (see
+   [Crate lists to keep in sync](#crate-lists-to-keep-in-sync)).
 
 ## Adding a new non-publishable crate
 
 Add `publish = false` to `[package]` in its `Cargo.toml`, and an entry in
 `release-plz.toml` with `publish = false`, `release = false`,
-`changelog_update = false`.
+`changelog_update = false`. Then update the crate lists below.
+
+## Crate lists to keep in sync
+
+Two places enumerate the crates by hand and are not derived from the workspace,
+so a new crate is invisible to them until it is added:
+
+- The crates table in [README.md](README.md#crates), with the crate's status and
+  a one-line description.
+- `.github/workflows/eval_crate.yml`, which names the crates in four spots: the
+  `workflow_dispatch` `options`, the schedule's crate array, the `case` that
+  validates an `eval-crate:<crate>` label, and the Python-reference maps. A crate
+  with no Python counterpart to compare against does not belong in that workflow
+  at all — leave it out rather than adding a placeholder.
