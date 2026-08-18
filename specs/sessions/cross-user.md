@@ -73,16 +73,15 @@ directories, never located through `PATH`. Session cleanup resolves `rm` the sam
 way, and skips the cross-user removal with a warning if either binary is absent
 rather than falling back to a bare name.
 
-The exposure being closed differs from the Python reference implementation, and
-the difference is worth stating so an auditor does not have to re-derive it.
-There, the job's environment is merged over the parent's and handed to the
-`Popen` call that launches `sudo`, making a bare name directly hijackable.
+A bare command name resolves through whatever `PATH` the spawning process holds,
+so it is worth stating why that is not a live exploit here, rather than leaving an
+auditor to re-derive it.
 
-Here it is not, for two separate reasons. `CrossUserHelper::spawn` sets no
-environment, so the helper inherits the session process's own and `Command::new`
-resolves against the parent's `PATH`. And `sudo` runs once at helper startup,
-before any job action exists; per-action environments arrive later over the
-helper's stdin protocol, so they cannot influence the argv that located `sudo`.
+Two separate reasons. `CrossUserHelper::spawn` sets no environment, so the helper
+inherits the session process's own and `Command::new` resolves against the
+parent's `PATH`. And `sudo` runs once at helper startup, before any job action
+exists; per-action environments arrive later over the helper's stdin protocol, so
+they cannot influence the argv that located `sudo`.
 
 It is *not* the case that job environments are only applied after an
 `env_clear()`. That holds on the same-user path in `subprocess.rs`, but the
@@ -91,9 +90,10 @@ helper's runner layers the action environment onto whatever it inherited, and no
 channel, not on clearing.
 
 Resolving from trusted directories is therefore hardening in this crate rather
-than the fix for a live exploit: it removes an unstated invariant (that no caller
-ever adds an environment to that `Command`) whose accidental violation would
-reintroduce the Python behaviour silently. See the
+than the fix for a live exploit: it removes an unstated invariant -- that no
+caller ever adds an environment to that `Command`, and that the agent's own
+`PATH` is trustworthy -- which an edit to an unrelated line could violate
+silently. See the
 [Authentication Token](embedded-cross-user-helper.md#authentication-token)
 section of the helper spec for rationale and verification details.
 

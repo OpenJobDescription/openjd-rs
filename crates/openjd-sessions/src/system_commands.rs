@@ -5,21 +5,16 @@
 //! Resolution of system command names to absolute paths, without consulting `PATH`.
 //!
 //! The problem: `Command::new("sudo")` resolves a bare name through a `PATH`,
-//! which makes correctness depend on whose `PATH` that is. Be precise about the
-//! answer here, because it differs from the Python implementation.
+//! which makes correctness depend on whose `PATH` that is. Be precise about what
+//! that means here, because this crate's exposure is narrower than the general
+//! shape of the problem suggests.
 //!
-//! In `openjd-sessions-for-python`, the job's environment is merged over the
-//! parent's and handed to the `Popen` call that launches `sudo`. A bare name there
-//! resolves through a `PATH` the job wrote, so a job that supplies its own `sudo`
-//! has it run at the session's privilege level.
-//!
-//! This crate is not in that position, for two reasons that are worth separating
-//! because only the first is about the environment. `CrossUserHelper::spawn` sets
-//! no environment on its `Command`, so the helper inherits the session process's
-//! own and `Command::new` resolves against the parent's `PATH`. And `sudo` is
-//! spawned once when the helper starts, before any job action exists; per-action
-//! environments travel to the helper over its stdin protocol afterwards, so they
-//! cannot reach the argv that located `sudo`.
+//! Two reasons, worth separating because only the first is about the environment.
+//! `CrossUserHelper::spawn` sets no environment on its `Command`, so the helper
+//! inherits the session process's own and `Command::new` resolves against the
+//! parent's `PATH`. And `sudo` is spawned once when the helper starts, before any
+//! job action exists; per-action environments travel to the helper over its stdin
+//! protocol afterwards, so they cannot reach the argv that located `sudo`.
 //!
 //! Note it is *not* true that job environments are only ever applied after an
 //! `env_clear()`. That holds on the same-user path (`subprocess.rs`), but the
@@ -35,8 +30,9 @@
 //!   later would change the security of a line nobody edited.
 //! * It assumes the session process's own `PATH` is trustworthy, which is a
 //!   property of how the agent is launched, not of this crate.
-//! * It keeps the two implementations answering the same question the same way, so
-//!   a reader does not have to derive the difference to audit either one.
+//! * It keeps this crate and `openjd-sessions-for-python` answering the same
+//!   question the same way, so an auditor does not have to derive the difference
+//!   between them to audit either one.
 //!
 //! The solution: names are resolved here, by scanning a fixed list of trusted
 //! absolute directories.
@@ -58,10 +54,14 @@ use std::path::{Path, PathBuf};
 
 /// Absolute directories searched for system commands, in order.
 ///
-/// The order is deliberate. On NixOS the setuid `sudo` wrapper lives in
-/// `/run/wrappers/bin` and the `/usr/bin` copy is either absent or not setuid, so
-/// the wrapper directory must be consulted first. Everywhere else that directory
-/// does not exist and costs one `stat`.
+/// The order matters in exactly one place, and it is not against `/usr/bin`. On
+/// NixOS `/usr/bin` holds only `env`, so there is no `/usr/bin/sudo` for the wrapper
+/// directory to beat. The real competitor is `/run/current-system/sw/bin`, which also
+/// holds a `sudo` -- a non-setuid one, because nix store paths cannot carry the
+/// setuid bit. Only `/run/wrappers/bin/sudo` can elevate, so the wrapper directory
+/// must precede the system profile; that pairing is what
+/// `setuid_wrapper_precedes_the_nixos_system_profile` pins. On every other platform
+/// both `/run` entries are absent and cost one `stat` each.
 ///
 /// `sbin` entries are last: on non-usr-merged distributions some commands exist
 /// only under `/sbin`.
@@ -383,20 +383,35 @@ mod tests {
     }
 
     #[test]
-    fn setuid_wrapper_directory_precedes_usr_bin() {
-        // On NixOS /usr/bin/sudo is absent or not setuid; the wrapper must win.
+    fn setuid_wrapper_precedes_the_nixos_system_profile() {
+        // The ordering that decides which `sudo` NixOS resolves.
+        //
+        // Not /usr/bin. On NixOS /usr/bin holds only `env`, so there is no
+        // /usr/bin/sudo for the wrapper to beat and an assertion against it holds
+        // vacuously -- it would stay green under a reordering that breaks the
+        // invariant it is named for.
+        //
+        // The real competitor is /run/current-system/sw/bin. With the default
+        // security.sudo.enable, both exist: a mode 0755 store symlink in the system
+        // profile that is *not* setuid, and the setuid wrapper. Only the wrapper
+        // works. If the profile came first, resolution would succeed and the spawn
+        // would then fail with "sudo: must be owned by uid 0 and have the setuid bit
+        // set" -- worse than not finding it, because system_command_path never gets
+        // to produce its explanatory error. CI runs Linux and macOS, so nothing else
+        // here would catch it.
         let wrapper = TRUSTED_SYSTEM_DIRECTORIES
             .iter()
             .position(|d| *d == "/run/wrappers/bin")
             .expect("/run/wrappers/bin is searched");
-        let usr_bin = TRUSTED_SYSTEM_DIRECTORIES
+        let profile = TRUSTED_SYSTEM_DIRECTORIES
             .iter()
-            .position(|d| *d == "/usr/bin")
-            .expect("/usr/bin is searched");
+            .position(|d| *d == "/run/current-system/sw/bin")
+            .expect("/run/current-system/sw/bin is searched");
 
         assert!(
-            wrapper < usr_bin,
-            "wrapper directory must be searched first"
+            wrapper < profile,
+            "the setuid wrapper must precede the NixOS system profile, which also \
+             contains a non-setuid sudo"
         );
     }
 }
