@@ -61,16 +61,31 @@
 # a workflow that hands an agent `cargo` and `Write` is exactly the caller it is
 # meant to stop. Widening it would delete the guarantee for the reviewer too.
 #
-# So the role this workflow needs is a SEPARATE one, in the same isolated
-# Bedrock-only account, pinned to this repo and to this file:
+# The role this workflow needs is therefore a separate one, pinned to this repo
+# and this file:
 #
 #   sub              LIKE repo:OpenJobDescription/openjd-rs:*
 #   job_workflow_ref LIKE OpenJobDescription/openjd-rs/.github/workflows/eval_crate.yml@*
 #   aud              ==   sts.amazonaws.com
 #   maxSessionDuration    3600
 #
-# Its ARN goes in `AWS_EVAL_CRATE_BEDROCK_ROLE`. Until that secret exists every
+# Its ARN goes in `AWS_EVAL_CRATE_ROLE`, and until that secret exists every
 # trigger no-ops with a notice rather than failing -- see the `plan` job.
+#
+# THAT ROLE IS NOT JUST PAPERWORK, and this workflow should not be treated as
+# ready the moment it appears. The reviewer's role is governed by a threat model
+# whose load-bearing mitigations this workflow contradicts by construction: its
+# agent holds arbitrary shell (`cargo`, `python3`) where that model allows only
+# read-only tools; it deliberately compiles and runs repository code where that
+# model forbids executing contributor content at all; and in PR mode it runs this
+# file as it exists on the PR branch, where that model routes anything holding
+# credentials through a base-branch reusable workflow for exactly that reason.
+# Same-repo-plus-label gating substitutes a trusted-contributor assumption for
+# those controls. That is a defensible trade for a maintainer-triggered quality
+# report, but it is a DIFFERENT trade, and it belongs in its own threat-model
+# decision (and plausibly its own AWS account) rather than inheriting one written
+# for a read-only reviewer. Until that decision is made and recorded, the correct
+# state of this workflow is the one it is in: gated off.
 #
 # WHY PR MODE IS LABEL-GATED AND SAME-REPO ONLY
 #
@@ -159,7 +174,7 @@ jobs:
       # Presence only -- the value is never echoed.
       - id: auth
         env:
-          BEDROCK_ROLE: ${{ secrets.AWS_EVAL_CRATE_BEDROCK_ROLE }}
+          BEDROCK_ROLE: ${{ secrets.AWS_EVAL_CRATE_ROLE }}
         run: |
           set -euo pipefail
           if [ -n "${BEDROCK_ROLE:-}" ]; then
@@ -185,7 +200,7 @@ jobs:
           # when someone asks why the sweep has not run.
           if [ "$CONFIGURED" != "true" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "reason=AWS_EVAL_CRATE_BEDROCK_ROLE is not set; see the workflow header for the role this needs" >> "$GITHUB_OUTPUT"
+            echo "reason=AWS_EVAL_CRATE_ROLE is not set; see the workflow header for the role this needs" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$EVENT" in
@@ -340,7 +355,7 @@ jobs:
       - name: Assume role for Bedrock
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ secrets.AWS_EVAL_CRATE_BEDROCK_ROLE }}
+          role-to-assume: ${{ secrets.AWS_EVAL_CRATE_ROLE }}
           aws-region: us-west-2
           role-duration-seconds: 3600
 
