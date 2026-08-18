@@ -13,6 +13,8 @@
 mod test_arithmetic;
 #[path = "integration/test_ast_validation.rs"]
 mod test_ast_validation;
+#[path = "integration/test_coercion_drift.rs"]
+mod test_coercion_drift;
 #[path = "integration/test_comparison.rs"]
 mod test_comparison;
 #[path = "integration/test_error_formatting.rs"]

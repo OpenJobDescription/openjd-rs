@@ -1513,3 +1513,79 @@ fn parse_nesting_at_limit_ok() {
     }
     assert!(ExprType::parse(&s).is_ok());
 }
+
+// ══════════════════════════════════════════════════════════════
+// satisfies — directional, unlike match_type
+// ══════════════════════════════════════════════════════════════
+
+fn t(s: &str) -> ExprType {
+    ExprType::parse(s).unwrap()
+}
+
+/// The relation is directional: that is the whole point of having it
+/// alongside `match_type`, which is a symmetric unification test.
+#[test]
+fn satisfies_is_directional_where_match_type_is_symmetric() {
+    assert!(t("int").satisfies(&t("any")));
+    assert!(!t("any").satisfies(&t("int")));
+    // match_type reports both directions as a match, which is why it is
+    // the wrong tool for deciding whether a value needs coercion.
+    assert!(t("int").match_type(&t("any")).is_some());
+    assert!(t("any").match_type(&t("int")).is_some());
+}
+
+#[test]
+fn satisfies_union_target_needs_only_one_member() {
+    assert!(t("int").satisfies(&t("int | string")));
+    assert!(t("string").satisfies(&t("int | string")));
+    assert!(t("nulltype").satisfies(&t("int?")));
+    assert!(!t("bool").satisfies(&t("int | string")));
+}
+
+#[test]
+fn satisfies_union_source_needs_every_member() {
+    // Either possibility could be the runtime type, so both must be
+    // acceptable.
+    assert!(t("int | string").satisfies(&t("int | string")));
+    assert!(t("int | string").satisfies(&t("any")));
+    assert!(!t("int | string").satisfies(&t("int")));
+}
+
+#[test]
+fn satisfies_list_is_covariant_in_its_element() {
+    assert!(t("list[int]").satisfies(&t("list[any]")));
+    assert!(t("list[int]").satisfies(&t("list[int | string]")));
+    assert!(!t("list[int]").satisfies(&t("list[float]")));
+    assert!(!t("list[any]").satisfies(&t("list[int]")));
+    assert!(t("list[list[int]]").satisfies(&t("list[list[any]]")));
+}
+
+/// None of these denote a set of runtime values, so nothing satisfies them.
+#[test]
+fn satisfies_rejects_targets_that_are_not_value_sets() {
+    for target in ["T", "T1", "T2", "T3", "noreturn", "unresolved[int]"] {
+        let target = t(target);
+        for source in ["int", "string", "list[int]", "any"] {
+            assert!(!t(source).satisfies(&target), "{source} -> {target}");
+        }
+    }
+    // A list parameterized by one of them is likewise unusable, which the
+    // element-wise rule reports rather than the top-level check.
+    assert!(!t("list[int]").satisfies(&t("list[T1]")));
+}
+
+/// An unresolved source delegates to its constraint, since that constraint
+/// is what the resolved value's type will be.
+#[test]
+fn satisfies_unresolved_source_delegates_to_constraint() {
+    assert!(t("unresolved[int]").satisfies(&t("int | string")));
+    assert!(!t("unresolved[int]").satisfies(&t("string")));
+}
+
+/// A source of unknown type is not *known* to belong to any narrower target.
+#[test]
+fn satisfies_unknown_source_does_not_satisfy_narrower_target() {
+    assert!(!t("any").satisfies(&t("int")));
+    assert!(!t("T1").satisfies(&t("int")));
+    assert!(t("any").satisfies(&t("any")));
+}

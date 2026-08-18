@@ -533,6 +533,16 @@ impl ExprType {
     /// (no `any`, `union`, `unresolved`, type variable, or signature).
     pub fn is_concrete(&self) -> bool;
 
+    // ── Satisfaction (for target-type coercion) ──
+
+    /// True if a value of this type is already acceptable where `target`
+    /// is required, so no conversion is needed. **Directional**, unlike
+    /// [`match_type`]: `int` satisfies `any`, but `any` does not satisfy
+    /// `int`. Union targets need one member satisfied; union sources need
+    /// every member satisfied; `list[T]` is covariant in `T`.
+    /// See `specs/expr/type-system.md` § Satisfaction.
+    pub fn satisfies(&self, target: &ExprType) -> bool;
+
     // ── Signature access (debug-asserts on `code == Signature`) ──
     pub fn sig_params(&self) -> &[ExprType];
     pub fn sig_return(&self) -> &ExprType;
@@ -702,6 +712,17 @@ impl ExprValue {
 
     /// Coerce `self` toward `target`. Consuming call; errors pass the
     /// value back on failure via the error message, not as a type.
+    ///
+    /// Two steps: if the value's type already satisfies `target` (see
+    /// [`ExprType::satisfies`]) it is returned unchanged, so the result may
+    /// keep the *source* type — coercing a `list[int]` to `list[any]` yields
+    /// a `list[int]`. Otherwise the non-destructive conversion table is
+    /// applied toward each of the target's candidate destinations, non-list
+    /// before list. Targets that are not sets of runtime values (type
+    /// variables, `noreturn`, `unresolved[T]`, signatures) are rejected.
+    /// In an unresolved source constraint, unbound type variables read as
+    /// wildcards: `unresolved[list[T1]]` coerces as `unresolved[list[any]]`.
+    /// See `specs/expr/values.md` § Coercion.
     pub fn coerce(
         self, target: &ExprType, path_format: PathFormat,
     ) -> Result<Self, String>;
