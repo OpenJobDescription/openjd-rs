@@ -99,15 +99,12 @@ fn is_executable_file(path: &Path) -> bool {
     if !metadata.is_file() {
         return false;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    // No cfg branch here. This module is declared `#[cfg(unix)]` in lib.rs, so a
+    // non-unix build never compiles it. A `cfg(not(unix))` arm returning `true`
+    // would be dead code giving the opposite answer, which a reader would have to
+    // rule out before trusting the executable check.
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
 }
 
 /// Resolve `name` within an explicit list of directories.
@@ -195,7 +192,8 @@ mod tests {
         assert!(find_system_command_in("openjd-test-cmd", &[dir_s]).is_some());
     }
 
-    /// This module's own source, minus its tests, for [`never_reads_the_environment`].
+    /// This module's own source, minus its tests, for
+    /// [`production_source_contains_no_environment_lookup`].
     fn production_source() -> &'static str {
         let source = include_str!("system_commands.rs");
         // Split off the test module, whose own assertions mention the very tokens
@@ -370,7 +368,11 @@ mod tests {
         // the list as untouchable.
         for (directory, why) in [
             ("/run/wrappers/bin", "NixOS: the only setuid sudo"),
-            ("/run/current-system/sw/bin", "NixOS: setsid, pgrep, rm"),
+            // rm only. This crate resolves exactly two commands, sudo and rm:
+            // setsid is called in-process via nix::libc::setsid() from pre_exec, and
+            // pgrep is not used here at all. Naming commands the crate never
+            // resolves would undercut the point of the assertion.
+            ("/run/current-system/sw/bin", "NixOS: rm"),
             ("/usr/local/bin", "FreeBSD and other BSDs: sudo from ports"),
         ] {
             assert!(

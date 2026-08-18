@@ -273,8 +273,10 @@ impl CrossUserHelper {
     ) -> Result<(Self, std::fs::File), SessionError> {
         let auth_token = generate_auth_token()?;
         // Resolved from a fixed list of trusted directories rather than through
-        // PATH, which the job influences. Bound once and reused below so the
-        // error message names the same binary that was actually launched.
+        // PATH. Note the job does not influence the PATH used here -- see the
+        // system_commands module docs for why this is hardening rather than the fix
+        // for a reachable hole. Bound once and reused below so the error message
+        // names the same binary that was actually launched.
         let sudo = crate::system_commands::system_command_path("sudo").map_err(|source| {
             SessionError::SubprocessStart {
                 command: "sudo".to_string(),

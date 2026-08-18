@@ -1047,26 +1047,46 @@ impl Session {
                         // hardening rather than a privilege boundary: it stops
                         // the removal depending on that user's own login-shell
                         // PATH.
-                        let commands = crate::system_commands::find_system_command("sudo")
-                            .zip(crate::system_commands::find_system_command("rm"));
-                        if !files.is_empty() && commands.is_none() {
-                            // Skipping silently would be the worst outcome here. The
-                            // fallback below is std::fs::remove_dir_all under a
-                            // `let _ =`, which cannot remove files owned by the job
-                            // user, so the session directory leaks with job data
-                            // still in it and nothing on the record explains why.
-                            session_log!(
-                                warn,
-                                &self.session_id,
-                                LogContent::FILE_PATH,
-                                "Could not locate sudo and rm in a trusted directory; \
-                                 skipping cross-user cleanup of {} file(s) in {}. Files \
-                                 owned by the job user may remain.",
-                                files.len(),
-                                self.working_directory.display()
-                            );
+                        // Looked up separately rather than zipped, so the warning can
+                        // name the one that is actually missing. `sudo` absent and
+                        // `rm` absent are different host problems with different
+                        // fixes, and reporting "sudo and rm" would describe the less
+                        // likely case of the two: `sudo` has already resolved once at
+                        // helper start by the time cleanup runs.
+                        let sudo = crate::system_commands::find_system_command("sudo");
+                        let rm = crate::system_commands::find_system_command("rm");
+                        if !files.is_empty() {
+                            let missing: Vec<&str> = [("sudo", &sudo), ("rm", &rm)]
+                                .iter()
+                                .filter(|(_, found)| found.is_none())
+                                .map(|(name, _)| *name)
+                                .collect();
+                            if !missing.is_empty() {
+                                // Skipping silently would be the worst outcome here.
+                                // The fallback below is std::fs::remove_dir_all under
+                                // a `let _ =`, which cannot remove files owned by the
+                                // job user, so the session directory leaks with job
+                                // data still in it and nothing explains why.
+                                //
+                                // PROCESS_CONTROL as well as FILE_PATH: per
+                                // logging.rs, only EXCEPTION_INFO, PROCESS_CONTROL and
+                                // HOST_INFO reach the worker log, so a FILE_PATH-only
+                                // record would go to the session stream alone and the
+                                // operator who needs this would never see it.
+                                session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+                                    "Could not locate {} in a trusted directory; \
+                                     skipping cross-user cleanup of {} file(s) in {}. \
+                                     Files owned by the job user may remain.",
+                                    missing.join(" or "),
+                                    files.len(),
+                                    self.working_directory.display()
+                                );
+                            }
                         }
-                        if let (false, Some((sudo, rm))) = (files.is_empty(), commands) {
+                        if let (false, (Some(sudo), Some(rm))) = (files.is_empty(), (sudo, rm)) {
                             let mut args = vec![
                                 "-u".to_string(),
                                 user.user().to_string(),
@@ -1098,7 +1118,7 @@ impl Session {
                                 Ok(status) => session_log!(
                                     warn,
                                     &self.session_id,
-                                    LogContent::FILE_PATH,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
                                     "Cross-user cleanup of {} exited {}; files owned by \
                                      the job user may remain.",
                                     self.working_directory.display(),
@@ -1107,7 +1127,7 @@ impl Session {
                                 Err(e) => session_log!(
                                     warn,
                                     &self.session_id,
-                                    LogContent::FILE_PATH,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
                                     "Could not run cross-user cleanup of {}: {e}; files \
                                      owned by the job user may remain.",
                                     self.working_directory.display()
