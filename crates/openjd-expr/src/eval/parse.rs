@@ -554,10 +554,30 @@ fn parse_inner(
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
 
     // Wrap multi-line expressions in parentheses for implicit line continuation.
-    // NOTE: the wrap shifts every AST offset by +1 relative to the unwrapped
-    // expression text. Each consumer of AST ranges compensates independently
-    // (error.rs caret rendering, evaluator.rs float passthrough) — if a third
-    // consumer appears, centralize the adjustment instead of copying it again.
+    //
+    // NOTE: the wrap shifts every offset the parser reports — AST ranges and
+    // error locations alike — by +1 relative to the unwrapped expression text.
+    // There is no single place that undoes it; each consumer compensates on its
+    // own, and one of them does not compensate at all:
+    //
+    //   - `Display for ExpressionError` (error.rs:314) subtracts 1 from the
+    //     column when the expression contains a newline.
+    //   - `eval_number`'s float passthrough (evaluator.rs:508) subtracts a
+    //     shift derived the same way, before slicing the unwrapped source.
+    //   - the keyword retry below subtracts 1 from the parser's error offset.
+    //   - `compute_caret_offset` (error.rs:403) does NOT compensate. It indexes
+    //     `expr.as_bytes()` with raw, still-shifted AST offsets while `expr` is
+    //     the unwrapped source, so its backwards operator scan reads bytes one
+    //     position right of the intended ones. The BinOp arm is affected: the
+    //     caret for a multi-line `**` or `//` lands on the operator's second
+    //     character. The Attribute/Call/Subscript arms are unaffected because
+    //     they subtract two shifted offsets from each other, which cancels.
+    //
+    // Do not read this list as "handled". Centralizing the adjustment — record
+    // the shift on ParsedExpression at parse time, or normalize AST ranges once
+    // after a successful multi-line parse — would fix the caret defect and
+    // remove three copies of the same `- 1`, but it changes the diagnostic
+    // output of every multi-line BinOp error and so needs its own tests.
     let is_multiline = source.contains('\n');
 
     loop {

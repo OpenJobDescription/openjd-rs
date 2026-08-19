@@ -579,6 +579,27 @@ fn power_error_caret() {
 }
 
 #[test]
+fn single_line_two_char_operator_caret_points_at_first_char() {
+    // Baseline for the multi-line defect below: on one line, the caret sits on
+    // the first character of a two-character operator.
+    assert_err("1 ** 'a'", &["  1 ** 'a'\n", "  ~~^~~~~~"]);
+    assert_err("1 // 'a'", &["  1 // 'a'\n", "  ~~^~~~~~"]);
+}
+
+#[test]
+#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
+            multi-line paren-wrap offset shift, so its backwards operator scan \
+            reads bytes one position to the right and the caret for a \
+            multi-line ** or // lands on the operator's second character \
+            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
+            the NOTE in eval/parse.rs::parse_inner for the centralization that \
+            fixes it. Un-ignore then."]
+fn multiline_two_char_operator_caret_points_at_first_char() {
+    assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
+    assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
+}
+
+#[test]
 fn fail_function_caret() {
     assert_err(
         "fail('boom')",
