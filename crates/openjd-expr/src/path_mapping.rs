@@ -110,23 +110,33 @@ impl PathMappingRule {
         Some(result)
     }
 
-    fn apply_filesystem(&self, path: &str, case_insensitive: bool, sep: char) -> Option<String> {
+    /// Compare and rewrite a filesystem path against this rule.
+    ///
+    /// `windows` names the semantics of the rule's *source* format, and drives
+    /// four decisions that all follow from it: which characters separate
+    /// components, whether components compare case-insensitively, what counts
+    /// as a rooted path, and what counts as a trailing separator. This
+    /// parameter used to be called `case_insensitive` and was reused for the
+    /// other three; the values coincide today because only `PathFormat::Windows`
+    /// is case-insensitive, but the concepts are distinct, so it is named for
+    /// the format rather than for one of its consequences.
+    fn apply_filesystem(&self, path: &str, windows: bool, sep: char) -> Option<String> {
         // A relative path must never match an absolute rule (or vice versa).
         // Python's pathlib.is_relative_to gets this from the root in .parts;
         // split_path_parts discards it, so compare rootedness explicitly.
-        if is_rooted(&self.source_path, case_insensitive) != is_rooted(path, case_insensitive) {
+        if is_rooted(&self.source_path, windows) != is_rooted(path, windows) {
             return None;
         }
 
-        let source_parts = split_path_parts(&self.source_path);
-        let path_parts = split_path_parts(path);
+        let source_parts = split_path_parts(&self.source_path, windows);
+        let path_parts = split_path_parts(path, windows);
 
         if path_parts.len() < source_parts.len() {
             return None;
         }
 
         for (sp, pp) in source_parts.iter().zip(path_parts.iter()) {
-            let matches = if case_insensitive {
+            let matches = if windows {
                 sp.eq_ignore_ascii_case(pp)
             } else {
                 sp == pp
@@ -143,7 +153,7 @@ impl PathMappingRule {
             result.push_str(part);
         }
 
-        if has_trailing_slash(path, case_insensitive) && !result.ends_with(sep) {
+        if has_trailing_slash(path, windows) && !result.ends_with(sep) {
             result.push(sep);
         }
 
@@ -151,12 +161,19 @@ impl PathMappingRule {
     }
 }
 
-/// Split a path into parts, handling both `/` and `\` separators.
+/// Split a path into parts on the separators the format actually recognizes.
+///
+/// Windows accepts both `/` and `\`. POSIX accepts only `/` — there, a
+/// backslash is an ordinary filename character, so `home\user` is one
+/// component and not two. Splitting on `\` unconditionally let a POSIX rule
+/// for `/home/user` match the input `/home\user/f`, which Python rejects:
+/// `PurePosixPath("/home\\user/f").parts` is `('/', 'home\\user', 'f')` and
+/// `is_relative_to("/home/user")` is `False`.
+///
 /// Preserves drive letters as the first part (e.g., "C:" from "C:\foo").
-fn split_path_parts(path: &str) -> Vec<&str> {
-    path.split(&['/', '\\'][..])
-        .filter(|s| !s.is_empty())
-        .collect()
+fn split_path_parts(path: &str, windows: bool) -> Vec<&str> {
+    let separators: &[char] = if windows { &['/', '\\'] } else { &['/'] };
+    path.split(separators).filter(|s| !s.is_empty()).collect()
 }
 
 /// Whether a path is anchored at a root separator. Drive-anchored Windows
