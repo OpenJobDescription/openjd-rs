@@ -197,9 +197,15 @@ pub fn count_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 /// Negative values mean "no limit", matching Python's `str.split`.
 /// (`re_split` deliberately differs: Python's `re.split` treats negative as
 /// "no splits" and 0 as unlimited — see `functions/regex.rs`.)
+///
+/// The `i64 -> usize` conversion saturates rather than casting: on 32-bit
+/// targets `usize` is narrower than `i64`, and a plain `as` cast would wrap a
+/// large maxsplit down to a small one (or to 0) and silently split too few
+/// times. Saturating to `usize::MAX` keeps "larger than the string" behaving
+/// like "no limit" on every target width.
 fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
     a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) if *n >= 0 => Some(*n as usize),
+        ExprValue::Int(n) if *n >= 0 => Some(usize::try_from(*n).unwrap_or(usize::MAX)),
         _ => None,
     })
 }
@@ -223,7 +229,7 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let maxsplit = maxsplit_arg(a);
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => s
-            .splitn(n + 1, sep)
+            .splitn(n.saturating_add(1), sep)
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
         None => s
@@ -253,7 +259,7 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => {
             let mut v: Vec<_> = s
-                .rsplitn(n + 1, sep)
+                .rsplitn(n.saturating_add(1), sep)
                 .map(|p| ExprValue::String(p.to_string()))
                 .collect();
             v.reverse();

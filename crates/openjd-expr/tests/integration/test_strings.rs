@@ -2041,6 +2041,89 @@ fn split_zero_maxsplit_means_no_splits() {
         r#"["a b c"]"#
     );
 }
+// Regression: the `i64 -> usize` maxsplit conversion used a plain `as` cast,
+// which is lossy where `usize` is narrower than `i64`. On a 32-bit target a
+// maxsplit above `u32::MAX` wrapped to a small number (2^32 wrapped to 0,
+// giving no splits at all) and `n + 1` could overflow `usize`. The conversion
+// now saturates to `usize::MAX` and the `+ 1` saturates too, so "maxsplit
+// larger than the string" means "no limit" on every target width.
+//
+// NOTE ON FALSIFIABILITY: on a 64-bit host every non-negative `i64` converts
+// losslessly and `n + 1` cannot overflow `usize`, so these assertions pass with
+// or without the fix. They are load-bearing only on a 32-bit target, where the
+// unfixed code returns `["a b c"]` for the 2^32 case. Treat them as a contract
+// pinned for 32-bit builds, not as proof on this host.
+#[test]
+fn split_huge_maxsplit_means_no_limit() {
+    // 2^32: wraps to 0 under a lossy cast on 32-bit, i.e. "no splits".
+    assert_eq!(
+        eval("split('a b c', ' ', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    // u32::MAX: survives the cast on 32-bit, but then `n + 1` overflows usize.
+    assert_eq!(
+        eval("split('a b c', ' ', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    // i64::MAX: the widest value the parser can hand us.
+    assert_eq!(
+        eval("split('a,b,c,d', ',', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn rsplit_huge_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a,b,c,d', ',', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn re_split_huge_maxsplit_means_no_limit() {
+    // re_split() shares the same lossy-cast shape as split()/rsplit().
+    assert_eq!(
+        eval("re_split('a1b2c', '[0-9]', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c', '[0-9]', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c3d', '[0-9]', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+// Negative control for the saturation: a small positive maxsplit must still
+// limit the split. A mutation that clamped every positive maxsplit up to
+// "unlimited" would pass the three tests above and fail this one.
+#[test]
+fn small_positive_maxsplit_still_limits() {
+    assert_eq!(
+        eval("split('a b c d', ' ', 1)").to_display_string(),
+        r#"["a", "b c d"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c d', ' ', 1)").to_display_string(),
+        r#"["a b c", "d"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c3d', '[0-9]', 1)").to_display_string(),
+        r#"["a", "b2c3d"]"#
+    );
+}
+
 #[test]
 fn rsplit_no_match_exact() {
     assert_eq!(eval("rsplit('abc', ',')").to_display_string(), r#"["abc"]"#);
