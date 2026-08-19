@@ -63,14 +63,32 @@ accessible as `Param.def` or `Param.is`.
 The solution:
 
 1. Attempt to parse the expression
-2. If parsing fails, scan for Python keywords used as attribute names (after `.`)
-3. Replace each keyword with a same-length placeholder identifier to preserve column offsets
-4. Re-parse with the placeholders
+2. If parsing fails, look at the offset the parser reported the error at. The parser
+   rejects a contextual keyword with "Expected an identifier, but found a keyword",
+   and its error range begins exactly at the keyword token
+3. If the token at that offset is directly preceded by `.` and is exactly a Python
+   keyword, replace it with a same-length placeholder identifier, which preserves
+   every other offset in the source
+4. Re-parse with the placeholder, repeating from step 1 — one keyword is renamed per
+   parse attempt, so an expression with several of them converges in several passes
 5. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
 renames keywords before parsing and restores them after.
+
+> **The rename is located, not searched for.** Only the one position the parser
+> objected to is considered. This is what keeps the fixup out of string literals:
+> a keyword inside a literal is valid Python, so it is never the parser's error
+> location. Searching the source text for the first `.keyword` instead — the
+> original implementation — rewrote literals, so `'a.class' + X.class` evaluated
+> to `"a.alassc1"` instead of `"a.classc1"`, silently and with no error raised.
+>
+> The keyword token is delimited by scanning to the first non-identifier
+> character rather than by assuming a keyword's length, so `.assert` is not read
+> as `.as` followed by junk. All offsets involved are byte offsets; mixing a byte
+> offset into a `chars()` index was a latent defect in the original boundary
+> check on sources containing multi-byte characters.
 
 ### Reverse mapping at evaluation
 

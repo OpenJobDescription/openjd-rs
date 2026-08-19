@@ -172,16 +172,118 @@ fn multiline_float_passthrough_not_misaligned() {
         "30.25"
     );
 }
+// Regression: the contextual-keyword retry scanned `source` for the first
+// `.keyword` and rewrote it, with no idea where the parser had actually
+// objected. For `'a.class' + X.class` the first match is inside the string
+// literal, so the literal was rewritten and the expression evaluated to
+// "a.alassc1" — a silently wrong value, with no error surfaced. The retry now
+// renames at the parser's error offset, which is never inside a literal
+// (a literal parses fine).
 #[test]
-#[ignore = "known bug: the contextual-keyword retry in eval/parse.rs rewrites \
-            keyword-like text inside string literals; see the MAINTAINABILITY \
-            note in parse_inner. Un-ignore when the retry is fixed."]
-fn known_bug_keyword_retry_corrupts_string_literals() {
+fn keyword_retry_leaves_string_literals_alone() {
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
         eval_with("'a.class' + X.class", &st).to_display_string(),
         "a.classc1"
+    );
+}
+
+#[test]
+fn keyword_retry_leaves_literals_alone_in_either_order() {
+    // The literal after the keyword access was never the failing case (the
+    // scan found the real one first), so it is the negative control: both
+    // orders must now agree.
+    let mut st = SymbolTable::new();
+    st.set("X.class", "c1").unwrap();
+    assert_eq!(
+        eval_with("X.class + '.class'", &st).to_display_string(),
+        "c1.class"
+    );
+    // Two literals ahead of the real access, so a scan-based retry would have
+    // had to skip both.
+    assert_eq!(
+        eval_with("'a.class' + 'b.class' + X.class", &st).to_display_string(),
+        "a.classb.classc1"
+    );
+}
+
+#[test]
+fn keyword_retry_still_renames_multiple_distinct_keywords() {
+    // Negative control: the retry must still fix every contextual keyword,
+    // one parse attempt at a time, including repeats of the same keyword.
+    let mut st = SymbolTable::new();
+    st.set("A.class", "a1").unwrap();
+    st.set("B.if", "b1").unwrap();
+    st.set("C.class", "c1").unwrap();
+    assert_eq!(
+        eval_with("A.class + B.if + C.class", &st).to_display_string(),
+        "a1b1c1"
+    );
+}
+
+#[test]
+fn keyword_retry_handles_keyword_prefixes_of_other_keywords() {
+    // End-to-end smoke check only. It does NOT pin the token delimiting:
+    // truncating `.assert` to the keyword `.as` still evaluates correctly,
+    // because resolve_keyword_renames rewrites `.placeholder` to `.original`
+    // as an unanchored substring and make_replacement only changes a keyword's
+    // first character, so the truncated placeholder reconstructs by accident.
+    // The delimiting is pinned by the rename_keyword_at_* unit tests in
+    // eval/parse.rs, which observe the recorded rename directly.
+    let mut st = SymbolTable::new();
+    st.set("X.assert", "v").unwrap();
+    assert_eq!(eval_with("X.assert", &st).to_display_string(), "v");
+    let mut st2 = SymbolTable::new();
+    st2.set("X.as", "w").unwrap();
+    assert_eq!(eval_with("X.as", &st2).to_display_string(), "w");
+}
+
+#[test]
+fn keyword_retry_requires_attribute_position() {
+    // Negative control for the "must follow a '.'" guard: a bare keyword is a
+    // real syntax error and must not be renamed into a valid identifier.
+    assert!(eval_err_msg("1 + class").contains("Syntax error"));
+    assert!(eval_err_msg("class").contains("Syntax error"));
+}
+
+#[test]
+fn keyword_retry_offsets_are_bytes_not_chars() {
+    // The old boundary check indexed `source.chars().nth(byte_offset)`, mixing
+    // a byte offset into a char index. With multi-byte characters ahead of the
+    // attribute the two diverge, and `.if` inside `.iffy` could pass the
+    // "followed by a non-identifier" check and be rewritten. `.iffy` is not a
+    // keyword and must survive intact.
+    let mut st = SymbolTable::new();
+    st.set("X.iffy", "ok").unwrap();
+    assert_eq!(
+        eval_with("'日本語' + X.iffy", &st).to_display_string(),
+        "日本語ok"
+    );
+    // Same shape, but the attribute really is a keyword: the multi-byte prefix
+    // must not stop the rename from landing on it.
+    let mut st2 = SymbolTable::new();
+    st2.set("X.if", "yes").unwrap();
+    assert_eq!(
+        eval_with("'日本語' + X.if", &st2).to_display_string(),
+        "日本語yes"
+    );
+}
+
+#[test]
+fn keyword_retry_multiline_offset_is_unwrapped() {
+    // Multi-line sources are parsed wrapped in "(...)", so the parser's error
+    // offset is one byte right of `source`. If that shift were not undone the
+    // rename would land on the character after the keyword.
+    let mut st = SymbolTable::new();
+    st.set("X.class", "c1").unwrap();
+    assert_eq!(
+        eval_with("'a.class' +\nX.class", &st).to_display_string(),
+        "a.classc1"
+    );
+    assert_eq!(
+        eval_with("X.class if True else\n'no'", &st).to_display_string(),
+        "c1"
     );
 }
 

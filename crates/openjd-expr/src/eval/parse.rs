@@ -81,6 +81,64 @@ fn make_replacement(keyword: &str, source: &str) -> String {
     "x".repeat(len)
 }
 
+/// Rewrite the contextual keyword at `kw_start` (a byte offset into `source`,
+/// taken from the parser's error location) to a same-length placeholder,
+/// recording the mapping in `renames`. Returns whether anything was rewritten.
+///
+/// Renames only an attribute name: the token must be immediately preceded by
+/// `.` and be exactly a Python keyword. Both conditions are checked against the
+/// one position the parser objected to, never searched for elsewhere in
+/// `source`, which is what keeps keyword-like text inside string literals from
+/// being rewritten.
+///
+/// All offsets here are byte offsets. The token is delimited by scanning to the
+/// first non-identifier character rather than by assuming a keyword's length,
+/// so `.assert` is not mistaken for `.as` followed by junk, and a multi-byte
+/// character after the keyword cannot desynchronize the comparison.
+fn rename_keyword_at(
+    source: &mut String,
+    kw_start: usize,
+    renames: &mut HashMap<String, String>,
+) -> bool {
+    // Range-guard the offset rather than trusting it: because the multi-line
+    // wrap is undone by subtracting one, the parser reporting an error at the
+    // closing paren yields an offset one past the end of `source`.
+    if kw_start == 0 || kw_start >= source.len() {
+        return false;
+    }
+    // Attribute access only — the keyword must directly follow a '.'.
+    if source.as_bytes()[kw_start - 1] != b'.' {
+        return false;
+    }
+    // No char-boundary check is needed for the slicing below: it is only
+    // reached once the preceding byte is an ASCII '.', and the byte after a
+    // complete ASCII character is always a char boundary.
+    let tail = &source[kw_start..];
+    let token_len = tail
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(tail.len());
+    let token = &tail[..token_len];
+    if !PYTHON_KEYWORDS.contains(&token) {
+        return false;
+    }
+    // Reuse the placeholder already chosen for this keyword, so that repeated
+    // accesses (`A.class + B.class`) map back through a single rename entry.
+    let replacement = renames
+        .iter()
+        .find(|(_, original)| original.as_str() == token)
+        .map(|(placeholder, _)| placeholder.clone())
+        .unwrap_or_else(|| {
+            let placeholder = make_replacement(token, source);
+            renames.insert(placeholder.clone(), token.to_string());
+            placeholder
+        });
+    // Same length, so every other offset in `source` is preserved and the next
+    // parse attempt reports positions that still line up with the original.
+    debug_assert_eq!(replacement.len(), token_len);
+    source.replace_range(kw_start..kw_start + token_len, &replacement);
+    true
+}
+
 /// Parse a Python expression, handling contextual keywords (Python keywords
 /// used as attribute names after '.').
 ///
@@ -537,43 +595,27 @@ fn parse_inner(
                 });
             }
             Err(e) => {
-                // Try to find a keyword after '.' that caused the error
+                // Rename the contextual keyword the parser actually rejected.
                 //
-                // MAINTAINABILITY: this retry scans raw source text with no
-                // string-literal awareness, and is known to rewrite keyword-like
-                // text inside literals (e.g. 'a.class'). Fixing that here means
-                // teaching this loop lexical structure; prefer restructuring the
-                // retry around the parser's error location instead of adding
-                // more string scanning.
-                let mut found = false;
-                for kw in PYTHON_KEYWORDS {
-                    let pattern = format!(".{kw}");
-                    if let Some(pos) = source.find(&pattern) {
-                        // Check that the keyword is followed by a non-identifier char
-                        let after_pos = pos + 1 + kw.len();
-                        let after_char = source.chars().nth(after_pos);
-                        if after_char.is_none_or(|c| !c.is_alphanumeric() && c != '_') {
-                            let replacement = keyword_renames
-                                .iter()
-                                .find(|(_, v)| v.as_str() == *kw)
-                                .map(|(k, _)| k.clone())
-                                .unwrap_or_else(|| {
-                                    let r = make_replacement(kw, &source);
-                                    keyword_renames.insert(r.clone(), kw.to_string());
-                                    r
-                                });
-                            // Replace in source — same length, preserves positions
-                            source = format!(
-                                "{}.{}{}",
-                                &source[..pos],
-                                replacement,
-                                &source[after_pos..]
-                            );
-                            found = true;
-                            break;
-                        }
-                    }
-                }
+                // The parser reports "Expected an identifier, but found a
+                // keyword" with its range starting exactly at the keyword
+                // token, so the offending text is located rather than searched
+                // for. This is what keeps the retry out of string literals: a
+                // keyword inside a literal parses fine and is therefore never
+                // the parser's error location. Scanning `source` for the first
+                // `.keyword` instead used to rewrite literals — `'a.class' +
+                // X.class` evaluated to "a.alassc1" rather than "a.classc1",
+                // silently, because `.class` inside the literal came first.
+                let error_offset = e.location.start().to_usize();
+                // Undo the multi-line paren wrap: `to_parse` is "(" + source
+                // + ")", so every offset the parser reports sits one byte to
+                // the right of the same character in `source`.
+                let kw_start = if is_multiline {
+                    error_offset.saturating_sub(1)
+                } else {
+                    error_offset
+                };
+                let found = rename_keyword_at(&mut source, kw_start, &mut keyword_renames);
                 if !found {
                     let msg = format!("Syntax error: {}", e.error);
                     let start = e.location.start().to_usize();
@@ -1072,6 +1114,81 @@ mod tests {
         let parsed = ParsedExpression::new("Param.if").unwrap();
         assert!(matches!(parsed.ast, ast::Expr::Attribute(_)));
         assert!(!parsed.keyword_renames.is_empty());
+    }
+
+    /// Helper: rename at `kw_start` and report the rewritten source plus the
+    /// single (placeholder, original) pair recorded, if any.
+    fn rename_once(source: &str, kw_start: usize) -> (bool, String, Option<(String, String)>) {
+        let mut s = source.to_string();
+        let mut renames = HashMap::new();
+        let found = rename_keyword_at(&mut s, kw_start, &mut renames);
+        let pair = renames.iter().next().map(|(p, o)| (p.clone(), o.clone()));
+        (found, s, pair)
+    }
+
+    // These exercise `rename_keyword_at` directly rather than through
+    // evaluation. Going through evaluation cannot distinguish exact token
+    // delimiting from a keyword-prefix match, because `resolve_keyword_renames`
+    // rewrites `.placeholder` to `.original` as an unanchored substring and
+    // `make_replacement` only ever changes a keyword's first character — so a
+    // truncated "as" placeholder inside "assert" happens to reconstruct
+    // correctly. The defect is still real (the wrong keyword gets recorded as
+    // renamed), it is just invisible downstream, so it is pinned here.
+    #[test]
+    fn rename_keyword_at_delimits_the_whole_token() {
+        // "assert" must be renamed as "assert", not as the keyword "as"
+        // followed by leftover "sert".
+        let (found, source, pair) = rename_once("X.assert", 2);
+        assert!(found);
+        let (placeholder, original) = pair.expect("a rename must be recorded");
+        assert_eq!(original, "assert");
+        assert_eq!(placeholder.len(), "assert".len());
+        assert_eq!(source, format!("X.{placeholder}"));
+        assert_eq!(source.len(), "X.assert".len());
+    }
+
+    #[test]
+    fn rename_keyword_at_renames_a_short_keyword_exactly() {
+        // Negative control for the above: "as" on its own is still renamed.
+        let (found, source, pair) = rename_once("X.as + 1", 2);
+        assert!(found);
+        let (placeholder, original) = pair.expect("a rename must be recorded");
+        assert_eq!(original, "as");
+        assert_eq!(source, format!("X.{placeholder} + 1"));
+    }
+
+    #[test]
+    fn rename_keyword_at_ignores_non_keyword_attributes() {
+        // "iffy" starts with the keyword "if" but is a perfectly good
+        // attribute name; nothing may be rewritten.
+        let (found, source, pair) = rename_once("X.iffy", 2);
+        assert!(!found);
+        assert_eq!(source, "X.iffy");
+        assert!(pair.is_none());
+    }
+
+    #[test]
+    fn rename_keyword_at_requires_a_preceding_dot() {
+        // A bare keyword is a genuine syntax error, not an attribute name.
+        let (found, source, _) = rename_once("1 + class", 4);
+        assert!(!found);
+        assert_eq!(source, "1 + class");
+    }
+
+    #[test]
+    fn rename_keyword_at_tolerates_bad_offsets() {
+        // Offsets are range-guarded rather than trusted. One-past-the-end is
+        // reachable in practice: undoing the multi-line wrap subtracts one, so
+        // an error reported at the trailing ')' lands just past `source`.
+        // Without the guard, indexing `kw_start - 1` panics.
+        assert!(!rename_once("X.class", 0).0);
+        assert!(!rename_once("X.class", "X.class".len()).0);
+        assert!(!rename_once("X.class", "X.class".len() + 1).0);
+        assert!(!rename_once("X.class", 999).0);
+        // A mid-character offset needs no separate check, and is declined here
+        // by the dot check: byte 1 is inside the 3-byte '日', and the byte
+        // before it is not '.'.
+        assert!(!rename_once("日.class", 1).0);
     }
 
     #[test]
