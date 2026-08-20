@@ -21,15 +21,15 @@ fn yaml_val(s: &str) -> serde_json::Value {
     serde_saphyr::from_str(s).unwrap()
 }
 
-/// Helper: preprocess with default path options and no user-supplied values.
-fn preprocess_defaults(jt: &openjd_model::template::JobTemplate) -> JobParameterValues {
+/// Helper: preprocess with POSIX path options and no user-supplied values.
+fn preprocess_posix_defaults(jt: &openjd_model::template::JobTemplate) -> JobParameterValues {
     preprocess_job_parameters(
         jt,
         &JobParameterInputValues::new(),
         &[],
         &PathParameterOptions {
-            job_template_dir: "/tmp",
-            current_working_dir: "/tmp",
+            job_template_dir: "/job_template_dir",
+            current_working_dir: "/current_working_dir",
             allow_template_dir_walk_up: true,
             path_format: PathFormat::Posix,
             allow_uri_path_values: true,
@@ -50,7 +50,7 @@ fn current_profile_succeeds_on_simple_template() {
     }"#,
     );
     let jt = decode_job_template(tpl, None, &CallerLimits::default()).unwrap();
-    let params = preprocess_defaults(&jt);
+    let params = preprocess_posix_defaults(&jt);
 
     let ctx = ValidationContext::from_profile(ModelProfile::current());
     let job = create_job(&jt, &params, &ctx).unwrap();
@@ -78,7 +78,7 @@ fn latest_profile_populates_expr_symbols_in_symtab() {
     }"#,
     );
     let jt = decode_job_template(tpl, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
-    let params = preprocess_defaults(&jt);
+    let params = preprocess_posix_defaults(&jt);
 
     let ctx = ValidationContext::from_profile(ModelProfile::latest());
     let job = create_job(&jt, &params, &ctx).unwrap();
@@ -122,7 +122,7 @@ fn current_profile_omits_expr_symbols_from_symtab() {
     );
     // Decode still accepts the template (extensions were allowed at decode time)
     let jt = decode_job_template(tpl, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
-    let params = preprocess_defaults(&jt);
+    let params = preprocess_posix_defaults(&jt);
 
     // Override with current() which has Expr OFF
     let ctx = ValidationContext::from_profile(ModelProfile::current());

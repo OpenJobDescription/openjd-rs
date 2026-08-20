@@ -573,6 +573,12 @@ impl Session {
         self.state = state;
     }
 
+    /// Test-only: inject job parameter values for unit-testing `build_symbol_table`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues) {
+        self.job_parameter_values = values;
+    }
+
     /// Full constructor from SessionConfig.
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
@@ -2325,6 +2331,7 @@ impl Session {
     ) -> Result<SymbolTable, SessionError> {
         use openjd_model::types::TaskParameterType;
 
+        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         let mut symtab = if let Some(base) = base {
             // Deserialize with host path format — this is the template→session boundary.
             // Path values stored as Posix in template scope get normalized to host format.
@@ -2389,11 +2396,22 @@ impl Session {
         } else {
             let mut s = SymbolTable::new();
             for (name, param) in &self.job_parameter_values {
+                use openjd_model::types::JobParameterType;
+                // RawParam.* — coerced to declared type so expressions like
+                // {{ RawParam.N + 1 }} work correctly with typed arithmetic.
                 let raw_key = format!("RawParam.{name}");
-                s.set(&raw_key, param.value.clone())
+                let raw_value = match param.param_type {
+                    JobParameterType::Path | JobParameterType::ListPath => param.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
+                s.set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
                 let key = format!("Param.{name}");
-                use openjd_model::types::JobParameterType;
                 let mapped_value = match param.param_type {
                     JobParameterType::Path => {
                         let raw = match &param.value {
@@ -2424,7 +2442,12 @@ impl Session {
                         }
                         other => self.apply_path_mapping_to_value(other),
                     },
-                    _ => self.apply_path_mapping_to_value(&param.value),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 s.set(&key, mapped_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
@@ -2432,7 +2455,6 @@ impl Session {
             s
         };
 
-        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         symtab
             .set(
                 "Session.WorkingDirectory",
@@ -2445,10 +2467,21 @@ impl Session {
 
         if let Some(task_params) = task_parameter_values {
             for (name, tv) in task_params {
-                // Task.RawParam.* — raw string value
+                // Task.RawParam.* — coerced to declared type so expressions
+                // like {{ Task.RawParam.Frame + 1 }} work correctly.
                 let raw_key = format!("Task.RawParam.{name}");
+                let raw_value = match tv.param_type {
+                    TaskParameterType::Path => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
                 symtab
-                    .set(&raw_key, tv.value.clone())
+                    .set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
 
                 // Task.Param.* — typed value with path mapping applied for PATH types
@@ -2466,7 +2499,13 @@ impl Session {
                             openjd_expr::path_mapping::PathFormat::host(),
                         )
                     }
-                    _ => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 symtab
                     .set(&key, param_value)
@@ -2475,6 +2514,22 @@ impl Session {
         }
 
         Ok(symtab)
+    }
+
+    /// Coerce a parameter value to its declared type using `ExprValue::coerce`.
+    ///
+    /// This ensures that string values arriving from the PyO3 boundary are
+    /// properly typed in the symbol table so that expression evaluation
+    /// (arithmetic, comparisons) works correctly on the Rust runtime.
+    fn coerce_param_value(
+        value: &openjd_expr::ExprValue,
+        target_type: &openjd_expr::ExprType,
+        path_format: openjd_expr::path_mapping::PathFormat,
+        param_key: &str,
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        value.clone().coerce(target_type, path_format).map_err(|e| {
+            SessionError::Runtime(format!("Failed to coerce parameter '{param_key}': {e}"))
+        })
     }
 
     /// Apply path mapping rules to a string, returning the mapped result.
@@ -3200,6 +3255,479 @@ mod wrap_actions_tests {
         assert_eq!(
             symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
             Some(&ExprValue::Null)
+        );
+    }
+}
+
+#[cfg(test)]
+mod typed_param_seeding_tests {
+    //! RED tests for Gap 11: parameter values arrive as strings across the PyO3
+    //! boundary and the session symbol table must coerce them to their declared
+    //! types before expression evaluation.
+    use super::*;
+    use openjd_expr::{ExprType, ExprValue, FormatString, FormatStringOptions};
+    use openjd_model::types::{
+        JobParameterType, JobParameterValue, TaskParameterType, TaskParameterValue,
+    };
+    use openjd_model::TaskParameterSet;
+    use std::path::PathBuf;
+
+    /// Helper: build a test Session with given job parameters and call
+    /// `build_symbol_table` (from-scratch branch, no base/resolved symtab).
+    fn build_symtab_from_scratch(
+        params: Vec<(&str, JobParameterType, ExprValue)>,
+    ) -> Result<openjd_model::symbol_table::SymbolTable, SessionError> {
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut job_params = HashMap::new();
+        for (name, ptype, value) in params {
+            job_params.insert(
+                name.to_string(),
+                JobParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.set_job_parameter_values_for_test(job_params);
+        session.build_symbol_table(None, None)
+    }
+
+    /// Helper: build a test Session with job parameters and task parameters,
+    /// then call `build_symbol_table` with the task parameters.
+    fn build_symtab_with_task_params(
+        job_params: Vec<(&str, JobParameterType, ExprValue)>,
+        task_params: Vec<(&str, TaskParameterType, ExprValue)>,
+    ) -> Result<openjd_model::symbol_table::SymbolTable, SessionError> {
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut jp = HashMap::new();
+        for (name, ptype, value) in job_params {
+            jp.insert(
+                name.to_string(),
+                JobParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.set_job_parameter_values_for_test(jp);
+
+        let mut tp: TaskParameterSet = TaskParameterSet::new();
+        for (name, ptype, value) in task_params {
+            tp.insert(
+                name.to_string(),
+                TaskParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.build_symbol_table(Some(&tp), None)
+    }
+
+    /// Helper: evaluate a format-string expression against a symbol table.
+    fn eval_expr(
+        symtab: &openjd_model::symbol_table::SymbolTable,
+        expr: &str,
+    ) -> Result<ExprValue, openjd_expr::ExpressionError> {
+        let fs = FormatString::new(expr).expect("invalid format string");
+        fs.resolve_with(symtab, &FormatStringOptions::default())
+    }
+
+    /// Helper: evaluate a format-string expression as a string.
+    fn eval_str(
+        symtab: &openjd_model::symbol_table::SymbolTable,
+        expr: &str,
+    ) -> Result<String, openjd_expr::ExpressionError> {
+        let fs = FormatString::new(expr).expect("invalid format string");
+        fs.resolve_string_with(symtab, &FormatStringOptions::default())
+    }
+
+    // ── Job parameter matrix (12 types) ──
+
+    #[test]
+    fn job_int_arithmetic() {
+        // INT "5" → {{ Param.N + 1 }} → 6
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("5".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.N + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(6));
+    }
+
+    #[test]
+    fn job_int_equality_comparison() {
+        // INT "5" → {{ 'y' if Param.N == 5 else 'n' }} → "y" (silent-branch bug)
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("5".into()),
+        )])
+        .unwrap();
+        let result = eval_str(&symtab, "{{'y' if Param.N == 5 else 'n'}}").unwrap();
+        assert_eq!(result, "y");
+    }
+
+    #[test]
+    fn job_float_arithmetic() {
+        // FLOAT "2.5" → {{ Param.Scale * 2 }} → 5.0 (NOT "2.52.5")
+        let symtab = build_symtab_from_scratch(vec![(
+            "Scale",
+            JobParameterType::Float,
+            ExprValue::String("2.5".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Scale * 2}}").unwrap();
+        // Result should be Float(5.0)
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn job_bool_negation() {
+        // BOOL "true" → {{ not Param.B }} → false
+        let symtab = build_symtab_from_scratch(vec![(
+            "B",
+            JobParameterType::Bool,
+            ExprValue::String("true".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{not Param.B}}").unwrap();
+        assert_eq!(result, ExprValue::Bool(false));
+    }
+
+    #[test]
+    fn job_string_unchanged() {
+        // STRING "hello" → stays string
+        let symtab = build_symtab_from_scratch(vec![(
+            "S",
+            JobParameterType::String,
+            ExprValue::String("hello".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.S}}").unwrap();
+        assert_eq!(result, ExprValue::String("hello".into()));
+    }
+
+    #[test]
+    fn job_range_expr_coercion() {
+        // RANGE_EXPR "1-5" → coerces to RangeExpr type
+        let symtab = build_symtab_from_scratch(vec![(
+            "R",
+            JobParameterType::RangeExpr,
+            ExprValue::String("1-5".into()),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.R").unwrap();
+        assert!(
+            matches!(val, ExprValue::RangeExpr(_)),
+            "expected RangeExpr, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn job_list_string() {
+        // LIST[STRING] — stays as-is
+        let symtab = build_symtab_from_scratch(vec![(
+            "Tags",
+            JobParameterType::ListString,
+            ExprValue::ListString(vec!["a".into(), "b".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Tags[0]}}").unwrap();
+        assert_eq!(result, ExprValue::String("a".into()));
+    }
+
+    #[test]
+    fn job_list_int_element_arithmetic() {
+        // LIST[INT] ["1","2","3"] → {{ Param.Tiles[0] + 1 }} → 2
+        let symtab = build_symtab_from_scratch(vec![(
+            "Tiles",
+            JobParameterType::ListInt,
+            ExprValue::ListString(vec!["1".into(), "2".into(), "3".into()], 3),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Tiles[0] + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(2));
+    }
+
+    #[test]
+    fn job_list_float_element() {
+        // LIST[FLOAT] ["1.5","2.5"] → elements are float
+        let symtab = build_symtab_from_scratch(vec![(
+            "Weights",
+            JobParameterType::ListFloat,
+            ExprValue::ListString(vec!["1.5".into(), "2.5".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Weights[0] + 1}}").unwrap();
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap())
+        );
+    }
+
+    #[test]
+    fn job_list_bool_element() {
+        // LIST[BOOL] ["true","false"] → elements are bool
+        let symtab = build_symtab_from_scratch(vec![(
+            "Flags",
+            JobParameterType::ListBool,
+            ExprValue::ListString(vec!["true".into(), "false".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{not Param.Flags[0]}}").unwrap();
+        assert_eq!(result, ExprValue::Bool(false));
+    }
+
+    #[test]
+    fn job_list_list_int_nested() {
+        // LIST[LIST[INT]] — nested coercion (recursive)
+        // Input: a ListList containing ListString elements that should become ListInt
+        let inner1 = ExprValue::ListString(vec!["10".into(), "20".into()], 2);
+        let inner2 = ExprValue::ListString(vec!["30".into(), "40".into()], 2);
+        let outer = ExprValue::ListList(vec![inner1, inner2], ExprType::list(ExprType::STRING), 0);
+        let symtab =
+            build_symtab_from_scratch(vec![("Grid", JobParameterType::ListListInt, outer)])
+                .unwrap();
+        let val = symtab.get_value("Param.Grid").unwrap();
+        // After coercion, should be a ListList of ListInt elements
+        if let ExprValue::ListList(elements, _, _) = val {
+            assert_eq!(elements.len(), 2);
+            assert!(
+                matches!(&elements[0], ExprValue::ListInt(v) if v == &[10, 20]),
+                "expected ListInt([10, 20]), got {:?}",
+                elements[0]
+            );
+        } else {
+            panic!("expected ListList, got {val:?}");
+        }
+    }
+
+    #[test]
+    fn job_path_unchanged() {
+        // PATH "C:/projects" → path-mapping applied, value stays path form
+        let symtab = build_symtab_from_scratch(vec![(
+            "P",
+            JobParameterType::Path,
+            ExprValue::String("C:/projects".into()),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.P").unwrap();
+        assert!(
+            matches!(val, ExprValue::Path { .. }),
+            "expected Path, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn job_list_path_unchanged() {
+        // LIST[PATH] — path mapping applied, stays list-path form
+        let symtab = build_symtab_from_scratch(vec![(
+            "Paths",
+            JobParameterType::ListPath,
+            ExprValue::ListString(vec!["/a".into(), "/b".into()], 2),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.Paths").unwrap();
+        assert!(
+            matches!(val, ExprValue::ListPath(..)),
+            "expected ListPath, got {val:?}"
+        );
+    }
+
+    // ── Task parameter matrix (5 types) ──
+
+    #[test]
+    fn task_int_comparison_and_arithmetic() {
+        // Task INT "5" → {{ Task.Param.Frame > 3 }} → true; {{ Task.Param.Frame + 1 }} → 6
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("5".into()),
+            )],
+        )
+        .unwrap();
+        let cmp = eval_expr(&symtab, "{{Task.Param.Frame > 3}}").unwrap();
+        assert_eq!(cmp, ExprValue::Bool(true));
+        let arith = eval_expr(&symtab, "{{Task.Param.Frame + 1}}").unwrap();
+        assert_eq!(arith, ExprValue::Int(6));
+    }
+
+    #[test]
+    fn task_float_arithmetic() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Weight",
+                TaskParameterType::Float,
+                ExprValue::String("3.5".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.Param.Weight * 2}}").unwrap();
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(7.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn task_string_unchanged() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Label",
+                TaskParameterType::String,
+                ExprValue::String("hello".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.Param.Label}}").unwrap();
+        assert_eq!(result, ExprValue::String("hello".into()));
+    }
+
+    #[test]
+    fn task_path_unchanged() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Out",
+                TaskParameterType::Path,
+                ExprValue::String("/output".into()),
+            )],
+        )
+        .unwrap();
+        let val = symtab.get_value("Task.Param.Out").unwrap();
+        assert!(
+            matches!(val, ExprValue::Path { .. }),
+            "expected Path, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn task_chunk_int_stays_string() {
+        // CHUNK[INT] — exempt from coercion, stays as string (range expression string)
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Chunk",
+                TaskParameterType::ChunkInt,
+                ExprValue::String("1-10".into()),
+            )],
+        )
+        .unwrap();
+        let val = symtab.get_value("Task.Param.Chunk").unwrap();
+        // ChunkInt maps to RANGE_EXPR via expr_type(), so coercion would parse it.
+        // But per the brief, ChunkInt is EXEMPT — stays as string.
+        // If the implementation coerces it, we'd get RangeExpr; if exempt, stays String.
+        assert_eq!(val, &ExprValue::String("1-10".into()));
+    }
+
+    // ── RawParam contract ──
+
+    #[test]
+    fn job_raw_param_int_arithmetic() {
+        // Job INT "21" → {{ RawParam.N + 1 }} → 22
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("21".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{RawParam.N + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(22));
+    }
+
+    #[test]
+    fn task_raw_param_int_arithmetic() {
+        // Task INT "7" → {{ Task.RawParam.Frame + 1 }} → 8
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("7".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.RawParam.Frame + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(8));
+    }
+
+    #[test]
+    fn float_display_compatibility() {
+        // A FLOAT coerced value used in string interpolation should render the
+        // original string form (Float64::with_str preserves it).
+        let symtab = build_symtab_from_scratch(vec![(
+            "V",
+            JobParameterType::Float,
+            ExprValue::String("2.500".into()),
+        )])
+        .unwrap();
+        let result = eval_str(&symtab, "value={{Param.V}}").unwrap();
+        // Float64::with_str preserves the original display string "2.500"
+        assert_eq!(result, "value=2.500");
+    }
+
+    // ── Bad values (must produce errors, not panics or silent passthrough) ──
+
+    #[test]
+    fn bad_int_value_errors() {
+        // INT "abc" → build_symbol_table returns Err
+        let result = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("abc".into()),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad INT value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.N': \
+             Cannot convert 'abc' to int: invalid digit found in string"
+        );
+    }
+
+    #[test]
+    fn bad_bool_value_errors() {
+        // BOOL "maybe" → build_symbol_table returns Err
+        let result = build_symtab_from_scratch(vec![(
+            "B",
+            JobParameterType::Bool,
+            ExprValue::String("maybe".into()),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad BOOL value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.B': Cannot convert 'maybe' to bool"
+        );
+    }
+
+    #[test]
+    fn bad_list_int_partial_errors() {
+        // LIST[INT] ["1","abc","3"] → whole-list Err (no partial coercion)
+        let result = build_symtab_from_scratch(vec![(
+            "Tiles",
+            JobParameterType::ListInt,
+            ExprValue::ListString(vec!["1".into(), "abc".into(), "3".into()], 3),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad LIST[INT] element, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.Tiles': \
+             Cannot convert 'abc' to int: invalid digit found in string"
         );
     }
 }

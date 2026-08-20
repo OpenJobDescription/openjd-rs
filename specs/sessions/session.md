@@ -272,8 +272,15 @@ Populates a `SymbolTable` with:
 | `Task.RawParam.<name>` | Task parameter value (no path mapping) | `run_task()` call |
 
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
-applied to each element. Values are stored as `ExprValue` (typed) when the EXPR extension
-is active, or as strings for the base spec.
+applied to each element. All other parameter values are coerced to their declared
+parameter type when seeded, for `Param.*`, `RawParam.*`, `Task.Param.*`, and
+`Task.RawParam.*` alike: values cross the language boundary as strings (an INT parameter
+arrives as `"5"`), and typed expression evaluation requires typed symbols, so the value
+is converted via `ExprValue::coerce` (`"5"` → `Int(5)`, including element-wise coercion
+for list types). `CHUNK_INT` task parameters are exempt and remain strings — chunk range
+expressions are not numeric values. A value that cannot be coerced to its declared type
+(e.g. INT `"abc"`) fails symbol table construction with a `SessionError::Runtime` naming
+the parameter.
 
 ### Pre-resolved symbol table path
 
