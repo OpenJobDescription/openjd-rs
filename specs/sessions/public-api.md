@@ -267,6 +267,7 @@ pipeline). Production callers should use `with_config`.
 impl Session {
     pub fn new_for_test(working_directory: PathBuf) -> Self;
     pub fn set_state_for_test(&mut self, state: SessionState);
+    pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);
     pub fn set_helper_auth_token_for_test(&mut self, token: String);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
