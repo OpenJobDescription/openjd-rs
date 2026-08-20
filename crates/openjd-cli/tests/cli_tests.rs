@@ -790,6 +790,45 @@ mod redacted_env {
 }
 
 // ============================================================
+// Group 13: Self-asserting tasks (openjd-specifications conformance shape)
+// ============================================================
+
+/// The conformance suite's single-task job fixtures assert their own output: the
+/// `onRun` action spawns the case's command as a child, reproduces its output, and
+/// exits non-zero when that output does not match. That only holds if we capture a
+/// grandchild's output and propagate the action's exit status, so pin both
+/// directions here instead of relying on the external suite to catch a regression.
+mod self_asserting_task {
+    use super::*;
+
+    #[test]
+    fn test_grandchild_output_captured_and_assertion_passes() {
+        let template = templates_dir().join("self_asserting_task.yaml");
+        let (code, stdout, stderr) = run_cli(&["run", template.to_str().unwrap()]);
+        assert_eq!(code, 0, "should succeed. stderr: {stderr}");
+        // Printed by the grandchild and echoed by the action. Missing means output
+        // from a process we did not spawn ourselves was dropped.
+        assert!(stdout.contains("OUTPUT:EXPECTED_VALUE"), "stdout: {stdout}");
+        assert!(!stdout.contains("ASSERT_FAILED"), "stdout: {stdout}");
+    }
+
+    #[test]
+    fn test_assertion_failure_fails_the_run() {
+        let template = templates_dir().join("self_asserting_task.yaml");
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            template.to_str().unwrap(),
+            "-p",
+            "Printed=WRONG_VALUE",
+        ]);
+        let output = format!("{stdout}{stderr}");
+        assert_ne!(code, 0, "should fail. stdout: {stdout} stderr: {stderr}");
+        assert!(output.contains("ASSERT_FAILED"), "output: {output}");
+        assert!(output.contains("OUTPUT:WRONG_VALUE"), "output: {output}");
+    }
+}
+
+// ============================================================
 // Group 6: Run Command (test_run_command.py)
 // ============================================================
 
