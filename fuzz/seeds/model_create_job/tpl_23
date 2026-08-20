@@ -1,0 +1,28 @@
+specificationVersion: jobtemplate-2023-09
+name: ReverseDeps
+steps:
+- name: StepC
+  dependencies:
+  - dependsOn: StepB
+  script:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "Running StepC"
+- name: StepB
+  dependencies:
+  - dependsOn: StepA
+  script:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "Running StepB"
+- name: StepA
+  script:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "Running StepA"

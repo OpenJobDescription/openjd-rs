@@ -1,0 +1,18 @@
+# RFC 0008: a second wrap-defining environment template. Supplying this
+# alongside another wrap env template must be rejected by the session's
+# single-layer rule before the second environment is entered.
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR]
+environment:
+  name: WrapB
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: python
+        args: ["-c", "print('WrapB Enter')"]
+      onWrapTaskRun:
+        command: python
+        args: ["-c", "print('WrapB Task')"]
+      onWrapEnvExit:
+        command: python
+        args: ["-c", "print('WrapB Exit')"]

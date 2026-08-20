@@ -1,0 +1,87 @@
+name: Fuzz
+
+# Smoke-fuzz every fuzz target on pull requests and on merges to main. The
+# run is short and time-boxed per target so it gates without slowing the merge
+# queue. Any panic, abort, overflow, or char-boundary slice in a fuzzed entry
+# point fails the job. Coverage plateaus within about a minute per target once
+# seeded, so a longer run buys little here; deeper campaigns are left to manual
+# local runs (see fuzz/README.md).
+#
+# The fuzz crate (fuzz/) is deliberately outside the root workspace and builds
+# only with a nightly toolchain under AddressSanitizer, so it lives in its own
+# workflow rather than the stable CI matrix.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, release, "patch_*"]
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: 1
+  # Per-target smoke budget, in seconds. Coverage plateaus within a few seconds
+  # once seeded, so a short run catches regressions reachable from the corpus;
+  # deeper campaigns are run manually (see fuzz/README.md).
+  FUZZ_SECONDS: 10
+
+jobs:
+  fuzz:
+    name: Fuzz
+    # libFuzzer + cargo-fuzz's sanitizer build is best supported on Linux.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # cargo-fuzz requires a nightly toolchain (sanitizer -Z flags). Pin the
+      # nightly so a bad nightly (e.g. an ASan codegen ICE) can't randomly break
+      # the fuzz job; bump this date deliberately.
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install nightly-2026-05-15 --profile minimal --component rust-src
+          rustup override set nightly-2026-05-15
+
+      - name: Compute rustc hash
+        id: rustc
+        run: echo "hash=$(rustc +nightly-2026-05-15 --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cargo + fuzz cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/cargo-fuzz
+            fuzz/target
+          key: fuzz-${{ steps.rustc.outputs.hash }}-${{ hashFiles('**/Cargo.lock', 'fuzz/Cargo.toml') }}
+          restore-keys: |
+            fuzz-${{ steps.rustc.outputs.hash }}-
+            fuzz-
+
+      - name: Install cargo-fuzz
+        run: which cargo-fuzz || cargo install cargo-fuzz --locked --version ^0.13
+
+      # Build + run every target. The target list is derived from
+      # `cargo fuzz list` inside the script, so a newly-added target is picked
+      # up automatically — nothing to update here. A crash in any target fails
+      # the job.
+      - name: Run fuzz targets
+        run: scripts/run_fuzz.sh
+
+      # If any target produced a crash artifact, surface it so the failure is
+      # actionable from the run page instead of just a red X.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore

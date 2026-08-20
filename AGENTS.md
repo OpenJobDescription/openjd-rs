@@ -18,6 +18,8 @@ cargo clippy --all-features --all-targets --workspace -- -D warnings  # Lint
 cargo fmt --all                          # Apply formatting
 cargo doc --no-deps --workspace          # Build docs
 scripts/coverage.sh                      # Code coverage (see COVERAGE_REPORT.md)
+scripts/run_fuzz.sh                      # Smoke-fuzz all cargo-fuzz targets (see fuzz/README.md)
+python3 scripts/check_fuzz_coverage.py   # Untrusted-input fuzz coverage gate (runs in CI)
 ```
 
 MSRV: **1.94.1** (enforced in CI).
@@ -123,6 +125,8 @@ Spec entry point: `specs/openjd-for-js/spec.md`
 The `specs/` directory is the primary resource for understanding each crate's design. Specs and code evolve together — within a coding session, you might edit the code first and then update the spec, or write the spec first and then implement, or iterate on both simultaneously. The order doesn't matter, but **before committing, always confirm the spec and code line up.** If you changed behavior, the spec must reflect it. If you changed the spec, the code must match.
 
 Every crate's spec directory must include a `public-api.md` that fully describes the crate's public API — all public types, functions, traits, and constants with their signatures. When adding or changing public API surface, update `public-api.md` in the same commit.
+
+When adding a public function that takes untrusted input (`&str`, `&[u8]`, `serde_json::Value`, `&Path`) to `openjd-expr`, `openjd-model`, or `openjd-snapshots`, CI's fuzz-coverage gate (`scripts/check_fuzz_coverage.py`) will fail until the function is classified in `fuzz/fuzz_coverage.toml` — either mapped to a fuzz target that exercises it or marked not-untrusted with a reason. See `fuzz/README.md`.
 
 The structure:
 
@@ -239,10 +243,11 @@ PRs run these checks (all must pass):
 | **Conformance** | Full OpenJD conformance suite (1,038 tests) on all three platforms |
 | **MSRV** | `cargo check --workspace` with Rust 1.94.1 |
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
-| **Compliance** | Copyright header check |
+| **Compliance** | Copyright header check + fuzz-coverage gate (`scripts/check_fuzz_coverage.py`: every public fn taking untrusted input must be classified in `fuzz/fuzz_coverage.toml`) |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
+| **Fuzz** | Separate workflow (`.github/workflows/fuzz.yml`): smoke-fuzzes every cargo-fuzz target (nightly + ASan, overflow-checks on) — see `fuzz/README.md` |
 
 If a dependency update bumps `wasm-bindgen`, also bump the matching
 `wasm-bindgen-cli` version pinned in the `openjd-for-js` job in

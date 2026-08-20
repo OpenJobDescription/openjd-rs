@@ -1,0 +1,130 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
+[package]
+name = "openjd-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Keep this crate out of the root workspace. cargo-fuzz builds it standalone
+# with a nightly toolchain and sanitizer `-Z` flags; an empty `[workspace]`
+# table makes it its own workspace root so the stable build/test/clippy/MSRV
+# jobs never see it.
+[workspace]
+
+# This crate is deliberately NOT a member of the root workspace (the root
+# Cargo.toml does not list `fuzz/`). cargo-fuzz builds it standalone with a
+# nightly toolchain and `-Z` flags; keeping it out of the workspace avoids
+# perturbing the stable build/test/clippy jobs and the MSRV check.
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+
+[dependencies.openjd-expr]
+path = "../crates/openjd-expr"
+
+[dependencies.openjd-model]
+path = "../crates/openjd-model"
+
+[dependencies.openjd-snapshots]
+path = "../crates/openjd-snapshots"
+
+# Building the fuzz targets with debug assertions AND overflow checks is the
+# whole point: many of the historically-found bugs were `attempt to * with
+# overflow` panics that only fire when overflow-checks are on. Keeping them on
+# in the release profile (which cargo-fuzz builds) means the sanitizer build
+# still traps arithmetic overflow instead of silently wrapping.
+[profile.release]
+debug = 1
+overflow-checks = true
+debug-assertions = true
+
+[[bin]]
+name = "expr_parse"
+path = "fuzz_targets/expr_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "expr_evaluate"
+path = "fuzz_targets/expr_evaluate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "range_expr"
+path = "fuzz_targets/range_expr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "int_range_new"
+path = "fuzz_targets/int_range_new.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "range_expr_slice"
+path = "fuzz_targets/range_expr_slice.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "format_string"
+path = "fuzz_targets/format_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_decode"
+path = "fuzz_targets/model_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "snapshot_decode"
+path = "fuzz_targets/snapshot_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_create_job"
+path = "fuzz_targets/model_create_job.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "snapshot_ops"
+path = "fuzz_targets/snapshot_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "expr_type_parse"
+path = "fuzz_targets/expr_type_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "copy_symbol_value"
+path = "fuzz_targets/copy_symbol_value.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,1 @@
+endswith(string(P), '.txt')

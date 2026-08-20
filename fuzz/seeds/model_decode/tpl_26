@@ -1,0 +1,47 @@
+specificationVersion: jobtemplate-2023-09
+name: Step Let In Step Env Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: Base
+    type: INT
+    default: 7
+steps:
+  - name: TestStep
+    let:
+      - val = Param.Base * 3
+      - label = "item_" + string(val)
+    stepEnvironments:
+      - name: VarEnv
+        variables:
+          MY_VAL: "{{ val }}"
+          MY_LABEL: "{{ label }}"
+      - name: ScriptEnv
+        script:
+          actions:
+            onEnter:
+              command: python
+              args:
+                - -c
+                - "print('ENTER_VAL:{{val}}')\nprint('ENTER_LABEL:{{label}}')"
+            onExit:
+              command: python
+              args:
+                - -c
+                - "print('EXIT_VAL:{{val}}')\nprint('EXIT_LABEL:{{label}}')"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+            - -c
+            - |
+              import os
+              print('ENV_VAL:' + os.environ.get('MY_VAL', ''))
+              print('ENV_LABEL:' + os.environ.get('MY_LABEL', ''))
+              print('TASK_VAL:{{val}}')
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: Frame
+          type: INT
+          range: [1]

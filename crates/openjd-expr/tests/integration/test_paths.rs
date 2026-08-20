@@ -168,6 +168,25 @@ fn is_relative_to_false() {
     );
 }
 
+// Regression: the Windows-format prefix compare in `path_starts_with` sliced
+// the path by the base's byte length, which panicked when that offset landed
+// inside a multibyte char (e.g. path "日" is 3 bytes, base "ab" is 2). See the
+// expr quality report's exploratory finding X8; found by the expr_evaluate
+// fuzz target once it exercised the Windows path format. Must evaluate to a
+// bool, not panic.
+#[test]
+fn is_relative_to_multibyte_no_char_boundary_panic() {
+    assert_eq!(
+        eval_windows("P.is_relative_to('ab')", &windows_st("P", "日")).to_display_string(),
+        "false"
+    );
+    // A multibyte base against a shorter multibyte path exercises the same slice.
+    assert_eq!(
+        eval_windows("P.is_relative_to('日本')", &windows_st("P", "日")).to_display_string(),
+        "false"
+    );
+}
+
 // === TestRelativeTo ===
 #[test]
 fn relative_to() {
