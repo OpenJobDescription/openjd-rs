@@ -354,19 +354,29 @@ pub fn re_split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_string_ops(s.len())?;
     validate_regex_pattern(&pat)?;
     let maxsplit = a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) => Some(*n as usize),
+        ExprValue::Int(n) => Some(*n),
         _ => None,
     });
     let re = ctx.get_or_compile_regex(&pat)?;
+    // Python re.split semantics (unlike str.split): negative maxsplit means
+    // no splits at all; 0 means unlimited.
+    // The `i64 -> usize` conversion saturates rather than casting: on 32-bit
+    // targets a plain `as` cast would wrap a large maxsplit down to a small one
+    // (or to 0) and silently split too few times. See `maxsplit_arg` in
+    // `functions/string.rs`.
     let parts: Vec<ExprValue> = match maxsplit {
-        Some(n) => re
-            .splitn(&s, n + 1)
+        Some(n) if n < 0 => vec![ExprValue::String(s.clone())],
+        Some(n) if n > 0 => re
+            .splitn(
+                &s,
+                usize::try_from(n).unwrap_or(usize::MAX).saturating_add(1),
+            )
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
-        None => re
+        _ => re
             .split(&s)
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
     };
-    ExprValue::make_list(parts, ExprType::STRING)
+    ExprValue::make_list_checked(ctx, parts, ExprType::STRING)
 }

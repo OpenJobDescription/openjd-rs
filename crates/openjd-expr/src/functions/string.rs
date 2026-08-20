@@ -193,6 +193,23 @@ pub fn count_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Int(s.matches(sub).count() as i64))
 }
 
+/// Extract the optional third `maxsplit` argument for split()/rsplit().
+/// Negative values mean "no limit", matching Python's `str.split`.
+/// (`re_split` deliberately differs: Python's `re.split` treats negative as
+/// "no splits" and 0 as unlimited — see `functions/regex.rs`.)
+///
+/// The `i64 -> usize` conversion saturates rather than casting: on 32-bit
+/// targets `usize` is narrower than `i64`, and a plain `as` cast would wrap a
+/// large maxsplit down to a small one (or to 0) and silently split too few
+/// times. Saturating to `usize::MAX` keeps "larger than the string" behaving
+/// like "no limit" on every target width.
+fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
+    a.get(2).and_then(|v| match v {
+        ExprValue::Int(n) if *n >= 0 => Some(usize::try_from(*n).unwrap_or(usize::MAX)),
+        _ => None,
+    })
+}
+
 pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
@@ -209,13 +226,10 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Err(ExpressionError::new("split failed: empty separator"));
     }
     ctx.count_string_ops(s.len())?;
-    let maxsplit = a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) => Some(*n as usize),
-        _ => None,
-    });
+    let maxsplit = maxsplit_arg(a);
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => s
-            .splitn(n + 1, sep)
+            .splitn(n.saturating_add(1), sep)
             .map(|p| ExprValue::String(p.to_string()))
             .collect(),
         None => s
@@ -241,14 +255,11 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         return Err(ExpressionError::new("split failed: empty separator"));
     }
     ctx.count_string_ops(s.len())?;
-    let maxsplit = a.get(2).and_then(|v| match v {
-        ExprValue::Int(n) => Some(*n as usize),
-        _ => None,
-    });
+    let maxsplit = maxsplit_arg(a);
     let parts: Vec<ExprValue> = match maxsplit {
         Some(n) => {
             let mut v: Vec<_> = s
-                .rsplitn(n + 1, sep)
+                .rsplitn(n.saturating_add(1), sep)
                 .map(|p| ExprValue::String(p.to_string()))
                 .collect();
             v.reverse();

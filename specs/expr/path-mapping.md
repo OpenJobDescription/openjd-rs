@@ -45,9 +45,29 @@ slashes are preserved. Output separators use the host-native format — use
 `apply_with_format` for explicit control.
 
 Format-appropriate comparison means:
-- **Posix**: exact byte comparison
-- **Windows**: case-insensitive, normalizes backslashes to forward slashes
+- **Posix**: exact byte comparison; `/` is the only separator
+- **Windows**: case-insensitive, treats `\` and `/` interchangeably as separators
 - **URI**: scheme and authority compared case-insensitively, path compared exactly
+
+Filesystem matching (Posix and Windows) compares the path component by
+component, and mirrors Python's `PurePosixPath`/`PureWindowsPath`
+`is_relative_to` on two points that component comparison alone would miss:
+
+> **Rootedness must agree.** A relative path never matches an absolute rule and
+> an absolute path never matches a relative rule, even when every component
+> lines up. Python gets this from the root entry in `.parts`; component
+> splitting discards it, so it is compared separately. A path is rooted if it
+> starts with `/`, or — under Windows only — with `\`. Drive-anchored Windows
+> paths need no special case: `C:` is kept as the first component, so a drive
+> mismatch already fails component comparison.
+>
+> **Only the format's own separators split components.** Under Windows, `\` and
+> `/` are interchangeable, so the rule `C:/Users/bob` matches the input
+> `C:\Users\bob\f.txt`. Under Posix, `\` is an ordinary filename character, so
+> `home\user` is a single component: the rule `/home/user` does **not** match
+> the input `/home\user/f`, and the rule `/home\user` matches `/home\user/f`
+> but not `/home/user/f`. This follows `PurePosixPath("/home\\user/f").parts`
+> == `('/', 'home\\user', 'f')`.
 
 ### apply_with_format
 

@@ -372,6 +372,28 @@ fn make_list_checked_range_fn() {
 }
 
 #[test]
+fn re_split_large_result_respects_budgets() {
+    // End-to-end: a large re_split fails cleanly under a tight memory cap.
+    // Note this cannot distinguish make_list_checked from make_list: the
+    // checked constructor only moves the limit check before the transient
+    // allocation (track() charges the result either way).
+    let mut st = SymbolTable::new();
+    st.set("Param.Text", "word ".repeat(10_000)).unwrap();
+    let e = ParsedExpression::new("re_split(Param.Text, ' ')")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("exceeded limit"),
+        "expected a bound-exceeded error, got:\n{e}"
+    );
+}
+
+#[test]
 fn make_list_checked_sorted_fn() {
     // sorted() → make_list_checked. Use a large input symtab list so the
     // oversize only materializes at construction.
