@@ -2331,6 +2331,7 @@ impl Session {
     ) -> Result<SymbolTable, SessionError> {
         use openjd_model::types::TaskParameterType;
 
+        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         let mut symtab = if let Some(base) = base {
             // Deserialize with host path format — this is the template→session boundary.
             // Path values stored as Posix in template scope get normalized to host format.
@@ -2395,11 +2396,22 @@ impl Session {
         } else {
             let mut s = SymbolTable::new();
             for (name, param) in &self.job_parameter_values {
+                use openjd_model::types::JobParameterType;
+                // RawParam.* — coerced to declared type so expressions like
+                // {{ RawParam.N + 1 }} work correctly with typed arithmetic.
                 let raw_key = format!("RawParam.{name}");
-                s.set(&raw_key, param.value.clone())
+                let raw_value = match param.param_type {
+                    JobParameterType::Path | JobParameterType::ListPath => param.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
+                s.set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
                 let key = format!("Param.{name}");
-                use openjd_model::types::JobParameterType;
                 let mapped_value = match param.param_type {
                     JobParameterType::Path => {
                         let raw = match &param.value {
@@ -2430,7 +2442,12 @@ impl Session {
                         }
                         other => self.apply_path_mapping_to_value(other),
                     },
-                    _ => self.apply_path_mapping_to_value(&param.value),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 s.set(&key, mapped_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
@@ -2438,7 +2455,6 @@ impl Session {
             s
         };
 
-        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         symtab
             .set(
                 "Session.WorkingDirectory",
@@ -2451,10 +2467,21 @@ impl Session {
 
         if let Some(task_params) = task_parameter_values {
             for (name, tv) in task_params {
-                // Task.RawParam.* — raw string value
+                // Task.RawParam.* — coerced to declared type so expressions
+                // like {{ Task.RawParam.Frame + 1 }} work correctly.
                 let raw_key = format!("Task.RawParam.{name}");
+                let raw_value = match tv.param_type {
+                    TaskParameterType::Path => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
                 symtab
-                    .set(&raw_key, tv.value.clone())
+                    .set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
 
                 // Task.Param.* — typed value with path mapping applied for PATH types
@@ -2472,7 +2499,13 @@ impl Session {
                             openjd_expr::path_mapping::PathFormat::host(),
                         )
                     }
-                    _ => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 symtab
                     .set(&key, param_value)
@@ -2481,6 +2514,22 @@ impl Session {
         }
 
         Ok(symtab)
+    }
+
+    /// Coerce a parameter value to its declared type using `ExprValue::coerce`.
+    ///
+    /// This ensures that string values arriving from the PyO3 boundary are
+    /// properly typed in the symbol table so that expression evaluation
+    /// (arithmetic, comparisons) works correctly on the Rust runtime.
+    fn coerce_param_value(
+        value: &openjd_expr::ExprValue,
+        target_type: &openjd_expr::ExprType,
+        path_format: openjd_expr::path_mapping::PathFormat,
+        param_key: &str,
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        value.clone().coerce(target_type, path_format).map_err(|e| {
+            SessionError::Runtime(format!("Failed to coerce parameter '{param_key}': {e}"))
+        })
     }
 
     /// Apply path mapping rules to a string, returning the mapped result.
@@ -3332,7 +3381,10 @@ mod typed_param_seeding_tests {
         .unwrap();
         let result = eval_expr(&symtab, "{{Param.Scale * 2}}").unwrap();
         // Result should be Float(5.0)
-        assert_eq!(result, ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap()));
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap())
+        );
     }
 
     #[test]
@@ -3413,7 +3465,10 @@ mod typed_param_seeding_tests {
         )])
         .unwrap();
         let result = eval_expr(&symtab, "{{Param.Weights[0] + 1}}").unwrap();
-        assert_eq!(result, ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap()));
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap())
+        );
     }
 
     #[test]
@@ -3435,17 +3490,10 @@ mod typed_param_seeding_tests {
         // Input: a ListList containing ListString elements that should become ListInt
         let inner1 = ExprValue::ListString(vec!["10".into(), "20".into()], 2);
         let inner2 = ExprValue::ListString(vec!["30".into(), "40".into()], 2);
-        let outer = ExprValue::ListList(
-            vec![inner1, inner2],
-            ExprType::list(ExprType::STRING),
-            0,
-        );
-        let symtab = build_symtab_from_scratch(vec![(
-            "Grid",
-            JobParameterType::ListListInt,
-            outer,
-        )])
-        .unwrap();
+        let outer = ExprValue::ListList(vec![inner1, inner2], ExprType::list(ExprType::STRING), 0);
+        let symtab =
+            build_symtab_from_scratch(vec![("Grid", JobParameterType::ListListInt, outer)])
+                .unwrap();
         let val = symtab.get_value("Param.Grid").unwrap();
         // After coercion, should be a ListList of ListInt elements
         if let ExprValue::ListList(elements, _, _) = val {
@@ -3499,7 +3547,11 @@ mod typed_param_seeding_tests {
         // Task INT "5" → {{ Task.Param.Frame > 3 }} → true; {{ Task.Param.Frame + 1 }} → 6
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Frame", TaskParameterType::Int, ExprValue::String("5".into()))],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("5".into()),
+            )],
         )
         .unwrap();
         let cmp = eval_expr(&symtab, "{{Task.Param.Frame > 3}}").unwrap();
@@ -3512,18 +3564,29 @@ mod typed_param_seeding_tests {
     fn task_float_arithmetic() {
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Weight", TaskParameterType::Float, ExprValue::String("3.5".into()))],
+            vec![(
+                "Weight",
+                TaskParameterType::Float,
+                ExprValue::String("3.5".into()),
+            )],
         )
         .unwrap();
         let result = eval_expr(&symtab, "{{Task.Param.Weight * 2}}").unwrap();
-        assert_eq!(result, ExprValue::Float(openjd_expr::value::Float64::new(7.0).unwrap()));
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(7.0).unwrap())
+        );
     }
 
     #[test]
     fn task_string_unchanged() {
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Label", TaskParameterType::String, ExprValue::String("hello".into()))],
+            vec![(
+                "Label",
+                TaskParameterType::String,
+                ExprValue::String("hello".into()),
+            )],
         )
         .unwrap();
         let result = eval_expr(&symtab, "{{Task.Param.Label}}").unwrap();
@@ -3534,7 +3597,11 @@ mod typed_param_seeding_tests {
     fn task_path_unchanged() {
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Out", TaskParameterType::Path, ExprValue::String("/output".into()))],
+            vec![(
+                "Out",
+                TaskParameterType::Path,
+                ExprValue::String("/output".into()),
+            )],
         )
         .unwrap();
         let val = symtab.get_value("Task.Param.Out").unwrap();
@@ -3549,7 +3616,11 @@ mod typed_param_seeding_tests {
         // CHUNK[INT] — exempt from coercion, stays as string (range expression string)
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Chunk", TaskParameterType::ChunkInt, ExprValue::String("1-10".into()))],
+            vec![(
+                "Chunk",
+                TaskParameterType::ChunkInt,
+                ExprValue::String("1-10".into()),
+            )],
         )
         .unwrap();
         let val = symtab.get_value("Task.Param.Chunk").unwrap();
@@ -3579,7 +3650,11 @@ mod typed_param_seeding_tests {
         // Task INT "7" → {{ Task.RawParam.Frame + 1 }} → 8
         let symtab = build_symtab_with_task_params(
             vec![],
-            vec![("Frame", TaskParameterType::Int, ExprValue::String("7".into()))],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("7".into()),
+            )],
         )
         .unwrap();
         let result = eval_expr(&symtab, "{{Task.RawParam.Frame + 1}}").unwrap();
