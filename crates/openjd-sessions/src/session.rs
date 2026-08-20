@@ -3686,7 +3686,14 @@ mod typed_param_seeding_tests {
             JobParameterType::Int,
             ExprValue::String("abc".into()),
         )]);
-        assert!(result.is_err(), "expected error for bad INT value, got Ok");
+        let msg = result
+            .expect_err("expected error for bad INT value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.N': \
+             Cannot convert 'abc' to int: invalid digit found in string"
+        );
     }
 
     #[test]
@@ -3697,7 +3704,13 @@ mod typed_param_seeding_tests {
             JobParameterType::Bool,
             ExprValue::String("maybe".into()),
         )]);
-        assert!(result.is_err(), "expected error for bad BOOL value, got Ok");
+        let msg = result
+            .expect_err("expected error for bad BOOL value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.B': Cannot convert 'maybe' to bool"
+        );
     }
 
     #[test]
@@ -3708,9 +3721,13 @@ mod typed_param_seeding_tests {
             JobParameterType::ListInt,
             ExprValue::ListString(vec!["1".into(), "abc".into(), "3".into()], 3),
         )]);
-        assert!(
-            result.is_err(),
-            "expected error for bad LIST[INT] element, got Ok"
+        let msg = result
+            .expect_err("expected error for bad LIST[INT] element, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.Tiles': \
+             Cannot convert 'abc' to int: invalid digit found in string"
         );
     }
 }
