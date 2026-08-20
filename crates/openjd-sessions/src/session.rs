@@ -66,6 +66,12 @@ use crate::session_user::SessionUser;
 /// assert_eq!(format!("{state}"), "READY");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "runtime state machine: consumers match on these to react, and a new state \
+              must be a compile error rather than a silently ignored `_` arm. Not \
+              extension-gated."
+)]
 pub enum SessionState {
     Ready,
     Running,
@@ -93,6 +99,13 @@ pub type EnvironmentIdentifier = String;
 pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 
 /// Configuration for creating a new Session.
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration assembled by struct literal (the \
+              CLI and downstream callers build it directly), not a spec-mirroring \
+              growth axis. Marking it would force `Default` plus field mutation \
+              at every call site. See specs/non-exhaustive-policy.md."
+)]
 pub struct SessionConfig {
     pub session_id: String,
     pub job_parameter_values: JobParameterValues,
@@ -2225,11 +2238,12 @@ impl Session {
                 .iter()
                 .map(|rule| {
                     serde_json::json!({
-                        "source_path_format": match rule.source_path_format {
-                            openjd_expr::path_mapping::PathFormat::Posix => "POSIX",
-                            openjd_expr::path_mapping::PathFormat::Windows => "WINDOWS",
-                            openjd_expr::path_mapping::PathFormat::Uri => "URI",
-                        },
+                        // `PathFormat` serializes to its canonical UPPERCASE
+                        // transport name ("POSIX"/"WINDOWS"/"URI"), so defer to
+                        // its `Serialize` impl rather than a hand-rolled match:
+                        // `PathFormat` is `#[non_exhaustive]` and a future
+                        // variant then needs no change here.
+                        "source_path_format": rule.source_path_format,
                         "source_path": &rule.source_path,
                         "destination_path": &rule.destination_path,
                     })

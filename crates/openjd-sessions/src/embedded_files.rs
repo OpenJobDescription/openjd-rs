@@ -23,6 +23,7 @@ use crate::session_user::SessionUser;
 
 /// Scope for embedded file symbol table entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EmbeddedFilesScope {
     Step,
     Env,

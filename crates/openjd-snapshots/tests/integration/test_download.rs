@@ -321,10 +321,9 @@ async fn diff_deletes_empty_directory() {
     std::fs::create_dir(&dir_to_delete).unwrap();
 
     let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_dirs(vec![DirEntry {
-            path: dir_to_delete.to_string_lossy().to_string(),
-            deleted: true,
-        }]);
+        .with_dirs(vec![DirEntry::deleted(
+            dir_to_delete.to_string_lossy().to_string(),
+        )]);
     download_abs_manifest(
         &AbsManifest::Diff(manifest),
         dc.clone(),
@@ -350,10 +349,7 @@ async fn non_empty_directory_not_deleted() {
     std::fs::write(dir.join("file.txt"), b"content").unwrap();
 
     let manifest: AbsSnapshotDiff = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
-        .with_dirs(vec![DirEntry {
-            path: dir.to_string_lossy().to_string(),
-            deleted: true,
-        }]);
+        .with_dirs(vec![DirEntry::deleted(dir.to_string_lossy().to_string())]);
     download_abs_manifest(
         &AbsManifest::Diff(manifest),
         dc.clone(),
@@ -386,14 +382,8 @@ async fn deletion_order_children_before_parents() {
             file_in_child.to_string_lossy().to_string(),
         )])
         .with_dirs(vec![
-            DirEntry {
-                path: parent.to_string_lossy().to_string(),
-                deleted: true,
-            },
-            DirEntry {
-                path: child.to_string_lossy().to_string(),
-                deleted: true,
-            },
+            DirEntry::deleted(parent.to_string_lossy().to_string()),
+            DirEntry::deleted(child.to_string_lossy().to_string()),
         ]);
     download_abs_manifest(
         &AbsManifest::Diff(manifest),

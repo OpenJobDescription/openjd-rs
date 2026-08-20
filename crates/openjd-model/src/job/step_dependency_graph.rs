@@ -13,6 +13,10 @@ type NodeIndex = usize;
 
 /// A step-to-step dependency edge.
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct StepDependencyEdge {
     /// Index of the step that is depended upon.
     pub origin: NodeIndex,
@@ -22,6 +26,10 @@ pub struct StepDependencyEdge {
 
 /// A node in the dependency graph.
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct StepDependencyNode {
     /// The step this node represents (index into job.steps).
     pub step_index: usize,

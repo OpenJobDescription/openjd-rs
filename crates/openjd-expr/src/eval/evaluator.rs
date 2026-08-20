@@ -47,6 +47,10 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
 /// Result of expression evaluation.
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct EvalResult {
     pub value: ExprValue,
     pub peak_memory: usize,

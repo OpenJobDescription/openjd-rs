@@ -132,10 +132,7 @@ fn template_with_two_steps_param_spaces(range1: usize, range2: usize) -> String 
 
 #[test]
 fn max_step_count_within_limit() {
-    let limits = CallerLimits {
-        max_step_count: Some(3),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_step_count(3);
     let v = yaml_val(&minimal_template(3));
     let result = decode_job_template(v, None, &limits);
     assert!(
@@ -147,10 +144,7 @@ fn max_step_count_within_limit() {
 
 #[test]
 fn max_step_count_exceeded() {
-    let limits = CallerLimits {
-        max_step_count: Some(2),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_step_count(2);
     let v = yaml_val(&minimal_template(3));
     let err = decode_job_template(v, None, &limits).unwrap_err();
     let msg = err.to_string();
@@ -185,10 +179,7 @@ fn decode_job_template_without_limits_still_works() {
 
 #[test]
 fn max_env_count_within_limit() {
-    let limits = CallerLimits {
-        max_env_count: Some(5),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_env_count(5);
     // 2 job envs + 2 step envs = 4 total
     let v = yaml_val(&template_with_envs(2, 2));
     let result = decode_job_template(v, None, &limits);
@@ -201,10 +192,7 @@ fn max_env_count_within_limit() {
 
 #[test]
 fn max_env_count_exceeded() {
-    let limits = CallerLimits {
-        max_env_count: Some(3),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_env_count(3);
     // 2 job envs + 2 step envs = 4 total
     let v = yaml_val(&template_with_envs(2, 2));
     let err = decode_job_template(v, None, &limits).unwrap_err();
@@ -217,10 +205,7 @@ fn max_env_count_exceeded() {
 
 #[test]
 fn max_env_count_counts_job_and_step_envs_together() {
-    let limits = CallerLimits {
-        max_env_count: Some(4),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_env_count(4);
     // Exactly 4 total (2 + 2) — should pass
     let v = yaml_val(&template_with_envs(2, 2));
     let result = decode_job_template(v, None, &limits);
@@ -233,10 +218,7 @@ fn max_env_count_counts_job_and_step_envs_together() {
 
 #[test]
 fn max_task_count_within_limit() {
-    let limits = CallerLimits {
-        max_task_count: Some(100),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_task_count(100);
     let v = yaml_val(&template_with_param_space(50));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -261,10 +243,7 @@ fn max_task_count_within_limit() {
 
 #[test]
 fn max_task_count_exceeded_single_step() {
-    let limits = CallerLimits {
-        max_task_count: Some(10),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_task_count(10);
     let v = yaml_val(&template_with_param_space(20));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -290,10 +269,7 @@ fn max_task_count_exceeded_single_step() {
 
 #[test]
 fn max_task_count_exceeded_across_steps() {
-    let limits = CallerLimits {
-        max_task_count: Some(15),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_task_count(15);
     // 10 + 10 = 20 total tasks
     let v = yaml_val(&template_with_two_steps_param_spaces(10, 10));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
@@ -341,10 +317,7 @@ fn max_task_count_none_means_no_limit() {
 
 #[test]
 fn max_task_count_step_without_param_space_counts_as_one() {
-    let limits = CallerLimits {
-        max_task_count: Some(5),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_task_count(5);
     // 3 steps with no parameter space = 3 tasks total
     let v = yaml_val(&minimal_template(3));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
@@ -377,10 +350,7 @@ fn max_task_count_counts_tasks_not_chunks() {
     // 100 tasks chunked into 1 chunk (defaultTaskCount=100).
     // The iterator would report len()=1 with default chunking,
     // but the actual task count is 100 and should exceed a limit of 50.
-    let limits = CallerLimits {
-        max_task_count: Some(50),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_task_count(50);
     let range: Vec<String> = (0..100).map(|i| i.to_string()).collect();
     let tmpl = format!(
         r#"{{
@@ -431,10 +401,7 @@ fn max_task_count_counts_tasks_not_chunks() {
 fn max_template_size_within_limit() {
     use openjd_model::template::parse::{document_string_to_object, DocumentType};
     let doc = r#"{"specificationVersion": "jobtemplate-2023-09", "name": "T", "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#;
-    let limits = CallerLimits {
-        max_template_size: Some(10000),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_template_size(10000);
     let result = document_string_to_object(doc, DocumentType::Json, &limits);
     assert!(result.is_ok(), "Within limit: {:?}", result.err());
 }
@@ -443,10 +410,7 @@ fn max_template_size_within_limit() {
 fn max_template_size_exceeded() {
     use openjd_model::template::parse::{document_string_to_object, DocumentType};
     let doc = r#"{"specificationVersion": "jobtemplate-2023-09", "name": "T", "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#;
-    let limits = CallerLimits {
-        max_template_size: Some(10),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_template_size(10);
     let err = document_string_to_object(doc, DocumentType::Json, &limits).unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -461,10 +425,7 @@ fn max_template_size_exceeded() {
 
 #[test]
 fn max_step_script_size_within_limit() {
-    let limits = CallerLimits {
-        max_step_script_size: Some(100_000),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_step_script_size(100_000);
     let v = yaml_val(&minimal_template(1));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -485,10 +446,7 @@ fn max_step_script_size_within_limit() {
 
 #[test]
 fn max_step_script_size_exceeded() {
-    let limits = CallerLimits {
-        max_step_script_size: Some(1), // impossibly small
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_step_script_size(1);
     let v = yaml_val(&minimal_template(1));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -518,10 +476,7 @@ fn max_step_script_size_exceeded() {
 
 #[test]
 fn max_environment_size_within_limit() {
-    let limits = CallerLimits {
-        max_environment_size: Some(100_000),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_environment_size(100_000);
     let v = yaml_val(&template_with_envs(1, 0));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -542,10 +497,7 @@ fn max_environment_size_within_limit() {
 
 #[test]
 fn max_environment_size_exceeded() {
-    let limits = CallerLimits {
-        max_environment_size: Some(1), // impossibly small
-        ..Default::default()
-    };
+    let limits = CallerLimits::new().with_max_environment_size(1);
     let v = yaml_val(&template_with_envs(1, 0));
     let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
     let params = preprocess_job_parameters(
@@ -590,11 +542,9 @@ fn caller_limits_default_is_all_none() {
 
 #[test]
 fn multiple_caller_limits_all_checked() {
-    let limits = CallerLimits {
-        max_step_count: Some(1),
-        max_env_count: Some(0),
-        ..Default::default()
-    };
+    let limits = CallerLimits::new()
+        .with_max_step_count(1)
+        .with_max_env_count(0);
     // 2 steps + 1 env — both limits exceeded
     let v = yaml_val(&template_with_envs(1, 0));
     // This template has 1 step and 1 job env — step count is fine (1), but env count (1) > 0

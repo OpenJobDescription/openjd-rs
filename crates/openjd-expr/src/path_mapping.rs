@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Path format (POSIX, Windows, or URI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
 pub enum PathFormat {
     #[serde(alias = "posix", alias = "Posix")]
     Posix,
@@ -36,6 +37,7 @@ impl PathFormat {
 /// <https://github.com/OpenJobDescription/openjd-specifications/wiki/How-Jobs-Are-Run#path-mapping>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct PathMappingRule {
     pub source_path_format: PathFormat,
     pub source_path: String,
@@ -43,6 +45,32 @@ pub struct PathMappingRule {
 }
 
 impl PathMappingRule {
+    /// Construct a path mapping rule.
+    ///
+    /// Prefer this over a struct literal: `PathMappingRule` is
+    /// `#[non_exhaustive]`, so literal construction is not available to
+    /// other crates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use openjd_expr::{PathFormat, PathMappingRule};
+    ///
+    /// let rule = PathMappingRule::new(PathFormat::Posix, "/mnt/shared", "Z:\\shared");
+    /// assert_eq!(rule.source_path, "/mnt/shared");
+    /// ```
+    pub fn new(
+        source_path_format: PathFormat,
+        source_path: impl Into<String>,
+        destination_path: impl Into<String>,
+    ) -> Self {
+        Self {
+            source_path_format,
+            source_path: source_path.into(),
+            destination_path: destination_path.into(),
+        }
+    }
+
     /// Apply this rule using host-native output separators.
     /// Equivalent to Python's behavior (uses `os.name` to pick separator).
     pub fn apply(&self, path: &str) -> Option<String> {

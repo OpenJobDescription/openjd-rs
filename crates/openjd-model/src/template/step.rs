@@ -16,6 +16,7 @@ use serde::Deserialize;
 /// Allows specifying a script interpreter directly instead of a full StepScript.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct SimpleAction {
     /// Let bindings evaluated once per task (requires EXPR extension).
     #[serde(rename = "let")]
@@ -33,6 +34,7 @@ pub struct SimpleAction {
 /// §3 StepTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StepTemplate {
     pub name: String,
     pub description: Option<Description>,
@@ -129,6 +131,7 @@ impl StepTemplate {
 /// §3.2 StepDependency
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StepDependency {
     pub depends_on: String,
 }
@@ -136,6 +139,7 @@ pub struct StepDependency {
 /// §3.5 StepScript
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StepScript {
     #[serde(rename = "let")]
     pub let_bindings: Option<Vec<String>>,
