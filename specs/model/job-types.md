@@ -126,7 +126,9 @@ plain `@fmtstring` in the spec — job-creation stage), so no `Session.*`, `Task
 `let_bindings` deserializes from the `let` wire key, matching the template side and the
 OpenJD wire format, and serializes back out as `let`. The legacy `letBindings` spelling
 is accepted as an alias on input for backward compatibility. `EnvironmentScript` (below)
-carries `let_bindings` with the same wire behavior.
+carries `let_bindings` with the same wire behavior. Both `StepScript` and
+`EnvironmentScript` reject unknown fields on input, so a misspelled or unrecognized
+script key fails loudly instead of being silently dropped.
 
 ### Environment, EnvironmentScript, EnvironmentActions
 

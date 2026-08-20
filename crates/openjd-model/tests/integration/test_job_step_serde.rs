@@ -6,9 +6,10 @@
 //!
 //! The OpenJD wire key is `"let"` (matching the template side). These tests
 //! pin that the job-side deserializer accepts the `"let"` wire key, keeps the
-//! legacy `"letBindings"` spelling working as an alias, and emits `"let"` on
-//! serialization. `EnvironmentScript` is exercised through a full `job::Step`
-//! document because that is how the worker reaches it via `deserialize_step`.
+//! legacy `"letBindings"` spelling working as an alias, emits `"let"` on
+//! serialization, and rejects unknown fields instead of silently dropping
+//! them. `EnvironmentScript` is exercised through a full `job::Step` document
+//! because that is how the worker reaches it via `deserialize_step`.
 
 use openjd_expr::FormatString;
 use openjd_model::job::{
@@ -121,5 +122,48 @@ fn environment_script_serializes_let_key() {
     assert!(
         !obj.contains_key("letBindings"),
         "must not emit the legacy `letBindings` key, got: {value}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Group B — reject unknown fields (deny_unknown_fields)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn step_script_rejects_unknown_field() {
+    let err = serde_json::from_str::<Step>(
+        r#"{"name":"S","script":{"letBindingz":[],"actions":{"onRun":{"command":"echo hello"}}}}"#,
+    )
+    .expect_err("an unknown script field must be rejected, not silently dropped");
+    assert!(
+        err.to_string().contains("unknown field"),
+        "expected an unknown-field error, got: {err}",
+    );
+}
+
+#[test]
+fn step_script_alias_works_with_deny_unknown_fields() {
+    // serde historically had a bug where `deny_unknown_fields` caused field
+    // aliases to be ignored; this pins that the legacy `letBindings` alias
+    // still deserializes once unknown fields are rejected.
+    let step: Step = serde_json::from_str(
+        r#"{"name":"S","script":{"letBindings":["greeting = 'hello'"],"actions":{"onRun":{"command":"echo hello"}}}}"#,
+    )
+    .expect("the `letBindings` alias must still deserialize under deny_unknown_fields");
+    assert_eq!(
+        step.script.let_bindings,
+        Some(vec!["greeting = 'hello'".to_string()]),
+    );
+}
+
+#[test]
+fn environment_script_rejects_unknown_field() {
+    let err = serde_json::from_str::<Step>(
+        r#"{"name":"S","script":{"actions":{"onRun":{"command":"echo hello"}}},"stepEnvironments":[{"name":"E","script":{"letBindingz":[],"actions":{"onEnter":{"command":"echo hello"}}}}]}"#,
+    )
+    .expect_err("an unknown environment-script field must be rejected");
+    assert!(
+        err.to_string().contains("unknown field"),
+        "expected an unknown-field error, got: {err}",
     );
 }
