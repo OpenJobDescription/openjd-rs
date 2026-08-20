@@ -352,6 +352,146 @@ jobs:
             bash scripts/run_cross_user_tests.sh
           fi
 
+  # macOS has no Docker, but the runner has passwordless sudo, so the test
+  # users/groups are provisioned directly on the host with Directory Services
+  # (the macOS analog of the useradd/groupadd calls in the Linux containers).
+  cross-user-macos:
+    name: Cross-User Tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      OPENJD_TEST_SUDO_TARGET_USER: openjd-target
+      OPENJD_TEST_SUDO_SHARED_GROUP: openjd-shared
+      OPENJD_TEST_SUDO_DISJOINT_USER: openjd-disjoint
+      OPENJD_TEST_SUDO_DISJOINT_GROUP: openjd-disjointgrp
+      # The default per-user TMPDIR (/var/folders/<hash>/T) is mode 0700, so the
+      # target user cannot traverse to the session working directory or execute
+      # the extracted helper binary inside it. Tests need a world-traversable
+      # temp root (real deployments use a shared session root such as
+      # /var/lib/deadline/sessions for the same reason). Job-scoped, so it must
+      # be created before any step that writes temp files -- see the first step.
+      TMPDIR: /private/tmp/openjd-tests
+    steps:
+      - name: Create temp root
+        # TMPDIR is exported to every step; the directory must exist before
+        # checkout/rustup/cache write their first temp file.
+        run: |
+          sudo mkdir -p "${TMPDIR}"
+          sudo chmod 1777 "${TMPDIR}"
+          # Record the default per-user TMPDIR this runner would otherwise use,
+          # so the override is self-documenting: the tests rely on it being
+          # world-traversable, unlike the default /var/folders/<hash>/T (0700).
+          echo "default TMPDIR mode: $(stat -f '%Lp %N' "${TMPDIR:-/tmp}" 2>/dev/null || true)"
+          echo "runner default temp: ${RUNNER_TEMP:-unset}"
+      - uses: actions/checkout@v7
+      - name: Install rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+            crates/openjd-sessions/src/helper/target
+          key: rust-cross-user-macos-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            rust-cross-user-macos-
+      - name: Provision test users and groups
+        run: |
+          set -euxo pipefail
+
+          sudo dseditgroup -o create "${OPENJD_TEST_SUDO_SHARED_GROUP}"
+          sudo dseditgroup -o create "${OPENJD_TEST_SUDO_DISJOINT_GROUP}"
+
+          # Target user: impersonated by the tests; shares a group with runner.
+          sudo sysadminctl -addUser "${OPENJD_TEST_SUDO_TARGET_USER}" \
+            -fullName "OpenJD Test Target" -password "OpenJD-ci-test-1!" -shell /bin/zsh
+          sudo createhomedir -c -u "${OPENJD_TEST_SUDO_TARGET_USER}" > /dev/null
+          sudo dseditgroup -o edit -a "${OPENJD_TEST_SUDO_TARGET_USER}" -t user "${OPENJD_TEST_SUDO_SHARED_GROUP}"
+          # Linux useradd gives every user a self-named group and the tempdir
+          # cleanup test chowns to "user:user"; macOS does not, so create it.
+          sudo dseditgroup -o create "${OPENJD_TEST_SUDO_TARGET_USER}"
+          sudo dseditgroup -o edit -a "${OPENJD_TEST_SUDO_TARGET_USER}" -t user "${OPENJD_TEST_SUDO_TARGET_USER}"
+
+          # Disjoint user: shares no relevant group with the runner. What the
+          # disjoint test exercises is that the runner is NOT a member of the
+          # DISJOINT_GROUP that TempDir chowns to; on macOS both accounts are
+          # unavoidably in `staff` and Apple's implicit groups (everyone,
+          # localaccounts, ...), so make the disjoint user's PRIMARY group the
+          # disjoint group rather than staff to keep the setup as close to the
+          # Linux container's (truly disjoint) layout as macOS allows.
+          sudo sysadminctl -addUser "${OPENJD_TEST_SUDO_DISJOINT_USER}" \
+            -fullName "OpenJD Test Disjoint" -password "OpenJD-ci-test-1!" -shell /bin/zsh
+          sudo createhomedir -c -u "${OPENJD_TEST_SUDO_DISJOINT_USER}" > /dev/null
+          sudo dseditgroup -o edit -a "${OPENJD_TEST_SUDO_DISJOINT_USER}" -t user "${OPENJD_TEST_SUDO_DISJOINT_GROUP}"
+          disjoint_gid="$(dscl . -read "/Groups/${OPENJD_TEST_SUDO_DISJOINT_GROUP}" PrimaryGroupID | awk '{print $2}')"
+          sudo dscl . -create "/Users/${OPENJD_TEST_SUDO_DISJOINT_USER}" PrimaryGroupID "${disjoint_gid}"
+          # NOTE: no `dseditgroup -d ... staff` here — sysadminctl places users in
+          # staff via PrimaryGroupID, not a member record, and the reassignment
+          # above has already moved them off it. A delete would be a no-op.
+
+          # The test-running user joins the shared group (matches the Docker layout).
+          sudo dseditgroup -o edit -a runner -t user "${OPENJD_TEST_SUDO_SHARED_GROUP}"
+
+          # Passwordless sudo from runner to the test users, mirroring the
+          # hostuser rule in the Linux containers.
+          echo "runner ALL=(${OPENJD_TEST_SUDO_TARGET_USER},${OPENJD_TEST_SUDO_DISJOINT_USER}) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/openjd-cross-user-tests
+          sudo chmod 440 /etc/sudoers.d/openjd-cross-user-tests
+          sudo visudo -cf /etc/sudoers.d/openjd-cross-user-tests
+
+          sudo dscacheutil -flushcache
+      - name: Verify provisioning
+        run: |
+          set -euxo pipefail
+          id "${OPENJD_TEST_SUDO_TARGET_USER}"
+          id "${OPENJD_TEST_SUDO_DISJOINT_USER}"
+          # Check membership at the PROCESS-CREDENTIAL level, not just the
+          # directory record: bare `id -Gn` reports this step's own kernel group
+          # set. On macOS, new processes resolve supplementary groups through
+          # Directory Services at spawn, so steps created after provisioning pick
+          # up the membership even though the parent Runner.Worker process
+          # predates it -- this asserts that stays true (the test step below
+          # inherits its groups the same way this step does).
+          id -Gn | tr ' ' '\n' | grep -qx "${OPENJD_TEST_SUDO_SHARED_GROUP}"
+          id -Gn runner | tr ' ' '\n' | grep -qx "${OPENJD_TEST_SUDO_SHARED_GROUP}"
+          if id -Gn "${OPENJD_TEST_SUDO_DISJOINT_USER}" | tr ' ' '\n' | grep -qx "${OPENJD_TEST_SUDO_SHARED_GROUP}"; then
+            echo "disjoint user must not be in the shared group" && exit 1
+          fi
+          # The property the disjoint tempdir test relies on: the runner is not
+          # a member of the disjoint group (TempDir chowns to it and must fail).
+          if id -Gn runner | tr ' ' '\n' | grep -qx "${OPENJD_TEST_SUDO_DISJOINT_GROUP}"; then
+            echo "runner must not be in the disjoint group" && exit 1
+          fi
+          # And the disjoint user's primary group is the disjoint group, not staff.
+          test "$(id -gn "${OPENJD_TEST_SUDO_DISJOINT_USER}")" = "${OPENJD_TEST_SUDO_DISJOINT_GROUP}"
+          sudo -u "${OPENJD_TEST_SUDO_TARGET_USER}" -i /usr/bin/true
+      # The sibling Windows modules are cfg-gated off on unix, so selecting the
+      # test_cross_user:: module path runs exactly the POSIX cross-user tests.
+      - name: Run cross-user tests
+        run: |
+          set -euo pipefail
+          # libtest exits 0 when a filter matches nothing, so a future rename or
+          # cfg change to the test module would silently turn this job green.
+          # Assert the filter still selects tests before running them.
+          count=$(cargo test -p openjd-sessions --features test-utils --test integration -- \
+            --include-ignored --list test_cross_user:: 2>/dev/null | grep -c ': test$' || true)
+          echo "cross-user tests matched: ${count}"
+          if [ "${count}" -eq 0 ]; then
+            echo "ERROR: test_cross_user:: filter matched no tests — the module may have been renamed or cfg'd out." >&2
+            exit 1
+          fi
+          cargo test -p openjd-sessions --features test-utils --test integration -- \
+            --include-ignored --test-threads=1 test_cross_user::
+      - name: Remove test users and sudoers rule
+        if: always()
+        run: |
+          sudo rm -f /etc/sudoers.d/openjd-cross-user-tests || true
+          sudo sysadminctl -deleteUser "${OPENJD_TEST_SUDO_TARGET_USER}" 2>/dev/null || true
+          sudo sysadminctl -deleteUser "${OPENJD_TEST_SUDO_DISJOINT_USER}" 2>/dev/null || true
+
   # Reuses the Windows build-test cache via a restore-only step so we don't
   # pay another 3+ minutes recompiling openjd-expr/model/sessions. The
   # test-utils feature used here isn't enabled in build-test, so cargo will
