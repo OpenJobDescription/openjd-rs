@@ -16,6 +16,29 @@ use openjd_model::job::{
     Action, EnvironmentActions, EnvironmentScript, Step, StepActions, StepScript,
 };
 
+/// Asserts that a serialized script object uses the `let` wire key and does
+/// not emit the legacy `letBindings` spelling.
+fn assert_emits_let_wire_key(value: &serde_json::Value) {
+    let obj = value.as_object().expect("script serializes to an object");
+    assert!(
+        obj.contains_key("let"),
+        "expected the `let` wire key, got: {value}",
+    );
+    assert!(
+        !obj.contains_key("letBindings"),
+        "must not emit the legacy `letBindings` key, got: {value}",
+    );
+}
+
+/// Asserts that `err` is an unknown-field error naming the offending key.
+fn assert_unknown_field_error(err: &serde_json::Error, key: &str) {
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&format!("unknown field `{key}`")),
+        "expected an unknown-field error naming `{key}`, got: {msg}",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Group A — accept/serialize the `let` wire key
 // ---------------------------------------------------------------------------
@@ -59,17 +82,7 @@ fn step_script_serializes_let_key() {
         embedded_files: None,
     };
     let value = serde_json::to_value(&script).unwrap();
-    let obj = value
-        .as_object()
-        .expect("StepScript serializes to an object");
-    assert!(
-        obj.contains_key("let"),
-        "expected the `let` wire key, got: {value}",
-    );
-    assert!(
-        !obj.contains_key("letBindings"),
-        "must not emit the legacy `letBindings` key, got: {value}",
-    );
+    assert_emits_let_wire_key(&value);
 }
 
 #[test]
@@ -79,8 +92,8 @@ fn step_script_rejects_duplicate_let_keys() {
     )
     .expect_err("supplying both `let` and `letBindings` must be a duplicate-field error");
     assert!(
-        err.to_string().contains("duplicate field"),
-        "expected a duplicate-field error, got: {err}",
+        err.to_string().contains("duplicate field `let`"),
+        "expected a duplicate-field error naming `let`, got: {err}",
     );
 }
 
@@ -112,17 +125,7 @@ fn environment_script_serializes_let_key() {
         embedded_files: None,
     };
     let value = serde_json::to_value(&script).unwrap();
-    let obj = value
-        .as_object()
-        .expect("EnvironmentScript serializes to an object");
-    assert!(
-        obj.contains_key("let"),
-        "expected the `let` wire key, got: {value}",
-    );
-    assert!(
-        !obj.contains_key("letBindings"),
-        "must not emit the legacy `letBindings` key, got: {value}",
-    );
+    assert_emits_let_wire_key(&value);
 }
 
 // ---------------------------------------------------------------------------
@@ -135,10 +138,7 @@ fn step_script_rejects_unknown_field() {
         r#"{"name":"S","script":{"letBindingz":[],"actions":{"onRun":{"command":"echo hello"}}}}"#,
     )
     .expect_err("an unknown script field must be rejected, not silently dropped");
-    assert!(
-        err.to_string().contains("unknown field"),
-        "expected an unknown-field error, got: {err}",
-    );
+    assert_unknown_field_error(&err, "letBindingz");
 }
 
 #[test]
@@ -162,8 +162,5 @@ fn environment_script_rejects_unknown_field() {
         r#"{"name":"S","script":{"actions":{"onRun":{"command":"echo hello"}}},"stepEnvironments":[{"name":"E","script":{"letBindingz":[],"actions":{"onEnter":{"command":"echo hello"}}}}]}"#,
     )
     .expect_err("an unknown environment-script field must be rejected");
-    assert!(
-        err.to_string().contains("unknown field"),
-        "expected an unknown-field error, got: {err}",
-    );
+    assert_unknown_field_error(&err, "letBindingz");
 }
