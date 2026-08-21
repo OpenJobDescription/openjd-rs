@@ -1265,6 +1265,85 @@ fn portable_word_boundaries_accepted() {
     assert!(eval("re_search('hello world', r'\\bworld\\b')").is_list());
     assert!(eval("re_search('hello', r'l\\Bl')").is_list());
 }
+#[test]
+fn verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x)[a b]')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x)[a b]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x:[a b])')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x:[a b])')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn verbose_mode_escaped_space_in_class_accepted() {
+    // An escaped space is a literal space in both engines, even under
+    // verbose mode.
+    assert!(eval("re_search(' ', r'(?x)[a\\ b]')").is_list());
+}
+#[test]
+fn verbose_mode_class_without_whitespace_accepted() {
+    assert!(eval("re_search('a', r'(?x) [ab] c?')").is_list());
+}
+#[test]
+fn bare_flags_mid_pattern_rejected() {
+    // Python 3.11+ raises "global flags not at the start of the
+    // expression"; pre-3.11 applied the flag to the whole pattern where
+    // Rust applies it only forward.
+    assert_err(
+        "re_search('ab', r'a(?i)b')",
+        &[
+            "Unsupported regex feature: bare inline flags not at the start of the pattern; use a scoped group like (?i:...)\n",
+            "  re_search('ab', r'a(?i)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn multiple_leading_bare_flags_accepted() {
+    // Consecutive flag groups at the very start are fine in both engines.
+    assert!(eval("re_search('A B', r'(?i)(?s)a.b')").is_list());
+}
+#[test]
+fn capture_name_with_dot_rejected() {
+    // regex_syntax permits `.` in group names; Python raises "bad
+    // character in group name".
+    assert_err(
+        "re_search('ab', r'(?P<a.b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a.b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a.b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_bracket_rejected() {
+    assert_err(
+        "re_search('ab', r'(?P<a[b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a[b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a[b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_underscore_and_digits_accepted() {
+    assert!(eval("re_search('ab', r'(?P<my_name1>a)b')").is_list());
+}
 
 // === TestRegexEscapedPatternsAccepted ===
 #[test]
