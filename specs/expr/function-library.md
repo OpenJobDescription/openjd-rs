@@ -468,13 +468,37 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
 - **`round()`** uses banker's rounding / round-half-even (§2.2.2)
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
-  Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
-  inspect the result, rather than a substring scan. This correctly ignores
-  lookaround-shaped syntax that appears inside character classes, escaped
-  sequences, or regex comments (e.g., `[(?=]`, `\?=`, `(?#...)`). The parser
-  rejects forbidden constructs at parse time; the translated error names the
-  specific feature (e.g., "Unsupported regex feature: lookahead") so callers
-  can produce stable diagnostics.
+  Validation parses the pattern with `regex_syntax`, rather than a substring
+  scan. This correctly ignores lookaround-shaped syntax that appears inside
+  character classes, escaped sequences, or regex comments (e.g., `[(?=]`,
+  `\?=`, `(?#...)`). The parser rejects forbidden constructs at parse time;
+  the translated error names the specific feature (e.g., "Unsupported regex
+  feature: lookahead") so callers can produce stable diagnostics.
+  Validation walks the pattern's **AST** (not just its HIR) because several
+  Rust-only constructs outside the spec's Python/Rust intersection dialect
+  are erased by AST→HIR translation and must be rejected at the AST level:
+  Unicode property classes (`\p{...}`/`\P{...}`), the `(?<name>...)` capture
+  group spelling (Python requires `(?P<name>...)`), capture group names
+  that are not valid Python identifiers (`regex_syntax` also permits `.`,
+  `[`, `]`; Python raises "bad character in group name"), POSIX character
+  classes (`[[:alpha:]]`), character class set operators (`--`, `&&`,
+  `~~`), nested character classes (`[a[b]]`), Rust-only inline flags (`U`
+  swap greed, `R` CRLF mode, negated `u`, and bare global negation
+  `(?-...)`; the shared flags `i`, `m`, `s`, `x` and positive `u` remain
+  allowed, including scoped negation `(?-i:...)`), bare inline flags
+  anywhere but the start of the pattern (`a(?i)b` — an error in Python
+  3.11+, applied globally rather than forward-only in older Pythons;
+  consecutive leading flag groups stay allowed), verbose mode combined with
+  unescaped whitespace or `#` inside a character class (`(?x)[a b]` — Rust
+  strips them, Python VERBOSE keeps them as literals), and Rust-only word
+  boundary spellings (`\b{start}`, `\b{end}`, `\b{start-half}`,
+  `\b{end-half}`, `\<`, `\>` — Python reads these as `\b` plus literal
+  characters, silently diverging). The AST is then translated to HIR for a
+  belt-and-braces walk over the remaining constructs.
+  **Known accepted divergence:** plain `$` without MULTILINE matches before
+  a trailing newline in Python but is end-of-haystack only in Rust
+  (Python's `$` ≈ Rust's `(?:\n?\z)`); the intersection dialect allows `$`,
+  so results differ on newline-terminated input.
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
   `repr_pwsh` renders nested lists as nested array literals, using the unary
   comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`

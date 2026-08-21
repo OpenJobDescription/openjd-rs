@@ -52,16 +52,334 @@ fn validate_regex_pattern(pattern: &str) -> Result<(), ExpressionError> {
     // anchor — without re-implementing the full regex grammar.
     reject_rust_only_features(pattern)?;
 
-    // Parse the pattern into its HIR. Using `regex_syntax` (instead of a
-    // pure substring scan) means we correctly ignore lookaround-shaped
-    // sequences inside character classes, escapes, or regex comments.
-    // `regex_syntax` rejects lookaround, backreferences, and `\Z` at
-    // parse time; the HIR walker below is a belt-and-braces guard.
-    let hir = match regex_syntax::Parser::new().parse(pattern) {
-        Ok(h) => h,
-        Err(e) => return Err(translate_parse_error(e)),
-    };
+    // Parse the pattern into its AST first and walk it. Several Rust-only
+    // constructs are erased (or normalized away) by the AST→HIR translation
+    // — `(?<name>...)` vs `(?P<name>...)`, POSIX classes, `\p{...}`, and
+    // character class set operators all become plain captures/classes in
+    // HIR — so they can only be rejected at the AST level. Using
+    // `regex_syntax` (instead of a pure substring scan) means we correctly
+    // ignore lookaround-shaped sequences inside character classes, escapes,
+    // or regex comments. `regex_syntax` rejects lookaround, backreferences,
+    // and `\Z` at parse time.
+    let ast = regex_syntax::ast::parse::Parser::new()
+        .parse(pattern)
+        .map_err(|e| translate_parse_error(e.into()))?;
+    check_ast_portability(pattern, &ast)?;
+
+    // Translate the already-parsed AST to HIR (equivalent to
+    // `regex_syntax::Parser::new().parse(pattern)` but without re-parsing)
+    // for the belt-and-braces HIR walk below.
+    let hir = regex_syntax::hir::translate::Translator::new()
+        .translate(pattern, &ast)
+        .map_err(|e| translate_parse_error(e.into()))?;
     check_hir_portability(&hir)
+}
+
+/// Walk the pattern AST and reject constructs that Rust's `regex` crate
+/// accepts but that fall outside the spec's Python/Rust intersection dialect
+/// (§2.2.5). These are invisible after AST→HIR translation, so they must be
+/// caught here:
+///
+/// - `\p{...}` / `\P{...}` — Unicode property classes (Rust-only; Python
+///   `re` rejects them as a bad escape)
+/// - `(?<name>...)` — Rust's capture group name spelling (Python requires
+///   `(?P<name>...)`)
+/// - `[[:alpha:]]` — POSIX character classes (Python parses these as
+///   ordinary bracket expressions with silently different semantics)
+/// - `--` / `&&` / `~~` — character class set operators (Python parses
+///   these as ordinary ranges/literals with silently different semantics)
+/// - `[a[b]]` — nested character classes (the enabling construct behind the
+///   set operators; Python treats the inner `[` as a literal)
+/// - `(?U)` / `(?R)` — Rust-only inline flags (swap greed, CRLF mode);
+///   Python rejects them as unknown flags. Negated Unicode mode (`-u`) and
+///   bare global negation `(?-...)` are likewise Rust-only. Shared flags
+///   `i`, `m`, `s`, `x` (and positive `u`) stay allowed.
+/// - `a(?i)b` — bare inline flags anywhere but the start of the pattern.
+///   Python 3.11+ rejects "global flags not at the start of the
+///   expression" (3.6–3.10 applied them to the whole pattern, unlike
+///   Rust's forward-only application). Consecutive leading flag groups
+///   (`(?i)(?s)ab`) are accepted by both engines and stay allowed.
+/// - `(?x)[a b]` — verbose mode combined with unescaped whitespace or `#`
+///   inside a character class. Rust strips whitespace/comments inside
+///   classes under `x`; Python's VERBOSE mode explicitly keeps them as
+///   literals, so such patterns match differently with no error on either
+///   side.
+/// - `(?P<a.b>...)` — capture group names that are not valid Python
+///   identifiers. `regex_syntax` also permits `.`, `[`, and `]` in names;
+///   Python raises "bad character in group name".
+/// - `\b{start}`, `\b{end}`, `\b{start-half}`, `\b{end-half}`, `\<`, `\>` —
+///   Rust-only word boundary spellings (Python reads `\b{start}` as `\b`
+///   followed by the literal `{start}`, silently diverging)
+fn check_ast_portability(
+    pattern: &str,
+    ast: &regex_syntax::ast::Ast,
+) -> Result<(), ExpressionError> {
+    use regex_syntax::ast;
+
+    struct PortabilityVisitor<'a> {
+        /// The pattern source, for inspecting character class bodies.
+        pattern: &'a str,
+        /// True if any positive `x` (verbose / ignore-whitespace) flag
+        /// appears anywhere in the pattern, bare or scoped. Scope is not
+        /// tracked: a class outside an `(?x:...)` group's scope may be
+        /// flagged too, which over-rejects but never diverges silently.
+        uses_verbose: bool,
+        /// Source spans of every bracketed character class.
+        class_spans: Vec<ast::Span>,
+        /// Source spans of every bare `(?flags)` group.
+        bare_flag_spans: Vec<ast::Span>,
+    }
+
+    impl ast::Visitor for PortabilityVisitor<'_> {
+        type Output = ();
+        type Err = ExpressionError;
+
+        fn finish(self) -> Result<(), ExpressionError> {
+            // Bare `(?flags)` groups must form a contiguous run from the
+            // start of the pattern. Python 3.11+ rejects global flags
+            // anywhere else, and pre-3.11 Pythons applied them to the whole
+            // pattern where Rust applies them only forward.
+            let mut spans = self.bare_flag_spans;
+            spans.sort_by_key(|s| s.start.offset);
+            let mut expected = 0;
+            for s in &spans {
+                if s.start.offset != expected {
+                    return Err(ExpressionError::new(
+                        "Unsupported regex feature: bare inline flags not at the start \
+                         of the pattern; use a scoped group like (?i:...)",
+                    ));
+                }
+                expected = s.end.offset;
+            }
+
+            // Under verbose mode, Rust strips unescaped whitespace and `#`
+            // comments inside character classes while Python keeps them as
+            // literals — a silent divergence.
+            if self.uses_verbose {
+                for span in &self.class_spans {
+                    let body = &self.pattern[span.start.offset..span.end.offset];
+                    let mut escaped = false;
+                    for c in body.chars() {
+                        if escaped {
+                            escaped = false;
+                        } else if c == '\\' {
+                            escaped = true;
+                        } else if c.is_whitespace() || c == '#' {
+                            return Err(ExpressionError::new(
+                                "Unsupported regex feature: verbose mode (?x) with \
+                                 whitespace or '#' in a character class; Python treats \
+                                 them as literals",
+                            ));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        fn visit_pre(&mut self, node: &ast::Ast) -> Result<(), ExpressionError> {
+            match node {
+                ast::Ast::ClassUnicode(_) => Err(unicode_property_error()),
+                ast::Ast::ClassBracketed(c) => {
+                    self.class_spans.push(c.span);
+                    Ok(())
+                }
+                ast::Ast::Flags(set) => {
+                    self.bare_flag_spans.push(set.span);
+                    self.uses_verbose |= check_flags(&set.flags, false)?;
+                    Ok(())
+                }
+                ast::Ast::Assertion(a) => check_assertion(&a.kind),
+                ast::Ast::Group(g) => match &g.kind {
+                    ast::GroupKind::CaptureName {
+                        starts_with_p: false,
+                        ..
+                    } => Err(ExpressionError::new(
+                        "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)",
+                    )),
+                    ast::GroupKind::CaptureName { name, .. } => check_capture_name(&name.name),
+                    ast::GroupKind::NonCapturing(flags) => {
+                        self.uses_verbose |= check_flags(flags, true)?;
+                        Ok(())
+                    }
+                    _ => Ok(()),
+                },
+                _ => Ok(()),
+            }
+        }
+
+        fn visit_class_set_item_pre(
+            &mut self,
+            item: &ast::ClassSetItem,
+        ) -> Result<(), ExpressionError> {
+            match item {
+                ast::ClassSetItem::Ascii(c) => Err(ExpressionError::new(format!(
+                    "Unsupported regex feature: POSIX character class [[:{}{}:]]",
+                    if c.negated { "^" } else { "" },
+                    posix_class_name(&c.kind),
+                ))),
+                ast::ClassSetItem::Unicode(_) => Err(unicode_property_error()),
+                ast::ClassSetItem::Bracketed(_) => Err(ExpressionError::new(
+                    "Unsupported regex feature: nested character class",
+                )),
+                _ => Ok(()),
+            }
+        }
+
+        fn visit_class_set_binary_op_pre(
+            &mut self,
+            op: &ast::ClassSetBinaryOp,
+        ) -> Result<(), ExpressionError> {
+            let feature = match op.kind {
+                ast::ClassSetBinaryOpKind::Difference => "character class difference --",
+                ast::ClassSetBinaryOpKind::Intersection => "character class intersection &&",
+                ast::ClassSetBinaryOpKind::SymmetricDifference => {
+                    "character class symmetric difference ~~"
+                }
+            };
+            Err(ExpressionError::new(format!(
+                "Unsupported regex feature: {feature}"
+            )))
+        }
+    }
+
+    fn unicode_property_error() -> ExpressionError {
+        ExpressionError::new("Unsupported regex feature: Unicode property class \\p{...}")
+    }
+
+    /// Validate an inline flag sequence against the Python/Rust
+    /// intersection. `scoped` is true for `(?flags:...)` groups and false
+    /// for bare `(?flags)` settings. Returns true if a positive `x`
+    /// (verbose / ignore-whitespace) flag is present, so the caller can run
+    /// the whitespace-in-class check.
+    ///
+    /// - `i`, `m`, `s`, `x` are shared by both engines and always allowed.
+    /// - Positive `u` is allowed: both engines accept it and both default
+    ///   to Unicode mode.
+    /// - `U` (swap greed) and `R` (CRLF mode) are Rust-only; Python rejects
+    ///   them as unknown flags.
+    /// - Negation is only allowed in the scoped form `(?-imsx:...)`; Python
+    ///   has no bare `(?-...)` global negation.
+    /// - Negated `u` is Rust-only: Python never allows negating Unicode
+    ///   mode, and in Rust it silently changes `\w`/`\d`/`.` semantics.
+    fn check_flags(flags: &ast::Flags, scoped: bool) -> Result<bool, ExpressionError> {
+        let mut negated = false;
+        let mut verbose = false;
+        for item in &flags.items {
+            match &item.kind {
+                ast::FlagsItemKind::Negation => {
+                    if !scoped {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: global flag negation (?-...); \
+                             use a scoped group (?-i:...)",
+                        ));
+                    }
+                    negated = true;
+                }
+                ast::FlagsItemKind::Flag(f) => match f {
+                    ast::Flag::CaseInsensitive
+                    | ast::Flag::MultiLine
+                    | ast::Flag::DotMatchesNewLine => {}
+                    ast::Flag::IgnoreWhitespace => {
+                        if !negated {
+                            verbose = true;
+                        }
+                    }
+                    ast::Flag::Unicode => {
+                        if negated {
+                            return Err(ExpressionError::new(
+                                "Unsupported regex feature: negated Unicode flag -u",
+                            ));
+                        }
+                    }
+                    ast::Flag::SwapGreed => {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: inline flag U (swap greed)",
+                        ));
+                    }
+                    ast::Flag::CRLF => {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: inline flag R (CRLF mode)",
+                        ));
+                    }
+                },
+            }
+        }
+        Ok(verbose)
+    }
+
+    /// Require capture group names to be valid Python identifiers.
+    /// `regex_syntax` additionally permits `.`, `[`, and `]` in names
+    /// (non-first position); Python's `re` raises "bad character in group
+    /// name" for those, so a pattern accepted here would fail outright
+    /// under the Python implementation.
+    fn check_capture_name(name: &str) -> Result<(), ExpressionError> {
+        let valid = name.chars().enumerate().all(|(i, c)| {
+            c == '_'
+                || if i == 0 {
+                    c.is_alphabetic()
+                } else {
+                    c.is_alphanumeric()
+                }
+        });
+        if valid {
+            Ok(())
+        } else {
+            Err(ExpressionError::new(format!(
+                "Unsupported regex feature: capture group name '{name}' is not a valid \
+                 Python identifier"
+            )))
+        }
+    }
+
+    /// Reject the Rust-only word boundary spellings. Python's `re` does not
+    /// error on these — it reads `\b{start}` as `\b` followed by the
+    /// literal characters `{start}` — so they diverge silently.
+    fn check_assertion(kind: &ast::AssertionKind) -> Result<(), ExpressionError> {
+        use ast::AssertionKind::*;
+        let spelling = match kind {
+            WordBoundaryStart => "\\b{start}",
+            WordBoundaryEnd => "\\b{end}",
+            WordBoundaryStartAngle => "\\<",
+            WordBoundaryEndAngle => "\\>",
+            WordBoundaryStartHalf => "\\b{start-half}",
+            WordBoundaryEndHalf => "\\b{end-half}",
+            _ => return Ok(()),
+        };
+        Err(ExpressionError::new(format!(
+            "Unsupported regex feature: word boundary assertion {spelling}"
+        )))
+    }
+
+    fn posix_class_name(kind: &regex_syntax::ast::ClassAsciiKind) -> &'static str {
+        use regex_syntax::ast::ClassAsciiKind::*;
+        match kind {
+            Alnum => "alnum",
+            Alpha => "alpha",
+            Ascii => "ascii",
+            Blank => "blank",
+            Cntrl => "cntrl",
+            Digit => "digit",
+            Graph => "graph",
+            Lower => "lower",
+            Print => "print",
+            Punct => "punct",
+            Space => "space",
+            Upper => "upper",
+            Word => "word",
+            Xdigit => "xdigit",
+        }
+    }
+
+    ast::visit(
+        ast,
+        PortabilityVisitor {
+            pattern,
+            uses_verbose: false,
+            class_spans: Vec::new(),
+            bare_flag_spans: Vec::new(),
+        },
+    )
 }
 
 /// Scan the pattern source for Rust-only escape sequences that
@@ -150,6 +468,14 @@ fn translate_parse_error(err: regex_syntax::Error) -> ExpressionError {
 /// `regex_syntax` already rejects lookaround, backreferences, and `\Z`/`\z`
 /// at parse time, so in practice this walker is a belt-and-braces guard for
 /// any future grammar additions that expose these constructs via HIR.
+///
+/// **Known divergence — `$` (`Look::End`):** without MULTILINE, Python's
+/// `$` matches at end of string *or immediately before a trailing newline*
+/// (`re.search(r"a$", "a\n")` matches), while Rust's `$` is end-of-haystack
+/// only (Python's `$` is closer to Rust's `(?:\n?\z)`). The spec's
+/// intersection dialect allows `$`, so it stays accepted here even though
+/// results differ on newline-terminated input. This is the same divergence
+/// family as `\Z` vs `\z`, both of which are rejected outright.
 fn check_hir_portability(hir: &regex_syntax::hir::Hir) -> Result<(), ExpressionError> {
     use regex_syntax::hir::{HirKind, Look};
     match hir.kind() {
@@ -164,15 +490,21 @@ fn check_hir_portability(hir: &regex_syntax::hir::Hir) -> Result<(), ExpressionE
             | Look::WordAscii
             | Look::WordAsciiNegate
             | Look::WordUnicode
-            | Look::WordUnicodeNegate
-            | Look::WordStartAscii
+            | Look::WordUnicodeNegate => Ok(()),
+            // Rust-only word boundary spellings (`\b{start}`, `\<`, ...)
+            // lower to these. They are rejected with precise messages by
+            // `check_ast_portability`; this arm is the belt-and-braces
+            // backstop.
+            Look::WordStartAscii
             | Look::WordEndAscii
             | Look::WordStartUnicode
             | Look::WordEndUnicode
             | Look::WordStartHalfAscii
             | Look::WordEndHalfAscii
             | Look::WordStartHalfUnicode
-            | Look::WordEndHalfUnicode => Ok(()),
+            | Look::WordEndHalfUnicode => Err(ExpressionError::new(
+                "Unsupported regex feature: Rust-only word boundary assertion",
+            )),
         },
         HirKind::Capture(c) => check_hir_portability(&c.sub),
         HirKind::Repetition(r) => check_hir_portability(&r.sub),

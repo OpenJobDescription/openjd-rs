@@ -1020,6 +1020,331 @@ fn end_of_string_z_rejected() {
     );
 }
 
+// === Constructs outside the Python/Rust intersection (issue #310) ===
+#[test]
+fn unicode_property_class_rejected() {
+    assert_err(
+        "re_search('3', r'\\p{Nd}')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('3', r'\\p{Nd}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn unicode_property_class_inside_class_rejected() {
+    assert_err(
+        "re_search('a', r'[\\p{L}]')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('a', r'[\\p{L}]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn rust_capture_group_name_syntax_rejected() {
+    assert_err(
+        "re_search('ab', r'(?<n>a)b')",
+        &[
+            "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)\n",
+            "  re_search('ab', r'(?<n>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn python_capture_group_name_syntax_accepted() {
+    assert_eq!(
+        eval("re_search('ab', r'(?P<n>a)b')").to_display_string(),
+        "[\"ab\", \"a\"]"
+    );
+}
+#[test]
+fn posix_character_class_rejected() {
+    assert_err(
+        "re_search('a', r'[[:alpha:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:alpha:]]\n",
+            "  re_search('a', r'[[:alpha:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_posix_character_class_rejected() {
+    assert_err(
+        "re_search('5', r'[[:^digit:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:^digit:]]\n",
+            "  re_search('5', r'[[:^digit:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_difference_rejected() {
+    assert_err(
+        "re_search('b', r'[a-z--[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class difference --\n",
+            "  re_search('b', r'[a-z--[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_intersection_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z&&[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class intersection &&\n",
+            "  re_search('e', r'[a-z&&[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_symmetric_difference_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z~~[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class symmetric difference ~~\n",
+            "  re_search('e', r'[a-z~~[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn nested_character_class_rejected() {
+    assert_err(
+        "re_search('b', r'[a[bc]]')",
+        &[
+            "Unsupported regex feature: nested character class\n",
+            "  re_search('b', r'[a[bc]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn swap_greed_inline_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U)a+')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U)a+')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn crlf_inline_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?R)^a')",
+        &[
+            "Unsupported regex feature: inline flag R (CRLF mode)\n",
+            "  re_search('a', r'(?R)^a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_swap_greed_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U:a+)')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U:a+)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn global_flag_negation_rejected() {
+    assert_err(
+        "re_search('A', r'(?-i)a')",
+        &[
+            "Unsupported regex feature: global flag negation (?-...); use a scoped group (?-i:...)\n",
+            "  re_search('A', r'(?-i)a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_unicode_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?-u:a)')",
+        &[
+            "Unsupported regex feature: negated Unicode flag -u\n",
+            "  re_search('a', r'(?-u:a)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn shared_inline_flags_accepted() {
+    // `i`, `m`, `s`, `x` (and positive `u`) are in the Python/Rust
+    // intersection, bare and scoped, including scoped negation.
+    assert!(eval("re_search('HELLO', r'(?i)hello')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?m)^b')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?s)a.b')").is_list());
+    assert!(eval("re_search('ab', r'(?x)a b')").is_list());
+    assert!(eval("re_search('a', r'(?u)\\w')").is_list());
+    assert!(eval("re_search('HELLO', r'(?i:hello)')").is_list());
+    assert!(eval("re_search('hello', r'(?-i:hello)')").is_list());
+}
+#[test]
+fn word_boundary_start_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start}\n",
+            "  re_search('ab', r'\\b{start}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end}\n",
+            "  re_search('ab', r'a\\b{end}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'\\<a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\<\n",
+            "  re_search('ab', r'\\<a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\>')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\>\n",
+            "  re_search('ab', r'a\\>')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_half_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start-half}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start-half}\n",
+            "  re_search('ab', r'\\b{start-half}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_half_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end-half}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end-half}\n",
+            "  re_search('ab', r'a\\b{end-half}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn portable_word_boundaries_accepted() {
+    assert!(eval("re_search('hello world', r'\\bworld\\b')").is_list());
+    assert!(eval("re_search('hello', r'l\\Bl')").is_list());
+}
+#[test]
+fn verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x)[a b]')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x)[a b]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x:[a b])')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x:[a b])')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn verbose_mode_escaped_space_in_class_accepted() {
+    // An escaped space is a literal space in both engines, even under
+    // verbose mode.
+    assert!(eval("re_search(' ', r'(?x)[a\\ b]')").is_list());
+}
+#[test]
+fn verbose_mode_class_without_whitespace_accepted() {
+    assert!(eval("re_search('a', r'(?x) [ab] c?')").is_list());
+}
+#[test]
+fn bare_flags_mid_pattern_rejected() {
+    // Python 3.11+ raises "global flags not at the start of the
+    // expression"; pre-3.11 applied the flag to the whole pattern where
+    // Rust applies it only forward.
+    assert_err(
+        "re_search('ab', r'a(?i)b')",
+        &[
+            "Unsupported regex feature: bare inline flags not at the start of the pattern; use a scoped group like (?i:...)\n",
+            "  re_search('ab', r'a(?i)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn multiple_leading_bare_flags_accepted() {
+    // Consecutive flag groups at the very start are fine in both engines.
+    assert!(eval("re_search('A B', r'(?i)(?s)a.b')").is_list());
+}
+#[test]
+fn capture_name_with_dot_rejected() {
+    // regex_syntax permits `.` in group names; Python raises "bad
+    // character in group name".
+    assert_err(
+        "re_search('ab', r'(?P<a.b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a.b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a.b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_bracket_rejected() {
+    assert_err(
+        "re_search('ab', r'(?P<a[b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a[b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a[b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_underscore_and_digits_accepted() {
+    assert!(eval("re_search('ab', r'(?P<my_name1>a)b')").is_list());
+}
+
 // === TestRegexEscapedPatternsAccepted ===
 #[test]
 fn escaped_lookahead_accepted() {
