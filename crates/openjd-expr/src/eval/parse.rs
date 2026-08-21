@@ -150,6 +150,17 @@ fn rename_keyword_at(
         Some(existing) => existing.clone(),
         None => {
             let placeholder = make_replacement(token, source);
+            // The two maps have to stay inverses. A placeholder already present in
+            // `renames` means `make_replacement` handed out one that belongs to a
+            // different keyword, which would overwrite that keyword's entry here while
+            // `placeholders` kept both -- the surviving mapping then resolves one keyword
+            // under the other's name. `make_replacement`'s fallback does not check for
+            // collisions, so this is reachable: see issue #333.
+            debug_assert!(
+                !renames.contains_key(&placeholder),
+                "placeholder {placeholder:?} is already taken by {:?}",
+                renames.get(&placeholder)
+            );
             renames.insert(placeholder.clone(), token.to_string());
             placeholders.insert(token.to_string(), placeholder.clone());
             placeholder
@@ -1171,11 +1182,26 @@ mod tests {
     // correctly. The defect is still real (the wrong keyword gets recorded as
     // renamed), it is just invisible downstream, so it is pinned here.
     #[test]
+    fn rename_keyword_at_delimits_the_whole_token() {
+        // "assert" must be renamed as "assert", not as the keyword "as"
+        // followed by leftover "sert".
+        let (found, source, pair) = rename_once("X.assert", 2);
+        assert!(found);
+        let (placeholder, original) = pair.expect("a rename must be recorded");
+        assert_eq!(original, "assert");
+        assert_eq!(placeholder.len(), "assert".len());
+        assert_eq!(source, format!("X.{placeholder}"));
+        assert_eq!(source.len(), "X.assert".len());
+    }
+
+    #[test]
     fn rename_keyword_at_reuses_one_placeholder_per_keyword() {
-        // Two accesses of the same keyword share a placeholder, so `renames` holds one
-        // entry rather than one per occurrence. Without the reverse index the second
-        // call picks a fresh placeholder, since the first is by then present in the
-        // source and `make_replacement` skips candidates it finds there.
+        // Two accesses of the same keyword share a placeholder, so `renames` holds one entry
+        // rather than one per occurrence, and both occurrences read back as the same keyword.
+        //
+        // A regression guard, not a fix: the lookup this pins has always reused. It is here
+        // because the reuse now depends on `placeholders` staying an inverse of `renames`,
+        // and nothing else would notice the two drifting apart.
         let mut source = String::from("A.class + B.class");
         let mut renames = HashMap::new();
         let mut placeholders = HashMap::new();
@@ -1206,19 +1232,6 @@ mod tests {
             format!("A.{placeholder} + B.{placeholder}"),
             "both occurrences should carry the same placeholder"
         );
-    }
-
-    #[test]
-    fn rename_keyword_at_delimits_the_whole_token() {
-        // "assert" must be renamed as "assert", not as the keyword "as"
-        // followed by leftover "sert".
-        let (found, source, pair) = rename_once("X.assert", 2);
-        assert!(found);
-        let (placeholder, original) = pair.expect("a rename must be recorded");
-        assert_eq!(original, "assert");
-        assert_eq!(placeholder.len(), "assert".len());
-        assert_eq!(source, format!("X.{placeholder}"));
-        assert_eq!(source.len(), "X.assert".len());
     }
 
     #[test]
