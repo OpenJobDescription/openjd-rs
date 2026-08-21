@@ -2364,30 +2364,36 @@ impl Session {
                         .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
                     }
                     JobParameterType::ListPath => {
-                        if let openjd_expr::ExprValue::ListString(ref elements, _) = param.value {
-                            let mapped: Vec<openjd_expr::ExprValue> = elements
-                                .iter()
-                                .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::new_path(
-                                        m,
-                                        openjd_expr::path_mapping::PathFormat::host(),
-                                    )
-                                })
-                                .collect();
-                            let key = format!("Param.{name}");
-                            s.set(
-                                &key,
+                        // `build_symbol_table` omits `Param.<name>` for LIST[PATH] at template
+                        // scope, so this is the only place it gets set. Anything other than a
+                        // ListString still has to produce a symbol: without a fallback the
+                        // parameter is simply absent and an expression referencing it fails as
+                        // an unknown symbol. `ListPath` reaches here from callers that build
+                        // `JobParameterValue` directly rather than through JSON coercion.
+                        let key = format!("Param.{name}");
+                        let mapped_value = match &param.value {
+                            openjd_expr::ExprValue::ListString(elements, _) => {
+                                let mapped: Vec<openjd_expr::ExprValue> = elements
+                                    .iter()
+                                    .map(|s| {
+                                        let m = self.apply_path_mapping_to_string(s);
+                                        openjd_expr::ExprValue::new_path(
+                                            m,
+                                            openjd_expr::path_mapping::PathFormat::host(),
+                                        )
+                                    })
+                                    .collect();
                                 openjd_expr::ExprValue::make_list(
                                     mapped,
                                     openjd_expr::ExprType::PATH,
                                 )
-                                .unwrap(),
-                            )
-                            .map_err(|e| {
-                                SessionError::Runtime(format!("Failed to set {key}: {e}"))
-                            })?;
-                        }
+                                .unwrap()
+                            }
+                            other => self.apply_path_mapping_to_value(other),
+                        };
+                        s.set(&key, mapped_value).map_err(|e| {
+                            SessionError::Runtime(format!("Failed to set {key}: {e}"))
+                        })?;
                     }
                     _ => {}
                 }
@@ -3505,6 +3511,64 @@ mod typed_param_seeding_tests {
             );
         } else {
             panic!("expected ListList, got {val:?}");
+        }
+    }
+
+    /// Helper: build a symbol table through the *resolved* branch, i.e. with a base
+    /// `resolved_symtab` from create_job, rather than from scratch.
+    fn build_symtab_from_resolved(
+        params: Vec<(&str, JobParameterType, ExprValue)>,
+    ) -> Result<openjd_model::symbol_table::SymbolTable, SessionError> {
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut job_params = HashMap::new();
+        for (name, ptype, value) in params {
+            job_params.insert(
+                name.to_string(),
+                JobParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.set_job_parameter_values_for_test(job_params);
+        // An empty base is enough: the branch under test re-applies path mapping to
+        // Param.* from `job_parameter_values`, not from the base.
+        let base = openjd_expr::SerializedSymbolTable::from_value(serde_json::json!([]));
+        session.build_symbol_table(None, Some(&base))
+    }
+
+    #[test]
+    fn resolved_list_path_sets_param_for_every_variant() {
+        // `build_symbol_table` in openjd-model omits Param.<name> for LIST[PATH] at template
+        // scope, so the session is the only place it gets set. Both variants have to produce
+        // a symbol: a missing one is not a wrong value, it is an unknown-symbol failure in
+        // any expression that references the parameter.
+        for (label, value) in [
+            (
+                "ListString",
+                ExprValue::ListString(vec!["/a".into(), "/b".into()], 2),
+            ),
+            (
+                "ListPath",
+                ExprValue::make_list(
+                    vec![
+                        ExprValue::new_path("/a", openjd_expr::path_mapping::PathFormat::Posix),
+                        ExprValue::new_path("/b", openjd_expr::path_mapping::PathFormat::Posix),
+                    ],
+                    openjd_expr::ExprType::PATH,
+                )
+                .unwrap(),
+            ),
+            // The empty case is the one that used to change variant with its length.
+            ("empty ListString", ExprValue::ListString(Vec::new(), 0)),
+        ] {
+            let symtab =
+                build_symtab_from_resolved(vec![("Paths", JobParameterType::ListPath, value)])
+                    .unwrap_or_else(|e| panic!("{label}: build_symbol_table failed: {e}"));
+            assert!(
+                symtab.get_value("Param.Paths").is_some(),
+                "{label}: Param.Paths was not set at all"
+            );
         }
     }
 

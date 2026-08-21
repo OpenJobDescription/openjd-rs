@@ -1196,9 +1196,22 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
 /// arms matches `ListString` with no fallback, so a `ListPath` would silently not get its
 /// `Param.<name>` symbol set at all.
 fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprType {
+    // Exhaustive for the same reason `list_element_type` is: a catch-all would silently
+    // return the declared type for the next parameter type whose representation differs
+    // from it, which is the empty/non-empty variant split this function exists to avoid.
     match param_type {
         JobParameterType::Path => openjd_expr::ExprType::STRING,
-        other => other.expr_type(),
+        JobParameterType::String
+        | JobParameterType::Int
+        | JobParameterType::Float
+        | JobParameterType::Bool
+        | JobParameterType::RangeExpr
+        | JobParameterType::ListString
+        | JobParameterType::ListInt
+        | JobParameterType::ListFloat
+        | JobParameterType::ListPath
+        | JobParameterType::ListBool
+        | JobParameterType::ListListInt => param_type.expr_type(),
     }
 }
 
