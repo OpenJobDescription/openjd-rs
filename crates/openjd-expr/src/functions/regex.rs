@@ -90,6 +90,13 @@ fn validate_regex_pattern(pattern: &str) -> Result<(), ExpressionError> {
 ///   these as ordinary ranges/literals with silently different semantics)
 /// - `[a[b]]` — nested character classes (the enabling construct behind the
 ///   set operators; Python treats the inner `[` as a literal)
+/// - `(?U)` / `(?R)` — Rust-only inline flags (swap greed, CRLF mode);
+///   Python rejects them as unknown flags. Negated Unicode mode (`-u`) and
+///   bare global negation `(?-...)` are likewise Rust-only. Shared flags
+///   `i`, `m`, `s`, `x` (and positive `u`) stay allowed.
+/// - `\b{start}`, `\b{end}`, `\b{start-half}`, `\b{end-half}`, `\<`, `\>` —
+///   Rust-only word boundary spellings (Python reads `\b{start}` as `\b`
+///   followed by the literal `{start}`, silently diverging)
 fn check_ast_portability(ast: &regex_syntax::ast::Ast) -> Result<(), ExpressionError> {
     use regex_syntax::ast;
 
@@ -106,6 +113,8 @@ fn check_ast_portability(ast: &regex_syntax::ast::Ast) -> Result<(), ExpressionE
         fn visit_pre(&mut self, node: &ast::Ast) -> Result<(), ExpressionError> {
             match node {
                 ast::Ast::ClassUnicode(_) => Err(unicode_property_error()),
+                ast::Ast::Flags(set) => check_flags(&set.flags, false),
+                ast::Ast::Assertion(a) => check_assertion(&a.kind),
                 ast::Ast::Group(g) => match &g.kind {
                     ast::GroupKind::CaptureName {
                         starts_with_p: false,
@@ -113,6 +122,7 @@ fn check_ast_portability(ast: &regex_syntax::ast::Ast) -> Result<(), ExpressionE
                     } => Err(ExpressionError::new(
                         "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)",
                     )),
+                    ast::GroupKind::NonCapturing(flags) => check_flags(flags, true),
                     _ => Ok(()),
                 },
                 _ => Ok(()),
@@ -156,6 +166,79 @@ fn check_ast_portability(ast: &regex_syntax::ast::Ast) -> Result<(), ExpressionE
 
     fn unicode_property_error() -> ExpressionError {
         ExpressionError::new("Unsupported regex feature: Unicode property class \\p{...}")
+    }
+
+    /// Validate an inline flag sequence against the Python/Rust
+    /// intersection. `scoped` is true for `(?flags:...)` groups and false
+    /// for bare `(?flags)` settings.
+    ///
+    /// - `i`, `m`, `s`, `x` are shared by both engines and always allowed.
+    /// - Positive `u` is allowed: both engines accept it and both default
+    ///   to Unicode mode.
+    /// - `U` (swap greed) and `R` (CRLF mode) are Rust-only; Python rejects
+    ///   them as unknown flags.
+    /// - Negation is only allowed in the scoped form `(?-imsx:...)`; Python
+    ///   has no bare `(?-...)` global negation.
+    /// - Negated `u` is Rust-only: Python never allows negating Unicode
+    ///   mode, and in Rust it silently changes `\w`/`\d`/`.` semantics.
+    fn check_flags(flags: &ast::Flags, scoped: bool) -> Result<(), ExpressionError> {
+        let mut negated = false;
+        for item in &flags.items {
+            match &item.kind {
+                ast::FlagsItemKind::Negation => {
+                    if !scoped {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: global flag negation (?-...); \
+                             use a scoped group (?-i:...)",
+                        ));
+                    }
+                    negated = true;
+                }
+                ast::FlagsItemKind::Flag(f) => match f {
+                    ast::Flag::CaseInsensitive
+                    | ast::Flag::MultiLine
+                    | ast::Flag::DotMatchesNewLine
+                    | ast::Flag::IgnoreWhitespace => {}
+                    ast::Flag::Unicode => {
+                        if negated {
+                            return Err(ExpressionError::new(
+                                "Unsupported regex feature: negated Unicode flag -u",
+                            ));
+                        }
+                    }
+                    ast::Flag::SwapGreed => {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: inline flag U (swap greed)",
+                        ));
+                    }
+                    ast::Flag::CRLF => {
+                        return Err(ExpressionError::new(
+                            "Unsupported regex feature: inline flag R (CRLF mode)",
+                        ));
+                    }
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Reject the Rust-only word boundary spellings. Python's `re` does not
+    /// error on these — it reads `\b{start}` as `\b` followed by the
+    /// literal characters `{start}` — so they diverge silently.
+    fn check_assertion(kind: &ast::AssertionKind) -> Result<(), ExpressionError> {
+        use ast::AssertionKind::*;
+        let spelling = match kind {
+            WordBoundaryStart => "\\b{start}",
+            WordBoundaryEnd => "\\b{end}",
+            WordBoundaryStartAngle => "\\<",
+            WordBoundaryEndAngle => "\\>",
+            WordBoundaryStartHalf => "\\b{start-half}",
+            WordBoundaryEndHalf => "\\b{end-half}",
+            _ => return Ok(()),
+        };
+        Err(ExpressionError::new(format!(
+            "Unsupported regex feature: word boundary assertion {spelling}"
+        )))
     }
 
     fn posix_class_name(kind: &regex_syntax::ast::ClassAsciiKind) -> &'static str {
@@ -281,15 +364,21 @@ fn check_hir_portability(hir: &regex_syntax::hir::Hir) -> Result<(), ExpressionE
             | Look::WordAscii
             | Look::WordAsciiNegate
             | Look::WordUnicode
-            | Look::WordUnicodeNegate
-            | Look::WordStartAscii
+            | Look::WordUnicodeNegate => Ok(()),
+            // Rust-only word boundary spellings (`\b{start}`, `\<`, ...)
+            // lower to these. They are rejected with precise messages by
+            // `check_ast_portability`; this arm is the belt-and-braces
+            // backstop.
+            Look::WordStartAscii
             | Look::WordEndAscii
             | Look::WordStartUnicode
             | Look::WordEndUnicode
             | Look::WordStartHalfAscii
             | Look::WordEndHalfAscii
             | Look::WordStartHalfUnicode
-            | Look::WordEndHalfUnicode => Ok(()),
+            | Look::WordEndHalfUnicode => Err(ExpressionError::new(
+                "Unsupported regex feature: Rust-only word boundary assertion",
+            )),
         },
         HirKind::Capture(c) => check_hir_portability(&c.sub),
         HirKind::Repetition(r) => check_hir_portability(&r.sub),
