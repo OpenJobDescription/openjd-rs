@@ -682,6 +682,18 @@ pub(super) fn coerce_to_type(
                 return Ok(ExprValue::Int(v as i64));
             }
         }
+        // Numeric to BOOL, decided on the number rather than on its text. The fallback
+        // below coerces through the string form, and a float carries its original literal,
+        // so `1.0` would arrive at the bool table as "1.0" and be refused while `1` is
+        // accepted. The spec's BOOL coercion admits 1 and 0 in either numeric form -- the
+        // conformance corpus asserts it for both (2.15's IntValues and FloatValues) -- so
+        // decide it here and let anything else fall through to the same refusal.
+        (ExprValue::Int(i), JobParameterType::Bool) if *i == 0 || *i == 1 => {
+            return Ok(ExprValue::Bool(*i == 1));
+        }
+        (ExprValue::Float(f), JobParameterType::Bool) if f.value() == 0.0 || f.value() == 1.0 => {
+            return Ok(ExprValue::Bool(f.value() == 1.0));
+        }
         _ => {}
     }
 
@@ -750,7 +762,7 @@ pub(super) fn coerce_from_str(
         | JobParameterType::ListListInt => {
             // Try parsing the string as JSON for list parameter coercion.
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
-                json_to_expr_value(&json_val)?
+                json_to_expr_value_as(&json_val, param_type)?
             } else {
                 return Err(format!(
                     "Value '{s}' is not valid JSON for a list parameter."
@@ -1145,7 +1157,70 @@ fn path_is_within(path: &str, base: &str, format: openjd_expr::path_mapping::Pat
     }
 }
 
+/// The element type of a list parameter type, or `None` for a scalar type.
+///
+/// `LIST[LIST[INT]]` yields `LIST[INT]`, so nesting is handled by the same recursion
+/// rather than a special case.
+pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParameterType> {
+    Some(match param_type {
+        JobParameterType::ListString => JobParameterType::String,
+        JobParameterType::ListPath => JobParameterType::Path,
+        JobParameterType::ListInt => JobParameterType::Int,
+        JobParameterType::ListFloat => JobParameterType::Float,
+        JobParameterType::ListBool => JobParameterType::Bool,
+        JobParameterType::ListListInt => JobParameterType::ListInt,
+        _ => return None,
+    })
+}
+
+/// Convert a serde_json::Value to an ExprValue, coercing to the declared type.
+///
+/// [`json_to_expr_value`] maps JSON types onto `ExprValue` variants structurally: a JSON
+/// `1` becomes an `Int` whatever the parameter was declared as. For a scalar parameter
+/// that is fine, because [`coerce_from_str`] applies the declared type's own accept table
+/// first. For a list parameter it was not: the elements were built from their JSON types
+/// and the declared element type never consulted, so a `LIST[BOOL]` default of `[1, 0]`
+/// produced a list of `Int` rather than a list of `Bool`.
+///
+/// The visible symptom was a `LIST[BOOL]` template that validates and then fails later,
+/// when something asks for the value at its declared type and gets
+/// `Cannot coerce int to bool` from the expression engine, which is right to refuse a
+/// lossy conversion. Scalar `BOOL` already accepted `1`, `1.0`, `"yes"` and `"on"`, so the
+/// two forms of one type disagreed.
+///
+/// Each element is now coerced to the declared element type through the same
+/// [`coerce_to_type`] path the scalar types use, which keeps `LIST[T]` and `T` consistent
+/// by construction. An element that already matches its type is returned untouched.
+pub(super) fn json_to_expr_value_as(
+    val: &serde_json::Value,
+    param_type: JobParameterType,
+) -> Result<openjd_expr::ExprValue, String> {
+    match (val, list_element_type(param_type)) {
+        // A list parameter: recurse, carrying the element type down. LIST[LIST[INT]]
+        // recurses twice and reaches the Int arm at the leaves.
+        (serde_json::Value::Array(arr), Some(element_type)) => {
+            let elements: Vec<openjd_expr::ExprValue> = arr
+                .iter()
+                .map(|element| json_to_expr_value_as(element, element_type))
+                .collect::<Result<_, _>>()?;
+            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE)
+                .map_err(|e| format!("Invalid list value: {e}"))
+        }
+        // A list type whose value is not a list. Fall through to the untyped conversion so
+        // the existing "not a list" diagnostics keep their wording.
+        (other, Some(_)) => json_to_expr_value(other),
+        // A leaf: convert by JSON type, then coerce to what the parameter declared.
+        (other, None) => {
+            let value = json_to_expr_value(other)?;
+            coerce_to_type(&value, param_type)
+        }
+    }
+}
+
 /// Convert a serde_json::Value to an ExprValue.
+///
+/// Structural only: the caller's declared type is not consulted. Prefer
+/// [`json_to_expr_value_as`] when the declared type is known.
 pub(super) fn json_to_expr_value(
     val: &serde_json::Value,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -1306,5 +1381,174 @@ mod tests {
         let val = openjd_expr::ExprValue::Int(i64::MAX);
         let result = coerce_to_type(&val, JobParameterType::Float);
         assert!(result.is_ok(), "large int-to-float coercion should succeed");
+    }
+
+    /// `LIST[T]` must accept exactly what `T` accepts.
+    ///
+    /// The regression these cover: list elements were built from their JSON type and the
+    /// declared element type was never consulted, so a `LIST[BOOL]` of `[1, 0]` became a
+    /// list of `Int`. Scalar `BOOL` accepted `1` all along, so one type behaved two ways.
+    mod list_elements_coerce_to_the_declared_type {
+        use super::*;
+        use openjd_expr::ExprValue;
+
+        /// Every list type, its element type, and a value written in the element type's
+        /// alternative accepted form rather than its canonical one.
+        fn coerce(json: &str, param_type: JobParameterType) -> Result<ExprValue, String> {
+            let value: serde_json::Value = serde_json::from_str(json).expect("test json");
+            json_to_expr_value_as(&value, param_type)
+        }
+
+        #[test]
+        fn list_bool_accepts_every_form_scalar_bool_accepts() {
+            // The scalar table is true/false, 1/0, yes/no, on/off, case insensitive. Each
+            // of these is a LIST[BOOL] default the spec permits.
+            for json in [
+                "[true, false]",
+                "[1, 0]",
+                "[1.0, 0.0]",
+                r#"["true", "false"]"#,
+                r#"["yes", "no"]"#,
+                r#"["on", "off"]"#,
+                r#"["1", "0"]"#,
+                r#"["TRUE", "False"]"#,
+                r#"[true, 1, "yes", 0.0, "off"]"#,
+            ] {
+                let result = coerce(json, JobParameterType::ListBool);
+                let value = result.unwrap_or_else(|e| panic!("{json} rejected: {e}"));
+                match value {
+                    ExprValue::ListBool(_) => {}
+                    other => panic!("{json} produced {other:?}, expected ListBool"),
+                }
+            }
+        }
+
+        #[test]
+        fn list_bool_preserves_each_elements_truth_value() {
+            // Coercing the type must not flatten the values: mixed forms keep their sense.
+            let value = coerce(
+                r#"[true, 1, "yes", 0.0, "off"]"#,
+                JobParameterType::ListBool,
+            )
+            .expect("mixed forms should coerce");
+            match value {
+                ExprValue::ListBool(items) => {
+                    assert_eq!(items, vec![true, true, true, false, false]);
+                }
+                other => panic!("expected ListBool, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_bool_still_rejects_a_value_that_is_not_boolean_at_all() {
+            let error = coerce(r#"["maybe"]"#, JobParameterType::ListBool)
+                .expect_err("'maybe' is not a boolean");
+            assert!(
+                error.contains("not a valid boolean"),
+                "expected the scalar bool diagnostic, got: {error}"
+            );
+        }
+
+        #[test]
+        fn list_int_accepts_int_strings_as_scalar_int_does() {
+            match coerce(r#"["1", "2"]"#, JobParameterType::ListInt).expect("int strings") {
+                ExprValue::ListInt(items) => assert_eq!(items, vec![1, 2]),
+                other => panic!("expected ListInt, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_int_rejects_a_non_integer_element() {
+            let error =
+                coerce(r#"["x"]"#, JobParameterType::ListInt).expect_err("'x' is not an int");
+            assert!(
+                error.contains("not a valid integer"),
+                "expected the scalar int diagnostic, got: {error}"
+            );
+        }
+
+        #[test]
+        fn list_float_accepts_ints_and_float_strings() {
+            match coerce(r#"[1, "2.5", 3.5]"#, JobParameterType::ListFloat).expect("floats") {
+                ExprValue::ListFloat(items) => {
+                    let values: Vec<f64> = items.iter().map(|f| f.value()).collect();
+                    assert_eq!(values, vec![1.0, 2.5, 3.5]);
+                }
+                other => panic!("expected ListFloat, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_string_and_list_path_take_strings_unchanged() {
+            for param_type in [JobParameterType::ListString, JobParameterType::ListPath] {
+                match coerce(r#"["a", "b"]"#, param_type).expect("strings") {
+                    ExprValue::ListString(items, _) => assert_eq!(items, vec!["a", "b"]),
+                    other => panic!("expected ListString for {param_type:?}, got {other:?}"),
+                }
+            }
+        }
+
+        #[test]
+        fn list_list_int_recurses_to_its_leaves() {
+            // LIST[LIST[INT]] has to coerce two levels down, which is why the element type
+            // is threaded through the recursion rather than special-cased.
+            match coerce(r#"[["1", 2], [3]]"#, JobParameterType::ListListInt).expect("nested") {
+                ExprValue::ListList(items, _, _) => {
+                    assert_eq!(items.len(), 2);
+                    match &items[0] {
+                        ExprValue::ListInt(inner) => assert_eq!(*inner, vec![1, 2]),
+                        other => panic!("expected inner ListInt, got {other:?}"),
+                    }
+                }
+                other => panic!("expected ListList, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn empty_list_is_accepted_for_every_list_type() {
+            for param_type in [
+                JobParameterType::ListString,
+                JobParameterType::ListPath,
+                JobParameterType::ListInt,
+                JobParameterType::ListFloat,
+                JobParameterType::ListBool,
+                JobParameterType::ListListInt,
+            ] {
+                coerce("[]", param_type)
+                    .unwrap_or_else(|e| panic!("empty list rejected for {param_type:?}: {e}"));
+            }
+        }
+
+        #[test]
+        fn scalar_types_are_unaffected() {
+            // list_element_type returns None for them, so they take the untyped path and
+            // then the declared type's own coercion, exactly as before.
+            assert!(list_element_type(JobParameterType::Bool).is_none());
+            assert!(list_element_type(JobParameterType::Int).is_none());
+            assert!(list_element_type(JobParameterType::Float).is_none());
+            assert!(list_element_type(JobParameterType::String).is_none());
+            assert!(list_element_type(JobParameterType::Path).is_none());
+            assert!(list_element_type(JobParameterType::RangeExpr).is_none());
+        }
+
+        #[test]
+        fn every_list_type_has_an_element_type() {
+            // A list type added without a mapping would silently fall back to the untyped
+            // path and reintroduce the bug, so pin the whole set.
+            for (param_type, expected) in [
+                (JobParameterType::ListString, JobParameterType::String),
+                (JobParameterType::ListPath, JobParameterType::Path),
+                (JobParameterType::ListInt, JobParameterType::Int),
+                (JobParameterType::ListFloat, JobParameterType::Float),
+                (JobParameterType::ListBool, JobParameterType::Bool),
+                (JobParameterType::ListListInt, JobParameterType::ListInt),
+            ] {
+                assert_eq!(
+                    list_element_type(param_type),
+                    Some(expected),
+                    "{param_type:?} must declare its element type"
+                );
+            }
+        }
     }
 }

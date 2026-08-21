@@ -5322,3 +5322,144 @@ fn plain_int_list_value_beyond_range_bound_still_accepted() {
     );
     assert_eq!(job.steps.len(), 1);
 }
+
+// === LIST[BOOL] defaults that need coercion, through to the symbol table ===
+//
+// Regression cover for the conformance fixture 2023-09/EXPR/job_templates/2.15--list-bool-param.
+// It declares LIST[BOOL] parameters whose defaults are written as ints, floats and strings, all
+// of which the spec's BOOL coercion admits and scalar BOOL already accepted.
+//
+// The list elements used to be built from their JSON type with the declared element type never
+// consulted, so `[1, 0]` became a list of Int. decode and preprocess both passed, and the
+// failure surfaced later in build_symbol_table as "Cannot coerce int to bool" -- the expression
+// engine correctly refusing a lossy conversion on a value that should never have reached it as
+// an int. A service calling this saw a template validate and then fail to create.
+
+/// The 2.15 fixture's parameter set, one entry per accepted spelling of a boolean.
+fn list_bool_coercion_params() -> &'static str {
+    r#"
+    {"name": "Bools", "type": "LIST[BOOL]", "default": [true, false]},
+    {"name": "IntValues", "type": "LIST[BOOL]", "default": [1, 0, 1, 0]},
+    {"name": "FloatValues", "type": "LIST[BOOL]", "default": [1.0, 0.0]},
+    {"name": "StringTrueFalse", "type": "LIST[BOOL]", "default": ["true", "false"]},
+    {"name": "StringYesNo", "type": "LIST[BOOL]", "default": ["yes", "no"]},
+    {"name": "StringOnOff", "type": "LIST[BOOL]", "default": ["on", "off"]},
+    {"name": "String10", "type": "LIST[BOOL]", "default": ["1", "0"]},
+    {"name": "MixedCase", "type": "LIST[BOOL]", "default": ["TRUE", "False", "YES", "no", "On", "OFF"]},
+    {"name": "MixedTypes", "type": "LIST[BOOL]", "default": [true, 1, "yes", 0.0, "off"]}
+    "#
+}
+
+fn preprocess_defaults(params: &str) -> openjd_model::JobParameterValues {
+    let td = TestDirs::new();
+    let jt_val = expr_list_job_template(params);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default())
+        .expect("template with coercible LIST[BOOL] defaults must decode");
+    preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .expect("defaults must preprocess")
+}
+
+#[test]
+fn test_list_bool_defaults_arrive_as_bools() {
+    let result = preprocess_defaults(list_bool_coercion_params());
+
+    // Every parameter must arrive as a list of real booleans, whatever spelling its default
+    // used. Before the fix, IntValues was a ListInt and FloatValues a ListFloat.
+    for name in [
+        "Bools",
+        "IntValues",
+        "FloatValues",
+        "StringTrueFalse",
+        "StringYesNo",
+        "StringOnOff",
+        "String10",
+        "MixedCase",
+        "MixedTypes",
+    ] {
+        match &result[name].value {
+            openjd_expr::ExprValue::ListBool(_) => {}
+            other => panic!("{name} arrived as {other:?}, expected ListBool"),
+        }
+    }
+}
+
+#[test]
+fn test_list_bool_defaults_keep_their_truth_values() {
+    let result = preprocess_defaults(list_bool_coercion_params());
+
+    // Coercing the type must not flatten the values.
+    for (name, expected) in [
+        ("Bools", vec![true, false]),
+        ("IntValues", vec![true, false, true, false]),
+        ("FloatValues", vec![true, false]),
+        ("StringTrueFalse", vec![true, false]),
+        ("StringYesNo", vec![true, false]),
+        ("StringOnOff", vec![true, false]),
+        ("String10", vec![true, false]),
+        ("MixedCase", vec![true, false, true, false, true, false]),
+        ("MixedTypes", vec![true, true, true, false, false]),
+    ] {
+        match &result[name].value {
+            openjd_expr::ExprValue::ListBool(items) => {
+                assert_eq!(*items, expected, "{name} coerced to the wrong values")
+            }
+            other => panic!("{name} arrived as {other:?}, expected ListBool"),
+        }
+    }
+}
+
+#[test]
+fn test_list_bool_coerced_defaults_build_a_symbol_table() {
+    // The failure this regression test exists for. build_symbol_table has to produce a
+    // typed symbol per parameter, and it refused int-to-bool -- correctly, since the value
+    // should not have been an int by then.
+    let result = preprocess_defaults(list_bool_coercion_params());
+    let symtab = build_symbol_table(&result)
+        .expect("a symbol table must build from coercible LIST[BOOL] defaults");
+
+    // Both Param.X and RawParam.X are seeded, so a missing coercion shows up in either.
+    for name in ["IntValues", "FloatValues", "MixedTypes"] {
+        assert!(
+            symtab.contains(&format!("Param.{name}")),
+            "Param.{name} missing from the symbol table"
+        );
+    }
+}
+
+#[test]
+fn test_list_bool_still_rejects_a_non_boolean_default() {
+    // The coercion must not have become a blanket accept: a value that is not a boolean in
+    // any accepted spelling is still refused, and at decode/preprocess rather than later.
+    let td = TestDirs::new();
+    let jt_val =
+        expr_list_job_template(r#"{"name": "Bad", "type": "LIST[BOOL]", "default": ["maybe"]}"#);
+    let decoded = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default());
+    let rejected = match decoded {
+        Err(_) => true,
+        Ok(jt) => preprocess_job_parameters(
+            &jt,
+            &JobParameterInputValues::new(),
+            &[],
+            &openjd_model::PathParameterOptions {
+                job_template_dir: td.template(),
+                current_working_dir: td.cwd(),
+                allow_template_dir_walk_up: false,
+                path_format: PathFormat::host(),
+                allow_uri_path_values: true,
+            },
+        )
+        .is_err(),
+    };
+    assert!(rejected, "\"maybe\" is not a boolean and must be refused");
+}
