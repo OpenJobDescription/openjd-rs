@@ -467,6 +467,20 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
 - **Float floor division** derives its quotient from that remainder before rounding
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
 - **`round()`** uses banker's rounding / round-half-even (§2.2.2)
+- **String classification** (`isdigit`, `isalpha`, `isalnum`, `isspace`,
+  `isupper`, `islower`, §2.2.4) matches Python's `str` methods of the same
+  name exactly, not Rust's `char` predicates, which use different Unicode
+  properties (e.g. `char::is_alphabetic()` is the `Alphabetic` property, a
+  superset of Python's `L*` categories; `char::is_ascii_digit()` misses
+  non-ASCII decimal digits). Lookup tables in
+  `functions/unicode_tables.rs` are generated from CPython by
+  `scripts/generate_unicode_tables.py` and pinned to a stated Unicode
+  version (see `UNICODE_VERSION` in the generated file). `isupper`/`islower`
+  follow Python's cased-character rule: at least one cased character and
+  every cased character upper/lowercase — uncased characters (digits, CJK)
+  are ignored, and titlecase (Lt) characters are cased but neither upper
+  nor lower. Regenerate the tables with the script when intentionally
+  adopting a newer Unicode version.
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
   Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
   inspect the result, rather than a substring scan. This correctly ignores
