@@ -85,6 +85,20 @@ fn make_replacement(keyword: &str, source: &str) -> String {
     "x".repeat(len)
 }
 
+/// How far every parser-reported offset is shifted, for `source`.
+///
+/// Multi-line expressions are wrapped in parentheses for implicit line continuation, so the
+/// parser sees one extra leading byte and every offset it reports -- AST ranges and error
+/// locations alike -- is one greater than the corresponding offset in `source`.
+///
+/// Anything that takes an offset or a range from the parser and uses it against the
+/// unwrapped source has to subtract this. Call it rather than open-coding the newline test:
+/// the caret formatter went without any compensation for a while precisely because the rule
+/// lived in four places instead of one.
+pub(crate) fn parser_offset_shift(source: &str) -> usize {
+    usize::from(source.contains('\n'))
+}
+
 /// Rewrite the contextual keyword at `kw_start` (a byte offset into `source`,
 /// taken from the parser's error location) to a same-length placeholder,
 /// recording the mapping in `renames`. Returns whether anything was rewritten.
@@ -564,15 +578,9 @@ fn parse_inner(
     // Inverse of `keyword_renames`, for the rename write path. See `rename_keyword_at`.
     let mut keyword_placeholders: HashMap<String, String> = HashMap::new();
 
-    // Wrap multi-line expressions in parentheses for implicit line continuation.
-    //
-    // The wrap shifts every offset the parser reports by +1, and each consumer undoes
-    // that itself rather than there being one place that does it. If you add another
-    // consumer of a parser offset or AST range here, it needs the same `- 1` when the
-    // expression is multi-line.
-    //
-    // `compute_caret_offset` is the one that does not, which misplaces the caret for a
-    // multi-line `**` or `//`: https://github.com/OpenJobDescription/openjd-rs/issues/339
+    // Wrap multi-line expressions in parentheses for implicit line continuation. The wrap
+    // shifts every offset the parser reports by one; `parser_offset_shift` is that rule, and
+    // anything converting a parser offset back to a position in `source` goes through it.
     let is_multiline = source.contains('\n');
 
     loop {
@@ -626,7 +634,7 @@ fn parse_inner(
                 // + ")", so every offset the parser reports sits one byte to
                 // the right of the same character in `source`.
                 let kw_start = if is_multiline {
-                    error_offset.saturating_sub(1)
+                    error_offset.saturating_sub(parser_offset_shift(&source))
                 } else {
                     error_offset
                 };

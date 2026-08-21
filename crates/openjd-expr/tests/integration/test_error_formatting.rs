@@ -587,16 +587,29 @@ fn single_line_two_char_operator_caret_points_at_first_char() {
 }
 
 #[test]
-#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
-            multi-line paren-wrap offset shift, so its backwards operator scan \
-            reads bytes one position to the right and the caret for a \
-            multi-line ** or // lands on the operator's second character \
-            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
-            the NOTE in eval/parse.rs::parse_inner for the centralization that \
-            fixes it. Un-ignore then."]
 fn multiline_two_char_operator_caret_points_at_first_char() {
+    // The caret must sit on the first character of a two-character operator. Before the
+    // offset shift was centralized this rendered "~~~^", because the backwards operator
+    // scan indexed the unwrapped source with still-shifted AST offsets and so never
+    // recognized the operator as two characters wide.
     assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
     assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
+}
+
+#[test]
+fn single_line_two_char_operator_caret_is_unchanged() {
+    // Control for the above: the single-line case has no shift to undo and was already
+    // correct, so it must render identically.
+    assert_err("1 ** 'a'", &["  1 ** 'a'\n", "  ~~^"]);
+    assert_err("1 // 'a'", &["  1 // 'a'\n", "  ~~^"]);
+}
+
+#[test]
+fn multiline_single_char_operator_caret_points_at_the_operator() {
+    // One-character operators went through the same scan, just without the two-character
+    // branch, so they are worth pinning alongside it.
+    assert_err("1 +\n'a'", &["  1 +\n", "  ~~^"]);
+    assert_err("1 *\n'a'", &["  1 *\n", "  ~~^"]);
 }
 
 #[test]
@@ -1040,6 +1053,11 @@ fn undefined_dotted_variable_with_suggestion() {
 }
 
 // --- TestMultiLineExpressions: type error variants matching Python ---
+//
+// The carets below point at the operator itself. They used to sit one column to its
+// right, on the following space, because the caret formatter indexed the unwrapped
+// source with parser offsets that still carried the multi-line paren-wrap shift. Same
+// convention as `bare_multiline_error_shows_correct_line` and the single-line cases.
 
 #[test]
 fn multiline_type_error_in_parens() {
@@ -1048,7 +1066,7 @@ fn multiline_type_error_in_parens() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    1 + 'x'\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1060,7 +1078,7 @@ fn multiline_type_error_in_list() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    2 + 'x',\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1072,7 +1090,7 @@ fn multiline_type_error_on_first_line() {
         &[
             "Cannot use '+' operator with int and string\n",
             "  1 + 'x' + (\n",
-            "  ~~~^~~~",
+            "  ~~^~~~~",
         ],
     );
 }
@@ -1084,7 +1102,7 @@ fn multiline_type_error_deeply_nested() {
         &[
             "Cannot use '+' operator with int and string\n",
             "      1 + 'x'\n",
-            "      ~~~^~~~",
+            "      ~~^~~~~",
         ],
     );
 }
