@@ -1127,6 +1127,144 @@ fn nested_character_class_rejected() {
         ],
     );
 }
+#[test]
+fn swap_greed_inline_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U)a+')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U)a+')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn crlf_inline_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?R)^a')",
+        &[
+            "Unsupported regex feature: inline flag R (CRLF mode)\n",
+            "  re_search('a', r'(?R)^a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_swap_greed_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U:a+)')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U:a+)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn global_flag_negation_rejected() {
+    assert_err(
+        "re_search('A', r'(?-i)a')",
+        &[
+            "Unsupported regex feature: global flag negation (?-...); use a scoped group (?-i:...)\n",
+            "  re_search('A', r'(?-i)a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_unicode_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?-u:a)')",
+        &[
+            "Unsupported regex feature: negated Unicode flag -u\n",
+            "  re_search('a', r'(?-u:a)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn shared_inline_flags_accepted() {
+    // `i`, `m`, `s`, `x` (and positive `u`) are in the Python/Rust
+    // intersection, bare and scoped, including scoped negation.
+    assert!(eval("re_search('HELLO', r'(?i)hello')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?m)^b')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?s)a.b')").is_list());
+    assert!(eval("re_search('ab', r'(?x)a b')").is_list());
+    assert!(eval("re_search('a', r'(?u)\\w')").is_list());
+    assert!(eval("re_search('HELLO', r'(?i:hello)')").is_list());
+    assert!(eval("re_search('hello', r'(?-i:hello)')").is_list());
+}
+#[test]
+fn word_boundary_start_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start}\n",
+            "  re_search('ab', r'\\b{start}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end}\n",
+            "  re_search('ab', r'a\\b{end}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'\\<a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\<\n",
+            "  re_search('ab', r'\\<a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\>')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\>\n",
+            "  re_search('ab', r'a\\>')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_half_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start-half}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start-half}\n",
+            "  re_search('ab', r'\\b{start-half}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_half_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end-half}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end-half}\n",
+            "  re_search('ab', r'a\\b{end-half}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn portable_word_boundaries_accepted() {
+    assert!(eval("re_search('hello world', r'\\bworld\\b')").is_list());
+    assert!(eval("re_search('hello', r'l\\Bl')").is_list());
+}
 
 // === TestRegexEscapedPatternsAccepted ===
 #[test]

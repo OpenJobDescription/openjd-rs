@@ -479,9 +479,15 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   are erased by AST→HIR translation and must be rejected at the AST level:
   Unicode property classes (`\p{...}`/`\P{...}`), the `(?<name>...)` capture
   group spelling (Python requires `(?P<name>...)`), POSIX character classes
-  (`[[:alpha:]]`), character class set operators (`--`, `&&`, `~~`), and
-  nested character classes (`[a[b]]`). The AST is then translated to HIR for
-  a belt-and-braces walk over the remaining constructs.
+  (`[[:alpha:]]`), character class set operators (`--`, `&&`, `~~`),
+  nested character classes (`[a[b]]`), Rust-only inline flags (`U` swap
+  greed, `R` CRLF mode, negated `u`, and bare global negation `(?-...)`;
+  the shared flags `i`, `m`, `s`, `x` and positive `u` remain allowed,
+  including scoped negation `(?-i:...)`), and Rust-only word boundary
+  spellings (`\b{start}`, `\b{end}`, `\b{start-half}`, `\b{end-half}`,
+  `\<`, `\>` — Python reads these as `\b` plus literal characters, silently
+  diverging). The AST is then translated to HIR for a belt-and-braces walk
+  over the remaining constructs.
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
   `repr_pwsh` renders nested lists as nested array literals, using the unary
   comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
