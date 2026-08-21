@@ -52,16 +52,133 @@ fn validate_regex_pattern(pattern: &str) -> Result<(), ExpressionError> {
     // anchor — without re-implementing the full regex grammar.
     reject_rust_only_features(pattern)?;
 
-    // Parse the pattern into its HIR. Using `regex_syntax` (instead of a
-    // pure substring scan) means we correctly ignore lookaround-shaped
-    // sequences inside character classes, escapes, or regex comments.
-    // `regex_syntax` rejects lookaround, backreferences, and `\Z` at
-    // parse time; the HIR walker below is a belt-and-braces guard.
-    let hir = match regex_syntax::Parser::new().parse(pattern) {
-        Ok(h) => h,
-        Err(e) => return Err(translate_parse_error(e)),
-    };
+    // Parse the pattern into its AST first and walk it. Several Rust-only
+    // constructs are erased (or normalized away) by the AST→HIR translation
+    // — `(?<name>...)` vs `(?P<name>...)`, POSIX classes, `\p{...}`, and
+    // character class set operators all become plain captures/classes in
+    // HIR — so they can only be rejected at the AST level. Using
+    // `regex_syntax` (instead of a pure substring scan) means we correctly
+    // ignore lookaround-shaped sequences inside character classes, escapes,
+    // or regex comments. `regex_syntax` rejects lookaround, backreferences,
+    // and `\Z` at parse time.
+    let ast = regex_syntax::ast::parse::Parser::new()
+        .parse(pattern)
+        .map_err(|e| translate_parse_error(e.into()))?;
+    check_ast_portability(&ast)?;
+
+    // Translate the already-parsed AST to HIR (equivalent to
+    // `regex_syntax::Parser::new().parse(pattern)` but without re-parsing)
+    // for the belt-and-braces HIR walk below.
+    let hir = regex_syntax::hir::translate::Translator::new()
+        .translate(pattern, &ast)
+        .map_err(|e| translate_parse_error(e.into()))?;
     check_hir_portability(&hir)
+}
+
+/// Walk the pattern AST and reject constructs that Rust's `regex` crate
+/// accepts but that fall outside the spec's Python/Rust intersection dialect
+/// (§2.2.5). These are invisible after AST→HIR translation, so they must be
+/// caught here:
+///
+/// - `\p{...}` / `\P{...}` — Unicode property classes (Rust-only; Python
+///   `re` rejects them as a bad escape)
+/// - `(?<name>...)` — Rust's capture group name spelling (Python requires
+///   `(?P<name>...)`)
+/// - `[[:alpha:]]` — POSIX character classes (Python parses these as
+///   ordinary bracket expressions with silently different semantics)
+/// - `--` / `&&` / `~~` — character class set operators (Python parses
+///   these as ordinary ranges/literals with silently different semantics)
+/// - `[a[b]]` — nested character classes (the enabling construct behind the
+///   set operators; Python treats the inner `[` as a literal)
+fn check_ast_portability(ast: &regex_syntax::ast::Ast) -> Result<(), ExpressionError> {
+    use regex_syntax::ast;
+
+    struct PortabilityVisitor;
+
+    impl ast::Visitor for PortabilityVisitor {
+        type Output = ();
+        type Err = ExpressionError;
+
+        fn finish(self) -> Result<(), ExpressionError> {
+            Ok(())
+        }
+
+        fn visit_pre(&mut self, node: &ast::Ast) -> Result<(), ExpressionError> {
+            match node {
+                ast::Ast::ClassUnicode(_) => Err(unicode_property_error()),
+                ast::Ast::Group(g) => match &g.kind {
+                    ast::GroupKind::CaptureName {
+                        starts_with_p: false,
+                        ..
+                    } => Err(ExpressionError::new(
+                        "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)",
+                    )),
+                    _ => Ok(()),
+                },
+                _ => Ok(()),
+            }
+        }
+
+        fn visit_class_set_item_pre(
+            &mut self,
+            item: &ast::ClassSetItem,
+        ) -> Result<(), ExpressionError> {
+            match item {
+                ast::ClassSetItem::Ascii(c) => Err(ExpressionError::new(format!(
+                    "Unsupported regex feature: POSIX character class [[:{}{}:]]",
+                    if c.negated { "^" } else { "" },
+                    posix_class_name(&c.kind),
+                ))),
+                ast::ClassSetItem::Unicode(_) => Err(unicode_property_error()),
+                ast::ClassSetItem::Bracketed(_) => Err(ExpressionError::new(
+                    "Unsupported regex feature: nested character class",
+                )),
+                _ => Ok(()),
+            }
+        }
+
+        fn visit_class_set_binary_op_pre(
+            &mut self,
+            op: &ast::ClassSetBinaryOp,
+        ) -> Result<(), ExpressionError> {
+            let feature = match op.kind {
+                ast::ClassSetBinaryOpKind::Difference => "character class difference --",
+                ast::ClassSetBinaryOpKind::Intersection => "character class intersection &&",
+                ast::ClassSetBinaryOpKind::SymmetricDifference => {
+                    "character class symmetric difference ~~"
+                }
+            };
+            Err(ExpressionError::new(format!(
+                "Unsupported regex feature: {feature}"
+            )))
+        }
+    }
+
+    fn unicode_property_error() -> ExpressionError {
+        ExpressionError::new("Unsupported regex feature: Unicode property class \\p{...}")
+    }
+
+    fn posix_class_name(kind: &regex_syntax::ast::ClassAsciiKind) -> &'static str {
+        use regex_syntax::ast::ClassAsciiKind::*;
+        match kind {
+            Alnum => "alnum",
+            Alpha => "alpha",
+            Ascii => "ascii",
+            Blank => "blank",
+            Cntrl => "cntrl",
+            Digit => "digit",
+            Graph => "graph",
+            Lower => "lower",
+            Print => "print",
+            Punct => "punct",
+            Space => "space",
+            Upper => "upper",
+            Word => "word",
+            Xdigit => "xdigit",
+        }
+    }
+
+    ast::visit(ast, PortabilityVisitor)
 }
 
 /// Scan the pattern source for Rust-only escape sequences that
