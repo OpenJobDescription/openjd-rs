@@ -134,6 +134,10 @@ The following function families use this pattern:
   `list[path]`, and `list[nulltype]` overloads implement standard path-to-string
   and empty-list behavior without allocating a scalar path coercion before the
   output preflight. Unsupported lists are rejected during signature dispatch.
+- **`string()` on a list** renders a JSON array whose element strings are
+  escaped, so it reuses the same bound via `preflight_display_list`. Scalars
+  render as themselves and are not charged. See
+  [values.md](values.md#list-display-strings).
 - **Amplifying string operations** (`replace`, `join`) compute their projected
   output from a worst-case non-overlapping replacement count or from
   element/separator lengths, then reserve the bound before constructing the
@@ -471,7 +475,11 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   rejects forbidden constructs at parse time; the translated error names the
   specific feature (e.g., "Unsupported regex feature: lookahead") so callers
   can produce stable diagnostics.
-- **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6)
+- **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
+  `repr_pwsh` renders nested lists as nested array literals, using the unary
+  comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
+  flattens in PowerShell. `repr_sh` and `repr_cmd` reject nested lists at
+  signature dispatch.
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
 - **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /
   `PureWindowsPath(*parts)` semantics: an absolute component in the list resets the

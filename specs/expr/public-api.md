@@ -744,7 +744,8 @@ impl ExprValue {
 
     /// Display / conversion.
     pub fn repr_python(&self) -> String;       // matches Python repr
-    pub fn to_display_string(&self) -> String; // human-readable form
+    pub fn to_display_string(&self) -> String; // human-readable form; lists render
+                                               // as JSON arrays (see values.md)
     pub fn as_str_repr(&self) -> std::borrow::Cow<'_, str>;
 
     // ── JSON transport (template-scope → session-scope boundary) ──

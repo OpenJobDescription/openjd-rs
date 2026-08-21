@@ -77,7 +77,9 @@ let result = fs.resolve_string_with(&symtab, &FormatStringOptions::default())?;
 ```
 
 Concatenates all segments into a single string. Expression results are converted via
-`to_display_string()`. The `target_type` field on the options is ignored here.
+`to_display_string()`, so a list result interpolates as a JSON array — see
+[values.md](values.md#list-display-strings). The `target_type` field on the options is
+ignored here.
 
 ### resolve_with — preserves typed values for single-expression strings
 

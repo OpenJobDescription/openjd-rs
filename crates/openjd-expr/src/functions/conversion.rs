@@ -11,7 +11,14 @@ use crate::value::{ExprValue, Float64};
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
-pub fn string_fn(_: Ctx, a: &[ExprValue]) -> R {
+pub fn string_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    // A list renders as a JSON array whose element strings are escaped, so the
+    // output can grow several times larger than the input. Charge the same
+    // budget `repr_json` does before building it. Scalars render as themselves.
+    if a[0].is_list() {
+        let budget = super::repr::preflight_display_list(ctx, &a[0])?;
+        return Ok(budget.finish(a[0].to_display_string()));
+    }
     Ok(ExprValue::String(a[0].to_display_string()))
 }
 

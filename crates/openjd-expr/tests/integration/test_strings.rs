@@ -2379,9 +2379,11 @@ fn re_sub_lookbehind_rejected() {
 // --- Escaped regex patterns: exact return values ---
 #[test]
 fn escaped_backreference_exact() {
+    // The matched string is `\1`; the backslash is JSON-escaped in the list
+    // display form.
     assert_eq!(
         eval(r#"re_search('test\\1', r'\\1')"#).to_display_string(),
-        r#"["\1"]"#
+        r#"["\\1"]"#
     );
 }
 #[test]
@@ -2732,7 +2734,25 @@ fn negative_padding_width_returns_input_unchanged() {
 fn pwsh_repr_preserves_nested_list_item_structure() {
     assert_eq!(
         eval("repr_pwsh([[1, 2], [3]])").to_display_string(),
-        "@([1, 2], [3])"
+        "@(@(1, 2), @(3))"
+    );
+}
+
+#[test]
+fn pwsh_repr_nested_string_lists_quote_elements() {
+    assert_eq!(
+        eval(r#"repr_pwsh([["it's", "b"], ["c d"]])"#).to_display_string(),
+        "@(@('it''s', 'b'), @('c d'))"
+    );
+}
+
+#[test]
+fn pwsh_repr_single_nested_list_uses_unary_comma() {
+    // `@(@(1, 2))` would flatten to `@(1, 2)` in PowerShell; the unary
+    // comma preserves the one-element outer array.
+    assert_eq!(
+        eval("repr_pwsh([[1, 2]])").to_display_string(),
+        "@(,@(1, 2))"
     );
 }
 

@@ -33,6 +33,8 @@ mod test_function_context;
 mod test_function_library;
 #[path = "integration/test_int64_bounds.rs"]
 mod test_int64_bounds;
+#[path = "integration/test_list_json_display.rs"]
+mod test_list_json_display;
 #[path = "integration/test_list_nesting.rs"]
 mod test_list_nesting;
 #[path = "integration/test_lists.rs"]
@@ -63,6 +65,8 @@ mod test_profile_threading;
 mod test_range_expr;
 #[path = "integration/test_regex_validation.rs"]
 mod test_regex_validation;
+#[path = "integration/test_repr_pwsh_roundtrip.rs"]
+mod test_repr_pwsh_roundtrip;
 #[path = "integration/test_rfc_examples.rs"]
 mod test_rfc_examples;
 #[path = "integration/test_slicing.rs"]

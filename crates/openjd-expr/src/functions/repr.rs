@@ -142,9 +142,9 @@ fn display_bound(value: &ExprValue) -> usize {
             let mut total = 2usize.saturating_add(len.saturating_sub(1).saturating_mul(2));
             for_each_list_item(value, |item| {
                 let item_bound = match item {
-                    ValueRef::String(value) | ValueRef::Path(value) => {
-                        value.len().saturating_add(2)
-                    }
+                    // Quoted *and* JSON-escaped inside a list — see
+                    // `ExprValue::write_display`.
+                    ValueRef::String(value) | ValueRef::Path(value) => escaped_bound(value.len()),
                     _ => display_bound_ref(item),
                 };
                 total = total.saturating_add(item_bound);
@@ -176,7 +176,7 @@ fn output_bound_ref(value: ValueRef<'_>, style: ReprStyle) -> usize {
             ValueRef::Bool(_) => 6,
             ValueRef::Int(value) => decimal_len(value),
             ValueRef::Float(value) => value.display_len(),
-            ValueRef::List(value) => display_bound(value),
+            ValueRef::List(value) => output_bound(value, style),
         },
     }
 }
@@ -196,7 +196,8 @@ fn output_bound(value: &ExprValue, style: ReprStyle) -> usize {
             let (wrapper, separator) = match style {
                 ReprStyle::Py | ReprStyle::Json => (2usize, 2usize),
                 ReprStyle::Sh | ReprStyle::Cmd => (0, 1),
-                ReprStyle::Pwsh => (3, 2),
+                // 4 covers `@(,)` for the single-element nested-list form.
+                ReprStyle::Pwsh => (4, 2),
             };
             let mut total = wrapper.saturating_add(len.saturating_sub(1).saturating_mul(separator));
             for_each_list_item(value, |item| {
@@ -240,6 +241,16 @@ fn preflight_repr(
     ctx.count_ops(items)?;
     let bound = output_bound(value, style);
     StringOutputBudget::reserve(ctx, bound, bound)
+}
+
+/// Preflight for the display form of a list (`string(list)`). Reuses the JSON
+/// bound: display escaping is never wider than `repr_json`'s, since the two
+/// differ only in that `repr_json` also escapes non-ASCII characters.
+pub(super) fn preflight_display_list(
+    ctx: Ctx,
+    value: &ExprValue,
+) -> Result<StringOutputBudget, ExpressionError> {
+    preflight_repr(ctx, value, ReprStyle::Json)
 }
 
 // ─── Public entry points ───
@@ -314,46 +325,7 @@ fn write_display_ref(value: ValueRef<'_>, buf: &mut String) {
         }
         ValueRef::Float(value) => write_float(value, buf),
         ValueRef::String(value) | ValueRef::Path(value) => buf.push_str(value),
-        ValueRef::List(value) => write_display(value, buf),
-    }
-}
-
-fn write_display(value: &ExprValue, buf: &mut String) {
-    use std::fmt::Write;
-    match value {
-        ExprValue::Null => buf.push_str("null"),
-        ExprValue::Bool(value) => buf.push_str(if *value { "true" } else { "false" }),
-        ExprValue::Int(value) => {
-            let _ = write!(buf, "{value}");
-        }
-        ExprValue::Float(value) => write_float(value, buf),
-        ExprValue::String(value) | ExprValue::Path { value, .. } => buf.push_str(value),
-        ExprValue::ListString(_, _) | ExprValue::ListPath(_, _, _) => {
-            write_delimited_list(value, buf, "[", ", ", "]", write_quoted_display_string)
-        }
-        ExprValue::ListBool(_)
-        | ExprValue::ListInt(_)
-        | ExprValue::ListFloat(_)
-        | ExprValue::ListList(_, _, _) => {
-            write_delimited_list(value, buf, "[", ", ", "]", write_display_ref)
-        }
-        ExprValue::RangeExpr(value) => {
-            let _ = write!(buf, "{value}");
-        }
-        ExprValue::Unresolved(value) => {
-            let _ = write!(buf, "<unresolved[{value}]>");
-        }
-    }
-}
-
-fn write_quoted_display_string(value: ValueRef<'_>, buf: &mut String) {
-    match value {
-        ValueRef::String(value) | ValueRef::Path(value) => {
-            buf.push('"');
-            buf.push_str(value);
-            buf.push('"');
-        }
-        _ => unreachable!("called with a non-string list item"),
+        ValueRef::List(value) => value.write_display(buf),
     }
 }
 
@@ -436,9 +408,11 @@ fn write_repr_json(val: &ExprValue, buf: &mut String) {
     }
 }
 
+/// `repr_json` escapes non-ASCII as `\uXXXX` — unlike display strings, which
+/// keep them verbatim. See `crate::json_escape` for why the two differ.
 fn write_repr_json_string(value: &str, buf: &mut String) {
     buf.push('"');
-    write_json_escape(value, buf);
+    crate::json_escape::write_escaped_ascii(value, buf);
     buf.push('"');
 }
 
@@ -452,33 +426,6 @@ fn write_repr_json_ref(value: ValueRef<'_>, buf: &mut String) {
         ValueRef::Float(value) => write_float(value, buf),
         ValueRef::String(value) | ValueRef::Path(value) => write_repr_json_string(value, buf),
         ValueRef::List(value) => write_repr_json(value, buf),
-    }
-}
-
-/// Escape a string for JSON output, matching Python's `json.dumps(ensure_ascii=True)`.
-/// All non-ASCII characters are encoded as `\uXXXX` (with surrogate pairs for chars > U+FFFF).
-fn write_json_escape(s: &str, buf: &mut String) {
-    use std::fmt::Write;
-    for c in s.chars() {
-        match c {
-            '"' => buf.push_str("\\\""),
-            '\\' => buf.push_str("\\\\"),
-            '\x08' => buf.push_str("\\b"),
-            '\x0c' => buf.push_str("\\f"),
-            '\n' => buf.push_str("\\n"),
-            '\r' => buf.push_str("\\r"),
-            '\t' => buf.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(buf, "\\u{:04x}", c as u32);
-            }
-            c if c.is_ascii() => buf.push(c),
-            c => {
-                let mut units = [0u16; 2];
-                for unit in c.encode_utf16(&mut units) {
-                    let _ = write!(buf, "\\u{:04x}", unit);
-                }
-            }
-        }
     }
 }
 
@@ -523,7 +470,7 @@ fn write_repr_sh_ref(value: ValueRef<'_>, buf: &mut String) -> Result<(), Expres
         ValueRef::String(value) | ValueRef::Path(value) => shlex_quote_into(value, buf),
         ValueRef::List(value) => {
             let mut display = String::new();
-            write_display(value, &mut display);
+            value.write_display(&mut display);
             let quoted = shlex::try_quote(&display)
                 .map_err(|error| ExpressionError::new(format!("Cannot shell-quote list: {error}")))?
                 .into_owned();
@@ -570,7 +517,7 @@ fn write_repr_cmd(val: &ExprValue, buf: &mut String) {
         | ExprValue::ListList(_, _, _) => {
             write_delimited_list(val, buf, "", " ", "", write_repr_cmd_ref);
         }
-        _ => write_display(val, buf),
+        _ => val.write_display(buf),
     }
 }
 
@@ -593,6 +540,14 @@ fn write_repr_pwsh(val: &ExprValue, buf: &mut String) {
             let _ = write!(buf, "{value}");
         }
         ExprValue::Float(value) => write_float(value, buf),
+        // A one-element array whose element is itself an array needs the
+        // unary comma: `@(@(1, 2))` flattens to `@(1, 2)` in PowerShell,
+        // while `@(,@(1, 2))` preserves the nesting.
+        ExprValue::ListList(items, _, _) if items.len() == 1 => {
+            buf.push_str("@(,");
+            write_repr_pwsh(&items[0], buf);
+            buf.push(')');
+        }
         ExprValue::ListBool(_)
         | ExprValue::ListInt(_)
         | ExprValue::ListFloat(_)
@@ -604,7 +559,7 @@ fn write_repr_pwsh(val: &ExprValue, buf: &mut String) {
         ExprValue::RangeExpr(value) => {
             let _ = write!(buf, "'{value}'");
         }
-        _ => write_display(val, buf),
+        _ => val.write_display(buf),
     }
 }
 
@@ -629,7 +584,7 @@ fn write_repr_pwsh_ref(value: ValueRef<'_>, buf: &mut String) {
             let _ = write!(buf, "{value}");
         }
         ValueRef::Float(value) => write_float(value, buf),
-        ValueRef::List(value) => write_display(value, buf),
+        ValueRef::List(value) => write_repr_pwsh(value, buf),
     }
 }
 

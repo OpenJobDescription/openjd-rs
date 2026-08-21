@@ -193,6 +193,50 @@ Empty list variant selection by `hint_type`:
 | LIST[T] | `ListList([], T)` |
 | anything else | `ListInt([])` (canonical empty list) |
 
+## Display Strings
+
+`ExprValue::to_display_string()` is the conversion used wherever a value becomes
+text without an explicit repr: the `string()` builtin, format string
+interpolation with surrounding text, and `as_str_repr()`.
+`write_display(&mut String)` is the same renderer writing into a caller-supplied
+buffer. No repr renders a list in display form: `repr_pwsh`, whose generic
+`list[T]` overload admits nested lists, recurses into its own renderer, so
+`repr_pwsh([["a", "b"], ["c"]])` yields the nested PowerShell array literal
+`@(@('a', 'b'), @('c'))` (a one-element outer list uses the unary comma —
+`@(,@(1, 2))` — because `@(@(1, 2))` flattens in PowerShell; round-trip tests
+in `tests/integration/test_repr_pwsh_roundtrip.rs` execute `powershell.exe` to
+verify reconstruction). `repr_sh` and `repr_cmd` register no `list[list[...]]`
+overload, so a nested list fails signature dispatch with `No matching
+signature` (pinned by `repr_sh_rejects_nested_lists` and
+`repr_cmd_rejects_unsupported_lists` in `tests/integration/test_strings.rs`);
+the `ValueRef::List` arms remaining in `repr.rs` are defensive dead code.
+Only one display implementation exists — the duplicate that once lived in
+`repr.rs` let a list-escaping bug survive in two places (openjd-rs#312).
+
+Scalars render as themselves: `null`, `true`/`false`, decimal integers, the
+float's preserved or shortest representation, and strings and paths unquoted.
+
+### List display strings
+
+A list renders as a JSON array (RFC 0006 §2.2.1, "convert list to JSON string
+representation"). Elements are separated by `", "` — `json.dumps` defaults, and
+what the conformance suite asserts (`[1, 2, 3]`, not `[1,2,3]`). Bools, ints,
+and floats render bare, nested lists recurse, and strings and paths are
+double-quoted with `"`, `\`, and characters below `U+0020` escaped via
+`crate::json_escape`.
+
+Escaping non-ASCII is left to the implementation — JSON accepts those characters
+directly and the spec requires only that the output parse, so conformance tests
+assert neither form. We preserve them, since display strings land in log lines
+and command arguments that people read. `repr_json` escapes them as `\uXXXX`
+(matching `json.dumps(ensure_ascii=True)`) because its output is embedded in
+scripts and transports that may not be UTF-8 clean; it is the only one of the
+two that guarantees ASCII.
+
+Escaping can expand a string up to six bytes per input byte, so `string()`
+charges the same budget as `repr_json` before rendering a list
+(`repr::preflight_display_list`). Scalars cannot expand and are not charged.
+
 ## Memory Sizing
 
 Every `ExprValue` reports its memory size via `memory_size()`, which returns

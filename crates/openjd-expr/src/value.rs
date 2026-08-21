@@ -1467,58 +1467,59 @@ impl ExprValue {
     }
 
     /// Human-readable string for format string interpolation and display.
+    ///
+    /// Lists render as JSON arrays: element strings and paths are quoted and
+    /// JSON-escaped, with non-ASCII characters preserved verbatim. See
+    /// `specs/expr/values.md` ("List display strings").
     pub fn to_display_string(&self) -> String {
+        let mut buf = String::new();
+        self.write_display(&mut buf);
+        buf
+    }
+
+    /// Append [`Self::to_display_string`] to `buf` without an intermediate
+    /// allocation. Single source of truth for the display form; `functions/repr.rs`
+    /// uses it for the nested-list case of the shell reprs.
+    pub(crate) fn write_display(&self, buf: &mut String) {
+        use std::fmt::Write;
         match self {
-            Self::Null => "null".to_string(),
-            Self::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-            Self::Int(i) => i.to_string(),
-            Self::Float(fv) => fv.to_display_string(),
-            Self::String(s) => s.clone(),
-            Self::Path { value, .. } => value.clone(),
-            Self::ListBool(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|b| if *b { "true" } else { "false" })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListInt(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListFloat(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|f| f.to_display_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListString(v, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|s| format!("\"{}\"", s))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListPath(v, _, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|s| format!("\"{}\"", s))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListList(v, _, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|e| e.to_display_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::RangeExpr(r) => r.to_string(),
-            Self::Unresolved(t) => format!("<unresolved[{t}]>"),
+            Self::Null => buf.push_str("null"),
+            Self::Bool(b) => buf.push_str(if *b { "true" } else { "false" }),
+            Self::Int(i) => {
+                let _ = write!(buf, "{i}");
+            }
+            Self::Float(fv) => buf.push_str(&fv.display_cow()),
+            Self::String(s) => buf.push_str(s),
+            Self::Path { value, .. } => buf.push_str(value),
+            Self::ListBool(v) => {
+                write_display_list(buf, v.iter(), |buf, b| {
+                    buf.push_str(if *b { "true" } else { "false" })
+                });
+            }
+            Self::ListInt(v) => {
+                write_display_list(buf, v.iter(), |buf, i| {
+                    let _ = write!(buf, "{i}");
+                });
+            }
+            Self::ListFloat(v) => {
+                write_display_list(buf, v.iter(), |buf, f| buf.push_str(&f.display_cow()));
+            }
+            Self::ListString(v, _) | Self::ListPath(v, _, _) => {
+                write_display_list(buf, v.iter(), |buf, s| {
+                    buf.push('"');
+                    crate::json_escape::write_escaped(s, buf);
+                    buf.push('"');
+                });
+            }
+            Self::ListList(v, _, _) => {
+                write_display_list(buf, v.iter(), |buf, e| e.write_display(buf));
+            }
+            Self::RangeExpr(r) => {
+                let _ = write!(buf, "{r}");
+            }
+            Self::Unresolved(t) => {
+                let _ = write!(buf, "<unresolved[{t}]>");
+            }
         }
     }
 
@@ -1780,6 +1781,23 @@ pub fn format_float(f: f64) -> String {
     } else {
         f.to_string()
     }
+}
+
+/// Write `items` into `buf` as a JSON array, rendering each element with
+/// `write_item`.
+fn write_display_list<T>(
+    buf: &mut String,
+    items: impl Iterator<Item = T>,
+    write_item: impl Fn(&mut String, T),
+) {
+    buf.push('[');
+    for (i, item) in items.enumerate() {
+        if i > 0 {
+            buf.push_str(", ");
+        }
+        write_item(buf, item);
+    }
+    buf.push(']');
 }
 
 /// Normalize path separators to match `format`.
