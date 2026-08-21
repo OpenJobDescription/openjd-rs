@@ -5323,41 +5323,81 @@ fn plain_int_list_value_beyond_range_bound_still_accepted() {
     assert_eq!(job.steps.len(), 1);
 }
 
-// === LIST[BOOL] defaults that need coercion, through to the symbol table ===
+// === LIST[BOOL] values that need element coercion, through to the symbol table ===
 //
 // Regression cover for the conformance fixture 2023-09/EXPR/job_templates/2.15--list-bool-param.
-// It declares LIST[BOOL] parameters whose defaults are written as ints, floats and strings, all
-// of which the spec's BOOL coercion admits and scalar BOOL already accepted.
+// It declares LIST[BOOL] parameters written in the other spellings the spec's BOOL coercion
+// admits, all of which scalar BOOL already accepted.
 //
-// The list elements used to be built from their JSON type with the declared element type never
-// consulted, so `[1, 0]` became a list of Int. decode and preprocess both passed, and the
-// failure surfaced later in build_symbol_table as "Cannot coerce int to bool" -- the expression
-// engine correctly refusing a lossy conversion on a value that should never have reached it as
-// an int. A service calling this saw a template validate and then fail to create.
+// These drive *supplied values*, not defaults. A LIST[BOOL] default is deserialized through
+// `BoolValue` at decode (template/expr_parameters.rs) and re-serialized as `Vec<bool>`, so by
+// preprocess it is already "[true,false]" and never reaches the element coercion. A supplied
+// value arrives as an `ExprValue::String` holding raw JSON and routes through
+// coerce_to_type -> coerce_from_str -> json_to_expr_value_as, which is the path that was broken
+// and the path a service takes, since the API carries parameter values as strings.
+//
+// The elements used to be built from their JSON type with the declared element type never
+// consulted, so "[1, 0]" became a list of Int. preprocess passed, and the failure surfaced later
+// in build_symbol_table as "Cannot coerce int to bool" -- the expression engine correctly
+// refusing a lossy conversion on a value that should never have reached it as an int.
 
-/// The 2.15 fixture's parameter set, one entry per accepted spelling of a boolean.
-fn list_bool_coercion_params() -> &'static str {
+/// One LIST[BOOL] parameter per accepted spelling, no defaults: the value is supplied.
+fn list_bool_value_params() -> &'static str {
     r#"
-    {"name": "Bools", "type": "LIST[BOOL]", "default": [true, false]},
-    {"name": "IntValues", "type": "LIST[BOOL]", "default": [1, 0, 1, 0]},
-    {"name": "FloatValues", "type": "LIST[BOOL]", "default": [1.0, 0.0]},
-    {"name": "StringTrueFalse", "type": "LIST[BOOL]", "default": ["true", "false"]},
-    {"name": "StringYesNo", "type": "LIST[BOOL]", "default": ["yes", "no"]},
-    {"name": "StringOnOff", "type": "LIST[BOOL]", "default": ["on", "off"]},
-    {"name": "String10", "type": "LIST[BOOL]", "default": ["1", "0"]},
-    {"name": "MixedCase", "type": "LIST[BOOL]", "default": ["TRUE", "False", "YES", "no", "On", "OFF"]},
-    {"name": "MixedTypes", "type": "LIST[BOOL]", "default": [true, 1, "yes", 0.0, "off"]}
+    {"name": "Bools", "type": "LIST[BOOL]"},
+    {"name": "IntValues", "type": "LIST[BOOL]"},
+    {"name": "FloatValues", "type": "LIST[BOOL]"},
+    {"name": "StringTrueFalse", "type": "LIST[BOOL]"},
+    {"name": "StringYesNo", "type": "LIST[BOOL]"},
+    {"name": "StringOnOff", "type": "LIST[BOOL]"},
+    {"name": "String10", "type": "LIST[BOOL]"},
+    {"name": "MixedCase", "type": "LIST[BOOL]"},
+    {"name": "MixedTypes", "type": "LIST[BOOL]"}
     "#
 }
 
-fn preprocess_defaults(params: &str) -> openjd_model::JobParameterValues {
+/// The raw JSON each parameter is given, paired with the truth values it must produce.
+fn list_bool_value_cases() -> Vec<(&'static str, &'static str, Vec<bool>)> {
+    vec![
+        ("Bools", "[true, false]", vec![true, false]),
+        ("IntValues", "[1, 0, 1, 0]", vec![true, false, true, false]),
+        ("FloatValues", "[1.0, 0.0]", vec![true, false]),
+        ("StringTrueFalse", r#"["true", "false"]"#, vec![true, false]),
+        ("StringYesNo", r#"["yes", "no"]"#, vec![true, false]),
+        ("StringOnOff", r#"["on", "off"]"#, vec![true, false]),
+        ("String10", r#"["1", "0"]"#, vec![true, false]),
+        (
+            "MixedCase",
+            r#"["TRUE", "False", "YES", "no", "On", "OFF"]"#,
+            vec![true, false, true, false, true, false],
+        ),
+        (
+            "MixedTypes",
+            r#"[true, 1, "yes", 0.0, "off"]"#,
+            vec![true, true, true, false, false],
+        ),
+    ]
+}
+
+fn preprocess_supplied(
+    params: &str,
+    values: &[(&str, &str)],
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
     let td = TestDirs::new();
     let jt_val = expr_list_job_template(params);
     let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default())
-        .expect("template with coercible LIST[BOOL] defaults must decode");
+        .expect("LIST[BOOL] template must decode");
+    let mut input = JobParameterInputValues::new();
+    for (name, json) in values {
+        // A service hands parameter values over as strings; this is that shape.
+        input.insert(
+            (*name).into(),
+            openjd_expr::ExprValue::String((*json).to_string()),
+        );
+    }
     preprocess_job_parameters(
         &jt,
-        &JobParameterInputValues::new(),
+        &input,
         &[],
         &openjd_model::PathParameterOptions {
             job_template_dir: td.template(),
@@ -5367,69 +5407,64 @@ fn preprocess_defaults(params: &str) -> openjd_model::JobParameterValues {
             allow_uri_path_values: true,
         },
     )
-    .expect("defaults must preprocess")
 }
 
 #[test]
-fn test_list_bool_defaults_arrive_as_bools() {
-    let result = preprocess_defaults(list_bool_coercion_params());
+fn test_supplied_list_bool_values_arrive_as_bools() {
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
 
-    // Every parameter must arrive as a list of real booleans, whatever spelling its default
-    // used. Before the fix, IntValues was a ListInt and FloatValues a ListFloat.
-    for name in [
-        "Bools",
-        "IntValues",
-        "FloatValues",
-        "StringTrueFalse",
-        "StringYesNo",
-        "StringOnOff",
-        "String10",
-        "MixedCase",
-        "MixedTypes",
-    ] {
+    // Before the fix, IntValues came through as a ListInt and FloatValues as a ListFloat.
+    for (name, json, _) in list_bool_value_cases() {
         match &result[name].value {
             openjd_expr::ExprValue::ListBool(_) => {}
-            other => panic!("{name} arrived as {other:?}, expected ListBool"),
+            other => panic!("{name} = {json} arrived as {other:?}, expected ListBool"),
         }
     }
 }
 
 #[test]
-fn test_list_bool_defaults_keep_their_truth_values() {
-    let result = preprocess_defaults(list_bool_coercion_params());
+fn test_supplied_list_bool_values_keep_their_truth_values() {
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
 
     // Coercing the type must not flatten the values.
-    for (name, expected) in [
-        ("Bools", vec![true, false]),
-        ("IntValues", vec![true, false, true, false]),
-        ("FloatValues", vec![true, false]),
-        ("StringTrueFalse", vec![true, false]),
-        ("StringYesNo", vec![true, false]),
-        ("StringOnOff", vec![true, false]),
-        ("String10", vec![true, false]),
-        ("MixedCase", vec![true, false, true, false, true, false]),
-        ("MixedTypes", vec![true, true, true, false, false]),
-    ] {
+    for (name, json, expected) in list_bool_value_cases() {
         match &result[name].value {
             openjd_expr::ExprValue::ListBool(items) => {
-                assert_eq!(*items, expected, "{name} coerced to the wrong values")
+                assert_eq!(
+                    *items, expected,
+                    "{name} = {json} coerced to the wrong values"
+                )
             }
-            other => panic!("{name} arrived as {other:?}, expected ListBool"),
+            other => panic!("{name} = {json} arrived as {other:?}, expected ListBool"),
         }
     }
 }
 
 #[test]
-fn test_list_bool_coerced_defaults_build_a_symbol_table() {
-    // The failure this regression test exists for. build_symbol_table has to produce a
-    // typed symbol per parameter, and it refused int-to-bool -- correctly, since the value
-    // should not have been an int by then.
-    let result = preprocess_defaults(list_bool_coercion_params());
-    let symtab = build_symbol_table(&result)
-        .expect("a symbol table must build from coercible LIST[BOOL] defaults");
+fn test_supplied_list_bool_values_build_a_symbol_table() {
+    // The failure this regression test exists for. build_symbol_table has to produce a typed
+    // symbol per parameter, and it refused int-to-bool -- correctly, since the value should
+    // not have been an int by then.
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
 
-    // Both Param.X and RawParam.X are seeded, so a missing coercion shows up in either.
-    for name in ["IntValues", "FloatValues", "MixedTypes"] {
+    let symtab = build_symbol_table(&result)
+        .expect("a symbol table must build from coercible LIST[BOOL] values");
+    for (name, _, _) in list_bool_value_cases() {
         assert!(
             symtab.contains(&format!("Param.{name}")),
             "Param.{name} missing from the symbol table"
@@ -5438,28 +5473,117 @@ fn test_list_bool_coerced_defaults_build_a_symbol_table() {
 }
 
 #[test]
-fn test_list_bool_still_rejects_a_non_boolean_default() {
-    // The coercion must not have become a blanket accept: a value that is not a boolean in
-    // any accepted spelling is still refused, and at decode/preprocess rather than later.
-    let td = TestDirs::new();
-    let jt_val =
-        expr_list_job_template(r#"{"name": "Bad", "type": "LIST[BOOL]", "default": ["maybe"]}"#);
-    let decoded = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default());
-    let rejected = match decoded {
-        Err(_) => true,
-        Ok(jt) => preprocess_job_parameters(
-            &jt,
-            &JobParameterInputValues::new(),
-            &[],
-            &openjd_model::PathParameterOptions {
-                job_template_dir: td.template(),
-                current_working_dir: td.cwd(),
-                allow_template_dir_walk_up: false,
-                path_format: PathFormat::host(),
-                allow_uri_path_values: true,
-            },
-        )
-        .is_err(),
-    };
-    assert!(rejected, "\"maybe\" is not a boolean and must be refused");
+fn test_supplied_list_bool_value_still_rejects_a_non_boolean_element() {
+    // The coercion must not have become a blanket accept: an element that is not a boolean in
+    // any accepted spelling is still refused, and at preprocess rather than later.
+    let err = preprocess_supplied(
+        r#"{"name": "Bad", "type": "LIST[BOOL]"}"#,
+        &[("Bad", r#"["maybe"]"#)],
+    )
+    .expect_err("\"maybe\" is not a boolean and must be refused");
+    // The scalar diagnostic is what the element gets, unchanged.
+    let message = err.to_string();
+    assert!(
+        message.contains("not a valid boolean"),
+        "expected the scalar boolean diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
+    // The fix is type-driven rather than bool-specific, so the other element types get the
+    // same treatment: LIST[INT] accepts int strings because scalar INT does.
+    let result = preprocess_supplied(
+        r#"{"name": "Ints", "type": "LIST[INT]"},
+           {"name": "Floats", "type": "LIST[FLOAT]"},
+           {"name": "Nested", "type": "LIST[LIST[INT]]"}"#,
+        &[
+            ("Ints", r#"["1", "2", 3]"#),
+            ("Floats", r#"[1, "2.5", 3.5]"#),
+            ("Nested", r#"[["1", 2], [3]]"#),
+        ],
+    )
+    .expect("coercible list values must preprocess");
+
+    assert!(
+        matches!(&result["Ints"].value, openjd_expr::ExprValue::ListInt(v) if *v == vec![1, 2, 3]),
+        "Ints arrived as {:?}",
+        result["Ints"].value
+    );
+    match &result["Floats"].value {
+        openjd_expr::ExprValue::ListFloat(v) => {
+            let got: Vec<f64> = v.iter().map(|f| f.value()).collect();
+            assert_eq!(got, vec![1.0, 2.5, 3.5]);
+        }
+        other => panic!("Floats arrived as {other:?}, expected ListFloat"),
+    }
+    // LIST[LIST[INT]] recurses twice and reaches the Int arm at the leaves.
+    match &result["Nested"].value {
+        openjd_expr::ExprValue::ListList(rows, _, _) => {
+            assert_eq!(rows.len(), 2, "expected two rows, got {rows:?}");
+            assert!(
+                matches!(&rows[0], openjd_expr::ExprValue::ListInt(v) if *v == vec![1, 2]),
+                "row 0 arrived as {:?}",
+                rows[0]
+            );
+            assert!(
+                matches!(&rows[1], openjd_expr::ExprValue::ListInt(v) if *v == vec![3]),
+                "row 1 arrived as {:?}",
+                rows[1]
+            );
+        }
+        other => panic!("Nested arrived as {other:?}, expected ListList"),
+    }
+}
+
+#[test]
+fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
+    // An empty list has no elements to infer from, so the declared element type is the only
+    // thing that can type it. Getting this wrong makes LIST[BOOL] of [] a ListList.
+    let result = preprocess_supplied(
+        r#"{"name": "Bools", "type": "LIST[BOOL]"},
+           {"name": "Ints", "type": "LIST[INT]"},
+           {"name": "Floats", "type": "LIST[FLOAT]"},
+           {"name": "Strings", "type": "LIST[STRING]"}"#,
+        &[
+            ("Bools", "[]"),
+            ("Ints", "[]"),
+            ("Floats", "[]"),
+            ("Strings", "[]"),
+        ],
+    )
+    .expect("an empty list must preprocess for every list type");
+
+    assert!(
+        matches!(
+            &result["Bools"].value,
+            openjd_expr::ExprValue::ListBool(v) if v.is_empty()
+        ),
+        "Bools arrived as {:?}, expected an empty ListBool",
+        result["Bools"].value
+    );
+    assert!(
+        matches!(
+            &result["Ints"].value,
+            openjd_expr::ExprValue::ListInt(v) if v.is_empty()
+        ),
+        "Ints arrived as {:?}, expected an empty ListInt",
+        result["Ints"].value
+    );
+    assert!(
+        matches!(
+            &result["Floats"].value,
+            openjd_expr::ExprValue::ListFloat(v) if v.is_empty()
+        ),
+        "Floats arrived as {:?}, expected an empty ListFloat",
+        result["Floats"].value
+    );
+    assert!(
+        matches!(
+            &result["Strings"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
+        ),
+        "Strings arrived as {:?}, expected an empty ListString",
+        result["Strings"].value
+    );
 }

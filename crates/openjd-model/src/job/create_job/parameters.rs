@@ -1203,11 +1203,16 @@ pub(super) fn json_to_expr_value_as(
                 .iter()
                 .map(|element| json_to_expr_value_as(element, element_type))
                 .collect::<Result<_, _>>()?;
-            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::NULLTYPE)
+            // `make_list` consults the hint only for an empty list, which has no elements to
+            // infer from. Passing the declared element type is what keeps `LIST[BOOL]` of `[]`
+            // a `ListBool` rather than an untyped `ListList`.
+            openjd_expr::ExprValue::make_list(elements, element_type.expr_type())
                 .map_err(|e| format!("Invalid list value: {e}"))
         }
-        // A list type whose value is not a list. Fall through to the untyped conversion so
-        // the existing "not a list" diagnostics keep their wording.
+        // A list type whose value is not a list. Left on the untyped conversion, which returns
+        // the scalar as-is: pre-existing behaviour, not something this change introduces. An
+        // explicit "not a list" error belongs here, but it is a separate behaviour change and
+        // `check_constraints` has no arm for it either.
         (other, Some(_)) => json_to_expr_value(other),
         // A leaf: convert by JSON type, then coerce to what the parameter declared.
         (other, None) => {
@@ -1506,6 +1511,10 @@ mod tests {
 
         #[test]
         fn empty_list_is_accepted_for_every_list_type() {
+            // An empty list has no elements to infer from, so the declared element type is the
+            // only thing that can type it. Asserting the variant, not just is_ok(), because
+            // an untyped ListList also parses and would hide the same LIST[T] / T mismatch
+            // this change removes.
             for param_type in [
                 JobParameterType::ListString,
                 JobParameterType::ListPath,
@@ -1514,8 +1523,22 @@ mod tests {
                 JobParameterType::ListBool,
                 JobParameterType::ListListInt,
             ] {
-                coerce("[]", param_type)
+                let value = coerce("[]", param_type)
                     .unwrap_or_else(|e| panic!("empty list rejected for {param_type:?}: {e}"));
+                let typed = match (&value, param_type) {
+                    (ExprValue::ListString(v, _), JobParameterType::ListString) => v.is_empty(),
+                    (ExprValue::ListPath(v, _, _), JobParameterType::ListPath) => v.is_empty(),
+                    (ExprValue::ListInt(v), JobParameterType::ListInt) => v.is_empty(),
+                    (ExprValue::ListFloat(v), JobParameterType::ListFloat) => v.is_empty(),
+                    (ExprValue::ListBool(v), JobParameterType::ListBool) => v.is_empty(),
+                    (ExprValue::ListList(v, _, _), JobParameterType::ListListInt) => v.is_empty(),
+                    _ => false,
+                };
+                assert!(
+                    typed,
+                    "empty list for {param_type:?} arrived as {value:?}, which does not carry \
+                     the declared element type"
+                );
             }
         }
 
