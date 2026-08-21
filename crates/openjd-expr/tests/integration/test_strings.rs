@@ -1020,6 +1020,114 @@ fn end_of_string_z_rejected() {
     );
 }
 
+// === Constructs outside the Python/Rust intersection (issue #310) ===
+#[test]
+fn unicode_property_class_rejected() {
+    assert_err(
+        "re_search('3', r'\\p{Nd}')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('3', r'\\p{Nd}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn unicode_property_class_inside_class_rejected() {
+    assert_err(
+        "re_search('a', r'[\\p{L}]')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('a', r'[\\p{L}]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn rust_capture_group_name_syntax_rejected() {
+    assert_err(
+        "re_search('ab', r'(?<n>a)b')",
+        &[
+            "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)\n",
+            "  re_search('ab', r'(?<n>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn python_capture_group_name_syntax_accepted() {
+    assert_eq!(
+        eval("re_search('ab', r'(?P<n>a)b')").to_display_string(),
+        "[\"ab\", \"a\"]"
+    );
+}
+#[test]
+fn posix_character_class_rejected() {
+    assert_err(
+        "re_search('a', r'[[:alpha:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:alpha:]]\n",
+            "  re_search('a', r'[[:alpha:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_posix_character_class_rejected() {
+    assert_err(
+        "re_search('5', r'[[:^digit:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:^digit:]]\n",
+            "  re_search('5', r'[[:^digit:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_difference_rejected() {
+    assert_err(
+        "re_search('b', r'[a-z--[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class difference --\n",
+            "  re_search('b', r'[a-z--[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_intersection_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z&&[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class intersection &&\n",
+            "  re_search('e', r'[a-z&&[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_symmetric_difference_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z~~[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class symmetric difference ~~\n",
+            "  re_search('e', r'[a-z~~[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn nested_character_class_rejected() {
+    assert_err(
+        "re_search('b', r'[a[bc]]')",
+        &[
+            "Unsupported regex feature: nested character class\n",
+            "  re_search('b', r'[a[bc]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
 // === TestRegexEscapedPatternsAccepted ===
 #[test]
 fn escaped_lookahead_accepted() {
