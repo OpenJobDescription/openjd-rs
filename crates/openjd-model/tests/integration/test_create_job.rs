@@ -5537,6 +5537,57 @@ fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
 }
 
 #[test]
+fn test_supplied_scalar_bool_accepts_numeric_forms() {
+    // The numeric arms are in coerce_to_type, which scalar parameters use too, so scalar BOOL
+    // widens along with LIST[BOOL]: the float 1.0 was refused before because Float64 keeps the
+    // original literal and "1.0" is not in the string bool table. Int 1 already worked.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "FromInt", "type": "BOOL"},
+               {"name": "FromFloat", "type": "BOOL"}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("scalar BOOL template must decode");
+
+    let mut input = JobParameterInputValues::new();
+    input.insert("FromInt".into(), openjd_expr::ExprValue::Int(1));
+    input.insert(
+        "FromFloat".into(),
+        openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(1.0).unwrap()),
+    );
+
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .expect("numeric 1 must be accepted for a scalar BOOL in either form");
+
+    assert_eq!(
+        result["FromInt"].value,
+        openjd_expr::ExprValue::Bool(true),
+        "FromInt arrived as {:?}",
+        result["FromInt"].value
+    );
+    assert_eq!(
+        result["FromFloat"].value,
+        openjd_expr::ExprValue::Bool(true),
+        "FromFloat arrived as {:?}",
+        result["FromFloat"].value
+    );
+}
+
+#[test]
 fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
     // An empty list has no elements to infer from, so the declared element type is the only
     // thing that can type it. Getting this wrong makes LIST[BOOL] of [] a ListList.

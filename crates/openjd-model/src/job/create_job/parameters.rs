@@ -1543,9 +1543,52 @@ mod tests {
         }
 
         #[test]
-        fn scalar_types_are_unaffected() {
-            // list_element_type returns None for them, so they take the untyped path and
-            // then the declared type's own coercion, exactly as before.
+        fn scalar_bool_accepts_the_same_numeric_forms_as_list_bool() {
+            // The numeric arms live in coerce_to_type, which scalars use too, so this is the
+            // one place a scalar type's behaviour does change: a scalar BOOL given the float
+            // 1.0 was refused before, because Float64 keeps the original literal and "1.0" is
+            // not in the string bool table. Int 1 was already accepted through that table.
+            // Pinned here so the widening is deliberate and stays symmetric with LIST[BOOL].
+            for (value, expected) in [
+                (ExprValue::Int(1), true),
+                (ExprValue::Int(0), false),
+                (
+                    ExprValue::Float(openjd_expr::value::Float64::new(1.0).unwrap()),
+                    true,
+                ),
+                (
+                    ExprValue::Float(openjd_expr::value::Float64::new(0.0).unwrap()),
+                    false,
+                ),
+            ] {
+                let got = coerce_to_type(&value, JobParameterType::Bool)
+                    .unwrap_or_else(|e| panic!("{value:?} rejected for scalar BOOL: {e}"));
+                assert_eq!(
+                    got,
+                    ExprValue::Bool(expected),
+                    "{value:?} coerced to the wrong boolean"
+                );
+            }
+
+            // Only 1 and 0 are admitted. Anything else falls through to the same refusal
+            // as before, so this is not a blanket numeric-to-bool conversion.
+            for value in [
+                ExprValue::Int(2),
+                ExprValue::Int(-1),
+                ExprValue::Float(openjd_expr::value::Float64::new(0.5).unwrap()),
+                ExprValue::Float(openjd_expr::value::Float64::new(2.0).unwrap()),
+            ] {
+                assert!(
+                    coerce_to_type(&value, JobParameterType::Bool).is_err(),
+                    "{value:?} is not a boolean and must be refused for scalar BOOL"
+                );
+            }
+        }
+
+        #[test]
+        fn scalar_types_take_the_untyped_element_path() {
+            // list_element_type returns None for them, so they skip the element recursion
+            // entirely and go straight to the declared type's own coercion.
             assert!(list_element_type(JobParameterType::Bool).is_none());
             assert!(list_element_type(JobParameterType::Int).is_none());
             assert!(list_element_type(JobParameterType::Float).is_none());
