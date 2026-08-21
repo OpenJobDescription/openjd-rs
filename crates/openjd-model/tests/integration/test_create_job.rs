@@ -5325,21 +5325,20 @@ fn plain_int_list_value_beyond_range_bound_still_accepted() {
 
 // === LIST[BOOL] values that need element coercion, through to the symbol table ===
 //
-// Regression cover for the conformance fixture 2023-09/EXPR/job_templates/2.15--list-bool-param.
-// It declares LIST[BOOL] parameters written in the other spellings the spec's BOOL coercion
-// admits, all of which scalar BOOL already accepted.
+// Covers the conformance fixture 2023-09/EXPR/job_templates/2.15--list-bool-param, which declares
+// LIST[BOOL] parameters written in the other spellings the spec's BOOL coercion admits.
 //
-// These drive *supplied values*, not defaults. A LIST[BOOL] default is deserialized through
-// `BoolValue` at decode (template/expr_parameters.rs) and re-serialized as `Vec<bool>`, so by
-// preprocess it is already "[true,false]" and never reaches the element coercion. A supplied
-// value arrives as an `ExprValue::String` holding raw JSON and routes through
-// coerce_to_type -> coerce_from_str -> json_to_expr_value_as, which is the path that was broken
-// and the path a service takes, since the API carries parameter values as strings.
+// These drive *supplied values*, not defaults, and the distinction matters. A LIST[BOOL] default
+// is deserialized through `BoolValue` at decode (template/expr_parameters.rs) and re-serialized as
+// `Vec<bool>`, so by preprocess it is already "[true,false]" and never reaches the element
+// coercion at all. A supplied value arrives as an `ExprValue::String` holding raw JSON and routes
+// through coerce_to_job_parameter_type -> coerce_from_str -> json_to_expr_value_as. That is the
+// path a service takes, since the API carries parameter values as strings, so it is the one worth
+// asserting on: a test written against defaults exercises none of this.
 //
-// The elements used to be built from their JSON type with the declared element type never
-// consulted, so "[1, 0]" became a list of Int. preprocess passed, and the failure surfaced later
-// in build_symbol_table as "Cannot coerce int to bool" -- the expression engine correctly
-// refusing a lossy conversion on a value that should never have reached it as an int.
+// Each element must reach build_symbol_table already at its declared type. An element left as an
+// Int under a LIST[BOOL] gets "Cannot coerce int to bool" there -- the expression engine correctly
+// refusing a lossy conversion -- which surfaces long after the template validated.
 
 /// One LIST[BOOL] parameter per accepted spelling, no defaults: the value is supplied.
 fn list_bool_value_params() -> &'static str {
@@ -5418,7 +5417,8 @@ fn test_supplied_list_bool_values_arrive_as_bools() {
     let result = preprocess_supplied(list_bool_value_params(), &values)
         .expect("coercible LIST[BOOL] values must preprocess");
 
-    // Before the fix, IntValues came through as a ListInt and FloatValues as a ListFloat.
+    // Every spelling must land as a ListBool, not as a ListInt or ListFloat that merely
+    // happens to hold the right numbers.
     for (name, json, _) in list_bool_value_cases() {
         match &result[name].value {
             openjd_expr::ExprValue::ListBool(_) => {}
@@ -5538,7 +5538,7 @@ fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
 
 #[test]
 fn test_supplied_scalar_bool_accepts_numeric_forms() {
-    // The numeric arms are in coerce_to_type, which scalar parameters use too, so scalar BOOL
+    // The numeric arms are in coerce_to_job_parameter_type, which scalar parameters use too, so scalar BOOL
     // widens along with LIST[BOOL]: the float 1.0 was refused before because Float64 keeps the
     // original literal and "1.0" is not in the string bool table. Int 1 already worked.
     let td = TestDirs::new();

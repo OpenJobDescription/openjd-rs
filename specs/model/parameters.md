@@ -152,7 +152,7 @@ two input modes:
 - **CLI input** (string values): Parsed via `coerce_from_str` — handles numeric parsing,
   boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types.
 
-- **Library input** (typed ExprValue): Validated via `coerce_to_type` — checks type
+- **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types.
 
 ## Validation Context and Extension Effects

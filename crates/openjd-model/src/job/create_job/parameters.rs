@@ -659,7 +659,7 @@ impl MergedParameterDefinition {
 }
 
 /// Coerce an `ExprValue` to the target `JobParameterType`.
-pub(super) fn coerce_to_type(
+pub(super) fn coerce_to_job_parameter_type(
     value: &openjd_expr::ExprValue,
     param_type: JobParameterType,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -916,7 +916,7 @@ pub fn preprocess_job_parameters(
                     Some(input_val.clone())
                 };
             let Some(coerced) = coerced_opt else { continue };
-            match coerce_to_type(&coerced, param_type) {
+            match coerce_to_job_parameter_type(&coerced, param_type) {
                 Ok(expr_value) => {
                     if let Err(e) = param.check_constraints(&expr_value) {
                         errors.push(model_err_message(e));
@@ -1173,24 +1173,21 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
     })
 }
 
-/// Convert a serde_json::Value to an ExprValue, coercing to the declared type.
+/// Convert a `serde_json::Value` to an `ExprValue` of the declared parameter type.
 ///
-/// [`json_to_expr_value`] maps JSON types onto `ExprValue` variants structurally: a JSON
-/// `1` becomes an `Int` whatever the parameter was declared as. For a scalar parameter
-/// that is fine, because [`coerce_from_str`] applies the declared type's own accept table
-/// first. For a list parameter it was not: the elements were built from their JSON types
-/// and the declared element type never consulted, so a `LIST[BOOL]` default of `[1, 0]`
-/// produced a list of `Int` rather than a list of `Bool`.
+/// [`json_to_expr_value`] maps JSON onto `ExprValue` variants structurally, so a JSON `1`
+/// becomes an `Int` whatever the parameter declared. That is not enough on its own: a
+/// `LIST[BOOL]` of `[1, 0]` has to end up a list of `Bool`, since anything downstream that
+/// asks for the value at its declared type gets `Cannot coerce int to bool` from the
+/// expression engine, which is right to refuse a lossy conversion.
 ///
-/// The visible symptom was a `LIST[BOOL]` template that validates and then fails later,
-/// when something asks for the value at its declared type and gets
-/// `Cannot coerce int to bool` from the expression engine, which is right to refuse a
-/// lossy conversion. Scalar `BOOL` already accepted `1`, `1.0`, `"yes"` and `"on"`, so the
-/// two forms of one type disagreed.
+/// So each leaf is coerced to the declared type through [`coerce_to_job_parameter_type`],
+/// the same path the scalar types take. `LIST[T]` therefore accepts exactly what `T`
+/// accepts, by construction rather than by a parallel table. A leaf that already matches
+/// its type is returned untouched.
 ///
-/// Each element is now coerced to the declared element type through the same
-/// [`coerce_to_type`] path the scalar types use, which keeps `LIST[T]` and `T` consistent
-/// by construction. An element that already matches its type is returned untouched.
+/// A value that is not a list where a list type is declared is an error: the declared type
+/// is the only thing that can say so, and no later stage checks it.
 pub(super) fn json_to_expr_value_as(
     val: &serde_json::Value,
     param_type: JobParameterType,
@@ -1209,16 +1206,31 @@ pub(super) fn json_to_expr_value_as(
             openjd_expr::ExprValue::make_list(elements, element_type.expr_type())
                 .map_err(|e| format!("Invalid list value: {e}"))
         }
-        // A list type whose value is not a list. Left on the untyped conversion, which returns
-        // the scalar as-is: pre-existing behaviour, not something this change introduces. An
-        // explicit "not a list" error belongs here, but it is a separate behaviour change and
-        // `check_constraints` has no arm for it either.
-        (other, Some(_)) => json_to_expr_value(other),
+        // A list type whose value is not a list. Refused here because nothing downstream
+        // does: `check_constraints` has no arm for a scalar under a list type, so passing it
+        // through leaves a value that contradicts its own declared type.
+        (other, Some(_)) => Err(format!(
+            "Value is not a list for parameter type {}. Got {}.",
+            param_type.as_spec_str(),
+            json_type_name(other)
+        )),
         // A leaf: convert by JSON type, then coerce to what the parameter declared.
         (other, None) => {
             let value = json_to_expr_value(other)?;
-            coerce_to_type(&value, param_type)
+            coerce_to_job_parameter_type(&value, param_type)
         }
+    }
+}
+
+/// The JSON type of `val`, for diagnostics.
+fn json_type_name(val: &serde_json::Value) -> &'static str {
+    match val {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "a list",
+        serde_json::Value::Object(_) => "an object",
     }
 }
 
@@ -1372,7 +1384,7 @@ mod tests {
     #[test]
     fn coerce_int_to_float_returns_ok() {
         let val = openjd_expr::ExprValue::Int(42);
-        let result = coerce_to_type(&val, JobParameterType::Float);
+        let result = coerce_to_job_parameter_type(&val, JobParameterType::Float);
         assert!(result.is_ok(), "int-to-float coercion should succeed");
         match result.unwrap() {
             openjd_expr::ExprValue::Float(f) => assert_eq!(f.value(), 42.0),
@@ -1384,7 +1396,7 @@ mod tests {
     fn coerce_large_int_to_float_returns_ok() {
         // Large i64 that loses precision as f64 but is still finite
         let val = openjd_expr::ExprValue::Int(i64::MAX);
-        let result = coerce_to_type(&val, JobParameterType::Float);
+        let result = coerce_to_job_parameter_type(&val, JobParameterType::Float);
         assert!(result.is_ok(), "large int-to-float coercion should succeed");
     }
 
@@ -1522,11 +1534,33 @@ mod tests {
         }
 
         #[test]
+        fn a_scalar_under_a_list_type_is_refused() {
+            // A list type needs a list. Nothing downstream checks this -- check_constraints has
+            // no arm for a scalar under a list type -- so a value that parses as a JSON scalar
+            // has to be refused here or it survives as a value contradicting its own type.
+            for (json, param_type, expected_got) in [
+                ("5", JobParameterType::ListInt, "a number"),
+                ("true", JobParameterType::ListBool, "a boolean"),
+                (r#""abc""#, JobParameterType::ListString, "a string"),
+                ("1.5", JobParameterType::ListFloat, "a number"),
+                (r#""/tmp""#, JobParameterType::ListPath, "a string"),
+                ("7", JobParameterType::ListListInt, "a number"),
+            ] {
+                let err = coerce(json, param_type).expect_err(&format!(
+                    "{json} must be refused for {param_type:?}, which needs a list"
+                ));
+                assert!(
+                    err.contains("is not a list") && err.contains(expected_got),
+                    "{json} for {param_type:?} gave an unhelpful diagnostic: {err}"
+                );
+            }
+        }
+
+        #[test]
         fn empty_list_is_accepted_for_every_list_type() {
-            // An empty list has no elements to infer from, so the declared element type is the
-            // only thing that can type it. Asserting the variant, not just is_ok(), because
-            // an untyped ListList also parses and would hide the same LIST[T] / T mismatch
-            // this change removes.
+            // An empty list has no elements to infer from, so the declared element type is
+            // the only thing that can type it. Assert the variant rather than just is_ok():
+            // an untyped ListList parses too, and would hide a LIST[T] that is not a list of T.
             for param_type in [
                 JobParameterType::ListString,
                 JobParameterType::ListPath,
@@ -1556,7 +1590,7 @@ mod tests {
 
         #[test]
         fn scalar_bool_accepts_the_same_numeric_forms_as_list_bool() {
-            // The numeric arms live in coerce_to_type, which scalars use too, so this is the
+            // The numeric arms live in coerce_to_job_parameter_type, which scalars use too, so this is the
             // one place a scalar type's behaviour does change: a scalar BOOL given the float
             // 1.0 was refused before, because Float64 keeps the original literal and "1.0" is
             // not in the string bool table. Int 1 was already accepted through that table.
@@ -1573,7 +1607,7 @@ mod tests {
                     false,
                 ),
             ] {
-                let got = coerce_to_type(&value, JobParameterType::Bool)
+                let got = coerce_to_job_parameter_type(&value, JobParameterType::Bool)
                     .unwrap_or_else(|e| panic!("{value:?} rejected for scalar BOOL: {e}"));
                 assert_eq!(
                     got,
@@ -1591,7 +1625,7 @@ mod tests {
                 ExprValue::Float(openjd_expr::value::Float64::new(2.0).unwrap()),
             ] {
                 assert!(
-                    coerce_to_type(&value, JobParameterType::Bool).is_err(),
+                    coerce_to_job_parameter_type(&value, JobParameterType::Bool).is_err(),
                     "{value:?} is not a boolean and must be refused for scalar BOOL"
                 );
             }
@@ -1611,8 +1645,8 @@ mod tests {
 
         #[test]
         fn every_list_type_has_an_element_type() {
-            // A list type added without a mapping would silently fall back to the untyped
-            // path and reintroduce the bug, so pin the whole set.
+            // Pin the whole set: a list type added without a mapping falls back to the
+            // untyped path, where its elements silently keep their JSON types.
             for (param_type, expected) in [
                 (JobParameterType::ListString, JobParameterType::String),
                 (JobParameterType::ListPath, JobParameterType::Path),

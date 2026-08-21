@@ -80,7 +80,7 @@ pub struct PathParameterOptions<'a> {
 **Value coercion:**
 - `coerce_from_str` — Parses string input (CLI): numeric parsing, boolean aliases
   (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types
-- `coerce_to_type` — Validates typed input (library): type compatibility, numeric
+- `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
   widening (int → float), list element type validation
 
 ### build_symbol_table
