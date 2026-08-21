@@ -15,6 +15,7 @@ pub mod path_parse;
 pub mod regex;
 pub mod repr;
 pub mod string;
+pub(crate) mod unicode_tables;
 
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;

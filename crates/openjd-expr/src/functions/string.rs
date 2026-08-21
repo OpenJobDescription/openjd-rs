@@ -274,51 +274,63 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 }
 
 pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, DIGIT};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()),
+        !s.is_empty() && s.chars().all(|c| in_table(DIGIT, c)),
     ))
 }
 pub fn isalpha_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, ALPHA};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_alphabetic()),
+        !s.is_empty() && s.chars().all(|c| in_table(ALPHA, c)),
     ))
 }
 pub fn isalnum_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, ALNUM};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()),
+        !s.is_empty() && s.chars().all(|c| in_table(ALNUM, c)),
     ))
 }
 pub fn isspace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, SPACE};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_whitespace()),
+        !s.is_empty() && s.chars().all(|c| in_table(SPACE, c)),
     ))
 }
 pub fn isupper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, CASED, UPPER};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
+    // Python str.isupper: at least one cased character, and every cased
+    // character is uppercase. Uncased characters (digits, CJK, punctuation)
+    // are ignored. Titlecase (Lt) characters are cased but not uppercase,
+    // so their presence makes the result false.
     Ok(ExprValue::Bool(
-        s.chars().any(|c| c.is_alphabetic())
+        s.chars().any(|c| in_table(CASED, c))
             && s.chars()
-                .filter(|c| c.is_alphabetic())
-                .all(|c| c.is_uppercase()),
+                .filter(|&c| in_table(CASED, c))
+                .all(|c| in_table(UPPER, c)),
     ))
 }
 pub fn islower_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, CASED, LOWER};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
+    // Python str.islower: at least one cased character, and every cased
+    // character is lowercase. See isupper_fn for the cased-character rule.
     Ok(ExprValue::Bool(
-        s.chars().any(|c| c.is_alphabetic())
+        s.chars().any(|c| in_table(CASED, c))
             && s.chars()
-                .filter(|c| c.is_alphabetic())
-                .all(|c| c.is_lowercase()),
+                .filter(|&c| in_table(CASED, c))
+                .all(|c| in_table(LOWER, c)),
     ))
 }
 pub fn isascii_fn(ctx: Ctx, a: &[ExprValue]) -> R {
