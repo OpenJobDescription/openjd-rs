@@ -1162,6 +1162,11 @@ fn path_is_within(path: &str, base: &str, format: openjd_expr::path_mapping::Pat
 /// `LIST[LIST[INT]]` yields `LIST[INT]`, so nesting is handled by the same recursion
 /// rather than a special case.
 pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParameterType> {
+    // Matched exhaustively on purpose. A list type that reached the scalar arm would have its
+    // elements built from their JSON types, which is the whole failure this function exists to
+    // prevent, and no test can catch a variant nobody thought to add. `JobParameterType` is
+    // `#[non_exhaustive]`, but that only forces a wildcard on downstream crates, so within
+    // `openjd-model` a new variant is a compile error here instead.
     Some(match param_type {
         JobParameterType::ListString => JobParameterType::String,
         JobParameterType::ListPath => JobParameterType::Path,
@@ -1169,8 +1174,32 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
         JobParameterType::ListFloat => JobParameterType::Float,
         JobParameterType::ListBool => JobParameterType::Bool,
         JobParameterType::ListListInt => JobParameterType::ListInt,
-        _ => return None,
+        JobParameterType::String
+        | JobParameterType::Int
+        | JobParameterType::Float
+        | JobParameterType::Path
+        | JobParameterType::Bool
+        | JobParameterType::RangeExpr => return None,
     })
+}
+
+/// The `ExprType` that [`coerce_to_job_parameter_type`] actually produces for `param_type`.
+///
+/// Usually the declared type's own `expr_type()`, but `PATH` is represented as a string:
+/// `coerce_from_str` returns `ExprValue::String` for it, so a list of `PATH` elements is a
+/// `ListString`.
+///
+/// The difference is only observable for an empty list, where [`openjd_expr::ExprValue::make_list`]
+/// has no elements to infer from and falls back to this hint. Using the declared type there
+/// would put empty and non-empty `LIST[PATH]` in different variants, and `openjd-sessions`
+/// discriminates on the variant when it applies path mapping -- one of its two `LIST[PATH]`
+/// arms matches `ListString` with no fallback, so a `ListPath` would silently not get its
+/// `Param.<name>` symbol set at all.
+fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprType {
+    match param_type {
+        JobParameterType::Path => openjd_expr::ExprType::STRING,
+        other => other.expr_type(),
+    }
 }
 
 /// Convert a `serde_json::Value` to an `ExprValue` of the declared parameter type.
@@ -1182,9 +1211,14 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
 /// expression engine, which is right to refuse a lossy conversion.
 ///
 /// So each leaf is coerced to the declared type through [`coerce_to_job_parameter_type`],
-/// the same path the scalar types take. `LIST[T]` therefore accepts exactly what `T`
-/// accepts, by construction rather than by a parallel table. A leaf that already matches
-/// its type is returned untouched.
+/// the same path the scalar types take. For values arriving as JSON, `LIST[T]` therefore
+/// accepts exactly what `T` accepts, by construction rather than by a parallel table. A leaf
+/// that already matches its type is returned untouched.
+///
+/// The guarantee is scoped to JSON because that is the only way in: a library caller handing
+/// over an already-typed list variant (`ExprValue::ListInt` for a `LIST[FLOAT]`, say) never
+/// reaches here, since [`coerce_to_job_parameter_type`] only routes strings through
+/// [`coerce_from_str`]. That path stays strict and rejects the mismatch.
 ///
 /// A value that is not a list where a list type is declared is an error: the declared type
 /// is the only thing that can say so, and no later stage checks it.
@@ -1200,10 +1234,12 @@ pub(super) fn coerce_json_to_job_parameter_type(
                 .iter()
                 .map(|element| coerce_json_to_job_parameter_type(element, element_type))
                 .collect::<Result<_, _>>()?;
-            // `make_list` consults the hint only for an empty list, which has no elements to
-            // infer from. Passing the declared element type is what keeps `LIST[BOOL]` of `[]`
-            // a `ListBool` rather than an untyped `ListList`.
-            openjd_expr::ExprValue::make_list(elements, element_type.expr_type())
+            // `make_list` consults the hint only for an empty list, which has no elements
+            // to infer from. The hint is the element *representation* type, so an empty list
+            // lands in the same variant a non-empty one would: `ListBool` for `LIST[BOOL]`
+            // rather than an untyped `ListList`, and `ListString` for `LIST[PATH]`, since
+            // that is what a non-empty list of `PATH` elements becomes.
+            openjd_expr::ExprValue::make_list(elements, representation_expr_type(element_type))
                 .map_err(|e| format!("Invalid list value: {e}"))
         }
         // A list type whose value is not a list. Refused here because nothing downstream
@@ -1534,6 +1570,35 @@ mod tests {
         }
 
         #[test]
+        fn a_list_lands_in_the_same_variant_whether_or_not_it_is_empty() {
+            // `make_list` infers the variant from the elements when there are any and falls back
+            // to a hint when there are none, so the two routes have to agree. They disagree if
+            // the hint is the declared element type rather than its representation: LIST[PATH]
+            // is a ListString when populated (PATH is represented as a string) but would be a
+            // ListPath when empty. `openjd-sessions` discriminates on the variant, and one of
+            // its LIST[PATH] arms matches ListString with no fallback, so a value that changes
+            // variant with its length silently loses its Param.<name> symbol.
+            for (param_type, populated) in [
+                (JobParameterType::ListString, r#"["a"]"#),
+                (JobParameterType::ListPath, r#"["/tmp/a"]"#),
+                (JobParameterType::ListInt, "[1]"),
+                (JobParameterType::ListFloat, "[1.5]"),
+                (JobParameterType::ListBool, "[true]"),
+                (JobParameterType::ListListInt, "[[1]]"),
+            ] {
+                let full = coerce(populated, param_type)
+                    .unwrap_or_else(|e| panic!("{populated} rejected for {param_type:?}: {e}"));
+                let empty = coerce("[]", param_type)
+                    .unwrap_or_else(|e| panic!("[] rejected for {param_type:?}: {e}"));
+                assert_eq!(
+                    std::mem::discriminant(&full),
+                    std::mem::discriminant(&empty),
+                    "{param_type:?} is a {full:?} when populated but a {empty:?} when empty"
+                );
+            }
+        }
+
+        #[test]
         fn a_scalar_under_a_list_type_is_refused() {
             // A list type needs a list. Nothing downstream checks this -- check_constraints has
             // no arm for a scalar under a list type -- so a value that parses as a JSON scalar
@@ -1573,7 +1638,9 @@ mod tests {
                     .unwrap_or_else(|e| panic!("empty list rejected for {param_type:?}: {e}"));
                 let typed = match (&value, param_type) {
                     (ExprValue::ListString(v, _), JobParameterType::ListString) => v.is_empty(),
-                    (ExprValue::ListPath(v, _, _), JobParameterType::ListPath) => v.is_empty(),
+                    // LIST[PATH] is a ListString: PATH is represented as a string, so
+                    // this is the variant a non-empty list of PATH elements produces.
+                    (ExprValue::ListString(v, _), JobParameterType::ListPath) => v.is_empty(),
                     (ExprValue::ListInt(v), JobParameterType::ListInt) => v.is_empty(),
                     (ExprValue::ListFloat(v), JobParameterType::ListFloat) => v.is_empty(),
                     (ExprValue::ListBool(v), JobParameterType::ListBool) => v.is_empty(),
