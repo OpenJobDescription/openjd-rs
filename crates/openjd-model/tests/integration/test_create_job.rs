@@ -5332,7 +5332,7 @@ fn plain_int_list_value_beyond_range_bound_still_accepted() {
 // is deserialized through `BoolValue` at decode (template/expr_parameters.rs) and re-serialized as
 // `Vec<bool>`, so by preprocess it is already "[true,false]" and never reaches the element
 // coercion at all. A supplied value arrives as an `ExprValue::String` holding raw JSON and routes
-// through coerce_to_job_parameter_type -> coerce_from_str -> json_to_expr_value_as. That is the
+// through coerce_to_job_parameter_type -> coerce_from_str -> coerce_json_to_job_parameter_type. That is the
 // path a service takes, since the API carries parameter values as strings, so it is the one worth
 // asserting on: a test written against defaults exercises none of this.
 //

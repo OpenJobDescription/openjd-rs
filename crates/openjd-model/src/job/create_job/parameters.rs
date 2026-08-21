@@ -762,7 +762,7 @@ pub(super) fn coerce_from_str(
         | JobParameterType::ListListInt => {
             // Try parsing the string as JSON for list parameter coercion.
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
-                json_to_expr_value_as(&json_val, param_type)?
+                coerce_json_to_job_parameter_type(&json_val, param_type)?
             } else {
                 return Err(format!(
                     "Value '{s}' is not valid JSON for a list parameter."
@@ -1188,7 +1188,7 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
 ///
 /// A value that is not a list where a list type is declared is an error: the declared type
 /// is the only thing that can say so, and no later stage checks it.
-pub(super) fn json_to_expr_value_as(
+pub(super) fn coerce_json_to_job_parameter_type(
     val: &serde_json::Value,
     param_type: JobParameterType,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -1198,7 +1198,7 @@ pub(super) fn json_to_expr_value_as(
         (serde_json::Value::Array(arr), Some(element_type)) => {
             let elements: Vec<openjd_expr::ExprValue> = arr
                 .iter()
-                .map(|element| json_to_expr_value_as(element, element_type))
+                .map(|element| coerce_json_to_job_parameter_type(element, element_type))
                 .collect::<Result<_, _>>()?;
             // `make_list` consults the hint only for an empty list, which has no elements to
             // infer from. Passing the declared element type is what keeps `LIST[BOOL]` of `[]`
@@ -1237,7 +1237,7 @@ fn json_type_name(val: &serde_json::Value) -> &'static str {
 /// Convert a serde_json::Value to an ExprValue.
 ///
 /// Structural only: the caller's declared type is not consulted. Prefer
-/// [`json_to_expr_value_as`] when the declared type is known.
+/// [`coerce_json_to_job_parameter_type`] when the declared type is known.
 pub(super) fn json_to_expr_value(
     val: &serde_json::Value,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -1413,7 +1413,7 @@ mod tests {
         /// alternative accepted form rather than its canonical one.
         fn coerce(json: &str, param_type: JobParameterType) -> Result<ExprValue, String> {
             let value: serde_json::Value = serde_json::from_str(json).expect("test json");
-            json_to_expr_value_as(&value, param_type)
+            coerce_json_to_job_parameter_type(&value, param_type)
         }
 
         #[test]
