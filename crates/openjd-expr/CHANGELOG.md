@@ -4,6 +4,17 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.3.0...openjd-expr-v0.4.0) - 2026-08-21
+
+### Bug fixes
+
+- Escape list elements when converting a list to a string ([#336](https://github.com/OpenJobDescription/openjd-rs/pull/336))
+
+- [**breaking**] Split coercion into satisfaction and conversion ([#329](https://github.com/OpenJobDescription/openjd-rs/pull/329))
+
+- Seven overflow, panic, and silent-wrong-value bugs from the quality report ([#321](https://github.com/OpenJobDescription/openjd-rs/pull/321))
+
+
 ## [0.3.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.2.1...openjd-expr-v0.3.0) - 2026-08-13
 
 ### Bug fixes
