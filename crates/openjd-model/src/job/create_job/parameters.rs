@@ -1484,6 +1484,18 @@ mod tests {
         }
 
         #[test]
+        fn list_float_rejects_a_non_numeric_element() {
+            // Same shape as the LIST[INT] and LIST[BOOL] rejection tests: the element gets the
+            // scalar type's diagnostic, so a list is no more permissive than its element type.
+            let err = coerce(r#"[1.0, "abc"]"#, JobParameterType::ListFloat)
+                .expect_err("\"abc\" is not a float and must be refused");
+            assert!(
+                err.contains("float"),
+                "expected the scalar float diagnostic, got: {err}"
+            );
+        }
+
+        #[test]
         fn list_string_and_list_path_take_strings_unchanged() {
             for param_type in [JobParameterType::ListString, JobParameterType::ListPath] {
                 match coerce(r#"["a", "b"]"#, param_type).expect("strings") {
