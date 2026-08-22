@@ -2609,7 +2609,8 @@ impl Session {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap())
+        openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
+            .map_err(|e| SessionError::Runtime(format!("Failed to build Param.{name}: {e}")))
     }
 
     // ────────────────────────────────────────────────────────────────
