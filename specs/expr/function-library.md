@@ -481,6 +481,16 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   are ignored, and titlecase (Lt) characters are cased but neither upper
   nor lower. Regenerate the tables with the script when intentionally
   adopting a newer Unicode version.
+- **`title()` and `capitalize()`** (§2.2.4) also match Python exactly.
+  `title()` follows CPython's `do_title`: a character is titlecased when the
+  previous character is not cased, lowercased otherwise — so digits and
+  other uncased characters restart words (`'1st'` → `'1St'`). Word-start
+  characters use the full titlecase mapping (`TITLE_MAP`, ToTitleFull):
+  the dz-digraph U+01C6 titlecases to U+01C5 (not uppercase U+01C4), and
+  `ß` expands to `Ss`. `capitalize()` titlecases the first character (Python
+  ≥ 3.8 semantics) and lowercases the rest. Both apply the Final_Sigma
+  context rule when lowering U+03A3 (via the `CASED` and `CASE_IGNORABLE`
+  tables), which Rust's context-free `char::to_lowercase` cannot express.
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
   Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
   inspect the result, rather than a substring scan. This correctly ignores
