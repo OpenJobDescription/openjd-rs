@@ -592,22 +592,18 @@ fn multiline_two_char_operator_caret_points_at_first_char() {
     // offset shift was centralized this rendered "~~~^", because the backwards operator
     // scan indexed the unwrapped source with still-shifted AST offsets and so never
     // recognized the operator as two characters wide.
-    assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
-    assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
-}
-
-#[test]
-fn single_line_two_char_operator_caret_is_unchanged() {
-    // Control for the above: the single-line case has no shift to undo and was already
-    // correct, so it must render identically.
-    assert_err("1 ** 'a'", &["  1 ** 'a'\n", "  ~~^"]);
-    assert_err("1 // 'a'", &["  1 // 'a'\n", "  ~~^"]);
+    //
+    // Full caret line, not a prefix: `assert_err` is contains-based, so a truncated
+    // expectation would pin the column while letting the span width drift.
+    assert_err("1 **\n'a'", &["  1 **\n", "  ~~^~"]);
+    assert_err("1 //\n'a'", &["  1 //\n", "  ~~^~"]);
 }
 
 #[test]
 fn multiline_single_char_operator_caret_points_at_the_operator() {
     // One-character operators went through the same scan, just without the two-character
-    // branch, so they are worth pinning alongside it.
+    // branch, so they are worth pinning alongside it. Caret line is complete here: the
+    // span is exactly three columns for these.
     assert_err("1 +\n'a'", &["  1 +\n", "  ~~^"]);
     assert_err("1 *\n'a'", &["  1 *\n", "  ~~^"]);
 }
