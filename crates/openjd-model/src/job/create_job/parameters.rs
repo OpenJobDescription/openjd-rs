@@ -1191,10 +1191,10 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
 ///
 /// The difference is only observable for an empty list, where [`openjd_expr::ExprValue::make_list`]
 /// has no elements to infer from and falls back to this hint. Using the declared type there
-/// would put empty and non-empty `LIST[PATH]` in different variants, and `openjd-sessions`
-/// discriminates on the variant when it applies path mapping -- one of its two `LIST[PATH]`
-/// arms matches `ListString` with no fallback, so a `ListPath` would silently not get its
-/// `Param.<name>` symbol set at all.
+/// would put empty and non-empty `LIST[PATH]` in different variants, which matters because
+/// `openjd-sessions` discriminates on the variant when it applies path mapping: the variants
+/// take different code paths and are not required to produce identical values, so a parameter
+/// whose variant flips with its length changes behaviour purely by being empty.
 fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprType {
     // Exhaustive for the same reason `list_element_type` is: a catch-all would silently
     // return the declared type for the next parameter type whose representation differs
@@ -1231,7 +1231,14 @@ fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprTy
 /// The guarantee is scoped to JSON because that is the only way in: a library caller handing
 /// over an already-typed list variant (`ExprValue::ListInt` for a `LIST[FLOAT]`, say) never
 /// reaches here, since [`coerce_to_job_parameter_type`] only routes strings through
-/// [`coerce_from_str`]. That path stays strict and rejects the mismatch.
+/// [`coerce_from_str`].
+///
+/// That path is stricter, but not airtight, and the gap is worth knowing about: it returns the
+/// value untouched when `value_matches_type` accepts it, and that check is variant-only for
+/// `LIST[LIST[INT]]` -- a `ListList` whose inner lists are `ListString` passes. `LIST[STRING]`
+/// and `LIST[PATH]` also accept each other, which is harmless because they share a
+/// representation. For the scalar types and the flat `LIST[scalar]` types a mismatch is
+/// rejected.
 ///
 /// A value that is not a list where a list type is declared is an error: the declared type
 /// is the only thing that can say so, and no later stage checks it.
@@ -1588,9 +1595,9 @@ mod tests {
             // to a hint when there are none, so the two routes have to agree. They disagree if
             // the hint is the declared element type rather than its representation: LIST[PATH]
             // is a ListString when populated (PATH is represented as a string) but would be a
-            // ListPath when empty. `openjd-sessions` discriminates on the variant, and one of
-            // its LIST[PATH] arms matches ListString with no fallback, so a value that changes
-            // variant with its length silently loses its Param.<name> symbol.
+            // ListPath when empty. `openjd-sessions` branches on the variant when applying
+            // path mapping, so a value whose variant depends only on its length takes a
+            // different path through the consumer for no reason a caller could predict.
             for (param_type, populated) in [
                 (JobParameterType::ListString, r#"["a"]"#),
                 (JobParameterType::ListPath, r#"["/tmp/a"]"#),
