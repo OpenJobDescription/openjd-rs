@@ -2468,7 +2468,14 @@ impl Session {
                 // like {{ Task.RawParam.Frame + 1 }} work correctly.
                 let raw_key = format!("Task.RawParam.{name}");
                 let raw_value = match tv.param_type {
-                    TaskParameterType::Path => tv.value.clone(),
+                    // RawParam for PATH is a plain string whichever variant the value
+                    // arrived in, same as the job-parameter arm above.
+                    TaskParameterType::Path => match &tv.value {
+                        openjd_expr::ExprValue::Path { value, .. } => {
+                            openjd_expr::ExprValue::String(value.clone())
+                        }
+                        other => other.clone(),
+                    },
                     TaskParameterType::ChunkInt => tv.value.clone(),
                     _ => Self::coerce_param_value(
                         &tv.value,
@@ -2485,11 +2492,10 @@ impl Session {
                 let key = format!("Task.Param.{name}");
                 let param_value = match tv.param_type {
                     TaskParameterType::Path => {
-                        let s = match &tv.value {
-                            openjd_expr::ExprValue::String(s) => s.as_str(),
-                            openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
-                            _ => "",
-                        };
+                        // Erroring, not defaulting to "": an empty path is a silently wrong
+                        // value interpolated into the action, which is worse than refusing
+                        // the input. Same rule as the job-parameter arm.
+                        let s = Self::path_param_raw(name, &tv.value)?;
                         let mapped = self.apply_path_mapping_to_string(s);
                         openjd_expr::ExprValue::new_path(
                             mapped,
@@ -2553,7 +2559,8 @@ impl Session {
             openjd_expr::ExprValue::String(s) => Ok(s.as_str()),
             openjd_expr::ExprValue::Path { value, .. } => Ok(value.as_str()),
             other => Err(SessionError::Runtime(format!(
-                "Parameter '{name}' is declared PATH but its value is {}, which is not a path",
+                "Parameter '{name}' is declared PATH but its value is {}, \
+                 which is not a path",
                 other.type_name()
             ))),
         }
@@ -3707,6 +3714,42 @@ mod typed_param_seeding_tests {
         assert!(
             err.to_string().contains("PATH"),
             "resolved diagnostic should name the type, got: {err}"
+        );
+    }
+
+    #[test]
+    fn task_path_with_a_non_path_value_is_refused() {
+        // Same rule as the job-parameter arm: `_ => ""` used to interpolate an empty path
+        // into the action, which is a silently wrong value rather than an error.
+        let err = build_symtab_with_task_params(
+            vec![],
+            vec![("F", TaskParameterType::Path, ExprValue::Int(7))],
+        )
+        .expect_err("an int is not a path");
+        assert!(
+            err.to_string().contains("PATH"),
+            "diagnostic should name the type, got: {err}"
+        );
+    }
+
+    #[test]
+    fn task_path_raw_param_is_a_plain_string() {
+        // Task.RawParam mirrors RawParam: a Path value is unwrapped to its string.
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "F",
+                TaskParameterType::Path,
+                ExprValue::new_path("/src/a", openjd_expr::path_mapping::PathFormat::Posix),
+            )],
+        )
+        .expect("build must succeed");
+        let raw = symtab
+            .get_value("Task.RawParam.F")
+            .expect("Task.RawParam.F");
+        assert!(
+            matches!(raw, ExprValue::String(_)),
+            "expected String, got {raw:?}"
         );
     }
 

@@ -5537,6 +5537,30 @@ fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
 }
 
 #[test]
+fn test_raw_param_list_path_carries_its_memory_size() {
+    // build_symbol_table normalizes LIST[PATH] to ListString for RawParam. The ListString
+    // cache field is the only thing heap_size() consults, and the evaluator charges it on
+    // every symbol read, so a hardcoded zero makes the list free however large it is.
+    let values: Vec<(&str, &str)> = vec![("Paths", r#"["/some/quite/long/path", "/another"]"#)];
+    let result = preprocess_supplied(r#"{"name": "Paths", "type": "LIST[PATH]"}"#, &values)
+        .expect("LIST[PATH] must preprocess");
+    let symtab = build_symbol_table(&result).expect("symbol table must build");
+    match symtab
+        .get_value("RawParam.Paths")
+        .expect("RawParam.Paths must be set")
+    {
+        openjd_expr::ExprValue::ListString(elements, cached) => {
+            assert!(!elements.is_empty());
+            assert!(
+                *cached > 0,
+                "cached heap size is zero; the evaluator would charge nothing for this list"
+            );
+        }
+        other => panic!("expected ListString, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_supplied_scalar_bool_accepts_numeric_forms() {
     // The numeric arms are in coerce_to_job_parameter_type, which scalar parameters use too, so scalar BOOL
     // widens along with LIST[BOOL]: the float 1.0 was refused before because Float64 keeps the

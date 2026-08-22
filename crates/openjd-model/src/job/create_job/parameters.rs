@@ -1201,6 +1201,11 @@ fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprTy
     // from it, which is the empty/non-empty variant split this function exists to avoid.
     match param_type {
         JobParameterType::Path => openjd_expr::ExprType::STRING,
+        // A list of PATH is a list of its representation. No caller passes ListPath today
+        // (only element types reach this, and nothing yields ListPath as an element type),
+        // but answering list(PATH) here would contradict the contract this function
+        // documents and re-split the variant for whoever asks first.
+        JobParameterType::ListPath => openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
         JobParameterType::String
         | JobParameterType::Int
         | JobParameterType::Float
@@ -1209,7 +1214,6 @@ fn representation_expr_type(param_type: JobParameterType) -> openjd_expr::ExprTy
         | JobParameterType::ListString
         | JobParameterType::ListInt
         | JobParameterType::ListFloat
-        | JobParameterType::ListPath
         | JobParameterType::ListBool
         | JobParameterType::ListListInt => param_type.expr_type(),
     }
@@ -1350,15 +1354,29 @@ pub fn build_symbol_table(params: &JobParameterValues) -> Result<SymbolTable, Mo
                 }
                 _ => pv.value.clone(),
             },
-            JobParameterType::ListPath => {
-                if let openjd_expr::ExprValue::ListString(ref elements, _) = pv.value {
-                    openjd_expr::ExprValue::ListString(elements.clone(), 0)
-                } else if let openjd_expr::ExprValue::ListPath(ref elements, _, _) = pv.value {
-                    openjd_expr::ExprValue::ListString(elements.clone(), 0)
-                } else {
-                    pv.value.clone()
+            JobParameterType::ListPath => match &pv.value {
+                // Through make_list rather than ListString(.., 0): the second field is the
+                // cached heap size the evaluator's memory limit charges, and zeroing it
+                // makes the list free no matter how large it is. This symtab is what
+                // create_job resolves format strings against.
+                openjd_expr::ExprValue::ListString(elements, _)
+                | openjd_expr::ExprValue::ListPath(elements, _, _) => {
+                    openjd_expr::ExprValue::make_list(
+                        elements
+                            .iter()
+                            .cloned()
+                            .map(openjd_expr::ExprValue::String)
+                            .collect(),
+                        openjd_expr::ExprType::STRING,
+                    )
+                    .map_err(|e| {
+                        ModelError::DecodeValidation(format!(
+                            "Parameter '{name}': invalid LIST[PATH] value: {e}"
+                        ))
+                    })?
                 }
-            }
+                _ => pv.value.clone(),
+            },
             _ => pv.value.clone(),
         };
         symtab.set(&format!("RawParam.{name}"), raw_value)?;
