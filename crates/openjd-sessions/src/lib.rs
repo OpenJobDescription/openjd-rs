@@ -19,6 +19,10 @@ pub mod runner;
 pub mod session;
 pub mod session_user;
 pub(crate) mod subprocess;
+// Unix-only: its callers (the `sudo` invocations) are themselves `cfg(unix)`, so
+// compiling it on Windows would only produce dead-code warnings.
+#[cfg(unix)]
+pub(crate) mod system_commands;
 pub mod tempdir;
 #[cfg(windows)]
 pub mod win32;

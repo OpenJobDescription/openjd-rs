@@ -103,6 +103,7 @@ to provide visual structure in log output.
 | `session.rs` | `HOST_INFO` | Version, platform, architecture at init |
 | `session.rs` | `FILE_PATH` | Working directory, files directory paths |
 | `session.rs` | `BANNER` | Section banners for enter/exit/run/cleanup |
+| `session.rs` | `FILE_PATH \| PROCESS_CONTROL` | Cross-user cleanup failures: command not found, nonzero exit, spawn error |
 | `subprocess.rs` | `PROCESS_CONTROL` | PID start, SIGTERM, SIGKILL, exit code, spawn failures |
 | `subprocess.rs` | `COMMAND_OUTPUT` | Stdout/stderr lines from the subprocess |
 | `subprocess.rs` | `BANNER` | Output header banner |
@@ -110,6 +111,13 @@ to provide visual structure in log output.
 | `runner/step_script.rs` | `BANNER` | Subsection banner before action execution |
 | `embedded_files.rs` | `FILE_PATH` | File write paths |
 | `embedded_files.rs` | `FILE_CONTENTS` | File data content (debug level only) |
+
+The cross-user cleanup rows carry two flags together, and the pairing is deliberate:
+`PROCESS_CONTROL` is one of the three content types that reach the worker agent log,
+so a `FILE_PATH`-only record would go to the session stream alone and the operator who
+needs it would not see it. The path in those records is the session working directory,
+which makes them the first records in this crate that route a filesystem path into the
+worker log rather than only the session stream.
 
 ## Consumer Integration
 

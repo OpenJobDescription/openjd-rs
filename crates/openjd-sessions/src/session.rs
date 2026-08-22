@@ -149,6 +149,42 @@ fn format_exit_code(code: Option<i32>) -> String {
     }
 }
 
+/// Build the argv passed to `sudo` to delete session files as the job user.
+///
+/// Note what is *not* here: `-i`. Per sudo(8), `-i` does not exec the command, it
+/// concatenates the argv into one string and hands it to the target user's login
+/// shell via `-c`, "escaping each character (including white space) with a
+/// backslash except for alphanumerics, underscores, hyphens, and dollar signs".
+///
+/// Dollar signs are the problem. These paths come from `read_dir` of the session
+/// working directory, so they are filenames the job chose. A job that creates a file
+/// named `$HOME` gets that name through unescaped, the login shell expands it to a
+/// path that does not exist, and `rm -rf` on a nonexistent path is a no-op that
+/// exits 0. The caller's `status.success()` check would then report a clean cleanup
+/// while the file remained, owned by the job user, and the `remove_dir_all` fallback
+/// cannot remove it -- a silently leaked session directory, reachable by the job
+/// rather than by host misconfiguration.
+///
+/// Without `-i` sudo execs `rm` directly, so no shell re-parses these strings and
+/// the argv is the argv. `rm` needs no login environment, and dropping the login
+/// shell also means the resolved absolute path is the one that runs: with `-i` the
+/// shell resolved it again in the job user's own context, which need not agree with
+/// the agent's.
+#[cfg(unix)]
+fn cross_user_cleanup_args(user: &str, rm: &std::path::Path, files: Vec<String>) -> Vec<String> {
+    let mut args = vec![
+        "-u".to_string(),
+        user.to_string(),
+        rm.to_string_lossy().to_string(),
+        "-rf".to_string(),
+        // Everything after this is a job-chosen filename, so it must not be read as
+        // an option however it is spelled.
+        "--".to_string(),
+    ];
+    args.extend(files);
+    args
+}
+
 /// Normalize an environment variable name for the current platform.
 /// On Windows, env vars are case-insensitive, so we uppercase all keys
 /// to avoid undefined behavior from mixed-case duplicates in the Win32 API.
@@ -1038,26 +1074,128 @@ impl Session {
             if let Some(ref user) = self.cross_user.user {
                 if !user.is_process_user() {
                     if let Ok(entries) = std::fs::read_dir(&self.working_directory) {
+                        // The helpers directory is excluded, and without this the
+                        // status check below is a guaranteed false positive on every
+                        // cross-user session.
+                        //
+                        // `create_helpers_dir` chowns `.helpers-<uuid>` to the job
+                        // user's group and sets 0o750, so the group gets r-x and no w
+                        // -- deliberately, so the job user can traverse and read the
+                        // helper but not modify it. `rm -rf` therefore cannot unlink
+                        // the binary inside it, cannot rmdir a non-empty directory,
+                        // and exits nonzero; `-f` suppresses missing operands, not
+                        // EACCES. The `remove_dir_all` fallback below removes it
+                        // without trouble, because the process user owns it.
+                        //
+                        // Leaving it in the operand list made the warning fire on
+                        // every session, routed to the worker agent log, naming a
+                        // leak that had not happened and blaming job-user ownership
+                        // for a file the process user owns. A warning that always
+                        // fires is one operators filter, which costs exactly the
+                        // signal this check exists to add.
+                        let helpers_dir = self.cross_user.helpers_dir.clone();
                         let files: Vec<String> = entries
                             .filter_map(|e| e.ok())
-                            .map(|e| e.path().to_string_lossy().to_string())
+                            .map(|e| e.path())
+                            .filter(|path| helpers_dir.as_deref() != Some(path.as_path()))
+                            .map(|path| path.to_string_lossy().to_string())
                             .collect();
+                        // Both resolved from trusted directories rather than
+                        // through PATH. If either is missing we skip this
+                        // best-effort removal and fall through to the TempDir
+                        // cleanup below, rather than falling back to a bare
+                        // name -- a bare name here is the defect this resolver
+                        // exists to remove.
+                        //
+                        // `rm` runs as the job user, so qualifying it is
+                        // hardening rather than a privilege boundary: it stops
+                        // the removal depending on that user's own login-shell
+                        // PATH.
+                        // Looked up separately rather than zipped, so the warning can
+                        // name the one that is actually missing. `sudo` absent and
+                        // `rm` absent are different host problems with different
+                        // fixes.
+                        let sudo = crate::system_commands::find_system_command("sudo");
+                        let rm = crate::system_commands::find_system_command("rm");
                         if !files.is_empty() {
-                            let mut args = vec![
-                                "-u".to_string(),
-                                user.user().to_string(),
-                                "-i".to_string(),
-                                "rm".to_string(),
-                                "-rf".to_string(),
-                                "--".to_string(),
-                            ];
-                            args.extend(files);
-                            let _ = std::process::Command::new("sudo")
+                            let missing: Vec<&str> = [("sudo", &sudo), ("rm", &rm)]
+                                .iter()
+                                .filter(|(_, found)| found.is_none())
+                                .map(|(name, _)| *name)
+                                .collect();
+                            if !missing.is_empty() {
+                                // Skipping silently would be the worst outcome here.
+                                // The fallback below is std::fs::remove_dir_all under
+                                // a `let _ =`, which cannot remove files owned by the
+                                // job user, so the session directory leaks with job
+                                // data still in it and nothing explains why.
+                                //
+                                // PROCESS_CONTROL as well as FILE_PATH: per
+                                // logging.rs, only EXCEPTION_INFO, PROCESS_CONTROL and
+                                // HOST_INFO reach the worker log, so a FILE_PATH-only
+                                // record would go to the session stream alone and the
+                                // operator who needs this would never see it.
+                                session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+                                    "Could not locate {} in a trusted directory; \
+                                     skipping cross-user cleanup of {} file(s) in {}. \
+                                     Files owned by the job user may remain.",
+                                    // " and ", not " or ": when both are absent the
+                                    // code knows both are, and "sudo or rm" reads as
+                                    // uncertainty -- an operator would install sudo,
+                                    // retry, and hit the same warning. A one-element
+                                    // join never emits the separator, so the
+                                    // single-missing message is unchanged.
+                                    missing.join(" and "),
+                                    files.len(),
+                                    self.working_directory.display()
+                                );
+                            }
+                        }
+                        if let (false, (Some(sudo), Some(rm))) = (files.is_empty(), (sudo, rm)) {
+                            let args = cross_user_cleanup_args(user.user(), &rm, files);
+                            // The status is inspected rather than discarded. Both
+                            // binaries resolving is the common case -- `sudo` was
+                            // already resolved once at helper start -- so the
+                            // failures an operator actually hits happen here, not
+                            // in the branch above: a sudoers rule that does not
+                            // permit this command, or `rm` refusing a path.
+                            // Discarding the status left every one of those silent,
+                            // and the fallback below cannot remove job-user-owned
+                            // files, so the directory leaked with no explanation on
+                            // the record.
+                            //
+                            // The check means what it says only because the argv
+                            // above carries no `-i`; see cross_user_cleanup_args for
+                            // why a login shell would make exit 0 unreliable here.
+                            match std::process::Command::new(&sudo)
                                 .args(&args)
                                 .stdin(std::process::Stdio::null())
                                 .stdout(std::process::Stdio::null())
                                 .stderr(std::process::Stdio::null())
-                                .status();
+                                .status()
+                            {
+                                Ok(status) if status.success() => {}
+                                Ok(status) => session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+                                    "Cross-user cleanup of {} exited {}; files owned by \
+                                     the job user may remain.",
+                                    self.working_directory.display(),
+                                    status
+                                ),
+                                Err(e) => session_log!(
+                                    warn,
+                                    &self.session_id,
+                                    LogContent::FILE_PATH | LogContent::PROCESS_CONTROL,
+                                    "Could not run cross-user cleanup of {}: {e}; files \
+                                     owned by the job user may remain.",
+                                    self.working_directory.display()
+                                ),
+                            }
                         }
                     }
                 }
@@ -3072,6 +3210,69 @@ impl Drop for Session {
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod cross_user_cleanup_tests {
+    //! Unit tests for the cross-user cleanup argv.
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn does_not_interpose_a_login_shell() {
+        // The load-bearing assertion. With `-i`, sudo hands the concatenated argv to
+        // the job user's login shell via `-c`, escaping everything except
+        // alphanumerics, underscores, hyphens and DOLLAR SIGNS (sudo(8)). These paths
+        // are job-chosen filenames, so a file named `$HOME` would be expanded by that
+        // shell into a path that does not exist, and `rm -rf` on a nonexistent path
+        // exits 0 -- making the caller's status.success() check report a clean
+        // cleanup over a file that is still there.
+        let args = cross_user_cleanup_args(
+            "job-user",
+            Path::new("/trusted/rm"),
+            vec!["/sessions/abc/$HOME".to_string()],
+        );
+
+        assert!(
+            !args.iter().any(|a| a == "-i"),
+            "argv must not request a login shell: {args:?}"
+        );
+    }
+
+    #[test]
+    fn passes_the_resolved_rm_and_terminates_options_before_filenames() {
+        // The negative control for the assertion above: the argv must still be a
+        // usable one, or "no -i" would be satisfied by an argv that does nothing.
+        let args = cross_user_cleanup_args(
+            "job-user",
+            Path::new("/trusted/rm"),
+            vec![
+                "/sessions/abc/-rf".to_string(),
+                "/sessions/abc/b".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                "-u",
+                "job-user",
+                "/trusted/rm",
+                "-rf",
+                "--",
+                "/sessions/abc/-rf",
+                "/sessions/abc/b",
+            ]
+        );
+        // `--` must precede every filename, so a job-chosen name that looks like an
+        // option is still treated as a path.
+        let end_of_options = args.iter().position(|a| a == "--").expect("-- is present");
+        let first_file = args
+            .iter()
+            .position(|a| a.starts_with("/sessions/"))
+            .expect("a file is present");
+        assert!(end_of_options < first_file);
     }
 }
 
