@@ -274,51 +274,63 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 }
 
 pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, DIGIT};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()),
+        !s.is_empty() && s.chars().all(|c| in_table(DIGIT, c)),
     ))
 }
 pub fn isalpha_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, ALPHA};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_alphabetic()),
+        !s.is_empty() && s.chars().all(|c| in_table(ALPHA, c)),
     ))
 }
 pub fn isalnum_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, ALNUM};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()),
+        !s.is_empty() && s.chars().all(|c| in_table(ALNUM, c)),
     ))
 }
 pub fn isspace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, SPACE};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(
-        !s.is_empty() && s.chars().all(|c| c.is_whitespace()),
+        !s.is_empty() && s.chars().all(|c| in_table(SPACE, c)),
     ))
 }
 pub fn isupper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, CASED, UPPER};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
+    // Python str.isupper: at least one cased character, and every cased
+    // character is uppercase. Uncased characters (digits, CJK, punctuation)
+    // are ignored. Titlecase (Lt) characters are cased but not uppercase,
+    // so their presence makes the result false.
     Ok(ExprValue::Bool(
-        s.chars().any(|c| c.is_alphabetic())
+        s.chars().any(|c| in_table(CASED, c))
             && s.chars()
-                .filter(|c| c.is_alphabetic())
-                .all(|c| c.is_uppercase()),
+                .filter(|&c| in_table(CASED, c))
+                .all(|c| in_table(UPPER, c)),
     ))
 }
 pub fn islower_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, CASED, LOWER};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
+    // Python str.islower: at least one cased character, and every cased
+    // character is lowercase. See isupper_fn for the cased-character rule.
     Ok(ExprValue::Bool(
-        s.chars().any(|c| c.is_alphabetic())
+        s.chars().any(|c| in_table(CASED, c))
             && s.chars()
-                .filter(|c| c.is_alphabetic())
-                .all(|c| c.is_lowercase()),
+                .filter(|&c| in_table(CASED, c))
+                .all(|c| in_table(LOWER, c)),
     ))
 }
 pub fn isascii_fn(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -327,23 +339,72 @@ pub fn isascii_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(s.is_ascii()))
 }
 
+/// True per Unicode's Final_Sigma rule: `chars[i]` (a capital sigma) is
+/// preceded by a cased character and not followed by one, skipping
+/// case-ignorable characters in both directions. Mirrors CPython's
+/// `handle_capital_sigma` so `title()`/`capitalize()` lower U+03A3 exactly
+/// like Python's context-sensitive case mapping.
+fn is_final_sigma(chars: &[char], i: usize) -> bool {
+    use super::unicode_tables::{in_table, CASED, CASE_IGNORABLE};
+    let preceded_by_cased = chars[..i]
+        .iter()
+        .rev()
+        .find(|&&c| !in_table(CASE_IGNORABLE, c))
+        .is_some_and(|&c| in_table(CASED, c));
+    let followed_by_cased = chars[i + 1..]
+        .iter()
+        .find(|&&c| !in_table(CASE_IGNORABLE, c))
+        .is_some_and(|&c| in_table(CASED, c));
+    preceded_by_cased && !followed_by_cased
+}
+
+/// Append the Python full lowercase mapping of `chars[i]`, applying the
+/// Final_Sigma context rule for U+03A3 (Rust's `char::to_lowercase` cannot
+/// see the surrounding context).
+fn push_lowered(chars: &[char], i: usize, out: &mut String) {
+    const CAPITAL_SIGMA: char = '\u{03a3}';
+    const FINAL_SIGMA: char = '\u{03c2}';
+    const SMALL_SIGMA: char = '\u{03c3}';
+    if chars[i] == CAPITAL_SIGMA {
+        out.push(if is_final_sigma(chars, i) {
+            FINAL_SIGMA
+        } else {
+            SMALL_SIGMA
+        });
+    } else {
+        out.extend(chars[i].to_lowercase());
+    }
+}
+
+/// Append the Python full titlecase mapping (ToTitleFull) of `c`.
+fn push_titled(c: char, out: &mut String) {
+    use super::unicode_tables::title_mapping;
+    match title_mapping(c) {
+        Some(mapped) => out.push_str(mapped),
+        None => out.push(c),
+    }
+}
+
 pub fn title_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    use super::unicode_tables::{in_table, CASED};
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
+    // Python str.title (CPython do_title): titlecase a character when the
+    // previous character is not cased, lowercase it otherwise. Word
+    // boundaries are uncased characters — digits and punctuation both
+    // restart a word ('1st' -> '1St'), and uncased letters like CJK
+    // ideographs do too.
+    let chars: Vec<char> = s.chars().collect();
+    ctx.check_memory(chars.len() * std::mem::size_of::<char>())?;
     let mut result = String::with_capacity(s.len());
-    let mut capitalize_next = true;
-    for c in s.chars() {
-        if c.is_alphanumeric() {
-            if capitalize_next {
-                result.extend(c.to_uppercase());
-                capitalize_next = false;
-            } else {
-                result.extend(c.to_lowercase());
-            }
+    let mut prev_cased = false;
+    for i in 0..chars.len() {
+        if prev_cased {
+            push_lowered(&chars, i, &mut result);
         } else {
-            result.push(c);
-            capitalize_next = true;
+            push_titled(chars[i], &mut result);
         }
+        prev_cased = in_table(CASED, chars[i]);
     }
     Ok(ExprValue::String(result))
 }
@@ -351,11 +412,18 @@ pub fn title_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn capitalize_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
-    let mut chars = s.chars();
-    let result = match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
-    };
+    // Python str.capitalize: titlecase the first character (ToTitleFull —
+    // uppercasing is wrong for titlecase digraphs like U+01C6), lowercase
+    // the rest with Final_Sigma context.
+    let chars: Vec<char> = s.chars().collect();
+    ctx.check_memory(chars.len() * std::mem::size_of::<char>())?;
+    let mut result = String::with_capacity(s.len());
+    if !chars.is_empty() {
+        push_titled(chars[0], &mut result);
+        for i in 1..chars.len() {
+            push_lowered(&chars, i, &mut result);
+        }
+    }
     Ok(ExprValue::String(result))
 }
 
