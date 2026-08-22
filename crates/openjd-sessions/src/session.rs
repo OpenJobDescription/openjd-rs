@@ -2347,11 +2347,10 @@ impl Session {
                 use openjd_model::types::JobParameterType;
                 match param.param_type {
                     JobParameterType::Path => {
-                        let raw = match &param.value {
-                            openjd_expr::ExprValue::String(s) => s.as_str(),
-                            openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
-                            _ => continue,
-                        };
+                        // Erroring, not skipping: Param.* for PATH is omitted at template
+                        // scope, so a `continue` here leaves the symbol unset and the
+                        // failure surfaces later as an unknown symbol.
+                        let raw = Self::path_param_raw(name, &param.value)?;
                         let mapped = self.apply_path_mapping_to_string(raw);
                         let key = format!("Param.{name}");
                         s.set(
@@ -2371,49 +2370,7 @@ impl Session {
                         // an unknown symbol. `ListPath` reaches here from callers that build
                         // `JobParameterValue` directly rather than through JSON coercion.
                         let key = format!("Param.{name}");
-                        // Both list variants hold their elements as strings, so they get the
-                        // same treatment: map each element, then tag the result host-format,
-                        // which is what this branch is for -- template scope stores paths as
-                        // Posix and the worker needs its own separators.
-                        //
-                        // Not delegating to `apply_path_mapping_to_value` here: it rewraps
-                        // with the value's incoming format rather than host, and returns
-                        // anything that is not a Path or ListPath unmapped. For a
-                        // path-mapping mechanism, writing a path that was never mapped is a
-                        // worse outcome than refusing the value, so anything that is not a
-                        // list of paths is an error rather than a silent passthrough.
-                        let elements: Option<&Vec<String>> = match &param.value {
-                            openjd_expr::ExprValue::ListString(elements, _) => Some(elements),
-                            openjd_expr::ExprValue::ListPath(elements, _, _) => Some(elements),
-                            // An empty list carries no element type to match on.
-                            openjd_expr::ExprValue::ListList(items, _, _) if items.is_empty() => {
-                                None
-                            }
-                            other => {
-                                return Err(SessionError::Runtime(format!(
-                                    "Parameter '{name}' is declared LIST[PATH] but its value is \
-                                     {}, which is not a list of paths",
-                                    other.type_name()
-                                )));
-                            }
-                        };
-                        let mapped: Vec<openjd_expr::ExprValue> = elements
-                            .map(|elements| {
-                                elements
-                                    .iter()
-                                    .map(|s| {
-                                        let m = self.apply_path_mapping_to_string(s);
-                                        openjd_expr::ExprValue::new_path(
-                                            m,
-                                            openjd_expr::path_mapping::PathFormat::host(),
-                                        )
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let mapped_value =
-                            openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
-                                .unwrap();
+                        let mapped_value = self.map_list_path_param(name, &param.value)?;
                         s.set(&key, mapped_value).map_err(|e| {
                             SessionError::Runtime(format!("Failed to set {key}: {e}"))
                         })?;
@@ -2442,8 +2399,21 @@ impl Session {
                         other => other.clone(),
                     },
                     JobParameterType::ListPath => match &param.value {
+                        // Through make_list rather than ListString(.., 0): the second field
+                        // is the cached heap size the evaluator's memory limit charges, and
+                        // zeroing it makes the list free no matter how large it is.
                         openjd_expr::ExprValue::ListPath(elements, _, _) => {
-                            openjd_expr::ExprValue::ListString(elements.clone(), 0)
+                            openjd_expr::ExprValue::make_list(
+                                elements
+                                    .iter()
+                                    .cloned()
+                                    .map(openjd_expr::ExprValue::String)
+                                    .collect(),
+                                openjd_expr::ExprType::STRING,
+                            )
+                            .map_err(|e| {
+                                SessionError::Runtime(format!("Failed to build {raw_key}: {e}"))
+                            })?
                         }
                         other => other.clone(),
                     },
@@ -2459,34 +2429,16 @@ impl Session {
                 let key = format!("Param.{name}");
                 let mapped_value = match param.param_type {
                     JobParameterType::Path => {
-                        let raw = match &param.value {
-                            openjd_expr::ExprValue::String(s) => s.as_str(),
-                            openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
-                            _ => "",
-                        };
+                        // Erroring, not defaulting to "": an empty path is a silently wrong
+                        // value, which is worse than refusing the input.
+                        let raw = Self::path_param_raw(name, &param.value)?;
                         let mapped = self.apply_path_mapping_to_string(raw);
                         openjd_expr::ExprValue::new_path(
                             mapped,
                             openjd_expr::path_mapping::PathFormat::host(),
                         )
                     }
-                    JobParameterType::ListPath => match &param.value {
-                        openjd_expr::ExprValue::ListString(elements, _) => {
-                            let mapped: Vec<openjd_expr::ExprValue> = elements
-                                .iter()
-                                .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::new_path(
-                                        m,
-                                        openjd_expr::path_mapping::PathFormat::host(),
-                                    )
-                                })
-                                .collect();
-                            openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
-                                .unwrap()
-                        }
-                        other => self.apply_path_mapping_to_value(other),
-                    },
+                    JobParameterType::ListPath => self.map_list_path_param(name, &param.value)?,
                     _ => Self::coerce_param_value(
                         &param.value,
                         &param.param_type.expr_type(),
@@ -2588,36 +2540,69 @@ impl Session {
     }
 
     /// Apply path mapping rules to a value if it's a Path or ListPath type.
-    fn apply_path_mapping_to_value(
-        &self,
-        value: &openjd_expr::ExprValue,
-    ) -> openjd_expr::ExprValue {
+    /// The raw path string of a scalar PATH parameter value.
+    ///
+    /// Errors on any other variant rather than inventing a value: a missing or empty path
+    /// is either an unknown-symbol failure later or a silently wrong path now, and both are
+    /// worse than refusing the value where it is wrong.
+    fn path_param_raw<'v>(
+        name: &str,
+        value: &'v openjd_expr::ExprValue,
+    ) -> Result<&'v str, SessionError> {
         match value {
-            openjd_expr::ExprValue::Path {
-                value: path_str,
-                format,
-                ..
-            } => {
-                for rule in self.path_mapping_rules.iter() {
-                    if let Some(mapped) = rule.apply(path_str) {
-                        return openjd_expr::ExprValue::new_path(mapped, *format);
-                    }
-                }
-                value.clone()
+            openjd_expr::ExprValue::String(s) => Ok(s.as_str()),
+            openjd_expr::ExprValue::Path { value, .. } => Ok(value.as_str()),
+            other => Err(SessionError::Runtime(format!(
+                "Parameter '{name}' is declared PATH but its value is {}, which is not a path",
+                other.type_name()
+            ))),
+        }
+    }
+
+    /// Map a LIST[PATH] parameter value to a host-format `ListPath` for `Param.<name>`.
+    ///
+    /// Used by both the resolved and from-scratch symbol table branches, so the two cannot
+    /// drift apart. Both list variants hold their elements as strings and get the same
+    /// treatment: map each element, then tag the result host-format -- template scope stores
+    /// paths as Posix and the worker needs its own separators.
+    ///
+    /// Not delegating to `apply_path_mapping_to_value`: it rewraps with the value's incoming
+    /// format rather than host, and returns anything that is not a Path or ListPath unmapped.
+    /// For a path-mapping mechanism, writing a path that was never mapped is a worse outcome
+    /// than refusing the value, so anything that is not a list of paths is an error.
+    fn map_list_path_param(
+        &self,
+        name: &str,
+        value: &openjd_expr::ExprValue,
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        let elements: Option<&Vec<String>> = match value {
+            openjd_expr::ExprValue::ListString(elements, _) => Some(elements),
+            openjd_expr::ExprValue::ListPath(elements, _, _) => Some(elements),
+            // An empty list carries no element type to match on.
+            openjd_expr::ExprValue::ListList(items, _, _) if items.is_empty() => None,
+            other => {
+                return Err(SessionError::Runtime(format!(
+                    "Parameter '{name}' is declared LIST[PATH] but its value is {}, which is \
+                     not a list of paths",
+                    other.type_name()
+                )));
             }
-            openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
-                let mapped: Vec<openjd_expr::ExprValue> = elements
+        };
+        let mapped: Vec<openjd_expr::ExprValue> = elements
+            .map(|elements| {
+                elements
                     .iter()
                     .map(|s| {
-                        let mapped_s =
-                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
-                        openjd_expr::ExprValue::new_path(mapped_s, *fmt)
+                        let m = self.apply_path_mapping_to_string(s);
+                        openjd_expr::ExprValue::new_path(
+                            m,
+                            openjd_expr::path_mapping::PathFormat::host(),
+                        )
                     })
-                    .collect();
-                openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
-            }
-            _ => value.clone(),
-        }
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap())
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -3638,6 +3623,122 @@ mod typed_param_seeding_tests {
                 }
                 other => panic!("{label}: expected ListPath, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn from_scratch_list_path_matches_the_resolved_branch() {
+        // The two branches share map_list_path_param, so a ListPath input must come out
+        // identically: mapped elements, host format. The from-scratch branch used to
+        // delegate to apply_path_mapping_to_value, which kept the incoming format tag --
+        // a ListPath(_, Posix, _) on a Windows worker was rejected by the evaluator's
+        // format check on first reference.
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut job_params = HashMap::new();
+        job_params.insert(
+            "Paths".to_string(),
+            JobParameterValue {
+                param_type: JobParameterType::ListPath,
+                value: ExprValue::make_list(
+                    vec![ExprValue::new_path(
+                        "/src/a",
+                        openjd_expr::path_mapping::PathFormat::Posix,
+                    )],
+                    openjd_expr::ExprType::PATH,
+                )
+                .unwrap(),
+            },
+        );
+        session.set_job_parameter_values_for_test(job_params);
+        session.extend_path_mapping_rules(vec![openjd_expr::path_mapping::PathMappingRule {
+            source_path_format: openjd_expr::path_mapping::PathFormat::Posix,
+            source_path: "/src".into(),
+            destination_path: "/dst".into(),
+        }]);
+        let symtab = session
+            .build_symbol_table(None, None)
+            .expect("from-scratch build must succeed");
+        match symtab.get_value("Param.Paths").expect("Param.Paths") {
+            ExprValue::ListPath(elements, fmt, _) => {
+                assert!(
+                    elements.iter().all(|e| e.contains("dst")),
+                    "path mapping was not applied: {elements:?}"
+                );
+                assert_eq!(
+                    *fmt,
+                    openjd_expr::path_mapping::PathFormat::host(),
+                    "expected host path format"
+                );
+            }
+            other => panic!("expected ListPath, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_scratch_list_path_rejects_a_value_that_is_not_a_list_of_paths() {
+        // Same refusal as the resolved branch: a silently unmapped path is worse than an
+        // error at the point where the value is wrong.
+        let err = build_symtab_from_scratch(vec![(
+            "Paths",
+            JobParameterType::ListPath,
+            ExprValue::String("/src/a".into()),
+        )])
+        .expect_err("a scalar string is not a list of paths");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Paths") && msg.contains("LIST[PATH]"),
+            "expected a diagnostic naming the parameter and its type, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn scalar_path_with_a_non_path_value_is_refused_in_both_branches() {
+        // The resolved branch used `_ => continue` (missing symbol later) and the
+        // from-scratch branch `_ => ""` (silently wrong empty path). Both now refuse.
+        let value = ExprValue::Int(7);
+        let err = build_symtab_from_scratch(vec![("P", JobParameterType::Path, value.clone())])
+            .expect_err("an int is not a path (from-scratch)");
+        assert!(
+            err.to_string().contains("PATH"),
+            "from-scratch diagnostic should name the type, got: {err}"
+        );
+        let err = build_symtab_from_resolved(vec![("P", JobParameterType::Path, value)])
+            .expect_err("an int is not a path (resolved)");
+        assert!(
+            err.to_string().contains("PATH"),
+            "resolved diagnostic should name the type, got: {err}"
+        );
+    }
+
+    #[test]
+    fn list_path_raw_param_carries_its_memory_size() {
+        // The ListString cache field is the only thing heap_size() consults for the
+        // variant, and the evaluator's memory limit charges it on every symbol read.
+        // Normalizing ListPath -> ListString with a hardcoded 0 made RawParam free no
+        // matter how large.
+        let symtab = build_symtab_from_scratch(vec![(
+            "Paths",
+            JobParameterType::ListPath,
+            ExprValue::make_list(
+                vec![ExprValue::new_path(
+                    "/some/quite/long/path/that/occupies/heap",
+                    openjd_expr::path_mapping::PathFormat::Posix,
+                )],
+                openjd_expr::ExprType::PATH,
+            )
+            .unwrap(),
+        )])
+        .expect("build must succeed");
+        let raw = symtab.get_value("RawParam.Paths").expect("RawParam.Paths");
+        match raw {
+            ExprValue::ListString(elements, cached) => {
+                assert!(!elements.is_empty());
+                assert!(
+                    *cached > 0,
+                    "cached heap size is zero; the evaluator would charge nothing for this list"
+                );
+            }
+            other => panic!("expected ListString, got {other:?}"),
         }
     }
 
