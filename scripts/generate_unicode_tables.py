@@ -27,10 +27,21 @@ Table definitions (per CPython Objects/unicodectype.c semantics):
 - UPPER:   chr(cp).isupper()   — Uppercase property (Lu + Other_Uppercase)
 - LOWER:   chr(cp).islower()   — Lowercase property (Ll + Other_Lowercase)
 - CASED:   UPPER or LOWER or general category Lt
+- CASE_IGNORABLE: the Unicode Case_Ignorable property, probed from CPython's
+  Final_Sigma handling in str.lower (unicodedata does not expose it)
 
 str.isupper()/str.islower() are not per-character predicates: they require at
 least one cased character and that every cased character is upper/lowercase.
 The CASED table supports that composition in Rust.
+
+Additionally TITLE_MAP holds the full titlecase mapping (ToTitleFull) for
+every code point whose titlecase differs from itself, probed as the
+single-character str.title() result. Python's str.title() and
+str.capitalize() titlecase word-start characters (e.g. U+01C6 dz-digraph
+becomes U+01C5, and U+00DF sharp s becomes "Ss"), which Rust's
+char::to_uppercase does not provide. CASE_IGNORABLE and CASED together
+implement the Final_Sigma context rule for lowering U+03A3 within
+title()/capitalize().
 """
 
 import sys
@@ -64,6 +75,21 @@ def is_cased(ch):
     return ch.isupper() or ch.islower() or unicodedata.category(ch) == "Lt"
 
 
+def is_case_ignorable(ch):
+    """Probe the Case_Ignorable property via CPython's Final_Sigma handling.
+
+    U+03A3 GREEK CAPITAL LETTER SIGMA lowercases to final sigma (U+03C2) iff
+    it is preceded by a cased character with only case-ignorable characters
+    in between. So with a cased prefix 'A', sigma stays final across `ch`
+    iff `ch` is case-ignorable or itself cased; with an uncased prefix '1',
+    sigma is final only if `ch` is cased. The difference isolates
+    Case_Ignorable.
+    """
+    with_cased_prefix = ("A" + ch + "\u03a3").lower().endswith("\u03c2")
+    with_uncased_prefix = ("1" + ch + "\u03a3").lower().endswith("\u03c2")
+    return with_cased_prefix and not with_uncased_prefix
+
+
 TABLES = [
     ("DIGIT", "str.isdigit code points (Numeric_Type = Decimal or Digit).", lambda c: c.isdigit()),
     ("ALPHA", "str.isalpha code points (general category Lu/Ll/Lt/Lm/Lo).", lambda c: c.isalpha()),
@@ -72,7 +98,31 @@ TABLES = [
     ("UPPER", "Uppercase code points (Lu + Other_Uppercase).", lambda c: c.isupper()),
     ("LOWER", "Lowercase code points (Ll + Other_Lowercase).", lambda c: c.islower()),
     ("CASED", "Cased code points (UPPER or LOWER or category Lt).", is_cased),
+    (
+        "CASE_IGNORABLE",
+        "Case_Ignorable code points (for the Final_Sigma context rule).",
+        is_case_ignorable,
+    ),
 ]
+
+
+def build_title_map():
+    """Full titlecase mappings (ToTitleFull) where titlecase(c) != c.
+
+    A single-character str.title() applies ToTitleFull (the first character
+    of a title() word is titlecased), so probing it per code point yields
+    the exact mapping CPython uses, including one-to-many mappings from
+    SpecialCasing.txt (e.g. U+00DF -> "Ss").
+    """
+    entries = []
+    for cp in range(0x110000):
+        if cp in SURROGATE_RANGE:
+            continue
+        ch = chr(cp)
+        titled = ch.title()
+        if titled != ch:
+            entries.append((cp, titled))
+    return entries
 
 
 def verify(table, predicate):
@@ -136,6 +186,41 @@ def main():
         if row:
             lines.append("    " + ", ".join(row) + ",")
         lines.append("];")
+    title_map = build_title_map()
+    print(f"TITLE_MAP: {len(title_map)} entries")
+    lines.extend(
+        [
+            "",
+            "/// Full titlecase mappings (ToTitleFull) where titlecase(c) != c,",
+            "/// probed as CPython's single-character str.title() result. Sorted by",
+            "/// code point for binary search.",
+            "#[rustfmt::skip]",
+            "pub static TITLE_MAP: &[(u32, &str)] = &[",
+        ]
+    )
+    row = []
+    for cp, titled in title_map:
+        escaped = "".join(f"\\u{{{ord(c):x}}}" for c in titled)
+        row.append(f'({cp:#x}, "{escaped}")')
+        if len(row) == 4:
+            lines.append("    " + ", ".join(row) + ",")
+            row = []
+    if row:
+        lines.append("    " + ", ".join(row) + ",")
+    lines.extend(
+        [
+            "];",
+            "",
+            "/// The full titlecase mapping for `c`, or `None` when it maps to itself.",
+            "pub fn title_mapping(c: char) -> Option<&'static str> {",
+            "    let cp = c as u32;",
+            "    TITLE_MAP",
+            "        .binary_search_by_key(&cp, |&(k, _)| k)",
+            "        .ok()",
+            "        .map(|i| TITLE_MAP[i].1)",
+            "}",
+        ]
+    )
     lines.extend(
         [
             "",
@@ -148,7 +233,7 @@ def main():
             "    /// binary search and the generator's range-merging rely on.",
             "    #[test]",
             "    fn tables_are_well_formed() {",
-            "        for table in [DIGIT, ALPHA, ALNUM, SPACE, UPPER, LOWER, CASED] {",
+            "        for table in [DIGIT, ALPHA, ALNUM, SPACE, UPPER, LOWER, CASED, CASE_IGNORABLE] {",
             "            let mut prev_end: Option<u32> = None;",
             "            for &(start, end) in table {",
             "                assert!(start <= end);",
@@ -173,6 +258,27 @@ def main():
             "                let linear = table.iter().any(|&(s, e)| s <= cp && cp <= e);",
             "                assert_eq!(in_table(table, c), linear, \"U+{cp:04X}\");",
             "            }",
+            "        }",
+            "    }",
+            "",
+            "    /// TITLE_MAP must be sorted by code point with no duplicates, every",
+            "    /// mapping must differ from its key, and `title_mapping` must agree",
+            "    /// with a linear scan.",
+            "    #[test]",
+            "    fn title_map_is_well_formed() {",
+            "        let mut prev: Option<u32> = None;",
+            "        for &(cp, mapped) in TITLE_MAP {",
+            "            if let Some(p) = prev {",
+            "                assert!(cp > p, \"unsorted or duplicate at {cp:#x}\");",
+            "            }",
+            "            assert!(!mapped.is_empty());",
+            "            assert_ne!(char::from_u32(cp).map(String::from).as_deref(), Some(mapped));",
+            "            prev = Some(cp);",
+            "        }",
+            "        for cp in 0..=0x10FFFFu32 {",
+            "            let Some(c) = char::from_u32(cp) else { continue };",
+            "            let linear = TITLE_MAP.iter().find(|&&(k, _)| k == cp).map(|&(_, v)| v);",
+            "            assert_eq!(title_mapping(c), linear, \"U+{cp:04X}\");",
             "        }",
             "    }",
             "}",
