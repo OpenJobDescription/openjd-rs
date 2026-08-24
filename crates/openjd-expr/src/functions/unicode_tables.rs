@@ -1115,16 +1115,23 @@ mod tests {
         }
     }
 
-    /// Exhaustive: `in_table` must agree with a linear scan for every
-    /// code point, covering all range-boundary edge cases.
+    /// Exhaustive: `in_table` must agree with a linear sweep for every
+    /// code point, covering all range-boundary edge cases. The sweep
+    /// uses a forward-advancing cursor over the ranges (same trick as
+    /// `verify()` in the generator) so the whole test is linear, not
+    /// quadratic — it must stay fast in the debug profile.
     #[test]
     fn binary_search_matches_linear_scan() {
         for table in [DIGIT, DECIMAL, SPACE, CASED] {
+            let mut idx = 0;
             for cp in 0..=0x10FFFFu32 {
                 let Some(c) = char::from_u32(cp) else {
                     continue;
                 };
-                let linear = table.iter().any(|&(s, e)| s <= cp && cp <= e);
+                while idx < table.len() && table[idx].1 < cp {
+                    idx += 1;
+                }
+                let linear = idx < table.len() && table[idx].0 <= cp;
                 assert_eq!(in_table(table, c), linear, "U+{cp:04X}");
             }
         }
@@ -1167,7 +1174,7 @@ mod tests {
 
     /// TITLE_MAP must be sorted by code point with no duplicates, every
     /// mapping must differ from its key, and `title_mapping` must agree
-    /// with a linear scan.
+    /// with a linear sweep (forward cursor, so the test stays linear).
     #[test]
     fn title_map_is_well_formed() {
         let mut prev: Option<u32> = None;
@@ -1182,11 +1189,16 @@ mod tests {
             );
             prev = Some(cp);
         }
+        let mut idx = 0;
         for cp in 0..=0x10FFFFu32 {
             let Some(c) = char::from_u32(cp) else {
                 continue;
             };
-            let linear = TITLE_MAP.iter().find(|&&(k, _)| k == cp).map(|&(_, v)| v);
+            while idx < TITLE_MAP.len() && TITLE_MAP[idx].0 < cp {
+                idx += 1;
+            }
+            let linear =
+                (idx < TITLE_MAP.len() && TITLE_MAP[idx].0 == cp).then(|| TITLE_MAP[idx].1);
             assert_eq!(title_mapping(c), linear, "U+{cp:04X}");
         }
     }
