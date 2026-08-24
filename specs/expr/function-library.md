@@ -481,6 +481,17 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   are ignored, and titlecase (Lt) characters are cased but neither upper
   nor lower. Regenerate the tables with the script when intentionally
   adopting a newer Unicode version.
+- **Whitespace trimming and splitting** (§2.2.4): `strip()`/`lstrip()`/
+  `rstrip()` without a `chars` argument and no-separator `split()`/
+  `rsplit()` trim and split on CPython's `Py_UNICODE_ISSPACE` set via the
+  same `SPACE` table as `isspace()` — Unicode `White_Space` plus the
+  information separators U+001C..U+001F, which Rust's
+  `str::trim`/`split_whitespace` (exactly `White_Space`) would miss.
+  The `int(string)`/`float(string)` conversions deliberately keep Rust's
+  `str::trim` instead: CPython's `int()`/`float()` accept `White_Space`
+  around the number but reject U+001C..U+001F (`int('\x1c5')` raises even
+  though `isspace('\x1c')` is `true`), so `White_Space` is the
+  CPython-exact set there.
 - **`int(string)` and `float(string)`** (§2.2.1) accept Unicode decimal
   digits, matching CPython: characters with `Numeric_Type=Decimal` (general
   category Nd, e.g. `'٣'` U+0663) are replaced with their ASCII values

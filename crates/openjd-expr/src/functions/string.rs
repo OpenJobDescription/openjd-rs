@@ -29,6 +29,17 @@ fn byte_to_char_offset(s: &str, byte_offset: usize) -> usize {
     s[..byte_offset].chars().count()
 }
 
+/// Python whitespace for `strip`/`lstrip`/`rstrip` and no-separator
+/// `split`/`rsplit`: CPython's `Py_UNICODE_ISSPACE`, via the generated
+/// `SPACE` table. This is Unicode `White_Space` (what Rust's
+/// `char::is_whitespace` tests) plus the information separators
+/// U+001C..U+001F, so Rust's `str::trim`/`split_whitespace` must not be
+/// used for these functions.
+fn is_python_space(c: char) -> bool {
+    use super::unicode_tables::{in_table, SPACE};
+    in_table(SPACE, c)
+}
+
 pub fn upper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -49,7 +60,9 @@ pub fn strip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             s.trim_matches(|c| chars.contains(&c)).to_string(),
         ))
     } else {
-        Ok(ExprValue::String(s.trim().to_string()))
+        Ok(ExprValue::String(
+            s.trim_matches(is_python_space).to_string(),
+        ))
     }
 }
 
@@ -62,7 +75,9 @@ pub fn lstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             s.trim_start_matches(|c| chars.contains(&c)).to_string(),
         ))
     } else {
-        Ok(ExprValue::String(s.trim_start().to_string()))
+        Ok(ExprValue::String(
+            s.trim_start_matches(is_python_space).to_string(),
+        ))
     }
 }
 
@@ -75,7 +90,9 @@ pub fn rstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
             s.trim_end_matches(|c| chars.contains(&c)).to_string(),
         ))
     } else {
-        Ok(ExprValue::String(s.trim_end().to_string()))
+        Ok(ExprValue::String(
+            s.trim_end_matches(is_python_space).to_string(),
+        ))
     }
 }
 
@@ -216,7 +233,8 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         // Whitespace split
         ctx.count_string_ops(s.len())?;
         let parts: Vec<ExprValue> = s
-            .split_whitespace()
+            .split(is_python_space)
+            .filter(|p| !p.is_empty())
             .map(|p| ExprValue::String(p.to_string()))
             .collect();
         return ExprValue::make_list_checked(ctx, parts, ExprType::STRING);
@@ -245,7 +263,8 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() == 1 {
         ctx.count_string_ops(s.len())?;
         let parts: Vec<ExprValue> = s
-            .split_whitespace()
+            .split(is_python_space)
+            .filter(|p| !p.is_empty())
             .map(|p| ExprValue::String(p.to_string()))
             .collect();
         return ExprValue::make_list_checked(ctx, parts, ExprType::STRING);

@@ -102,6 +102,22 @@ fn vulgar_fraction_to_float_error() {
 }
 
 #[test]
+fn information_separator_to_int_error() {
+    // CPython's int() trims Unicode White_Space but NOT the information
+    // separators U+001C..U+001F: int('\x1c5') raises even though
+    // isspace('\x1c') is true. Rust's str::trim matches White_Space
+    // exactly, so the conversion functions are CPython-exact as-is.
+    assert_err(
+        "int('\\x1c5')",
+        &[
+            "Cannot convert '\u{001c}5' to int\n",
+            "  int('\\x1c5')\n",
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
 fn operator_error_friendly_name() {
     assert_err(
         "'hello' + 5",

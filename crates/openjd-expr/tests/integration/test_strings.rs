@@ -283,6 +283,62 @@ fn isspace_no_break_space() {
     assert_eq!(eval("isspace('\u{00a0}')").to_display_string(), "true");
 }
 #[test]
+fn strip_information_separator() {
+    // str.strip() uses the same Py_UNICODE_ISSPACE set as isspace,
+    // including U+001C..U+001F — not Unicode White_Space, so Rust's
+    // str::trim misses them.
+    assert_eq!(
+        eval("strip('a\\x1cb\\x1c')").to_display_string(),
+        "a\u{001c}b"
+    );
+}
+#[test]
+fn lstrip_rstrip_information_separator() {
+    assert_eq!(
+        eval("lstrip('\\x1ca\\x1c')").to_display_string(),
+        "a\u{001c}"
+    );
+    assert_eq!(
+        eval("rstrip('\\x1ca\\x1c')").to_display_string(),
+        "\u{001c}a"
+    );
+}
+#[test]
+fn strip_no_break_space() {
+    // White_Space members keep working through the SPACE table.
+    assert_eq!(eval("strip('\\xa0a\\xa0')").to_display_string(), "a");
+}
+#[test]
+fn split_information_separator() {
+    // No-separator split()/rsplit() split on Py_UNICODE_ISSPACE runs too:
+    // 'a\x1cb'.split() == ['a', 'b'] in Python.
+    assert_eq!(
+        eval("split('a\\x1cb')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a\\x1db')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+}
+#[test]
+fn split_mixed_whitespace_runs() {
+    // Runs of mixed whitespace collapse and leading/trailing runs drop,
+    // like str.split(): ' a\x1c b\x1c'.split() == ['a', 'b'].
+    assert_eq!(
+        eval("split(' a\\x1c b\\x1c')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+}
+#[test]
+fn int_trims_white_space_but_not_information_separators() {
+    // CPython's int()/float() trim Unicode White_Space around the number
+    // (NBSP works) but reject U+001C..U+001F — a narrower set than
+    // str.strip(). Rust's str::trim is exactly White_Space, so the
+    // conversion functions are CPython-exact as-is.
+    assert_eq!(eval("int('\\xa05\\xa0')").to_display_string(), "5");
+}
+#[test]
 fn islower_ignores_uncased_letters() {
     // Python islower ignores uncased characters (CJK): 'a五' is lowercase.
     assert_eq!(eval("islower('a\u{4e94}')").to_display_string(), "true");
