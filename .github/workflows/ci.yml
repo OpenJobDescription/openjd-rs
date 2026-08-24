@@ -27,7 +27,7 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust nightly with rustfmt
         run: |
           rustup toolchain install nightly --profile minimal --component rustfmt
@@ -43,7 +43,7 @@ jobs:
     name: cargo-deny (licenses, advisories, bans, sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: Restore helper manifest
@@ -65,7 +65,7 @@ jobs:
     name: Compliance (copyright headers)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Check copyright headers
         run: bash scripts/check_copyright_headers.sh
 
@@ -80,7 +80,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable with clippy
         shell: bash
         run: |
@@ -216,7 +216,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable with clippy
         run: |
           rustup toolchain install stable --profile minimal --component clippy
@@ -269,7 +269,7 @@ jobs:
         if: runner.os != 'Windows'
         run: chmod +x bin/${{ matrix.binary }}
       - name: Checkout openjd-specifications
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           repository: OpenJobDescription/openjd-specifications
           path: openjd-specifications
@@ -293,7 +293,7 @@ jobs:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install MSRV toolchain
         run: |
           rustup toolchain install 1.94.1 --profile minimal
@@ -315,7 +315,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable
         run: |
           rustup toolchain install stable --profile minimal
@@ -343,7 +343,7 @@ jobs:
       matrix:
         variant: [localuser, ldap]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Run cross-user tests
         run: |
           if [ "${{ matrix.variant }}" = "ldap" ]; then
@@ -362,7 +362,7 @@ jobs:
     needs: build-test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable
         shell: bash
         run: |
@@ -423,7 +423,7 @@ jobs:
     name: openjd-for-js (WASM + JS tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable with wasm32 target
         shell: bash
         run: |

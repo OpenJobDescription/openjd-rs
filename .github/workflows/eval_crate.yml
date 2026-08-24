@@ -211,7 +211,7 @@ jobs:
       # The skill resolves sibling repos relative to the openjd-rs root, so
       # everything is checked out as siblings INSIDE the workspace.
       - name: Check out openjd-rs
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
         with:
           # In PR mode evaluate the PR's own code; otherwise the default ref.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -219,7 +219,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out openjd-specifications (canonical specs)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
         with:
           repository: OpenJobDescription/openjd-specifications
           ref: mainline
@@ -232,7 +232,7 @@ jobs:
       # no feature branches: this job holds Bedrock credentials, so what it
       # checks out is a trust decision, not a convenience.
       - name: Check out Python reference
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
         with:
           repository: ${{ fromJSON('{"expr":"OpenJobDescription/openjd-model-for-python","model":"OpenJobDescription/openjd-model-for-python","sessions":"OpenJobDescription/openjd-sessions-for-python","cli":"OpenJobDescription/openjd-cli"}')[matrix.crate] }}
           ref: mainline
@@ -266,7 +266,7 @@ jobs:
 
       # ---- Bedrock auth: the same shape as the org's review workflow ----
       - name: Check out workflow tooling (pinned requirements)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
         with:
           repository: aws-deadline/.github
           ref: mainline
@@ -460,7 +460,7 @@ jobs:
       # writes only FETCH_HEAD, so a later `git checkout <branch>` would fail and
       # silently recreate the branch from the shallow tip.
       - name: Check out the default branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
