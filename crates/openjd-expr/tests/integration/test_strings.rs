@@ -310,6 +310,57 @@ fn islower_pharyngeal_fricative() {
     assert_eq!(eval("islower('\u{0295}')").to_display_string(), "true");
 }
 
+// === int()/float() accept Unicode decimal digits (Nd), like CPython ===
+// CPython's int() and float() replace Numeric_Type=Decimal characters with
+// their ASCII values before parsing, so isdigit(x) passing implies int(x)
+// succeeds for Nd digits. Expected values are CPython's answers (verified
+// against CPython 3.14 / Unicode 16.0.0).
+#[test]
+fn int_arabic_indic_digit() {
+    // int('٣') == 3
+    assert_eq!(eval("int('\u{0663}')").to_display_string(), "3");
+}
+#[test]
+fn int_arabic_indic_digits_multi() {
+    // int('١٢٣') == 123
+    assert_eq!(
+        eval("int('\u{0661}\u{0662}\u{0663}')").to_display_string(),
+        "123"
+    );
+}
+#[test]
+fn int_mixed_ascii_and_arabic_indic() {
+    // CPython transforms per-character, so mixed scripts parse: int('12٣') == 123.
+    assert_eq!(eval("int('12\u{0663}')").to_display_string(), "123");
+}
+#[test]
+fn int_negative_arabic_indic() {
+    assert_eq!(eval("int('-\u{0663}')").to_display_string(), "-3");
+}
+#[test]
+fn int_devanagari_and_fullwidth_digits() {
+    // U+0967 DEVANAGARI DIGIT ONE, U+FF17 FULLWIDTH DIGIT SEVEN.
+    assert_eq!(eval("int('\u{0967}\u{ff17}')").to_display_string(), "17");
+}
+#[test]
+fn int_isdigit_guard_pattern_nd_digit() {
+    // The guard pattern from templates: passing isdigit implies int succeeds
+    // for Nd digits (matching the CPython pair of semantics).
+    assert_eq!(
+        eval("int('\u{0663}') if isdigit('\u{0663}') else 0").to_display_string(),
+        "3"
+    );
+}
+#[test]
+fn float_arabic_indic_digits() {
+    // float('٣.٥') == 3.5 — the '.' is ASCII; Nd digits normalize around it.
+    assert_eq!(
+        eval("float('\u{0663}.\u{0665}')").to_display_string(),
+        "3.5"
+    );
+    assert_eq!(eval("float('\u{0662}')").to_display_string(), "2.0");
+}
+
 // === Python str.title / str.capitalize parity ===
 // Expected values are CPython's answers (verified against CPython 3.14 /
 // Unicode 16.0.0).

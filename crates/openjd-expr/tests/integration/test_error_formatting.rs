@@ -74,6 +74,34 @@ fn type_error_at_end() {
 }
 
 #[test]
+fn superscript_digit_to_int_error() {
+    // U+00B2 SUPERSCRIPT TWO: isdigit('²') is true, but it has
+    // Numeric_Type=Digit, not Decimal — CPython's int('²') raises too.
+    assert_err(
+        "int('\u{00b2}')",
+        &[
+            "Cannot convert '\u{00b2}' to int\n",
+            "  int('\u{00b2}')\n",
+            "  ^~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn vulgar_fraction_to_float_error() {
+    // U+00BD VULGAR FRACTION ONE HALF (Numeric_Type=Numeric): rejected by
+    // CPython's float() as well.
+    assert_err(
+        "float('\u{00bd}')",
+        &[
+            "Cannot convert '\u{00bd}' to float\n",
+            "  float('\u{00bd}')\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
 fn operator_error_friendly_name() {
     assert_err(
         "'hello' + 5",

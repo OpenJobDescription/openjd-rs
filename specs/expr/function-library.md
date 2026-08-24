@@ -481,6 +481,20 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   are ignored, and titlecase (Lt) characters are cased but neither upper
   nor lower. Regenerate the tables with the script when intentionally
   adopting a newer Unicode version.
+- **`int(string)` and `float(string)`** (§2.2.1) accept Unicode decimal
+  digits, matching CPython: characters with `Numeric_Type=Decimal` (general
+  category Nd, e.g. `'٣'` U+0663) are replaced with their ASCII values
+  before parsing, via `decimal_digit_value()` backed by the generated
+  `DECIMAL` table. This keeps the guard pattern
+  `int(Param.X) if isdigit(Param.X) else 0` sound for Nd digits.
+  `Numeric_Type=Digit` characters like `'²'` remain errors — `isdigit('²')`
+  is `true` but `int('²')` fails, exactly as in CPython. Two deliberate
+  differences from CPython remain: underscores between digits are rejected
+  (`int('1_0')` is an error here, `10` in CPython) because expression
+  strings come from template data where `'1_0'` is more likely a mistake
+  than a readability separator, and the implicit string→int/float coercion
+  of format-string results and parameter values (`ExprValue::from_str_coerce`)
+  stays ASCII-only.
 - **`title()` and `capitalize()`** (§2.2.4) also match Python exactly.
   `title()` follows CPython's `do_title`: a character is titlecased when the
   previous character is not cased, lowercased otherwise — so digits and

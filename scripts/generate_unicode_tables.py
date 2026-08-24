@@ -21,6 +21,7 @@ specs/expr/function-library.md to match.
 
 Table definitions (per CPython Objects/unicodectype.c semantics):
 - DIGIT:   chr(cp).isdigit()   — Numeric_Type = Decimal or Digit
+- DECIMAL: chr(cp).isdecimal() — Numeric_Type = Decimal (general category Nd)
 - ALPHA:   chr(cp).isalpha()   — general category Lu/Ll/Lt/Lm/Lo
 - ALNUM:   chr(cp).isalnum()   — ALPHA or Numeric_Type != None
 - SPACE:   chr(cp).isspace()   — Zs/Zl/Zp or bidirectional WS/B/S
@@ -33,6 +34,15 @@ Table definitions (per CPython Objects/unicodectype.c semantics):
 str.isupper()/str.islower() are not per-character predicates: they require at
 least one cased character and that every cased character is upper/lowercase.
 The CASED table supports that composition in Rust.
+
+The DECIMAL table additionally backs `decimal_digit_value()`, which maps a
+Numeric_Type=Decimal character to its digit value 0-9. CPython's int() and
+float() replace such characters with their ASCII equivalents before parsing
+(Python/pystrtod.c via _PyUnicode_TransformDecimalAndSpaceToASCII), so the
+expression language's int()/float() do the same. UAX #44 guarantees decimal
+digits occur in contiguous 0-9 runs; the generator verifies every DECIMAL
+range is a whole number of zero-aligned runs so the Rust side can compute
+the value as (cp - range_start) % 10.
 
 Additionally TITLE_MAP holds the full titlecase mapping (ToTitleFull) for
 every code point whose titlecase differs from itself, probed as the
@@ -92,6 +102,11 @@ def is_case_ignorable(ch):
 
 TABLES = [
     ("DIGIT", "str.isdigit code points (Numeric_Type = Decimal or Digit).", lambda c: c.isdigit()),
+    (
+        "DECIMAL",
+        "str.isdecimal code points (Numeric_Type = Decimal, category Nd).",
+        lambda c: c.isdecimal(),
+    ),
     ("ALPHA", "str.isalpha code points (general category Lu/Ll/Lt/Lm/Lo).", lambda c: c.isalpha()),
     ("ALNUM", "str.isalnum code points (ALPHA or any Numeric_Type).", lambda c: c.isalnum()),
     ("SPACE", "str.isspace code points (Zs/Zl/Zp or bidi WS/B/S).", lambda c: c.isspace()),
@@ -136,6 +151,22 @@ def verify(table, predicate):
         assert in_table == expected, f"table/CPython mismatch at U+{cp:04X}"
 
 
+def verify_decimal_alignment(ranges):
+    """DECIMAL ranges must be whole zero-aligned 0-9 runs.
+
+    decimal_digit_value() in the generated Rust computes the digit value as
+    (cp - range_start) % 10, which is only correct if every range starts at
+    a digit with value 0 and each successive code point increments the value
+    mod 10. Check the exact value of every code point against unicodedata.
+    """
+    for start, end in ranges:
+        assert (end - start + 1) % 10 == 0, f"DECIMAL range U+{start:04X}..U+{end:04X} not runs of 10"
+        for cp in range(start, end + 1):
+            expected = (cp - start) % 10
+            actual = unicodedata.decimal(chr(cp))
+            assert actual == expected, f"U+{cp:04X}: decimal value {actual} != {expected}"
+
+
 def main():
     lines = [
         "// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.",
@@ -172,6 +203,8 @@ def main():
     for name, doc, predicate in TABLES:
         ranges = build_ranges(predicate)
         verify(ranges, predicate)
+        if name == "DECIMAL":
+            verify_decimal_alignment(ranges)
         print(f"{name}: {len(ranges)} ranges, {sum(e - s + 1 for s, e in ranges)} code points")
         lines.append("")
         lines.append(f"/// {doc}")
@@ -186,6 +219,34 @@ def main():
         if row:
             lines.append("    " + ", ".join(row) + ",")
         lines.append("];")
+    lines.extend(
+        [
+            "",
+            "/// The decimal digit value (0-9) of `c` when it has Numeric_Type=Decimal",
+            "/// (general category Nd), or `None` otherwise.",
+            "///",
+            "/// CPython's int() and float() replace such characters with their ASCII",
+            "/// equivalents before parsing; the expression language's int()/float()",
+            "/// use this to do the same. Every DECIMAL range is a whole number of",
+            "/// zero-aligned 0-9 runs (verified by the generator), so the value is",
+            "/// `(cp - range_start) % 10`.",
+            "pub fn decimal_digit_value(c: char) -> Option<u32> {",
+            "    let cp = c as u32;",
+            "    DECIMAL",
+            "        .binary_search_by(|&(start, end)| {",
+            "            if end < cp {",
+            "                std::cmp::Ordering::Less",
+            "            } else if start > cp {",
+            "                std::cmp::Ordering::Greater",
+            "            } else {",
+            "                std::cmp::Ordering::Equal",
+            "            }",
+            "        })",
+            "        .ok()",
+            "        .map(|i| (cp - DECIMAL[i].0) % 10)",
+            "}",
+        ]
+    )
     title_map = build_title_map()
     print(f"TITLE_MAP: {len(title_map)} entries")
     lines.extend(
@@ -233,7 +294,7 @@ def main():
             "    /// binary search and the generator's range-merging rely on.",
             "    #[test]",
             "    fn tables_are_well_formed() {",
-            "        for table in [DIGIT, ALPHA, ALNUM, SPACE, UPPER, LOWER, CASED, CASE_IGNORABLE] {",
+            "        for table in [DIGIT, DECIMAL, ALPHA, ALNUM, SPACE, UPPER, LOWER, CASED, CASE_IGNORABLE] {",
             "            let mut prev_end: Option<u32> = None;",
             "            for &(start, end) in table {",
             "                assert!(start <= end);",
@@ -252,11 +313,44 @@ def main():
             "    /// code point, covering all range-boundary edge cases.",
             "    #[test]",
             "    fn binary_search_matches_linear_scan() {",
-            "        for table in [DIGIT, SPACE, CASED] {",
+            "        for table in [DIGIT, DECIMAL, SPACE, CASED] {",
             "            for cp in 0..=0x10FFFFu32 {",
             "                let Some(c) = char::from_u32(cp) else { continue };",
             "                let linear = table.iter().any(|&(s, e)| s <= cp && cp <= e);",
             "                assert_eq!(in_table(table, c), linear, \"U+{cp:04X}\");",
+            "            }",
+            "        }",
+            "    }",
+            "",
+            "    /// Every DECIMAL range must be a whole number of zero-aligned 0-9",
+            "    /// runs — the invariant `decimal_digit_value`'s `% 10` computation",
+            "    /// relies on (the generator verifies the per-code-point values",
+            "    /// against unicodedata).",
+            "    #[test]",
+            "    fn decimal_ranges_are_zero_aligned_runs() {",
+            "        for &(start, end) in DECIMAL {",
+            "            assert_eq!((end - start + 1) % 10, 0, \"U+{start:04X}..U+{end:04X}\");",
+            "        }",
+            "    }",
+            "",
+            "    /// Spot-check `decimal_digit_value` against known code points, and",
+            "    /// confirm DECIMAL is a subset of DIGIT.",
+            "    #[test]",
+            "    fn decimal_digit_value_known_points() {",
+            "        for (i, c) in ('0'..='9').enumerate() {",
+            "            assert_eq!(decimal_digit_value(c), Some(i as u32));",
+            "        }",
+            "        assert_eq!(decimal_digit_value('\\u{0663}'), Some(3)); // ARABIC-INDIC THREE",
+            "        assert_eq!(decimal_digit_value('\\u{0967}'), Some(1)); // DEVANAGARI ONE",
+            "        assert_eq!(decimal_digit_value('\\u{ff17}'), Some(7)); // FULLWIDTH SEVEN",
+            "        assert_eq!(decimal_digit_value('\\u{1d7d8}'), Some(0)); // MATH DOUBLE-STRUCK ZERO",
+            "        assert_eq!(decimal_digit_value('\\u{00b2}'), None); // SUPERSCRIPT TWO (No)",
+            "        assert_eq!(decimal_digit_value('\\u{216b}'), None); // ROMAN NUMERAL TWELVE (Nl)",
+            "        assert_eq!(decimal_digit_value('a'), None);",
+            "        for cp in 0..=0x10FFFFu32 {",
+            "            let Some(c) = char::from_u32(cp) else { continue };",
+            "            if decimal_digit_value(c).is_some() {",
+            "                assert!(in_table(DIGIT, c), \"U+{cp:04X} decimal but not DIGIT\");",
             "            }",
             "        }",
             "    }",
