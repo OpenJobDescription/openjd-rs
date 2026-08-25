@@ -462,6 +462,49 @@ fn make_list_checked_split_fn() {
 }
 
 #[test]
+fn title_checks_memory_before_char_collect() {
+    // title() collects the input into a transient `Vec<char>` whose upper
+    // bound is 4 * s.len() bytes. The memory check runs *before* the
+    // collect, so a 100 kB input under a 150 kB budget (input fits, the
+    // 400 kB char buffer bound does not) errors without allocating it.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("a".repeat(100_000)))
+        .unwrap();
+    let e = ParsedExpression::new("title(Param.S)")
+        .and_then(|p| {
+            p.with_memory_limit(150_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Expression memory usage") && e.contains("exceeded limit (150000 bytes)"),
+        "expected memory-limit error from title(), got:\n{e}"
+    );
+}
+
+#[test]
+fn capitalize_checks_memory_before_char_collect() {
+    // Same transient Vec<char> bound as title() — see above.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("a".repeat(100_000)))
+        .unwrap();
+    let e = ParsedExpression::new("capitalize(Param.S)")
+        .and_then(|p| {
+            p.with_memory_limit(150_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Expression memory usage") && e.contains("exceeded limit (150000 bytes)"),
+        "expected memory-limit error from capitalize(), got:\n{e}"
+    );
+}
+
+#[test]
 fn make_list_checked_small_lists_succeed() {
     // Sanity check: small lists well within the memory cap still work.
     let r = eval_bounded("[1, 2, 3, 4, 5]", 10_000).unwrap();

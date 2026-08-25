@@ -413,8 +413,10 @@ pub fn title_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     // boundaries are uncased characters — digits and punctuation both
     // restart a word ('1st' -> '1St'), and uncased letters like CJK
     // ideographs do too.
+    // Check before collecting so the Vec<char> is never allocated past
+    // the budget; char count <= byte count, so s.len() is an upper bound.
+    ctx.check_memory(s.len().saturating_mul(std::mem::size_of::<char>()))?;
     let chars: Vec<char> = s.chars().collect();
-    ctx.check_memory(chars.len() * std::mem::size_of::<char>())?;
     let mut result = String::with_capacity(s.len());
     let mut prev_cased = false;
     for i in 0..chars.len() {
@@ -434,8 +436,10 @@ pub fn capitalize_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     // Python str.capitalize: titlecase the first character (ToTitleFull —
     // uppercasing is wrong for titlecase digraphs like U+01C6), lowercase
     // the rest with Final_Sigma context.
+    // Check before collecting so the Vec<char> is never allocated past
+    // the budget; char count <= byte count, so s.len() is an upper bound.
+    ctx.check_memory(s.len().saturating_mul(std::mem::size_of::<char>()))?;
     let chars: Vec<char> = s.chars().collect();
-    ctx.check_memory(chars.len() * std::mem::size_of::<char>())?;
     let mut result = String::with_capacity(s.len());
     if !chars.is_empty() {
         push_titled(chars[0], &mut result);
