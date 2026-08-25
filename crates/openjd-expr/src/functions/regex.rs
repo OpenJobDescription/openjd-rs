@@ -309,18 +309,23 @@ fn check_ast_portability(
     }
 
     /// Require capture group names to be valid Python identifiers.
-    /// `regex_syntax` additionally permits `.`, `[`, and `]` in names
-    /// (non-first position); Python's `re` raises "bad character in group
-    /// name" for those, so a pattern accepted here would fail outright
-    /// under the Python implementation.
+    /// `regex_syntax` is more permissive: it allows `.`, `[`, and `]` in
+    /// names (non-first position) and, more broadly, checks Rust's
+    /// `char::is_alphanumeric` (general categories) rather than Python's
+    /// XID_Start/XID_Continue — e.g. `²` (category No) is alphanumeric but
+    /// not XID_Continue. CPython's `re` validates names with
+    /// `str.isidentifier()` and raises "bad character in group name", so a
+    /// pattern accepted here with a looser rule would fail outright under
+    /// the Python implementation. The IDENT_START/IDENT_CONTINUE tables are
+    /// generated from CPython's `str.isidentifier()` itself.
     fn check_capture_name(name: &str) -> Result<(), ExpressionError> {
+        use super::unicode_tables::{in_table, IDENT_CONTINUE, IDENT_START};
         let valid = name.chars().enumerate().all(|(i, c)| {
-            c == '_'
-                || if i == 0 {
-                    c.is_alphabetic()
-                } else {
-                    c.is_alphanumeric()
-                }
+            if i == 0 {
+                in_table(IDENT_START, c)
+            } else {
+                in_table(IDENT_CONTINUE, c)
+            }
         });
         if valid {
             Ok(())

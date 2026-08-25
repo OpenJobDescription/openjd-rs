@@ -1660,8 +1660,30 @@ fn capture_name_with_bracket_rejected() {
     );
 }
 #[test]
+fn capture_name_with_non_xid_alphanumeric_rejected() {
+    // `²` (U+00B2, category No) passes Rust's char::is_alphanumeric but is
+    // not XID_Continue: "x²".isidentifier() is false, and CPython raises
+    // "bad character in group name 'x²'".
+    assert_err(
+        "re_search('ab', r'(?P<x\u{b2}>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'x\u{b2}' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<x\u{b2}>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
 fn capture_name_with_underscore_and_digits_accepted() {
     assert!(eval("re_search('ab', r'(?P<my_name1>a)b')").is_list());
+}
+#[test]
+fn capture_name_non_ascii_xid_accepted() {
+    // Non-ASCII XID characters are valid Python identifiers: "имя" and
+    // "名前" pass str.isidentifier(), and CPython accepts them as group
+    // names. The check must not over-reject them.
+    assert!(eval("re_search('ab', r'(?P<\u{438}\u{43c}\u{44f}>a)b')").is_list());
+    assert!(eval("re_search('ab', r'(?P<\u{540d}\u{524d}>a)b')").is_list());
 }
 
 // === TestRegexEscapedPatternsAccepted ===

@@ -30,6 +30,15 @@ Table definitions (per CPython Objects/unicodectype.c semantics):
 - CASED:   UPPER or LOWER or general category Lt
 - CASE_IGNORABLE: the Unicode Case_Ignorable property, probed from CPython's
   Final_Sigma handling in str.lower (unicodedata does not expose it)
+- IDENT_START:    valid first characters of a Python identifier
+  (XID_Start plus '_'), probed via str.isidentifier()
+- IDENT_CONTINUE: valid non-first identifier characters (XID_Continue),
+  probed via ('a' + c).isidentifier()
+
+IDENT_START/IDENT_CONTINUE back the regex capture-group-name validation:
+CPython's re module (sre_parse) checks group names with name.isidentifier(),
+so probing isidentifier() reproduces the exact rule, including the NFKC-free
+per-character form (isidentifier does not normalize).
 
 str.isupper()/str.islower() are not per-character predicates: they require at
 least one cased character and that every cased character is upper/lowercase.
@@ -117,6 +126,16 @@ TABLES = [
         "CASE_IGNORABLE",
         "Case_Ignorable code points (for the Final_Sigma context rule).",
         is_case_ignorable,
+    ),
+    (
+        "IDENT_START",
+        "Valid first characters of a Python identifier (XID_Start + '_'),\n/// probed via str.isidentifier().",
+        lambda c: c.isidentifier(),
+    ),
+    (
+        "IDENT_CONTINUE",
+        "Valid non-first Python identifier characters (XID_Continue),\n/// probed via ('a' + c).isidentifier().",
+        lambda c: ("a" + c).isidentifier(),
     ),
 ]
 
@@ -294,7 +313,7 @@ def main():
             "    /// binary search and the generator's range-merging rely on.",
             "    #[test]",
             "    fn tables_are_well_formed() {",
-            "        for table in [DIGIT, DECIMAL, ALPHA, ALNUM, SPACE, UPPER, LOWER, CASED, CASE_IGNORABLE] {",
+            f"        for table in [{', '.join(name for name, _, _ in TABLES)}] {{",
             "            let mut prev_end: Option<u32> = None;",
             "            for &(start, end) in table {",
             "                assert!(start <= end);",

@@ -528,8 +528,13 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   are erased by AST→HIR translation and must be rejected at the AST level:
   Unicode property classes (`\p{...}`/`\P{...}`), the `(?<name>...)` capture
   group spelling (Python requires `(?P<name>...)`), capture group names
-  that are not valid Python identifiers (`regex_syntax` also permits `.`,
-  `[`, `]`; Python raises "bad character in group name"), POSIX character
+  that are not valid Python identifiers — checked against the
+  `IDENT_START`/`IDENT_CONTINUE` tables generated from CPython's
+  `str.isidentifier()` (XID_Start/XID_Continue plus `_`), matching the
+  exact rule `sre_parse` applies; `regex_syntax` is more permissive,
+  allowing `.`, `[`, `]` and any `char::is_alphanumeric` character (e.g.
+  `²`, category No, which is not XID_Continue), where Python raises "bad
+  character in group name" — POSIX character
   classes (`[[:alpha:]]`), character class set operators (`--`, `&&`,
   `~~`), nested character classes (`[a[b]]`), Rust-only inline flags (`U`
   swap greed, `R` CRLF mode, negated `u`, and bare global negation
