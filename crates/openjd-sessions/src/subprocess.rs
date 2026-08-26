@@ -448,6 +448,102 @@ mod platform {
 
 use platform::*;
 
+/// A process node whose creation time was successfully read and validated
+/// against its parent during tree collection.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ValidatedProcess {
+    pid: u32,
+    creation_time: u64,
+}
+
+/// Collect the process tree rooted at `root_pid` in breadth-first order,
+/// validating every parent->child edge against process creation times.
+///
+/// Walks the `parents` snapshot (a list of `(pid, ppid)` pairs) with a
+/// visited set instead of recursing. Both details matter:
+/// `th32ParentProcessID` is recorded at child creation time, so PID reuse
+/// can make the recorded parent graph cyclic (a dead ancestor's PID reused
+/// by a descendant). The previous recursive implementation had no cycle
+/// guard and overflowed the thread's stack (0xc00000fd) when it hit such a
+/// cycle.
+///
+/// On top of the cycle guard this mirrors psutil's `Process.children()`
+/// PID-reuse guard, which the original Python->Rust port dropped: a true
+/// child is always created at-or-after its parent, so an edge (child, ppid)
+/// is accepted only when `ppid` is an already-accepted node AND the child's
+/// creation time is `>=` that parent's. A stale edge (the parent PID was
+/// reused after the real parent exited) has a child older than the recorded
+/// parent and always fails the check. We fail closed: an edge whose child
+/// creation time is unreadable is skipped, preferring to under-kill rather
+/// than kill an unrelated live process. If the ROOT's creation time is
+/// unreadable we return an empty `Vec` (callers fall back to killing just
+/// the root by other means).
+#[cfg(any(windows, test))]
+fn collect_tree_validated(
+    root_pid: u32,
+    parents: &[(u32, u32)],
+    creation_time: &mut dyn FnMut(u32) -> Option<u64>,
+) -> Vec<ValidatedProcess> {
+    use std::collections::{HashMap, HashSet};
+
+    // Fail closed: without the root's creation time we cannot validate any
+    // edge, so collect nothing and let the caller decide how to kill root.
+    let Some(root_ct) = creation_time(root_pid) else {
+        return Vec::new();
+    };
+
+    let mut ctimes: HashMap<u32, u64> = HashMap::from([(root_pid, root_ct)]);
+    let mut visited: HashSet<u32> = HashSet::from([root_pid]);
+    let mut result: Vec<ValidatedProcess> = vec![ValidatedProcess {
+        pid: root_pid,
+        creation_time: root_ct,
+    }];
+
+    let mut i = 0;
+    while i < result.len() {
+        let parent = result[i];
+        i += 1;
+        for &(child, ppid) in parents {
+            // Only descend from the node we are currently processing, and
+            // visit each child once (this is the cycle/duplicate guard).
+            if ppid != parent.pid || !visited.insert(child) {
+                continue;
+            }
+            // Resolve the child's creation time, caching callback results.
+            let child_ct = match ctimes.get(&child) {
+                Some(&ct) => ct,
+                None => {
+                    // Fail closed: unreadable child creation time skips the edge.
+                    let Some(ct) = creation_time(child) else {
+                        continue;
+                    };
+                    ctimes.insert(child, ct);
+                    ct
+                }
+            };
+            // A true child is never older than its parent.
+            if child_ct >= parent.creation_time {
+                result.push(ValidatedProcess {
+                    pid: child,
+                    creation_time: child_ct,
+                });
+            }
+        }
+    }
+    result
+}
+
+/// Kill-time revalidation predicate guarding the TOCTOU window between tree
+/// collection and `TerminateProcess`: a PID collected earlier could be
+/// reused by an unrelated process before we terminate it. Returns `true`
+/// only when the process currently at that PID reports exactly the creation
+/// time recorded at collection.
+#[cfg(any(windows, test))]
+fn process_identity_matches(expected_creation_time: u64, current: Option<u64>) -> bool {
+    current == Some(expected_creation_time)
+}
+
 /// Write cancel_info.json to the working directory as required by the OpenJD spec
 /// for NotifyThenTerminate cancelation.
 fn write_cancel_info(working_dir: &Path, terminate_delay: Duration) {
@@ -2000,5 +2096,95 @@ mod tests {
             "Non-zero exit with cancelled token should be Canceled, not {:?}",
             result.state
         );
+    }
+}
+
+#[cfg(test)]
+mod collect_tree_validated_tests {
+    use super::*;
+
+    /// Build a `creation_time` callback from a slice of `(pid, ctime)` pairs.
+    /// Any pid absent from the slice reports an unreadable creation time.
+    fn ctimes_from(pairs: &[(u32, u64)]) -> impl FnMut(u32) -> Option<u64> + '_ {
+        move |pid| pairs.iter().find(|(p, _)| *p == pid).map(|(_, ct)| *ct)
+    }
+
+    fn vp(pid: u32, creation_time: u64) -> ValidatedProcess {
+        ValidatedProcess { pid, creation_time }
+    }
+
+    #[test]
+    fn collects_true_descendants_in_bfs_order() {
+        let parents = [(20u32, 10u32), (30, 20)];
+        let mut ct = ctimes_from(&[(10, 100), (20, 200), (30, 300)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 100), vp(20, 200), vp(30, 300)]);
+    }
+
+    #[test]
+    fn rejects_stale_edge_child_older_than_parent() {
+        let parents = [(40u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 500), (40, 100)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 500)]);
+    }
+
+    #[test]
+    fn rejects_child_with_unreadable_creation_time() {
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 100)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 100)]);
+    }
+
+    #[test]
+    fn returns_empty_when_root_ctime_unreadable() {
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(20, 200)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, Vec::<ValidatedProcess>::new());
+    }
+
+    #[test]
+    fn stale_cycle_terminates() {
+        let parents = [(20u32, 10u32), (10, 20)];
+        let mut ct = ctimes_from(&[(10, 500), (20, 100)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 500)]);
+    }
+
+    #[test]
+    fn accepts_equal_creation_time() {
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 100), (20, 100)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 100), vp(20, 100)]);
+    }
+
+    #[test]
+    fn prunes_entire_subtree_below_rejected_edge() {
+        let parents = [(20u32, 10u32), (30, 20)];
+        let mut ct = ctimes_from(&[(10, 500), (20, 100), (30, 600)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 500)]);
+    }
+
+    #[test]
+    fn equal_time_cycle_terminates_without_duplicates() {
+        let parents = [(20u32, 10u32), (10, 20)];
+        let mut ct = ctimes_from(&[(10, 100), (20, 100)]);
+        let got = collect_tree_validated(10, &parents, &mut ct);
+        assert_eq!(got, vec![vp(10, 100), vp(20, 100)]);
+    }
+
+    #[test]
+    fn identity_match_rejects_changed_creation_time() {
+        assert!(!process_identity_matches(200, Some(900)));
+        assert!(!process_identity_matches(200, None));
+    }
+
+    #[test]
+    fn identity_match_accepts_same_creation_time() {
+        assert!(process_identity_matches(200, Some(200)));
     }
 }
