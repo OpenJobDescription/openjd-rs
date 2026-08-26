@@ -455,7 +455,7 @@ mod platform {
                 None => {
                     // Could not capture root identity at schedule time; fall
                     // back to the previous immediate tree-kill behavior.
-                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: could not capture root identity at schedule time, falling back to unvalidated tree kill");
+                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: could not capture root identity at schedule time, falling back to best-effort tree kill (validated if root is still readable)");
                     kill_process_tree(pid as u32);
                 }
             }
