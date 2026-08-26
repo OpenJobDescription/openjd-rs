@@ -321,8 +321,11 @@ mod platform {
         let mut kernel = FILETIME::default();
         let mut user = FILETIME::default();
         let ok = unsafe {
-            // All four out-params are valid, writable FILETIME slots; we
-            // only consume `creation`.
+            // SAFETY: `handle` is a live process handle supplied by the
+            // caller (opened via a successful OpenProcess) granting at least
+            // PROCESS_QUERY_LIMITED_INFORMATION. All four out-params are
+            // valid, writable FILETIME slots on this stack frame; we only
+            // consume `creation`.
             GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).is_ok()
         };
         if !ok {
@@ -335,9 +338,15 @@ mod platform {
     ///
     /// Fail closed: any failure to open the process or read its times
     /// returns `None`, and callers treat `None` as "cannot validate, do not
-    /// kill".
+    /// kill". `PROCESS_QUERY_LIMITED_INFORMATION` can be denied on protected
+    /// (PPL) processes, in which case the candidate is skipped: a
+    /// fail-closed under-kill by design.
     fn process_creation_time(pid: u32) -> Option<u64> {
         unsafe {
+            // SAFETY: OpenProcess is called with a valid access mask and
+            // returns a handle we own; on success we read its times and
+            // CloseHandle it on every path out of this block. On failure the
+            // `?` short-circuits before any handle exists to leak.
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
             let ct = creation_time_from_handle(handle);
             let _ = CloseHandle(handle);
@@ -356,6 +365,12 @@ mod platform {
     /// terminate was issued.
     fn kill_process_checked(target: &ValidatedProcess) -> bool {
         unsafe {
+            // SAFETY: OpenProcess returns a handle we own, granting both
+            // query and terminate rights; it is CloseHandle'd on every
+            // return path below (open-failure returns before a handle
+            // exists). The same handle backs both the identity read and the
+            // TerminateProcess, so no PID reuse can slip between check and
+            // kill.
             let Ok(handle) = OpenProcess(
                 PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
                 false,
@@ -561,16 +576,25 @@ struct ValidatedProcess {
 /// cycle.
 ///
 /// On top of the cycle guard this mirrors psutil's `Process.children()`
-/// PID-reuse guard, which the original Python->Rust port dropped: a true
-/// child is always created at-or-after its parent, so an edge (child, ppid)
-/// is accepted only when `ppid` is an already-accepted node AND the child's
-/// creation time is `>=` that parent's. A stale edge (the parent PID was
-/// reused after the real parent exited) has a child older than the recorded
-/// parent and always fails the check. We fail closed: an edge whose child
-/// creation time is unreadable is skipped, preferring to under-kill rather
-/// than kill an unrelated live process. If the ROOT's creation time is
-/// unreadable we return an empty `Vec` (callers fall back to killing just
-/// the root by other means).
+/// PID-reuse guard, which the original Python->Rust port dropped: under a
+/// forward-moving system clock, a true child is never older than its
+/// parent, so an edge (child, ppid) is accepted only when `ppid` is an
+/// already-accepted node AND the child's creation time is `>=` that
+/// parent's. A stale edge (the parent PID was reused after the real parent
+/// exited) has a child older than the recorded parent and always fails the
+/// check. We fail closed: an edge whose child creation time is unreadable
+/// is skipped, preferring to under-kill rather than kill an unrelated live
+/// process. If the ROOT's creation time is unreadable we return an empty
+/// `Vec` (callers fall back to killing just the root by other means).
+///
+/// Because `FILETIME` creation times are wall-clock rather than monotonic,
+/// this invariant is only exact under a forward-moving clock. An NTP
+/// step-back or manual clock change between a parent's and its child's
+/// creation can make a TRUE child's recorded creation time earlier than its
+/// parent's, failing the `>=` edge check and pruning that child's whole
+/// subtree. The failure mode is a leaked (skipped) descendant, never
+/// terminating an unrelated process, so this stays on the safe under-kill
+/// side.
 #[cfg(any(windows, test))]
 fn collect_tree_validated(
     root_pid: u32,
