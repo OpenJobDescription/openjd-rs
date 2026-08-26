@@ -252,20 +252,6 @@ mod platform {
         }
     }
 
-    /// Kill a single process by PID.
-    fn kill_process(pid: u32) -> bool {
-        unsafe {
-            let handle = OpenProcess(PROCESS_TERMINATE, false, pid);
-            if let Ok(h) = handle {
-                let ok = TerminateProcess(h, 1).is_ok();
-                let _ = CloseHandle(h);
-                ok
-            } else {
-                false
-            }
-        }
-    }
-
     /// Check if a process is still alive.
     #[allow(dead_code)]
     fn is_process_alive(pid: u32) -> bool {
@@ -282,12 +268,44 @@ mod platform {
         }
     }
 
-    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass.
-    fn snapshot_process_parents() -> Vec<(u32, u32)> {
+    /// The current system wall clock as FILETIME ticks (100-ns intervals since
+    /// 1601-01-01 UTC) — the same epoch `GetProcessTimes` reports process
+    /// creation times in, so a value from here is directly comparable to a
+    /// process creation time.
+    ///
+    /// Derived from the standard-library system clock rather than
+    /// `GetSystemTimeAsFileTime` so no additional `windows` crate feature (and
+    /// thus no Cargo.toml change) is required; both read the same UTC system
+    /// clock, so the value and wall-clock base are equivalent.
+    fn system_time_as_filetime_ticks() -> u64 {
+        // 11_644_473_600 seconds separate the FILETIME epoch (1601) from the
+        // Unix epoch (1970); 10_000_000 FILETIME ticks make one second.
+        const SECS_1601_TO_1970: u64 = 11_644_473_600;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        now.as_secs()
+            .saturating_add(SECS_1601_TO_1970)
+            .saturating_mul(10_000_000)
+            .saturating_add((now.subsec_nanos() / 100) as u64)
+    }
+
+    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, together
+    /// with a wall-clock stamp captured immediately BEFORE the snapshot.
+    ///
+    /// The stamp upper-bounds the creation time of every process the snapshot
+    /// can list: anything genuinely present was created before this instant.
+    /// `collect_tree_validated` uses it to reject a candidate whose freshly
+    /// read creation time is newer than the snapshot — the signature of a PID
+    /// reused after the snapshot was taken.
+    fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
         use windows::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
             TH32CS_SNAPPROCESS,
         };
+        // Capture the stamp immediately before taking the snapshot so it truly
+        // upper-bounds the creation time of every process the snapshot lists.
+        let stamp = system_time_as_filetime_ticks();
         let mut pairs = Vec::new();
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -307,7 +325,7 @@ mod platform {
                 let _ = CloseHandle(snap);
             }
         }
-        pairs
+        (stamp, pairs)
     }
 
     /// Read a process's creation time from an already-open handle.
@@ -408,18 +426,26 @@ mod platform {
     /// when it hit such a cycle. Edge validation now lives in
     /// `super::collect_tree_validated`; this history is kept here because
     /// this is the platform entry point that walks that graph.
-    fn kill_process_tree(root_pid: u32) {
-        let parents = snapshot_process_parents();
-        let tree = super::collect_tree_validated(root_pid, &parents, &mut |pid| {
-            process_creation_time(pid)
-        });
+    fn kill_process_tree(root_pid: u32, expected_root_ct: Option<u64>) {
+        let (snapshot_time, parents) = snapshot_process_parents();
+        let tree = super::collect_tree_validated(
+            root_pid,
+            &parents,
+            snapshot_time,
+            expected_root_ct,
+            &mut |pid| process_creation_time(pid),
+        );
         if tree.is_empty() {
-            // The root's creation time was unreadable, so no edge could be
-            // validated. Fall back to a best-effort kill of just the root by
-            // raw PID: this is the sole remaining use of the unvalidated
-            // `kill_process`, accepted only because there is nothing left to
-            // validate against.
-            kill_process(root_pid);
+            // The root's identity could not be established: either its
+            // creation time was unreadable — which most often means the
+            // process already exited, exactly when its PID may have been
+            // reused — or a pinned schedule-time identity no longer matches.
+            // A raw-PID kill here would buy nothing legitimate
+            // (PROCESS_QUERY_LIMITED_INFORMATION is granted more liberally
+            // than PROCESS_TERMINATE, so anything we could validate we could
+            // also have terminated) while risking termination of a reused
+            // PID. Fail closed: log and return without killing.
+            log::info!(target: "openjd.sessions", "Not terminating tree for pid {root_pid}: root identity could not be established (process exited or protected), skipping kill");
             return;
         }
         // collect_tree_validated returns breadth-first order (every parent
@@ -431,7 +457,11 @@ mod platform {
 
     /// Terminate: kill the entire process tree.
     pub fn send_terminate(pid: i32) {
-        kill_process_tree(pid as u32);
+        // Immediate path: the caller still holds the live `Child` handle, so
+        // the kernel pins this root PID and it cannot be reused out from under
+        // us. There is no separate schedule-time identity to thread, so pass
+        // `None` and let collect_tree_validated read the root fresh.
+        kill_process_tree(pid as u32, None);
     }
 
     /// Notify: send CTRL_BREAK_EVENT for graceful shutdown.
@@ -446,32 +476,32 @@ mod platform {
     ///
     /// Captures the root's creation time NOW, synchronously, while the caller
     /// still holds the live `Child` handle so the kernel pins this PID and it
-    /// cannot be reused out from under us. After the delay the task
-    /// revalidates the root's identity before walking the tree. Without this,
-    /// the detached task could fire after the `Child` handle is dropped and
-    /// the PID recycled, killing an unrelated process tree.
+    /// cannot be reused out from under us. That schedule-time identity is then
+    /// threaded into the kill: `kill_process_tree` re-reads the root after the
+    /// delay and fails closed unless it still reports exactly this creation
+    /// time, so a PID recycled while the task was sleeping is never killed.
     pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
         let root_identity = process_creation_time(pid as u32);
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             match root_identity {
                 Some(ct) => {
-                    // Fresh same-handle identity check before touching the
-                    // tree. If the root no longer matches, the original
-                    // process already exited (and its PID may be reused), so
-                    // there is nothing to kill. Each node is revalidated
-                    // again at kill time inside kill_process_tree.
-                    if process_identity_matches(ct, process_creation_time(pid as u32)) {
-                        kill_process_tree(pid as u32);
-                    } else {
-                        log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root creation time changed (process exited or PID reused), skipping tree kill");
-                    }
+                    // Thread the schedule-time identity into the kill. This
+                    // replaces the old separate gate (read identity, then call
+                    // an unpinned kill): collect_tree_validated now re-reads
+                    // the root and returns empty unless it still reports `ct`,
+                    // so reuse between the check and the walk cannot slip
+                    // through. Each node is revalidated again at kill time
+                    // inside kill_process_checked.
+                    kill_process_tree(pid as u32, Some(ct));
                 }
                 None => {
-                    // Could not capture root identity at schedule time; fall
-                    // back to the previous immediate tree-kill behavior.
-                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: could not capture root identity at schedule time, falling back to best-effort tree kill (validated if root is still readable)");
-                    kill_process_tree(pid as u32);
+                    // Root identity was unreadable at schedule time (the
+                    // process likely already exited). Pass `None`: with no
+                    // pinned identity, collect_tree_validated fails closed and
+                    // kills nothing whenever the root stays unreadable.
+                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root identity was not captured at schedule time; tree kill fails closed if the root remains unreadable");
+                    kill_process_tree(pid as u32, None);
                 }
             }
         });
@@ -595,19 +625,56 @@ struct ValidatedProcess {
 /// subtree. The failure mode is a leaked (skipped) descendant, never
 /// terminating an unrelated process, so this stays on the safe under-kill
 /// side.
+///
+/// `snapshot_time` closes a second PID-reuse direction: the one where a
+/// genuine edge (child, parent) is captured in the snapshot, the child then
+/// exits, and its PID is reused by an unrelated process U before this function
+/// reads the child's creation time. U's creation time is newer than the
+/// parent's, so the `>=` edge check passes and U would be recorded as a
+/// validated node. Because any process genuinely present in the snapshot was
+/// created BEFORE the snapshot was taken, we reject any candidate (root
+/// included) whose freshly read creation time is greater than `snapshot_time`.
+/// The stamp and process creation times share the same wall-clock base
+/// (FILETIME ticks since 1601 UTC), so the comparison is exact.
+///
+/// `expected_root_ct` pins the root's identity to a value established before
+/// this call (a schedule-time read from the delayed-terminate path). When
+/// `Some(exp)`, the freshly read root creation time must be `Some` and equal
+/// to `exp`, otherwise this returns empty (fail closed) — closing the reuse
+/// window between an earlier identity read and this walk. The recorded root
+/// node then carries `exp`, the pinned identity, not the re-read value. When
+/// `None`, the root is validated only by the fresh read and `snapshot_time`.
 #[cfg(any(windows, test))]
 fn collect_tree_validated(
     root_pid: u32,
     parents: &[(u32, u32)],
+    snapshot_time: u64,
+    expected_root_ct: Option<u64>,
     creation_time: &mut dyn FnMut(u32) -> Option<u64>,
 ) -> Vec<ValidatedProcess> {
     use std::collections::{HashMap, HashSet};
 
     // Fail closed: without the root's creation time we cannot validate any
     // edge, so collect nothing and let the caller decide how to kill root.
-    let Some(root_ct) = creation_time(root_pid) else {
+    let Some(read_root_ct) = creation_time(root_pid) else {
         return Vec::new();
     };
+    // If a schedule-time identity was pinned, the root read now must match it
+    // exactly; a mismatch means the PID was reused or the process exited.
+    if let Some(exp) = expected_root_ct {
+        if read_root_ct != exp {
+            return Vec::new();
+        }
+    }
+    // A process genuinely in the snapshot was created before the snapshot; a
+    // newer creation time means this PID was reused after the snapshot.
+    if read_root_ct > snapshot_time {
+        return Vec::new();
+    }
+    // Carry the pinned schedule-time identity forward when provided. It equals
+    // the fresh read here, but using it keeps the recorded identity anchored to
+    // the moment the caller captured it.
+    let root_ct = expected_root_ct.unwrap_or(read_root_ct);
 
     let mut ctimes: HashMap<u32, u64> = HashMap::from([(root_pid, root_ct)]);
     let mut visited: HashSet<u32> = HashSet::from([root_pid]);
@@ -638,8 +705,12 @@ fn collect_tree_validated(
                     ct
                 }
             };
-            // A true child is never older than its parent.
-            if child_ct >= parent.creation_time {
+            // A true child is never older than its parent, and — like every
+            // genuine snapshot member — was created before the snapshot. A
+            // creation time newer than the snapshot marks a PID reused after
+            // the snapshot (fail closed); an older-than-parent one marks a
+            // stale reused-parent edge.
+            if child_ct >= parent.creation_time && child_ct <= snapshot_time {
                 result.push(ValidatedProcess {
                     pid: child,
                     creation_time: child_ct,
@@ -2233,7 +2304,7 @@ mod collect_tree_validated_tests {
     fn collects_true_descendants_in_bfs_order() {
         let parents = [(20u32, 10u32), (30, 20)];
         let mut ct = ctimes_from(&[(10, 100), (20, 200), (30, 300)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 100), vp(20, 200), vp(30, 300)]);
     }
 
@@ -2241,7 +2312,7 @@ mod collect_tree_validated_tests {
     fn rejects_stale_edge_child_older_than_parent() {
         let parents = [(40u32, 10u32)];
         let mut ct = ctimes_from(&[(10, 500), (40, 100)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 500)]);
     }
 
@@ -2249,7 +2320,7 @@ mod collect_tree_validated_tests {
     fn rejects_child_with_unreadable_creation_time() {
         let parents = [(20u32, 10u32)];
         let mut ct = ctimes_from(&[(10, 100)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 100)]);
     }
 
@@ -2257,7 +2328,7 @@ mod collect_tree_validated_tests {
     fn returns_empty_when_root_ctime_unreadable() {
         let parents = [(20u32, 10u32)];
         let mut ct = ctimes_from(&[(20, 200)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, Vec::<ValidatedProcess>::new());
     }
 
@@ -2265,7 +2336,7 @@ mod collect_tree_validated_tests {
     fn stale_cycle_terminates() {
         let parents = [(20u32, 10u32), (10, 20)];
         let mut ct = ctimes_from(&[(10, 500), (20, 100)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 500)]);
     }
 
@@ -2273,7 +2344,7 @@ mod collect_tree_validated_tests {
     fn accepts_equal_creation_time() {
         let parents = [(20u32, 10u32)];
         let mut ct = ctimes_from(&[(10, 100), (20, 100)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 100), vp(20, 100)]);
     }
 
@@ -2281,7 +2352,7 @@ mod collect_tree_validated_tests {
     fn prunes_entire_subtree_below_rejected_edge() {
         let parents = [(20u32, 10u32), (30, 20)];
         let mut ct = ctimes_from(&[(10, 500), (20, 100), (30, 600)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 500)]);
     }
 
@@ -2289,7 +2360,7 @@ mod collect_tree_validated_tests {
     fn equal_time_cycle_terminates_without_duplicates() {
         let parents = [(20u32, 10u32), (10, 20)];
         let mut ct = ctimes_from(&[(10, 100), (20, 100)]);
-        let got = collect_tree_validated(10, &parents, &mut ct);
+        let got = collect_tree_validated(10, &parents, u64::MAX, None, &mut ct);
         assert_eq!(got, vec![vp(10, 100), vp(20, 100)]);
     }
 
@@ -2302,5 +2373,46 @@ mod collect_tree_validated_tests {
     #[test]
     fn identity_match_accepts_same_creation_time() {
         assert!(process_identity_matches(200, Some(200)));
+    }
+
+    #[test]
+    fn rejects_candidate_created_after_snapshot() {
+        // Finding 1: the edge (20,10) is genuine at snapshot time, but pid 20
+        // exited and was reused by a newer process. snapshot_time bounds out
+        // the impostor even though ctime 500 passes the `>=` parent check.
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 100), (20, 500)]);
+        let got = collect_tree_validated(10, &parents, 300, None, &mut ct);
+        assert_eq!(got, vec![vp(10, 100)]);
+    }
+
+    #[test]
+    fn rejects_root_created_after_snapshot() {
+        // The root itself reads newer than the snapshot => reused PID => empty.
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 500), (20, 600)]);
+        let got = collect_tree_validated(10, &parents, 300, None, &mut ct);
+        assert_eq!(got, Vec::<ValidatedProcess>::new());
+    }
+
+    #[test]
+    fn root_expected_ctime_mismatch_returns_empty() {
+        // Finding 2: pinned schedule-time identity 200, but the root now reads
+        // 900 => reused or exited => fail closed.
+        let parents = [(20u32, 10u32)];
+        let mut ct = ctimes_from(&[(10, 900), (20, 950)]);
+        let got = collect_tree_validated(10, &parents, u64::MAX, Some(200), &mut ct);
+        assert_eq!(got, Vec::<ValidatedProcess>::new());
+    }
+
+    #[test]
+    fn root_expected_ctime_match_uses_expected_identity() {
+        // Pinned identity 200 matches the fresh read; the recorded root carries
+        // the pinned value and children are collected normally.
+        let parents = [(20u32, 10u32), (30, 20)];
+        let mut ct = ctimes_from(&[(10, 200), (20, 300), (30, 400)]);
+        let got = collect_tree_validated(10, &parents, u64::MAX, Some(200), &mut ct);
+        assert_eq!(got, vec![vp(10, 200), vp(20, 300), vp(30, 400)]);
+        assert_eq!(got[0].creation_time, 200);
     }
 }
