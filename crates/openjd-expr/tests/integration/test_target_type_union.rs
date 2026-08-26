@@ -6,13 +6,13 @@
 //!
 //! When `target_type` is a union, the expression result should be:
 //!
-//! 1. Returned as-is if its type is one of the union's members
-//!    (RFC 0005 §"Implicit Type Coercion" — coercion is non-destructive
-//!    where the intent is obvious; if the value already satisfies one of
-//!    the targets, no coercion is needed).
-//! 2. Otherwise, non-destructively coerced to one of the scalar union
-//!    members.
-//! 3. Otherwise, an error.
+//! 1. Returned as-is if it already satisfies the union — that is, if its type
+//!    satisfies any member (RFC 0005 §"Implicit Type Coercion" — coercion is
+//!    non-destructive where the intent is obvious; if the value already
+//!    satisfies one of the targets, no coercion is needed).
+//! 2. Otherwise, non-destructively converted toward one of the union's
+//!    members, non-list members first.
+//! 3. Otherwise, an error naming the whole union as the target.
 //!
 //! These tests exercise the public `EvalBuilder::with_target_type` and
 //! `ExprValue::coerce` surfaces against union targets like `int | string`.
@@ -127,9 +127,10 @@ fn coerce_bool_to_int_or_bool_union_returns_self() {
 
 #[test]
 fn coerce_int_to_string_or_path_union_picks_string() {
-    // int doesn't match string or path directly, but int → string is a
-    // valid non-destructive coercion. The reference picks the first
-    // member whose non-destructive coercion succeeds.
+    // int doesn't match string or path directly. `string | path` offers two
+    // candidate destinations, but only one has a rule for an int source —
+    // int → string — so RFC 0005's per-source destination order is not even
+    // needed here; the string destination is the only one that can convert.
     let v = ExprValue::Int(42);
     let target = parse_type("string | path");
     let coerced = v.coerce(&target, PathFormat::Posix).unwrap();
@@ -290,4 +291,309 @@ fn optional_int_coerces_string_to_int() {
     // `Int(42)`.
     let r = eval_with_target_type("'42'", &parse_type("int?"), &SymbolTable::new()).unwrap();
     assert_eq!(r, ExprValue::Int(42));
+}
+
+// ── Union targets accept whatever their members accept ────────────────
+
+/// A union target must accept at least everything its members accept.
+/// Previously list members were skipped entirely, so adding an alternative
+/// to a target could *remove* an accepted conversion.
+#[test]
+fn union_target_accepts_what_its_list_member_accepts() {
+    let range = ExprValue::RangeExpr(RangeExpr::from_values(vec![1, 2, 3]).unwrap());
+    let cases = [
+        // (value, bare target, same target with an alternative added)
+        (
+            ExprValue::ListInt(vec![1, 2, 3]),
+            "list[float]",
+            "list[float] | string",
+        ),
+        (range, "list[int]", "list[int] | list[float]"),
+    ];
+    for (value, bare, with_alternative) in cases {
+        let direct = value
+            .clone()
+            .coerce(&parse_type(bare), PathFormat::Posix)
+            .unwrap();
+        let via_union = value
+            .clone()
+            .coerce(&parse_type(with_alternative), PathFormat::Posix)
+            .unwrap_or_else(|e| panic!("{value:?} -> {with_alternative}: {e}"));
+        assert_eq!(direct, via_union, "{value:?}: {bare} vs {with_alternative}");
+    }
+}
+
+/// Non-list destinations are tried before list ones. Converting to a scalar
+/// produces a single value whose cost does not depend on the source;
+/// converting to a list materializes elements and can fail on size limits. A
+/// range expression's canonical form already *is* a string, so
+/// `list[int] | string` yields the string rather than expanding the range.
+#[test]
+fn union_target_prefers_scalar_destination_over_list() {
+    let range = ExprValue::RangeExpr(RangeExpr::from_values(vec![1, 2, 3]).unwrap());
+    let r = range
+        .clone()
+        .coerce(&parse_type("list[int] | string"), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(r, ExprValue::String("1-3".to_string()));
+    // With no scalar destination available, the list conversion still runs.
+    let r = range
+        .coerce(&parse_type("list[int] | bool"), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(r, ExprValue::ListInt(vec![1, 2, 3]));
+}
+
+/// The type level cannot see the payload that decides which destination a
+/// concrete value reaches, so against a union target it narrows to the union
+/// of every destination with a rule — a sound description of every value the
+/// coercion could produce. See `specs/expr/values.md`.
+#[test]
+fn unresolved_union_target_narrows_to_all_rule_destinations() {
+    let mut st = SymbolTable::new();
+    st.set("U.Range", ExprValue::unresolved(parse_type("range_expr")))
+        .unwrap();
+    let r = eval_with_target_type("U.Range", &parse_type("list[int] | string"), &st).unwrap();
+    // A range_expr converts to `string` (its canonical form) and to
+    // `list[int]` (materialization) — the payload's length cap decides.
+    assert_eq!(r, ExprValue::unresolved(parse_type("list[int] | string")));
+}
+
+// ── Targets that are not sets of values ──────────────────────────────
+
+/// Type variables are bound by signature matching before any value is
+/// coerced, so reaching coercion with one is always an error — on the
+/// concrete and the unresolved path alike, and at any nesting depth.
+#[test]
+fn type_variable_and_noreturn_targets_are_rejected() {
+    for target in [
+        "T1",
+        "list[T1]",
+        "noreturn",
+        "list[list[T1]]",
+        "T1 | list[T1]",
+    ] {
+        let target = parse_type(target);
+        // Assert the full message, per AGENTS.md: an unusable target reports
+        // the target itself, not a rule-specific hint about how the value
+        // might have converted, since no rule applies to it at all.
+        for (value, source) in [
+            (ExprValue::Int(5), "int"),
+            (ExprValue::ListInt(vec![1]), "list[int]"),
+            (
+                ExprValue::RangeExpr(RangeExpr::from_values(vec![1, 2, 3]).unwrap()),
+                "range_expr",
+            ),
+            (ExprValue::unresolved(ExprType::INT), "int"),
+            (ExprValue::unresolved(parse_type("list[int]")), "list[int]"),
+        ] {
+            assert_eq!(
+                value.coerce(&target, PathFormat::Posix).unwrap_err(),
+                format!("Cannot coerce {source} to {target}")
+            );
+        }
+    }
+}
+
+/// A list destination's element type must be *fully* bindable, not merely
+/// usable in part. `list[int | T1]` denotes runtime values through its `int`
+/// member, but producing a list for that destination would carry the unbound
+/// `T1` into the result's element type, breaking the guarantee that a
+/// coercion result satisfies the target it was coerced to. Both paths reject
+/// it, so the two stay in agreement.
+#[test]
+fn list_destination_with_a_partly_symbolic_element_is_rejected() {
+    let target = parse_type("list[int | T1]");
+    for (value, source) in [
+        (ExprValue::ListString(vec!["5".into()], 1), "list[string]"),
+        (ExprValue::ListBool(vec![true]), "list[bool]"),
+        (
+            ExprValue::unresolved(parse_type("list[string]")),
+            "list[string]",
+        ),
+        (
+            ExprValue::unresolved(parse_type("list[bool]")),
+            "list[bool]",
+        ),
+    ] {
+        assert_eq!(
+            value.coerce(&target, PathFormat::Posix).unwrap_err(),
+            format!("Cannot coerce {source} to {target}")
+        );
+    }
+}
+
+/// `ExprType::new` can build a param-less `unresolved`, which constrains
+/// nothing. `satisfies` must not index into its missing constraint.
+#[test]
+fn satisfies_does_not_panic_on_a_param_less_unresolved() {
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+    assert!(!bare.satisfies(&ExprType::INT));
+    assert!(bare.satisfies(&ExprType::ANY));
+}
+
+/// A union is the one place an unusable member is tolerated: the value only
+/// has to land in one member, so a usable one alongside a type variable still
+/// works. Such a union cannot arise from signature dispatch — `call_arg_targets`
+/// drops symbolic positions before building a union — but the rule keeps
+/// membership decisions per-member rather than all-or-nothing.
+#[test]
+fn union_with_one_usable_member_still_coerces() {
+    let target = parse_type("list[int] | T1");
+    let coerced = ExprValue::ListInt(vec![1])
+        .coerce(&target, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(coerced, ExprValue::ListInt(vec![1]));
+}
+
+// ── Unbound type variables in a source read as wildcards ──────────────
+
+/// A concrete value can never have a type variable in its type, so an
+/// unbound variable inside an unresolved source constraint reads as a
+/// wildcard: `T1` behaves as `any`, and `list[T1]` as `list[any]` (see
+/// specs/expr/values.md). The shape around the variable still constrains
+/// the outcome — a list of unknown element type is still a list, and no
+/// list coerces to a scalar.
+#[test]
+fn symbolic_source_keeps_its_shape() {
+    let err = ExprValue::unresolved(parse_type("list[T1]"))
+        .coerce(&parse_type("int"), PathFormat::Posix)
+        .unwrap_err();
+    assert_eq!(err, "Cannot coerce list[T1] to int");
+    let converted = ExprValue::unresolved(parse_type("list[T1]"))
+        .coerce(&parse_type("list[string]"), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(converted, ExprValue::unresolved(parse_type("list[string]")));
+}
+
+#[test]
+fn bare_type_variable_source_reads_as_any() {
+    let coerced = ExprValue::unresolved(parse_type("T1"))
+        .coerce(&parse_type("int"), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(coerced, ExprValue::unresolved(ExprType::INT));
+}
+
+/// The promise for an unknown source covers only the target members a
+/// value could land in: `T1` in `int | T1` denotes no runtime values, so
+/// it is filtered out rather than copied into the constraint — copying it
+/// would produce a constraint that does not satisfy the target.
+#[test]
+fn unknown_source_promise_filters_unusable_union_members() {
+    let coerced = ExprValue::unresolved(parse_type("any"))
+        .coerce(&parse_type("int | T1"), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(coerced, ExprValue::unresolved(ExprType::INT));
+}
+
+/// A `List`-coded type built via `ExprType::new` with zero or several
+/// parameters is malformed — no concrete value has such a type — so the
+/// list/list rule's empty-list-could-convert argument does not apply, and
+/// coercion rejects it rather than laundering it into a well-formed list
+/// type.
+#[test]
+fn malformed_list_source_is_rejected() {
+    use openjd_expr::types::TypeCode;
+    for malformed in [
+        ExprType::new(TypeCode::List, vec![]),
+        ExprType::new(TypeCode::List, vec![ExprType::INT, ExprType::STRING]),
+    ] {
+        let err = ExprValue::unresolved(malformed.clone())
+            .coerce(&parse_type("list[int]"), PathFormat::Posix)
+            .unwrap_err();
+        assert_eq!(err, format!("Cannot coerce {malformed} to list[int]"));
+    }
+}
+
+// ── nulltype is satisfied, never converted into ───────────────────────
+
+/// RFC 0005 lists no `X → nulltype` conversion, and discounts `nulltype` when
+/// counting a union target's candidate scalar types. So `null` is reached only
+/// by already being `null`. Turning the *text* `"null"` into `null` is a
+/// transport-decode rule belonging to `from_str_coerce`, and it must not fire
+/// as an implicit coercion — neither for a bare `nulltype` target nor inside a
+/// union such as `int?`.
+#[test]
+fn string_null_does_not_implicitly_coerce_to_null() {
+    // A bare `nulltype` target has no destination at all, so nothing converts.
+    for target in ["nulltype", "int?", "int | nulltype"] {
+        let target = parse_type(target);
+        let err = ExprValue::String("null".to_string())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap_err();
+        assert_eq!(err, format!("Cannot coerce string to {target}"), "{target}");
+    }
+    // Discounting `nulltype` lets a real conversion win instead: every string
+    // is a valid path, so `path?` yields the path, not `null`.
+    assert_eq!(
+        ExprValue::String("null".to_string())
+            .coerce(&parse_type("path? | list[path]"), PathFormat::Posix)
+            .unwrap(),
+        ExprValue::new_path("null", PathFormat::Posix)
+    );
+    // At the type level, a bare `nulltype` target is rejected the same way,
+    // while `int?` still defers the parse check to resolution.
+    assert_eq!(
+        ExprValue::unresolved(ExprType::STRING)
+            .coerce(&ExprType::NULLTYPE, PathFormat::Posix)
+            .unwrap_err(),
+        "Cannot coerce string to nulltype"
+    );
+    assert_eq!(
+        ExprValue::unresolved(ExprType::STRING)
+            .coerce(&parse_type("int?"), PathFormat::Posix)
+            .unwrap(),
+        ExprValue::unresolved(ExprType::INT)
+    );
+    // Transport decoding is unaffected: this is the entry point from outside
+    // the expression language, where strings are the only representation.
+    assert_eq!(
+        ExprValue::from_str_coerce("null", &ExprType::NULLTYPE, PathFormat::Posix).unwrap(),
+        ExprValue::Null
+    );
+}
+
+/// The `null` *value* is unaffected — it satisfies any union with a `nulltype`
+/// member and passes through untouched.
+#[test]
+fn null_value_still_satisfies_optional_targets() {
+    for target in ["nulltype", "int?", "string?", "path? | list[path]"] {
+        let target = parse_type(target);
+        assert_eq!(
+            ExprValue::Null.coerce(&target, PathFormat::Posix).unwrap(),
+            ExprValue::Null,
+            "target={target}"
+        );
+    }
+}
+
+/// RFC 0005 §"None/null Semantics": a list item's target type is
+/// `T? | list[T]`. That union has a `nulltype` member, a scalar member, and a
+/// list member all at once, so it exercises every destination rule together.
+#[test]
+fn list_item_target_shape_from_the_spec() {
+    let target = parse_type("string? | list[string]");
+    let cases: [(ExprValue, ExprValue); 5] = [
+        // Already acceptable — each satisfies a member, so passes through.
+        (ExprValue::Null, ExprValue::Null),
+        (ExprValue::String("x".into()), ExprValue::String("x".into())),
+        (
+            ExprValue::ListString(vec!["a".into()], 1),
+            ExprValue::ListString(vec!["a".into()], 1),
+        ),
+        // Converted: `string` is the only candidate scalar, `nulltype` and the
+        // list member being discounted for a scalar value.
+        (ExprValue::Int(42), ExprValue::String("42".into())),
+        // Converted element-wise toward the single list candidate.
+        (
+            ExprValue::ListInt(vec![1, 2]),
+            ExprValue::ListString(vec!["1".into(), "2".into()], 2),
+        ),
+    ];
+    for (value, expected) in cases {
+        assert_eq!(
+            value.clone().coerce(&target, PathFormat::Posix).unwrap(),
+            expected,
+            "value={value:?}"
+        );
+    }
 }

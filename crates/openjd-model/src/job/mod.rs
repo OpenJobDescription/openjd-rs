@@ -118,8 +118,9 @@ pub struct Step {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StepScript {
+    #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
     pub actions: StepActions,
     pub embedded_files: Option<Vec<EmbeddedFile>>,
@@ -172,8 +173,9 @@ impl Hash for Environment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentScript {
+    #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
     pub actions: EnvironmentActions,
     pub embedded_files: Option<Vec<EmbeddedFile>>,

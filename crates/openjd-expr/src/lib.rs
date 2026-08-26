@@ -21,6 +21,7 @@ pub mod eval;
 pub mod format_string;
 pub mod function_library;
 pub mod functions;
+pub(crate) mod json_escape;
 pub mod path_mapping;
 pub mod profile;
 pub mod range_expr;

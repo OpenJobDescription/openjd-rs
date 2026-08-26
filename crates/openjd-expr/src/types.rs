@@ -281,6 +281,108 @@ impl ExprType {
         self.params.iter().all(|p| p.is_concrete())
     }
 
+    /// Returns `true` if a value of this type is already acceptable where
+    /// `target` is required, so that no conversion is needed.
+    ///
+    /// The relation is **directional**: `int` satisfies `any`, but `any` does
+    /// not satisfy `int`. See [`match_type`](Self::match_type) for the
+    /// related but different symmetric operation.
+    ///
+    /// The rules:
+    ///
+    /// - An `any` target accepts every type — RFC 0005 lists it as
+    ///   "matches anything".
+    /// - A union target is satisfied when **any** member is satisfied, so
+    ///   `int` satisfies `int | string`.
+    /// - A union source satisfies a target only when **every** member does,
+    ///   since any one of them could be the runtime type.
+    /// - `list[T]` is covariant in its element type: `list[int]` satisfies
+    ///   `list[any]` and `list[int | string]`.
+    /// - Nothing satisfies a type variable, `noreturn`, `unresolved[T]`, or a
+    ///   signature. None of those denote a set of runtime values that a value
+    ///   could belong to. Type variables in particular are bound by signature
+    ///   matching before any value is coerced, so encountering one here means
+    ///   it was never bound — see `specs/expr/values.md`.
+    /// - Otherwise the two types must be equal.
+    pub fn satisfies(&self, target: &ExprType) -> bool {
+        if !target.denotes_runtime_values() {
+            return false;
+        }
+        match (self.code, target.code) {
+            // An `any` target accepts every type (RFC 0005: "matches
+            // anything").
+            (_, TypeCode::Any) => true,
+            // An unresolved source delegates to its constraint: the
+            // constraint is what the resolved value's type will be.
+            // `ExprType::new` can build a param-less `unresolved`, which
+            // constrains nothing, so index safely.
+            (TypeCode::Unresolved, _) => self.params.first().is_some_and(|c| c.satisfies(target)),
+            // A union source must satisfy via **every** member, since any of
+            // them could be the runtime type; a union target via at least
+            // one. Source before target: the (union, union) case has to
+            // decompose the source, because no multi-member union fits
+            // inside a single member — not even its own.
+            (TypeCode::Union, _) => self.params.iter().all(|m| m.satisfies(target)),
+            (_, TypeCode::Union) => target.params.iter().any(|m| self.satisfies(m)),
+            // A source of unknown type is not *known* to belong to any
+            // narrower target. (Unbound type variables fall out below:
+            // symbolic sources never equal a value-denoting target.)
+            (TypeCode::Any, _) => false,
+            // `list[T]` is covariant in its element type.
+            (TypeCode::List, TypeCode::List)
+                if self.params.len() == 1 && target.params.len() == 1 =>
+            {
+                self.params[0].satisfies(&target.params[0])
+            }
+            _ => !self.is_symbolic() && self == target,
+        }
+    }
+
+    /// Returns `true` if this type denotes a set of runtime values.
+    ///
+    /// Type variables, `noreturn`, `unresolved[T]`, and signatures do not:
+    /// no value can ever *be* one of those, so nothing satisfies them and
+    /// coercion rejects them as targets outright.
+    ///
+    /// The check is recursive, because those codes can appear nested where
+    /// they are just as unusable: `list[T1]` cannot be built without a
+    /// binding for `T1` any more than `T1` can. A union is the one case that
+    /// tolerates an unusable part — it denotes values when **any** member
+    /// does, since a value only has to land in one of them, and
+    /// [`Self::satisfies`] and the coercion destination list both consider
+    /// members individually.
+    pub(crate) fn denotes_runtime_values(&self) -> bool {
+        match self.code {
+            TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3
+            | TypeCode::NoReturn
+            | TypeCode::Unresolved
+            | TypeCode::Signature => false,
+            TypeCode::Union => self.params.iter().any(|p| p.denotes_runtime_values()),
+            _ => self.params.iter().all(|p| p.denotes_runtime_values()),
+        }
+    }
+
+    /// Replace every type variable with `any`, recursively.
+    ///
+    /// This is the value-set reading of an unbound variable: the concrete
+    /// value it stands for has *some* type, unknown here, which is exactly
+    /// the set of possibilities `any` denotes. The shape around the
+    /// variable is preserved — `list[T1]` becomes `list[any]`. Unions
+    /// re-normalize, so `int | T1` collapses to `any` (a union with an
+    /// `any` member accepts everything).
+    pub(crate) fn erase_type_vars(&self) -> ExprType {
+        let bindings = HashMap::from([
+            (TypeCode::TypeVarT, ExprType::ANY),
+            (TypeCode::TypeVarT1, ExprType::ANY),
+            (TypeCode::TypeVarT2, ExprType::ANY),
+            (TypeCode::TypeVarT3, ExprType::ANY),
+        ]);
+        self.substitute(&bindings)
+    }
+
     /// Substitute type variables with concrete types.
     pub fn substitute(&self, bindings: &HashMap<TypeCode, ExprType>) -> ExprType {
         if let Some(bound) = bindings.get(&self.code) {

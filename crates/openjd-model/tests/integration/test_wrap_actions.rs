@@ -714,6 +714,31 @@ fn defining_zero_wrap_hooks_accepted() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// At-least-one-action rule, WRAP_ACTIONS wording
+//
+// An environment script must define at least one action. With
+// WRAP_ACTIONS enabled the error names the wrap hooks as a third
+// acceptable choice alongside onEnter and onExit. The wording without
+// the extension is covered in test_environment_template.rs.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn empty_env_actions_rejected_with_wrap_hooks_named() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Empty",
+                "script": {"actions": {}}
+            }
+        }"#,
+        WRAP_EXTS,
+        &["environment -> script -> actions:\n\tmust define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together)."],
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // EXPR prerequisite (RFC 0008)
 //
 // A template that lists WRAP_ACTIONS must also list EXPR.

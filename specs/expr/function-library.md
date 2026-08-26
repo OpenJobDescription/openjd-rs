@@ -134,6 +134,10 @@ The following function families use this pattern:
   `list[path]`, and `list[nulltype]` overloads implement standard path-to-string
   and empty-list behavior without allocating a scalar path coercion before the
   output preflight. Unsupported lists are rejected during signature dispatch.
+- **`string()` on a list** renders a JSON array whose element strings are
+  escaped, so it reuses the same bound via `preflight_display_list`. Scalars
+  render as themselves and are not charged. See
+  [values.md](values.md#list-display-strings).
 - **Amplifying string operations** (`replace`, `join`) compute their projected
   output from a worst-case non-overlapping replacement count or from
   element/separator lengths, then reserve the bound before constructing the
@@ -463,15 +467,97 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
 - **Float floor division** derives its quotient from that remainder before rounding
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
 - **`round()`** uses banker's rounding / round-half-even (§2.2.2)
+- **String classification** (`isdigit`, `isalpha`, `isalnum`, `isspace`,
+  `isupper`, `islower`, §2.2.4) matches Python's `str` methods of the same
+  name exactly, not Rust's `char` predicates, which use different Unicode
+  properties (e.g. `char::is_alphabetic()` is the `Alphabetic` property, a
+  superset of Python's `L*` categories; `char::is_ascii_digit()` misses
+  non-ASCII decimal digits). Lookup tables in
+  `functions/unicode_tables.rs` are generated from CPython by
+  `scripts/generate_unicode_tables.py` and pinned to a stated Unicode
+  version (see `UNICODE_VERSION` in the generated file). `isupper`/`islower`
+  follow Python's cased-character rule: at least one cased character and
+  every cased character upper/lowercase — uncased characters (digits, CJK)
+  are ignored, and titlecase (Lt) characters are cased but neither upper
+  nor lower. Regenerate the tables with the script when intentionally
+  adopting a newer Unicode version.
+- **Whitespace trimming and splitting** (§2.2.4): `strip()`/`lstrip()`/
+  `rstrip()` without a `chars` argument and no-separator `split()`/
+  `rsplit()` trim and split on CPython's `Py_UNICODE_ISSPACE` set via the
+  same `SPACE` table as `isspace()` — Unicode `White_Space` plus the
+  information separators U+001C..U+001F, which Rust's
+  `str::trim`/`split_whitespace` (exactly `White_Space`) would miss.
+  The `int(string)`/`float(string)` conversions deliberately keep Rust's
+  `str::trim` instead: CPython's `int()`/`float()` accept `White_Space`
+  around the number but reject U+001C..U+001F (`int('\x1c5')` raises even
+  though `isspace('\x1c')` is `true`), so `White_Space` is the
+  CPython-exact set there.
+- **`int(string)` and `float(string)`** (§2.2.1) accept Unicode decimal
+  digits, matching CPython: characters with `Numeric_Type=Decimal` (general
+  category Nd, e.g. `'٣'` U+0663) are replaced with their ASCII values
+  before parsing, via `decimal_digit_value()` backed by the generated
+  `DECIMAL` table. This keeps the guard pattern
+  `int(Param.X) if isdigit(Param.X) else 0` sound for Nd digits.
+  `Numeric_Type=Digit` characters like `'²'` remain errors — `isdigit('²')`
+  is `true` but `int('²')` fails, exactly as in CPython. Two deliberate
+  differences from CPython remain: underscores between digits are rejected
+  (`int('1_0')` is an error here, `10` in CPython) because expression
+  strings come from template data where `'1_0'` is more likely a mistake
+  than a readability separator, and the implicit string→int/float coercion
+  of format-string results and parameter values (`ExprValue::from_str_coerce`)
+  stays ASCII-only.
+- **`title()` and `capitalize()`** (§2.2.4) also match Python exactly.
+  `title()` follows CPython's `do_title`: a character is titlecased when the
+  previous character is not cased, lowercased otherwise — so digits and
+  other uncased characters restart words (`'1st'` → `'1St'`). Word-start
+  characters use the full titlecase mapping (`TITLE_MAP`, ToTitleFull):
+  the dz-digraph U+01C6 titlecases to U+01C5 (not uppercase U+01C4), and
+  `ß` expands to `Ss`. `capitalize()` titlecases the first character (Python
+  ≥ 3.8 semantics) and lowercases the rest. Both apply the Final_Sigma
+  context rule when lowering U+03A3 (via the `CASED` and `CASE_IGNORABLE`
+  tables), which Rust's context-free `char::to_lowercase` cannot express.
 - **Regex functions** reject lookahead, lookbehind, backreferences, and `\Z` (§2.2.5).
-  Validation uses `regex_syntax::Parser` to parse the pattern into its HIR and
-  inspect the result, rather than a substring scan. This correctly ignores
-  lookaround-shaped syntax that appears inside character classes, escaped
-  sequences, or regex comments (e.g., `[(?=]`, `\?=`, `(?#...)`). The parser
-  rejects forbidden constructs at parse time; the translated error names the
-  specific feature (e.g., "Unsupported regex feature: lookahead") so callers
-  can produce stable diagnostics.
-- **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6)
+  Validation parses the pattern with `regex_syntax`, rather than a substring
+  scan. This correctly ignores lookaround-shaped syntax that appears inside
+  character classes, escaped sequences, or regex comments (e.g., `[(?=]`,
+  `\?=`, `(?#...)`). The parser rejects forbidden constructs at parse time;
+  the translated error names the specific feature (e.g., "Unsupported regex
+  feature: lookahead") so callers can produce stable diagnostics.
+  Validation walks the pattern's **AST** (not just its HIR) because several
+  Rust-only constructs outside the spec's Python/Rust intersection dialect
+  are erased by AST→HIR translation and must be rejected at the AST level:
+  Unicode property classes (`\p{...}`/`\P{...}`), the `(?<name>...)` capture
+  group spelling (Python requires `(?P<name>...)`), capture group names
+  that are not valid Python identifiers — checked against the
+  `IDENT_START`/`IDENT_CONTINUE` tables generated from CPython's
+  `str.isidentifier()` (XID_Start/XID_Continue plus `_`), matching the
+  exact rule `sre_parse` applies; `regex_syntax` is more permissive,
+  allowing `.`, `[`, `]` and any `char::is_alphanumeric` character (e.g.
+  `²`, category No, which is not XID_Continue), where Python raises "bad
+  character in group name" — POSIX character
+  classes (`[[:alpha:]]`), character class set operators (`--`, `&&`,
+  `~~`), nested character classes (`[a[b]]`), Rust-only inline flags (`U`
+  swap greed, `R` CRLF mode, negated `u`, and bare global negation
+  `(?-...)`; the shared flags `i`, `m`, `s`, `x` and positive `u` remain
+  allowed, including scoped negation `(?-i:...)`), bare inline flags
+  anywhere but the start of the pattern (`a(?i)b` — an error in Python
+  3.11+, applied globally rather than forward-only in older Pythons;
+  consecutive leading flag groups stay allowed), verbose mode combined with
+  unescaped whitespace or `#` inside a character class (`(?x)[a b]` — Rust
+  strips them, Python VERBOSE keeps them as literals), and Rust-only word
+  boundary spellings (`\b{start}`, `\b{end}`, `\b{start-half}`,
+  `\b{end-half}`, `\<`, `\>` — Python reads these as `\b` plus literal
+  characters, silently diverging). The AST is then translated to HIR for a
+  belt-and-braces walk over the remaining constructs.
+  **Known accepted divergence:** plain `$` without MULTILINE matches before
+  a trailing newline in Python but is end-of-haystack only in Rust
+  (Python's `$` ≈ Rust's `(?:\n?\z)`); the intersection dialect allows `$`,
+  so results differ on newline-terminated input.
+- **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
+  `repr_pwsh` renders nested lists as nested array literals, using the unary
+  comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
+  flattens in PowerShell. `repr_sh` and `repr_cmd` reject nested lists at
+  signature dispatch.
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
 - **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /
   `PureWindowsPath(*parts)` semantics: an absolute component in the list resets the

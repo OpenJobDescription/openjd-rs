@@ -314,13 +314,13 @@ fn coerce_unresolved_errors_when_no_union_member_succeeds() {
 
 /// RFC 0005: `list[int]` is the only list type a `range_expr` implicitly
 /// coerces to, and a coerced value must satisfy the target it was coerced
-/// to — so the coercion yields a `list[int]`, never a widened list. A
-/// `list[any]` target is also satisfied by a `list[int]` value (no
-/// widening involved), so it is accepted too.
+/// to — so the coercion yields a `list[int]`, never a widened list. Any
+/// target a `list[int]` already satisfies is accepted, since no widening is
+/// involved: `list[any]` and `list[int | string]` as well as `list[int]`.
 #[test]
 fn coerce_range_expr_to_list_int_only() {
     let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
-    for target in ["list[int]", "list[any]"] {
+    for target in ["list[int]", "list[any]", "list[int | string]"] {
         let target = ExprType::parse(target).unwrap();
         let value = ExprValue::RangeExpr(range.clone())
             .coerce(&target, PathFormat::Posix)
@@ -353,16 +353,32 @@ fn coerce_range_expr_to_other_list_errors_on_both_paths() {
     }
 }
 
-/// The unresolved table must agree with the concrete one, accepting the
-/// `list[int]` and `list[any]` targets.
+/// The unresolved table must agree with the concrete one: it accepts the same
+/// targets, and for these targets — where the `range_expr` rule is the only
+/// destination that applies — it yields the same result type. Since a
+/// `range_expr` only ever materializes to a `list[int]`, that is the constraint
+/// the placeholder carries even when the target is wider: a `list[any]` target
+/// does not turn the result into an `unresolved[list[any]]`.
+///
+/// Result types agree only when a single destination applies; see
+/// `specs/expr/values.md` for why the type level cannot generally predict which
+/// member of a multi-destination target a payload will land in.
 #[test]
 fn coerce_unresolved_range_expr_to_list_matches_concrete() {
-    for target in ["list[int]", "list[any]"] {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[int]", "list[any]", "list[int | string]"] {
         let target = ExprType::parse(target).unwrap();
-        let value = ExprValue::unresolved(ExprType::RANGE_EXPR)
+        let concrete = ExprValue::RangeExpr(range.clone())
             .coerce(&target, PathFormat::Posix)
             .unwrap();
-        assert_eq!(value, ExprValue::unresolved(target));
+        let unresolved = ExprValue::unresolved(ExprType::RANGE_EXPR)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            unresolved,
+            ExprValue::unresolved(concrete.expr_type()),
+            "target={target}"
+        );
     }
 }
 

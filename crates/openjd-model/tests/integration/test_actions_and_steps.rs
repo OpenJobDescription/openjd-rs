@@ -296,7 +296,7 @@ fn test_env_actions_empty() {
     }"#;
     check_err(
         s,
-        &["jobEnvironments[0] -> script -> actions:\n\tonEnter is required."],
+        &["jobEnvironments[0] -> script -> actions:\n\tmust define at least one of onEnter or onExit."],
     );
 }
 
@@ -599,10 +599,9 @@ fn test_env_action_on_exit() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "jobEnvironments": [{"name": "E", "script": {"actions": {"onExit": {"command": "foo"}}}}]
     }"#;
-    check_err(
-        s,
-        &["jobEnvironments[0] -> script -> actions:\n\tonEnter is required."],
-    );
+    // Either ordinary action alone is sufficient, so a cleanup-only
+    // environment is valid.
+    decode_ok(s);
 }
 
 #[test]

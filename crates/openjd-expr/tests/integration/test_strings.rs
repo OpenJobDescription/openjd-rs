@@ -199,6 +199,325 @@ fn isascii_empty() {
     assert_eq!(eval("''.isascii()").to_display_string(), "true");
 }
 
+// === Python str-method parity on Unicode input (issue #309) ===
+// Expected values in this section are CPython's answers for the same
+// str method (verified against CPython 3.14 / Unicode 16.0.0).
+#[test]
+fn isdigit_arabic_indic_digit() {
+    // U+0663 ARABIC-INDIC DIGIT THREE (Nd): Python isdigit is true.
+    assert_eq!(eval("isdigit('\u{0663}')").to_display_string(), "true");
+}
+#[test]
+fn isdigit_mixed_ascii_and_arabic_indic() {
+    assert_eq!(eval("isdigit('12\u{0663}')").to_display_string(), "true");
+}
+#[test]
+fn isdigit_superscript_two() {
+    // U+00B2 (No, Numeric_Type=Digit): Python isdigit is true.
+    assert_eq!(eval("isdigit('\u{00b2}')").to_display_string(), "true");
+}
+#[test]
+fn isdigit_vulgar_fraction_false() {
+    // U+00BD (No, Numeric_Type=Numeric): Python isdigit is false.
+    assert_eq!(eval("isdigit('\u{00bd}')").to_display_string(), "false");
+}
+#[test]
+fn isdigit_roman_numeral_false() {
+    // U+216B ROMAN NUMERAL TWELVE (Nl): Python isdigit is false.
+    assert_eq!(eval("isdigit('\u{216b}')").to_display_string(), "false");
+}
+#[test]
+fn isalpha_roman_numeral_false() {
+    // Nl is not L*: Python isalpha is false (Rust is_alphabetic says true).
+    assert_eq!(eval("isalpha('\u{216b}')").to_display_string(), "false");
+}
+#[test]
+fn isalpha_combining_mark_false() {
+    // U+0345 COMBINING GREEK YPOGEGRAMMENI (Mn, Other_Alphabetic):
+    // Python isalpha is false (Rust is_alphabetic says true).
+    assert_eq!(eval("isalpha('\u{0345}')").to_display_string(), "false");
+}
+#[test]
+fn isalpha_circled_letter_false() {
+    // U+24B6 CIRCLED LATIN CAPITAL LETTER A (So, Other_Alphabetic).
+    assert_eq!(eval("isalpha('\u{24b6}')").to_display_string(), "false");
+}
+#[test]
+fn isalpha_cjk_and_accented_true() {
+    assert_eq!(
+        eval("isalpha('\u{4e94}\u{00f1}\u{02b0}')").to_display_string(),
+        "true"
+    );
+}
+#[test]
+fn isalnum_arabic_indic_digit() {
+    assert_eq!(eval("isalnum('\u{0663}')").to_display_string(), "true");
+}
+#[test]
+fn isalnum_vulgar_fraction_true() {
+    // Python isalnum includes isnumeric: true for U+00BD even though
+    // isdigit and isalpha are both false.
+    assert_eq!(eval("isalnum('\u{00bd}')").to_display_string(), "true");
+}
+#[test]
+fn isalnum_circled_letter_false() {
+    // Not L* and no numeric value: Python isalnum is false.
+    assert_eq!(eval("isalnum('\u{24b6}')").to_display_string(), "false");
+}
+#[test]
+fn isdigit_isalnum_consistent_for_decimal_digits() {
+    // The reported inconsistency: a decimal digit must be both.
+    assert_eq!(eval("isdigit('\u{0663}')").to_display_string(), "true");
+    assert_eq!(eval("isalnum('\u{0663}')").to_display_string(), "true");
+}
+#[test]
+fn isspace_information_separators() {
+    // U+001C..U+001F are isspace in Python (not Unicode White_Space).
+    assert_eq!(
+        eval("isspace('\u{001c}\u{001d}\u{001e}\u{001f}')").to_display_string(),
+        "true"
+    );
+}
+#[test]
+fn isspace_no_break_space() {
+    assert_eq!(eval("isspace('\u{00a0}')").to_display_string(), "true");
+}
+#[test]
+fn strip_information_separator() {
+    // str.strip() uses the same Py_UNICODE_ISSPACE set as isspace,
+    // including U+001C..U+001F — not Unicode White_Space, so Rust's
+    // str::trim misses them.
+    assert_eq!(
+        eval("strip('a\\x1cb\\x1c')").to_display_string(),
+        "a\u{001c}b"
+    );
+}
+#[test]
+fn lstrip_rstrip_information_separator() {
+    assert_eq!(
+        eval("lstrip('\\x1ca\\x1c')").to_display_string(),
+        "a\u{001c}"
+    );
+    assert_eq!(
+        eval("rstrip('\\x1ca\\x1c')").to_display_string(),
+        "\u{001c}a"
+    );
+}
+#[test]
+fn strip_no_break_space() {
+    // White_Space members keep working through the SPACE table.
+    assert_eq!(eval("strip('\\xa0a\\xa0')").to_display_string(), "a");
+}
+#[test]
+fn split_information_separator() {
+    // No-separator split()/rsplit() split on Py_UNICODE_ISSPACE runs too:
+    // 'a\x1cb'.split() == ['a', 'b'] in Python.
+    assert_eq!(
+        eval("split('a\\x1cb')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a\\x1db')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+}
+#[test]
+fn split_mixed_whitespace_runs() {
+    // Runs of mixed whitespace collapse and leading/trailing runs drop,
+    // like str.split(): ' a\x1c b\x1c'.split() == ['a', 'b'].
+    assert_eq!(
+        eval("split(' a\\x1c b\\x1c')").to_display_string(),
+        r#"["a", "b"]"#
+    );
+}
+#[test]
+fn int_trims_white_space_but_not_information_separators() {
+    // CPython's int()/float() trim Unicode White_Space around the number
+    // (NBSP works) but reject U+001C..U+001F — a narrower set than
+    // str.strip(). Rust's str::trim is exactly White_Space, so the
+    // conversion functions are CPython-exact as-is.
+    assert_eq!(eval("int('\\xa05\\xa0')").to_display_string(), "5");
+}
+#[test]
+fn islower_ignores_uncased_letters() {
+    // Python islower ignores uncased characters (CJK): 'a五' is lowercase.
+    assert_eq!(eval("islower('a\u{4e94}')").to_display_string(), "true");
+}
+#[test]
+fn isupper_ignores_uncased_letters() {
+    assert_eq!(eval("isupper('A\u{4e94}')").to_display_string(), "true");
+}
+#[test]
+fn isupper_islower_uncased_only_false() {
+    // No cased characters at all: both false in Python.
+    assert_eq!(eval("isupper('\u{4e94}123')").to_display_string(), "false");
+    assert_eq!(eval("islower('\u{4e94}123')").to_display_string(), "false");
+}
+#[test]
+fn titlecase_char_neither_upper_nor_lower() {
+    // U+01C5 LATIN CAPITAL LETTER D WITH SMALL LETTER Z WITH CARON (Lt)
+    // is cased but neither uppercase nor lowercase in Python.
+    assert_eq!(eval("isupper('\u{01c5}')").to_display_string(), "false");
+    assert_eq!(eval("islower('\u{01c5}')").to_display_string(), "false");
+}
+#[test]
+fn islower_pharyngeal_fricative() {
+    // U+0295 (Ll): Python islower is true; Rust std disagreed pre-fix.
+    assert_eq!(eval("islower('\u{0295}')").to_display_string(), "true");
+}
+
+// === int()/float() accept Unicode decimal digits (Nd), like CPython ===
+// CPython's int() and float() replace Numeric_Type=Decimal characters with
+// their ASCII values before parsing, so isdigit(x) passing implies int(x)
+// succeeds for Nd digits. Expected values are CPython's answers (verified
+// against CPython 3.14 / Unicode 16.0.0).
+#[test]
+fn int_arabic_indic_digit() {
+    // int('٣') == 3
+    assert_eq!(eval("int('\u{0663}')").to_display_string(), "3");
+}
+#[test]
+fn int_arabic_indic_digits_multi() {
+    // int('١٢٣') == 123
+    assert_eq!(
+        eval("int('\u{0661}\u{0662}\u{0663}')").to_display_string(),
+        "123"
+    );
+}
+#[test]
+fn int_mixed_ascii_and_arabic_indic() {
+    // CPython transforms per-character, so mixed scripts parse: int('12٣') == 123.
+    assert_eq!(eval("int('12\u{0663}')").to_display_string(), "123");
+}
+#[test]
+fn int_negative_arabic_indic() {
+    assert_eq!(eval("int('-\u{0663}')").to_display_string(), "-3");
+}
+#[test]
+fn int_devanagari_and_fullwidth_digits() {
+    // U+0967 DEVANAGARI DIGIT ONE, U+FF17 FULLWIDTH DIGIT SEVEN.
+    assert_eq!(eval("int('\u{0967}\u{ff17}')").to_display_string(), "17");
+}
+#[test]
+fn int_isdigit_guard_pattern_nd_digit() {
+    // The guard pattern from templates: passing isdigit implies int succeeds
+    // for Nd digits (matching the CPython pair of semantics).
+    assert_eq!(
+        eval("int('\u{0663}') if isdigit('\u{0663}') else 0").to_display_string(),
+        "3"
+    );
+}
+#[test]
+fn float_arabic_indic_digits() {
+    // float('٣.٥') == 3.5 — the '.' is ASCII; Nd digits normalize around it.
+    assert_eq!(
+        eval("float('\u{0663}.\u{0665}')").to_display_string(),
+        "3.5"
+    );
+    assert_eq!(eval("float('\u{0662}')").to_display_string(), "2.0");
+}
+
+// === Python str.title / str.capitalize parity ===
+// Expected values are CPython's answers (verified against CPython 3.14 /
+// Unicode 16.0.0).
+#[test]
+fn title_digit_starts_new_word() {
+    // Word boundaries are uncased characters, so digits restart a word.
+    assert_eq!(eval("title('1st')").to_display_string(), "1St");
+    assert_eq!(eval("title('ab2cd')").to_display_string(), "Ab2Cd");
+}
+#[test]
+fn title_apostrophe_starts_new_word() {
+    assert_eq!(eval("title(\"ab'cd\")").to_display_string(), "Ab'Cd");
+}
+#[test]
+fn title_ascii_words() {
+    assert_eq!(
+        eval("title('hello world')").to_display_string(),
+        "Hello World"
+    );
+}
+#[test]
+fn title_uses_titlecase_mapping() {
+    // U+01C6 dz-digraph titlecases to U+01C5, not uppercase U+01C4.
+    assert_eq!(
+        eval("title('\u{01c6}ab')").to_display_string(),
+        "\u{01c5}ab"
+    );
+}
+#[test]
+fn title_sharp_s_expands_at_word_start_only() {
+    // 'ssß'.title() == 'Ssß': ß mid-word lowercases to itself.
+    assert_eq!(
+        eval("title('ss\u{00df}')").to_display_string(),
+        "Ss\u{00df}"
+    );
+}
+#[test]
+fn title_uncased_letters_start_words() {
+    // CJK ideographs are uncased, so they end the current word.
+    assert_eq!(
+        eval("title('a\u{4e94}b')").to_display_string(),
+        "A\u{4e94}B"
+    );
+}
+#[test]
+fn title_final_sigma() {
+    // 'OΣ K'.title() == 'Oς K': sigma is word-final, needs context.
+    assert_eq!(
+        eval("title('O\u{03a3} K')").to_display_string(),
+        "O\u{03c2} K"
+    );
+}
+#[test]
+fn title_sigma_not_final_before_cased() {
+    // 'ΑΣB'.title() == 'Ασb': cased char follows, ordinary small sigma.
+    assert_eq!(
+        eval("title('\u{0391}\u{03a3}B')").to_display_string(),
+        "\u{0391}\u{03c3}b"
+    );
+}
+#[test]
+fn capitalize_uses_titlecase_mapping() {
+    // Python >= 3.8 titlecases the first character: ǆab -> ǅab.
+    assert_eq!(
+        eval("capitalize('\u{01c6}ab')").to_display_string(),
+        "\u{01c5}ab"
+    );
+}
+#[test]
+fn capitalize_sharp_s_expands() {
+    assert_eq!(eval("capitalize('\u{00df}x')").to_display_string(), "Ssx");
+}
+#[test]
+fn capitalize_ligature_expands() {
+    // U+FB02 LATIN SMALL LIGATURE FL: 'ﬂoor'.capitalize() == 'Floor'.
+    assert_eq!(
+        eval("capitalize('\u{fb02}oor')").to_display_string(),
+        "Floor"
+    );
+}
+#[test]
+fn capitalize_uncased_first_char() {
+    assert_eq!(eval("capitalize('1st')").to_display_string(), "1st");
+}
+#[test]
+fn capitalize_lowercases_rest() {
+    assert_eq!(eval("capitalize('ABC')").to_display_string(), "Abc");
+}
+#[test]
+fn capitalize_final_sigma_in_rest() {
+    // 'OΣ K'.capitalize() == 'Oς k'.
+    assert_eq!(
+        eval("capitalize('O\u{03a3} K')").to_display_string(),
+        "O\u{03c2} k"
+    );
+}
+#[test]
+fn capitalize_empty() {
+    assert_eq!(eval("capitalize('')").to_display_string(), "");
+}
+
 #[test]
 fn replace() {
     assert_eq!(
@@ -1018,6 +1337,353 @@ fn end_of_string_z_rejected() {
             "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
+}
+
+// === Constructs outside the Python/Rust intersection (issue #310) ===
+#[test]
+fn unicode_property_class_rejected() {
+    assert_err(
+        "re_search('3', r'\\p{Nd}')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('3', r'\\p{Nd}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn unicode_property_class_inside_class_rejected() {
+    assert_err(
+        "re_search('a', r'[\\p{L}]')",
+        &[
+            "Unsupported regex feature: Unicode property class \\p{...}\n",
+            "  re_search('a', r'[\\p{L}]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn rust_capture_group_name_syntax_rejected() {
+    assert_err(
+        "re_search('ab', r'(?<n>a)b')",
+        &[
+            "Unsupported regex feature: (?<name>...) capture group; use (?P<name>...)\n",
+            "  re_search('ab', r'(?<n>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn python_capture_group_name_syntax_accepted() {
+    assert_eq!(
+        eval("re_search('ab', r'(?P<n>a)b')").to_display_string(),
+        "[\"ab\", \"a\"]"
+    );
+}
+#[test]
+fn posix_character_class_rejected() {
+    assert_err(
+        "re_search('a', r'[[:alpha:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:alpha:]]\n",
+            "  re_search('a', r'[[:alpha:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_posix_character_class_rejected() {
+    assert_err(
+        "re_search('5', r'[[:^digit:]]')",
+        &[
+            "Unsupported regex feature: POSIX character class [[:^digit:]]\n",
+            "  re_search('5', r'[[:^digit:]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_difference_rejected() {
+    assert_err(
+        "re_search('b', r'[a-z--[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class difference --\n",
+            "  re_search('b', r'[a-z--[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_intersection_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z&&[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class intersection &&\n",
+            "  re_search('e', r'[a-z&&[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn class_set_symmetric_difference_rejected() {
+    assert_err(
+        "re_search('e', r'[a-z~~[aeiou]]')",
+        &[
+            "Unsupported regex feature: character class symmetric difference ~~\n",
+            "  re_search('e', r'[a-z~~[aeiou]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn nested_character_class_rejected() {
+    assert_err(
+        "re_search('b', r'[a[bc]]')",
+        &[
+            "Unsupported regex feature: nested character class\n",
+            "  re_search('b', r'[a[bc]]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn swap_greed_inline_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U)a+')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U)a+')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn crlf_inline_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?R)^a')",
+        &[
+            "Unsupported regex feature: inline flag R (CRLF mode)\n",
+            "  re_search('a', r'(?R)^a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_swap_greed_flag_rejected() {
+    assert_err(
+        "re_search('aaa', r'(?U:a+)')",
+        &[
+            "Unsupported regex feature: inline flag U (swap greed)\n",
+            "  re_search('aaa', r'(?U:a+)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn global_flag_negation_rejected() {
+    assert_err(
+        "re_search('A', r'(?-i)a')",
+        &[
+            "Unsupported regex feature: global flag negation (?-...); use a scoped group (?-i:...)\n",
+            "  re_search('A', r'(?-i)a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn negated_unicode_flag_rejected() {
+    assert_err(
+        "re_search('a', r'(?-u:a)')",
+        &[
+            "Unsupported regex feature: negated Unicode flag -u\n",
+            "  re_search('a', r'(?-u:a)')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn shared_inline_flags_accepted() {
+    // `i`, `m`, `s`, `x` (and positive `u`) are in the Python/Rust
+    // intersection, bare and scoped, including scoped negation.
+    assert!(eval("re_search('HELLO', r'(?i)hello')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?m)^b')").is_list());
+    assert!(eval("re_search('a\\nb', r'(?s)a.b')").is_list());
+    assert!(eval("re_search('ab', r'(?x)a b')").is_list());
+    assert!(eval("re_search('a', r'(?u)\\w')").is_list());
+    assert!(eval("re_search('HELLO', r'(?i:hello)')").is_list());
+    assert!(eval("re_search('hello', r'(?-i:hello)')").is_list());
+}
+#[test]
+fn word_boundary_start_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start}\n",
+            "  re_search('ab', r'\\b{start}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end}\n",
+            "  re_search('ab', r'a\\b{end}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'\\<a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\<\n",
+            "  re_search('ab', r'\\<a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_angle_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\>')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\>\n",
+            "  re_search('ab', r'a\\>')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_start_half_rejected() {
+    assert_err(
+        "re_search('ab', r'\\b{start-half}a')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{start-half}\n",
+            "  re_search('ab', r'\\b{start-half}a')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn word_boundary_end_half_rejected() {
+    assert_err(
+        "re_search('ab', r'a\\b{end-half}')",
+        &[
+            "Unsupported regex feature: word boundary assertion \\b{end-half}\n",
+            "  re_search('ab', r'a\\b{end-half}')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn portable_word_boundaries_accepted() {
+    assert!(eval("re_search('hello world', r'\\bworld\\b')").is_list());
+    assert!(eval("re_search('hello', r'l\\Bl')").is_list());
+}
+#[test]
+fn verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x)[a b]')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x)[a b]')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn scoped_verbose_mode_class_whitespace_rejected() {
+    assert_err(
+        "re_search('a', r'(?x:[a b])')",
+        &[
+            "Unsupported regex feature: verbose mode (?x) with whitespace or '#' in a character class; Python treats them as literals\n",
+            "  re_search('a', r'(?x:[a b])')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn verbose_mode_escaped_space_in_class_accepted() {
+    // An escaped space is a literal space in both engines, even under
+    // verbose mode.
+    assert!(eval("re_search(' ', r'(?x)[a\\ b]')").is_list());
+}
+#[test]
+fn verbose_mode_class_without_whitespace_accepted() {
+    assert!(eval("re_search('a', r'(?x) [ab] c?')").is_list());
+}
+#[test]
+fn bare_flags_mid_pattern_rejected() {
+    // Python 3.11+ raises "global flags not at the start of the
+    // expression"; pre-3.11 applied the flag to the whole pattern where
+    // Rust applies it only forward.
+    assert_err(
+        "re_search('ab', r'a(?i)b')",
+        &[
+            "Unsupported regex feature: bare inline flags not at the start of the pattern; use a scoped group like (?i:...)\n",
+            "  re_search('ab', r'a(?i)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn multiple_leading_bare_flags_accepted() {
+    // Consecutive flag groups at the very start are fine in both engines.
+    assert!(eval("re_search('A B', r'(?i)(?s)a.b')").is_list());
+}
+#[test]
+fn capture_name_with_dot_rejected() {
+    // regex_syntax permits `.` in group names; Python raises "bad
+    // character in group name".
+    assert_err(
+        "re_search('ab', r'(?P<a.b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a.b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a.b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_bracket_rejected() {
+    assert_err(
+        "re_search('ab', r'(?P<a[b>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'a[b' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<a[b>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_non_xid_alphanumeric_rejected() {
+    // `²` (U+00B2, category No) passes Rust's char::is_alphanumeric but is
+    // not XID_Continue: "x²".isidentifier() is false, and CPython raises
+    // "bad character in group name 'x²'".
+    assert_err(
+        "re_search('ab', r'(?P<x\u{b2}>a)b')",
+        &[
+            "Unsupported regex feature: capture group name 'x\u{b2}' is not a valid Python identifier\n",
+            "  re_search('ab', r'(?P<x\u{b2}>a)b')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+#[test]
+fn capture_name_with_underscore_and_digits_accepted() {
+    assert!(eval("re_search('ab', r'(?P<my_name1>a)b')").is_list());
+}
+#[test]
+fn capture_name_non_ascii_xid_accepted() {
+    // Non-ASCII XID characters are valid Python identifiers: "имя" and
+    // "名前" pass str.isidentifier(), and CPython accepts them as group
+    // names. The check must not over-reject them.
+    assert!(eval("re_search('ab', r'(?P<\u{438}\u{43c}\u{44f}>a)b')").is_list());
+    assert!(eval("re_search('ab', r'(?P<\u{540d}\u{524d}>a)b')").is_list());
 }
 
 // === TestRegexEscapedPatternsAccepted ===
@@ -2001,6 +2667,129 @@ fn rsplit_maxsplit_method_exact() {
         r#"["a/b/c", "d"]"#
     );
 }
+
+// Regression: negative maxsplit wrapped through `as usize`, then `n + 1`
+// overflowed (debug panic; release returned []). Python treats any
+// negative maxsplit as "no limit".
+#[test]
+fn split_negative_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("split('a b c', ' ', -1)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("split('a,b,c,d', ',', -9223372036854775808)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn rsplit_negative_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("rsplit('a b c', ' ', -1)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a,b,c,d', ',', -2)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn split_zero_maxsplit_means_no_splits() {
+    // Boundary of the negative-maxsplit fix: 0 must still mean "no splits".
+    assert_eq!(
+        eval("split('a b c', ' ', 0)").to_display_string(),
+        r#"["a b c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 0)").to_display_string(),
+        r#"["a b c"]"#
+    );
+}
+// Regression: the `i64 -> usize` maxsplit conversion used a plain `as` cast,
+// which is lossy where `usize` is narrower than `i64`. On a 32-bit target a
+// maxsplit above `u32::MAX` wrapped to a small number (2^32 wrapped to 0,
+// giving no splits at all) and `n + 1` could overflow `usize`. The conversion
+// now saturates to `usize::MAX` and the `+ 1` saturates too, so "maxsplit
+// larger than the string" means "no limit" on every target width.
+//
+// NOTE ON FALSIFIABILITY: on a 64-bit host every non-negative `i64` converts
+// losslessly and `n + 1` cannot overflow `usize`, so these assertions pass with
+// or without the fix. They are load-bearing only on a 32-bit target, where the
+// unfixed code returns `["a b c"]` for the 2^32 case. Treat them as a contract
+// pinned for 32-bit builds, not as proof on this host.
+#[test]
+fn split_huge_maxsplit_means_no_limit() {
+    // 2^32: wraps to 0 under a lossy cast on 32-bit, i.e. "no splits".
+    assert_eq!(
+        eval("split('a b c', ' ', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    // u32::MAX: survives the cast on 32-bit, but then `n + 1` overflows usize.
+    assert_eq!(
+        eval("split('a b c', ' ', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    // i64::MAX: the widest value the parser can hand us.
+    assert_eq!(
+        eval("split('a,b,c,d', ',', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn rsplit_huge_maxsplit_means_no_limit() {
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c', ' ', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a,b,c,d', ',', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+#[test]
+fn re_split_huge_maxsplit_means_no_limit() {
+    // re_split() shares the same lossy-cast shape as split()/rsplit().
+    assert_eq!(
+        eval("re_split('a1b2c', '[0-9]', 4294967296)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c', '[0-9]', 4294967295)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c3d', '[0-9]', 9223372036854775807)").to_display_string(),
+        r#"["a", "b", "c", "d"]"#
+    );
+}
+
+// Negative control for the saturation: a small positive maxsplit must still
+// limit the split. A mutation that clamped every positive maxsplit up to
+// "unlimited" would pass the three tests above and fail this one.
+#[test]
+fn small_positive_maxsplit_still_limits() {
+    assert_eq!(
+        eval("split('a b c d', ' ', 1)").to_display_string(),
+        r#"["a", "b c d"]"#
+    );
+    assert_eq!(
+        eval("rsplit('a b c d', ' ', 1)").to_display_string(),
+        r#"["a b c", "d"]"#
+    );
+    assert_eq!(
+        eval("re_split('a1b2c3d', '[0-9]', 1)").to_display_string(),
+        r#"["a", "b2c3d"]"#
+    );
+}
+
 #[test]
 fn rsplit_no_match_exact() {
     assert_eq!(eval("rsplit('abc', ',')").to_display_string(), r#"["abc"]"#);
@@ -2181,6 +2970,29 @@ fn re_split_maxsplit_exact() {
     );
 }
 #[test]
+fn re_split_negative_maxsplit_means_no_splits() {
+    // Regression: negative maxsplit wrapped via `as usize`, then `n + 1`
+    // panicked in debug builds. Python's re.split (unlike str.split) treats
+    // negative maxsplit as "no splits at all".
+    assert_eq!(
+        eval("re_split('a b c', ' ', -1)").to_display_string(),
+        r#"["a b c"]"#
+    );
+    assert_eq!(
+        eval("re_split('a b c', ' ', -9223372036854775808)").to_display_string(),
+        r#"["a b c"]"#
+    );
+}
+#[test]
+fn re_split_zero_maxsplit_means_unlimited() {
+    // Python re.split parity: maxsplit=0 means unlimited (str.split's 0 means
+    // no splits). Previously Rust returned ["a b c"] here.
+    assert_eq!(
+        eval("re_split('a b c', ' ', 0)").to_display_string(),
+        r#"["a", "b", "c"]"#
+    );
+}
+#[test]
 fn re_split_kv_exact() {
     assert_eq!(
         eval(r"re_split('key1=val1,key2=val2', r'[=,]')").to_display_string(),
@@ -2233,9 +3045,11 @@ fn re_sub_lookbehind_rejected() {
 // --- Escaped regex patterns: exact return values ---
 #[test]
 fn escaped_backreference_exact() {
+    // The matched string is `\1`; the backslash is JSON-escaped in the list
+    // display form.
     assert_eq!(
         eval(r#"re_search('test\\1', r'\\1')"#).to_display_string(),
-        r#"["\1"]"#
+        r#"["\\1"]"#
     );
 }
 #[test]
@@ -2586,7 +3400,25 @@ fn negative_padding_width_returns_input_unchanged() {
 fn pwsh_repr_preserves_nested_list_item_structure() {
     assert_eq!(
         eval("repr_pwsh([[1, 2], [3]])").to_display_string(),
-        "@([1, 2], [3])"
+        "@(@(1, 2), @(3))"
+    );
+}
+
+#[test]
+fn pwsh_repr_nested_string_lists_quote_elements() {
+    assert_eq!(
+        eval(r#"repr_pwsh([["it's", "b"], ["c d"]])"#).to_display_string(),
+        "@(@('it''s', 'b'), @('c d'))"
+    );
+}
+
+#[test]
+fn pwsh_repr_single_nested_list_uses_unary_comma() {
+    // `@(@(1, 2))` would flatten to `@(1, 2)` in PowerShell; the unary
+    // comma preserves the one-element outer array.
+    assert_eq!(
+        eval("repr_pwsh([[1, 2]])").to_display_string(),
+        "@(,@(1, 2))"
     );
 }
 

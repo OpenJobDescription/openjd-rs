@@ -744,18 +744,41 @@ fn test_env_name_513_chars_with_extension_fails() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Bug fix: onEnter is required per spec §4.3
+// Environment actions: at least one of onEnter or onExit (spec §4.3)
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-fn test_env_actions_on_enter_required() {
-    // onExit alone should fail — onEnter is required
-    check_env_err(
+fn test_env_actions_on_exit_only_is_valid() {
+    // onExit alone is sufficient: a queue environment whose only work is
+    // cleanup does not need an onEnter.
+    decode_ok(
         r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onExit": {"command": "cleanup"}}}}
     }"#,
-        &["environment -> script -> actions:\n\tonEnter is required."],
+    );
+}
+
+#[test]
+fn test_env_actions_on_enter_only_is_valid() {
+    decode_ok(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "setup"}}}}
+    }"#,
+    );
+}
+
+#[test]
+fn test_env_actions_empty_is_rejected() {
+    // Removing the onEnter requirement must not make an empty actions object
+    // acceptable.
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {}}}
+    }"#,
+        &["environment -> script -> actions:\n\tmust define at least one of onEnter or onExit."],
     );
 }
 

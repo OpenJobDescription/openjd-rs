@@ -99,11 +99,12 @@ pub struct EffectiveRules {
     pub allowed_job_param_types: std::collections::HashSet<JobParameterType>,
     pub allowed_task_param_types: std::collections::HashSet<TaskParameterType>,
     pub allow_fmtstring_in_numeric_fields: bool,
-    /// When the `WRAP_ACTIONS` extension is enabled, an environment script
-    /// is valid if it defines any of `onEnter`, `onExit`, or one of the
-    /// RFC 0008 wrap hooks (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`).
-    /// Without the extension, the base 2023-09 rule applies:
-    /// `onEnter` is required whenever `script` is present.
+    /// An environment script must define at least one action whether or not
+    /// this flag is set, and either `onEnter` or `onExit` alone satisfies
+    /// that. The flag decides two things: whether the RFC 0008 wrap hooks
+    /// (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`) also count as an
+    /// acceptable choice, and which wording the error uses when no action is
+    /// defined. It does not make `onEnter` required.
     pub wrap_actions_enabled: bool,
 }
 

@@ -372,6 +372,28 @@ fn make_list_checked_range_fn() {
 }
 
 #[test]
+fn re_split_large_result_respects_budgets() {
+    // End-to-end: a large re_split fails cleanly under a tight memory cap.
+    // Note this cannot distinguish make_list_checked from make_list: the
+    // checked constructor only moves the limit check before the transient
+    // allocation (track() charges the result either way).
+    let mut st = SymbolTable::new();
+    st.set("Param.Text", "word ".repeat(10_000)).unwrap();
+    let e = ParsedExpression::new("re_split(Param.Text, ' ')")
+        .and_then(|p| {
+            p.with_memory_limit(TIGHT_MEM)
+                .with_operation_limit(10_000_000)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("exceeded limit"),
+        "expected a bound-exceeded error, got:\n{e}"
+    );
+}
+
+#[test]
 fn make_list_checked_sorted_fn() {
     // sorted() → make_list_checked. Use a large input symtab list so the
     // oversize only materializes at construction.
@@ -436,6 +458,49 @@ fn make_list_checked_split_fn() {
     assert!(
         e.contains("exceeded limit"),
         "expected memory-limit error from split(), got:\n{e}"
+    );
+}
+
+#[test]
+fn title_checks_memory_before_char_collect() {
+    // title() collects the input into a transient `Vec<char>` whose upper
+    // bound is 4 * s.len() bytes. The memory check runs *before* the
+    // collect, so a 100 kB input under a 150 kB budget (input fits, the
+    // 400 kB char buffer bound does not) errors without allocating it.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("a".repeat(100_000)))
+        .unwrap();
+    let e = ParsedExpression::new("title(Param.S)")
+        .and_then(|p| {
+            p.with_memory_limit(150_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Expression memory usage") && e.contains("exceeded limit (150000 bytes)"),
+        "expected memory-limit error from title(), got:\n{e}"
+    );
+}
+
+#[test]
+fn capitalize_checks_memory_before_char_collect() {
+    // Same transient Vec<char> bound as title() — see above.
+    let mut st = SymbolTable::new();
+    st.set("Param.S", ExprValue::String("a".repeat(100_000)))
+        .unwrap();
+    let e = ParsedExpression::new("capitalize(Param.S)")
+        .and_then(|p| {
+            p.with_memory_limit(150_000)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Expression memory usage") && e.contains("exceeded limit (150000 bytes)"),
+        "expected memory-limit error from capitalize(), got:\n{e}"
     );
 }
 

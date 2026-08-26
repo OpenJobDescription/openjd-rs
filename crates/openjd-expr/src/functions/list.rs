@@ -122,14 +122,22 @@ pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if step > 0 {
         while v < stop {
             elements.push(ExprValue::Int(v));
-            v += step;
             ctx.count_op()?;
+            // Overflow means the next value would exceed i64::MAX >= stop, so the range ends.
+            match v.checked_add(step) {
+                Some(next) => v = next,
+                None => break,
+            }
         }
     } else {
         while v > stop {
             elements.push(ExprValue::Int(v));
-            v += step;
             ctx.count_op()?;
+            // Underflow means the next value would be below i64::MIN <= stop, so the range ends.
+            match v.checked_add(step) {
+                Some(next) => v = next,
+                None => break,
+            }
         }
     }
     ExprValue::make_list_checked(ctx, elements, ExprType::INT)

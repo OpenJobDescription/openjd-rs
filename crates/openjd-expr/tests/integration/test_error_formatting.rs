@@ -74,6 +74,50 @@ fn type_error_at_end() {
 }
 
 #[test]
+fn superscript_digit_to_int_error() {
+    // U+00B2 SUPERSCRIPT TWO: isdigit('²') is true, but it has
+    // Numeric_Type=Digit, not Decimal — CPython's int('²') raises too.
+    assert_err(
+        "int('\u{00b2}')",
+        &[
+            "Cannot convert '\u{00b2}' to int\n",
+            "  int('\u{00b2}')\n",
+            "  ^~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn vulgar_fraction_to_float_error() {
+    // U+00BD VULGAR FRACTION ONE HALF (Numeric_Type=Numeric): rejected by
+    // CPython's float() as well.
+    assert_err(
+        "float('\u{00bd}')",
+        &[
+            "Cannot convert '\u{00bd}' to float\n",
+            "  float('\u{00bd}')\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn information_separator_to_int_error() {
+    // CPython's int() trims Unicode White_Space but NOT the information
+    // separators U+001C..U+001F: int('\x1c5') raises even though
+    // isspace('\x1c') is true. Rust's str::trim matches White_Space
+    // exactly, so the conversion functions are CPython-exact as-is.
+    assert_err(
+        "int('\\x1c5')",
+        &[
+            "Cannot convert '\u{001c}5' to int\n",
+            "  int('\\x1c5')\n",
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
 fn operator_error_friendly_name() {
     assert_err(
         "'hello' + 5",
@@ -576,6 +620,27 @@ fn power_error_caret() {
             "  ~~^~~~~",
         ],
     );
+}
+
+#[test]
+fn single_line_two_char_operator_caret_points_at_first_char() {
+    // Baseline for the multi-line defect below: on one line, the caret sits on
+    // the first character of a two-character operator.
+    assert_err("1 ** 'a'", &["  1 ** 'a'\n", "  ~~^~~~~~"]);
+    assert_err("1 // 'a'", &["  1 // 'a'\n", "  ~~^~~~~~"]);
+}
+
+#[test]
+#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
+            multi-line paren-wrap offset shift, so its backwards operator scan \
+            reads bytes one position to the right and the caret for a \
+            multi-line ** or // lands on the operator's second character \
+            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
+            the NOTE in eval/parse.rs::parse_inner for the centralization that \
+            fixes it. Un-ignore then."]
+fn multiline_two_char_operator_caret_points_at_first_char() {
+    assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
+    assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
 }
 
 #[test]

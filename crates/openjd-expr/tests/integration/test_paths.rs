@@ -167,6 +167,40 @@ fn is_relative_to_false() {
         "false"
     );
 }
+#[test]
+fn is_relative_to_windows_multibyte_no_panic() {
+    // Regression: the Windows case-insensitive compare byte-sliced
+    // `path[..base.len()]`, panicking when the boundary fell inside a
+    // multibyte char ('日' is 3 bytes; base 'ab' is 2).
+    assert_eq!(
+        eval_windows("P.is_relative_to('ab')", &windows_st("P", "日")).to_display_string(),
+        "false"
+    );
+}
+#[test]
+fn is_relative_to_windows_multibyte_match() {
+    // Multibyte prefixes must still match when the boundary is char-aligned.
+    assert_eq!(
+        eval_windows(
+            "P.is_relative_to('C:\\\\日本')",
+            &windows_st("P", "C:\\日本\\out")
+        )
+        .to_display_string(),
+        "true"
+    );
+}
+#[test]
+fn relative_to_windows_multibyte_no_panic() {
+    // relative_to shares the same prefix-compare helper.
+    assert_eq!(
+        eval_windows(
+            "P.relative_to('C:\\\\日本')",
+            &windows_st("P", "C:\\日本\\out")
+        )
+        .to_display_string(),
+        "out"
+    );
+}
 
 // === TestRelativeTo ===
 #[test]

@@ -166,6 +166,31 @@ fn range_expr_sum() {
     assert_eq!(eval("sum(range_expr('1-5'))").to_display_string(), "15");
 }
 
+#[test]
+fn range_expr_sum_negative_overflow_is_error() {
+    // Opposite-sign branch of the checked accumulation: summing large
+    // negative values must underflow to a clean error, not a panic.
+    assert_err(
+        "sum(range_expr('-4611686018427387900--4611686018427387000'))",
+        &["Integer overflow: result is outside the 64-bit signed range"],
+    );
+}
+
+#[test]
+fn range_expr_sum_overflow_is_error() {
+    // Regression: the RangeExpr branch of sum() used an unchecked
+    // `r.iter().sum::<i64>()` (debug panic "attempt to add with overflow").
+    // 901 values near 2^62 sum far past i64::MAX; must be a clean error.
+    assert_err(
+        "sum(range_expr('4611686018427387000-4611686018427387900'))",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  sum(range_expr('4611686018427387000-4611686018427387900'))\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
 // === Additional range_expr tests ===
 #[test]
 fn range_expr_from_list_v2() {

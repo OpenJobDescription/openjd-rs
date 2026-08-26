@@ -37,6 +37,8 @@ mod test_job_cancelation_serde;
 mod test_job_eq_hash;
 #[path = "integration/test_job_parameters.rs"]
 mod test_job_parameters;
+#[path = "integration/test_job_step_serde.rs"]
+mod test_job_step_serde;
 #[path = "integration/test_job_template.rs"]
 mod test_job_template;
 #[path = "integration/test_let_bindings.rs"]

@@ -389,29 +389,22 @@ pub fn validate_single_environment(
     if let Some(script) = &env.script {
         let script_path = path_field(path, "script");
         let actions_path = path_field(&script_path, "actions");
-        // Base 2023-09 requires `onEnter` whenever a `script` is present.
-        // RFC 0008 relaxes this: when `WRAP_ACTIONS` is enabled, an env may
-        // define only wrap hooks (or any single action) without a standalone
-        // `onEnter`. Concretely, require at least one of the five known
-        // actions to be present so we don't accept an empty `actions: {}`.
-        if rules.wrap_actions_enabled {
-            // RFC 0008: an env may define only wrap hooks (or any single
-            // action) without a standalone `onEnter`. Require at least one of
-            // the five known actions so an empty `actions: {}` is still
-            // rejected. The all-or-nothing wrap-hook rule (defining any wrap
-            // hook requires all three) is enforced separately in
-            // `wrap_actions.rs`, not here.
-            if !script.actions.has_any_action() {
-                errors.add(
-                    &actions_path,
-                    "must define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together).",
-                );
-            }
-        } else if script.actions.on_enter.is_none() {
-            // Preserve the original wording when the extension is not enabled
-            // so pre-RFC error messages don't change. `on_enter.is_none()`
-            // also covers the empty-`actions` case.
-            errors.add(&actions_path, "onEnter is required.");
+        // An environment script must define at least one action. Either
+        // `onEnter` or `onExit` alone satisfies this, so an environment whose
+        // only work is cleanup is valid. With `WRAP_ACTIONS` a complete set of
+        // wrap hooks also satisfies it. Requiring at least one of the five
+        // known actions is what rejects an empty `actions: {}`. The
+        // all-or-nothing wrap-hook rule (defining any wrap hook requires all
+        // three) is enforced separately in `wrap_actions.rs`, not here.
+        if !script.actions.has_any_action() {
+            errors.add(
+                &actions_path,
+                if rules.wrap_actions_enabled {
+                    "must define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together)."
+                } else {
+                    "must define at least one of onEnter or onExit."
+                },
+            );
         }
         for (name, action) in script.actions.iter_named() {
             validate_action(
