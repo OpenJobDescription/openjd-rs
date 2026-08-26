@@ -208,10 +208,11 @@ mod platform {
 mod platform {
     use super::*;
 
-    use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, STILL_ACTIVE};
     use windows::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, TerminateProcess, CREATE_NEW_PROCESS_GROUP,
-        PROCESS_QUERY_INFORMATION, PROCESS_TERMINATE,
+        GetExitCodeProcess, GetProcessTimes, OpenProcess, TerminateProcess,
+        CREATE_NEW_PROCESS_GROUP, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
     };
 
     /// Send CTRL_BREAK_EVENT to a process group for graceful cancellation.
@@ -309,43 +310,108 @@ mod platform {
         pairs
     }
 
-    /// Kill a process tree: collect all descendants, then kill leaf-to-root.
-    /// Mirrors Python's `_windows_process_killer.py`.
-    fn kill_process_tree(root_pid: u32) {
-        // Kill in reverse order (children first): breadth-first order lists
-        // every parent before its children, so the reverse kills leaves
-        // before their ancestors.
-        let to_kill = collect_tree(root_pid);
-        for &pid in to_kill.iter().rev() {
-            kill_process(pid);
+    /// Read a process's creation time from an already-open handle.
+    ///
+    /// The handle must grant at least `PROCESS_QUERY_LIMITED_INFORMATION`.
+    /// Packs the creation `FILETIME` into a single `u64` tick count
+    /// (`high << 32 | low`). Returns `None` if `GetProcessTimes` fails.
+    fn creation_time_from_handle(handle: HANDLE) -> Option<u64> {
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        let ok = unsafe {
+            // All four out-params are valid, writable FILETIME slots; we
+            // only consume `creation`.
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).is_ok()
+        };
+        if !ok {
+            return None;
+        }
+        Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
+    }
+
+    /// Read the creation time of the process currently at `pid`.
+    ///
+    /// Fail closed: any failure to open the process or read its times
+    /// returns `None`, and callers treat `None` as "cannot validate, do not
+    /// kill".
+    fn process_creation_time(pid: u32) -> Option<u64> {
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let ct = creation_time_from_handle(handle);
+            let _ = CloseHandle(handle);
+            ct
         }
     }
 
-    /// Collect the process tree rooted at `root_pid` in breadth-first order.
+    /// Terminate `target` only if the process currently at its PID still has
+    /// the creation time recorded at collection, closing the collect-to-kill
+    /// TOCTOU window: a collected PID could be reused by an unrelated process
+    /// before we terminate it. A single handle is opened with both query and
+    /// terminate rights, and BOTH the identity read and the `TerminateProcess`
+    /// use that SAME handle, so no reuse can slip between the check and the
+    /// kill. On mismatch or unreadable identity the kill is skipped and the
+    /// reason logged so field misfires are diagnosable. Returns whether a
+    /// terminate was issued.
+    fn kill_process_checked(target: &ValidatedProcess) -> bool {
+        unsafe {
+            let Ok(handle) = OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                false,
+                target.pid,
+            ) else {
+                // Cannot open => cannot validate => fail closed.
+                log::info!(target: "openjd.sessions", "Not terminating pid {}: could not read creation time (open failed), PID likely reused or process exited", target.pid);
+                return false;
+            };
+            let current = creation_time_from_handle(handle);
+            if !process_identity_matches(target.creation_time, current) {
+                let reason = if current.is_some() {
+                    "creation time mismatch, PID likely reused"
+                } else {
+                    "could not read creation time"
+                };
+                log::info!(target: "openjd.sessions", "Not terminating pid {}: {reason}", target.pid);
+                let _ = CloseHandle(handle);
+                return false;
+            }
+            let issued = TerminateProcess(handle, 1).is_ok();
+            let _ = CloseHandle(handle);
+            issued
+        }
+    }
+
+    /// Kill a process tree: collect all descendants (validating every
+    /// creation-time edge), then kill leaf-to-root. Mirrors Python's
+    /// `_windows_process_killer.py`.
     ///
-    /// Walks a single toolhelp snapshot with a visited set instead of
-    /// recursing with a fresh snapshot per level. Both details matter:
     /// `th32ParentProcessID` is recorded at child creation time, so PID
     /// reuse can make the recorded parent graph cyclic (a dead ancestor's
     /// PID reused by a descendant). The previous recursive implementation
     /// had no cycle guard and overflowed the thread's stack (0xc00000fd)
-    /// when it hit such a cycle.
-    fn collect_tree(root_pid: u32) -> Vec<u32> {
-        use std::collections::HashSet;
+    /// when it hit such a cycle. Edge validation now lives in
+    /// `super::collect_tree_validated`; this history is kept here because
+    /// this is the platform entry point that walks that graph.
+    fn kill_process_tree(root_pid: u32) {
         let parents = snapshot_process_parents();
-        let mut result = vec![root_pid];
-        let mut seen: HashSet<u32> = HashSet::from([root_pid]);
-        let mut i = 0;
-        while i < result.len() {
-            let pid = result[i];
-            i += 1;
-            for &(child, ppid) in &parents {
-                if ppid == pid && seen.insert(child) {
-                    result.push(child);
-                }
-            }
+        let tree = super::collect_tree_validated(root_pid, &parents, &mut |pid| {
+            process_creation_time(pid)
+        });
+        if tree.is_empty() {
+            // The root's creation time was unreadable, so no edge could be
+            // validated. Fall back to a best-effort kill of just the root by
+            // raw PID: this is the sole remaining use of the unvalidated
+            // `kill_process`, accepted only because there is nothing left to
+            // validate against.
+            kill_process(root_pid);
+            return;
         }
-        result
+        // collect_tree_validated returns breadth-first order (every parent
+        // before its children), so the reverse kills leaves before ancestors.
+        for target in tree.iter().rev() {
+            kill_process_checked(target);
+        }
     }
 
     /// Terminate: kill the entire process tree.
@@ -362,10 +428,37 @@ mod platform {
     }
 
     /// Delayed terminate: kill the process tree after a grace period.
+    ///
+    /// Captures the root's creation time NOW, synchronously, while the caller
+    /// still holds the live `Child` handle so the kernel pins this PID and it
+    /// cannot be reused out from under us. After the delay the task
+    /// revalidates the root's identity before walking the tree. Without this,
+    /// the detached task could fire after the `Child` handle is dropped and
+    /// the PID recycled, killing an unrelated process tree.
     pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
+        let root_identity = process_creation_time(pid as u32);
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
-            kill_process_tree(pid as u32);
+            match root_identity {
+                Some(ct) => {
+                    // Fresh same-handle identity check before touching the
+                    // tree. If the root no longer matches, the original
+                    // process already exited (and its PID may be reused), so
+                    // there is nothing to kill. Each node is revalidated
+                    // again at kill time inside kill_process_tree.
+                    if process_identity_matches(ct, process_creation_time(pid as u32)) {
+                        kill_process_tree(pid as u32);
+                    } else {
+                        log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root creation time changed (process exited or PID reused), skipping tree kill");
+                    }
+                }
+                None => {
+                    // Could not capture root identity at schedule time; fall
+                    // back to the previous immediate tree-kill behavior.
+                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: could not capture root identity at schedule time, falling back to unvalidated tree kill");
+                    kill_process_tree(pid as u32);
+                }
+            }
         });
     }
 
@@ -381,7 +474,6 @@ mod platform {
         _use_setsid: bool,
     ) -> Option<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
         use std::os::windows::io::{FromRawHandle, OwnedHandle};
-        use windows::Win32::Foundation::HANDLE;
         use windows::Win32::Security::SECURITY_ATTRIBUTES;
         use windows::Win32::System::Pipes::CreatePipe;
 
