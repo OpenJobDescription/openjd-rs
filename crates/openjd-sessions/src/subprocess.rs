@@ -291,31 +291,37 @@ mod platform {
     }
 
     /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, together
-    /// with a wall-clock stamp captured immediately AFTER the enumeration walk
-    /// completes.
+    /// with a wall-clock stamp captured immediately AFTER
+    /// `CreateToolhelp32Snapshot` succeeds (before the enumeration walk).
     ///
-    /// Sound invariant: every process the snapshot lists was created before the
-    /// walk finished, so the stamp upper-bounds the creation time of every
-    /// listed process. `collect_tree_validated` uses it to reject a candidate
-    /// whose freshly read creation time is newer than the stamp — the signature
-    /// of a PID reused after the snapshot was taken.
-    ///
-    /// Capturing the stamp AFTER the walk (rather than before) is a deliberate
-    /// trade: it widens the reuse-acceptance window by the walk's duration, but
-    /// a genuine child forked DURING the (non-trivial) enumeration is no longer
-    /// falsely rejected. A stamp taken before the walk would give such a child
-    /// a creation time greater than the stamp and prune it with its whole
-    /// subtree; falsely pruning the newest, fastest-forking children breaks
-    /// legitimate kills, which is the worse failure.
+    /// `TH32CS_SNAPPROCESS` copies the process list at call time;
+    /// `Process32First`/`Next` iterate that frozen copy, so nothing created
+    /// after the call can appear in the pairs. A stamp taken right after the
+    /// call therefore upper-bounds the creation time of every listed process
+    /// AND keeps the reuse-acceptance window at its smallest sound value.
+    /// `collect_tree_validated` uses it to reject a candidate whose freshly
+    /// read creation time is newer than the stamp: the signature of a PID
+    /// reused after the snapshot was taken. Taking the stamp after the walk
+    /// (as an earlier version did) only widened that window by the walk's
+    /// duration for no benefit, since the walk cannot observe any process the
+    /// frozen copy did not already contain.
     fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
         use windows::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
             TH32CS_SNAPPROCESS,
         };
         let mut pairs = Vec::new();
+        // Stamp is captured immediately after the snapshot is created (below);
+        // this 0 is only the unreachable no-snapshot fallback.
+        let mut stamp: u64 = 0;
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if let Ok(snap) = snap {
+                // Point-in-time: CreateToolhelp32Snapshot froze the process
+                // list on the line above, so a stamp taken here upper-bounds
+                // every listed process while keeping the reuse-acceptance
+                // window at its smallest sound value.
+                stamp = system_time_as_filetime_ticks();
                 let mut entry = PROCESSENTRY32W {
                     dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
                     ..Default::default()
@@ -331,11 +337,6 @@ mod platform {
                 let _ = CloseHandle(snap);
             }
         }
-        // Capture the stamp AFTER the enumeration walk completes so the sound
-        // invariant holds: every process the snapshot listed was created before
-        // this instant. Taking it before the walk would falsely reject genuine
-        // children forked during the enumeration.
-        let stamp = system_time_as_filetime_ticks();
         (stamp, pairs)
     }
 
@@ -510,16 +511,18 @@ mod platform {
                     kill_process_tree(pid as u32, Some(ct));
                 }
                 None => {
-                    // Root identity was unreadable at schedule time (the
-                    // process likely already exited). `None` is a meaningful
-                    // input only on the immediate send_terminate path, where
-                    // the live `Child` handle pins the PID; on the delayed path
-                    // there is no identity to validate against, so the safe
-                    // action is not to walk at all. A fresh unpinned root read
-                    // here could match a process that acquired this PID by
-                    // reuse during the sleep and terminate it with its
-                    // children.
-                    log::info!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root identity was not captured at schedule time; not walking the tree (no identity to validate against)");
+                    // Root creation time could not be queried at schedule
+                    // time. This does NOT mean the process had exited: the
+                    // caller still held the live `Child` handle here, which
+                    // keeps the kernel process object (and its PID) valid even
+                    // for an already-terminated process, and a dead-but-held
+                    // process still reports its creation time. So a `None` read
+                    // means the open/query was DENIED (e.g. a protected
+                    // process), not that the process is gone. Either way there
+                    // is no pinned identity to validate against, so the safe
+                    // action is not to walk the tree at all rather than risk a
+                    // fresh unpinned read matching a reused PID.
+                    log::warn!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root creation time could not be queried at schedule time (access denied?); no identity to validate against, so the tree will not be walked after the grace period");
                 }
             }
         });
@@ -630,10 +633,14 @@ struct ValidatedProcess {
 /// already-accepted node AND the child's creation time is `>=` that
 /// parent's. A stale edge (the parent PID was reused after the real parent
 /// exited) has a child older than the recorded parent and always fails the
-/// check. We fail closed: an edge whose child creation time is unreadable
-/// is skipped, preferring to under-kill rather than kill an unrelated live
-/// process. If the ROOT's creation time is unreadable we return an empty
-/// `Vec` (callers fall back to killing just the root by other means).
+/// check. We fail closed on stale edges (a child older than its recorded
+/// parent, the mark of a reused parent PID). A child whose creation time is
+/// unreadable is NOT skipped: it is recorded as a traversable node carrying
+/// the parent's creation time as its bound (see the later paragraph), so a
+/// live subtree under a dead intermediate is still reached. If the ROOT's
+/// creation time is unreadable we return an empty `Vec` ONLY when no
+/// schedule-time identity is pinned; with `Some(exp)` the walk is seeded from
+/// that pinned identity and proceeds.
 ///
 /// Because `FILETIME` creation times are wall-clock rather than monotonic,
 /// this invariant is only exact under a forward-moving clock. An NTP
@@ -707,6 +714,19 @@ struct ValidatedProcess {
 /// may be terminated. The window is bounded and no worse than the
 /// pre-validation walk, and is structurally eliminated only by the Job Object
 /// rework (issue #347).
+///
+/// Separate residual (distinct from the dead-root/interim-holder case above):
+/// an unreadable-but-ALIVE fossil child. If a recorded `th32ParentProcessID`
+/// was freed and reassigned to OUR root, an access-denied process carrying
+/// that stale parent value becomes a child edge of the root. Because it is
+/// unreadable it bypasses the `>=` staleness check by construction (that check
+/// only applies to READABLE children) and is recorded as a traversable node
+/// carrying the parent's bound, so its own live children can fall inside
+/// `[parent_ct, snapshot_time]` and be terminated. Distinguishing genuinely
+/// dead PIDs (`OpenProcess` -> `ERROR_INVALID_PARAMETER`) from merely denied
+/// ones (`ERROR_ACCESS_DENIED`) would close this, but that changes the
+/// creation-time callback contract, so it is deferred with the Job Object
+/// rework (issue #347).
 #[cfg(any(windows, test))]
 fn collect_tree_validated(
     root_pid: u32,
@@ -725,6 +745,15 @@ fn collect_tree_validated(
         // match already proves this is the pinned process, so a stamp
         // comparison here could only false-positive under a backward clock
         // step-back and turn a legitimate cancel into a no-op.
+        //
+        // On mismatch we deliberately ABORT (return empty) rather than seed the
+        // walk. If `rc != exp` the PID has been REASSIGNED: the new occupant is
+        // alive, and its children are guaranteed-live unrelated processes whose
+        // creation times necessarily land in `[exp, snapshot_time]`, so they
+        // would pass the `>=`/`<=` edge checks. Seeding a root here would
+        // therefore deterministically kill those unrelated processes. Aborting
+        // instead only leaks our own orphans (under-kill), which is the safe
+        // direction.
         (Some(exp), Some(rc)) => {
             if rc != exp {
                 return Vec::new();
