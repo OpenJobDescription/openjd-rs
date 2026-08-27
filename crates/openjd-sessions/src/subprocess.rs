@@ -651,10 +651,25 @@ struct ValidatedProcess {
 /// parent's, so the `>=` edge check passes and U would be recorded as a
 /// validated node. Because every process the snapshot lists was created before
 /// the enumeration walk finished (the stamp is captured after the walk), we
-/// reject any candidate (root included) whose freshly read creation time is
-/// greater than `snapshot_time`. The stamp and process creation times share
-/// the same wall-clock base (FILETIME ticks since 1601 UTC), so the comparison
-/// is exact.
+/// reject any DESCENDANT candidate whose freshly read creation time is greater
+/// than `snapshot_time`. The stamp and process creation times share the same
+/// wall-clock base (FILETIME ticks since 1601 UTC), so the comparison is exact.
+///
+/// The root is exempt from the `snapshot_time` bound in every arm. The root's
+/// identity is never established by fossil-edge attribution (the reuse the
+/// stamp guards): it is either pinned by a live `Child` handle (the immediate
+/// `send_terminate` path, `expected_root_ct = None`), matched against a
+/// schedule-time identity (`Some(exp)` with `read == exp`), or seeded from that
+/// pinned identity when the root has already exited (`Some(exp)` with `None`).
+/// A stamp comparison on the root could therefore never catch a reused PID; it
+/// could only false-positive under a backward wall-clock adjustment (an NTP
+/// step-back or a VM resume, where the root's FILETIME creation was recorded
+/// before the step and the stamp read after it), return empty, and turn a
+/// legitimate cancel into a complete no-op — nothing killed, the session left
+/// waiting on a live tree. Accepted degradation: under such a backward step the
+/// root is still killed, but descendants whose recorded creation times exceed
+/// the post-step stamp may be skipped. That is an under-kill (a leaked
+/// descendant), which stays on the safe side.
 ///
 /// `expected_root_ct` pins the root's identity to a value established before
 /// this call (a schedule-time read from the delayed-terminate path). When
@@ -672,8 +687,9 @@ struct ValidatedProcess {
 ///
 /// The recorded root node then carries `exp`, the pinned identity, not any
 /// re-read value. When `expected_root_ct` is `None`, an unreadable fresh root
-/// read returns empty (fail closed) and a readable one is validated only by the
-/// fresh read and `snapshot_time`.
+/// read returns empty (fail closed) and a readable one is accepted as-is (the
+/// live `Child` handle already pins the PID; see the root-exemption note
+/// above).
 ///
 /// A child whose creation time is unreadable under an already-validated parent
 /// is kept TRAVERSABLE rather than pruned: it is recorded carrying the parent's
@@ -705,9 +721,12 @@ fn collect_tree_validated(
     // vs. unpinned, readable vs. exited matrix documented above.
     let root_ct = match (expected_root_ct, creation_time(root_pid)) {
         // Pinned identity, root still readable: the fresh read must match the
-        // pin exactly (else reuse/exit) and must not post-date the snapshot.
+        // pin exactly (else reuse/exit). No snapshot_time bound — the identity
+        // match already proves this is the pinned process, so a stamp
+        // comparison here could only false-positive under a backward clock
+        // step-back and turn a legitimate cancel into a no-op.
         (Some(exp), Some(rc)) => {
-            if rc != exp || rc > snapshot_time {
+            if rc != exp {
                 return Vec::new();
             }
             exp
@@ -717,14 +736,12 @@ fn collect_tree_validated(
         (Some(exp), None) => exp,
         // No pinned identity and no fresh read: nothing to validate against.
         (None, None) => return Vec::new(),
-        // No pinned identity, root readable: validate by the fresh read and the
-        // snapshot bound only.
-        (None, Some(rc)) => {
-            if rc > snapshot_time {
-                return Vec::new();
-            }
-            rc
-        }
+        // No pinned identity, root readable: the only caller passing None is the
+        // immediate send_terminate path, where the live Child handle pins the
+        // PID, so rc cannot belong to a reused PID. No snapshot_time bound — a
+        // stamp comparison here can only false-positive under a backward clock
+        // adjustment and would turn a legitimate cancel into a no-op.
+        (None, Some(rc)) => rc,
     };
 
     let mut visited: HashSet<u32> = HashSet::from([root_pid]);
@@ -2480,12 +2497,36 @@ mod collect_tree_validated_tests {
     }
 
     #[test]
-    fn rejects_root_created_after_snapshot() {
-        // The root itself reads newer than the snapshot => reused PID => empty.
+    fn immediate_root_newer_than_snapshot_still_collected() {
+        // Immediate send_terminate path (expected None): the live Child handle
+        // pins the PID, so the root is exempt from the snapshot bound even
+        // though its ctime (900) post-dates the stamp (300). A descendant that
+        // also post-dates the stamp (950) is still rejected.
         let parents = [(20u32, 10u32)];
-        let mut ct = ctimes_from(&[(10, 500), (20, 600)]);
+        let mut ct = ctimes_from(&[(10, 900), (20, 950)]);
         let got = collect_tree_validated(10, &parents, 300, None, &mut ct);
-        assert_eq!(got, Vec::<ValidatedProcess>::new());
+        assert_eq!(got, vec![vp(10, 900)]);
+    }
+
+    #[test]
+    fn pinned_root_newer_than_snapshot_still_collected() {
+        // Delayed path with a matching pin: the identity match proves the
+        // pinned process, so the root is collected despite ctime (900) > stamp
+        // (300).
+        let parents: [(u32, u32); 0] = [];
+        let mut ct = ctimes_from(&[(10, 900)]);
+        let got = collect_tree_validated(10, &parents, 300, Some(900), &mut ct);
+        assert_eq!(got, vec![vp(10, 900)]);
+    }
+
+    #[test]
+    fn root_exemption_does_not_extend_to_children() {
+        // The root (100) is exempt from the stamp (300), but children still
+        // obey it: 250 is accepted, 400 is rejected as a post-snapshot reuse.
+        let parents = [(20u32, 10u32), (30, 10)];
+        let mut ct = ctimes_from(&[(10, 100), (20, 250), (30, 400)]);
+        let got = collect_tree_validated(10, &parents, 300, None, &mut ct);
+        assert_eq!(got, vec![vp(10, 100), vp(20, 250)]);
     }
 
     #[test]
