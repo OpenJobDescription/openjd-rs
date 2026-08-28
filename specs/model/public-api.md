@@ -1193,6 +1193,17 @@ pub mod capabilities {
 
     /// Same, for attribute capability names.
     pub fn validate_attribute_capability_name(name: &str) -> Result<(), String>;
+
+    /// Check a single attribute capability *value* against §3.3.2.2 for the
+    /// named capability. A standard capability is checked against its allowed
+    /// set (case-insensitively) and nothing else; any other capability is
+    /// checked against the identifier pattern and the 100-character limit.
+    /// Pass the table from `standard_attribute_capabilities`.
+    pub fn validate_attribute_capability_value(
+        capability_name: &str,
+        value: &str,
+        standard_capabilities: &[(&str, &[&str])],
+    ) -> Result<(), String>;
 }
 ```
 

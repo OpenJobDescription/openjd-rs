@@ -46,10 +46,30 @@ Validates that `name` matches the attribute capability regex:
 
 Same structure as amount capabilities but with the `attr.` prefix.
 
+### `validate_attribute_capability_value(capability_name, value, standard_capabilities) -> Result<(), String>`
+
+Validates a single `<AttributeCapabilityValue>` (§3.3.2.2) for the named attribute
+capability. `standard_capabilities` is the table returned by
+`standard_attribute_capabilities` for the caller's revision and extensions.
+
+Two exclusive branches, matching the reference implementation:
+
+- The capability name (lowercased) is in `standard_capabilities` — the value must be in
+  that capability's allowed set, compared case-insensitively. The identifier pattern and
+  the length limit do not apply.
+- Otherwise — the value must be non-empty, at most 100 characters, and must match
+  `ATTR_VALUE_RE` (`^[A-Za-z_][A-Za-z0-9_\-]*$`).
+
+Called from the job-creation path for `attributes[].anyOf` / `.allOf` elements whose
+value was a format string, because §3.3.2.2 cannot be applied to those at decode. See
+[job-creation.md](job-creation.md).
+
 ## Implementation Note
 
-Both validation functions delegate to pre-compiled regexes in
-`validate_v2023_09::helpers` (`AMOUNT_CAP_RE`, `ATTR_CAP_RE`). The `capabilities`
+The two name validators delegate to pre-compiled regexes in
+`validate_v2023_09::helpers` (`AMOUNT_CAP_RE`, `ATTR_CAP_RE`), and
+`validate_attribute_capability_value` uses `ATTR_VALUE_RE` from the same module plus the
+standard capability table. The `capabilities`
 module re-exports the standard capability lists that also appear in `helpers` —
 the `helpers` versions are used internally during validation, while the `capabilities`
 versions form the public API.

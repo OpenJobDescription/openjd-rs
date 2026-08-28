@@ -8,7 +8,7 @@ use openjd_expr::format_string::copy_symbol_value;
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 
-use crate::error::ModelError;
+use crate::error::{ModelError, PathElement, ValidationErrors};
 use crate::job;
 use crate::template;
 use crate::template::validate_v2023_09::EffectiveLimits;
@@ -23,6 +23,7 @@ pub(super) fn instantiate_step(
     has_expr: bool,
     limits: &EffectiveLimits,
     ctx: &crate::types::ValidationContext,
+    step_index: usize,
 ) -> Result<job::Step, ModelError> {
     let mut step_symtab = symtab.clone();
 
@@ -201,7 +202,7 @@ pub(super) fn instantiate_step(
     let host_requirements = st
         .host_requirements
         .as_ref()
-        .map(|hr| resolve_host_requirements(hr, &step_symtab))
+        .map(|hr| resolve_host_requirements(hr, &step_symtab, ctx, step_index))
         .transpose()?;
 
     let parameter_space = st
@@ -347,6 +348,8 @@ pub fn convert_environment_with_symtab(
 fn resolve_host_requirements(
     hr: &template::HostRequirements,
     symtab: &SymbolTable,
+    ctx: &crate::types::ValidationContext,
+    step_index: usize,
 ) -> Result<job::HostRequirements, ModelError> {
     let amounts = hr
         .amounts
@@ -378,9 +381,14 @@ fn resolve_host_requirements(
         .attributes
         .as_ref()
         .map(|attrs| {
+            let standard = crate::capabilities::standard_attribute_capabilities(
+                ctx.profile.revision(),
+                ctx.profile.extensions(),
+            )?;
             attrs
                 .iter()
-                .map(|a| {
+                .enumerate()
+                .map(|(attr_index, a)| {
                     let any_of = a
                         .any_of
                         .as_ref()
@@ -391,6 +399,13 @@ fn resolve_host_requirements(
                         .as_ref()
                         .map(|vals| ranges::resolve_string_list(vals, symtab))
                         .transpose()?;
+                    for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
+                        if let Some(values) = values {
+                            check_resolved_attribute_values(
+                                &a.name, field, values, standard, step_index, attr_index,
+                            )?;
+                        }
+                    }
                     Ok(job::AttributeRequirement {
                         name: a.name.clone(),
                         any_of,
@@ -405,6 +420,57 @@ fn resolve_host_requirements(
         amounts,
         attributes,
     })
+}
+
+/// Re-check `<AttributeCapabilityValue>` constraints (§3.3.2.2) on resolved
+/// `attributes[].anyOf` / `attributes[].allOf` values.
+///
+/// Both fields are `@fmtstring` in base 2023-09, so a value written as a
+/// format string is unknown at decode and its constraints cannot be applied
+/// there — `validate_v2023_09::structure` gates the decode-time check on
+/// `FormatString::is_literal` for exactly that reason. Job creation resolves
+/// the value, so the deferred check resumes here.
+///
+/// Errors are reported at the path and with the wording the decode-time check
+/// uses for the same violation, so a violation reads the same way whichever
+/// path caught it. Two differences are deliberate: the path always carries the
+/// failing element's index, which decode omits for standard capabilities, and
+/// the length message names the resolved value.
+///
+/// Only the first failing `anyOf`/`allOf` group on the first failing attribute
+/// is reported, because the caller collects through `?`. Decode accumulates
+/// every violation instead. Closing that gap means threading one
+/// `ValidationErrors` through the whole of `resolve_host_requirements`.
+fn check_resolved_attribute_values(
+    capability_name: &str,
+    field: &str,
+    values: &[String],
+    standard: &[(&str, &[&str])],
+    step_index: usize,
+    attr_index: usize,
+) -> Result<(), ModelError> {
+    let mut errors = ValidationErrors::default();
+    for (value_index, value) in values.iter().enumerate() {
+        if let Err(message) = crate::capabilities::validate_attribute_capability_value(
+            capability_name,
+            value,
+            standard,
+        ) {
+            errors.add(
+                &[
+                    PathElement::Field("steps".to_string()),
+                    PathElement::Index(step_index),
+                    PathElement::Field("hostRequirements".to_string()),
+                    PathElement::Field("attributes".to_string()),
+                    PathElement::Index(attr_index),
+                    PathElement::Field(field.to_string()),
+                    PathElement::Index(value_index),
+                ],
+                message,
+            );
+        }
+    }
+    errors.into_result("JobTemplate")
 }
 
 /// Evaluate let bindings and return a new symbol table with bound values.

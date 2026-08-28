@@ -4,6 +4,10 @@
 
 //! Tests ported from Python test/openjd/model/v2023_09/test_step_host_requirements.py
 //!
+//! The final section, "Resolved `<AttributeCapabilityValue>` constraints", is
+//! not a port. It is a job-creation suite covering the §3.3.2.2 value check
+//! that decode defers when an `anyOf`/`allOf` element is a format string.
+//!
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_job_template;
@@ -743,4 +747,351 @@ fn test_amount_min_equals_max() {
     decode_ok(&job_with_host_req(
         r#"{"amounts": [{"name": "amount.custom", "min": 5, "max": 5}]}"#,
     ));
+}
+
+// ══════════════════════════════════════════════════════════════
+// Resolved <AttributeCapabilityValue> constraints (§3.3.2.2)
+//
+// `attributes[].anyOf` / `.allOf` elements are @fmtstring in base
+// 2023-09, so an element written as a format string has an unknown
+// value at decode and its constraints cannot be applied there.
+// Job creation resolves the value, so the deferred check resumes
+// there. These tests exercise job CREATION, not decode.
+// ══════════════════════════════════════════════════════════════
+
+use openjd_expr::path_mapping::PathFormat;
+use openjd_model::{create_job, job, preprocess_job_parameters};
+
+/// Decode `template_json`, preprocess `params` as STRING inputs, and create the job.
+///
+/// Returns the rendered error text on failure at either stage so callers can
+/// assert on the full message the way `check_err` does for decode.
+fn create_job_from(template_json: &str, params: &[(&str, &str)]) -> Result<job::Job, String> {
+    let root = tempfile::TempDir::new().unwrap();
+    let dir = root.path().to_str().unwrap();
+    let jt = decode_job_template(yaml_val(template_json), None, &CallerLimits::default())
+        .map_err(|e| e.to_string())?;
+    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
+        .iter()
+        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
+        .collect();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: dir,
+            current_working_dir: dir,
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    create_job(&jt, &processed, &jt.default_validation_context()).map_err(|e| e.to_string())
+}
+
+fn create_ok(template_json: &str, params: &[(&str, &str)]) -> job::Job {
+    create_job_from(template_json, params)
+        .unwrap_or_else(|e| panic!("Expected create_job success, got:\n{e}"))
+}
+
+fn create_err(template_json: &str, params: &[(&str, &str)], expected: &[&str]) -> String {
+    let msg = create_job_from(template_json, params)
+        .expect_err("Expected create_job to fail")
+        .to_string();
+    for line in expected {
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
+    }
+    msg
+}
+
+/// A single-step job template whose `hostRequirements.attributes` is `attributes`
+/// and which declares one unconstrained STRING parameter named `Value`.
+fn job_with_attrs(attributes: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "Value", "type": "STRING"}}],
+        "steps": [{{
+            "name": "S",
+            "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}},
+            "hostRequirements": {{"attributes": {attributes}}}
+        }}]
+    }}"#
+    )
+}
+
+/// As [`job_with_attrs`], but declaring two STRING parameters, `Value` and `Other`,
+/// so a single `anyOf`/`allOf` list can hold two independently resolved values.
+fn job_with_attrs_two_params(attributes: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Value", "type": "STRING"}},
+            {{"name": "Other", "type": "STRING"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}},
+            "hostRequirements": {{"attributes": {attributes}}}
+        }}]
+    }}"#
+    )
+}
+
+/// A legal `<AttributeCapabilityValue>` of exactly `len` characters.
+fn identifier_of_len(len: usize) -> String {
+    "a".repeat(len)
+}
+
+// ── Non-standard capability: pattern and length constraints ──
+
+#[test]
+fn test_resolved_attr_any_of_invalid_chars_rejected() {
+    create_err(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "not valid!")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'not valid!' contains invalid characters.",
+        ],
+    );
+}
+
+#[test]
+fn test_resolved_attr_all_of_invalid_chars_rejected() {
+    create_err(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "allOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "not valid!")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf[0]:\n\tvalue 'not valid!' contains invalid characters.",
+        ],
+    );
+}
+
+#[test]
+fn test_resolved_attr_value_over_100_chars_rejected() {
+    let long = identifier_of_len(101);
+    create_err(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", &long)],
+        &[&format!(
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue '{long}' exceeds 100 characters."
+        )],
+    );
+}
+
+#[test]
+fn test_resolved_attr_value_empty_rejected() {
+    create_err(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "")],
+        &["steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tmust not be empty."],
+    );
+}
+
+// ── Standard capability: fixed value set, compared case-insensitively ──
+
+#[test]
+fn test_resolved_attr_standard_capability_unknown_value_rejected() {
+    create_err(
+        &job_with_attrs(r#"[{"name": "attr.worker.os.family", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "solaris")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'solaris' is not valid for attr.worker.os.family.",
+        ],
+    );
+}
+
+#[test]
+fn test_resolved_attr_standard_capability_value_case_insensitive_ok() {
+    let job = create_ok(
+        &job_with_attrs(r#"[{"name": "attr.worker.os.family", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "LINUX")],
+    );
+    let attrs = job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .attributes
+        .as_ref()
+        .unwrap();
+    assert_eq!(attrs[0].any_of.as_ref().unwrap(), &["LINUX".to_string()]);
+}
+
+/// A capability NAME is matched against the standard table case-insensitively, so
+/// `ATTR.WORKER.OS.FAMILY` is still constrained to the OS family value set. The
+/// message names the lowercased table entry, not the name as written.
+#[test]
+fn test_resolved_attr_standard_capability_name_matched_case_insensitively() {
+    create_err(
+        &job_with_attrs(r#"[{"name": "ATTR.WORKER.OS.FAMILY", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "solaris")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'solaris' is not valid for attr.worker.os.family.",
+        ],
+    );
+}
+
+/// Every bad value in one list is reported, not just the first.
+#[test]
+fn test_resolved_attr_all_invalid_values_in_one_list_reported() {
+    create_err(
+        &job_with_attrs_two_params(
+            r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}", "{{Param.Other}}"]}]"#,
+        ),
+        &[("Value", "first bad!"), ("Other", "second bad!")],
+        &[
+            "2 validation errors for JobTemplate",
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'first bad!' contains invalid characters.",
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[1]:\n\tvalue 'second bad!' contains invalid characters.",
+        ],
+    );
+}
+
+// ── Error path indices point at the offending step and attribute ──
+
+#[test]
+fn test_resolved_attr_error_reports_second_step_index() {
+    let msg = create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Value", "type": "STRING"}],
+        "steps": [
+            {
+                "name": "Good",
+                "script": {"actions": {"onRun": {"command": "foo"}}},
+                "hostRequirements": {"attributes": [{"name": "attr.custom.software", "anyOf": ["blender"]}]}
+            },
+            {
+                "name": "Bad",
+                "script": {"actions": {"onRun": {"command": "foo"}}},
+                "hostRequirements": {"attributes": [{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]}
+            }
+        ]
+    }"#,
+        &[("Value", "not valid!")],
+        &[
+            "steps[1] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'not valid!' contains invalid characters.",
+        ],
+    );
+    assert!(
+        !msg.contains("steps[0] -> hostRequirements"),
+        "Error blamed the wrong step:\n{msg}"
+    );
+}
+
+#[test]
+fn test_resolved_attr_error_reports_second_attribute_index() {
+    let msg = create_err(
+        &job_with_attrs(
+            r#"[
+                {"name": "attr.custom.first", "anyOf": ["blender"]},
+                {"name": "attr.custom.second", "anyOf": ["{{Param.Value}}"]}
+            ]"#,
+        ),
+        &[("Value", "not valid!")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[1] -> anyOf[0]:\n\tvalue 'not valid!' contains invalid characters.",
+        ],
+    );
+    assert!(
+        !msg.contains("attributes[0] -> anyOf"),
+        "Error blamed the wrong attribute:\n{msg}"
+    );
+}
+
+#[test]
+fn test_resolved_attr_error_reports_second_value_index() {
+    let msg = create_err(
+        &job_with_attrs(
+            r#"[{"name": "attr.custom.software", "anyOf": ["blender", "{{Param.Value}}"]}]"#,
+        ),
+        &[("Value", "not valid!")],
+        &[
+            "steps[0] -> hostRequirements -> attributes[0] -> anyOf[1]:\n\tvalue 'not valid!' contains invalid characters.",
+        ],
+    );
+    assert!(
+        !msg.contains("anyOf[0]"),
+        "Error blamed the wrong value:\n{msg}"
+    );
+}
+
+// ── Negative controls: legal values must keep creating jobs ──
+
+#[test]
+fn test_resolved_attr_legal_identifier_accepted() {
+    let job = create_ok(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", "blender-4_2")],
+    );
+    let attrs = job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .attributes
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        attrs[0].any_of.as_ref().unwrap(),
+        &["blender-4_2".to_string()]
+    );
+}
+
+/// Literal values are unaffected by the resolved-value check, on both the `anyOf`
+/// branch (a standard capability, "run on Linux or macOS") and the `allOf` branch
+/// (a custom capability, "the worker must carry both licenses"). The two live on
+/// separate attributes because `anyOf: [linux]` with `allOf: [windows]` on one
+/// attribute is unsatisfiable and would mislead a reader.
+#[test]
+fn test_literal_attr_legal_value_still_accepted() {
+    let job = create_ok(
+        &job_with_attrs(
+            r#"[
+                {"name": "attr.worker.os.family", "anyOf": ["linux", "macos"]},
+                {"name": "attr.custom.licenses", "allOf": ["maya", "nuke"]}
+            ]"#,
+        ),
+        &[("Value", "unused")],
+    );
+    let attrs = job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .attributes
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        attrs[0].any_of.as_ref().unwrap(),
+        &["linux".to_string(), "macos".to_string()]
+    );
+    assert_eq!(
+        attrs[1].all_of.as_ref().unwrap(),
+        &["maya".to_string(), "nuke".to_string()]
+    );
+}
+
+#[test]
+fn test_resolved_attr_value_exactly_100_chars_accepted() {
+    let boundary = identifier_of_len(100);
+    let job = create_ok(
+        &job_with_attrs(r#"[{"name": "attr.custom.software", "anyOf": ["{{Param.Value}}"]}]"#),
+        &[("Value", &boundary)],
+    );
+    let attrs = job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .attributes
+        .as_ref()
+        .unwrap();
+    assert_eq!(attrs[0].any_of.as_ref().unwrap(), &[boundary]);
 }

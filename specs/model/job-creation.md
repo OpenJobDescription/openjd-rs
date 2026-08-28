@@ -117,6 +117,15 @@ calling this function.
    - Step names
    - Host requirement values (amounts min/max, attribute values). Resolved amount bounds
      must be finite `f64` values; non-numeric, NaN, and infinite results are rejected.
+     Resolved `attributes[].anyOf` / `.allOf` elements are re-checked against
+     `<AttributeCapabilityValue>` (§3.3.2.2) via
+     `capabilities::validate_attribute_capability_value`, because decode skips that check
+     when the element is a format string. Errors are reported at
+     `steps[i] -> hostRequirements -> attributes[j] -> anyOf[k]` so they read like the
+     decode-time error for a literal value. Only the first failing `anyOf`/`allOf` group on
+     the first failing attribute is reported; decode accumulates every violation instead.
+     The amount bound constraints (`min` non-negative, `max` positive, `min <= max`) are
+     **not** re-checked after resolution — see [validation.md](validation.md).
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
      String-backed FLOAT range elements are trimmed and must resolve to finite `f64` values.
    - Step-level let bindings

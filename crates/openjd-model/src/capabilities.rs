@@ -90,3 +90,44 @@ pub fn validate_attribute_capability_name(name: &str) -> Result<(), String> {
         Err(format!("'{name}' is not a valid attribute capability name"))
     }
 }
+
+/// Validate a single `<AttributeCapabilityValue>` (§3.3.2.2) for the named
+/// attribute capability.
+///
+/// A standard capability constrains its values to a fixed set, compared
+/// case-insensitively, and nothing else — the identifier pattern and length
+/// limit do not apply to it. Any other capability constrains its values to the
+/// identifier-like pattern with a 100 character limit. That split is exclusive
+/// to match the reference implementation, which likewise checks a standard
+/// capability against its value set only.
+///
+/// `standard_capabilities` is the table from [`standard_attribute_capabilities`]
+/// for the caller's revision and extensions.
+///
+/// Messages mirror the wording the decode-time check produces for the same
+/// violation on a literal value, with one deliberate difference: the length
+/// message names the resolved value. A template that reached this function
+/// through a format string does not show that value anywhere, so omitting it
+/// would leave the user nothing to act on.
+pub fn validate_attribute_capability_value(
+    capability_name: &str,
+    value: &str,
+    standard_capabilities: &[(&str, &[&str])],
+) -> Result<(), String> {
+    let lower = capability_name.to_lowercase();
+    if let Some((name, allowed)) = standard_capabilities.iter().find(|(n, _)| *n == lower) {
+        if allowed.iter().any(|v| v.eq_ignore_ascii_case(value)) {
+            Ok(())
+        } else {
+            Err(format!("value '{value}' is not valid for {name}."))
+        }
+    } else if value.is_empty() {
+        Err("must not be empty.".to_string())
+    } else if value.len() > 100 {
+        Err(format!("value '{value}' exceeds 100 characters."))
+    } else if crate::template::validate_v2023_09::helpers::ATTR_VALUE_RE.is_match(value) {
+        Ok(())
+    } else {
+        Err(format!("value '{value}' contains invalid characters."))
+    }
+}

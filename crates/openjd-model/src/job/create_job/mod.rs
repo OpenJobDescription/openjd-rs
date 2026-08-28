@@ -108,7 +108,10 @@ pub fn create_job(
     let steps = job_template
         .steps
         .iter()
-        .map(|st| instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx))
+        .enumerate()
+        .map(|(step_index, st)| {
+            instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx, step_index)
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Caller-imposed total task count limit across all steps
