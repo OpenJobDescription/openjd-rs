@@ -145,15 +145,22 @@ fn resolve_task_parameter(
                                 "chunks.defaultTaskCount: {e}"
                             )))
                         })?;
-                    resolved
-                        .trim()
-                        .parse::<i64>()
-                        .map_err(|_| {
-                            ModelError::Expression(ExpressionError::new(format!(
-                                "chunks.defaultTaskCount: '{resolved}' is not a valid integer"
-                            )))
-                        })?
-                        .max(1) as usize
+                    let count = resolved.trim().parse::<i64>().map_err(|_| {
+                        ModelError::Expression(ExpressionError::new(format!(
+                            "chunks.defaultTaskCount: '{resolved}' is not a valid integer"
+                        )))
+                    })?;
+                    // §3.4.1.5 sets a minimum of 1. The bound cannot be applied
+                    // at decode when the value is a format string, so it is
+                    // applied here. Rejecting rather than clamping: a resolved 0
+                    // silently became 1, which ran the job with a chunk shape the
+                    // author never asked for.
+                    if count < 1 {
+                        return Err(ModelError::Expression(ExpressionError::new(format!(
+                            "chunks.defaultTaskCount: resolved to {count}, but must be >= 1"
+                        ))));
+                    }
+                    count as usize
                 }
             };
             let target_runtime_seconds = p.chunks.target_runtime_seconds.as_ref()
@@ -162,9 +169,15 @@ fn resolve_task_parameter(
                     template::IntOrFormatString::FormatString(fs) => {
                         let resolved = fs.resolve_string_with(symtab, &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix))
                             .map_err(|e| ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: {e}"))))?;
-                        resolved.trim().parse::<i64>()
-                            .map(|n| n.max(0) as usize)
-                            .map_err(|_| ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: '{resolved}' is not a valid integer"))))
+                        let seconds = resolved.trim().parse::<i64>()
+                            .map_err(|_| ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: '{resolved}' is not a valid integer"))))?;
+                        // §3.4.1.5 sets a minimum of 0; same deferral as
+                        // defaultTaskCount above, and the same reason to reject
+                        // rather than clamp.
+                        if seconds < 0 {
+                            return Err(ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: resolved to {seconds}, but must be >= 0"))));
+                        }
+                        Ok(seconds as usize)
                     }
                 })
                 .transpose()?;

@@ -8,7 +8,7 @@ use openjd_expr::format_string::copy_symbol_value;
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 
-use crate::error::{ModelError, PathElement, ValidationErrors};
+use crate::error::{path_field, ModelError, PathElement, ValidationErrors};
 use crate::job;
 use crate::template;
 use crate::template::validate_v2023_09::EffectiveLimits;
@@ -356,7 +356,8 @@ fn resolve_host_requirements(
         .as_ref()
         .map(|amts| {
             amts.iter()
-                .map(|a| {
+                .enumerate()
+                .map(|(amount_index, a)| {
                     let min = a
                         .min
                         .as_ref()
@@ -367,6 +368,7 @@ fn resolve_host_requirements(
                         .as_ref()
                         .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount max"))
                         .transpose()?;
+                    check_resolved_amount_bounds(min, max, step_index, amount_index)?;
                     Ok(job::AmountRequirement {
                         name: a.name.clone(),
                         min,
@@ -420,6 +422,50 @@ fn resolve_host_requirements(
         amounts,
         attributes,
     })
+}
+
+/// Re-check the `amounts[].min` / `amounts[].max` bounds (§3.3.1) on resolved
+/// values.
+///
+/// Under FEATURE_BUNDLE_1 both fields may be format strings, so the bounds
+/// cannot be applied at decode — `validate_v2023_09::structure`'s
+/// `parse_literal_amount` returns `None` for a non-literal for exactly that
+/// reason, which skips all three checks. Job creation resolves the values, so
+/// the deferred checks resume here.
+///
+/// `min` is `<nonnegativefloat>` and `max` is `<positivefloat>`, so `0` is
+/// legal for one and not the other. Paths and wording match the decode-time
+/// checks, so a violation reads the same way whichever path caught it.
+fn check_resolved_amount_bounds(
+    min: Option<f64>,
+    max: Option<f64>,
+    step_index: usize,
+    amount_index: usize,
+) -> Result<(), ModelError> {
+    let amount_path = vec![
+        PathElement::Field("steps".to_string()),
+        PathElement::Index(step_index),
+        PathElement::Field("hostRequirements".to_string()),
+        PathElement::Field("amounts".to_string()),
+        PathElement::Index(amount_index),
+    ];
+    let mut errors = ValidationErrors::default();
+    if let Some(min) = min {
+        if min < 0.0 {
+            errors.add(&path_field(&amount_path, "min"), "must be non-negative.");
+        }
+    }
+    if let Some(max) = max {
+        if max <= 0.0 {
+            errors.add(&path_field(&amount_path, "max"), "must be positive.");
+        }
+    }
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            errors.add(&amount_path, format!("min ({min}) > max ({max})."));
+        }
+    }
+    errors.into_result("JobTemplate")
 }
 
 /// Re-check `<AttributeCapabilityValue>` constraints (§3.3.2.2) on resolved

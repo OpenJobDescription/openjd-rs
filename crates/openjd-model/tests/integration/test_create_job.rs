@@ -2138,6 +2138,118 @@ fn test_create_job_v2023_09_task_chunking() {
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+// Resolved chunks.defaultTaskCount / .targetRuntimeSeconds bounds
+//
+// Both fields may be format strings, so their §3.4.1.5 minimums
+// have an unknown value at decode (`validate_v2023_09::
+// task_chunking` reads `as_i64()`, which is `None` for a format
+// string) and are applied on the resolved value at job creation.
+//
+// A resolved out-of-range value is REJECTED, not clamped: the
+// clamp silently ran the job with a chunk shape the author never
+// asked for.
+// ══════════════════════════════════════════════════════════════
+
+/// A TASK_CHUNKING job template with one `CHUNK[INT]` task parameter whose
+/// `chunks` block is `chunks_json`, and two unconstrained STRING parameters,
+/// `Count` and `Seconds`, for use as resolved format strings.
+fn chunk_bounds_job(chunks_json: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Count", "type": "STRING"}},
+            {{"name": "Seconds", "type": "STRING"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [{{
+                    "name": "P",
+                    "type": "CHUNK[INT]",
+                    "range": "1-10",
+                    "chunks": {chunks_json}
+                }}],
+                "combination": "P"
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+/// The resolved `chunks` block of the job's only chunked task parameter.
+fn chunks_of(job: &job::Job) -> &job::ResolvedChunks {
+    match &job.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions["P"]
+    {
+        job::TaskParameter::ChunkInt { chunks, .. } => chunks,
+        other => panic!("Expected ChunkInt, got {other:?}"),
+    }
+}
+
+/// `defaultTaskCount` has a minimum of 1. The old code clamped with `.max(1)`,
+/// so a resolved `0` silently became a 1-task chunk.
+#[test]
+fn test_resolved_chunk_default_task_count_zero_rejected() {
+    let msg = parse_and_create_err(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": "{{Param.Count}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "0"), ("Seconds", "1")],
+    );
+    assert!(
+        msg.contains("chunks.defaultTaskCount: resolved to 0, but must be >= 1"),
+        "Missing bound rejection in error output:\nGot:\n{msg}"
+    );
+}
+
+/// The boundary value is accepted, and it is carried through as 1 rather than
+/// coming out of a clamp that would produce 1 for any value <= 1.
+#[test]
+fn test_resolved_chunk_default_task_count_one_accepted() {
+    let job = parse_and_create(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": "{{Param.Count}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "1"), ("Seconds", "1")],
+    );
+    assert_eq!(chunks_of(&job).default_task_count, 1);
+}
+
+#[test]
+fn test_resolved_chunk_target_runtime_seconds_negative_rejected() {
+    let msg = parse_and_create_err(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": 2, "targetRuntimeSeconds": "{{Param.Seconds}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "2"), ("Seconds", "-1")],
+    );
+    assert!(
+        msg.contains("chunks.targetRuntimeSeconds: resolved to -1, but must be >= 0"),
+        "Missing bound rejection in error output:\nGot:\n{msg}"
+    );
+}
+
+/// `targetRuntimeSeconds` bottoms out at 0, not 1, so `0` is in range and must
+/// survive as 0.
+#[test]
+fn test_resolved_chunk_target_runtime_seconds_zero_accepted() {
+    let job = parse_and_create(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": 2, "targetRuntimeSeconds": "{{Param.Seconds}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "2"), ("Seconds", "0")],
+    );
+    assert_eq!(chunks_of(&job).target_runtime_seconds, Some(0));
+}
+
 // === Tests ported from Python test_create_job.py ===
 
 #[test]

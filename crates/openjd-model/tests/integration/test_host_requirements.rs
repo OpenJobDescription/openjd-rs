@@ -762,15 +762,24 @@ fn test_amount_min_equals_max() {
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::{create_job, job, preprocess_job_parameters};
 
-/// Decode `template_json`, preprocess `params` as STRING inputs, and create the job.
+/// Decode `template_json` with `extensions` supported, preprocess `params` as
+/// STRING inputs, and create the job.
 ///
 /// Returns the rendered error text on failure at either stage so callers can
 /// assert on the full message the way `check_err` does for decode.
-fn create_job_from(template_json: &str, params: &[(&str, &str)]) -> Result<job::Job, String> {
+fn create_job_from_with_extensions(
+    template_json: &str,
+    params: &[(&str, &str)],
+    extensions: Option<&[&str]>,
+) -> Result<job::Job, String> {
     let root = tempfile::TempDir::new().unwrap();
     let dir = root.path().to_str().unwrap();
-    let jt = decode_job_template(yaml_val(template_json), None, &CallerLimits::default())
-        .map_err(|e| e.to_string())?;
+    let jt = decode_job_template(
+        yaml_val(template_json),
+        extensions,
+        &CallerLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
     let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
         .iter()
         .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
@@ -791,15 +800,25 @@ fn create_job_from(template_json: &str, params: &[(&str, &str)]) -> Result<job::
     create_job(&jt, &processed, &jt.default_validation_context()).map_err(|e| e.to_string())
 }
 
+/// As [`create_job_from_with_extensions`], with no extensions enabled.
+fn create_job_from(template_json: &str, params: &[(&str, &str)]) -> Result<job::Job, String> {
+    create_job_from_with_extensions(template_json, params, None)
+}
+
 fn create_ok(template_json: &str, params: &[(&str, &str)]) -> job::Job {
     create_job_from(template_json, params)
         .unwrap_or_else(|e| panic!("Expected create_job success, got:\n{e}"))
 }
 
 fn create_err(template_json: &str, params: &[(&str, &str)], expected: &[&str]) -> String {
-    let msg = create_job_from(template_json, params)
-        .expect_err("Expected create_job to fail")
-        .to_string();
+    assert_create_err(create_job_from(template_json, params), expected)
+}
+
+/// Assert `result` failed and that every line of `expected` appears in the
+/// rendered error. Returns the rendered error so callers can also assert on
+/// what is *absent*.
+fn assert_create_err(result: Result<job::Job, String>, expected: &[&str]) -> String {
+    let msg = result.expect_err("Expected create_job to fail");
     for line in expected {
         assert!(
             msg.contains(line),
@@ -1094,4 +1113,144 @@ fn test_resolved_attr_value_exactly_100_chars_accepted() {
         .as_ref()
         .unwrap();
     assert_eq!(attrs[0].any_of.as_ref().unwrap(), &[boundary]);
+}
+// ══════════════════════════════════════════════════════════════
+// Resolved amounts[].min / .max bounds (§3.3.1)
+//
+// Under FEATURE_BUNDLE_1 both fields may be format strings, so
+// their bounds have an unknown value at decode and cannot be
+// applied there — `validate_v2023_09::structure`'s
+// `parse_literal_amount` returns `None` for a non-literal, which
+// skips all three checks. Job creation resolves the values, so the
+// deferred checks resume there. These tests exercise job CREATION,
+// not decode.
+//
+// `min` is `<nonnegativefloat>` and `max` is `<positivefloat>`, so
+// `0` is legal for one and not the other.
+// ══════════════════════════════════════════════════════════════
+
+/// Extensions needed for `amounts[].min` / `.max` to accept a format string.
+const FB1: Option<&[&str]> = Some(&["FEATURE_BUNDLE_1"]);
+
+/// A single-step FEATURE_BUNDLE_1 job template whose `hostRequirements.amounts`
+/// is `amounts`, declaring two unconstrained STRING parameters, `Min` and `Max`,
+/// so either bound can be supplied as a resolved format string.
+fn job_with_amounts(amounts: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Min", "type": "STRING"}},
+            {{"name": "Max", "type": "STRING"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}},
+            "hostRequirements": {{"amounts": {amounts}}}
+        }}]
+    }}"#
+    )
+}
+
+fn create_amounts_ok(amounts: &str, params: &[(&str, &str)]) -> job::Job {
+    create_job_from_with_extensions(&job_with_amounts(amounts), params, FB1)
+        .unwrap_or_else(|e| panic!("Expected create_job success, got:\n{e}"))
+}
+
+fn create_amounts_err(amounts: &str, params: &[(&str, &str)], expected: &[&str]) -> String {
+    assert_create_err(
+        create_job_from_with_extensions(&job_with_amounts(amounts), params, FB1),
+        expected,
+    )
+}
+
+/// The resolved `amounts` of the job's only step.
+fn amounts_of(job: &job::Job) -> &[job::AmountRequirement] {
+    job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .amounts
+        .as_ref()
+        .unwrap()
+}
+
+// ── Each bound is re-checked on the resolved value ──
+
+/// `max` is `<positivefloat>`, so a resolved `0` is out of range. This is the
+/// case the old code accepted: it only checked that the text parsed as a finite
+/// number.
+#[test]
+fn test_resolved_amount_max_zero_rejected() {
+    create_amounts_err(
+        r#"[{"name": "amount.custom.thing", "max": "{{Param.Max}}"}]"#,
+        &[("Min", "1"), ("Max", "0")],
+        &["steps[0] -> hostRequirements -> amounts[0] -> max:\n\tmust be positive."],
+    );
+}
+
+#[test]
+fn test_resolved_amount_min_negative_rejected() {
+    create_amounts_err(
+        r#"[{"name": "amount.custom.thing", "min": "{{Param.Min}}"}]"#,
+        &[("Min", "-1"), ("Max", "1")],
+        &["steps[0] -> hostRequirements -> amounts[0] -> min:\n\tmust be non-negative."],
+    );
+}
+
+/// The cross-field check is reported on the amount itself, not on either bound.
+#[test]
+fn test_resolved_amount_min_greater_than_max_rejected() {
+    create_amounts_err(
+        r#"[{"name": "amount.custom.thing", "min": "{{Param.Min}}", "max": "{{Param.Max}}"}]"#,
+        &[("Min", "10"), ("Max", "2")],
+        &["steps[0] -> hostRequirements -> amounts[0]:\n\tmin (10) > max (2)."],
+    );
+}
+
+/// `min` is `<nonnegativefloat>` while `max` is `<positivefloat>`, so `0` is
+/// legal for `min` and not for `max`. This is the test that distinguishes the
+/// two fields: a check written as `min <= 0.0` would reject this job.
+#[test]
+fn test_resolved_amount_min_zero_accepted() {
+    let job = create_amounts_ok(
+        r#"[{"name": "amount.custom.thing", "min": "{{Param.Min}}"}]"#,
+        &[("Min", "0"), ("Max", "1")],
+    );
+    assert_eq!(amounts_of(&job)[0].min, Some(0.0));
+}
+
+// ── Error path indices point at the offending amount ──
+
+/// Two amounts where only the second is out of range. The index in the path is
+/// the amount's own index, not a hardcoded 0.
+#[test]
+fn test_resolved_amount_error_reports_second_amount_index() {
+    let msg = create_amounts_err(
+        r#"[
+            {"name": "amount.custom.first", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": "{{Param.Max}}"}
+        ]"#,
+        &[("Min", "1"), ("Max", "0")],
+        &["steps[0] -> hostRequirements -> amounts[1] -> max:\n\tmust be positive."],
+    );
+    assert!(
+        !msg.contains("amounts[0]"),
+        "Error blamed the wrong amount:\n{msg}"
+    );
+}
+
+// ── Negative control: in-range resolved bounds must keep creating jobs ──
+
+#[test]
+fn test_resolved_amount_ordinary_bounds_accepted() {
+    let job = create_amounts_ok(
+        r#"[{"name": "amount.custom.thing", "min": "{{Param.Min}}", "max": "{{Param.Max}}"}]"#,
+        &[("Min", "2"), ("Max", "8")],
+    );
+    let amounts = amounts_of(&job);
+    assert_eq!(amounts[0].min, Some(2.0));
+    assert_eq!(amounts[0].max, Some(8.0));
 }
