@@ -651,11 +651,22 @@ fn validate_host_requirements(
                     for (j, v) in vals.iter().enumerate() {
                         let v_path = path_index(&field_path, j);
                         let s = v.raw();
-                        if s.is_empty() {
-                            errors.add(&v_path, "must not be empty.");
-                        }
-                        if s.len() > 100 {
-                            errors.add(&v_path, "exceeds 100 characters.");
+                        // Gated on is_literal for the same reason as the pattern
+                        // check below: for a format string these measure the raw
+                        // template text, not the value the constraint applies to.
+                        // A 176-character format string resolving to a legal
+                        // 14-character value was rejected here, where the
+                        // reference implementation accepts it -- its
+                        // `_validate_attribute_list` skips any FormatString
+                        // carrying expressions. Both are re-checked on the
+                        // resolved value at job creation, so nothing is lost.
+                        if v.is_literal() {
+                            if s.is_empty() {
+                                errors.add(&v_path, "must not be empty.");
+                            }
+                            if s.len() > 100 {
+                                errors.add(&v_path, "exceeds 100 characters.");
+                            }
                         }
                         if !s.is_empty() && !ATTR_VALUE_RE.is_match(s) && v.is_literal() {
                             errors.add(

@@ -348,6 +348,29 @@ fn test_attr_value_allof_too_long() {
     );
 }
 
+/// The element length and emptiness checks measure the value, not the template text,
+/// so they are gated on the element being a literal exactly as the pattern check is.
+/// A long format string resolving to a short legal value is accepted at decode; the
+/// resolved value is checked at job creation instead. The reference implementation
+/// does the same: its `_validate_attribute_list` skips any format string carrying
+/// expressions, and `AttributeCapabilityValue` declares no maximum length at all.
+#[test]
+fn test_attr_value_long_format_string_resolving_short_is_accepted_at_decode() {
+    let long_name = format!("P{}", "a".repeat(54));
+    let element = format!("{{{{Param.{long_name}}}}}{{{{Param.{long_name}}}}}");
+    assert!(element.len() > 100, "the raw element must exceed the limit");
+    let s = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "{long_name}", "type": "STRING", "default": "short"}}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}},
+            "hostRequirements": {{"attributes": [{{"name": "attr.custom", "anyOf": ["{element}"]}}]}}}}]
+    }}"#
+    );
+    decode_ok(&s);
+}
+
 #[test]
 fn test_attr_value_allof_starts_with_digit() {
     check_err(&job_with_host_req(r#"{"attributes": [{"name": "attr.custom", "allOf": ["0abc"]}]}"#), &[

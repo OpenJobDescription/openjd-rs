@@ -125,7 +125,9 @@ calling this function.
      decode-time error for a literal value. Only the first failing `anyOf`/`allOf` group on
      the first failing attribute is reported; decode accumulates every violation instead.
      The amount bound constraints (`min` non-negative, `max` positive, `min <= max`) are
-     **not** re-checked after resolution — see [validation.md](validation.md).
+     re-applied on the resolved value by `check_resolved_amount_bounds`, and the
+     `chunks.defaultTaskCount` / `targetRuntimeSeconds` minimums are re-applied by
+     `resolve_parameter_space` — see [validation.md](validation.md).
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
      String-backed FLOAT range elements are trimmed and must resolve to finite `f64` values.
    - Step-level let bindings

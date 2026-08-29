@@ -117,14 +117,14 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
   `<AttributeCapabilityValue>` pattern, length and standard-value checks here, and job
   creation resumes all three (see [job-creation.md](job-creation.md)). An amount `min`/`max`
   that is a format string skips the non-negative, positive and `min <= max` bound checks
-  here, and job creation re-checks **only** that the resolved value parses as a finite
-  number — the bounds are never re-applied. A template whose `max` resolves to `0` under
-  FEATURE_BUNDLE_1 is therefore accepted, where the literal `max: 0` is rejected. The
-  reference implementation rejects both.
+  here, and job creation re-applies all three on the resolved value
+  (`check_resolved_amount_bounds`). The same holds for `chunks.defaultTaskCount` and
+  `chunks.targetRuntimeSeconds`: decode reads `as_i64()`, which is `None` for a format
+  string, and job creation rejects a resolved value below the §3.4.1.5 minimum rather than
+  clamping it.
 
-  The element length and emptiness checks are also applied to the **raw** text of a format
-  string, not just to literals, so a format string longer than 100 characters is rejected at
-  decode even when it would resolve to a short value.
+  Only the first failing group is reported on the job-creation path, for both attributes and
+  amounts, because the caller collects through `?`. Decode accumulates every violation.
 - Parameter space: ≤16 task parameters, no duplicate names, type allowed,
   range validation per type, combination expression validation
 - Script actions: command non-empty, length limits, `Task.File.*` references
