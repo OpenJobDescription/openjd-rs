@@ -152,12 +152,19 @@ counting is instant.
 `chunk_count = ceil(interval_len / default_task_count)`, then `small = interval_len / chunk_count`
 with leftovers distributed evenly across chunks.
 
-`ContiguousChunkNode` supports random access through `chunk_at(index)`. Finding which
-interval holds a given chunk still means walking the intervals, since that is only known
-from the chunk counts of the intervals before it — O(R) in sub-ranges, not O(N) in values,
-reusing the same walk as the count. The chunk *within* that interval is then computed
-arithmetically, so a single large contiguous interval costs O(1) rather than O(index).
-The exact chunk count is cached at construction time.
+`ContiguousChunkNode` supports random access through `chunk_at(index)`, and the exact
+chunk count is cached at construction time.
+
+Finding which interval holds a given chunk means walking the intervals, since that is only
+known from the chunk counts of the intervals before it. For step-1 sub-ranges that is O(R)
+in sub-ranges rather than O(N) in values, but a sub-range with step > 1 contributes one
+interval *per value*, so a stepped or heavily-gapped range is O(N). The chunk *within* the
+located interval is then computed arithmetically, so one large contiguous interval costs
+O(1) rather than O(index).
+
+Because of that walk, contiguous chunking still uses the sequential path for
+`Iterator::next` — see "Sequential Iteration" below. Random access is for callers that
+genuinely want one index, not a way to drive a full walk.
 
 Within an interval, chunk `j` gets one extra value when
 `ceil((j+1)*leftovers/chunk_count) > ceil(j*leftovers/chunk_count)`, so the number of
@@ -198,13 +205,20 @@ chunking is suppressed (the parameter uses static chunking with the override siz
 
 ### Sequential Iteration
 
-Only adaptive chunking requires sequential iteration: its chunk size can change part-way
-through a walk, so chunk N is not a function of N alone. For an adaptive space the
-`StepParameterSpaceIterator` uses the `node_iter` path instead of random-access `get()`,
-and the `sequential` flag tracks this. Every other space, contiguous chunking included,
-takes the random-access path — which means `Iterator::next` is itself implemented as
-`get(current_index)` there. `len()` returns the exact count except for adaptive, which
-returns 0.
+Two separate questions, tracked by two different flags.
+
+**Which path `Iterator::next` takes** is the `sequential` flag: adaptive chunking or
+contiguous chunking. Adaptive must be sequential because its chunk size can change
+part-way through a walk. Contiguous *could* answer per index, but locating a chunk walks
+the intervals before it, so driving a full walk through `get()` would be
+O(chunks x intervals) — quadratic for a range whose values are mostly isolated. Both
+therefore use the `node_iter` path. Every other space takes the random-access path, where
+`Iterator::next` is implemented as `get(current_index)`.
+
+**Whether `get()` answers at all** is gated on adaptive alone. A contiguous space supports
+random access; an adaptive one does not, because chunk N is not a function of N.
+
+`len()` returns the exact count except for adaptive, which returns 0.
 
 ## Design Decisions
 
