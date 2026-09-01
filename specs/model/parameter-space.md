@@ -29,8 +29,14 @@ impl Iterator for StepParameterSpaceIterator {
 
 `new` returns `Result<Self, ModelError>` because construction can fail (e.g., if the
 product of parameter dimensions overflows `usize`). `get` returns `Option<TaskParameterSet>`
-(returns `None` for out-of-bounds indices or when sequential iteration is required).
+(returns `None` for out-of-bounds indices, or for an adaptive space, where chunk
+boundaries are not a function of the index alone).
 `set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicUsize>` indirection).
+
+`chunks_parameter_name` and `chunks_default_task_count` report for *any* chunked space,
+adaptive or not: both values are in the template, and a chunk override replaces the size.
+Only `set_chunks_default_task_count` is adaptive-specific, because only an adaptive size
+is mutable mid-walk.
 
 `new_with_chunk_override` accepts an optional chunk size that overrides the template's
 `defaultTaskCount` for all chunk nodes. When `Some(n)`, it also suppresses adaptive
@@ -39,7 +45,7 @@ chunking (the parameter is treated as static with chunk size `n`).
 `reset` rewinds the iterator so a fresh `Iterator::next` walk yields the same elements
 again, without rebuilding from the parameter space. For non-sequential (random-access)
 iterators it sets the internal `current_index` to 0; for sequential iterators (adaptive
-chunking, contiguous chunks with gaps) it delegates to the inner node iterator's reset.
+chunking) it delegates to the inner node iterator's reset.
 The adaptive `Arc<AtomicUsize>` chunk-size override set via
 `set_chunks_default_task_count` is preserved across `reset` calls — `reset` does not
 restore the template's original `defaultTaskCount`.
@@ -146,9 +152,17 @@ counting is instant.
 `chunk_count = ceil(interval_len / default_task_count)`, then `small = interval_len / chunk_count`
 with leftovers distributed evenly across chunks.
 
-`ContiguousChunkNode` is sequential-only (no random access via `get()`) because chunk
-boundaries depend on scanning for gaps from the beginning. The exact chunk count is
-cached at construction time.
+`ContiguousChunkNode` supports random access through `chunk_at(index)`. Finding which
+interval holds a given chunk still means walking the intervals, since that is only known
+from the chunk counts of the intervals before it — O(R) in sub-ranges, not O(N) in values,
+reusing the same walk as the count. The chunk *within* that interval is then computed
+arithmetically, so a single large contiguous interval costs O(1) rather than O(index).
+The exact chunk count is cached at construction time.
+
+Within an interval, chunk `j` gets one extra value when
+`ceil((j+1)*leftovers/chunk_count) > ceil(j*leftovers/chunk_count)`, so the number of
+larger chunks before `j` telescopes to `ceil(j*leftovers/chunk_count)`. That is what lets
+the offset and size of chunk `j` be computed without walking the chunks before it.
 
 ### Noncontiguous Static Chunking
 
@@ -184,10 +198,13 @@ chunking is suppressed (the parameter uses static chunking with the override siz
 
 ### Sequential Iteration
 
-When any node in the tree requires sequential iteration (adaptive chunking or contiguous
-chunking), the `StepParameterSpaceIterator` uses the `node_iter` path instead of
-random-access `get()`. The `sequential` flag tracks this. `len()` still returns the
-exact count (except for adaptive, which returns 0).
+Only adaptive chunking requires sequential iteration: its chunk size can change part-way
+through a walk, so chunk N is not a function of N alone. For an adaptive space the
+`StepParameterSpaceIterator` uses the `node_iter` path instead of random-access `get()`,
+and the `sequential` flag tracks this. Every other space, contiguous chunking included,
+takes the random-access path — which means `Iterator::next` is itself implemented as
+`get(current_index)` there. `len()` returns the exact count except for adaptive, which
+returns 0.
 
 ## Design Decisions
 

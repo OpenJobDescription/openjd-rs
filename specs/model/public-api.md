@@ -1077,17 +1077,25 @@ impl StepParameterSpaceIterator {
     pub fn len(&self) -> usize;
     pub fn is_empty(&self) -> bool;
 
-    /// Random access. Returns `None` for out-of-bounds and for
-    /// sequential-only spaces (adaptive chunking, contiguous chunking).
+    /// Random access. Returns `None` for out-of-bounds and for adaptive
+    /// chunking, the one case where chunk N is not a function of N.
     pub fn get(&self, index: usize) -> Option<TaskParameterSet>;
 
     pub fn contains(&self, params: &TaskParameterSet) -> bool;
     pub fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String>;
 
-    /// Adaptive chunking (TASK_CHUNKING with `targetRuntimeSeconds`).
+    /// True only for adaptive chunking (TASK_CHUNKING with
+    /// `targetRuntimeSeconds`).
     pub fn chunks_adaptive(&self) -> bool;
+
+    /// The chunked parameter and its chunk size, for any chunked space —
+    /// adaptive or static, and reflecting a chunk override when one was
+    /// given. `None` when the space has no chunked parameter.
     pub fn chunks_parameter_name(&self) -> Option<&str>;
     pub fn chunks_default_task_count(&self) -> Option<usize>;
+
+    /// Adaptive-only: a static chunk size cannot change mid-walk, so this
+    /// is a no-op for a non-adaptive space.
     pub fn set_chunks_default_task_count(&mut self, value: usize);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the
@@ -1106,9 +1114,13 @@ impl Iterator for StepParameterSpaceIterator {
 Random-access indexing uses `O(1)` arithmetic on a product-of-factors
 representation — submitters that want to shard a large parameter
 space across workers can compute per-worker index slices without
-iterating the whole space. Adaptive chunking (TASK_CHUNKING §4 /
-RFC 0001) forces sequential iteration because chunk size depends on
-runtime feedback; for that case, callers mutate
+iterating the whole space. Contiguous chunking costs an additional
+walk over the range's sub-ranges to locate the chunk's interval, which
+is O(R) in sub-ranges rather than O(N) in values.
+
+Adaptive chunking (TASK_CHUNKING §4 / RFC 0001) is the one case that
+forces sequential iteration, because chunk size depends on runtime
+feedback; for that case, callers mutate
 `set_chunks_default_task_count` while iterating to reshape chunks
 dynamically.
 

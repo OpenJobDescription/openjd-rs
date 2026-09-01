@@ -406,12 +406,56 @@ impl ContiguousChunkNode {
     }
 }
 
+impl ContiguousChunkNode {
+    /// The chunk at `index`, without walking the chunks before it.
+    ///
+    /// Intervals still have to be walked, because which interval holds a given chunk is
+    /// only known from the chunk counts of the intervals before it. The chunk *within*
+    /// that interval is computed arithmetically, so one huge contiguous interval costs
+    /// O(1) instead of O(index) — which is what keeps a 100-billion-value range usable.
+    fn chunk_at(&self, index: usize) -> Option<RangeExpr> {
+        let mut state = ContiguousChunkIterState::new(self);
+        let mut remaining = index;
+        while state.start_next_interval() {
+            let cc = state.interval_chunk_count;
+            if remaining < cc {
+                let small = state.interval_small;
+                let lo = state.interval_leftovers;
+                // Number of size-(small+1) chunks before chunk `j`. `next_chunk` gives
+                // chunk j the extra value when ceil((j+1)*lo/cc) > ceil(j*lo/cc), so
+                // summing that over j telescopes to ceil(j*lo/cc).
+                let before = |j: usize| if lo == 0 { 0 } else { (j * lo).div_ceil(cc) };
+                let offset = remaining * small + before(remaining);
+                let size = small + before(remaining + 1) - before(remaining);
+                let start = state.interval_start_val + offset as i64;
+                let end = start + size as i64 - 1;
+                return Some(
+                    format!("{start}-{end}")
+                        .parse::<RangeExpr>()
+                        .expect("range string built from valid integers")
+                        .with_contiguous(true),
+                );
+            }
+            remaining -= cc;
+        }
+        None
+    }
+}
+
 impl Node for ContiguousChunkNode {
     fn len(&self) -> usize {
         self.num_chunks
     }
-    fn get(&self, _index: usize, _result: &mut TaskParameterSet) {
-        // Sequential-only; use iter()
+    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+        if let Some(r) = self.chunk_at(index) {
+            result.insert(
+                self.name.clone(),
+                TaskParameterValue {
+                    param_type: TaskParameterType::ChunkInt,
+                    value: ExprValue::RangeExpr(r),
+                },
+            );
+        }
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
         let v = params.get(&self.name).ok_or_else(|| {
@@ -1237,6 +1281,10 @@ pub struct StepParameterSpaceIterator {
     adaptive_chunk_size: Option<Arc<AtomicUsize>>,
     node_iter: Option<Box<dyn NodeIterator>>,
     chunks_param_name: Option<String>,
+    /// Effective chunk size for a non-adaptive chunked space. `None` when the space has
+    /// no chunked parameter. Adaptive spaces read `adaptive_chunk_size` instead, since
+    /// theirs is mutable.
+    chunk_size: Option<usize>,
     /// True when iteration must be sequential (adaptive or contiguous chunking).
     sequential: bool,
 }
@@ -1293,11 +1341,27 @@ impl StepParameterSpaceIterator {
                 adaptive_chunk_size: None,
                 node_iter: None,
                 chunks_param_name: None,
+                chunk_size: None,
                 sequential: false,
             });
         }
 
         let expr = space.combination.as_deref().unwrap_or("*");
+
+        // The chunked parameter and its effective chunk size, independent of whether the
+        // chunking is adaptive. Reported for any CHUNK[INT] parameter, matching the Python
+        // reference: neither value is unknowable for a static space, since both are in the
+        // template. Adaptive additionally gets the mutable Arc below, because only an
+        // adaptive size can be changed part-way through iteration.
+        let mut chunks_param_name: Option<String> = None;
+        let mut chunk_size: Option<usize> = None;
+        for (name, param) in &space.task_parameter_definitions {
+            if let job::TaskParameter::ChunkInt { chunks, .. } = param {
+                chunks_param_name = Some(name.clone());
+                chunk_size = Some(chunk_override.unwrap_or(chunks.default_task_count).max(1));
+                break;
+            }
+        }
 
         // Check if any parameter needs adaptive chunking
         let mut adaptive_info: Option<(String, Arc<AtomicUsize>)> = None;
@@ -1345,12 +1409,12 @@ impl StepParameterSpaceIterator {
         };
 
         let adaptive = adaptive_info.is_some();
-        let chunks_param_name = adaptive_info.as_ref().map(|(n, _)| n.clone());
         let adaptive_chunk_size = adaptive_info.map(|(_, rc)| rc);
 
-        // Use iterator path if any node requires sequential iteration
-        // (adaptive chunking or contiguous chunking with gaps)
-        let needs_sequential = adaptive || has_contiguous_chunks(space);
+        // Only adaptive chunking needs the sequential path now: its chunk size can change
+        // mid-iteration, so chunk N is not a function of N alone. Contiguous chunking is
+        // random-access via ContiguousChunkNode::chunk_at.
+        let needs_sequential = adaptive;
         let node_iter = if needs_sequential {
             Some(root.iter())
         } else {
@@ -1365,6 +1429,7 @@ impl StepParameterSpaceIterator {
             adaptive_chunk_size,
             node_iter,
             chunks_param_name,
+            chunk_size,
             sequential: needs_sequential,
         })
     }
@@ -1436,9 +1501,13 @@ impl StepParameterSpaceIterator {
 
     /// Current default_task_count for adaptive chunking.
     pub fn chunks_default_task_count(&self) -> Option<usize> {
-        self.adaptive_chunk_size
-            .as_ref()
-            .map(|a| a.load(Ordering::Relaxed))
+        match &self.adaptive_chunk_size {
+            // Adaptive: read the live value, which `set_chunks_default_task_count` may
+            // have changed since construction.
+            Some(a) => Some(a.load(Ordering::Relaxed)),
+            // Non-adaptive: the template's size, or the override that replaced it.
+            None => self.chunk_size,
+        }
     }
 
     /// Update the chunk size for adaptive chunking.
@@ -1691,17 +1760,6 @@ fn make_leaf_node(
             make_chunk_node(name, range, chunks, adaptive_info, chunk_override)
         }
     }
-}
-
-/// Check if any chunk parameter uses contiguous constraint (requires sequential iteration).
-fn has_contiguous_chunks(space: &job::StepParameterSpace) -> bool {
-    space.task_parameter_definitions.values().any(|p| {
-        matches!(
-            p,
-            job::TaskParameter::ChunkInt { chunks, .. }
-                if chunks.range_constraint == RangeConstraint::Contiguous
-        )
-    })
 }
 
 /// Build a chunk node from a range and chunk config. Creates `AdaptiveChunkNode` when
@@ -2144,6 +2202,246 @@ mod tests {
         for i in 0..5 {
             let set = iter.get(i).unwrap();
             assert_eq!(set["X"].value, ExprValue::Int(i as i64 + 1));
+        }
+    }
+
+    // ── Chunk metadata for non-adaptive spaces ──
+    // The reference implementation reports the chunked parameter's name and chunk size
+    // for any CHUNK[INT] parameter. Both were previously derived from adaptive detection,
+    // so both went silent the moment a space was not adaptive — including when a chunk
+    // override made an adaptive space static.
+
+    fn noncontiguous_static_chunk_param(
+        expr: &str,
+        default_task_count: usize,
+    ) -> job::TaskParameter {
+        job::TaskParameter::ChunkInt {
+            range: job::TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
+            chunks: job::ResolvedChunks {
+                default_task_count,
+                target_runtime_seconds: None,
+                range_constraint: RangeConstraint::Noncontiguous,
+            },
+        }
+    }
+
+    #[test]
+    fn test_static_chunk_metadata_is_reported() {
+        for param in [
+            static_chunk_param("1-10", 5),
+            noncontiguous_static_chunk_param("1-10", 5),
+        ] {
+            let space = make_space(vec![("Frame", param)], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert!(!iter.chunks_adaptive());
+            assert_eq!(iter.chunks_parameter_name(), Some("Frame"));
+            assert_eq!(iter.chunks_default_task_count(), Some(5));
+        }
+    }
+
+    #[test]
+    fn test_chunk_metadata_reports_the_override_not_the_template() {
+        let space = make_space(vec![("Frame", static_chunk_param("1-10", 5))], None);
+        let iter = StepParameterSpaceIterator::new_with_chunk_override(&space, Some(2)).unwrap();
+        assert_eq!(iter.chunks_parameter_name(), Some("Frame"));
+        assert_eq!(iter.chunks_default_task_count(), Some(2));
+    }
+
+    #[test]
+    fn test_override_of_an_adaptive_space_reports_metadata_and_is_no_longer_adaptive() {
+        let space = make_space(
+            vec![("Frame", adaptive_chunk_param((1..=10).collect(), 5))],
+            None,
+        );
+        let adaptive = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(adaptive.chunks_adaptive());
+        assert_eq!(adaptive.chunks_default_task_count(), Some(5));
+
+        // The override suppresses adaptive chunking, which previously also dropped both
+        // getters even though the caller had just supplied the size.
+        let overridden =
+            StepParameterSpaceIterator::new_with_chunk_override(&space, Some(1)).unwrap();
+        assert!(!overridden.chunks_adaptive());
+        assert_eq!(overridden.chunks_parameter_name(), Some("Frame"));
+        assert_eq!(overridden.chunks_default_task_count(), Some(1));
+    }
+
+    #[test]
+    fn test_no_chunk_metadata_without_a_chunked_parameter() {
+        let space = make_space(vec![("X", int_param(vec![1, 2, 3]))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.chunks_parameter_name(), None);
+        assert_eq!(iter.chunks_default_task_count(), None);
+    }
+
+    #[test]
+    fn test_adaptive_size_getter_still_tracks_the_live_value() {
+        // The mutable Arc must keep winning over the construction-time size, or the
+        // setter would appear to do nothing.
+        let space = make_space(
+            vec![("Frame", adaptive_chunk_param((1..=10).collect(), 5))],
+            None,
+        );
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        iter.set_chunks_default_task_count(3);
+        assert_eq!(iter.chunks_default_task_count(), Some(3));
+    }
+
+    // ── Random access for contiguous chunking ──
+    // Contiguous chunking used to force sequential iteration, so `get` and `__getitem__`
+    // declined for any contiguous chunked space while `len` still reported a count.
+
+    /// The chunk string at `index`, via random access.
+    fn chunk_via_get(iter: &StepParameterSpaceIterator, index: usize) -> String {
+        match &iter.get(index).expect("index within bounds")["Frame"].value {
+            ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("expected a RangeExpr chunk, got {other:?}"),
+        }
+    }
+
+    /// Every chunk string, via iteration.
+    fn chunks_via_iteration(space: &job::StepParameterSpace) -> Vec<String> {
+        StepParameterSpaceIterator::new(space)
+            .unwrap()
+            .map(|s| match &s["Frame"].value {
+                ExprValue::RangeExpr(r) => r.to_string(),
+                other => panic!("expected a RangeExpr chunk, got {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_contiguous_random_access_agrees_with_iteration_and_the_reference() {
+        // Expected values are the pure-Python reference's output for the same shapes
+        // (`divide_int_list_into_contiguous_chunks`), so this pins the values themselves
+        // rather than only get-versus-iterate self-consistency.
+        //
+        // Uneven splits, exact splits, single-chunk, chunk-per-value, and ranges with
+        // gaps and steps, since each drives a different branch of the interval walk.
+        let cases: Vec<(&str, usize, Vec<&str>)> = vec![
+            ("1-10", 3, vec!["1-3", "4-5", "6-8", "9-10"]),
+            ("1-10", 5, vec!["1-5", "6-10"]),
+            ("1-12", 5, vec!["1-4", "5-8", "9-12"]),
+            (
+                "1-10",
+                1,
+                vec![
+                    "1-1", "2-2", "3-3", "4-4", "5-5", "6-6", "7-7", "8-8", "9-9", "10-10",
+                ],
+            ),
+            ("1-10", 20, vec!["1-10"]),
+            ("1-7", 2, vec!["1-2", "3-4", "5-6", "7-7"]),
+            ("1-5,8-12", 3, vec!["1-3", "4-5", "8-10", "11-12"]),
+            (
+                "1-5,8-12",
+                2,
+                vec!["1-2", "3-4", "5-5", "8-9", "10-11", "12-12"],
+            ),
+            (
+                "1-20:2",
+                3,
+                vec![
+                    "1-1", "3-3", "5-5", "7-7", "9-9", "11-11", "13-13", "15-15", "17-17", "19-19",
+                ],
+            ),
+            (
+                "1-3,7,11-15",
+                2,
+                vec!["1-2", "3-3", "7-7", "11-12", "13-14", "15-15"],
+            ),
+        ];
+        for (expr, dtc, reference) in cases {
+            let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
+
+            // Iteration matches the reference.
+            assert_eq!(
+                chunks_via_iteration(&space),
+                reference,
+                "iteration disagrees with the reference for {expr} dtc={dtc}"
+            );
+
+            // Random access matches it too, index for index.
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(
+                iter.len(),
+                reference.len(),
+                "len disagrees with the reference for {expr} dtc={dtc}"
+            );
+            let by_index: Vec<String> = (0..iter.len()).map(|i| chunk_via_get(&iter, i)).collect();
+            assert_eq!(
+                by_index, reference,
+                "get disagrees with the reference for {expr} dtc={dtc}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_contiguous_random_access_is_lazy_on_a_huge_range() {
+        // One interval of 100 billion values. Indexing near the end must not walk the
+        // chunks before it, which is the whole reason the chunk is computed
+        // arithmetically rather than by advancing an iterator.
+        let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 1000))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 100_000_000);
+        assert_eq!(chunk_via_get(&iter, 0), "1-1000");
+        assert_eq!(chunk_via_get(&iter, 1), "1001-2000");
+        assert_eq!(chunk_via_get(&iter, 99_999_999), "99999999001-100000000000");
+    }
+
+    #[test]
+    fn test_contiguous_random_access_out_of_range_is_none() {
+        let space = make_space(vec![("Frame", static_chunk_param("1-10", 5))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 2);
+        assert!(iter.get(2).is_none());
+        assert!(iter.get(1000).is_none());
+    }
+
+    #[test]
+    fn test_contiguous_chunking_is_no_longer_sequential() {
+        // The flag is what gates `get`, and it is also what makes `Iterator::next` take
+        // the random-access path — so this pins that contiguous iteration now runs
+        // through `chunk_at` rather than the node iterator.
+        let space = make_space(vec![("Frame", static_chunk_param("1-10", 3))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(!iter.sequential);
+        assert!(iter.node_iter.is_none());
+    }
+
+    #[test]
+    fn test_contiguous_random_access_within_a_product() {
+        // ProductNode::get divides the index across children, so a chunked child has to
+        // answer for an index that is not the outer index.
+        let space = make_space(
+            vec![
+                ("A", int_param(vec![1, 2])),
+                ("Frame", static_chunk_param("1-10", 5)),
+            ],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 4); // 2 values x 2 chunks
+        let expected: Vec<(i64, String)> = StepParameterSpaceIterator::new(&space)
+            .unwrap()
+            .map(|s| {
+                let a = match &s["A"].value {
+                    ExprValue::Int(v) => *v,
+                    other => panic!("expected Int, got {other:?}"),
+                };
+                let f = match &s["Frame"].value {
+                    ExprValue::RangeExpr(r) => r.to_string(),
+                    other => panic!("expected RangeExpr, got {other:?}"),
+                };
+                (a, f)
+            })
+            .collect();
+        for (i, want) in expected.iter().enumerate() {
+            let set = iter.get(i).unwrap();
+            let a = match &set["A"].value {
+                ExprValue::Int(v) => *v,
+                other => panic!("expected Int, got {other:?}"),
+            };
+            assert_eq!(&(a, chunk_via_get(&iter, i)), want, "product index {i}");
         }
     }
 }
