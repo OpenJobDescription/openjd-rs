@@ -592,10 +592,20 @@ pub struct job::StepParameterSpace {
 
 pub enum job::TaskParameter {
     Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
-    Float { range: Vec<f64> },
+    Float { range: Vec<FloatRangeValue> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
     ChunkInt { range: TaskParamRange<i64>, chunks: ResolvedChunks },
+}
+
+pub struct job::FloatRangeValue {
+    pub value: f64,
+    pub text: Option<String>,
+}
+
+impl job::FloatRangeValue {
+    pub fn new(value: f64) -> Self;
+    pub fn with_text(value: f64, text: impl Into<String>) -> Self;
 }
 
 pub enum job::TaskParamRange<T> {

@@ -4,7 +4,9 @@
 
 //! Tests for the lazy `StepParameterSpaceIterator`.
 
-use crate::job::{ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter};
+use crate::job::{
+    FloatRangeValue, ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter,
+};
 use crate::step_param_space::StepParameterSpaceIterator;
 use crate::template::RangeConstraint;
 use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
@@ -29,7 +31,7 @@ fn int_list(vals: &[i64]) -> TaskParameter {
 
 fn float_list(vals: &[f64]) -> TaskParameter {
     TaskParameter::Float {
-        range: vals.to_vec(),
+        range: vals.iter().copied().map(FloatRangeValue::new).collect(),
     }
 }
 

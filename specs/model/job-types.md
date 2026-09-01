@@ -218,7 +218,7 @@ Fully resolved task parameter with concrete range values:
 ```rust
 pub enum TaskParameter {
     Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
-    Float { range: Vec<f64> },
+    Float { range: Vec<FloatRangeValue> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
     ChunkInt { range: TaskParamRange<i64>, chunks: ResolvedChunks },
@@ -229,6 +229,33 @@ pub enum TaskParameter {
 `openjd-expr`) for compact representation of large integer sequences. `Float`, `String`,
 and `Path` ranges are always materialized lists because they don't have a compact
 representation.
+
+### FloatRangeValue
+
+A resolved `<FloatRangeList>` element:
+
+```rust
+pub struct FloatRangeValue {
+    pub value: f64,
+    pub text: Option<String>,
+}
+```
+
+Template Schemas §7.5 keeps the decimal places a `<floatstring>` was written with, because
+that is what such an element is asking for — a range element written `'2.50'` wants `2.50` on
+the command line, and `2.50_f64` cannot say so. `text` carries that rendering; an element
+written as a `<float>` literal has no such request and stores `None`, rendering through
+`openjd_expr::value::format_float`.
+
+`text` is the rendered form rather than the source text: redundant leading zeros are stripped
+before it is stored (§7.5 rule 1), so `'02.50'` arrives as `2.50` and `'007'` as `7`.
+
+`Serialize` and `Deserialize` are hand-written so the wire shape stays the same
+`<float> | <floatstring>` union the template uses — an element with `text` serializes as that
+string, one without serializes as a number — rather than becoming a
+`{"value": .., "text": ..}` object. `PartialEq` and the containing `TaskParameter`'s `Hash`
+both include `text`, because two ranges that render the same number differently produce
+different command lines and are not the same job.
 
 ### TaskParamRange, ResolvedChunks
 

@@ -1786,10 +1786,18 @@ fn make_leaf_node(
             param_type: TaskParameterType::Float,
             values: range
                 .iter()
-                .map(|&f| {
-                    Float64::new(f).map(ExprValue::Float).map_err(|_| {
+                .map(|elem| {
+                    // `Float64::new` stores no text, and `format_float` renders
+                    // 2.50 as `2.5`, losing what the element asked for (§7.5).
+                    match &elem.text {
+                        Some(text) => Float64::with_str(elem.value, text.clone()),
+                        None => Float64::new(elem.value),
+                    }
+                    .map(ExprValue::Float)
+                    .map_err(|_| {
                         ModelError::DecodeValidation(format!(
-                            "Parameter '{name}': float value {f} is not finite"
+                            "Parameter '{name}': float value {} is not finite",
+                            elem.value
                         ))
                     })
                 })

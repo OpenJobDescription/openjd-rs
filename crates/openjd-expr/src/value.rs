@@ -161,7 +161,10 @@ impl Float64 {
         }
         Ok(Self {
             value: v,
-            original: if v == 0.0 && s != "0.0" {
+            // Only negative zero: `value` is normalized to 0.0 above, so keeping
+            // `"-0.0"` would render a sign the value no longer has. Any other
+            // spelling of zero keeps its decimal places.
+            original: if v == 0.0 && s.starts_with('-') {
                 None
             } else {
                 Some(s.into_boxed_str())

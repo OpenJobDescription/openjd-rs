@@ -338,6 +338,69 @@ impl Hash for StepParameterSpace {
     }
 }
 
+/// A resolved `<FloatRangeList>` element.
+///
+/// Template Schemas §7.5 keeps the decimal places a `<floatstring>` was written
+/// with, and `2.50_f64` cannot carry them. A `<float>` literal makes no such
+/// request and stores `None`, rendering through
+/// `openjd_expr::value::format_float`.
+///
+/// `text` is the rendered form, not the source: leading zeros are stripped before
+/// it is stored, so `'02.50'` arrives as `2.50`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FloatRangeValue {
+    /// The number the element denotes.
+    pub value: f64,
+    /// How to render it, when the element was written as a `<floatstring>`.
+    pub text: Option<String>,
+}
+
+impl FloatRangeValue {
+    /// A value with no rendering of its own — a `<float>` literal.
+    pub fn new(value: f64) -> Self {
+        Self { value, text: None }
+    }
+
+    /// A value that renders as `text` — a `<floatstring>`.
+    pub fn with_text(value: f64, text: impl Into<String>) -> Self {
+        Self {
+            value,
+            text: Some(text.into()),
+        }
+    }
+}
+
+/// Hand-written so the wire shape stays the `<float> | <floatstring>` union the
+/// template uses, rather than a `{"value": .., "text": ..}` object. Round-trips.
+impl Serialize for FloatRangeValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.text {
+            Some(text) => serializer.serialize_str(text),
+            None => serializer.serialize_f64(self.value),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FloatRangeValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::Number(n) => n
+                .as_f64()
+                .map(Self::new)
+                .ok_or_else(|| serde::de::Error::custom("Invalid float range value")),
+            serde_json::Value::String(s) => {
+                let value = s.trim().parse::<f64>().map_err(|_| {
+                    serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
+                })?;
+                Ok(Self::with_text(value, s))
+            }
+            _ => Err(serde::de::Error::custom(
+                "Expected a float or a float string",
+            )),
+        }
+    }
+}
+
 /// A resolved task parameter with concrete range values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -347,7 +410,7 @@ pub enum TaskParameter {
         chunks: Option<ResolvedChunks>,
     },
     Float {
-        range: Vec<f64>,
+        range: Vec<FloatRangeValue>,
     },
     String {
         range: Vec<String>,
@@ -361,8 +424,9 @@ pub enum TaskParameter {
     },
 }
 
-/// Manual because the `Float` variant's `Vec<f64>` has no `Hash`;
-/// floats hash via `hash_f64`.
+/// Manual because `f64` has no `Hash`; those hash via `hash_f64`. The rendering
+/// text is hashed too, since `PartialEq` compares it: same number, different
+/// rendering means a different command line, so not the same job.
 impl Hash for TaskParameter {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
@@ -373,8 +437,9 @@ impl Hash for TaskParameter {
             }
             Self::Float { range } => {
                 range.len().hash(state);
-                for &f in range {
-                    hash_f64(f, state);
+                for elem in range {
+                    hash_f64(elem.value, state);
+                    elem.text.hash(state);
                 }
             }
             Self::String { range } | Self::Path { range } => range.hash(state),

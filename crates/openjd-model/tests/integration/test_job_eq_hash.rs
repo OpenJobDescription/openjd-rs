@@ -16,7 +16,8 @@ use std::hash::{Hash, Hasher};
 
 use openjd_expr::{ExprValue, FormatString};
 use openjd_model::job::{
-    AmountRequirement, Environment, HostRequirements, Job, StepParameterSpace, TaskParameter,
+    AmountRequirement, Environment, FloatRangeValue, HostRequirements, Job, StepParameterSpace,
+    TaskParameter,
 };
 use openjd_model::CallerLimits;
 use openjd_model::{create_job, decode_job_template, JobParameterInputValues};
@@ -281,18 +282,35 @@ fn amount_requirement_negative_zero_eq_and_hash() {
 
 #[test]
 fn task_parameter_float_negative_zero_eq_and_hash() {
-    let a = TaskParameter::Float {
-        range: vec![0.0, 1.5],
+    let floats = |vals: &[f64]| TaskParameter::Float {
+        range: vals.iter().copied().map(FloatRangeValue::new).collect(),
     };
-    let b = TaskParameter::Float {
-        range: vec![-0.0, 1.5],
-    };
+    let a = floats(&[0.0, 1.5]);
+    let b = floats(&[-0.0, 1.5]);
     assert_eq!(a, b, "-0.0 == 0.0 under PartialEq");
     assert_eq!(hash_of(&a), hash_of(&b), "hash must agree with eq");
-    let c = TaskParameter::Float {
-        range: vec![0.0, 2.5],
-    };
+    let c = floats(&[0.0, 2.5]);
     assert_ne!(a, c);
+}
+
+#[test]
+fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
+    // Same number, different rendering means a different command line. Hash must
+    // follow eq, or a cache keyed on it could serve one for the other.
+    let bare = TaskParameter::Float {
+        range: vec![FloatRangeValue::new(2.5)],
+    };
+    let scaled = TaskParameter::Float {
+        range: vec![FloatRangeValue::with_text(2.5, "2.50")],
+    };
+    assert_ne!(bare, scaled);
+    assert_ne!(hash_of(&bare), hash_of(&scaled));
+
+    let same = TaskParameter::Float {
+        range: vec![FloatRangeValue::with_text(2.5, "2.50")],
+    };
+    assert_eq!(scaled, same);
+    assert_eq!(hash_of(&scaled), hash_of(&same));
 }
 
 #[test]

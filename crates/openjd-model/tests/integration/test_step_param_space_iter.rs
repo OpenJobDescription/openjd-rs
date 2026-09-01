@@ -165,6 +165,107 @@ fn test_float_range() {
     assert_eq!(tasks.len(), 3);
 }
 
+/// §7.5, both rules, on the value a Task receives: leading zeros go, decimal
+/// places stay. Also pinned by conformance fixture
+/// `2023-09/base/jobs/7.5--numeric-string-zeros-in-range-elements`.
+#[test]
+fn test_floatstring_range_elements_keep_their_decimal_places() {
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT",
+                "range": ["1.5", "02.50", "3.500", "007", "0.50", "1E+2"]}]}
+        }]
+    }"#,
+        &[],
+    );
+    let rendered: Vec<String> = (0..tasks.len())
+        .map(|i| task_val_str(&tasks, i, "Weight"))
+        .collect();
+    assert_eq!(
+        rendered,
+        [
+            "1.5",   // nothing to do
+            "2.50",  // leading zero goes, trailing zero stays
+            "3.500", // trailing zeros stay
+            "7",     // leading zeros go, and no `.0` is invented
+            "0.50",  // the necessary leading zero stays
+            "1E+2",  // the author's own notation is forwarded
+        ]
+    );
+}
+
+/// `2.50` and `2.5` are the same literal once parsed, so a `<float>` renders
+/// through `format_float` — which is what gives an integral float its `.0`.
+#[test]
+fn test_float_literal_range_elements_render_numerically() {
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "Scale", "type": "FLOAT",
+                "range": [1.0, 2.50, 0.5]}]}
+        }]
+    }"#,
+        &[],
+    );
+    let rendered: Vec<String> = (0..tasks.len())
+        .map(|i| task_val_str(&tasks, i, "Scale"))
+        .collect();
+    assert_eq!(rendered, ["1.0", "2.5", "0.5"]);
+}
+
+/// An `<intstring>` has no decimal places, so rule 1 is the whole of it.
+#[test]
+fn test_intstring_range_elements_drop_their_leading_zeros() {
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "Frame", "type": "INT",
+                "range": ["1", "02", "003"]}]}
+        }]
+    }"#,
+        &[],
+    );
+    let rendered: Vec<String> = (0..tasks.len())
+        .map(|i| task_val_str(&tasks, i, "Frame"))
+        .collect();
+    assert_eq!(rendered, ["1", "2", "3"]);
+}
+
+/// A zero keeps its decimal places like any other value — the case
+/// `Float64::with_str` dropped for every spelling other than `"0.0"`.
+#[test]
+fn test_zero_valued_floatstring_keeps_its_decimal_places() {
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "Offset", "type": "FLOAT",
+                "range": ["0.00", "000", "-0.0"]}]}
+        }]
+    }"#,
+        &[],
+    );
+    let rendered: Vec<String> = (0..tasks.len())
+        .map(|i| task_val_str(&tasks, i, "Offset"))
+        .collect();
+    assert_eq!(
+        rendered,
+        [
+            "0.00", // decimal places preserved
+            "0",    // '000' loses two redundant zeros, keeps the third
+            "0.0",  // negative zero is zero, which has no sign
+        ]
+    );
+}
+
 #[test]
 fn test_product_combination() {
     let tasks = create_and_iterate(
