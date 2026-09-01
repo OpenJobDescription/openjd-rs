@@ -15,3 +15,6 @@ mod parse;
 pub(crate) use evaluator::Evaluator;
 pub use evaluator::{EvalResult, DEFAULT_MEMORY_LIMIT, DEFAULT_OPERATION_LIMIT};
 pub use parse::{EvalBuilder, ParsedExpression, MAX_EXPRESSION_DEPTH, MAX_PARSE_INPUT_LEN};
+// The inverse of the multi-line paren wrap. Anything turning a parser offset back into a
+// position in the unwrapped source needs it, which includes error.rs and the evaluator.
+pub(crate) use parse::parser_offset_shift;
