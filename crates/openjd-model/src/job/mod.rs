@@ -345,9 +345,10 @@ impl Hash for StepParameterSpace {
 /// request and stores `None`, rendering through
 /// `openjd_expr::value::format_float`.
 ///
-/// `text` is the rendered form, not the source: leading zeros are stripped before
-/// it is stored, so `'02.50'` arrives as `2.50`.
-#[derive(Debug, Clone, PartialEq)]
+/// `text` is the rendered form, not the source: it is trimmed and has its
+/// redundant leading zeros stripped before being stored, so `'02.50'` arrives as
+/// `2.50`. Construct through `new`/`with_text`, which hold that invariant.
+#[derive(Debug, Clone)]
 pub struct FloatRangeValue {
     /// The number the element denotes.
     pub value: f64,
@@ -358,15 +359,63 @@ pub struct FloatRangeValue {
 impl FloatRangeValue {
     /// A value with no rendering of its own — a `<float>` literal.
     pub fn new(value: f64) -> Self {
-        Self { value, text: None }
+        Self {
+            value: normalize_zero(value),
+            text: None,
+        }
     }
 
     /// A value that renders as `text` — a `<floatstring>`.
+    ///
+    /// `text` is dropped when it would not render the value: zero has no sign, so
+    /// `"-0.00"` is stored as `"0.00"` and `"1e-400"`, which parses to zero by
+    /// underflow, keeps no text at all. Both would otherwise render a string that
+    /// disagrees with `value`.
     pub fn with_text(value: f64, text: impl Into<String>) -> Self {
+        let value = normalize_zero(value);
+        let text = text.into();
+        if value != 0.0 {
+            return Self {
+                value,
+                text: Some(text),
+            };
+        }
+        let unsigned = text.strip_prefix(['+', '-']).unwrap_or(&text);
+        if unsigned.is_empty() || !unsigned.bytes().all(|b| b == b'0' || b == b'.') {
+            return Self::new(value);
+        }
         Self {
             value,
-            text: Some(text.into()),
+            text: Some(unsigned.to_string()),
         }
+    }
+
+    /// The text this element renders as.
+    pub fn rendered(&self) -> std::borrow::Cow<'_, str> {
+        self.text.as_deref().map_or_else(
+            || std::borrow::Cow::Owned(openjd_expr::value::format_float(self.value)),
+            std::borrow::Cow::Borrowed,
+        )
+    }
+}
+
+/// `-0.0` and `0.0` are the same number, and `openjd_expr::value::Float64` holds
+/// the same invariant so that `Hash` and `PartialEq` agree.
+fn normalize_zero(v: f64) -> f64 {
+    if v == 0.0 {
+        0.0
+    } else {
+        v
+    }
+}
+
+/// Compares the rendering rather than the stored text, so two elements that put
+/// the same string on a command line are the same element however they were
+/// written. `FloatRangeValue::new(2.5)` and `with_text(2.5, "2.5")` are equal;
+/// `with_text(2.5, "2.50")` is not.
+impl PartialEq for FloatRangeValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.rendered() == other.rendered()
     }
 }
 
@@ -383,16 +432,35 @@ impl Serialize for FloatRangeValue {
 
 impl<'de> Deserialize<'de> for FloatRangeValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Applies the same checks the resolver does, so a deserialized Job cannot
+        // hold state `create_job` would have rejected: NaN, which would break the
+        // reflexive equality `PartialEq` and `Hash` rely on, and un-normalized
+        // text, which is what reaches a command line.
+        let finite = |v: f64, src: &str| {
+            if v.is_finite() {
+                Ok(v)
+            } else {
+                Err(serde::de::Error::custom(format!(
+                    "Float range value '{src}' is not finite"
+                )))
+            }
+        };
         match serde_json::Value::deserialize(deserializer)? {
-            serde_json::Value::Number(n) => n
-                .as_f64()
-                .map(Self::new)
-                .ok_or_else(|| serde::de::Error::custom("Invalid float range value")),
+            serde_json::Value::Number(n) => {
+                let v = n
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("Invalid float range value"))?;
+                Ok(Self::new(finite(v, &n.to_string())?))
+            }
             serde_json::Value::String(s) => {
-                let value = s.trim().parse::<f64>().map_err(|_| {
+                let trimmed = s.trim();
+                let value = trimmed.parse::<f64>().map_err(|_| {
                     serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
                 })?;
-                Ok(Self::with_text(value, s))
+                Ok(Self::with_text(
+                    finite(value, &s)?,
+                    crate::job::create_job::strip_redundant_leading_zeros(trimmed),
+                ))
             }
             _ => Err(serde::de::Error::custom(
                 "Expected a float or a float string",
@@ -439,7 +507,7 @@ impl Hash for TaskParameter {
                 range.len().hash(state);
                 for elem in range {
                     hash_f64(elem.value, state);
-                    elem.text.hash(state);
+                    elem.rendered().hash(state);
                 }
             }
             Self::String { range } | Self::Path { range } => range.hash(state),

@@ -118,6 +118,23 @@ pub(crate) fn int_float_cmp(i: i64, v: f64) -> Option<std::cmp::Ordering> {
     }))
 }
 
+/// The text to preserve for `v`, or `None` when `s` would not render it.
+///
+/// Only zero needs the check. `value` has been normalized to `0.0`, so keeping a
+/// signed text would render a sign the value no longer has; and text that reaches
+/// zero only by underflow, like `"1e-400"`, does not describe the value at all.
+/// The sign is dropped without the digits, so `"-0.00"` keeps two places.
+fn zero_safe_original(v: f64, s: String) -> Option<Box<str>> {
+    if v != 0.0 {
+        return Some(s.into_boxed_str());
+    }
+    let unsigned = s.strip_prefix(['+', '-']).unwrap_or(&s);
+    if unsigned.is_empty() || !unsigned.bytes().all(|b| b == b'0' || b == b'.') {
+        return None;
+    }
+    Some(unsigned.to_string().into_boxed_str())
+}
+
 /// Normalize -0.0 to 0.0 (matches Python's copysign normalization).
 fn normalize_zero(v: f64) -> f64 {
     if v == 0.0 {
@@ -161,14 +178,7 @@ impl Float64 {
         }
         Ok(Self {
             value: v,
-            // Only negative zero: `value` is normalized to 0.0 above, so keeping
-            // `"-0.0"` would render a sign the value no longer has. Any other
-            // spelling of zero keeps its decimal places.
-            original: if v == 0.0 && s.starts_with('-') {
-                None
-            } else {
-                Some(s.into_boxed_str())
-            },
+            original: zero_safe_original(v, s),
         })
     }
     /// The underlying `f64` value.

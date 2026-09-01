@@ -271,7 +271,7 @@ fn resolve_int_range(
 /// Template Schemas §7.5 rule 1, keeping the sign and one digit: `'02.50'` ->
 /// `2.50`, `'007'` -> `7`, `'000'` -> `0`, `'0.50'` unchanged. Textual, so it
 /// cannot lose precision or change notation: `'01E+2'` -> `1E+2`.
-pub(super) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
+pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
     let sign_len = usize::from(text.starts_with(['+', '-']));
     let digits = &text[sign_len..];
     let zeros = digits.bytes().take_while(|b| *b == b'0').count();
@@ -326,10 +326,16 @@ fn resolve_float_range(
                     }
                     // §7.5 rule 2: the f64 cannot carry the decimal places, so
                     // the text rides alongside it.
-                    Ok(job::FloatRangeValue::with_text(
-                        value,
-                        strip_redundant_leading_zeros(trimmed),
-                    ))
+                    let text = strip_redundant_leading_zeros(trimmed);
+                    // Same per-element cap resolve_string_range applies, for the
+                    // same reason: a <FormatString> resolves to arbitrary length,
+                    // and this text is what lands on a command line. Over the cap
+                    // the element keeps only its value, which is how it rendered
+                    // before the text was carried at all.
+                    if text.len() > limits.max_task_param_string_len {
+                        return Ok(job::FloatRangeValue::new(value));
+                    }
+                    Ok(job::FloatRangeValue::with_text(value, text))
                 }
             })
             .collect::<Result<Vec<_>, _>>()?,

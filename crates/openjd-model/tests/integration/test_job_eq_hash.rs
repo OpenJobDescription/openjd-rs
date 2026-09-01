@@ -311,6 +311,42 @@ fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
     };
     assert_eq!(scaled, same);
     assert_eq!(hash_of(&scaled), hash_of(&same));
+
+    // The converse: text that renders identically to no text at all is the same
+    // element. eq compares the rendering, not the stored Option.
+    let redundant = TaskParameter::Float {
+        range: vec![FloatRangeValue::with_text(2.5, "2.5")],
+    };
+    assert_eq!(bare, redundant);
+    assert_eq!(hash_of(&bare), hash_of(&redundant));
+}
+
+/// Zero has no sign, and `Float64::with_str` drops a signed zero's text when
+/// rendering, so storing it would leave two elements that emit byte-identical
+/// command lines comparing unequal and hashing differently.
+#[test]
+fn task_parameter_float_signed_zero_matches_its_rendering() {
+    let floats = |v: f64, t: &str| TaskParameter::Float {
+        range: vec![FloatRangeValue::with_text(v, t)],
+    };
+    let unsigned = floats(0.0, "0.0");
+    let signed = floats(-0.0, "-0.0");
+    assert_eq!(signed, unsigned, "both render 0.0");
+    assert_eq!(hash_of(&signed), hash_of(&unsigned));
+
+    // The decimal places survive the sign being dropped, so a signed and an
+    // unsigned zero written to two places stay equal to each other and distinct
+    // from one written to one place.
+    assert_eq!(floats(-0.0, "-0.00"), floats(0.0, "0.00"));
+    assert_ne!(floats(0.0, "0.00"), floats(0.0, "0.0"));
+
+    // Text that parses to zero only by underflow does not render the value, so it
+    // is not kept.
+    assert_eq!(
+        FloatRangeValue::with_text(0.0, "1e-400").rendered(),
+        "0.0",
+        "underflowed text would render a string that disagrees with the value"
+    );
 }
 
 #[test]

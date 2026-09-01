@@ -239,7 +239,8 @@ fn test_intstring_range_elements_drop_their_leading_zeros() {
 }
 
 /// A zero keeps its decimal places like any other value — the case
-/// `Float64::with_str` dropped for every spelling other than `"0.0"`.
+/// `Float64::with_str` dropped for every spelling other than `"0.0"`. The sign
+/// goes, because zero has none, but that must not take the decimal places with it.
 #[test]
 fn test_zero_valued_floatstring_keeps_its_decimal_places() {
     let tasks = create_and_iterate(
@@ -248,7 +249,7 @@ fn test_zero_valued_floatstring_keeps_its_decimal_places() {
         "name": "Job",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
             "parameterSpace": {"taskParameterDefinitions": [{"name": "Offset", "type": "FLOAT",
-                "range": ["0.00", "000", "-0.0"]}]}
+                "range": ["0.00", "000", "-0.0", "-0.00", "1e-400"]}]}
         }]
     }"#,
         &[],
@@ -262,7 +263,40 @@ fn test_zero_valued_floatstring_keeps_its_decimal_places() {
             "0.00", // decimal places preserved
             "0",    // '000' loses two redundant zeros, keeps the third
             "0.0",  // negative zero is zero, which has no sign
+            "0.00", // and losing the sign must not lose the decimal places
+            "0.0",  // parses to zero by underflow: the text does not render it
         ]
+    );
+}
+
+/// A `<FormatString>` range element resolves to arbitrary length, and the
+/// preserved text is what lands on a command line, so it takes the same
+/// per-element cap `resolve_string_range` applies. Over the cap the element keeps
+/// only its value — how it rendered before any text was carried.
+#[test]
+fn test_over_cap_floatstring_element_keeps_only_its_value() {
+    let tasks = create_and_iterate(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Job",
+        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "W", "type": "FLOAT",
+                "range": ["2.5{{ zfill('', 5000) }}", "2.50"]}]}
+        }]
+    }"#,
+        &[],
+    );
+    let rendered: Vec<String> = (0..tasks.len())
+        .map(|i| task_val_str(&tasks, i, "W"))
+        .collect();
+    // '2.5' followed by 5000 zeros: 5003 characters, all of them decimal places
+    // rule 2 would otherwise preserve. The value survives, the padding does not.
+    assert_eq!(
+        rendered,
+        ["2.5", "2.50"],
+        "an over-cap element must not reach a command line, \
+         and must not cost its neighbour its decimal places"
     );
 }
 
