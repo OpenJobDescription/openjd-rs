@@ -576,10 +576,15 @@ fn interval_chunking(interval_len: usize, default_task_count: usize) -> (usize, 
 /// computed without walking the chunks before it.
 fn larger_chunks_before(j: usize, leftovers: usize, chunk_count: usize) -> usize {
     if leftovers == 0 {
-        0
-    } else {
-        (j * leftovers).div_ceil(chunk_count)
+        return 0;
     }
+    // Widened to u128 for the product only. `j` is bounded by `chunk_count` and
+    // `leftovers` is `interval_len % chunk_count`, so `j * leftovers` approaches
+    // `(interval_len/2)^2` and overflows usize once an interval passes roughly 8.6e9
+    // values — well inside the range sizes this module is built to handle. The quotient
+    // is bounded by `leftovers`, so narrowing back is lossless.
+    let product = (j as u128) * (leftovers as u128);
+    (product.div_ceil(chunk_count as u128)) as usize
 }
 
 /// Find the last index of the contiguous interval starting at `start`.
@@ -616,16 +621,23 @@ fn interval_end_index(range: &job::TaskParamRange<i64>, start: usize) -> usize {
 
                 let sr = &sub_ranges[sr_idx];
 
-                if sr.step() != 1 {
-                    // Step > 1: each value is isolated
-                    return start;
-                }
-
-                // Current sub-range is step-1: interval extends to end of this sub-range
-                let mut end = sr_offset + sr.len() - 1;
-
-                // Check subsequent sub-ranges for adjacency
-                let mut last_val = sr.end();
+                // Where this interval ends within the current sub-range, and the value it
+                // ends on. A step > 1 sub-range has a gap between each of its own values,
+                // so the interval is that single value — but if it is the sub-range's
+                // *last* value it can still merge into an adjacent following sub-range,
+                // which is what `count_contiguous_chunks_from_sub_ranges` does. Returning
+                // early here instead left iteration and `len()` disagreeing: `1-5:2,6-10`
+                // at defaultTaskCount 2 counted 5 chunks but yielded 6.
+                let (mut end, mut last_val) = if sr.step() != 1 {
+                    let is_last_of_sub_range = start == sr_offset + sr.len() - 1;
+                    if !is_last_of_sub_range {
+                        return start;
+                    }
+                    (start, range_value_at(range, start))
+                } else {
+                    // Step-1: the interval extends to the end of this sub-range.
+                    (sr_offset + sr.len() - 1, sr.end())
+                };
                 for next_sr in &sub_ranges[sr_idx + 1..] {
                     if next_sr.start() == last_val + 1 && next_sr.step() == 1 {
                         end += next_sr.len();
@@ -1368,32 +1380,33 @@ impl StepParameterSpaceIterator {
 
         let expr = space.combination.as_deref().unwrap_or("*");
 
-        // The chunked parameter and its effective chunk size, independent of whether the
-        // chunking is adaptive. Reported for any CHUNK[INT] parameter, matching the Python
-        // reference: neither value is unknowable for a static space, since both are in the
-        // template. Adaptive additionally gets the mutable Arc below, because only an
-        // adaptive size can be changed part-way through iteration.
+        // The chunked parameter, its effective chunk size, and whether it is adaptive, all
+        // taken from the *same* parameter: the first CHUNK[INT] in definition order, which
+        // is what the Python reference reports too.
+        //
+        // Deriving them separately would let `chunks_parameter_name` name one parameter
+        // while `chunks_adaptive` described another. Template validation rejects more than
+        // one CHUNK[INT] per step, but `StepParameterSpace` is publicly constructible and
+        // deserializable — the same reason this function re-validates the value bound
+        // above — and openjd-cli feeds `chunks_parameter_name` back into adaptive
+        // chunk-size adjustment, so a mismatch would corrupt that feedback.
+        //
+        // Name and size are reported for any chunked space; only adaptive gets the mutable
+        // Arc, because only an adaptive size can change part-way through iteration.
         let mut chunks_param_name: Option<String> = None;
         let mut chunk_size: Option<usize> = None;
+        let mut adaptive_info: Option<(String, Arc<AtomicUsize>)> = None;
         for (name, param) in &space.task_parameter_definitions {
             if let job::TaskParameter::ChunkInt { chunks, .. } = param {
+                let effective = chunk_override.unwrap_or(chunks.default_task_count).max(1);
                 chunks_param_name = Some(name.clone());
-                chunk_size = Some(chunk_override.unwrap_or(chunks.default_task_count).max(1));
-                break;
-            }
-        }
-
-        // Check if any parameter needs adaptive chunking
-        let mut adaptive_info: Option<(String, Arc<AtomicUsize>)> = None;
-        if chunk_override.is_none() {
-            for (name, param) in &space.task_parameter_definitions {
-                if let job::TaskParameter::ChunkInt { chunks, .. } = param {
-                    if chunks.target_runtime_seconds.is_some_and(|t| t > 0) {
-                        let arc = Arc::new(AtomicUsize::new(chunks.default_task_count.max(1)));
-                        adaptive_info = Some((name.clone(), arc));
-                        break;
-                    }
+                chunk_size = Some(effective);
+                // An override pins the size, which rules out adaptive.
+                if chunk_override.is_none() && chunks.target_runtime_seconds.is_some_and(|t| t > 0)
+                {
+                    adaptive_info = Some((name.clone(), Arc::new(AtomicUsize::new(effective))));
                 }
+                break;
             }
         }
 
@@ -2391,6 +2404,19 @@ mod tests {
                 2,
                 vec!["1-2", "3-3", "7-7", "11-12", "13-14", "15-15"],
             ),
+            // A step > 1 sub-range followed by an adjacent step-1 one: the last value of
+            // the stepped sub-range merges into the run that follows it, so `5` and
+            // `6-10` form one interval of six values.
+            ("1-5:2,6-10", 2, vec!["1-1", "3-3", "5-6", "7-8", "9-10"]),
+            ("1-5:2,6-10", 3, vec!["1-1", "3-3", "5-7", "8-10"]),
+            ("1-3:2,4-6", 2, vec!["1-1", "3-4", "5-6"]),
+            (
+                "1-9:2,10-20",
+                2,
+                vec![
+                    "1-1", "3-3", "5-5", "7-7", "9-10", "11-12", "13-14", "15-16", "17-18", "19-20",
+                ],
+            ),
         ];
         for (expr, dtc, reference) in cases {
             let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
@@ -2428,6 +2454,84 @@ mod tests {
         assert_eq!(chunk_via_get(&iter, 0), "1-1000");
         assert_eq!(chunk_via_get(&iter, 1), "1001-2000");
         assert_eq!(chunk_via_get(&iter, 99_999_999), "99999999001-100000000000");
+    }
+
+    #[test]
+    fn test_chunk_offsets_do_not_overflow_on_a_huge_range() {
+        // `j * leftovers` approaches (interval_len/2)^2, which passes usize::MAX once an
+        // interval is over roughly 8.6e9 values. A default_task_count that divides the
+        // range evenly leaves `leftovers == 0` and never multiplies, so the arithmetic has
+        // to be exercised with one that leaves a remainder.
+        let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 3))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let n = iter.len();
+        assert_eq!(n, 33_333_333_334);
+
+        // Both ends, plus the last index, where the product is largest.
+        assert_eq!(chunk_via_get(&iter, 0), "1-3");
+        assert_eq!(chunk_via_get(&iter, n - 1), "99999999999-100000000000");
+
+        // Chunks must tile the range without gaps or overlaps. Spot-check adjacency
+        // deep into the space, where a wrapped product would show up as a wild offset.
+        for i in [1usize, 2, 1_000_000, 30_000_000_000, n - 2] {
+            let a = chunk_via_get(&iter, i);
+            let b = chunk_via_get(&iter, i + 1);
+            let a_end: i64 = a.split('-').next_back().unwrap().parse().unwrap();
+            let b_start: i64 = b.split('-').next().unwrap().parse().unwrap();
+            assert_eq!(b_start, a_end + 1, "chunks {i} and {} do not tile", i + 1);
+        }
+    }
+
+    #[test]
+    fn test_len_agrees_with_iteration_across_mixed_step_ranges() {
+        // `len()` comes from `count_contiguous_chunks_for_range` while iteration walks
+        // intervals via `interval_end_index`. The two used to disagree whenever an
+        // interval began in a step > 1 sub-range and continued into an adjacent step-1
+        // one, which made `len()` under-report and left the last chunk unreachable.
+        for (expr, dtc) in [
+            ("1-5:2,6-10", 2),
+            ("1-5:2,6-10", 3),
+            ("1-3:2,4-6", 2),
+            ("1-9:2,10-20", 2),
+            ("1-20:2", 3),
+            ("1-5,8-12", 3),
+        ] {
+            let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let walked = chunks_via_iteration(&space);
+            assert_eq!(
+                iter.len(),
+                walked.len(),
+                "len disagrees with iteration for {expr} dtc={dtc}"
+            );
+            // The final chunk must be reachable by index, which it is not when len()
+            // under-reports.
+            assert!(
+                iter.get(walked.len() - 1).is_some(),
+                "last chunk unreachable for {expr} dtc={dtc}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_chunk_metadata_and_adaptive_come_from_the_same_parameter() {
+        // Template validation rejects two CHUNK[INT] parameters per step, but
+        // StepParameterSpace is publicly constructible, so the getters must not describe
+        // different parameters. openjd-cli feeds chunks_parameter_name back into adaptive
+        // chunk-size adjustment, so a mismatch would corrupt that feedback.
+        let space = make_space(
+            vec![
+                ("StaticFrame", noncontiguous_static_chunk_param("1-10", 5)),
+                ("AdaptiveFrame", adaptive_chunk_param((1..=10).collect(), 2)),
+            ],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        // The first CHUNK[INT] in definition order decides everything, as in the
+        // reference, which breaks out of its scan on the first one it finds.
+        assert_eq!(iter.chunks_parameter_name(), Some("StaticFrame"));
+        assert!(!iter.chunks_adaptive());
+        assert_eq!(iter.chunks_default_task_count(), Some(5));
     }
 
     #[test]
