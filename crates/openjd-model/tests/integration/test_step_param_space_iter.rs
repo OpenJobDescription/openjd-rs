@@ -249,7 +249,7 @@ fn test_zero_valued_floatstring_keeps_its_decimal_places() {
         "name": "Job",
         "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}},
             "parameterSpace": {"taskParameterDefinitions": [{"name": "Offset", "type": "FLOAT",
-                "range": ["0.00", "000", "-0.0", "-0.00", "1e-400"]}]}
+                "range": ["0.00", "000", "-0.0", "-0.00", "0E+2", "1e-400"]}]}
         }]
     }"#,
         &[],
@@ -260,11 +260,12 @@ fn test_zero_valued_floatstring_keeps_its_decimal_places() {
     assert_eq!(
         rendered,
         [
-            "0.00", // decimal places preserved
-            "0",    // '000' loses two redundant zeros, keeps the third
-            "0.0",  // negative zero is zero, which has no sign
-            "0.00", // and losing the sign must not lose the decimal places
-            "0.0",  // parses to zero by underflow: the text does not render it
+            "0.00",   // decimal places preserved
+            "0",      // '000' loses two redundant zeros, keeps the third
+            "0.0",    // negative zero is zero, which has no sign
+            "0.00",   // and losing the sign must not lose the decimal places
+            "0E+2",   // an all-zero mantissa spells zero whatever the exponent
+            "1e-400", // underflow is not zero being spelled: the digits stay
         ]
     );
 }

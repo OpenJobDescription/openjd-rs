@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{EndOfLine, FileType};
 
+use crate::template::validate_v2023_09::DEFAULT_MAX_TASK_PARAM_STRING_LEN;
 use crate::template::RangeConstraint;
 use crate::types::JobParameterType;
 
@@ -345,9 +346,14 @@ impl Hash for StepParameterSpace {
 /// request and stores `None`, rendering through
 /// `openjd_expr::value::format_float`.
 ///
-/// `text` is the rendered form, not the source: it is trimmed and has its
-/// redundant leading zeros stripped before being stored, so `'02.50'` arrives as
-/// `2.50`. Construct through `new`/`with_text`, which hold that invariant.
+/// `text` is the rendered form, not the source: `resolve_float_range` trims it,
+/// strips its redundant leading zeros and caps its length before constructing one,
+/// so `'02.50'` arrives as `2.50`.
+///
+/// The constructors normalize `-0.0` and unsign a zero's text; they do **not**
+/// reject a non-finite `value`, and the fields are public, so a caller that builds
+/// one directly can produce a `value` no resolver would. `create_job` and
+/// `Deserialize` both reject non-finite before they get here.
 #[derive(Debug, Clone)]
 pub struct FloatRangeValue {
     /// The number the element denotes.
@@ -367,26 +373,14 @@ impl FloatRangeValue {
 
     /// A value that renders as `text` — a `<floatstring>`.
     ///
-    /// `text` is dropped when it would not render the value: zero has no sign, so
-    /// `"-0.00"` is stored as `"0.00"` and `"1e-400"`, which parses to zero by
-    /// underflow, keeps no text at all. Both would otherwise render a string that
-    /// disagrees with `value`.
+    /// A leading sign is dropped when `text` spells zero, which has no sign, but
+    /// its digits are kept, so `"-0.00"` is stored as `"0.00"`. Shares the rule
+    /// with `Float64::with_str` so that both render the element identically.
     pub fn with_text(value: f64, text: impl Into<String>) -> Self {
-        let value = normalize_zero(value);
         let text = text.into();
-        if value != 0.0 {
-            return Self {
-                value,
-                text: Some(text),
-            };
-        }
-        let unsigned = text.strip_prefix(['+', '-']).unwrap_or(&text);
-        if unsigned.is_empty() || !unsigned.bytes().all(|b| b == b'0' || b == b'.') {
-            return Self::new(value);
-        }
         Self {
-            value,
-            text: Some(unsigned.to_string()),
+            value: normalize_zero(value),
+            text: Some(openjd_expr::value::unsign_zero_text(&text).to_string()),
         }
     }
 
@@ -432,10 +426,12 @@ impl Serialize for FloatRangeValue {
 
 impl<'de> Deserialize<'de> for FloatRangeValue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // Applies the same checks the resolver does, so a deserialized Job cannot
-        // hold state `create_job` would have rejected: NaN, which would break the
-        // reflexive equality `PartialEq` and `Hash` rely on, and un-normalized
-        // text, which is what reaches a command line.
+        // Applies the resolver's checks, so a deserialized Job cannot hold state
+        // `create_job` would have rejected: NaN, which would break the reflexive
+        // equality `PartialEq` and `Hash` rely on, and un-normalized or unbounded
+        // text, which is what reaches a command line. `EffectiveLimits` is not
+        // reachable from here, so the length cap is the default rather than the
+        // configured one — see DEFAULT_MAX_TASK_PARAM_STRING_LEN.
         let finite = |v: f64, src: &str| {
             if v.is_finite() {
                 Ok(v)
@@ -457,10 +453,12 @@ impl<'de> Deserialize<'de> for FloatRangeValue {
                 let value = trimmed.parse::<f64>().map_err(|_| {
                     serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
                 })?;
-                Ok(Self::with_text(
-                    finite(value, &s)?,
-                    crate::job::create_job::strip_redundant_leading_zeros(trimmed),
-                ))
+                let value = finite(value, &s)?;
+                let text = crate::job::create_job::strip_redundant_leading_zeros(trimmed);
+                if text.len() > DEFAULT_MAX_TASK_PARAM_STRING_LEN {
+                    return Ok(Self::new(value));
+                }
+                Ok(Self::with_text(value, text))
             }
             _ => Err(serde::de::Error::custom(
                 "Expected a float or a float string",

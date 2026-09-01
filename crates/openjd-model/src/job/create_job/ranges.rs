@@ -329,9 +329,13 @@ fn resolve_float_range(
                     let text = strip_redundant_leading_zeros(trimmed);
                     // Same per-element cap resolve_string_range applies, for the
                     // same reason: a <FormatString> resolves to arbitrary length,
-                    // and this text is what lands on a command line. Over the cap
-                    // the element keeps only its value, which is how it rendered
-                    // before the text was carried at all.
+                    // and this text is what lands on a command line.
+                    //
+                    // Over the cap this downgrades to value-only where the STRING
+                    // and PATH paths error. Deliberate: before this change a long
+                    // <floatstring> was parsed to an f64 and its text discarded,
+                    // so erroring would reject templates that were valid, whereas
+                    // a STRING element over the cap was always an error.
                     if text.len() > limits.max_task_param_string_len {
                         return Ok(job::FloatRangeValue::new(value));
                     }

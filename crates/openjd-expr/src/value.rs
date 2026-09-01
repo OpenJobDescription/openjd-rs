@@ -118,21 +118,28 @@ pub(crate) fn int_float_cmp(i: i64, v: f64) -> Option<std::cmp::Ordering> {
     }))
 }
 
-/// The text to preserve for `v`, or `None` when `s` would not render it.
+/// Whether `text` spells zero: an all-zero mantissa, whatever the exponent.
 ///
-/// Only zero needs the check. `value` has been normalized to `0.0`, so keeping a
-/// signed text would render a sign the value no longer has; and text that reaches
-/// zero only by underflow, like `"1e-400"`, does not describe the value at all.
-/// The sign is dropped without the digits, so `"-0.00"` keeps two places.
-fn zero_safe_original(v: f64, s: String) -> Option<Box<str>> {
-    if v != 0.0 {
-        return Some(s.into_boxed_str());
+/// `"0.00"`, `"-0.0"` and `"0e5"` all do; `"1e-400"` does not, even though it
+/// parses to `0.0` by underflow. Decided from the text rather than from the parsed
+/// value, because the parse is lossy in both directions — `"0." + "0"*400 + "1"`
+/// also underflows, and its digits are exactly what a `<floatstring>` is for.
+#[must_use]
+pub fn text_spells_zero(text: &str) -> bool {
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let mantissa = unsigned.split(['e', 'E']).next().unwrap_or(unsigned);
+    mantissa.bytes().any(|b| b.is_ascii_digit()) && mantissa.bytes().all(|b| b == b'0' || b == b'.')
+}
+
+/// `text` with a leading sign removed when it spells zero, which has no sign.
+/// The digits stay, so `"-0.00"` keeps its two decimal places.
+#[must_use]
+pub fn unsign_zero_text(text: &str) -> &str {
+    if text_spells_zero(text) {
+        text.strip_prefix(['+', '-']).unwrap_or(text)
+    } else {
+        text
     }
-    let unsigned = s.strip_prefix(['+', '-']).unwrap_or(&s);
-    if unsigned.is_empty() || !unsigned.bytes().all(|b| b == b'0' || b == b'.') {
-        return None;
-    }
-    Some(unsigned.to_string().into_boxed_str())
 }
 
 /// Normalize -0.0 to 0.0 (matches Python's copysign normalization).
@@ -178,7 +185,9 @@ impl Float64 {
         }
         Ok(Self {
             value: v,
-            original: zero_safe_original(v, s),
+            // Zero has no sign, and `value` was normalized above, so keeping a
+            // signed spelling would render one the value does not have.
+            original: Some(unsign_zero_text(&s).to_string().into_boxed_str()),
         })
     }
     /// The underlying `f64` value.

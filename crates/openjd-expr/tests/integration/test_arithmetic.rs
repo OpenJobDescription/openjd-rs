@@ -657,7 +657,17 @@ fn with_str_zero_text_matches_the_value() {
     assert_eq!(disp(0.0, "0.00"), "0.00");
     assert_eq!(disp(-0.0, "-0.0"), "0.0");
     assert_eq!(disp(-0.0, "-0.00"), "0.00");
-    assert_eq!(disp(0.0, "1e-400"), "0.0");
+    // An all-zero mantissa spells zero whatever the exponent, so the notation
+    // survives here just as `1E+2` does for a non-zero value.
+    assert_eq!(disp(0.0, "0e5"), "0e5");
+    assert_eq!(disp(-0.0, "-0.0E+2"), "0.0E+2");
+    // Underflow is not zero being spelled: the digits are the author's request,
+    // and dropping them would render a different number.
+    assert_eq!(disp(0.0, "1e-400"), "1e-400");
+    assert_eq!(
+        disp(0.0, "0.0000000000000000000000000000000001"),
+        "0.0000000000000000000000000000000001"
+    );
 }
 
 #[test]

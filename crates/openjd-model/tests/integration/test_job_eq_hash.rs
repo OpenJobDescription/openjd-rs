@@ -340,13 +340,38 @@ fn task_parameter_float_signed_zero_matches_its_rendering() {
     assert_eq!(floats(-0.0, "-0.00"), floats(0.0, "0.00"));
     assert_ne!(floats(0.0, "0.00"), floats(0.0, "0.0"));
 
-    // Text that parses to zero only by underflow does not render the value, so it
-    // is not kept.
+    // Zero-ness is decided from the text, not from the parse, which underflows in
+    // both notations. An all-zero mantissa spells zero whatever the exponent; a
+    // tiny value's digits are the author's request and survive.
+    assert_eq!(FloatRangeValue::with_text(0.0, "-0e5").rendered(), "0e5");
     assert_eq!(
         FloatRangeValue::with_text(0.0, "1e-400").rendered(),
-        "0.0",
-        "underflowed text would render a string that disagrees with the value"
+        "1e-400"
     );
+    let tiny = format!("0.{}1", "0".repeat(400));
+    assert_eq!(FloatRangeValue::with_text(0.0, &tiny).rendered(), tiny);
+}
+
+/// `Deserialize` is the other door into a `FloatRangeValue`, so it takes the same
+/// bound `resolve_float_range` applies — `StepParameterSpace` is `Deserialize`, so
+/// a parameter space can be rebuilt from JSON without passing through `create_job`.
+#[test]
+fn float_range_value_deserialize_matches_the_resolver() {
+    let de = |json: &str| serde_json::from_str::<FloatRangeValue>(json);
+
+    // Trimmed, leading zeros stripped — as the resolver stores it.
+    assert_eq!(de(r#"" 02.50 ""#).unwrap().rendered(), "2.50");
+    // Non-finite is rejected rather than becoming a NaN `value`, which would stop
+    // `PartialEq` being reflexive while `Hash` still agreed.
+    assert!(de(r#""NaN""#).is_err());
+    assert!(de(r#""inf""#).is_err());
+    // Over the cap the text is dropped, not carried onto a command line.
+    let long = format!("2.5{}", "0".repeat(2000));
+    assert_eq!(de(&format!("\"{long}\"")).unwrap().rendered(), "2.5");
+    // At the cap it survives.
+    let at_cap = format!("2.{}", "0".repeat(1022));
+    assert_eq!(at_cap.len(), 1024);
+    assert_eq!(de(&format!("\"{at_cap}\"")).unwrap().rendered(), at_cap);
 }
 
 #[test]
