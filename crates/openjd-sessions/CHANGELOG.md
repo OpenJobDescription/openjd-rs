@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.3...openjd-sessions-v0.5.4) - 2026-09-01
+
+### Bug fixes
+
+- Prevent PID-reuse from terminating unrelated processes on Windows ([#348](https://github.com/OpenJobDescription/openjd-rs/pull/348))
+
+
 ## [0.5.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.2...openjd-sessions-v0.5.3) - 2026-08-25
 
 ### Miscellaneous

@@ -4,6 +4,13 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.3...openjd-model-v0.5.4) - 2026-09-01
+
+### Bug fixes
+
+- Resume deferred validation after format-string resolution ([#349](https://github.com/OpenJobDescription/openjd-rs/pull/349))
+
+
 ## [0.5.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.2...openjd-model-v0.5.3) - 2026-08-25
 
 ## [0.5.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.1...openjd-model-v0.5.2) - 2026-08-21
