@@ -32,13 +32,13 @@ use std::hash::{Hash, Hasher};
 use indexmap::IndexMap;
 use openjd_expr::format_string::FormatString;
 use openjd_expr::symbol_table::SerializedSymbolTable;
+use openjd_expr::value::Float64;
 use openjd_expr::ExprValue;
 use openjd_expr::RangeExpr;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{EndOfLine, FileType};
 
-use crate::template::validate_v2023_09::DEFAULT_MAX_TASK_PARAM_STRING_LEN;
 use crate::template::RangeConstraint;
 use crate::types::JobParameterType;
 
@@ -339,134 +339,6 @@ impl Hash for StepParameterSpace {
     }
 }
 
-/// A resolved `<FloatRangeList>` element.
-///
-/// Template Schemas §7.5 keeps the decimal places a `<floatstring>` was written
-/// with, and `2.50_f64` cannot carry them. A `<float>` literal makes no such
-/// request and stores `None`, rendering through
-/// `openjd_expr::value::format_float`.
-///
-/// `text` is the rendered form, not the source: `resolve_float_range` trims it,
-/// strips its redundant leading zeros and caps its length before constructing one,
-/// so `'02.50'` arrives as `2.50`.
-///
-/// The constructors normalize `-0.0` and unsign a zero's text; they do **not**
-/// reject a non-finite `value`, and the fields are public, so a caller that builds
-/// one directly can produce a `value` no resolver would. `create_job` and
-/// `Deserialize` both reject non-finite before they get here.
-#[derive(Debug, Clone)]
-pub struct FloatRangeValue {
-    /// The number the element denotes.
-    pub value: f64,
-    /// How to render it, when the element was written as a `<floatstring>`.
-    pub text: Option<String>,
-}
-
-impl FloatRangeValue {
-    /// A value with no rendering of its own — a `<float>` literal.
-    pub fn new(value: f64) -> Self {
-        Self {
-            value: normalize_zero(value),
-            text: None,
-        }
-    }
-
-    /// A value that renders as `text` — a `<floatstring>`.
-    ///
-    /// A leading sign is dropped when `text` spells zero, which has no sign, but
-    /// its digits are kept, so `"-0.00"` is stored as `"0.00"`. Shares the rule
-    /// with `Float64::with_str` so that both render the element identically.
-    pub fn with_text(value: f64, text: impl Into<String>) -> Self {
-        let text = text.into();
-        Self {
-            value: normalize_zero(value),
-            text: Some(openjd_expr::value::unsign_zero_text(&text).to_string()),
-        }
-    }
-
-    /// The text this element renders as.
-    pub fn rendered(&self) -> std::borrow::Cow<'_, str> {
-        self.text.as_deref().map_or_else(
-            || std::borrow::Cow::Owned(openjd_expr::value::format_float(self.value)),
-            std::borrow::Cow::Borrowed,
-        )
-    }
-}
-
-/// `-0.0` and `0.0` are the same number, and `openjd_expr::value::Float64` holds
-/// the same invariant so that `Hash` and `PartialEq` agree.
-fn normalize_zero(v: f64) -> f64 {
-    if v == 0.0 {
-        0.0
-    } else {
-        v
-    }
-}
-
-/// Compares the rendering rather than the stored text, so two elements that put
-/// the same string on a command line are the same element however they were
-/// written. `FloatRangeValue::new(2.5)` and `with_text(2.5, "2.5")` are equal;
-/// `with_text(2.5, "2.50")` is not.
-impl PartialEq for FloatRangeValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.rendered() == other.rendered()
-    }
-}
-
-/// Hand-written so the wire shape stays the `<float> | <floatstring>` union the
-/// template uses, rather than a `{"value": .., "text": ..}` object. Round-trips.
-impl Serialize for FloatRangeValue {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match &self.text {
-            Some(text) => serializer.serialize_str(text),
-            None => serializer.serialize_f64(self.value),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for FloatRangeValue {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // Applies the resolver's checks, so a deserialized Job cannot hold state
-        // `create_job` would have rejected: NaN, which would break the reflexive
-        // equality `PartialEq` and `Hash` rely on, and un-normalized or unbounded
-        // text, which is what reaches a command line. `EffectiveLimits` is not
-        // reachable from here, so the length cap is the default rather than the
-        // configured one — see DEFAULT_MAX_TASK_PARAM_STRING_LEN.
-        let finite = |v: f64, src: &str| {
-            if v.is_finite() {
-                Ok(v)
-            } else {
-                Err(serde::de::Error::custom(format!(
-                    "Float range value '{src}' is not finite"
-                )))
-            }
-        };
-        match serde_json::Value::deserialize(deserializer)? {
-            serde_json::Value::Number(n) => {
-                let v = n
-                    .as_f64()
-                    .ok_or_else(|| serde::de::Error::custom("Invalid float range value"))?;
-                Ok(Self::new(finite(v, &n.to_string())?))
-            }
-            serde_json::Value::String(s) => {
-                let trimmed = s.trim();
-                let value = trimmed.parse::<f64>().map_err(|_| {
-                    serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
-                })?;
-                let value = finite(value, &s)?;
-                let text = crate::job::create_job::strip_redundant_leading_zeros(trimmed);
-                if text.len() > DEFAULT_MAX_TASK_PARAM_STRING_LEN {
-                    return Ok(Self::new(value));
-                }
-                Ok(Self::with_text(value, text))
-            }
-            _ => Err(serde::de::Error::custom(
-                "Expected a float or a float string",
-            )),
-        }
-    }
-}
-
 /// A resolved task parameter with concrete range values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -476,7 +348,7 @@ pub enum TaskParameter {
         chunks: Option<ResolvedChunks>,
     },
     Float {
-        range: Vec<FloatRangeValue>,
+        range: Vec<Float64>,
     },
     String {
         range: Vec<String>,
@@ -490,9 +362,9 @@ pub enum TaskParameter {
     },
 }
 
-/// Manual because `f64` has no `Hash`; those hash via `hash_f64`. The rendering
-/// text is hashed too, since `PartialEq` compares it: same number, different
-/// rendering means a different command line, so not the same job.
+/// Manual because `f64` has no `Hash`; those hash via `hash_f64`. A float range
+/// element hashes its rendering too: same number, different spelling means a
+/// different command line, so not the same job.
 impl Hash for TaskParameter {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
@@ -504,8 +376,10 @@ impl Hash for TaskParameter {
             Self::Float { range } => {
                 range.len().hash(state);
                 for elem in range {
-                    hash_f64(elem.value, state);
-                    elem.rendered().hash(state);
+                    // Hash the rendering as well as the value, because `Float64`'s
+                    // own `Hash` takes only the value and `PartialEq` compares both.
+                    hash_f64(elem.value(), state);
+                    elem.to_display_string().hash(state);
                 }
             }
             Self::String { range } | Self::Path { range } => range.hash(state),

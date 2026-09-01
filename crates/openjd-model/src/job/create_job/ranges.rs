@@ -10,6 +10,7 @@ use indexmap::IndexMap;
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
+use openjd_expr::value::Float64;
 use openjd_expr::ExprValue;
 use openjd_expr::RangeExpr;
 
@@ -268,6 +269,16 @@ fn resolve_int_range(
     }
 }
 
+/// A `Float64` with no preserved spelling — a `<float>` literal, or a value whose
+/// text could not be carried. Renders through `format_float`.
+fn float64(value: f64, param_name: &str) -> Result<Float64, ModelError> {
+    Float64::new(value).map_err(|_| {
+        ModelError::Expression(ExpressionError::new(format!(
+            "FLOAT parameter '{param_name}' range value {value} is not finite"
+        )))
+    })
+}
+
 /// Template Schemas §7.5 rule 1, keeping the sign and one digit: `'02.50'` ->
 /// `2.50`, `'007'` -> `7`, `'000'` -> `0`, `'0.50'` unchanged. Textual, so it
 /// cannot lose precision or change notation: `'01E+2'` -> `1E+2`.
@@ -296,14 +307,14 @@ fn resolve_float_range(
     symtab: &SymbolTable,
     param_name: &str,
     limits: &EffectiveLimits,
-) -> Result<Vec<job::FloatRangeValue>, ModelError> {
-    let floats: Vec<job::FloatRangeValue> = match range {
+) -> Result<Vec<Float64>, ModelError> {
+    let floats: Vec<Float64> = match range {
         template::FloatRange::List(items) => items
             .iter()
             .map(|v| match v {
                 // `2.50` and `2.5` are the same literal after parsing, so a
                 // `<float>` makes no request about how it renders.
-                template::FloatRangeItem::Float(f) => Ok(job::FloatRangeValue::new(*f)),
+                template::FloatRangeItem::Float(f) => float64(*f, param_name),
                 template::FloatRangeItem::FormatString(fs) => {
                     let resolved = fs
                         .resolve_string_with(
@@ -337,9 +348,9 @@ fn resolve_float_range(
                     // so erroring would reject templates that were valid, whereas
                     // a STRING element over the cap was always an error.
                     if text.len() > limits.max_task_param_string_len {
-                        return Ok(job::FloatRangeValue::new(value));
+                        return float64(value, param_name);
                     }
-                    Ok(job::FloatRangeValue::with_text(value, text))
+                    Float64::with_str(value, text.into_owned()).map_err(ModelError::Expression)
                 }
             })
             .collect::<Result<Vec<_>, _>>()?,
@@ -357,8 +368,8 @@ fn resolve_float_range(
                         .map(|e| match e {
                             // No text: an expression element came from a literal
                             // or an int, so `{{ [2.50] }}` is 2.5 (§7.5).
-                            ExprValue::Float(f) => Ok(job::FloatRangeValue::new(f.value())),
-                            ExprValue::Int(i) => Ok(job::FloatRangeValue::new(*i as f64)),
+                            ExprValue::Float(f) => float64(f.value(), param_name),
+                            ExprValue::Int(i) => float64(*i as f64, param_name),
                             other => Err(ModelError::Expression(ExpressionError::new(format!(
                                 "Expected float in range, got {}",
                                 other.type_name()

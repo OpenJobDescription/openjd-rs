@@ -4,12 +4,11 @@
 
 //! Tests for the lazy `StepParameterSpaceIterator`.
 
-use crate::job::{
-    FloatRangeValue, ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter,
-};
+use crate::job::{ResolvedChunks, StepParameterSpace, TaskParamRange, TaskParameter};
 use crate::step_param_space::StepParameterSpaceIterator;
 use crate::template::RangeConstraint;
 use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
+use openjd_expr::value::Float64;
 use openjd_expr::{ExprValue, RangeExpr};
 
 fn make_space(params: Vec<(&str, TaskParameter)>, combination: Option<&str>) -> StepParameterSpace {
@@ -31,7 +30,7 @@ fn int_list(vals: &[i64]) -> TaskParameter {
 
 fn float_list(vals: &[f64]) -> TaskParameter {
     TaskParameter::Float {
-        range: vals.iter().copied().map(FloatRangeValue::new).collect(),
+        range: vals.iter().map(|v| Float64::new(*v).unwrap()).collect(),
     }
 }
 

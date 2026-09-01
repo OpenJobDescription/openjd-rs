@@ -14,10 +14,10 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use openjd_expr::value::Float64;
 use openjd_expr::{ExprValue, FormatString};
 use openjd_model::job::{
-    AmountRequirement, Environment, FloatRangeValue, HostRequirements, Job, StepParameterSpace,
-    TaskParameter,
+    AmountRequirement, Environment, HostRequirements, Job, StepParameterSpace, TaskParameter,
 };
 use openjd_model::CallerLimits;
 use openjd_model::{create_job, decode_job_template, JobParameterInputValues};
@@ -280,10 +280,19 @@ fn amount_requirement_negative_zero_eq_and_hash() {
     assert_eq!(hash_of(&hr_a), hash_of(&hr_b));
 }
 
+/// `Float64`'s constructors return `Result`; these keep the assertions readable.
+fn f64_of(v: f64) -> Float64 {
+    Float64::new(v).expect("finite")
+}
+
+fn f64_text(v: f64, text: &str) -> Float64 {
+    Float64::with_str(v, text.to_string()).expect("finite")
+}
+
 #[test]
 fn task_parameter_float_negative_zero_eq_and_hash() {
     let floats = |vals: &[f64]| TaskParameter::Float {
-        range: vals.iter().copied().map(FloatRangeValue::new).collect(),
+        range: vals.iter().map(|v| f64_of(*v)).collect(),
     };
     let a = floats(&[0.0, 1.5]);
     let b = floats(&[-0.0, 1.5]);
@@ -298,16 +307,16 @@ fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
     // Same number, different rendering means a different command line. Hash must
     // follow eq, or a cache keyed on it could serve one for the other.
     let bare = TaskParameter::Float {
-        range: vec![FloatRangeValue::new(2.5)],
+        range: vec![f64_of(2.5)],
     };
     let scaled = TaskParameter::Float {
-        range: vec![FloatRangeValue::with_text(2.5, "2.50")],
+        range: vec![f64_text(2.5, "2.50")],
     };
     assert_ne!(bare, scaled);
     assert_ne!(hash_of(&bare), hash_of(&scaled));
 
     let same = TaskParameter::Float {
-        range: vec![FloatRangeValue::with_text(2.5, "2.50")],
+        range: vec![f64_text(2.5, "2.50")],
     };
     assert_eq!(scaled, same);
     assert_eq!(hash_of(&scaled), hash_of(&same));
@@ -315,7 +324,7 @@ fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
     // The converse: text that renders identically to no text at all is the same
     // element. eq compares the rendering, not the stored Option.
     let redundant = TaskParameter::Float {
-        range: vec![FloatRangeValue::with_text(2.5, "2.5")],
+        range: vec![f64_text(2.5, "2.5")],
     };
     assert_eq!(bare, redundant);
     assert_eq!(hash_of(&bare), hash_of(&redundant));
@@ -327,7 +336,7 @@ fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
 #[test]
 fn task_parameter_float_signed_zero_matches_its_rendering() {
     let floats = |v: f64, t: &str| TaskParameter::Float {
-        range: vec![FloatRangeValue::with_text(v, t)],
+        range: vec![f64_text(v, t)],
     };
     let unsigned = floats(0.0, "0.0");
     let signed = floats(-0.0, "-0.0");
@@ -343,35 +352,44 @@ fn task_parameter_float_signed_zero_matches_its_rendering() {
     // Zero-ness is decided from the text, not from the parse, which underflows in
     // both notations. An all-zero mantissa spells zero whatever the exponent; a
     // tiny value's digits are the author's request and survive.
-    assert_eq!(FloatRangeValue::with_text(0.0, "-0e5").rendered(), "0e5");
-    assert_eq!(
-        FloatRangeValue::with_text(0.0, "1e-400").rendered(),
-        "1e-400"
-    );
+    assert_eq!(f64_text(0.0, "-0e5").to_display_string(), "0e5");
+    assert_eq!(f64_text(0.0, "1e-400").to_display_string(), "1e-400");
     let tiny = format!("0.{}1", "0".repeat(400));
-    assert_eq!(FloatRangeValue::with_text(0.0, &tiny).rendered(), tiny);
+    assert_eq!(f64_text(0.0, &tiny).to_display_string(), tiny);
 }
 
-/// `Deserialize` is the other door into a `FloatRangeValue`, so it takes the same
-/// bound `resolve_float_range` applies — `StepParameterSpace` is `Deserialize`, so
-/// a parameter space can be rebuilt from JSON without passing through `create_job`.
+/// `Float64` round-trips as the `<float> | <floatstring>` union, and routes through
+/// its constructors so it cannot deserialize into a state they forbid.
+///
+/// Normalization and the length cap are deliberately *not* here. Those are §7.5
+/// range-element rules applied by `resolve_float_range`, and `Float64` also carries
+/// job parameter defaults and expression literals, which preserve their spelling
+/// verbatim. `Deserialize` is not a validation boundary for any range type —
+/// `TaskParameter::String`'s `Vec<String>` has no cap on this path either.
 #[test]
-fn float_range_value_deserialize_matches_the_resolver() {
-    let de = |json: &str| serde_json::from_str::<FloatRangeValue>(json);
+fn float64_deserialize_routes_through_the_constructors() {
+    let de = |json: &str| serde_json::from_str::<Float64>(json);
 
-    // Trimmed, leading zeros stripped — as the resolver stores it.
-    assert_eq!(de(r#"" 02.50 ""#).unwrap().rendered(), "2.50");
+    // The union, both ways, exactly.
+    assert_eq!(de("2.5").unwrap(), f64_of(2.5));
+    assert_eq!(de(r#""2.50""#).unwrap(), f64_text(2.5, "2.50"));
+    assert_eq!(serde_json::to_string(&f64_of(2.5)).unwrap(), "2.5");
+    assert_eq!(
+        serde_json::to_string(&f64_text(2.5, "2.50")).unwrap(),
+        r#""2.50""#
+    );
+
+    // Surrounding whitespace cannot reach a command line.
+    assert_eq!(de(r#"" 2.50 ""#).unwrap().to_display_string(), "2.50");
+
     // Non-finite is rejected rather than becoming a NaN `value`, which would stop
     // `PartialEq` being reflexive while `Hash` still agreed.
     assert!(de(r#""NaN""#).is_err());
     assert!(de(r#""inf""#).is_err());
-    // Over the cap the text is dropped, not carried onto a command line.
-    let long = format!("2.5{}", "0".repeat(2000));
-    assert_eq!(de(&format!("\"{long}\"")).unwrap().rendered(), "2.5");
-    // At the cap it survives.
-    let at_cap = format!("2.{}", "0".repeat(1022));
-    assert_eq!(at_cap.len(), 1024);
-    assert_eq!(de(&format!("\"{at_cap}\"")).unwrap().rendered(), at_cap);
+    assert!(de(r#""-Infinity""#).is_err());
+
+    // The constructors' zero rule applies here too: zero has no sign.
+    assert_eq!(de(r#""-0.00""#).unwrap().to_display_string(), "0.00");
 }
 
 #[test]

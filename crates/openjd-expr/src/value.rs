@@ -14,10 +14,58 @@ use crate::types::{ExprType, TypeCode};
 /// Fields are private. Construction goes through [`Float64::new`] or
 /// [`Float64::with_str`], which enforce the no-NaN / no-Inf / no-`-0.0`
 /// invariants that the `Hash` and `PartialEq` impls on `ExprValue` depend on.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone)]
 pub struct Float64 {
     value: f64,
     original: Option<Box<str>>,
+}
+
+/// Equal when they render the same string, so a `Float64` carrying a preserved
+/// spelling differs from a bare one only when that spelling differs from the
+/// formatted value: `with_str(2.5, "2.5")` equals `new(2.5)`, `with_str(2.5, "2.50")`
+/// does not. Consistent with `Hash`, which hashes the value alone and so is merely
+/// coarser.
+impl PartialEq for Float64 {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.display_cow() == other.display_cow()
+    }
+}
+
+/// Serialized as the `<float> | <floatstring>` union the template itself uses: a
+/// number when there is no preserved spelling, that spelling as a string when there
+/// is. Round-trips exactly, and matches `ExprValue::transport_value`, which already
+/// renders a float as its display string.
+impl serde::Serialize for Float64 {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match &self.original {
+            Some(text) => s.serialize_str(text),
+            None => s.serialize_f64(self.value),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Float64 {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        // Routed through the constructors so a deserialized value cannot skip the
+        // no-NaN/no-Inf/no-`-0.0` invariants that `Hash` and `PartialEq` rely on.
+        match serde_json::Value::deserialize(d)? {
+            serde_json::Value::Number(n) => {
+                let v = n
+                    .as_f64()
+                    .ok_or_else(|| D::Error::custom("invalid float"))?;
+                Self::new(v).map_err(|e| D::Error::custom(e.to_string()))
+            }
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                let v = trimmed
+                    .parse::<f64>()
+                    .map_err(|_| D::Error::custom(format!("Cannot parse '{s}' as float")))?;
+                Self::with_str(v, trimmed.to_string()).map_err(|e| D::Error::custom(e.to_string()))
+            }
+            _ => Err(D::Error::custom("Expected a float or a float string")),
+        }
+    }
 }
 
 impl std::hash::Hash for Float64 {
@@ -125,7 +173,7 @@ pub(crate) fn int_float_cmp(i: i64, v: f64) -> Option<std::cmp::Ordering> {
 /// value, because the parse is lossy in both directions — `"0." + "0"*400 + "1"`
 /// also underflows, and its digits are exactly what a `<floatstring>` is for.
 #[must_use]
-pub fn text_spells_zero(text: &str) -> bool {
+fn text_spells_zero(text: &str) -> bool {
     let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
     let mantissa = unsigned.split(['e', 'E']).next().unwrap_or(unsigned);
     mantissa.bytes().any(|b| b.is_ascii_digit()) && mantissa.bytes().all(|b| b == b'0' || b == b'.')
@@ -134,7 +182,7 @@ pub fn text_spells_zero(text: &str) -> bool {
 /// `text` with a leading sign removed when it spells zero, which has no sign.
 /// The digits stay, so `"-0.00"` keeps its two decimal places.
 #[must_use]
-pub fn unsign_zero_text(text: &str) -> &str {
+fn unsign_zero_text(text: &str) -> &str {
     if text_spells_zero(text) {
         text.strip_prefix(['+', '-']).unwrap_or(text)
     } else {

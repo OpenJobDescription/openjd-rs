@@ -10,8 +10,6 @@ mod instantiate;
 pub mod parameters;
 mod ranges;
 
-pub(crate) use ranges::strip_redundant_leading_zeros;
-
 use indexmap::IndexMap;
 
 use openjd_expr::path_mapping::PathFormat;

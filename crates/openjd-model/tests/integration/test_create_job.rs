@@ -3556,7 +3556,7 @@ fn test_create_job_float_range_expr_list() {
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
-            assert!((range[0].value - 1.0).abs() < f64::EPSILON);
+            assert!((range[0].value() - 1.0).abs() < f64::EPSILON);
         }
         other => panic!("Expected Float, got {:?}", other),
     }
@@ -3583,7 +3583,7 @@ fn test_create_job_float_range_expr_int_promotion() {
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
-            assert!((range[0].value - 1.0).abs() < f64::EPSILON);
+            assert!((range[0].value() - 1.0).abs() < f64::EPSILON);
         }
         other => panic!("Expected Float, got {:?}", other),
     }
@@ -3671,7 +3671,7 @@ fn test_create_job_float_range_string_trims_whitespace() {
     // it cannot reach a command line.
     assert_eq!(
         range,
-        &[openjd_model::job::FloatRangeValue::with_text(2.5, "2.5")]
+        &[openjd_expr::value::Float64::with_str(2.5, "2.5".into()).unwrap()]
     );
 }
 

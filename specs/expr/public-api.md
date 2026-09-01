@@ -624,9 +624,12 @@ impl Float64 {
 
 impl std::fmt::Display for Float64 { /* ... */ }
 impl std::ops::Deref<Target = f64> for Float64 { /* ... */ }
+impl PartialEq for Float64 { /* value plus rendering: with_str(2.5,"2.50") != new(2.5) */ }
 impl PartialEq<f64> for Float64 { /* ... */ }
 impl PartialOrd<f64> for Float64 { /* ... */ }
-impl Hash for Float64 { /* uses to_bits() */ }
+impl Hash for Float64 { /* uses to_bits(); coarser than PartialEq, which also compares the rendering */ }
+impl Serialize for Float64 { /* `<float> | <floatstring>`: a number, or the preserved spelling as a string */ }
+impl<'de> Deserialize<'de> for Float64 { /* accepts either; routed through new/with_str */ }
 ```
 
 Accessible as `openjd_expr::value::Float64`. Not re-exported at the crate root.

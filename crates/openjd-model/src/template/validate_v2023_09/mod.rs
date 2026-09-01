@@ -24,14 +24,6 @@ use crate::error::{ModelError, ValidationErrors};
 use crate::template::*;
 use crate::types::{JobParameterType, ModelExtension, TaskParameterType, ValidationContext};
 
-/// Default for [`EffectiveLimits::max_task_param_string_len`].
-///
-/// Named so that `job::FloatRangeValue`'s `Deserialize` can apply the same bound.
-/// A deserialized `Job` arrives without the limits that produced it, and the
-/// preserved text of a `<floatstring>` range element reaches a command line, so it
-/// needs a cap on both paths.
-pub const DEFAULT_MAX_TASK_PARAM_STRING_LEN: usize = 1024;
-
 /// Numeric limits computed from revision + extensions.
 #[derive(Debug, Clone)]
 pub struct EffectiveLimits {
@@ -93,7 +85,7 @@ impl EffectiveLimits {
             max_env_template_param_count: 50,
             max_filename_len: if fb1 { 256 } else { 64 },
             max_task_param_range_len: 1024,
-            max_task_param_string_len: DEFAULT_MAX_TASK_PARAM_STRING_LEN,
+            max_task_param_string_len: 1024,
             max_job_param_string_len: 1024,
             max_command_len: 1024,
             max_description_len: 2048,
