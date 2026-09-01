@@ -2417,6 +2417,17 @@ mod tests {
                     "1-1", "3-3", "5-5", "7-7", "9-10", "11-12", "13-14", "15-16", "17-18", "19-20",
                 ],
             ),
+            // A step-1 run followed by an adjacent stepped sub-range: the follower's
+            // first value joins the run, the rest are isolated.
+            ("1-3,4-8:2", 2, vec!["1-2", "3-4", "6-6", "8-8"]),
+            ("1-3,4-8:2", 3, vec!["1-2", "3-4", "6-6", "8-8"]),
+            // Two adjacent stepped sub-ranges.
+            ("1-4:3,5-9:2", 2, vec!["1-1", "4-5", "7-7", "9-9"]),
+            (
+                "2-8:2,9-12",
+                2,
+                vec!["2-2", "4-4", "6-6", "8-9", "10-11", "12-12"],
+            ),
         ];
         for (expr, dtc, reference) in cases {
             let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
@@ -2495,6 +2506,9 @@ mod tests {
             ("1-9:2,10-20", 2),
             ("1-20:2", 3),
             ("1-5,8-12", 3),
+            ("1-3,4-8:2", 2),
+            ("1-4:3,5-9:2", 2),
+            ("2-8:2,9-12", 2),
         ] {
             let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
