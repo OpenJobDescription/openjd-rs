@@ -643,9 +643,18 @@ fn interval_end_index(range: &job::TaskParamRange<i64>, start: usize) -> usize {
                         end += next_sr.len();
                         last_val = next_sr.end();
                     } else if next_sr.start() == last_val + 1 && next_sr.step() > 1 {
-                        // First value is adjacent, but subsequent values have gaps
+                        // The first value is adjacent, so it joins the interval. For a
+                        // multi-value stepped sub-range the *second* value has a gap
+                        // before it, so the interval ends here. A length-1 stepped
+                        // sub-range has no second value, so it bridges into whatever
+                        // follows instead of terminating the interval -- which is what
+                        // `count_contiguous_chunks_from_sub_ranges` does, and leaving it
+                        // out made `len()` under-report for e.g. `1-2,3-3:2,4-8`.
                         end += 1;
-                        break;
+                        if next_sr.len() > 1 {
+                            break;
+                        }
+                        last_val = next_sr.end();
                     } else {
                         break;
                     }
@@ -2428,6 +2437,10 @@ mod tests {
                 2,
                 vec!["2-2", "4-4", "6-6", "8-9", "10-11", "12-12"],
             ),
+            // A length-1 stepped sub-range between two step-1 runs. Its single value is
+            // adjacent on both sides, so the whole range is one contiguous interval and
+            // the stepped sub-range must not terminate it.
+            ("1-2,3-3:2,4-8", 2, vec!["1-2", "3-4", "5-6", "7-8"]),
         ];
         for (expr, dtc, reference) in cases {
             let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
@@ -2509,6 +2522,7 @@ mod tests {
             ("1-3,4-8:2", 2),
             ("1-4:3,5-9:2", 2),
             ("2-8:2,9-12", 2),
+            ("1-2,3-3:2,4-8", 2),
         ] {
             let space = make_space(vec![("Frame", static_chunk_param(expr, dtc))], None);
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
