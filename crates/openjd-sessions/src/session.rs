@@ -1259,7 +1259,7 @@ impl Session {
                     &inner_symtab,
                     inner_on_enter,
                     WrappedContext::Env(&env.name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
                     "onEnter",
                 )
@@ -1531,7 +1531,7 @@ impl Session {
                     &inner_symtab,
                     inner_on_exit,
                     WrappedContext::Env(&env.name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
                     "onExit",
                 )
@@ -1781,7 +1781,7 @@ impl Session {
                     &inner_symtab,
                     &script.actions.on_run,
                     WrappedContext::Step(step_name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
                     "task",
                 )?;
@@ -2330,6 +2330,32 @@ impl Session {
         result
     }
 
+    /// Compute the live session-defined env vars — only variables from
+    /// environments that are still on the `environments_entered` stack.
+    ///
+    /// Unlike `evaluate_env_vars`, this excludes `process_env` (host-inherited)
+    /// and `extra` (caller-supplied overrides), producing only the session's own
+    /// `openjd_env` exports and declarative `variables:` maps. This is the
+    /// correct input for `WrappedAction.Environment` per RFC 0008.
+    fn live_session_env_vars(&self) -> HashMap<String, String> {
+        let mut result = HashMap::new();
+        for id in &self.environments_entered {
+            if let Some(changes) = self.created_env_vars.get(id) {
+                for (name, value) in changes {
+                    match value {
+                        Some(v) => {
+                            result.insert(name.clone(), v.clone());
+                        }
+                        None => {
+                            result.remove(name);
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
     /// Get the job parameter values.
     pub fn job_parameter_values(&self) -> &JobParameterValues {
         &self.job_parameter_values
@@ -2829,10 +2855,12 @@ pub(crate) enum WrappedContext<'a> {
 /// `phase` names the wrapped lifecycle action for error messages
 /// ("onEnter", "onExit", or "task").
 ///
-/// `session_env_vars` MUST be the session's session-defined variables
-/// (`self.env_vars`): `openjd_env` exports plus entered environments'
-/// declarative `variables:` maps. Host-inherited variables are
-/// intentionally excluded per RFC 0008.
+/// `session_env_vars` MUST be the session's **live** session-defined variables
+/// — only `openjd_env` exports and declarative `variables:` maps from
+/// environments that are still on the `environments_entered` stack.
+/// Host-inherited variables and exited environments' variables are
+/// intentionally excluded per RFC 0008. Use `live_session_env_vars()`
+/// rather than the cumulative `self.env_vars`.
 #[allow(clippy::too_many_arguments)]
 fn seed_wrapped_action_symbols(
     action_symtab: &mut SymbolTable,

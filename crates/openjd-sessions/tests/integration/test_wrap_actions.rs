@@ -1209,6 +1209,108 @@ async fn wrapped_action_environment_includes_variables_map_and_openjd_env() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Exited environment variables must not leak to later wrap hooks
+// ────────────────────────────────────────────────────────────────────
+
+/// An environment's variables must be absent from `WrappedAction.Environment`
+/// after the environment has been exited. Both declarative `variables:` map
+/// entries and `openjd_env` dynamic exports must be pruned.
+///
+/// Regression test for the finding that `exit_environment` removed the
+/// environment from `environments_entered` (fixing `evaluate_env_vars` /
+/// real subprocesses) but left the entries in the cumulative `env_vars`
+/// map that `seed_wrapped_action_symbols` consumed.
+#[tokio::test]
+async fn exited_env_vars_absent_from_later_wrapped_action_environment() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Wrap env: its onWrapTaskRun dumps WrappedAction.Environment to the trace file.
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let outer = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // Inner env with a STATIC_VAR via `variables:` and a DYNAMIC_VAR via openjd_env.
+    let mut inner = plain_env(
+        "SecretEnv",
+        Some(action_with_command(
+            "bash",
+            vec!["-c", "echo 'openjd_env: DYNAMIC_SECRET=dynamic_canary'"],
+        )),
+        None,
+    );
+    inner.variables = Some(fs_map(&[("STATIC_SECRET", "static_canary")]));
+    let inner_id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+
+    // Run a task while SecretEnv is live — both vars should appear.
+    let task1 = step("true", vec![]);
+    let result1 = session
+        .run_task("step_with_env", &task1, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result1.state, ActionState::Success);
+
+    let contents_while_live = read_trace(&trace);
+    assert!(
+        contents_while_live.contains("ENVLINE=STATIC_SECRET=static_canary"),
+        "STATIC_SECRET must be in WrappedAction.Environment while the env is live; got:\n{contents_while_live}"
+    );
+    assert!(
+        contents_while_live.contains("ENVLINE=DYNAMIC_SECRET=dynamic_canary"),
+        "DYNAMIC_SECRET must be in WrappedAction.Environment while the env is live; got:\n{contents_while_live}"
+    );
+
+    // Exit SecretEnv.
+    session
+        .exit_environment(&inner_id, None, true, None)
+        .await
+        .unwrap();
+
+    // Clear the trace file so we only see post-exit output.
+    std::fs::write(&trace, "").unwrap();
+
+    // Run another task — SecretEnv's variables must NOT appear.
+    let task2 = step("true", vec![]);
+    let result2 = session
+        .run_task("step_after_exit", &task2, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result2.state, ActionState::Success);
+
+    let contents_after_exit = read_trace(&trace);
+    assert!(
+        !contents_after_exit.contains("STATIC_SECRET"),
+        "STATIC_SECRET must NOT leak to WrappedAction.Environment after its environment exited; got:\n{contents_after_exit}"
+    );
+    assert!(
+        !contents_after_exit.contains("DYNAMIC_SECRET"),
+        "DYNAMIC_SECRET must NOT leak to WrappedAction.Environment after its environment exited; got:\n{contents_after_exit}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Wrap-hook default timeouts
 // ────────────────────────────────────────────────────────────────────
 
