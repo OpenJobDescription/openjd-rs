@@ -1392,11 +1392,13 @@ fn validate_let_bindings(
                 format!("name '{name}' contains invalid characters."),
             );
         }
-        // Name omitted from the message; at 513 characters it would dwarf it.
-        if name.len() > MAX_LET_IDENTIFIER_LEN {
+        // Characters, not bytes: §3.6.1 caps characters, and the charset check
+        // above does not `continue`, so a multi-byte name would otherwise draw a
+        // spurious length error alongside the real one.
+        if name.chars().count() > MAX_LET_IDENTIFIER_LEN {
             errors.add(
                 &b_path,
-                format!("name exceeds {MAX_LET_IDENTIFIER_LEN} characters."),
+                format!("name '{name}' exceeds {MAX_LET_IDENTIFIER_LEN} characters."),
             );
         }
         if !names.insert(name.to_string()) {

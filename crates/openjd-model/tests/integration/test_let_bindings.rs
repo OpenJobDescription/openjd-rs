@@ -1125,14 +1125,26 @@ fn script_let_allows_apply_path_mapping() {
 
 // === Identifier length (§3.6.1: <UserIdentifier> max 512 characters) ===
 //
-// The cap is flat, so the `_expr_only` cases pin it without FEATURE_BUNDLE_1.
-// A regression to the §7.1 cap would pass without them.
+// Effective extensions are the intersection of the template's `extensions` list
+// with the caller allowlist, so the FB1 cases need it declared in the body: the
+// other helpers here emit `["EXPR"]` only.
 
-fn decode_ok_expr_only(s: &str) {
-    let v = yaml_val(s);
-    decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).expect("Expected success");
+fn job_with_step_let_fb1(let_bindings: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{{
+            "name": "S",
+            "let": [{let_bindings}],
+            "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}
+        }}]
+    }}"#
+    )
 }
 
+// FB1 off: the cap is 512, not the 64 that `max_identifier_len` would give.
 #[test]
 fn test_let_name_512_chars_succeeds() {
     let name = "a".repeat(512);
@@ -1140,39 +1152,31 @@ fn test_let_name_512_chars_succeeds() {
 }
 
 #[test]
-fn test_let_name_512_chars_succeeds_expr_only() {
-    let name = "a".repeat(512);
-    decode_ok_expr_only(&job_with_step_let(&format!(r#""{name} = 1""#)));
-}
-
-#[test]
 fn test_let_name_513_chars_fails() {
     let name = "a".repeat(513);
     check_err(
         &job_with_step_let(&format!(r#""{name} = 1""#)),
-        &["steps[0] -> let[0]:\n\tname exceeds 512 characters."],
+        &[&format!(
+            "steps[0] -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
     );
 }
 
+// FB1 on: still 512, so the extension does not raise this cap either.
 #[test]
-fn test_let_name_513_chars_fails_expr_only() {
-    let name = "a".repeat(513);
-    let v = yaml_val(&job_with_step_let(&format!(r#""{name} = 1""#)));
-    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
-        .expect_err("Expected error");
-    assert!(
-        err.to_string()
-            .contains("steps[0] -> let[0]:\n\tname exceeds 512 characters."),
-        "Got:\n{err}"
-    );
+fn test_let_name_512_chars_succeeds_with_fb1() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_step_let_fb1(&format!(r#""{name} = 1""#)));
 }
 
 #[test]
-fn test_let_name_513_chars_fails_script() {
+fn test_let_name_513_chars_fails_with_fb1() {
     let name = "a".repeat(513);
     check_err(
-        &job_with_script_let(&format!(r#""{name} = 1""#)),
-        &["steps[0] -> script -> let[0]:\n\tname exceeds 512 characters."],
+        &job_with_step_let_fb1(&format!(r#""{name} = 1""#)),
+        &[&format!(
+            "steps[0] -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
     );
 }
 
@@ -1180,4 +1184,34 @@ fn test_let_name_513_chars_fails_script() {
 fn test_let_name_512_chars_succeeds_script() {
     let name = "a".repeat(512);
     decode_ok(&job_with_script_let(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_513_chars_fails_script() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_script_let(&format!(r#""{name} = 1""#)),
+        &[&format!(
+            "steps[0] -> script -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
+    );
+}
+
+// Characters, not bytes: 200 multi-byte characters are 600 bytes but well under
+// the cap, so only the charset error should fire.
+#[test]
+fn test_let_name_multibyte_under_cap_reports_only_charset() {
+    let name = "の".repeat(200);
+    let v = yaml_val(&job_with_step_let(&format!(r#""{name} = 1""#)));
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err("Expected error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("contains invalid characters."),
+        "expected the charset error, got:\n{msg}"
+    );
+    assert!(
+        !msg.contains("exceeds 512 characters."),
+        "600 bytes is only 200 characters; the length error must not fire:\n{msg}"
+    );
 }
