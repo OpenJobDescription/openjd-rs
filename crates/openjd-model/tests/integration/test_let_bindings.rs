@@ -1122,3 +1122,65 @@ fn script_let_allows_apply_path_mapping() {
     }"#,
     );
 }
+
+// === Identifier length (§3.6.1: <UserIdentifier> max 512 characters) ===
+//
+// The cap is flat, not the FEATURE_BUNDLE_1-gated §7.1 `<Identifier>` cap, so
+// the 512-character accept case must hold with EXPR alone. `decode_ok` here
+// declares EXPR and FEATURE_BUNDLE_1; `decode_ok_expr_only` pins the accept
+// case without FEATURE_BUNDLE_1, which is what the conformance fixture
+// `EXPR/job_templates/3.6--let-boundary-edges.yaml` asserts.
+
+fn decode_ok_expr_only(s: &str) {
+    let v = yaml_val(s);
+    decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).expect("Expected success");
+}
+
+#[test]
+fn test_let_name_512_chars_succeeds() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_step_let(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_512_chars_succeeds_expr_only() {
+    let name = "a".repeat(512);
+    decode_ok_expr_only(&job_with_step_let(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_513_chars_fails() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_step_let(&format!(r#""{name} = 1""#)),
+        &["steps[0] -> let[0]:\n\tname exceeds 512 characters."],
+    );
+}
+
+#[test]
+fn test_let_name_513_chars_fails_expr_only() {
+    let name = "a".repeat(513);
+    let v = yaml_val(&job_with_step_let(&format!(r#""{name} = 1""#)));
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err("Expected error");
+    assert!(
+        err.to_string()
+            .contains("steps[0] -> let[0]:\n\tname exceeds 512 characters."),
+        "Got:\n{err}"
+    );
+}
+
+#[test]
+fn test_let_name_513_chars_fails_script() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_script_let(&format!(r#""{name} = 1""#)),
+        &["steps[0] -> script -> let[0]:\n\tname exceeds 512 characters."],
+    );
+}
+
+#[test]
+fn test_let_name_512_chars_succeeds_script() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_script_let(&format!(r#""{name} = 1""#)));
+}
