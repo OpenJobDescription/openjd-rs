@@ -377,6 +377,12 @@ pub fn validate_single_environment(
         for (name, value) in vars {
             let var_path = path_field(&vars_path, name);
             validate_env_var_name(name, &var_path, errors);
+            if value.raw().contains('\0') {
+                errors.add(
+                    &var_path,
+                    "value contains a NUL byte, which cannot be represented in a process environment.",
+                );
+            }
             if value.raw().chars().count() > limits.max_description_len {
                 errors.add(
                     &var_path,

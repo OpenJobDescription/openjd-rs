@@ -1173,6 +1173,16 @@ impl Session {
                         context: format!("env var '{key}'"),
                         reason: e.to_string(),
                     })?;
+                // A NUL in the resolved value would poison every subsequent
+                // Command::spawn in the session. Reject it here so the
+                // environment entry fails cleanly rather than bricking later
+                // actions — including the environment's own onExit teardown.
+                if value.contains('\0') {
+                    return Err(SessionError::FormatString {
+                        context: format!("env var '{key}'"),
+                        reason: "resolved value contains a NUL byte, which cannot be represented in a process environment.".to_string(),
+                    });
+                }
                 let norm_key = normalize_env_key(key);
                 self.env_vars.insert(norm_key.clone(), value.clone());
                 if let Some(changes) = self.created_env_vars.get_mut(&identifier) {
