@@ -1125,11 +1125,8 @@ fn script_let_allows_apply_path_mapping() {
 
 // === Identifier length (§3.6.1: <UserIdentifier> max 512 characters) ===
 //
-// The cap is flat, not the FEATURE_BUNDLE_1-gated §7.1 `<Identifier>` cap, so
-// the 512-character accept case must hold with EXPR alone. `decode_ok` here
-// declares EXPR and FEATURE_BUNDLE_1; `decode_ok_expr_only` pins the accept
-// case without FEATURE_BUNDLE_1, which is what the conformance fixture
-// `EXPR/job_templates/3.6--let-boundary-edges.yaml` asserts.
+// The cap is flat, so the `_expr_only` cases pin it without FEATURE_BUNDLE_1.
+// A regression to the §7.1 cap would pass without them.
 
 fn decode_ok_expr_only(s: &str) {
     let v = yaml_val(s);

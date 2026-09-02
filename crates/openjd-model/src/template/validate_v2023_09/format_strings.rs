@@ -25,13 +25,9 @@ use crate::types::{ModelExtension, ValidationContext};
 
 /// Maximum length of a `let` binding's `<UserIdentifier>` (§3.6.1).
 ///
-/// Flat 512, deliberately not `EffectiveLimits::max_identifier_len`. That field
-/// carries the §7.1 `<Identifier>` cap, which is 64 without `FEATURE_BUNDLE_1`
-/// and 512 with it. §3.6.1 states one maximum for a `<UserIdentifier>` and does
-/// not gate it on an extension, and the conformance pair proves the flat
-/// reading: `EXPR/job_templates/3.6--let-boundary-edges.yaml` declares `EXPR`
-/// alone and requires a 512-character name to be accepted, so borrowing the
-/// §7.1 cap would reject a template the spec permits.
+/// Flat, so not `EffectiveLimits::max_identifier_len`: that is the §7.1 cap, 64
+/// without `FEATURE_BUNDLE_1`, and a 512-character name must be accepted with
+/// EXPR alone.
 const MAX_LET_IDENTIFIER_LEN: usize = 512;
 
 /// Build a symbol table containing Param/RawParam entries from job parameter definitions.
@@ -1396,9 +1392,7 @@ fn validate_let_bindings(
                 format!("name '{name}' contains invalid characters."),
             );
         }
-        // The name is not interpolated into the message: at 513 characters it
-        // would dwarf the diagnostic. This matches how `limits.rs` reports its
-        // length caps.
+        // Name omitted from the message; at 513 characters it would dwarf it.
         if name.len() > MAX_LET_IDENTIFIER_LEN {
             errors.add(
                 &b_path,
