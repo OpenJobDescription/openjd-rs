@@ -723,8 +723,14 @@ async fn test_cross_user_control_char_line_within_response_limit() {
         r.stdout.len()
     );
     let control_count = r.stdout.chars().filter(|&c| c == '\u{1}').count();
-    assert!(control_count > 0, "bounded control-character output must be delivered, not silently dropped");
-    assert!(control_count <= 64 * 1024, "control-character output must remain bounded");
+    assert!(
+        control_count > 0,
+        "bounded control-character output must be delivered, not silently dropped"
+    );
+    assert!(
+        control_count <= 64 * 1024,
+        "control-character output must remain bounded"
+    );
     session.cleanup();
 }
 

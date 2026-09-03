@@ -2,10 +2,10 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#[cfg(windows)]
-mod job_object;
 #[cfg(unix)]
 mod framer;
+#[cfg(windows)]
+mod job_object;
 mod protocol;
 #[cfg(unix)]
 mod runner;
