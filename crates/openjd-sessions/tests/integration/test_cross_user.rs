@@ -652,12 +652,12 @@ async fn test_cross_user_bounded_single_out_long_line() {
         "stdout len: {}",
         r.stdout.len()
     );
-    // The unbounded 'a' run must be truncated to <= 64 KiB (one Out).
+    // The unbounded 'a' run must be truncated to exactly the 64 KiB prefix (one Out).
     let a_count = r.stdout.chars().filter(|&c| c == 'a').count();
-    assert!(
-        a_count <= 64 * 1024,
-        "long line not bounded: {} 'a' chars",
-        a_count
+    assert_eq!(
+        a_count,
+        64 * 1024,
+        "long line must preserve exactly the bounded 64 KiB prefix, got {a_count}"
     );
     assert!(r.stdout.contains("END"), "trailing line missing");
     session.cleanup();
@@ -677,16 +677,18 @@ async fn test_cross_user_cancel_during_partial_line() {
     let started = std::time::Instant::now();
     let result = session
         .run_subprocess("sh", Some(&args), None, None, true, None)
-        .await;
+        .await
+        .expect("cross-user subprocess must return a cancellation result");
     let elapsed = started.elapsed();
 
     let delivered = canceller.await.expect("canceller task must not panic");
-    if let Err(e) = &result {
-        assert!(
-            delivered,
-            "subprocess failed before any cancel was delivered: {e}"
-        );
-    }
+    assert_eq!(
+        result.state,
+        ActionState::Canceled,
+        "cancel must end the action as Canceled; exit_code: {:?}, stdout: {}",
+        result.exit_code,
+        result.stdout
+    );
     assert!(
         delivered,
         "handle must find the in-flight helper action and deliver the cancel"
@@ -720,6 +722,9 @@ async fn test_cross_user_control_char_line_within_response_limit() {
         "control-char line must not trip the response limit; stdout len: {}",
         r.stdout.len()
     );
+    let control_count = r.stdout.chars().filter(|&c| c == '\u{1}').count();
+    assert!(control_count > 0, "bounded control-character output must be delivered, not silently dropped");
+    assert!(control_count <= 64 * 1024, "control-character output must remain bounded");
     session.cleanup();
 }
 

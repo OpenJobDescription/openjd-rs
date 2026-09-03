@@ -2254,6 +2254,10 @@ mod tests {
     fn helper_framer_decode_matches_subprocess_decode() {
         // Pin the mirrored line caps together.
         assert_eq!(crate::helper_framer::MAX_LINE_BYTES, LOG_LINE_MAX_LENGTH);
+        assert_eq!(
+            crate::helper_framer::MAX_RESPONSE_LINE_LENGTH,
+            crate::cross_user_helper::MAX_RESPONSE_LINE_LENGTH
+        );
         // Compare both decoders byte-for-byte across exhaustive inputs.
         let mut cases: Vec<Vec<u8>> = vec![
             b"".to_vec(),
