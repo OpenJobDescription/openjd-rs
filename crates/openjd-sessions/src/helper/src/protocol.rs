@@ -164,6 +164,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn out_response_serializes_to_bare_out_envelope() {
+        // The framer's response-size guard assumes Response::Out serializes as
+        // exactly {"out":"..."} (untagged, 10 bytes of envelope). If a tag or
+        // extra field is ever added, the guard's budget math breaks silently;
+        // this assertion turns that into a test failure.
+        let json = serde_json::to_string(&Response::Out { out: "x".into() }).unwrap();
+        assert_eq!(json, r#"{"out":"x"}"#);
+    }
+
+    #[test]
     fn parses_run_command_with_token() {
         let cmd: Command = serde_json::from_str(
             r#"{"token":"AbCdEfGhIjKlMnOpQrStUv","command":"echo","args":["hi"],"cwd":"/tmp"}"#,

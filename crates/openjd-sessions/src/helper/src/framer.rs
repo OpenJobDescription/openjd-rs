@@ -203,8 +203,8 @@ impl LineFramer {
                     let line = std::mem::take(&mut self.buf);
                     emit(decode_and_truncate(&line));
                     // Newline ends the line: reset for the next one.
+                    // (mem::take above already left buf empty.)
                     self.discarding = false;
-                    self.buf.clear();
                     data = &data[nl + 1..];
                 }
                 None => {
@@ -224,8 +224,8 @@ impl LineFramer {
             let line = std::mem::take(&mut self.buf);
             emit(decode_and_truncate(&line));
         }
+        // mem::take above (or the untaken branch's emptiness) leaves buf empty.
         self.discarding = false;
-        self.buf.clear();
     }
 
     /// Append `data` (a newline-free segment) to the current line buffer. Once

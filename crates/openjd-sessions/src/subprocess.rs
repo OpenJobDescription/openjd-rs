@@ -2253,6 +2253,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn helper_framer_decode_matches_subprocess_decode() {
+        // The helper mirrors this crate's line cap; pin the constants together
+        // so they cannot drift independently.
+        assert_eq!(crate::helper_framer::MAX_LINE_BYTES, LOG_LINE_MAX_LENGTH);
         // Compare the helper's ported decoder against this crate's original
         // byte-for-byte across an exhaustive set of inputs so the two copies
         // cannot drift.
