@@ -985,6 +985,18 @@ fn validate_embedded_files(
                     "must not contain path separators.",
                 );
             }
+            if fname.contains('\0') {
+                errors.add(
+                    &path_field(&f_path, "filename"),
+                    "must not contain null characters.",
+                );
+            }
+            if fname == "." || fname == ".." {
+                errors.add(
+                    &path_field(&f_path, "filename"),
+                    format!("must not be '{fname}'."),
+                );
+            }
         }
     }
 }

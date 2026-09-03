@@ -100,10 +100,41 @@ must be a single safe path component:
 | contains `/` or `\` | path separators |
 | contains `\0` | null byte |
 | exactly `.` or `..` | current/parent dir component |
+| not a single "normal" path component (e.g. `D:relative`, `C:`) | platform prefix/root |
+| consists only of dots and spaces (e.g. `".. "`, `"..."`) — **Windows only** | collapses to `.`/`..` at the OS layer |
 
 Rejection surfaces as `SessionError::EmbeddedFilePath { name, filename, reason }`.
 Backslash is rejected on all platforms — embedded file filenames are single
 path components by spec, so `\` has no legitimate use even on POSIX.
+
+The last rule uses `std::path::Path::components`, which parses for the host
+platform. It catches strings that contain no `/` or `\` yet are not plain
+basenames — most importantly Windows drive-relative anchors such as
+`D:relative` or a bare `C:`. `Path::join` treats these as a drive prefix and
+would otherwise write outside the target directory. On POSIX the same strings
+are ordinary filenames and are accepted.
+
+Windows also strips trailing dots and spaces from the final path component, so
+a filename consisting entirely of dots and spaces (`".. "`, `"..."`, `". "`)
+collapses to `.` or `..` at the OS layer and would resolve to the current or
+parent directory. Rust's `Path` only special-cases the exact strings `.`/`..`,
+so these otherwise parse as ordinary components and also pass the lexical
+containment check below. They are rejected explicitly on Windows. Any filename
+containing a separator is already rejected, so only a standalone
+all-dots-and-spaces name can reach this rule; on POSIX these are legitimate,
+distinct filenames and are accepted.
+
+After the filename is joined to the target directory, the sessions layer makes
+a final containment check: the resulting path is lexically normalized (`.`/`..`
+collapsed, no filesystem access or symlink resolution) and must still lie
+within the session files directory, otherwise the same
+`SessionError::EmbeddedFilePath` is raised with reason "resolves to a path
+outside the session files directory". This backs up the per-component
+validation so a bug there cannot lead to a write outside the session
+directory. The check requires both paths to be rooted — `target_directory` is
+always derived from an absolute session working directory — because lexical
+`..` handling is only sound for rooted paths; a relative path is rejected
+outright.
 
 This check is not required for correctness when the model layer is
 functioning. It provides protection against:

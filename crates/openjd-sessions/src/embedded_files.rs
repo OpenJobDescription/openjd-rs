@@ -7,7 +7,7 @@
 //! Mirrors Python `_embedded_files.py`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use openjd_expr::function_library::FunctionLibrary;
@@ -194,6 +194,22 @@ fn random_hex_filename() -> String {
 ///   path components by spec.
 /// - Contain a null byte.
 /// - Equal `.` or `..`.
+/// - Are not a single "normal" path component for the host platform. This
+///   catches platform-specific prefixes and roots that contain no separator
+///   and therefore slip past the checks above — most notably Windows
+///   drive-relative paths like `D:relative`, which `Path::join` treats as a
+///   drive prefix and would use to escape the target directory. `Path`
+///   parses components for the OS the session runs on, so the rule is always
+///   correct for the execution host.
+/// - **On Windows only:** consist entirely of dots and spaces (`".. "`,
+///   `"..."`, `". "`, ...). Windows strips trailing dots and spaces from the
+///   final path component, so such a name collapses to `.` or `..` at the OS
+///   layer and resolves to the current/parent directory — escaping the target.
+///   Rust only special-cases the exact strings `.`/`..`, so these otherwise
+///   parse as ordinary `Normal` components and slip past the checks above and
+///   the lexical containment check. Any filename with a separator is already
+///   rejected, so only a standalone all-dots-and-spaces name can reach this
+///   rule. On POSIX these are legitimate, distinct filenames and are accepted.
 ///
 /// Returns `Ok(())` if the filename is a safe single path component.
 fn validate_resolved_filename(resolved: &str) -> Result<(), String> {
@@ -209,7 +225,85 @@ fn validate_resolved_filename(resolved: &str) -> Result<(), String> {
     if resolved == "." || resolved == ".." {
         return Err(format!("must not be '{resolved}'"));
     }
+    // On Windows the filesystem strips trailing dots and spaces from the final
+    // path component, so a filename made up entirely of dots and spaces —
+    // `".. "`, `"..."`, `". "`, etc. — collapses to `.` or `..` at the OS layer
+    // and resolves to the current/parent directory, escaping the target. Rust
+    // only special-cases the exact strings `.`/`..`, so these reach here as
+    // ordinary `Normal` components and also pass the lexical containment check.
+    // Any filename containing a separator is already rejected above, so only a
+    // standalone all-dots-and-spaces name can get this far. On POSIX these are
+    // legitimate, distinct filenames, so the rule is Windows-only.
+    #[cfg(windows)]
+    if resolved
+        .trim_end_matches(|c| c == ' ' || c == '.')
+        .is_empty()
+    {
+        return Err("must not consist only of dots and spaces".into());
+    }
+    // Require exactly one normal path component. On Windows this rejects
+    // drive-relative anchors such as `D:relative` (parsed as `Prefix` +
+    // `Normal`) and bare drives like `C:` (`Prefix` only), neither of which
+    // contains a separator. On POSIX such strings are ordinary filenames and
+    // are accepted.
+    let mut components = Path::new(resolved).components();
+    if !matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    ) {
+        return Err("must be a single path component".into());
+    }
     Ok(())
+}
+
+/// Lexically normalize a path by collapsing `.` and `..` components without
+/// touching the filesystem.
+///
+/// Unlike [`std::fs::canonicalize`], this performs no I/O and does not resolve
+/// symlinks — appropriate here because the target file does not exist yet and
+/// we only want to reason about the path the caller constructed.
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Verify that `candidate` lexically resolves to a location inside `base`.
+///
+/// This is the final defense-in-depth guarantee before an embedded file is
+/// created: even if filename validation were bypassed or a future change let
+/// something through, the path we are about to write must still sit within the
+/// session files directory. Comparison is lexical (see [`normalize_lexical`]),
+/// so it holds regardless of whether the paths exist on disk yet.
+///
+/// Both `base` and `candidate` must be rooted; a relative path is rejected
+/// with an error because lexical `..` handling is only sound for rooted paths.
+fn ensure_within(base: &Path, candidate: &Path) -> Result<(), String> {
+    // Lexical containment is only sound when both paths are rooted. For a
+    // relative path a `..` that pops past the start is silently dropped
+    // (`PathBuf::pop` on an empty buffer is a no-op), so an escaping path like
+    // `files/../../x` would normalize to `files/x` and spuriously compare as
+    // contained. Rooted paths clamp at the root instead. `target_directory` is
+    // always derived from an absolute session working directory, so require
+    // that invariant explicitly rather than depend on it silently.
+    if !base.has_root() || !candidate.has_root() {
+        return Err("path containment can only be checked for rooted paths".into());
+    }
+    let base = normalize_lexical(base);
+    let candidate = normalize_lexical(candidate);
+    if candidate.starts_with(&base) {
+        Ok(())
+    } else {
+        Err("resolves to a path outside the session files directory".into())
+    }
 }
 
 struct FileRecord {
@@ -284,7 +378,18 @@ impl EmbeddedFiles {
                         reason,
                     }
                 })?;
-                self.target_directory.join(fname)
+                let joined = self.target_directory.join(fname);
+                // Final guarantee: the path we are about to create must resolve
+                // to a location inside the session files directory. This backs
+                // up the per-component filename validation above.
+                ensure_within(&self.target_directory, &joined).map_err(|reason| {
+                    SessionError::EmbeddedFilePath {
+                        name: file.name.clone(),
+                        filename: fname.clone(),
+                        reason,
+                    }
+                })?;
+                joined
             } else {
                 let name = random_hex_filename();
                 let path = self.target_directory.join(&name);
@@ -431,6 +536,80 @@ mod tests {
     #[test]
     fn test_random_hex_filename_no_collision() {
         assert_ne!(random_hex_filename(), random_hex_filename());
+    }
+
+    #[test]
+    fn normalize_lexical_collapses_parent_and_current() {
+        assert_eq!(
+            normalize_lexical(Path::new("/a/b/../c/./d")),
+            PathBuf::from("/a/c/d")
+        );
+    }
+
+    #[test]
+    fn ensure_within_accepts_direct_child() {
+        let base = Path::new("/session/files");
+        assert!(ensure_within(base, &base.join("script.sh")).is_ok());
+    }
+
+    #[test]
+    fn ensure_within_rejects_parent_escape() {
+        let base = Path::new("/session/files");
+        assert!(ensure_within(base, Path::new("/session/files/../../etc/passwd")).is_err());
+    }
+
+    #[test]
+    fn ensure_within_rejects_sibling_with_shared_prefix() {
+        // `files-evil` must not be treated as being under `files`.
+        let base = Path::new("/session/files");
+        assert!(ensure_within(base, Path::new("/session/files-evil/x")).is_err());
+    }
+
+    #[test]
+    fn ensure_within_rejects_relative_paths() {
+        // Lexical `..` handling is only sound for rooted paths: a `..` that pops
+        // past the start of a relative path is silently dropped, so an escaping
+        // path would spuriously compare as contained. Relative inputs must be
+        // rejected outright.
+        assert!(ensure_within(Path::new("files"), Path::new("files/../../files/x")).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_single_component() {
+        assert!(validate_resolved_filename("script.sh").is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_double_dot() {
+        assert_eq!(
+            validate_resolved_filename(".."),
+            Err("must not be '..'".to_string())
+        );
+    }
+
+    // Windows strips trailing dots and spaces from the final path component, so
+    // a name made only of dots and spaces collapses to `.`/`..` at the OS layer
+    // and escapes the target directory. These are legitimate filenames on
+    // POSIX, so the rejection — and this test — is Windows-only.
+    #[cfg(windows)]
+    #[test]
+    fn validate_rejects_all_dots_and_spaces() {
+        for value in [".. ", "...", ". ", "   ", ".. ."] {
+            assert_eq!(
+                validate_resolved_filename(value),
+                Err("must not consist only of dots and spaces".to_string()),
+                "expected rejection for {value:?}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_accepts_name_with_trailing_dot() {
+        // A named file that merely has a trailing dot does not collapse to a
+        // directory reference — Windows resolves `foo...` to `foo`, still inside
+        // the target — so it is accepted.
+        assert!(validate_resolved_filename("foo...").is_ok());
     }
 
     #[cfg(unix)]
