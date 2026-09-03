@@ -4,6 +4,17 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.4...openjd-model-v0.6.0) - 2026-09-03
+
+### Bug fixes
+
+- Enforce the 512-character cap on a let binding identifier ([#358](https://github.com/OpenJobDescription/openjd-rs/pull/358))
+
+- [**breaking**] Keep the decimal places of a floatstring range element ([#354](https://github.com/OpenJobDescription/openjd-rs/pull/354))
+
+- Close two chunking parity gaps with the Python reference ([#355](https://github.com/OpenJobDescription/openjd-rs/pull/355))
+
+
 ## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.3...openjd-model-v0.5.4) - 2026-09-01
 
 ### Bug fixes

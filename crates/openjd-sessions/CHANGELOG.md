@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.4...openjd-sessions-v0.5.5) - 2026-09-03
+
+### Bug fixes
+
+- Persist a resolved symbol table supplied by argument ([#361](https://github.com/OpenJobDescription/openjd-rs/pull/361))
+
+
 ## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.3...openjd-sessions-v0.5.4) - 2026-09-01
 
 ### Bug fixes
