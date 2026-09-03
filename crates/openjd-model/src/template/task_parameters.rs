@@ -30,17 +30,10 @@ pub enum TaskParameterDefinition {
 impl<'de> serde::Deserialize<'de> for TaskParameterDefinition {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let type_str = value
-            .get("type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                serde::de::Error::custom("missing 'type' field in task parameter definition")
-            })?
-            .to_string();
-
-        // ASCII, not `to_uppercase`: see the note in `parameters.rs`.
-        let normalized = type_str.to_ascii_uppercase();
-        let stripped = super::parameters::strip_type_field(value);
+        let (type_str, normalized, stripped) = super::parameters::split_type_tag(
+            value,
+            "missing 'type' field in task parameter definition",
+        )?;
 
         match normalized.as_str() {
             "INT" => serde_json::from_value(stripped)

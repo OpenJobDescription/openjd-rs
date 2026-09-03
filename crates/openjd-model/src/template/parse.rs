@@ -8,7 +8,7 @@
 
 use std::str::FromStr;
 
-use crate::error::{path_field, path_index, ModelError, ValidationErrors};
+use crate::error::{path_field, path_index, ModelError, PathElement, ValidationErrors};
 use crate::template::constrained_strings::ExtensionName;
 use crate::template::validation as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
@@ -185,7 +185,7 @@ fn validate_extensions_list(
 
 /// A parameter type name as the template author spelled it, with the error path
 /// it should be reported at.
-type WrittenTypeName = (Vec<crate::error::PathElement>, String);
+type WrittenTypeName = (Vec<PathElement>, String);
 
 /// Collect the `type` string of every parameter definition, as written, from the
 /// raw document.
@@ -207,7 +207,7 @@ fn collect_written_type_names(
 ) {
     fn collect_from(
         defs: Option<&serde_json::Value>,
-        path: &[crate::error::PathElement],
+        path: &[PathElement],
         out: &mut Vec<WrittenTypeName>,
     ) {
         let Some(items) = defs.and_then(|v| v.as_array()) else {
@@ -220,7 +220,7 @@ fn collect_written_type_names(
         }
     }
 
-    let root: Vec<crate::error::PathElement> = Vec::new();
+    let root: Vec<PathElement> = vec![];
     collect_from(
         template.get("parameterDefinitions"),
         &path_field(&root, "parameterDefinitions"),

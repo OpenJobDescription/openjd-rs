@@ -72,28 +72,37 @@ pub enum JobParameterDefinition {
 }
 
 /// Remove the `type` field from a JSON object before deserializing into a struct.
-pub(super) fn strip_type_field(mut value: serde_json::Value) -> serde_json::Value {
+fn strip_type_field(mut value: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         obj.remove("type");
     }
     value
 }
 
+/// Split a parameter definition into the tag as written, the tag folded for
+/// matching, and the body with `type` removed.
+///
+/// Both parameter kinds share this so §2's case rule has one home. The fold is
+/// ASCII deliberately: `to_uppercase` maps U+0131 to `I`, making `ıNT` a spelling
+/// of `INT`.
+pub(super) fn split_type_tag<E: serde::de::Error>(
+    value: serde_json::Value,
+    missing: &str,
+) -> Result<(String, String, serde_json::Value), E> {
+    let written = value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| E::custom(missing))?
+        .to_string();
+    let folded = written.to_ascii_uppercase();
+    Ok((written, folded, strip_type_field(value)))
+}
+
 impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let type_str = value
-            .get("type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                serde::de::Error::custom("missing 'type' field in parameter definition")
-            })?
-            .to_string();
-
-        // ASCII, not `to_uppercase`: §2's type names are ASCII, and Unicode folding
-        // maps U+0131 to 'I', which would make 'ıNT' a spelling of 'INT'.
-        let normalized = type_str.to_ascii_uppercase();
-        let stripped = strip_type_field(value);
+        let (type_str, normalized, stripped) =
+            split_type_tag(value, "missing 'type' field in parameter definition")?;
 
         match normalized.as_str() {
             "STRING" => serde_json::from_value(stripped)
