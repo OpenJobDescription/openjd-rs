@@ -4,6 +4,13 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.5.0...openjd-expr-v0.6.0) - 2026-09-03
+
+### Bug fixes
+
+- [**breaking**] Keep the decimal places of a floatstring range element ([#354](https://github.com/OpenJobDescription/openjd-rs/pull/354))
+
+
 ## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.4.0...openjd-expr-v0.5.0) - 2026-08-25
 
 ### Bug fixes
