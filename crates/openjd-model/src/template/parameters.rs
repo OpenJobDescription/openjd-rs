@@ -72,7 +72,7 @@ pub enum JobParameterDefinition {
 }
 
 /// Remove the `type` field from a JSON object before deserializing into a struct.
-fn strip_type_field(mut value: serde_json::Value) -> serde_json::Value {
+pub(super) fn strip_type_field(mut value: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         obj.remove("type");
     }
@@ -90,7 +90,9 @@ impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
             })?
             .to_string();
 
-        let normalized = type_str.to_uppercase();
+        // ASCII, not `to_uppercase`: §2's type names are ASCII, and Unicode folding
+        // maps U+0131 to 'I', which would make 'ıNT' a spelling of 'INT'.
+        let normalized = type_str.to_ascii_uppercase();
         let stripped = strip_type_field(value);
 
         match normalized.as_str() {

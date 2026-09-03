@@ -10,16 +10,59 @@ use crate::format_string::FormatString;
 use serde::Deserialize;
 
 /// §3.4.1 TaskParameterDefinition — discriminated union on `type`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
+///
+/// The `type` tag is matched case-blind, mirroring [`JobParameterDefinition`]:
+/// §2 makes both kinds of type name case-insensitive under the EXPR extension,
+/// and a non-canonical spelling without EXPR is rejected during validation,
+/// where the effective extension set is known.
+///
+/// [`JobParameterDefinition`]: super::parameters::JobParameterDefinition
+#[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
 pub enum TaskParameterDefinition {
     INT(IntTaskParameterDefinition),
     FLOAT(FloatTaskParameterDefinition),
     STRING(StringTaskParameterDefinition),
     PATH(PathTaskParameterDefinition),
-    #[serde(rename = "CHUNK[INT]")]
     CHUNK_INT(ChunkIntTaskParameterDefinition),
+}
+
+impl<'de> serde::Deserialize<'de> for TaskParameterDefinition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let type_str = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                serde::de::Error::custom("missing 'type' field in task parameter definition")
+            })?
+            .to_string();
+
+        // ASCII, not `to_uppercase`: see the note in `parameters.rs`.
+        let normalized = type_str.to_ascii_uppercase();
+        let stripped = super::parameters::strip_type_field(value);
+
+        match normalized.as_str() {
+            "INT" => serde_json::from_value(stripped)
+                .map(Self::INT)
+                .map_err(serde::de::Error::custom),
+            "FLOAT" => serde_json::from_value(stripped)
+                .map(Self::FLOAT)
+                .map_err(serde::de::Error::custom),
+            "STRING" => serde_json::from_value(stripped)
+                .map(Self::STRING)
+                .map_err(serde::de::Error::custom),
+            "PATH" => serde_json::from_value(stripped)
+                .map(Self::PATH)
+                .map_err(serde::de::Error::custom),
+            "CHUNK[INT]" => serde_json::from_value(stripped)
+                .map(Self::CHUNK_INT)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown task parameter type: '{type_str}'"
+            ))),
+        }
+    }
 }
 
 impl TaskParameterDefinition {
