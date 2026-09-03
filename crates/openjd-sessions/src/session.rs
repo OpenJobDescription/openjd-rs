@@ -1078,6 +1078,12 @@ impl Session {
 
     /// Enter an environment asynchronously (non-blocking).
     /// Returns the environment identifier on success.
+    ///
+    /// `resolved_symtab` is optional, and supplying it here is equivalent to
+    /// setting [`Environment::resolved_symtab`]: the argument is folded onto the
+    /// stored environment, so readers that run after this call returns — notably
+    /// the RFC 0008 wrap hooks — see it either way. If both are supplied, the
+    /// argument wins.
     pub async fn enter_environment(
         &mut self,
         env: &Environment,
@@ -1138,7 +1144,19 @@ impl Session {
             }
             None => format!("{}:{}", self.session_id, uuid::Uuid::new_v4().simple()),
         };
-        self.environments.insert(identifier.clone(), env.clone());
+        // A caller may supply an environment's resolved symbol table either on
+        // `Environment::resolved_symtab` or through the `resolved_symtab`
+        // argument. Both must survive for the lifetime of the environment,
+        // because RFC 0008 wrap hooks read the wrap environment's own scope off
+        // the *stored* `Environment` long after this call returns. Fold the
+        // argument onto our own copy so there is exactly one place to read
+        // from. The argument wins on conflict: it is the more specific input
+        // for this particular entry.
+        let mut stored_env = env.clone();
+        if let Some(st) = resolved_symtab {
+            stored_env.resolved_symtab = Some(st.clone());
+        }
+        self.environments.insert(identifier.clone(), stored_env);
         self.environments_entered.push(identifier.clone());
         self.created_env_vars
             .insert(identifier.clone(), HashMap::new());

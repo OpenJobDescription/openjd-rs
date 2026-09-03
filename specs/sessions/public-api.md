@@ -114,7 +114,11 @@ impl Session {
     ///
     /// `resolved_symtab` is the filtered symbol table produced by
     /// `openjd_model::convert_environment_with_symtab`; it carries
-    /// only the symbols this environment references.
+    /// only the symbols this environment references. Passing it here is
+    /// equivalent to setting `Environment::resolved_symtab` — the
+    /// argument is folded onto the stored environment, so later readers
+    /// (such as the RFC 0008 wrap hooks) see it either way. If both are
+    /// supplied, the argument wins.
     ///
     /// `os_env_vars` supplements the session-level env var map for
     /// this action only.

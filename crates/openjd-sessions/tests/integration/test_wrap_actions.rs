@@ -911,34 +911,8 @@ async fn wrap_env_resolved_symtab_params_available_in_wrap_hooks() {
 
     // The wrap env's own parameter, frozen at conversion time — exactly
     // what openjd-cli now produces via convert_environment_with_symtab.
-    let mut env_param_symtab = openjd_expr::SymbolTable::new();
-    env_param_symtab
-        .set(
-            "Param.Prefix",
-            openjd_expr::ExprValue::String("FROM_ENV_PARAM".into()),
-        )
-        .unwrap();
-
-    let wrap_task_script = format!(
-        r#"echo "[wrap-task] prefix={{{{Param.Prefix}}}}" >> '{}'"#,
-        trace.display()
-    );
-    let wrap_task = Action {
-        command: fs("bash"),
-        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
-        timeout: None,
-        cancelation: None,
-    };
-    let mut env = wrap_env(
-        "Wrapper",
-        action_with_command("true", vec![]),
-        None,
-        Some(wrap_task),
-        None,
-    );
-    env.resolved_symtab = Some(openjd_expr::SerializedSymbolTable::from_symtab(
-        &env_param_symtab,
-    ));
+    let mut env = wrap_env_echoing_prefix(&trace);
+    env.resolved_symtab = Some(prefix_symtab("FROM_ENV_PARAM"));
 
     session
         .enter_environment(&env, None, None, None)
@@ -959,6 +933,109 @@ async fn wrap_env_resolved_symtab_params_available_in_wrap_hooks() {
         contents.contains("[wrap-task] prefix=FROM_ENV_PARAM"),
         "wrap hook must resolve the wrap env's own Param.* from its frozen \
          resolved_symtab; got:\n{contents}"
+    );
+}
+
+/// Helper for the route-equivalence tests: a wrap environment whose
+/// `onWrapTaskRun` appends the resolved `Param.Prefix` to `trace`.
+fn wrap_env_echoing_prefix(trace: &std::path::Path) -> Environment {
+    let wrap_task_script = format!(
+        r#"echo "[wrap-task] prefix={{{{Param.Prefix}}}}" >> '{}'"#,
+        trace.display()
+    );
+    wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(Action {
+            command: fs("bash"),
+            args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+            timeout: None,
+            cancelation: None,
+        }),
+        None,
+    )
+}
+
+/// Helper for the route-equivalence tests: a serialized symbol table
+/// binding `Param.Prefix` to `value`.
+fn prefix_symtab(value: &str) -> openjd_expr::SerializedSymbolTable {
+    let mut st = openjd_expr::SymbolTable::new();
+    st.set("Param.Prefix", openjd_expr::ExprValue::String(value.into()))
+        .unwrap();
+    openjd_expr::SerializedSymbolTable::from_symtab(&st)
+}
+
+/// The twin of `wrap_env_resolved_symtab_params_available_in_wrap_hooks`, for
+/// the *other* way a caller can supply an environment's resolved symbol table:
+/// the `resolved_symtab` argument to `enter_environment`, with
+/// `Environment::resolved_symtab` left unset.
+///
+/// openjd-cli uses the field; service-shaped callers such as the Deadline
+/// worker agent use the argument, because they rebuild the `Environment` from a
+/// template and have nowhere to put the table. Both must reach the wrap hooks,
+/// which read the wrap environment's own scope off the *stored* `Environment`
+/// long after `enter_environment` has returned.
+#[tokio::test]
+async fn wrap_env_argument_symtab_params_available_in_wrap_hooks() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let env = wrap_env_echoing_prefix(&trace);
+    // Deliberately NOT set on the struct: env.resolved_symtab stays None.
+    assert!(env.resolved_symtab.is_none());
+
+    session
+        .enter_environment(&env, Some(&prefix_symtab("FROM_ENV_PARAM")), None, None)
+        .await
+        .unwrap();
+
+    let task = step("true", vec![]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[wrap-task] prefix=FROM_ENV_PARAM"),
+        "a wrap env's Param.* supplied via the resolved_symtab ARGUMENT must \
+         reach its wrap hooks, exactly as when supplied on the struct; got:\n{contents}"
+    );
+}
+
+/// When a caller supplies the resolved symbol table BOTH on
+/// `Environment::resolved_symtab` and as the `resolved_symtab` argument, the
+/// argument wins: it is the more specific input for this particular entry.
+/// Pins the precedence documented in `specs/sessions/session.md`.
+#[tokio::test]
+async fn wrap_env_argument_symtab_takes_precedence_over_the_field() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let mut env = wrap_env_echoing_prefix(&trace);
+    env.resolved_symtab = Some(prefix_symtab("FROM_THE_FIELD"));
+
+    session
+        .enter_environment(&env, Some(&prefix_symtab("FROM_THE_ARGUMENT")), None, None)
+        .await
+        .unwrap();
+
+    let task = step("true", vec![]);
+    let result = session
+        .run_task("test_step", &task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("[wrap-task] prefix=FROM_THE_ARGUMENT"),
+        "the resolved_symtab argument must win over an already-set \
+         Environment::resolved_symtab; got:\n{contents}"
     );
 }
 

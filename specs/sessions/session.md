@@ -130,17 +130,25 @@ set to `true`. Production code should always use `Session::with_config`.
 
 ### Enter
 
-`enter_environment(env, resolved_symtab, identifier, os_env_vars)`:
+`enter_environment(env, resolved_symtab, identifier, os_env_vars) -> Result<String, SessionError>`,
+where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 
 1. Validates state is `Ready`
 2. Sets state to `Running`
 3. Resolves environment `variables` format strings against the current symbol table
-4. Pushes the environment onto `environments_entered` (LIFO stack)
-5. Creates an `EnvironmentScriptRunner` and calls `enter()` (runs `onEnter` action)
-6. Processes `ActionMessage` values via `drive_action()` — env var changes from
+4. Stores the environment, folding the `resolved_symtab` argument onto the stored copy's
+   `Environment::resolved_symtab` field. A caller may supply an environment's resolved
+   symbol table either way, and the two are equivalent: readers that run after this call
+   returns — notably the RFC 0008 wrap hooks, which resolve a wrap environment's own
+   scope off the stored `Environment` — see the same table whichever route was used.
+   When a caller supplies both, the argument wins, being the more specific input for
+   this entry.
+5. Pushes the environment onto `environments_entered` (LIFO stack)
+6. Creates an `EnvironmentScriptRunner` and calls `enter()` (runs `onEnter` action)
+7. Processes `ActionMessage` values via `drive_action()` — env var changes from
    `openjd_env`/`openjd_unset_env` are applied to the environment's change set
-7. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
-8. On failure: state → `ReadyEnding`
+8. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
+9. On failure: state → `ReadyEnding`
 
 ### Exit
 
@@ -173,6 +181,9 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 When a wrap hook is dispatched, the borrow of the active environment stack is
 released by copying only the wrapper data needed for symbol seeding: its name,
 frozen resolved symbol table, script `let` bindings, and selected hook action.
+The frozen table is read off the *stored* `Environment`, which is why §Enter
+folds the `resolved_symtab` argument onto it — a wrapper's own `Param.*` reaches
+its hooks regardless of which route the caller used to supply the table.
 The wrapper's embedded files are handled separately via a per-wrap-environment
 cache (see [embedded-files.md](embedded-files.md#wrap-environment-file-path-caching)):
 file paths are allocated once and reused across invocations; file contents are
