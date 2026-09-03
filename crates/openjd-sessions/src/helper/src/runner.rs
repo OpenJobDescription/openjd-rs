@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 use super::protocol::{constant_time_eq, send, Command as HelperCommand, Response, RunCommand};
+use crate::framer::{fit_out_payload, LineFramer};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
@@ -50,6 +51,20 @@ pub fn run_command(
     let mut child_buf = std::io::BufReader::new(child_stdout);
     let mut child_killed = false;
     let mut escalation_deadline: Option<std::time::Instant> = None;
+
+    // Bounded line framer replaces read_line so non-UTF-8 output no longer
+    // aborts the run, per-line memory is bounded, and cancellation stays
+    // responsive instead of being starved by a blocking read.
+    let mut framer = LineFramer::new();
+    // Single emit path for all three read sites: trim_end preserves the
+    // existing cross-user behavior; fit_out_payload keeps the serialized
+    // Response::Out within the parent's 128 KiB response limit.
+    let mut emit_out = |line: String| {
+        let trimmed = line.trim_end();
+        send(&Response::Out {
+            out: fit_out_payload(trimmed).to_string(),
+        });
+    };
 
     loop {
         let timeout = if child_killed {
@@ -137,19 +152,25 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.contains(PollFlags::POLLIN))
         }) {
-            let mut line = String::new();
-            match child_buf.read_line(&mut line) {
-                Ok(0) => {
-                    let status = child.wait().map_err(|e| e.to_string())?;
-                    // Kill any remaining processes in the child's process group
-                    let _ = killpg(child_pid, Signal::SIGKILL);
-                    return Ok(status.code().unwrap_or(-1));
-                }
-                Ok(_) => send(&Response::Out {
-                    out: line.trim_end().to_string(),
-                }),
+            // Bounded, non-blocking read: one fill_buf per POLLIN, framed into
+            // bounded lines, then back to poll() so cancel is never starved by
+            // a partial line.
+            let data = match child_buf.fill_buf() {
+                Ok(d) => d,
                 Err(e) => return Err(e.to_string()),
+            };
+            if data.is_empty() {
+                // EOF: flush the trailing partial line, then keep the existing
+                // wait -> killpg -> return order and error semantics.
+                framer.finish(&mut emit_out);
+                let status = child.wait().map_err(|e| e.to_string())?;
+                // Kill any remaining processes in the child's process group
+                let _ = killpg(child_pid, Signal::SIGKILL);
+                return Ok(status.code().unwrap_or(-1));
             }
+            let n = data.len();
+            framer.push(data, &mut emit_out);
+            child_buf.consume(n);
         }
 
         // Check for child stdout closed (only if we actually polled)
@@ -158,13 +179,21 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
         }) {
-            let mut line = String::new();
-            while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                send(&Response::Out {
-                    out: line.trim_end().to_string(),
-                });
-                line.clear();
+            // Drain remaining buffered output through the framer, then flush the
+            // trailing partial line (invalid UTF-8 is escaped instead of
+            // aborting, per-line memory is bounded, and cancellation stays
+            // responsive).
+            // POLLHUP fires only after all writers closed, so EOF is guaranteed
+            // and this loop terminates.
+            while let Ok(data) = child_buf.fill_buf() {
+                if data.is_empty() {
+                    break;
+                }
+                let n = data.len();
+                framer.push(data, &mut emit_out);
+                child_buf.consume(n);
             }
+            framer.finish(&mut emit_out);
             let status = child.wait().map_err(|e| e.to_string())?;
             // Kill any remaining processes in the child's process group
             let _ = killpg(child_pid, Signal::SIGKILL);
@@ -174,15 +203,26 @@ pub fn run_command(
         // After kill or soft signal, poll for child exit even without fd events
         if child_killed || escalation_deadline.is_some() {
             if let Ok(Some(status)) = child.try_wait() {
-                let mut line = String::new();
-                while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                    send(&Response::Out {
-                        out: line.trim_end().to_string(),
-                    });
-                    line.clear();
-                }
                 // Kill any remaining processes in the child's process group
+                // first: killing the residual process group closes any
+                // inherited pipe write ends, guaranteeing the drain below
+                // reaches EOF instead of blocking on a grandchild that still
+                // holds the pipe. Buffered pipe data survives the writers'
+                // death, so no already-written output is lost.
                 let _ = killpg(child_pid, Signal::SIGKILL);
+                // Drain remaining buffered output through the framer, then flush
+                // the trailing partial line (invalid UTF-8 is escaped instead
+                // of aborting, per-line memory is bounded, and cancellation
+                // stays responsive).
+                while let Ok(data) = child_buf.fill_buf() {
+                    if data.is_empty() {
+                        break;
+                    }
+                    let n = data.len();
+                    framer.push(data, &mut emit_out);
+                    child_buf.consume(n);
+                }
+                framer.finish(&mut emit_out);
                 return Ok(status.code().unwrap_or(-1));
             }
         }

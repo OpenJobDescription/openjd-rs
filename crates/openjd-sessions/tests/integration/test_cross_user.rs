@@ -597,3 +597,160 @@ async fn test_cross_user_embedded_file_runnable_permissions() {
     assert_eq!(mode & 0o070, 0o070, "Group has r/w/x");
     assert_eq!(mode & 0o007, 0, "Others have no permissions");
 }
+
+// === Cross-user helper stdout framing regression tests ===
+//
+// These exercise the bounded, non-blocking stdout reader in
+// `helper/src/runner.rs`. Like the rest of this file they are `#[ignore]` and
+// require the Docker + sudo fixtures (OPENJD_TEST_SUDO_TARGET_USER /
+// OPENJD_TEST_SUDO_SHARED_GROUP), mirroring `test_cross_user_subprocess_basic`.
+
+/// Regression test: invalid UTF-8 in workload output must not abort the run. A
+/// workload that emits an invalid UTF-8 byte (0x97) between valid lines must
+/// keep streaming and exit cleanly, with the bad byte backslash-escaped.
+/// Pre-fix: `read_line` returned InvalidData on the 0x97 line and the run
+/// became a communication failure.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_invalid_utf8_output_continues() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    // \227 is octal for 0x97 (POSIX-portable printf escape).
+    let args = [
+        "-c".to_string(),
+        "printf 'before\\n\\227\\nafter\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success, "stdout: {}", r.stdout);
+    assert!(r.stdout.contains("before"), "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains(r"\x97"),
+        "escaped byte missing: {}",
+        r.stdout
+    );
+    assert!(r.stdout.contains("after"), "stdout: {}", r.stdout);
+    session.cleanup();
+}
+
+/// Regression test: per-line memory must stay bounded. A 1 MiB line with no
+/// newline must be bounded to a single truncated Out (<= 64 KiB) rather than
+/// buffered whole, and the following "END" line must still stream.
+/// Pre-fix: `read_line` buffered the entire unbounded line in memory (and the
+/// 1 MiB Out then exceeded the parent's response limit).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_bounded_single_out_long_line() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = [
+        "-c".to_string(),
+        "head -c 1048576 /dev/zero | tr '\\0' 'a'; printf '\\nEND\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "stdout len: {}",
+        r.stdout.len()
+    );
+    // The unbounded 'a' run must be truncated to <= 64 KiB (one Out).
+    let a_count = r.stdout.chars().filter(|&c| c == 'a').count();
+    assert!(
+        a_count <= 64 * 1024,
+        "long line not bounded: {} 'a' chars",
+        a_count
+    );
+    assert!(r.stdout.contains("END"), "trailing line missing");
+    session.cleanup();
+}
+
+/// Regression test: cancellation must stay responsive during a partial line. A
+/// workload that emits a partial line (no newline) then sleeps must still be
+/// cancelable promptly through the session handle.
+/// Pre-fix: `read_line` blocked waiting for the newline that never came, so the
+/// cancel was not serviced until the sleep ended.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_during_partial_line() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let canceller = spawn_cancel_with_retry(session.cancel_handle(), false);
+
+    let args = ["-c".to_string(), "printf x; sleep 300".to_string()];
+    let started = std::time::Instant::now();
+    let result = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await;
+    let elapsed = started.elapsed();
+
+    let delivered = canceller.await.expect("canceller task must not panic");
+    if let Err(e) = &result {
+        assert!(
+            delivered,
+            "subprocess failed before any cancel was delivered: {e}"
+        );
+    }
+    assert!(
+        delivered,
+        "handle must find the in-flight helper action and deliver the cancel"
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "cancel must interrupt the partial-line sleep, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// JSON-expansion guard end to end. 100 KiB of 0x01 serializes through
+/// serde_json at 6x (`\u0001`), which without the guard blows past the
+/// parent's 128 KiB response limit. The run must complete cleanly with a
+/// truncated Out rather than a per-line HelperCommunication error.
+/// Pre-fix: the ~600 KiB serialized line exceeded the parent limit.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_control_char_line_within_response_limit() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = [
+        "-c".to_string(),
+        "head -c 102400 /dev/zero | tr '\\0' '\\001'; printf '\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "control-char line must not trip the response limit; stdout len: {}",
+        r.stdout.len()
+    );
+    session.cleanup();
+}
+
+/// Regression guard (passes before and after the fix): a trailing line with no
+/// newline must still be delivered when the workload exits (EOF flush).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_eof_partial_line_preserved() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = ["-c".to_string(), "printf 'tail-no-newline'".to_string()];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success, "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains("tail-no-newline"),
+        "EOF partial line dropped: {}",
+        r.stdout
+    );
+    session.cleanup();
+}

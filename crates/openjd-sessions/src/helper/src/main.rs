@@ -4,6 +4,8 @@
 
 #[cfg(windows)]
 mod job_object;
+#[cfg(unix)]
+mod framer;
 mod protocol;
 #[cfg(unix)]
 mod runner;

@@ -2246,6 +2246,53 @@ mod tests {
         assert_eq!(decode_backslashreplace(&[0xab, 0xcd]), r"\xab\xcd");
     }
 
+    /// The helper carries its own copy of `decode_backslashreplace` (it is a
+    /// standalone crate that cannot depend on this one). Pin the two copies
+    /// byte-for-byte so they cannot drift apart. `#[cfg(unix)]` because
+    /// `crate::helper_framer` is only included on unix under test.
+    #[cfg(unix)]
+    #[test]
+    fn helper_framer_decode_matches_subprocess_decode() {
+        // Compare the helper's ported decoder against this crate's original
+        // byte-for-byte across an exhaustive set of inputs so the two copies
+        // cannot drift.
+        let mut cases: Vec<Vec<u8>> = vec![
+            b"".to_vec(),
+            b"plain".to_vec(),
+            b"a\x97b".to_vec(),
+            b"\xE2\x82".to_vec(),
+            b"\xE2\x82\xAC".to_vec(),
+            b"\xFF\xFE\x00".to_vec(),
+        ];
+        // Every single byte 0x00..=0xFF on its own.
+        for b in 0u8..=255 {
+            cases.push(vec![b]);
+        }
+        // Valid and truncated 2-, 3-, and 4-byte UTF-8 sequences.
+        cases.extend([
+            b"\xC3\xA9".to_vec(),         // valid 2-byte: é
+            b"\xC3".to_vec(),             // truncated 2-byte (1 of 2)
+            b"\xE2\x82\xAC".to_vec(),     // valid 3-byte: €
+            b"\xE2\x82".to_vec(),         // truncated 3-byte (2 of 3)
+            b"\xE2".to_vec(),             // truncated 3-byte (1 of 3)
+            b"\xF0\x9F\x98\x80".to_vec(), // valid 4-byte: 😀
+            b"\xF0\x9F\x98".to_vec(),     // truncated 4-byte (3 of 4)
+            b"\xF0\x9F".to_vec(),         // truncated 4-byte (2 of 4)
+            b"\xF0".to_vec(),             // truncated 4-byte (1 of 4)
+        ]);
+        // A deterministic mixed buffer: valid ASCII, valid multibyte, invalid
+        // bytes, and a truncated tail interleaved.
+        cases.push(b"ok \xE2\x82\xAC then \x97\xFF raw \xF0\x9F\x98\x80 end \xE4\xBD".to_vec());
+
+        for c in &cases {
+            assert_eq!(
+                crate::helper_framer::decode_backslashreplace(c),
+                decode_backslashreplace(c).as_ref(),
+                "mismatch for bytes: {c:02x?}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn test_run_subprocess_invalid_utf8_continues() {
