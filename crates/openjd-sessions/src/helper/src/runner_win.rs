@@ -16,7 +16,8 @@
 
 use super::job_object::JobObject;
 use super::protocol::{send, CancelMethod, Response, RunCommand};
-use std::io::BufRead;
+use crate::framer::{fit_out_payload, LineFramer};
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
@@ -75,38 +76,14 @@ pub fn run_command(
     let child_stdout = child.stdout.take().unwrap();
     let child_stderr = child.stderr.take().unwrap();
 
-    // Background threads read child output and send lines via channel
+    // Background threads frame child output into bounded lines, sent via channel.
     let (out_tx, out_rx) = mpsc::channel::<String>();
 
     let tx1 = out_tx.clone();
-    let stdout_thread = std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(child_stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    if tx1.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    let stdout_thread = std::thread::spawn(move || frame_child_output(child_stdout, tx1));
 
     let tx2 = out_tx.clone();
-    let stderr_thread = std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(child_stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    if tx2.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    let stderr_thread = std::thread::spawn(move || frame_child_output(child_stderr, tx2));
 
     drop(out_tx);
 
@@ -157,6 +134,46 @@ pub fn run_command(
     let _ = stderr_thread.join();
 
     Ok(exit_code)
+}
+
+/// Frame `reader` into bounded lines, one Out payload per line sent via `tx`.
+///
+/// Caps per-line memory at 64 KiB, escapes invalid UTF-8 instead of erroring
+/// the thread, and flushes the trailing partial line at EOF. Same bounding as
+/// the Unix runner; blocking 8 KiB reads on this dedicated thread are fine.
+fn frame_child_output<R: Read>(mut reader: R, tx: mpsc::Sender<String>) {
+    // Preserve prior lines() emit format: strip only the CRLF's \r (the framer
+    // keeps it), not all trailing whitespace like Unix's trim_end. fit_out_payload
+    // caps Out at the 128 KiB response limit, matching Unix.
+    let to_payload = |line: String| {
+        let stripped = line.strip_suffix('\r').unwrap_or(&line);
+        fit_out_payload(stripped).to_string()
+    };
+    let mut framer = LineFramer::new();
+    let mut buf = [0u8; 8 * 1024];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
+            // A signal can interrupt the read mid-call; retry rather than end the stream.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break, // read error ends the thread, as lines() did
+        };
+        let mut lines = Vec::new();
+        framer.push(&buf[..n], &mut |line| lines.push(to_payload(line)));
+        for line in lines {
+            if tx.send(line).is_err() {
+                return; // receiver dropped; stop without flushing
+            }
+        }
+    }
+    let mut lines = Vec::new();
+    framer.finish(&mut |line| lines.push(to_payload(line)));
+    for line in lines {
+        if tx.send(line).is_err() {
+            return;
+        }
+    }
 }
 
 /// Handle a cancel request. Returns an escalation deadline for soft signals

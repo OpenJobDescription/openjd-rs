@@ -4,7 +4,7 @@
 
 //! Bounded line framer for the cross-user helper's stdout reader.
 //!
-//! Currently wired into the Unix runner only; the Windows runner is covered by a follow-up.
+//! Used by both the Unix and Windows runners.
 //!
 //! Turns arbitrary byte chunks (from `fill_buf`) into bounded logical lines so
 //! a newline-less workload cannot grow the line buffer without limit. Splits on
@@ -13,8 +13,8 @@
 //!
 //! Deliberately `std` + `serde_json` only: it compiles into the standalone
 //! helper binary (a nested crate that cannot depend on `openjd-sessions`) and
-//! is also `#[path]`-included into `openjd-sessions` under `cfg(all(test,
-//! unix))` for unit tests and the `decode_backslashreplace` equivalence check.
+//! is also `#[path]`-included into `openjd-sessions` under `cfg(test)` for unit
+//! tests and the `decode_backslashreplace` equivalence check.
 //! So it references nothing from `openjd-sessions`, `nix`, or `tokio`.
 
 use std::borrow::Cow;
