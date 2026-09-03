@@ -52,13 +52,11 @@ pub fn run_command(
     let mut child_killed = false;
     let mut escalation_deadline: Option<std::time::Instant> = None;
 
-    // Bounded line framer replaces read_line so non-UTF-8 output no longer
-    // aborts the run, per-line memory is bounded, and cancellation stays
-    // responsive instead of being starved by a blocking read.
+    // Bounded framer replaces read_line: non-UTF-8 no longer aborts the run,
+    // per-line memory is bounded, and cancel is not starved by a blocking read.
     let mut framer = LineFramer::new();
-    // Single emit path for all three read sites: trim_end preserves the
-    // existing cross-user behavior; fit_out_payload keeps the serialized
-    // Response::Out within the parent's 128 KiB response limit.
+    // Single emit path for all read sites: trim_end keeps existing behavior;
+    // fit_out_payload holds Response::Out within the 128 KiB response limit.
     let mut emit_out = |line: String| {
         let trimmed = line.trim_end();
         send(&Response::Out {
@@ -152,16 +150,14 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.contains(PollFlags::POLLIN))
         }) {
-            // Bounded, non-blocking read: one fill_buf per POLLIN, framed into
-            // bounded lines, then back to poll() so cancel is never starved by
-            // a partial line.
+            // Non-blocking: one fill_buf per POLLIN, framed, then back to
+            // poll() so cancel is never starved by a partial line.
             let data = match child_buf.fill_buf() {
                 Ok(d) => d,
                 Err(e) => return Err(e.to_string()),
             };
             if data.is_empty() {
-                // EOF: flush the trailing partial line, then keep the existing
-                // wait -> killpg -> return order and error semantics.
+                // EOF: flush the partial line, keep wait -> killpg -> return.
                 framer.finish(&mut emit_out);
                 let status = child.wait().map_err(|e| e.to_string())?;
                 // Kill any remaining processes in the child's process group
@@ -179,12 +175,9 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
         }) {
-            // Drain remaining buffered output through the framer, then flush the
-            // trailing partial line (invalid UTF-8 is escaped instead of
-            // aborting, per-line memory is bounded, and cancellation stays
-            // responsive).
-            // POLLHUP fires only after all writers closed, so EOF is guaranteed
-            // and this loop terminates.
+            // Drain buffered output through the framer, then flush the partial
+            // line. POLLHUP fires only after all writers closed, so EOF is
+            // guaranteed and this loop terminates.
             while let Ok(data) = child_buf.fill_buf() {
                 if data.is_empty() {
                     break;
@@ -204,16 +197,12 @@ pub fn run_command(
         if child_killed || escalation_deadline.is_some() {
             if let Ok(Some(status)) = child.try_wait() {
                 // Kill any remaining processes in the child's process group
-                // first: killing the residual process group closes any
-                // inherited pipe write ends, guaranteeing the drain below
-                // reaches EOF instead of blocking on a grandchild that still
-                // holds the pipe. Buffered pipe data survives the writers'
-                // death, so no already-written output is lost.
+                // first: this closes inherited pipe write ends so the drain
+                // below reaches EOF instead of blocking on a grandchild holding
+                // the pipe. Buffered data survives, so nothing written is lost.
                 let _ = killpg(child_pid, Signal::SIGKILL);
-                // Drain remaining buffered output through the framer, then flush
-                // the trailing partial line (invalid UTF-8 is escaped instead
-                // of aborting, per-line memory is bounded, and cancellation
-                // stays responsive).
+                // Drain buffered output through the framer, then flush the
+                // trailing partial line.
                 while let Ok(data) = child_buf.fill_buf() {
                     if data.is_empty() {
                         break;

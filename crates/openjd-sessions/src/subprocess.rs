@@ -2246,19 +2246,15 @@ mod tests {
         assert_eq!(decode_backslashreplace(&[0xab, 0xcd]), r"\xab\xcd");
     }
 
-    /// The helper carries its own copy of `decode_backslashreplace` (it is a
-    /// standalone crate that cannot depend on this one). Pin the two copies
-    /// byte-for-byte so they cannot drift apart. `#[cfg(unix)]` because
-    /// `crate::helper_framer` is only included on unix under test.
+    /// Pin the helper's copy of `decode_backslashreplace` byte-for-byte to this
+    /// one so they cannot drift. `#[cfg(unix)]` because `crate::helper_framer`
+    /// is only included on unix under test.
     #[cfg(unix)]
     #[test]
     fn helper_framer_decode_matches_subprocess_decode() {
-        // The helper mirrors this crate's line cap; pin the constants together
-        // so they cannot drift independently.
+        // Pin the mirrored line caps together.
         assert_eq!(crate::helper_framer::MAX_LINE_BYTES, LOG_LINE_MAX_LENGTH);
-        // Compare the helper's ported decoder against this crate's original
-        // byte-for-byte across an exhaustive set of inputs so the two copies
-        // cannot drift.
+        // Compare both decoders byte-for-byte across exhaustive inputs.
         let mut cases: Vec<Vec<u8>> = vec![
             b"".to_vec(),
             b"plain".to_vec(),
@@ -2283,8 +2279,7 @@ mod tests {
             b"\xF0\x9F".to_vec(),         // truncated 4-byte (2 of 4)
             b"\xF0".to_vec(),             // truncated 4-byte (1 of 4)
         ]);
-        // A deterministic mixed buffer: valid ASCII, valid multibyte, invalid
-        // bytes, and a truncated tail interleaved.
+        // Mixed buffer: ASCII, multibyte, invalid bytes, and a truncated tail.
         cases.push(b"ok \xE2\x82\xAC then \x97\xFF raw \xF0\x9F\x98\x80 end \xE4\xBD".to_vec());
 
         for c in &cases {

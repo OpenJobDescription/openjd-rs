@@ -4,83 +4,60 @@
 
 //! Bounded line framer for the cross-user helper's stdout reader.
 //!
-//! Turns an arbitrary stream of bytes (delivered in `fill_buf` chunks) into
-//! bounded logical lines, so a workload that never emits a newline can never
-//! grow the helper's line buffer without limit. Splitting is on
-//! `\n` only — a lone `\r` stays inside the line — and each logical line
-//! produces at most one string, so the caller can emit exactly one
-//! `Response::Out` per line (never splitting a line across responses).
+//! Turns arbitrary byte chunks (from `fill_buf`) into bounded logical lines so
+//! a newline-less workload cannot grow the line buffer without limit. Splits on
+//! `\n` only (a lone `\r` stays in the line); each line yields one string, so
+//! the caller emits exactly one `Response::Out` per line.
 //!
-//! This module is deliberately `std` + `serde_json` only: it is compiled into
-//! the standalone helper binary (a nested Cargo crate that cannot depend on
-//! `openjd-sessions`), and it is ALSO `#[path]`-included into `openjd-sessions`
-//! under `cfg(all(test, unix))` so the library can unit-test it and assert
-//! [`decode_backslashreplace`] stays byte-for-byte equivalent to
-//! `subprocess::decode_backslashreplace`. It must therefore reference nothing
-//! from `openjd-sessions`, no `nix`, and no `tokio`.
+//! Deliberately `std` + `serde_json` only: it compiles into the standalone
+//! helper binary (a nested crate that cannot depend on `openjd-sessions`) and
+//! is also `#[path]`-included into `openjd-sessions` under `cfg(all(test,
+//! unix))` for unit tests and the `decode_backslashreplace` equivalence check.
+//! So it references nothing from `openjd-sessions`, `nix`, or `tokio`.
 
 use std::borrow::Cow;
 
-/// Maximum bytes of a single raw logical line the framer will accumulate
-/// before it force-truncates and discards the remainder.
+/// Max bytes of a raw logical line before truncation; the remainder is
+/// discarded.
 ///
-/// Mirrors `subprocess.rs`'s `LOG_LINE_MAX_LENGTH`. The helper is a separate
-/// crate and cannot reference that constant, so the value is duplicated here;
-/// the two must stay in sync (the cross-user path and the same-user path
-/// truncate log lines at the same size).
+/// Mirrors `subprocess.rs`'s `LOG_LINE_MAX_LENGTH` (duplicated because the
+/// helper is a separate crate); the two must stay in sync.
 pub const MAX_LINE_BYTES: usize = 64 * 1024;
 
-/// Maximum bytes of a single serialized JSON response line the parent will
-/// accept from the helper's stdout.
+/// Max bytes of a serialized JSON response line the parent accepts.
 ///
-/// Mirrors `cross_user_helper.rs`'s `MAX_RESPONSE_LINE_LENGTH`, the parent's
-/// hard limit when reading responses: a response line longer than this is
-/// turned into a `SessionError::HelperCommunication` per line (the parent
-/// reads with `Read::take(128 KiB)`). [`fit_out_payload`] uses this to keep
-/// every `Response::Out` under the limit.
+/// Mirrors the parent's hard limit (`Read::take(128 KiB)`): a longer line
+/// becomes a per-line `SessionError::HelperCommunication`. [`fit_out_payload`]
+/// keeps every `Response::Out` under it.
 pub const MAX_RESPONSE_LINE_LENGTH: usize = 128 * 1024;
 
-/// Lowercase hex digits, indexed by nibble value. Used by
-/// [`decode_backslashreplace`] to render undecodable bytes as `\xNN`.
+/// Lowercase hex digits by nibble value, for rendering bytes as `\xNN`.
 const HEX_DIGITS: [u8; 16] = *b"0123456789abcdef";
 
-/// Decode subprocess output as UTF-8, escaping every byte that is not valid
-/// UTF-8 as `\xNN` with lowercase hex.
+/// Decode bytes as UTF-8, escaping each invalid byte as `\xNN` (lowercase hex).
 ///
 /// Ported verbatim from `subprocess.rs::decode_backslashreplace` (the helper
-/// cannot depend on `openjd-sessions`). A byte-for-byte equivalence test in
-/// `subprocess.rs` guards the two copies against drifting apart.
+/// cannot depend on `openjd-sessions`); an equivalence test there pins the two.
 ///
-/// This mirrors CPython's `bytes.decode("utf-8", errors="backslashreplace")`,
-/// which `openjd-sessions-for-python` uses when reading subprocess output. A
-/// subprocess can emit bytes that are not valid UTF-8, for example a Windows
-/// DCC application writing its output in the system code page, such as Unreal
-/// Engine emitting the cp1252 em dash `0x97`. Escaping those bytes rather than
-/// replacing them with U+FFFD preserves the original byte values in the session
-/// log, which helps identify the code page the subprocess is emitting.
-///
-/// Valid UTF-8, including multi-byte sequences, passes through unmodified, and a
-/// borrowed string is returned without allocating when the whole input is
-/// already valid.
+/// Mirrors CPython's `bytes.decode("utf-8", errors="backslashreplace")`.
+/// Escaping (vs U+FFFD) preserves the original byte values in the log, which
+/// helps identify a subprocess emitting a non-UTF-8 code page (e.g. cp1252).
+/// Valid UTF-8 passes through and is returned borrowed without allocating.
 pub fn decode_backslashreplace(bytes: &[u8]) -> Cow<'_, str> {
-    // Fast path: the overwhelmingly common case is fully valid UTF-8, which
-    // needs no allocation.
+    // Fast path: fully valid UTF-8 needs no allocation.
     if let Ok(valid) = std::str::from_utf8(bytes) {
         return Cow::Borrowed(valid);
     }
 
-    // `utf8_chunks` splits the input into (valid UTF-8 prefix, invalid byte
-    // sequence) pairs, so the valid parts need no re-validation and the invalid
-    // sequences are delimited exactly as UTF-8 validation defines them.
-    // CPython escapes every byte of an undecodable sequence individually, so a
-    // 3-byte invalid sequence becomes three `\xNN` escapes.
+    // `utf8_chunks` yields (valid prefix, invalid bytes) pairs. Like CPython,
+    // escape every byte of an invalid sequence individually.
     let mut out = String::with_capacity(bytes.len());
     for chunk in bytes.utf8_chunks() {
         out.push_str(chunk.valid());
         for &byte in chunk.invalid() {
             out.push('\\');
             out.push('x');
-            // Both indices are nibbles, so they are always < 16.
+            // Nibbles are always < 16.
             out.push(HEX_DIGITS[(byte >> 4) as usize] as char);
             out.push(HEX_DIGITS[(byte & 0x0f) as usize] as char);
         }
@@ -88,11 +65,10 @@ pub fn decode_backslashreplace(bytes: &[u8]) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Truncate `s` to at most `max` bytes on a valid UTF-8 char boundary.
+/// Truncate `s` to at most `max` bytes on a UTF-8 char boundary.
 ///
-/// Matches `subprocess.rs::truncate_line`'s char-boundary behavior (it uses
-/// `floor_char_boundary`); walking back to the previous boundary is the
-/// std-only equivalent and never splits a multi-byte character.
+/// std-only equivalent of `subprocess.rs::truncate_line`'s
+/// `floor_char_boundary`; never splits a multi-byte character.
 fn truncate_char_boundary(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
@@ -104,24 +80,21 @@ fn truncate_char_boundary(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
-/// Decode a raw line and enforce the decoded-line byte bound.
+/// Decode a raw line and re-cap it at `MAX_LINE_BYTES`.
 ///
-/// `decode_backslashreplace` can expand up to 4x (each undecodable byte becomes
-/// the 4-character escape `\xNN`), so a raw line already at `MAX_LINE_BYTES`
-/// can decode to 4x that. The second truncation here guarantees the decoded
-/// string is itself at most `MAX_LINE_BYTES`.
+/// Decoding can expand up to 4x (each bad byte becomes `\xNN`), so a raw line
+/// at the cap can decode to 4x; this second truncation re-bounds the result.
 fn decode_and_truncate(bytes: &[u8]) -> String {
     let decoded = decode_backslashreplace(bytes);
     truncate_char_boundary(&decoded, MAX_LINE_BYTES).to_string()
 }
 
-/// serde_json's escaped length for a single `char`, matching serde_json's
-/// output byte-for-byte (an equivalence test pins this against serde_json).
+/// serde_json's escaped byte length for one `char` (an equivalence test pins
+/// this against serde_json).
 ///
-/// serde_json escapes `"` and `\` as two-character sequences, the five named
-/// control characters (`\b \t \n \f \r`) as two characters, any other control
-/// character below `0x20` as the six-character `\uXXXX`, and passes everything
-/// else (including `0x7F` and all non-ASCII) through as its raw UTF-8 bytes.
+/// `"` and `\` and the five named controls (`\b \t \n \f \r`) escape to 2 bytes;
+/// other controls below `0x20` to `\uXXXX` (6); everything else (incl. `0x7F`
+/// and non-ASCII) passes through as raw UTF-8.
 fn json_escaped_len(c: char) -> usize {
     match c {
         '"' | '\\' => 2,
@@ -131,21 +104,16 @@ fn json_escaped_len(c: char) -> usize {
     }
 }
 
-/// JSON-expansion guard: return the longest prefix of `s` whose serialized
-/// `Response::Out` (the JSON envelope plus the trailing `\n` that `send`
-/// writes) still fits within the parent's [`MAX_RESPONSE_LINE_LENGTH`].
+/// JSON-expansion guard: longest prefix of `s` whose serialized `Response::Out`
+/// (envelope plus `send`'s trailing `\n`) fits [`MAX_RESPONSE_LINE_LENGTH`].
 ///
-/// A decoded line that is under `MAX_LINE_BYTES` can still blow past the
-/// parent's response limit once serialized: a line of legal UTF-8 control
-/// characters expands 6x through serde_json (`\u0001`), so 64 KiB decoded can
-/// serialize to 384 KiB. Without this guard the parent
-/// (`cross_user_helper.rs`) would turn every such line into a
-/// `HelperCommunication` error. Computing the escaped length per character and
-/// stopping before the budget is exceeded keeps every response line valid.
+/// A sub-`MAX_LINE_BYTES` line can still overflow once serialized: control
+/// characters expand 6x (`\u0001`), so 64 KiB decoded can reach 384 KiB.
+/// Summing escaped lengths and stopping at the budget keeps every line valid
+/// and avoids a per-line `HelperCommunication` error.
 pub fn fit_out_payload(s: &str) -> &str {
-    // `{"out":"..."}` wrapping plus the `\n` that `send` appends. The two `"`
-    // that delimit the payload are part of the envelope; only the payload's
-    // own escaped characters count against the remaining budget.
+    // `{"out":"..."}` envelope plus `send`'s `\n`. The delimiting `"` are
+    // envelope; only the payload's escaped chars count against the budget.
     const ENVELOPE: usize = r#"{"out":""}"#.len() + 1;
     let budget = MAX_RESPONSE_LINE_LENGTH - ENVELOPE;
     let mut used = 0;
@@ -161,21 +129,17 @@ pub fn fit_out_payload(s: &str) -> &str {
 
 /// Byte-stream to bounded-logical-line state machine.
 ///
-/// Fed arbitrary `fill_buf` chunks via [`push`](LineFramer::push); emits one
-/// string per complete logical line (split on `\n`). A line that reaches
-/// `MAX_LINE_BYTES` before its newline keeps its truncated 64 KiB prefix and
-/// discards the remainder up to the next `\n`; that line's single `Out` is
-/// still emitted exactly once, at the line end (newline or EOF), so an
-/// over-cap line has the same emit timing as an ordinary one. Call
-/// [`finish`](LineFramer::finish) at EOF to flush any trailing partial line.
+/// [`push`](LineFramer::push) takes `fill_buf` chunks and emits one string per
+/// `\n`-terminated line. An over-cap line keeps its truncated 64 KiB prefix,
+/// discards the rest to the next `\n`, and still emits its single `Out` once at
+/// the line end (same timing as any line). [`finish`](LineFramer::finish)
+/// flushes a trailing partial line at EOF.
 #[derive(Default)]
 pub struct LineFramer {
     /// Raw bytes of the current line, capped at `MAX_LINE_BYTES`.
     buf: Vec<u8>,
-    /// True once an over-cap line has filled `buf` with its kept 64 KiB
-    /// prefix: the remainder up to the next `\n` is discarded, and the line's
-    /// single `Out` is emitted at the line end (newline or EOF), not when the
-    /// cap is reached.
+    /// Set once an over-cap line filled `buf`: the rest up to the next `\n` is
+    /// discarded and the `Out` still emits at the line end, not at the cap.
     discarding: bool,
 }
 
@@ -187,23 +151,19 @@ impl LineFramer {
         }
     }
 
-    /// Feed one chunk of bytes, emitting each complete logical line through
-    /// `emit`. A chunk may contain zero, one, or many newlines, and a logical
-    /// line may span many chunks.
+    /// Feed one chunk, emitting each complete line through `emit`. A chunk may
+    /// hold any number of newlines; a line may span many chunks.
     pub fn push<F: FnMut(String)>(&mut self, mut data: &[u8], emit: &mut F) {
         while !data.is_empty() {
             match data.iter().position(|&b| b == b'\n') {
                 Some(nl) => {
-                    // Accumulate the bytes before the newline (a no-op once
-                    // we're discarding an over-cap line), then emit the line
-                    // exactly once — whether or not it hit the cap — from the
-                    // kept buffer. Emitting here, at the line end, gives an
-                    // over-cap line the same emit timing as an ordinary one.
+                    // Accumulate up to the newline (no-op while discarding),
+                    // then emit the kept buffer once at the line end, giving an
+                    // over-cap line the same timing as an ordinary one.
                     self.accumulate(&data[..nl]);
                     let line = std::mem::take(&mut self.buf);
                     emit(decode_and_truncate(&line));
-                    // Newline ends the line: reset for the next one.
-                    // (mem::take above already left buf empty.)
+                    // Newline ends the line; reset (buf already emptied above).
                     self.discarding = false;
                     data = &data[nl + 1..];
                 }
@@ -215,24 +175,21 @@ impl LineFramer {
         }
     }
 
-    /// Flush the final partial line at EOF (matches the existing `read_line`
-    /// EOF behavior: a trailing line without a newline is still delivered).
-    /// Emits once when the buffer holds a partial line OR an over-cap line is
-    /// still being discarded (its kept prefix is in `buf`), then resets.
+    /// Flush the final partial line at EOF (a trailing newline-less line is
+    /// still delivered). Emits once when `buf` holds a partial or over-cap
+    /// prefix, then resets.
     pub fn finish<F: FnMut(String)>(&mut self, emit: &mut F) {
         if self.discarding || !self.buf.is_empty() {
             let line = std::mem::take(&mut self.buf);
             emit(decode_and_truncate(&line));
         }
-        // mem::take above (or the untaken branch's emptiness) leaves buf empty.
+        // buf is already empty here.
         self.discarding = false;
     }
 
-    /// Append `data` (a newline-free segment) to the current line buffer. Once
-    /// the buffer would exceed `MAX_LINE_BYTES`, keep the truncated 64 KiB
-    /// prefix in `buf` and switch to discarding the remainder; the line's
-    /// single `Out` is emitted later, at the line end (newline or EOF), not
-    /// here. While discarding, further bytes for this line are dropped.
+    /// Append a newline-free segment to `buf`. On exceeding `MAX_LINE_BYTES`,
+    /// keep the truncated prefix and start discarding the rest; the `Out` emits
+    /// later at the line end. While discarding, further bytes are dropped.
     fn accumulate(&mut self, data: &[u8]) {
         if self.discarding {
             return;
@@ -241,8 +198,7 @@ impl LineFramer {
         if data.len() <= room {
             self.buf.extend_from_slice(data);
         } else {
-            // Over cap: keep the truncated prefix and discard the rest of this
-            // logical line. The emit is deferred to the line end.
+            // Over cap: keep the prefix, discard the rest; emit at line end.
             self.buf.extend_from_slice(&data[..room]);
             self.discarding = true;
         }
@@ -259,8 +215,7 @@ mod tests {
 
     #[test]
     fn fit_guard_control_chars_six_x_expansion() {
-        // Legal UTF-8 control char 0x01 serializes to \u0001 through serde_json:
-        // a 6x expansion per character.
+        // 0x01 serializes to \u0001: 6x expansion.
         let s = "\u{01}".repeat(64 * 1024);
         let fitted = fit_out_payload(&s);
         let json = serde_json::to_string(&fitted).unwrap();
@@ -270,8 +225,7 @@ mod tests {
 
     #[test]
     fn fit_guard_backslashreplace_expansion() {
-        // 0x97 decodes to the 4-char `\x97`; JSON escapes the backslash, so each
-        // original byte costs 5 JSON bytes.
+        // 0x97 -> `\x97` (4 chars), then JSON-escaped backslash: 5 bytes/byte.
         let raw = vec![0x97u8; 64 * 1024];
         let decoded = decode_backslashreplace(&raw);
         let fitted = fit_out_payload(&decoded);
@@ -296,18 +250,14 @@ mod tests {
 
     #[test]
     fn escaped_len_matches_serde_json_exactly() {
-        // A representative mixed string: the per-char lengths must sum to
-        // serde_json's serialized length (minus the two delimiting quotes).
+        // Per-char lengths must sum to serde_json's length (minus 2 quotes).
         let s = "abc\"\\\u{08}\u{09}\u{0A}\u{0C}\u{0D}\u{01}\u{1F}€😀\u{7F}";
         let computed: usize = s.chars().map(json_escaped_len).sum();
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(computed, json.len() - 2);
 
-        // Exhaustive per-character check: every scalar value in 0..=0xFF (no
-        // surrogates fall in that range) plus representative scalars at every
-        // UTF-8 length and escaping class. json_escaped_len must equal
-        // serde_json's own serialized length for that single character (its
-        // serialization minus the two delimiting quotes).
+        // Exhaustive check: every scalar 0..=0xFF plus representatives at each
+        // UTF-8 length must match serde_json's length (minus 2 quotes).
         let representative = [
             0x7Fu32,
             0x80,
@@ -334,12 +284,9 @@ mod tests {
 
     #[test]
     fn out_envelope_within_response_limit_for_worst_cases() {
-        // A local mirror of the helper's untagged `Response::Out`: serde
-        // serializes this struct byte-for-byte the same as the real response
-        // (`{"out":"..."}`), so it is a faithful stand-in for the on-wire size.
-        // fit_out_payload must keep the serialized line plus send()'s trailing
-        // `\n` within the parent's response limit even for the worst-case
-        // JSON expansions.
+        // Mirror of the untagged `Response::Out` (`{"out":"..."}`), serialized
+        // identically to the real response. fit_out_payload must keep it plus
+        // send()'s `\n` within the response limit for worst-case expansions.
         #[derive(serde::Serialize)]
         struct OutMirror<'a> {
             out: &'a str,
@@ -352,8 +299,7 @@ mod tests {
         for payload in [&all_ctrl, &backslashreplace, &quote_heavy] {
             let fitted = fit_out_payload(payload);
             let serialized = serde_json::to_vec(&OutMirror { out: fitted }).unwrap();
-            // Strict `<` leaves room for the trailing newline that send()
-            // appends (len + 1 <= MAX is equivalent to len < MAX).
+            // Strict `<` leaves room for send()'s trailing newline.
             assert!(
                 serialized.len() < MAX_RESPONSE_LINE_LENGTH,
                 "serialized length {} + newline exceeds the response limit",
@@ -384,8 +330,7 @@ mod tests {
 
     #[test]
     fn crlf_kept_for_runner_trim() {
-        // The framer keeps the trailing \r; the runner's emit path does the
-        // trim_end. Only \n ends the line.
+        // Framer keeps trailing \r (runner trims); only \n ends the line.
         assert_eq!(frame_chunks(&[b"a\r\n"]), vec!["a\r".to_string()]);
     }
 
@@ -409,10 +354,8 @@ mod tests {
 
     #[test]
     fn over_cap_line_emits_single_truncated_out() {
-        // 1 MiB with no newline: nothing is emitted while the over-cap line is
-        // still open — the truncated 64 KiB prefix is kept and the remainder
-        // discarded. The single Out (<= MAX_LINE_BYTES) is emitted only when
-        // the line ends with a newline.
+        // 1 MiB, no newline: nothing emits while the line is open; the single
+        // truncated Out (<= MAX_LINE_BYTES) emits only at the newline.
         let data = vec![b'a'; 1024 * 1024];
         let mut framer = LineFramer::new();
         let mut out = Vec::new();
@@ -429,8 +372,7 @@ mod tests {
 
     #[test]
     fn over_cap_line_flushed_once_on_finish() {
-        // An over-cap line that ends at EOF (no trailing newline) still emits
-        // exactly one truncated Out, from finish() — never zero, never two.
+        // Over-cap line ending at EOF emits exactly one truncated Out via finish().
         let data = vec![b'a'; 1024 * 1024];
         let mut framer = LineFramer::new();
         let mut out = Vec::new();
@@ -450,8 +392,7 @@ mod tests {
 
     #[test]
     fn after_discard_next_line_normal() {
-        // After an over-cap line's truncated prefix, the remainder is discarded
-        // up to the next \n, and the following line frames normally.
+        // After an over-cap line, the following line frames normally.
         let mut data = vec![b'a'; 1024 * 1024];
         data.extend_from_slice(b"\nnext\n");
         let mut framer = LineFramer::new();
