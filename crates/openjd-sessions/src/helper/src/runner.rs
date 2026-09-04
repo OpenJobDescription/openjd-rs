@@ -180,6 +180,8 @@ pub fn run_command(
             // Drain buffered output through the framer, then flush the partial
             // line. POLLHUP fires only after all writers closed, so EOF is
             // guaranteed and this loop terminates.
+            // POLLERR can also enter this path and does not imply all writers
+            // closed; the drain stops on EOF or a read error either way.
             drain_child_output(&mut child_buf, &mut framer, &mut emit_out);
             framer.finish(&mut emit_out);
             let status = child.wait().map_err(|e| e.to_string())?;
@@ -191,10 +193,12 @@ pub fn run_command(
         // After kill or soft signal, poll for child exit even without fd events
         if child_killed || escalation_deadline.is_some() {
             if let Ok(Some(status)) = child.try_wait() {
-                // Kill any remaining processes in the child's process group
-                // first: this closes inherited pipe write ends so the drain
-                // below reaches EOF instead of blocking on a grandchild holding
-                // the pipe. Buffered data survives, so nothing written is lost.
+                // Kill the child's process group first so write ends held by
+                // group members close and the drain below normally reaches EOF
+                // quickly. A grandchild that left the group (setsid) can still
+                // hold the pipe open and stall this drain — a pre-existing
+                // limitation, unchanged here. Buffered data survives, so
+                // nothing written is lost.
                 let _ = killpg(child_pid, Signal::SIGKILL);
                 // Drain buffered output through the framer, then flush the
                 // trailing partial line.

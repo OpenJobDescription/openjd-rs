@@ -4,6 +4,8 @@
 
 //! Bounded line framer for the cross-user helper's stdout reader.
 //!
+//! Currently wired into the Unix runner only; the Windows runner is covered by a follow-up.
+//!
 //! Turns arbitrary byte chunks (from `fill_buf`) into bounded logical lines so
 //! a newline-less workload cannot grow the line buffer without limit. Splits on
 //! `\n` only (a lone `\r` stays in the line); each line yields one string, so
