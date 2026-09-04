@@ -61,7 +61,7 @@ pub trait EvalContext {
     fn check_memory(&self, bytes: usize) -> Result<(), ExpressionError>;
     fn get_or_compile_regex(&mut self, pattern: &str) -> Result<regex::Regex, ExpressionError> {
         regex::RegexBuilder::new(pattern)
-            .size_limit(1 << 20)
+            .size_limit(crate::eval::evaluator::REGEX_SIZE_LIMIT)
             .build()
             .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))
     }
