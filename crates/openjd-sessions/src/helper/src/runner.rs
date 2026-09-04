@@ -154,6 +154,8 @@ pub fn run_command(
             // poll() so cancel is never starved by a partial line.
             let data = match child_buf.fill_buf() {
                 Ok(d) => d,
+                // EINTR: retry via the poll loop, matching read_line's old behavior.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.to_string()),
             };
             if data.is_empty() {
@@ -178,14 +180,7 @@ pub fn run_command(
             // Drain buffered output through the framer, then flush the partial
             // line. POLLHUP fires only after all writers closed, so EOF is
             // guaranteed and this loop terminates.
-            while let Ok(data) = child_buf.fill_buf() {
-                if data.is_empty() {
-                    break;
-                }
-                let n = data.len();
-                framer.push(data, &mut emit_out);
-                child_buf.consume(n);
-            }
+            drain_child_output(&mut child_buf, &mut framer, &mut emit_out);
             framer.finish(&mut emit_out);
             let status = child.wait().map_err(|e| e.to_string())?;
             // Kill any remaining processes in the child's process group
@@ -203,17 +198,72 @@ pub fn run_command(
                 let _ = killpg(child_pid, Signal::SIGKILL);
                 // Drain buffered output through the framer, then flush the
                 // trailing partial line.
-                while let Ok(data) = child_buf.fill_buf() {
-                    if data.is_empty() {
-                        break;
-                    }
-                    let n = data.len();
-                    framer.push(data, &mut emit_out);
-                    child_buf.consume(n);
-                }
+                drain_child_output(&mut child_buf, &mut framer, &mut emit_out);
                 framer.finish(&mut emit_out);
                 return Ok(status.code().unwrap_or(-1));
             }
         }
+    }
+}
+
+/// Drain all currently-available buffered child output through the framer,
+/// stopping at EOF (an empty read) or a read error. `EINTR` is retried rather
+/// than surfaced, matching the behavior `read_line` provided before it was
+/// replaced by `fill_buf`. Does not flush the trailing partial line — the
+/// caller does that via [`LineFramer::finish`].
+fn drain_child_output(
+    reader: &mut impl BufRead,
+    framer: &mut LineFramer,
+    emit: &mut impl FnMut(String),
+) {
+    loop {
+        let data = match reader.fill_buf() {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // EINTR: retry
+            Err(_) => break,
+        };
+        if data.is_empty() {
+            break;
+        }
+        let n = data.len();
+        framer.push(data, emit);
+        reader.consume(n);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufReader;
+
+    /// Reader that returns `EINTR` on its first read, one line on its second,
+    /// then EOF — proving the drain retries an interrupted read instead of
+    /// aborting or dropping the line.
+    struct InterruptThenData {
+        step: usize,
+    }
+
+    impl std::io::Read for InterruptThenData {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.step += 1;
+            match self.step {
+                1 => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+                2 => {
+                    buf[..6].copy_from_slice(b"hello\n");
+                    Ok(6)
+                }
+                _ => Ok(0),
+            }
+        }
+    }
+
+    #[test]
+    fn drain_survives_interrupted_read() {
+        let mut reader = BufReader::new(InterruptThenData { step: 0 });
+        let mut framer = LineFramer::new();
+        let mut lines: Vec<String> = Vec::new();
+        drain_child_output(&mut reader, &mut framer, &mut |line| lines.push(line));
+        framer.finish(&mut |line| lines.push(line));
+        assert_eq!(lines, vec!["hello".to_string()]);
     }
 }
