@@ -209,6 +209,22 @@ pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per sp
 /// Default operation limit: 10 million.
 pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
+/// Maximum number of distinct regex patterns that may be cached per evaluation.
+///
+/// When the cap is reached, new patterns are compiled but not cached — they
+/// still work, they just pay the compile cost each time.  Thirty-two entries
+/// is generous for any legitimate template (most use 1–3 distinct patterns)
+/// while bounding cache memory to at most 32 × `REGEX_SIZE_LIMIT` (32 MiB
+/// at the current 1 MiB limit).
+const MAX_REGEX_CACHE_ENTRIES: usize = 32;
+
+/// Per-regex compiled-program size limit passed to `RegexBuilder::size_limit`.
+/// Set to 1 MiB — the same default the `regex` crate uses.  The memory
+/// budget (not the per-regex limit) is the primary defense against cache
+/// growth; this limit exists only to reject adversarial NFA patterns that
+/// would consume excessive compile time.
+pub(crate) const REGEX_SIZE_LIMIT: usize = 1 << 20; // 1 MiB
+
 /// Result of expression evaluation.
 #[derive(Debug)]
 #[allow(
@@ -275,6 +291,9 @@ pub struct Evaluator<'a> {
     /// address. Indexing that comprehension directly names it as the
     /// reason the list is always empty.
     absorbed_listcomp_failure: Option<(usize, ExpressionError)>,
+    /// Running total of estimated bytes consumed by `regex_cache` entries.
+    /// Charged to `current_memory` so the memory budget covers compiled regexes.
+    regex_cache_bytes: usize,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -308,6 +327,7 @@ impl<'a> Evaluator<'a> {
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
             absorbed_listcomp_failure: None,
+            regex_cache_bytes: 0,
         }
     }
 
@@ -1847,6 +1867,7 @@ impl<'a> Evaluator<'a> {
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
             absorbed_listcomp_failure: None,
+            regex_cache_bytes: 0,
         }
     }
 
@@ -1865,10 +1886,49 @@ impl<'a> Evaluator<'a> {
     /// forward: the enclosing construct keeps evaluating on this
     /// evaluator, and a stale footprint would charge every later
     /// allocation for memory that is not live.
-    fn absorb_spend_and_reset(&mut self, child: &Evaluator, baseline: usize) {
+    ///
+    /// The regex cache lent to the child by [`Self::lend_regex_cache`]
+    /// comes back here too, with its byte charge, *before* the reset:
+    /// the cache outlives the iteration, so its charge must as well.
+    /// `baseline` comes from [`Self::footprint_baseline`] (net of the
+    /// regex charge), and [`Self::reset_footprint`] adds back the
+    /// charge as it stands now — entries the child cached stay charged
+    /// exactly once, and entries cached before the baseline are not
+    /// counted twice.
+    fn absorb_spend_and_reset(&mut self, child: &mut Evaluator, baseline: usize) {
         self.peak_memory = child.peak_memory;
         self.operation_count = child.operation_count;
-        self.current_memory = baseline;
+        self.regex_cache = std::mem::take(&mut child.regex_cache);
+        self.regex_cache_bytes = std::mem::take(&mut child.regex_cache_bytes);
+        self.reset_footprint(baseline);
+    }
+
+    /// Move the regex cache, and the bytes it charges, into `child` for
+    /// the duration of a comprehension scope. The child's
+    /// `current_memory` (copied from this evaluator) already includes
+    /// that charge, so the two move together and the child's own resets
+    /// keep it. Every exit hands both back through
+    /// [`Self::absorb_spend_and_reset`].
+    fn lend_regex_cache(&mut self, child: &mut Evaluator) {
+        child.regex_cache = std::mem::take(&mut self.regex_cache);
+        child.regex_cache_bytes = std::mem::take(&mut self.regex_cache_bytes);
+    }
+
+    /// The live footprint net of the regex cache's charge, for a later
+    /// [`Self::reset_footprint`]. Footprint resets drop transient
+    /// values, but the regex cache is cumulative for the whole
+    /// evaluation: an entry cached after the baseline was captured is
+    /// still resident after the reset, so resetting to a raw
+    /// `current_memory` snapshot would silently uncharge it (and later
+    /// cache hits are free), letting the cache grow past the budget.
+    fn footprint_baseline(&self) -> usize {
+        self.current_memory.saturating_sub(self.regex_cache_bytes)
+    }
+
+    /// Reset the live footprint to a [`Self::footprint_baseline`] plus
+    /// the regex cache's current charge.
+    fn reset_footprint(&mut self, baseline: usize) {
+        self.current_memory = baseline.saturating_add(self.regex_cache_bytes);
     }
 
     /// Evaluate `node` where the caller may absorb a failure: the
@@ -1913,12 +1973,12 @@ impl<'a> Evaluator<'a> {
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,
     ) -> Result<Speculative<T>, ExpressionError> {
-        let baseline = self.current_memory;
+        let baseline = self.footprint_baseline();
         match f(self) {
             Ok(v) => Ok(Speculative::Value(v)),
             Err(e) if contains_budget_error(&e) || contains_name_error(&e) => Err(e),
             Err(e) => {
-                self.current_memory = baseline;
+                self.reset_footprint(baseline);
                 Ok(Speculative::Absorbed(e))
             }
         }
@@ -1953,15 +2013,16 @@ impl<'a> Evaluator<'a> {
         // Nothing the child tracks survives this function: the loop
         // variable is a placeholder and the filter/body values are
         // evaluated only for their types. Every exit resets to here.
-        let memory_baseline = self.current_memory;
+        let memory_baseline = self.footprint_baseline();
         let mut tmp = crate::symbol_table::SymbolTable::new();
         tmp.set(var_name, ExprValue::unresolved(elem_type))
             .map_err(|e| ExpressionError::new(e.to_string()))?;
         let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
         combined.push(&tmp);
         let mut child = self.child_evaluator(&combined);
+        self.lend_regex_cache(&mut child);
         let body_type = child.speculate(|c| c.listcomp_body_type(lc, if_clause));
-        self.absorb_spend_and_reset(&child, memory_baseline);
+        self.absorb_spend_and_reset(&mut child, memory_baseline);
         let list_type = match body_type? {
             Speculative::Value(t) => crate::types::comprehension_list_type(&t)?,
             Speculative::Absorbed(e) => {
@@ -2052,7 +2113,7 @@ impl<'a> Evaluator<'a> {
         // per-iteration baseline captured inside the loop still includes
         // the iterable; the success path releases it explicitly after
         // the loop.)
-        let comprehension_baseline = self.current_memory;
+        let comprehension_baseline = self.footprint_baseline();
         let iterable = self.eval_node(&gen.iter, None)?;
         let var_name = match &gen.target {
             ast::Expr::Name(n) => n.id.to_string(),
@@ -2063,7 +2124,7 @@ impl<'a> Evaluator<'a> {
         // the comprehension as a whole is unknown. The iterable is
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
-            self.current_memory = comprehension_baseline;
+            self.reset_footprint(comprehension_baseline);
             return match self.comprehension_var_of(&iterable)? {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
@@ -2091,7 +2152,7 @@ impl<'a> Evaluator<'a> {
             } else {
                 // A type error an enclosing construct may absorb — the
                 // iterable's charge must not outlive the comprehension.
-                self.current_memory = comprehension_baseline;
+                self.reset_footprint(comprehension_baseline);
                 return Err(ExpressionError::type_error(format!(
                     "Cannot iterate over {}",
                     iterable.expr_type()
@@ -2114,14 +2175,14 @@ impl<'a> Evaluator<'a> {
         let mut filter_unresolved = false;
         for item in iter {
             self.count_op()?;
-            let memory_baseline = self.current_memory;
+            let memory_baseline = self.footprint_baseline();
             let mut tmp = crate::symbol_table::SymbolTable::new();
             tmp.set(&var_name, item)
                 .map_err(|e| ExpressionError::new(e.to_string()))?;
             let mut combined = base_symtabs.clone();
             combined.push(&tmp);
             let mut child = self.child_evaluator(&combined);
-            child.regex_cache = std::mem::take(&mut self.regex_cache);
+            self.lend_regex_cache(&mut child);
             let mut include = true;
             if let Some(if_clause) = gen.ifs.first() {
                 let cond = match child.evaluate(if_clause) {
@@ -2132,8 +2193,7 @@ impl<'a> Evaluator<'a> {
                         // with it (see `absorb_spend_and_reset`), and so
                         // is the iterable — the comprehension is
                         // abandoned. The regex cache comes back.
-                        self.absorb_spend_and_reset(&child, comprehension_baseline);
-                        self.regex_cache = child.regex_cache;
+                        self.absorb_spend_and_reset(&mut child, comprehension_baseline);
                         return Err(e);
                     }
                 };
@@ -2150,13 +2210,11 @@ impl<'a> Evaluator<'a> {
                     // whole decides its result, and evaluating them would
                     // cost what a run that short-circuits the filter does
                     // not.
-                    self.absorb_spend_and_reset(&child, memory_baseline);
-                    self.regex_cache = child.regex_cache;
+                    self.absorb_spend_and_reset(&mut child, memory_baseline);
                     filter_unresolved = true;
                     break;
                 } else {
-                    self.absorb_spend_and_reset(&child, comprehension_baseline);
-                    self.regex_cache = child.regex_cache;
+                    self.absorb_spend_and_reset(&mut child, comprehension_baseline);
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
                         unwrap_unresolved(&cond.expr_type())
@@ -2172,8 +2230,7 @@ impl<'a> Evaluator<'a> {
                 match child.eval_node(&lc.elt, elem_target.as_ref()) {
                     Ok(v) => Some(v),
                     Err(e) => {
-                        self.absorb_spend_and_reset(&child, comprehension_baseline);
-                        self.regex_cache = child.regex_cache;
+                        self.absorb_spend_and_reset(&mut child, comprehension_baseline);
                         return Err(e);
                     }
                 }
@@ -2190,15 +2247,14 @@ impl<'a> Evaluator<'a> {
             // iteration, and the element about to be pushed is charged
             // once, by BudgetedVec's pre-check, not again through the
             // child's footprint.
-            self.absorb_spend_and_reset(&child, memory_baseline);
-            self.regex_cache = child.regex_cache;
+            self.absorb_spend_and_reset(&mut child, memory_baseline);
             if let Some(elt) = elt {
                 if let Err(e) = result.push(self, elt) {
                     // Only a budget exceedance can land here, which no
                     // enclosing construct absorbs — but the exit drops
                     // the iterable like every other, so account for it
                     // the same way.
-                    self.current_memory = comprehension_baseline;
+                    self.reset_footprint(comprehension_baseline);
                     return Err(e);
                 }
             }
@@ -2354,11 +2410,46 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         if let Some(re) = self.regex_cache.get(pattern) {
             return Ok(re.clone());
         }
+
+        // Charge operations proportional to pattern length before compiling.
+        // Regex compilation is orders of magnitude more expensive per op than
+        // a cheap AST step; charging len(pattern) operations brings the cost
+        // into line with the operation budget's intent.
+        self.count_ops(pattern.len().max(1))?;
+
         let re = regex::RegexBuilder::new(pattern)
-            .size_limit(1 << 20)
+            .size_limit(REGEX_SIZE_LIMIT)
             .build()
             .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))?;
-        self.regex_cache.insert(pattern.to_string(), re.clone());
+
+        // Only charge the memory budget when the regex will actually be
+        // retained in the cache.  Past the cap, the regex is compiled,
+        // used for this call, and dropped — no persistent memory cost, so
+        // charging it would make `current_memory` diverge from real memory.
+        // The transient compile cost is already bounded by the op charge.
+        //
+        // `regex::Regex` does not expose its compiled size, so use the
+        // configured `REGEX_SIZE_LIMIT` as the conservative per-entry charge
+        // — the same "deliberately broad ceiling" pattern used by the
+        // `repr_*` preflight (`MAX_ESCAPE_EXPANSION`).  This bounds total
+        // cache memory to at most MAX_REGEX_CACHE_ENTRIES × REGEX_SIZE_LIMIT.
+        //
+        // When the entry's charge would not fit the memory budget, fall
+        // back to the same uncached path: the regex is not retained, so
+        // memory stays bounded, and evaluations with a memory limit below
+        // one entry keep working. `check_memory` only projects the charge,
+        // so nothing is charged (current or peak) on the fallback.
+        let entry_cost = REGEX_SIZE_LIMIT.saturating_add(pattern.len());
+        if self.regex_cache.len() < MAX_REGEX_CACHE_ENTRIES && self.check_memory(entry_cost).is_ok()
+        {
+            self.current_memory = self.current_memory.saturating_add(entry_cost);
+            if self.current_memory > self.peak_memory {
+                self.peak_memory = self.current_memory;
+            }
+            self.regex_cache_bytes = self.regex_cache_bytes.saturating_add(entry_cost);
+            self.regex_cache.insert(pattern.to_string(), re.clone());
+        }
+
         Ok(re)
     }
 }

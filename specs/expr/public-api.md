@@ -1803,7 +1803,8 @@ merely recommendations:
    `ceil(len / 256)` ops. `OperationLimitExceeded` surfaces at the
    first op that crosses the limit.
 4. **Deterministic evaluation** — no mutable globals in the dispatch
-   path; regex caches are local to each `Evaluator` instance.
+   path; regex caches are local to each `Evaluator` instance, bounded to
+   32 entries, and charged to the memory budget.
 5. **No user-defined functions** — `FunctionLibrary::register` exists
    but is a *host-side* API for building custom libraries; the language
    itself has no function-definition syntax. The OpenJD subset of

@@ -87,6 +87,13 @@ The `dispatch` method centralizes this: it releases input values, calls the func
 implementation, and tracks the output value. This keeps function implementations pure
 (values in, value out) with memory tracking handled by the evaluator.
 
+Compiled regex patterns cached by the evaluator are also charged to the memory
+budget.  Each cached entry charges `REGEX_SIZE_LIMIT` (1 MiB) plus the pattern
+string length.  The cache is capped at `MAX_REGEX_CACHE_ENTRIES` (32) entries;
+patterns compiled after the cap is reached, or whose charge would not fit the
+memory budget, are used once and discarded without a persistent memory charge.
+See the [Regex Cache](#regex-cache) section below.
+
 ### Operation Counting
 
 Every function call increments the operation counter:
@@ -96,9 +103,14 @@ Every function call increments the operation counter:
 | Function/operator call | 1 |
 | List iteration (comprehension, sorted, etc.) | +N (element count) |
 | String processing | +ceil(len / 256) |
+| Regex compile (cache miss, cached or not) | +max(len(pattern), 1) |
 
 The proportional costs prevent DoS via large strings or lists — a million-element list
 comprehension costs 1M operations even if each iteration is trivial.
+
+Each regex cache miss charges `max(len(pattern), 1)` operations before compiling,
+including compiles that are not retained (past the entry cap or the memory budget);
+cache hits charge nothing for the compile. See [Regex Cache](#regex-cache).
 
 The operation counter and the projected memory of `check_memory` saturate at `usize::MAX`
 rather than wrap, so a value there may stand for a larger true count, and it is treated as
@@ -518,6 +530,8 @@ typed over an unresolved iterable or filter. All use one helper, `speculate`
 - Any other value error is absorbed and the live footprint (`current_memory`) is reset to
   what it was before the attempt, because the failed sub-expression's values are
   gone. Peak memory and the operation count keep what the attempt consumed.
+  Regex cache entries compiled during the attempt stay cached, so their charge
+  survives the reset (see [Regex Cache](#regex-cache)).
   Dispatch also releases a failed call's operands (see
   [Dispatch Flow](#dispatch-flow)); the reset applies regardless of how the
   sub-expression failed.
@@ -836,15 +850,67 @@ expressions must be simple dotted name lookups.
 
 The evaluator maintains a `HashMap<String, regex::Regex>` that caches compiled regex
 patterns across function calls within a single evaluation. When a regex function
-(`re_match`, `re_search`, `re_sub`) is called, the evaluator checks the cache
-before compiling. This avoids recompiling the same pattern when used multiple times,
-e.g., in a list comprehension like `[x for x in items if re_search(x, "shot") != null]`.
+(`re_match`, `re_search`, `re_sub`, `re_findall`) is called, the evaluator checks the
+cache before compiling. This avoids recompiling the same pattern when used multiple
+times, e.g., in a list comprehension like
+`[x for x in items if re_search(x, "shot") != null]`.
 
 The cache is per-evaluation, not global — it is created fresh for each `evaluate()` call
 and discarded afterward. Child evaluators (created for list comprehensions) share the
-parent's cache via move-and-return: the parent's cache is moved into the child before
-each iteration and moved back after, so patterns compiled in one iteration are available
-in subsequent iterations without recompilation.
+parent's cache via move-and-return: `lend_regex_cache` moves the parent's cache into the
+child before each iteration (and before the unresolved-iterable typing pass), and
+`absorb_spend_and_reset` moves it back on every exit — success, filter or body error,
+non-boolean filter, unresolved-filter bail-out — so patterns compiled in one iteration
+are available in subsequent iterations without recompilation.
+
+### Bounding
+
+The cache is bounded by two crate-internal constants in `eval/evaluator.rs`, which are
+not part of the public API: `REGEX_SIZE_LIMIT` (1 MiB), the per-regex compiled-program
+size limit passed to `RegexBuilder::size_limit` to reject adversarial NFA patterns, and
+`MAX_REGEX_CACHE_ENTRIES` (32), the per-evaluation entry cap. They bound the cache in
+two ways:
+
+1. **Entry count cap** — at most `MAX_REGEX_CACHE_ENTRIES` (32) patterns are retained.
+   When the cap is reached, new patterns compile normally but are not inserted into
+   the cache. They work correctly for the current call but pay the compile cost on
+   every subsequent call.
+
+2. **Memory charging** — each cached entry charges `REGEX_SIZE_LIMIT + pattern.len()`
+   bytes to the evaluator's memory budget (the same budget tracked by `current_memory`
+   and bounded by `memory_limit`). Patterns compiled past the cap are *not* charged,
+   since they are not retained. This ensures that expressions with many distinct
+   patterns stay within the memory limit rather than silently consuming unbounded
+   memory.
+
+3. **Uncached fallback** — when the cache has room but an entry's charge would not fit
+   the memory budget (`current_memory + REGEX_SIZE_LIMIT + pattern.len()` over
+   `memory_limit`), the regex is not cached and not charged: it is compiled, used for
+   the current call, and dropped, exactly as past the entry cap. The charge is only
+   projected (`check_memory`), so neither `current_memory` nor `peak_memory` includes
+   it. A regex that is not retained adds no persistent memory, so the footprint stays
+   bounded, and evaluations with a `memory_limit` below one entry (about 1 MiB) run
+   regex functions as before, paying the compile on every call.
+
+Every cache miss, including the uncached compiles of (1) and (3), charges
+`max(len(pattern), 1)` operations before compiling, so repeated uncached compiles are
+bounded by the operation budget.
+
+The `regex_cache_bytes` counter tracks the total charge from cached entries. It moves
+together with the cache: `lend_regex_cache` and `absorb_spend_and_reset` transfer both,
+and the child's `current_memory` (copied from the parent) already includes the charge.
+
+The cache is cumulative for the whole evaluation, but footprint resets (comprehension
+iteration and abandonment exits, absorbed speculative failures) drop transient values.
+To keep the cache's charge live across every reset, each reset baseline is captured *net*
+of the regex charge (`footprint_baseline` = `current_memory - regex_cache_bytes`), and
+each reset restores `baseline + regex_cache_bytes` as it stands at reset time
+(`reset_footprint`). Entries cached after the baseline therefore stay charged, and
+entries cached before it are counted exactly once. `absorb_spend_and_reset` reclaims the
+cache and its bytes from the child *before* resetting, so the reset sees the child's
+additions. Without this, a reset would uncharge resident entries, later cache hits would
+be free, and an expression could hold up to `MAX_REGEX_CACHE_ENTRIES` regexes while
+reporting the footprint of one.
 
 ## Divergence from Python
 
