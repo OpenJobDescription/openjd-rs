@@ -45,6 +45,22 @@ pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per sp
 /// Default operation limit: 10 million.
 pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
+/// Maximum number of distinct regex patterns that may be cached per evaluation.
+///
+/// When the cap is reached, new patterns are compiled but not cached — they
+/// still work, they just pay the compile cost each time.  Thirty-two entries
+/// is generous for any legitimate template (most use 1–3 distinct patterns)
+/// while bounding cache memory to at most 32 × `REGEX_SIZE_LIMIT` (32 MiB
+/// at the current 1 MiB limit).
+const MAX_REGEX_CACHE_ENTRIES: usize = 32;
+
+/// Per-regex compiled-program size limit passed to `RegexBuilder::size_limit`.
+/// Set to 1 MiB — the same default the `regex` crate uses.  The memory
+/// budget (not the per-regex limit) is the primary defense against cache
+/// growth; this limit exists only to reject adversarial NFA patterns that
+/// would consume excessive compile time.
+pub(crate) const REGEX_SIZE_LIMIT: usize = 1 << 20; // 1 MiB
+
 /// Result of expression evaluation.
 #[derive(Debug)]
 pub struct EvalResult {
@@ -102,6 +118,9 @@ pub struct Evaluator<'a> {
     /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
+    /// Running total of estimated bytes consumed by `regex_cache` entries.
+    /// Charged to `current_memory` so the memory budget covers compiled regexes.
+    regex_cache_bytes: usize,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -134,6 +153,7 @@ impl<'a> Evaluator<'a> {
             library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            regex_cache_bytes: 0,
         }
     }
 
@@ -1363,6 +1383,7 @@ impl<'a> Evaluator<'a> {
             library: self.library,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            regex_cache_bytes: 0,
         }
     }
 
@@ -1371,6 +1392,7 @@ impl<'a> Evaluator<'a> {
         self.current_memory = child.current_memory;
         self.peak_memory = child.peak_memory;
         self.operation_count = child.operation_count;
+        self.regex_cache_bytes = child.regex_cache_bytes;
     }
 
     fn eval_listcomp(
@@ -1489,6 +1511,7 @@ impl<'a> Evaluator<'a> {
         for item in iter {
             self.count_op()?;
             let memory_baseline = self.current_memory;
+            let regex_bytes_baseline = self.regex_cache_bytes;
             let mut tmp = crate::symbol_table::SymbolTable::new();
             tmp.set(&var_name, item)
                 .map_err(|e| ExpressionError::new(e.to_string()))?;
@@ -1496,6 +1519,7 @@ impl<'a> Evaluator<'a> {
             combined.push(&tmp);
             let mut child = self.child_evaluator(&combined);
             child.regex_cache = std::mem::take(&mut self.regex_cache);
+            child.regex_cache_bytes = self.regex_cache_bytes;
             let mut include = true;
             if let Some(if_clause) = gen.ifs.first() {
                 let cond = child.evaluate(if_clause)?;
@@ -1524,7 +1548,11 @@ impl<'a> Evaluator<'a> {
             // do not survive the iteration, and the result elements are
             // accounted separately by BudgetedVec. Peak memory keeps
             // the high-water mark absorbed above.
-            self.current_memory = memory_baseline;
+            //
+            // Regex cache charges survive the iteration (the cache is
+            // cumulative), so add back any growth since the baseline.
+            let regex_delta = self.regex_cache_bytes.saturating_sub(regex_bytes_baseline);
+            self.current_memory = memory_baseline.saturating_add(regex_delta);
         }
         // The iterable is consumed by the comprehension: release its
         // tracked memory now that iteration is done (the borrowing
@@ -1635,11 +1663,40 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         if let Some(re) = self.regex_cache.get(pattern) {
             return Ok(re.clone());
         }
+
+        // Charge operations proportional to pattern length before compiling.
+        // Regex compilation is orders of magnitude more expensive per op than
+        // a cheap AST step; charging len(pattern) operations brings the cost
+        // into line with the operation budget's intent.
+        self.count_ops(pattern.len().max(1))?;
+
         let re = regex::RegexBuilder::new(pattern)
-            .size_limit(1 << 20)
+            .size_limit(REGEX_SIZE_LIMIT)
             .build()
             .map_err(|e| ExpressionError::new(format!("Invalid regex: {e}")))?;
-        self.regex_cache.insert(pattern.to_string(), re.clone());
+
+        // Only charge the memory budget when the regex will actually be
+        // retained in the cache.  Past the cap, the regex is compiled,
+        // used for this call, and dropped — no persistent memory cost, so
+        // charging it would make `current_memory` diverge from real memory.
+        // The transient compile cost is already bounded by the op charge.
+        //
+        // `regex::Regex` does not expose its compiled size, so use the
+        // configured `REGEX_SIZE_LIMIT` as the conservative per-entry charge
+        // — the same "deliberately broad ceiling" pattern used by the
+        // `repr_*` preflight (`MAX_ESCAPE_EXPANSION`).  This bounds total
+        // cache memory to at most MAX_REGEX_CACHE_ENTRIES × REGEX_SIZE_LIMIT.
+        if self.regex_cache.len() < MAX_REGEX_CACHE_ENTRIES {
+            let entry_cost = REGEX_SIZE_LIMIT.saturating_add(pattern.len());
+            self.check_memory(entry_cost)?;
+            self.current_memory = self.current_memory.saturating_add(entry_cost);
+            if self.current_memory > self.peak_memory {
+                self.peak_memory = self.current_memory;
+            }
+            self.regex_cache_bytes = self.regex_cache_bytes.saturating_add(entry_cost);
+            self.regex_cache.insert(pattern.to_string(), re.clone());
+        }
+
         Ok(re)
     }
 }
