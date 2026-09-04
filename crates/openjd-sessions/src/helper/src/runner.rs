@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 use super::protocol::{constant_time_eq, send, Command as HelperCommand, Response, RunCommand};
+use crate::framer::{fit_out_payload, LineFramer};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
@@ -50,6 +51,18 @@ pub fn run_command(
     let mut child_buf = std::io::BufReader::new(child_stdout);
     let mut child_killed = false;
     let mut escalation_deadline: Option<std::time::Instant> = None;
+
+    // Bounded framer replaces read_line: non-UTF-8 no longer aborts the run,
+    // per-line memory is bounded, and cancel is not starved by a blocking read.
+    let mut framer = LineFramer::new();
+    // Single emit path for all read sites: trim_end keeps existing behavior;
+    // fit_out_payload holds Response::Out within the 128 KiB response limit.
+    let mut emit_out = |line: String| {
+        let trimmed = line.trim_end();
+        send(&Response::Out {
+            out: fit_out_payload(trimmed).to_string(),
+        });
+    };
 
     loop {
         let timeout = if child_killed {
@@ -137,19 +150,25 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.contains(PollFlags::POLLIN))
         }) {
-            let mut line = String::new();
-            match child_buf.read_line(&mut line) {
-                Ok(0) => {
-                    let status = child.wait().map_err(|e| e.to_string())?;
-                    // Kill any remaining processes in the child's process group
-                    let _ = killpg(child_pid, Signal::SIGKILL);
-                    return Ok(status.code().unwrap_or(-1));
-                }
-                Ok(_) => send(&Response::Out {
-                    out: line.trim_end().to_string(),
-                }),
+            // Non-blocking: one fill_buf per POLLIN, framed, then back to
+            // poll() so cancel is never starved by a partial line.
+            let data = match child_buf.fill_buf() {
+                Ok(d) => d,
+                // EINTR: retry via the poll loop, matching read_line's old behavior.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.to_string()),
+            };
+            if data.is_empty() {
+                // EOF: flush the partial line, keep wait -> killpg -> return.
+                framer.finish(&mut emit_out);
+                let status = child.wait().map_err(|e| e.to_string())?;
+                // Kill any remaining processes in the child's process group
+                let _ = killpg(child_pid, Signal::SIGKILL);
+                return Ok(status.code().unwrap_or(-1));
             }
+            let n = data.len();
+            framer.push(data, &mut emit_out);
+            child_buf.consume(n);
         }
 
         // Check for child stdout closed (only if we actually polled)
@@ -158,13 +177,13 @@ pub fn run_command(
                 .revents()
                 .is_some_and(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
         }) {
-            let mut line = String::new();
-            while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                send(&Response::Out {
-                    out: line.trim_end().to_string(),
-                });
-                line.clear();
-            }
+            // Drain buffered output through the framer, then flush the partial
+            // line. POLLHUP fires only after all writers closed, so EOF is
+            // guaranteed and this loop terminates.
+            // POLLERR can also enter this path and does not imply all writers
+            // closed; the drain stops on EOF or a read error either way.
+            drain_child_output(&mut child_buf, &mut framer, &mut emit_out);
+            framer.finish(&mut emit_out);
             let status = child.wait().map_err(|e| e.to_string())?;
             // Kill any remaining processes in the child's process group
             let _ = killpg(child_pid, Signal::SIGKILL);
@@ -174,17 +193,81 @@ pub fn run_command(
         // After kill or soft signal, poll for child exit even without fd events
         if child_killed || escalation_deadline.is_some() {
             if let Ok(Some(status)) = child.try_wait() {
-                let mut line = String::new();
-                while child_buf.read_line(&mut line).unwrap_or(0) > 0 {
-                    send(&Response::Out {
-                        out: line.trim_end().to_string(),
-                    });
-                    line.clear();
-                }
-                // Kill any remaining processes in the child's process group
+                // Kill the child's process group first so write ends held by
+                // group members close and the drain below normally reaches EOF
+                // quickly. A grandchild that left the group (setsid) can still
+                // hold the pipe open and stall this drain — a pre-existing
+                // limitation, unchanged here. Buffered data survives, so
+                // nothing written is lost.
                 let _ = killpg(child_pid, Signal::SIGKILL);
+                // Drain buffered output through the framer, then flush the
+                // trailing partial line.
+                drain_child_output(&mut child_buf, &mut framer, &mut emit_out);
+                framer.finish(&mut emit_out);
                 return Ok(status.code().unwrap_or(-1));
             }
         }
+    }
+}
+
+/// Drain all currently-available buffered child output through the framer,
+/// stopping at EOF (an empty read) or a read error. `EINTR` is retried rather
+/// than surfaced, matching the behavior `read_line` provided before it was
+/// replaced by `fill_buf`. Does not flush the trailing partial line — the
+/// caller does that via [`LineFramer::finish`].
+fn drain_child_output(
+    reader: &mut impl BufRead,
+    framer: &mut LineFramer,
+    emit: &mut impl FnMut(String),
+) {
+    loop {
+        let data = match reader.fill_buf() {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue, // EINTR: retry
+            Err(_) => break,
+        };
+        if data.is_empty() {
+            break;
+        }
+        let n = data.len();
+        framer.push(data, emit);
+        reader.consume(n);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufReader;
+
+    /// Reader that returns `EINTR` on its first read, one line on its second,
+    /// then EOF — proving the drain retries an interrupted read instead of
+    /// aborting or dropping the line.
+    struct InterruptThenData {
+        step: usize,
+    }
+
+    impl std::io::Read for InterruptThenData {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.step += 1;
+            match self.step {
+                1 => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+                2 => {
+                    buf[..6].copy_from_slice(b"hello\n");
+                    Ok(6)
+                }
+                _ => Ok(0),
+            }
+        }
+    }
+
+    #[test]
+    fn drain_survives_interrupted_read() {
+        let mut reader = BufReader::new(InterruptThenData { step: 0 });
+        let mut framer = LineFramer::new();
+        let mut lines: Vec<String> = Vec::new();
+        drain_child_output(&mut reader, &mut framer, &mut |line| lines.push(line));
+        framer.finish(&mut |line| lines.push(line));
+        assert_eq!(lines, vec!["hello".to_string()]);
     }
 }

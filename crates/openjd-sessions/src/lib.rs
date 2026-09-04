@@ -32,6 +32,15 @@ pub(crate) mod win32_permissions;
 #[cfg(all(windows, feature = "test-utils"))]
 pub mod win32_permissions;
 
+// The bounded line framer lives in the helper's source tree (std-only) and
+// compiles into the helper binary. Included here under test so this crate can
+// unit-test it and pin its `decode_backslashreplace` byte-for-byte to
+// `subprocess::decode_backslashreplace`. Same `#[path]` technique as
+// win32_locate.rs: the helper is a nested crate, not a shared dependency.
+#[cfg(all(test, unix))]
+#[path = "helper/src/framer.rs"]
+mod helper_framer;
+
 // Re-export path mapping from openjd-expr (mirrors Python where sessions re-exports from expr)
 pub use openjd_expr::path_mapping;
 

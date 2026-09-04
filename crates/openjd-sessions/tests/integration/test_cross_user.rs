@@ -597,3 +597,198 @@ async fn test_cross_user_embedded_file_runnable_permissions() {
     assert_eq!(mode & 0o070, 0o070, "Group has r/w/x");
     assert_eq!(mode & 0o007, 0, "Others have no permissions");
 }
+
+// === Cross-user helper stdout framing regression tests ===
+//
+// Exercise the bounded, non-blocking stdout reader in `helper/src/runner.rs`.
+// `#[ignore]`; need the Docker + sudo fixtures like `test_cross_user_subprocess_basic`.
+
+/// Invalid UTF-8 (0x97) between valid lines must not abort the run: it streams
+/// on, backslash-escaped. Pre-fix `read_line` returned InvalidData.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_invalid_utf8_output_continues() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    // \227 is octal for 0x97 (POSIX-portable printf escape).
+    let args = [
+        "-c".to_string(),
+        "printf 'before\\n\\227\\nafter\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success, "stdout: {}", r.stdout);
+    assert!(r.stdout.contains("before"), "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains(r"\x97"),
+        "escaped byte missing: {}",
+        r.stdout
+    );
+    assert!(r.stdout.contains("after"), "stdout: {}", r.stdout);
+    session.cleanup();
+}
+
+/// Per-line memory stays bounded: a 1 MiB newline-less line yields one
+/// truncated Out (<= 64 KiB) and "END" still streams. Pre-fix `read_line`
+/// buffered the whole line and overflowed the response limit.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_bounded_single_out_long_line() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = [
+        "-c".to_string(),
+        "head -c 1048576 /dev/zero | tr '\\0' 'a'; printf '\\nEND\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "stdout len: {}",
+        r.stdout.len()
+    );
+    // The unbounded 'a' run must be truncated to exactly the 64 KiB prefix (one Out).
+    let a_count = r.stdout.chars().filter(|&c| c == 'a').count();
+    assert_eq!(
+        a_count,
+        64 * 1024,
+        "long line must preserve exactly the bounded 64 KiB prefix, got {a_count}"
+    );
+    assert!(r.stdout.contains("END"), "trailing line missing");
+    session.cleanup();
+}
+
+/// Stress the bounded reader with 10 MiB on one newline-less line, written in
+/// 10240 separate 1 KiB writes so the reader wakes thousands of times mid-line.
+/// Still exactly one truncated Out (the 64 KiB prefix) and "END" still streams:
+/// the discard path holds across many `fill_buf` wakeups without stalling the
+/// pipe. Pre-fix `read_line` buffered all 10 MiB and overflowed the response
+/// limit.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_bounded_single_out_10mib_repeated_flushes() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    // One 1 KiB chunk emitted 10240 times = 10 MiB, each `printf` a separate
+    // write(2) with no newline, so every wakeup lands mid-line.
+    let args = [
+        "-c".to_string(),
+        "chunk=$(head -c 1024 /dev/zero | tr '\\0' 'a'); i=0; while [ $i -lt 10240 ]; do printf '%s' \"$chunk\"; i=$((i+1)); done; printf '\\nEND\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "stdout len: {}",
+        r.stdout.len()
+    );
+    // Exactly the 64 KiB prefix survives. More would mean the cap leaked; a
+    // multiple would mean the line was emitted more than once.
+    let a_count = r.stdout.chars().filter(|&c| c == 'a').count();
+    assert_eq!(
+        a_count,
+        64 * 1024,
+        "10 MiB line must yield exactly one bounded 64 KiB prefix, got {a_count}"
+    );
+    assert!(r.stdout.contains("END"), "trailing line missing");
+    session.cleanup();
+}
+
+/// Cancel stays responsive during a partial line: a newline-less line then
+/// sleep must still cancel promptly. Pre-fix `read_line` blocked on the
+/// missing newline until the sleep ended.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_during_partial_line() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let canceller = spawn_cancel_with_retry(session.cancel_handle(), false);
+
+    let args = ["-c".to_string(), "printf x; sleep 300".to_string()];
+    let started = std::time::Instant::now();
+    let result = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .expect("cross-user subprocess must return a cancellation result");
+    let elapsed = started.elapsed();
+
+    let delivered = canceller.await.expect("canceller task must not panic");
+    assert_eq!(
+        result.state,
+        ActionState::Canceled,
+        "cancel must end the action as Canceled; exit_code: {:?}, stdout: {}",
+        result.exit_code,
+        result.stdout
+    );
+    assert!(
+        delivered,
+        "handle must find the in-flight helper action and deliver the cancel"
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "cancel must interrupt the partial-line sleep, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// JSON-expansion guard end to end: 100 KiB of 0x01 expands 6x (`\u0001`) to
+/// ~600 KiB, past the 128 KiB limit. Must complete with a truncated Out, not a
+/// per-line HelperCommunication error.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_control_char_line_within_response_limit() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = [
+        "-c".to_string(),
+        "head -c 102400 /dev/zero | tr '\\0' '\\001'; printf '\\n'".to_string(),
+    ];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "control-char line must not trip the response limit; stdout len: {}",
+        r.stdout.len()
+    );
+    let control_count = r.stdout.chars().filter(|&c| c == '\u{1}').count();
+    assert!(
+        control_count > 0,
+        "bounded control-character output must be delivered, not silently dropped"
+    );
+    assert!(
+        control_count <= 64 * 1024,
+        "control-character output must remain bounded"
+    );
+    session.cleanup();
+}
+
+/// EOF flush: a trailing newline-less line is still delivered on exit.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_eof_partial_line_preserved() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let args = ["-c".to_string(), "printf 'tail-no-newline'".to_string()];
+    let r = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success, "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains("tail-no-newline"),
+        "EOF partial line dropped: {}",
+        r.stdout
+    );
+    session.cleanup();
+}
