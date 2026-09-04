@@ -303,8 +303,12 @@ fn exact_string_contains() {
 }
 #[test]
 fn exact_regex_search() {
+    // 'a' * 500: dispatch(1) + count_string_ops(500)=2 → 3 ops
+    // re_search(haystack, r'b'): dispatch(1) + count_string_ops(500)=2
+    //   + compile: count_ops(max(1,1))=1 → 4 ops from re_search
+    // total = 3 + 4 = 7
     let r = eval_bounded("re_search('a' * 500, r'b')", 100_000_000, 10_000_000).unwrap();
-    assert_eq!(r.operation_count, 6);
+    assert_eq!(r.operation_count, 7);
 }
 #[test]
 fn exact_repr_sh_string() {
