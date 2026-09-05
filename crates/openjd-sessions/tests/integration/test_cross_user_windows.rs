@@ -826,6 +826,61 @@ async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
     session.cleanup();
 }
 
+/// Cancel stays responsive during a partial line: a newline-less write then a
+/// long sleep must still cancel promptly, because the chunked reader no longer
+/// blocks on the missing newline the way `BufReader::lines()` did. Mirrors the
+/// Unix `test_cross_user_cancel_during_partial_line`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_cancel_during_partial_line() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+    let canceller = spawn_cancel_with_retry(session.cancel_handle(), false);
+
+    let started = std::time::Instant::now();
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&[
+                "-Command".to_string(),
+                "[Console]::Out.Write('x'); Start-Sleep -Seconds 60".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await;
+    let elapsed = started.elapsed();
+
+    let delivered = canceller.await.expect("canceller task must not panic");
+    match result {
+        // The partial-line write must not delay cancel classification.
+        Ok(r) => assert_eq!(
+            r.state,
+            ActionState::Canceled,
+            "cancel during a partial line must end the action as Canceled; exit_code: {:?}, stdout: {}",
+            r.exit_code,
+            r.stdout
+        ),
+        // A canceled helper subprocess may surface as an error result, but
+        // only when the cancel was actually delivered.
+        Err(e) => assert!(
+            delivered,
+            "subprocess failed before any cancel was delivered: {e}"
+        ),
+    }
+    assert!(
+        delivered,
+        "handle must find the in-flight helper action and deliver the cancel"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "cancel must interrupt the partial-line sleep, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
 /// `mark_action_failed=true` must convert a canceled helper subprocess to
 /// Failed, matching drive_action's conversion and the
 /// `SessionCancelHandle::cancel` contract.
