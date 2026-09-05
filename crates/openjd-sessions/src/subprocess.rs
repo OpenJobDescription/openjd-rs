@@ -2247,9 +2247,8 @@ mod tests {
     }
 
     /// Pin the helper's copy of `decode_backslashreplace` byte-for-byte to this
-    /// one so they cannot drift. `#[cfg(unix)]` because `crate::helper_framer`
-    /// is only included on unix under test.
-    #[cfg(unix)]
+    /// one so they cannot drift, and pin the mirrored line caps. Runs on every
+    /// platform: `crate::helper_framer` is now included under `#[cfg(test)]`.
     #[test]
     fn helper_framer_decode_matches_subprocess_decode() {
         // Pin the mirrored line caps together.
