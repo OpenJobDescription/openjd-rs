@@ -4,6 +4,15 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.6.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.6.0...openjd-model-v0.6.1) - 2026-09-05
+
+### Bug fixes
+
+- Gate parameter type-name case on the EXPR extension ([#364](https://github.com/OpenJobDescription/openjd-rs/pull/364))
+
+- Reject NUL bytes in environment variable values ([#360](https://github.com/OpenJobDescription/openjd-rs/pull/360))
+
+
 ## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.4...openjd-model-v0.6.0) - 2026-09-03
 
 ### Bug fixes

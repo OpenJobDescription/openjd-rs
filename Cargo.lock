@@ -2024,7 +2024,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openjd-cli"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "clap",
@@ -2058,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-for-js"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "js-sys",
  "openjd-expr",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-model"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "indexmap",
  "openjd-expr",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "bitflags",
  "futures-util",
@@ -2112,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-snapshots"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "aws-config",
