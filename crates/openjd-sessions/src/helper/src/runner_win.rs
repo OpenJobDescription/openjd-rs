@@ -16,7 +16,8 @@
 
 use super::job_object::JobObject;
 use super::protocol::{send, CancelMethod, Response, RunCommand};
-use std::io::BufRead;
+use crate::framer::{fit_out_payload, LineFramer};
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
@@ -75,38 +76,14 @@ pub fn run_command(
     let child_stdout = child.stdout.take().unwrap();
     let child_stderr = child.stderr.take().unwrap();
 
-    // Background threads read child output and send lines via channel
+    // Background threads frame child output into bounded lines, sent via channel.
     let (out_tx, out_rx) = mpsc::channel::<String>();
 
     let tx1 = out_tx.clone();
-    let stdout_thread = std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(child_stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    if tx1.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    let stdout_thread = std::thread::spawn(move || frame_child_output(child_stdout, tx1));
 
     let tx2 = out_tx.clone();
-    let stderr_thread = std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(child_stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    if tx2.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    let stderr_thread = std::thread::spawn(move || frame_child_output(child_stderr, tx2));
 
     drop(out_tx);
 
@@ -157,6 +134,48 @@ pub fn run_command(
     let _ = stderr_thread.join();
 
     Ok(exit_code)
+}
+
+/// Frame `reader` into bounded lines, one Out payload per line sent via `tx`.
+///
+/// Caps per-line memory at 64 KiB, escapes invalid UTF-8 instead of erroring
+/// the thread, and flushes the trailing partial line at EOF. Same bounding as
+/// the Unix runner; blocking 8 KiB reads on this dedicated thread are fine.
+fn frame_child_output<R: Read>(mut reader: R, tx: mpsc::Sender<String>) {
+    let mut framer = LineFramer::new();
+    let mut buf = [0u8; 8 * 1024];
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
+            // A signal can interrupt the read mid-call; retry rather than end the stream.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break, // read error ends the thread, as lines() did
+        };
+        let mut lines = Vec::new();
+        framer.push(&buf[..n], &mut |line| lines.push(to_payload(&line)));
+        for line in lines {
+            if tx.send(line).is_err() {
+                return; // receiver dropped; stop without flushing
+            }
+        }
+    }
+    let mut lines = Vec::new();
+    framer.finish(&mut |line| lines.push(to_payload(&line)));
+    for line in lines {
+        if tx.send(line).is_err() {
+            return;
+        }
+    }
+}
+
+/// Turn one framed line into an `Out` payload. Strips only the CRLF's trailing
+/// `\r` (the framer keeps it; only `\n` ends a line), not all trailing
+/// whitespace like the Unix runner's `trim_end`, then caps the result at the
+/// 128 KiB response limit via [`fit_out_payload`], matching Unix's bound.
+fn to_payload(line: &str) -> String {
+    let stripped = line.strip_suffix('\r').unwrap_or(line);
+    fit_out_payload(stripped).to_string()
 }
 
 /// Handle a cancel request. Returns an escalation deadline for soft signals
@@ -316,4 +335,97 @@ fn collect_tree(root_pid: u32) -> Vec<u32> {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::framer::MAX_LINE_BYTES;
+
+    /// Mirror the runner's per-line transform: frame `chunks` through a fresh
+    /// `LineFramer` and apply `to_payload` to every emitted line, flushing the
+    /// trailing partial at EOF.
+    fn payloads(chunks: &[&[u8]]) -> Vec<String> {
+        let mut framer = LineFramer::new();
+        let mut out = Vec::new();
+        for chunk in chunks {
+            framer.push(chunk, &mut |line| out.push(to_payload(&line)));
+        }
+        framer.finish(&mut |line| out.push(to_payload(&line)));
+        out
+    }
+
+    /// Drive the real `frame_child_output` over `input` (a `&[u8]` is a
+    /// `Read`), returning the payloads its thread would send. Both the stdout
+    /// and stderr threads call this one function, so exercising it once covers
+    /// the framing both channels receive.
+    fn frame_reader(input: &[u8]) -> Vec<String> {
+        let (tx, rx) = mpsc::channel::<String>();
+        frame_child_output(input, tx);
+        rx.into_iter().collect()
+    }
+
+    /// Guards CRLF stripping: the framer keeps the `\r` (only `\n` ends a
+    /// line), so the runner must drop the single trailing `\r` of each line.
+    #[test]
+    fn crlf_stripped_from_payload() {
+        assert_eq!(
+            payloads(&[b"a\r\nb\r\n"]),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    /// Guards that a lone `\r` not at the line end (progress-bar carriage
+    /// return) is preserved; only a single trailing `\r` is stripped.
+    #[test]
+    fn lone_cr_preserved_in_payload() {
+        assert_eq!(
+            payloads(&[b"p 10%\rp 20%\n"]),
+            vec!["p 10%\rp 20%".to_string()]
+        );
+    }
+
+    /// Guards a `\r` landing exactly on a chunk boundary (chunk ends `\r`,
+    /// next chunk starts `\n`): it still frames as one `\r\n` line and strips
+    /// to no CR.
+    #[test]
+    fn cr_on_chunk_boundary_stripped() {
+        assert_eq!(payloads(&[b"x\r", b"\n"]), vec!["x".to_string()]);
+    }
+
+    /// Guards an empty line via `\r\n`: the framer emits `"\r"`, the runner
+    /// strips it to an empty payload.
+    #[test]
+    fn empty_crlf_line_yields_empty_payload() {
+        assert_eq!(payloads(&[b"\r\n"]), vec![String::new()]);
+    }
+
+    /// Guards invalid UTF-8 through the reader path: bytes are backslash-
+    /// escaped, not errored, and the thread keeps emitting.
+    #[test]
+    fn invalid_utf8_escaped_not_errored() {
+        assert_eq!(frame_reader(b"a\x97b\n"), vec![r"a\x97b".to_string()]);
+    }
+
+    /// Guards bounded output: a line over `MAX_LINE_BYTES` yields a single
+    /// truncated payload (<= `MAX_LINE_BYTES`) through the Windows reader path.
+    #[test]
+    fn over_cap_line_truncated_through_reader() {
+        let mut input = vec![b'a'; 1024 * 1024];
+        input.push(b'\n');
+        let out = frame_reader(&input);
+        assert_eq!(out.len(), 1, "over-cap line must emit exactly one Out");
+        assert!(out[0].len() <= MAX_LINE_BYTES);
+    }
+
+    /// Guards stdout/stderr symmetry: both threads route through this one
+    /// `frame_child_output`, so this shared-path check (lines split on `\n`,
+    /// CRLF stripped, EOF partial flushed) is the framing both channels get.
+    #[test]
+    fn frame_child_output_shared_by_both_channels() {
+        assert_eq!(
+            frame_reader(b"one\r\ntwo\nthree"),
+            vec!["one".to_string(), "two".to_string(), "three".to_string()]
+        );
+    }
 }
