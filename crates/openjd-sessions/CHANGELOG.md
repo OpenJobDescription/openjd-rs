@@ -5,6 +5,15 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.5...openjd-sessions-v0.5.6) - 2026-09-05
+
+### Bug fixes
+
+- Reject NUL bytes in environment variable values ([#360](https://github.com/OpenJobDescription/openjd-rs/pull/360))
+
+- Prune exited environment variables from WrappedAction.Environment ([#362](https://github.com/OpenJobDescription/openjd-rs/pull/362))
+
+
 ## [0.5.5](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.4...openjd-sessions-v0.5.5) - 2026-09-03
 
 ### Bug fixes
