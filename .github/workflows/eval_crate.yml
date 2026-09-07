@@ -283,7 +283,7 @@ jobs:
       # the org's review workflow uses, so it is known to be within this role's
       # MaxSessionDuration; raising it requires raising the role's cap first.
       - name: Assume role for Bedrock
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ secrets.AWS_CLAUDE_PR_REVIEW_ROLE }}
           aws-region: us-west-2
@@ -310,7 +310,7 @@ jobs:
           echo "AWS_SESSION_TOKEN=" >> "$GITHUB_ENV"
 
       - name: Run the eval-crate skill
-        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1.0.210
+        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
         env:
           AWS_BEARER_TOKEN_BEDROCK: ${{ env.AWS_BEARER_TOKEN_BEDROCK }}
           AWS_REGION: us-west-2
