@@ -45,6 +45,48 @@
 # needs all three. Only the Bedrock auth pre-step, the pinned action SHA and the
 # pinned requirements file are reused from it.
 #
+# THIS NEEDS ITS OWN BEDROCK ROLE, and cannot borrow the review workflow's.
+# `AWS_CLAUDE_PR_REVIEW_ROLE` looks like it should work -- its trust policy
+# admits `repo:OpenJobDescription/*:*`, which includes this repo -- but the same
+# condition block also requires
+#
+#   token.actions.githubusercontent.com:job_workflow_ref LIKE
+#     aws-deadline/.github/.github/workflows/reusable_claude_pr_review.yml@*
+#
+# and both conditions are ANDed. That claim names the workflow file the job was
+# *defined* in, so it can only ever be satisfied by a job running inside that
+# reusable workflow. This job is defined here, so sts:AssumeRoleWithWebIdentity
+# is refused. That is the pin doing its job, not a misconfiguration: it exists so
+# that a caller workflow in an allowed org cannot mint the token on its own, and
+# a workflow that hands an agent `cargo` and `Write` is exactly the caller it is
+# meant to stop. Widening it would delete the guarantee for the reviewer too.
+#
+# The role this workflow needs is therefore a separate one, pinned to this repo
+# and this file:
+#
+#   sub              LIKE repo:OpenJobDescription/openjd-rs:*
+#   job_workflow_ref LIKE OpenJobDescription/openjd-rs/.github/workflows/eval_crate.yml@*
+#   aud              ==   sts.amazonaws.com
+#   maxSessionDuration    3600
+#
+# Its ARN goes in `AWS_EVAL_CRATE_ROLE`, and until that secret exists every
+# trigger no-ops with a notice rather than failing -- see the `plan` job.
+#
+# THAT ROLE IS NOT JUST PAPERWORK, and this workflow should not be treated as
+# ready the moment it appears. The reviewer's role is governed by a threat model
+# whose load-bearing mitigations this workflow contradicts by construction: its
+# agent holds arbitrary shell (`cargo`, `python3`) where that model allows only
+# read-only tools; it deliberately compiles and runs repository code where that
+# model forbids executing contributor content at all; and in PR mode it runs this
+# file as it exists on the PR branch, where that model routes anything holding
+# credentials through a base-branch reusable workflow for exactly that reason.
+# Same-repo-plus-label gating substitutes a trusted-contributor assumption for
+# those controls. That is a defensible trade for a maintainer-triggered quality
+# report, but it is a DIFFERENT trade, and it belongs in its own threat-model
+# decision (and plausibly its own AWS account) rather than inheriting one written
+# for a read-only reviewer. Until that decision is made and recorded, the correct
+# state of this workflow is the one it is in: gated off.
+#
 # WHY PR MODE IS LABEL-GATED AND SAME-REPO ONLY
 #
 # Combining a fork-controlled checkout with `Bash(cargo ...)` is arbitrary code
@@ -125,8 +167,25 @@ jobs:
       - id: stamp
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
+      # Checked here rather than discovered 4 minutes into the eval job, where it
+      # surfaced as 12 STS retries and a bare "Not authorized to perform
+      # sts:AssumeRoleWithWebIdentity" after a full cargo build. `secrets` is not
+      # available in `if:`, so the presence test has to happen in a step.
+      # Presence only -- the value is never echoed.
+      - id: auth
+        env:
+          BEDROCK_ROLE: ${{ secrets.AWS_EVAL_CRATE_ROLE }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BEDROCK_ROLE:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - id: pick
         env:
+          CONFIGURED: ${{ steps.auth.outputs.configured }}
           EVENT: ${{ github.event_name }}
           LABEL: ${{ github.event.label.name }}
           INPUT_CRATE: ${{ github.event.inputs.crate }}
@@ -134,6 +193,16 @@ jobs:
           THIS_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # No role, no run -- for every trigger, before anything else is
+          # considered. A notice rather than a failure: an unconfigured optional
+          # workflow should be inert, and a weekly red X teaches people to ignore
+          # red. The notice names the missing secret so the reason is greppable
+          # when someone asks why the sweep has not run.
+          if [ "$CONFIGURED" != "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=AWS_EVAL_CRATE_ROLE is not set; see the workflow header for the role this needs" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           case "$EVENT" in
             schedule)
               # Every crate this workflow supports. `openjd-snapshots` is absent
@@ -279,13 +348,14 @@ jobs:
             -r workflow-tooling/.github/workflows/claude-review-requirements.txt
 
       # role-duration-seconds is what actually bounds the bearer token, so it is
-      # set explicitly rather than left to the action's default. 3600 is the value
-      # the org's review workflow uses, so it is known to be within this role's
-      # MaxSessionDuration; raising it requires raising the role's cap first.
+      # set explicitly rather than left to the action's default. 3600 is also the
+      # ceiling: these Bedrock-token roles are created with a 1-hour
+      # maxSessionDuration precisely to bound the token's TTL, so a larger value
+      # here would be refused by STS rather than honoured.
       - name: Assume role for Bedrock
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ secrets.AWS_CLAUDE_PR_REVIEW_ROLE }}
+          role-to-assume: ${{ secrets.AWS_EVAL_CRATE_ROLE }}
           aws-region: us-west-2
           role-duration-seconds: 3600
 
