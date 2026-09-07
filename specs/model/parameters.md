@@ -142,7 +142,17 @@ PATH parameters have special handling throughout the pipeline:
    default relative paths are joined to `job_template_dir`. URI paths (`s3://`, `https://`)
    are preserved as-is when the EXPR extension is enabled.
 
-4. **LIST[PATH]**: `RawParam.X` for `LIST[PATH]` is `list(STRING)`, not `list(PATH)`.
+4. **LIST[PATH]**: the coerced parameter value is `ExprValue::ListString` whatever its
+   length, including empty, because `PATH` elements are represented as strings. `RawParam.X`
+   for `LIST[PATH]` is correspondingly `list(STRING)`, not `list(PATH)`. `Param.X` only
+   becomes `list(PATH)` at session scope, after the session applies path mapping.
+
+   The variant is part of the contract, not an implementation detail: `openjd-sessions`
+   matches on it when applying path mapping. An empty list has no elements to infer a
+   variant from, so the coercion supplies the element representation type as a hint rather
+   than the declared element type — otherwise an empty `LIST[PATH]` would be a `ListPath`
+   while a populated one is a `ListString`. Consumers should still handle other variants,
+   since a caller can construct `JobParameterValue` directly.
 
 ## Value Coercion
 
