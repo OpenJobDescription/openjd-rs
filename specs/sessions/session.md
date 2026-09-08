@@ -178,6 +178,27 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 5. Processes `ActionMessage` values via `drive_action()`
 6. On completion: state → `Ready` or `ReadyEnding` based on result
 
+### Env var exports a task makes
+
+A task runs under a step identifier, which has no `created_env_vars` entry, so an
+`openjd_env` export it emits — directly, or through an RFC 0008 `onWrapTaskRun`
+hook that forwards its stdout — belongs to no environment and cannot be pruned
+when one exits. RFC 0008 still requires it in `WrappedAction.Environment`:
+runtimes must include every export from any earlier action in the session,
+"regardless of whether that action ran normally or via a wrap hook".
+
+`record_env_export` routes each export to the store that owns it. An
+environment's own exports go to `created_env_vars[identifier]`, so
+`exit_environment` removes them from the wrap symbol. Everything else goes to the
+session-lifetime `session_env_vars`, which `live_session_env_vars` merges beneath
+the entered environments' replay. An environment writing a name also clears that
+name from `session_env_vars`, so the two stores never hold the same name and the
+last writer is the one in effect.
+
+`session_env_vars` never feeds a process environment. That is `evaluate_env_vars`,
+built from `created_env_vars` alone, so a task printing an `openjd_env:` line
+behaves the same wrapped and unwrapped.
+
 When a wrap hook is dispatched, the borrow of the active environment stack is
 released by copying only the wrapper data needed for symbol seeding: its name,
 frozen resolved symbol table, script `let` bindings, and selected hook action.
