@@ -2,6 +2,9 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+// Unix-only for now: runner_win.rs still reads unbounded lines; a follow-up will reuse the framer there.
+#[cfg(unix)]
+mod framer;
 #[cfg(windows)]
 mod job_object;
 mod protocol;

@@ -20,7 +20,7 @@ use crate::logging::LogContent;
 
 /// Maximum bytes for a single JSON response line from the helper's stdout.
 /// Matches the helper binary's own `MAX_LINE_LENGTH` (128 KB).
-const MAX_RESPONSE_LINE_LENGTH: usize = 128 * 1024;
+pub(crate) const MAX_RESPONSE_LINE_LENGTH: usize = 128 * 1024;
 use crate::session_log;
 use crate::session_user::SessionUser;
 
