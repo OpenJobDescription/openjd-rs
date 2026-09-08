@@ -495,10 +495,18 @@ pub struct Session {
     ///
     /// Deliberately narrow. An environment's own exports stay out of this map so
     /// `exit_environment` still removes them from the wrap symbol, which is what
-    /// #362 fixed; and an environment writing a name clears that name here, so
-    /// the environment's value is the one in effect rather than a stale task
-    /// value. `session_env_vars` never feeds a process environment: that is
+    /// #362 fixed. `session_env_vars` never feeds a process environment: that is
     /// `evaluate_env_vars`, built from `created_env_vars` alone.
+    ///
+    /// Three kinds of export land here, all of which the released crate also
+    /// surfaced through its cumulative `env_vars`: a task's `onRun`, an
+    /// environment's `onExit` (by then its identifier is off
+    /// `environments_entered`, so no live environment owns it), and
+    /// `run_subprocess`, whose `{session}:subprocess:{uuid}` identifier never has
+    /// a `created_env_vars` entry. The last is not an OpenJD action, so RFC 0008
+    /// does not require it; it is kept because dropping it would diverge from the
+    /// released crate, and `run_subprocess_exports_reach_wrapped_action_environment`
+    /// pins it.
     session_env_vars: HashMap<String, String>,
     // Expression evaluation
     //
@@ -2359,12 +2367,25 @@ impl Session {
     /// `onRun`, or an `onWrapTaskRun` hook standing in for one — has no such
     /// entry, and goes to the session-lifetime `session_env_vars`.
     ///
-    /// An environment writing a name also clears it from `session_env_vars`, so
-    /// the two stores never hold the same name and the last writer is the one in
-    /// effect. Without that, a task's earlier value would either shadow the
-    /// environment's while it is entered, or reappear when it exits.
+    /// Ownership is decided by the live stack, not by a map lookup alone.
+    /// `exit_environment` pops the identifier off `environments_entered` before
+    /// running `onExit` and never removes its `created_env_vars` entry, so an
+    /// export made during `onExit` would otherwise land in an entry nothing reads
+    /// any more. Such an export belongs to no live environment and is
+    /// session-lifetime, which is also what the released crate did with it.
+    ///
+    /// An environment writing a name clears it from `session_env_vars`, so the
+    /// name is not held in both stores at once. Combined with
+    /// `live_session_env_vars` layering the session-lifetime map over the replay,
+    /// the later writer is the one in effect in both orders: environment after
+    /// task, and task after environment.
     fn record_env_export(&mut self, identifier: &str, key: String, value: Option<String>) {
-        if let Some(changes) = self.created_env_vars.get_mut(identifier) {
+        let is_live = self.environments_entered.iter().any(|id| id == identifier);
+        if let Some(changes) = self
+            .created_env_vars
+            .get_mut(identifier)
+            .filter(|_| is_live)
+        {
             changes.insert(key.clone(), value);
             self.session_env_vars.remove(&key);
         } else {
@@ -2390,7 +2411,7 @@ impl Session {
     /// every export from any earlier action in the session "regardless of whether
     /// that action ran normally or via a wrap hook".
     fn live_session_env_vars(&self) -> HashMap<String, String> {
-        let mut result = self.session_env_vars.clone();
+        let mut result = HashMap::new();
         for id in &self.environments_entered {
             if let Some(changes) = self.created_env_vars.get(id) {
                 for (name, value) in changes {
@@ -2404,6 +2425,15 @@ impl Session {
                     }
                 }
             }
+        }
+        // The session-lifetime map goes on top, not underneath. A name only
+        // survives in it while no live environment owns it, because
+        // `record_env_export` clears it when one writes — so anything still here
+        // was written after that environment's value and is the later writer.
+        // Layered underneath instead, an environment's older value would win and
+        // the task's export would resurface when the environment exited.
+        for (name, value) in &self.session_env_vars {
+            result.insert(name.clone(), value.clone());
         }
         result
     }

@@ -187,13 +187,30 @@ when one exits. RFC 0008 still requires it in `WrappedAction.Environment`:
 runtimes must include every export from any earlier action in the session,
 "regardless of whether that action ran normally or via a wrap hook".
 
-`record_env_export` routes each export to the store that owns it. An
-environment's own exports go to `created_env_vars[identifier]`, so
-`exit_environment` removes them from the wrap symbol. Everything else goes to the
-session-lifetime `session_env_vars`, which `live_session_env_vars` merges beneath
-the entered environments' replay. An environment writing a name also clears that
-name from `session_env_vars`, so the two stores never hold the same name and the
-last writer is the one in effect.
+`record_env_export` routes each export to the store that owns it. An export made
+while its environment is still on `environments_entered` goes to
+`created_env_vars[identifier]`, so `exit_environment` removes it from the wrap
+symbol. Everything else goes to the session-lifetime `session_env_vars`, which
+`live_session_env_vars` layers over the entered environments' replay.
+
+Ownership is decided by the live stack, not by a `created_env_vars` lookup alone.
+`exit_environment` pops the identifier before running `onExit` and never removes
+the map entry, so an export made during `onExit` would otherwise be written to an
+entry no reader consults.
+
+Last writer wins in both orders, which takes two rules together: an environment
+writing a name clears it from `session_env_vars`, and `session_env_vars` is
+layered on top of the replay rather than beneath it. With only the first rule, a
+task exporting a name an entered environment already declared would be shadowed
+by the environment's older value, and would then resurface when that environment
+exited.
+
+Three kinds of export reach `session_env_vars`, all of which openjd-sessions
+0.5.5 also surfaced through its cumulative `env_vars`: a task's `onRun`, an
+environment's `onExit`, and `run_subprocess`, whose
+`{session}:subprocess:{uuid}` identifier never has a `created_env_vars` entry.
+`run_subprocess` is not an OpenJD action, so RFC 0008 does not require the last
+one; it is kept for parity with the released crate.
 
 `session_env_vars` never feeds a process environment. That is `evaluate_env_vars`,
 built from `created_env_vars` alone, so a task printing an `openjd_env:` line
