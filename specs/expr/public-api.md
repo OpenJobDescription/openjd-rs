@@ -1086,7 +1086,9 @@ pub struct StaticResolution {
     /// format string can resolve to under the same `target_type` given
     /// to `validate_expressions`: literals + concrete-segment display
     /// lengths (`null` → 0); unresolved segments contribute 0. Exact when
-    /// `resolved_value` is `Some`. For a single-expression list value the
+    /// `resolved_value` is `Some`. Accumulation saturates rather than
+    /// wraps (safe for a lower bound; relevant on 32-bit targets). For a
+    /// single-expression list value the
     /// bound measures the interpolated display form (`[1, 2, 3]`), so it
     /// only applies to fields consumed as strings.
     pub min_resolved_string_len: usize,

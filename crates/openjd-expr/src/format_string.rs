@@ -288,7 +288,8 @@ impl FormatString {
         for seg in &self.segments {
             let (parsed, start, end) = match seg {
                 Segment::Literal(text) => {
-                    min_resolved_string_len += text.chars().count();
+                    min_resolved_string_len =
+                        min_resolved_string_len.saturating_add(text.chars().count());
                     if building {
                         concat.push_str(text);
                         if concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
@@ -348,13 +349,15 @@ impl FormatString {
                         // is being built.
                         match &val {
                             ExprValue::String(s) => {
-                                min_resolved_string_len += s.chars().count();
+                                min_resolved_string_len =
+                                    min_resolved_string_len.saturating_add(s.chars().count());
                                 if building {
                                     concat.push_str(s);
                                 }
                             }
                             ExprValue::Path { value, .. } => {
-                                min_resolved_string_len += value.chars().count();
+                                min_resolved_string_len =
+                                    min_resolved_string_len.saturating_add(value.chars().count());
                                 if building {
                                     concat.push_str(value);
                                 }
@@ -362,7 +365,8 @@ impl FormatString {
                             _ => {
                                 let at = concat.len();
                                 val.write_display(&mut concat);
-                                min_resolved_string_len += concat[at..].chars().count();
+                                min_resolved_string_len = min_resolved_string_len
+                                    .saturating_add(concat[at..].chars().count());
                                 if !building {
                                     concat.truncate(at);
                                 }
@@ -742,6 +746,13 @@ pub struct StaticResolution {
     /// The bound describes resolution under the same `target_type` that was
     /// passed to [`validate_expressions`](FormatString::validate_expressions)
     /// — it is only a valid bound for a resolution using that same target.
+    ///
+    /// Accumulation is saturating: up to [`MAX_FORMAT_STRING_SEGMENTS`]
+    /// segments can each contribute up to the evaluator's memory limit in
+    /// characters, which can exceed `usize::MAX` on 32-bit targets.
+    /// Saturating is the safe direction for a lower bound — a wrapped sum
+    /// would *shrink* the bound and let an oversized string pass a limit
+    /// check, while a saturated one still exceeds any real limit.
     ///
     /// For a single-expression format string whose value is a list, the
     /// bound measures the interpolated display form (e.g. `[1, 2, 3]`, 9

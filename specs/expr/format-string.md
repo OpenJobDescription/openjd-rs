@@ -224,6 +224,13 @@ the interpolated display form (`[1, 2, 3]` → 9 characters) while
 `resolved_value` is the typed list, so consumers enforcing string-length
 limits should only apply it to fields consumed as strings.
 
+Accumulation is saturating: up to `MAX_FORMAT_STRING_SEGMENTS` segments
+can each contribute up to the evaluator's memory limit in characters,
+which can exceed `usize::MAX` on 32-bit targets. Saturating is the safe
+direction for a lower bound — a wrapped sum would shrink the bound and
+let an oversized string pass a limit check, while a saturated one still
+exceeds any real limit.
+
 **`resolved_value`** is the exact resolved value, present iff every
 expression segment evaluated to a concrete value (checked with
 `ExprValue::is_unresolved` — a complete check, because unresolved values
