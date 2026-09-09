@@ -100,6 +100,13 @@ ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::NULLT
 ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Float(..)], ExprType::NULLTYPE)  // → ListFloat (int→float)
 ExprValue::make_list(vec![ExprValue::Path{..}, ExprValue::String(..)], ExprType::NULLTYPE)  // → ListString (path→string)
 ExprValue::make_list(vec![], ExprType::INT)  // → ListInt (empty, hint selects variant)
+ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::unresolved(ExprType::INT)], ExprType::NULLTYPE)
+    // → Err("make_list expected concrete elements, got unresolved") —
+    //   make_list constructs concrete lists. Validation-time list
+    //   expressions with unknown elements are hoisted by the evaluator
+    //   (list literals and comprehensions) to a top-level
+    //   unresolved(list[T]), so Unresolved never nests inside a list and
+    //   is_unresolved() is a complete concreteness check
 
 // Memory-checked list construction — prefer this from evaluator/function contexts
 ExprValue::make_list_checked(ctx, elements, hint_type)  // pre-checks ctx.check_memory(...)

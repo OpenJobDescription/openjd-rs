@@ -686,16 +686,20 @@ impl ExprValue {
 
     /// Construct an `Unresolved(constraint)` value.
     pub fn unresolved(constraint: ExprType) -> Self;
+    /// True if this is an `Unresolved` value. A complete concreteness
+    /// check: unresolved values never nest inside lists — the evaluator
+    /// hoists list literals and comprehensions with any unresolved
+    /// element to a top-level `unresolved(list[T])`, and `make_list`
+    /// rejects unresolved elements — so `false` means fully concrete.
     pub fn is_unresolved(&self) -> bool;
-    /// True if the value contains any unresolved value, either directly
-    /// or nested. `false` means fully concrete.
-    pub fn contains_unresolved(&self) -> bool;
 
     // ── List construction ──
 
     /// Build a typed list from elements, promoting element types where
     /// needed (int+float → float, path+string → string). `hint_type`
-    /// determines the element type for an empty list.
+    /// determines the element type for an empty list. An `Unresolved`
+    /// element is rejected: `make_list` constructs concrete lists (the
+    /// evaluator hoists unknown-element list expressions instead).
     pub fn make_list(
         elements: Vec<ExprValue>, hint_type: ExprType,
     ) -> Result<Self, ExpressionError>;

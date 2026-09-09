@@ -226,8 +226,11 @@ limits should only apply it to fields consumed as strings.
 
 **`resolved_value`** is the exact resolved value, present iff every
 expression segment evaluated to a concrete value (checked with
-`ExprValue::contains_unresolved`, so a list containing an unresolved
-element does not count as concrete) **and**, in the concatenated case,
+`ExprValue::is_unresolved` — a complete check, because unresolved values
+never nest inside lists: the evaluator hoists list literals and
+comprehensions with any unresolved element to a top-level
+`unresolved(list[T])`, and `ExprValue::make_list` rejects unresolved
+elements) **and**, in the concatenated case,
 the resulting string is at most `MAX_STATIC_RESOLVED_VALUE_LEN` bytes (see
 Defensive Caps). It follows the
 [`resolve_with`](#resolve_with--preserves-typed-values-for-single-expression-strings)

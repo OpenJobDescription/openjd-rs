@@ -327,7 +327,7 @@ impl FormatString {
                             t
                         };
                     }
-                    if val.contains_unresolved() {
+                    if val.is_unresolved() {
                         // May resolve to anything, including the empty
                         // string: contributes 0 to the lower bound, and no
                         // resolved value is possible. Release the partial
