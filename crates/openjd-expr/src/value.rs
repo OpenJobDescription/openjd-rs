@@ -733,6 +733,28 @@ impl ExprValue {
         matches!(self, Self::Unresolved(_))
     }
 
+    /// True if the value contains any unresolved value, either directly or
+    /// nested.
+    ///
+    /// A value for which this returns `false` is fully concrete: it is
+    /// exactly the value that run-time resolution would produce from the
+    /// same inputs.
+    ///
+    /// Implementation note: only the `ListList` variant needs recursion —
+    /// it is the general list representation storing `Vec<ExprValue>`
+    /// (produced for nested lists and for lists whose elements are not
+    /// uniformly one primitive type, e.g. `[Param.X, 'a']` evaluated
+    /// during validation). The typed list variants (`ListBool`, `ListInt`,
+    /// `ListFloat`, `ListString`, `ListPath`) store raw primitives and
+    /// structurally cannot contain an `Unresolved`.
+    pub fn contains_unresolved(&self) -> bool {
+        match self {
+            Self::Unresolved(_) => true,
+            Self::ListList(v, _, _) => v.iter().any(Self::contains_unresolved),
+            _ => false,
+        }
+    }
+
     /// Create a PATH value with separators normalized to the given format.
     ///
     /// This is the only public constructor for `ExprValue::Path`; the variant

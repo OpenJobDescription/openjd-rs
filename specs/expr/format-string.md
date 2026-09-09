@@ -158,6 +158,52 @@ fs.validate_expressions(&unresolved_symtab, &library)?;
 Evaluates each expression with unresolved values to catch type errors at template
 validation time, before parameter values are known.
 
+On success, returns a `StaticResolution` describing what that evaluation
+determined statically. Callers that only need pass/fail ignore it.
+
+```rust
+pub struct StaticResolution {
+    pub min_resolved_len: usize,
+    pub static_value: Option<ExprValue>,
+}
+```
+
+**`min_resolved_len`** is a lower bound, in characters, on the length of
+any string the format string can resolve to — computed per segment:
+
+| Segment | Contribution (characters) |
+|---|---|
+| Literal text | its character count |
+| Expression → concrete value | interpolated display length (`to_display_string()`; `null` interpolates as the empty string → 0) |
+| Expression → value that is or contains `Unresolved` | 0 (may resolve to the empty string) |
+
+Because unresolved segments contribute 0, the bound holds for **every**
+possible run-time resolution: if `min_resolved_len` already exceeds some
+limit on the resolved value, no binding of the unresolved symbols can
+produce a conforming string. This lets the model layer enforce
+resolved-value constraints (spec limits phrased "after the format string
+has been resolved") at template-validation or job-creation time, even
+for partially-static strings such as
+`"{{ Session.WorkingDirectory }}/{{ 'A' * 10000000 }}"` — the static
+segment alone puts the bound over any plausible limit.
+
+**`static_value`** is the exact resolved value, present iff every
+expression segment evaluated to a concrete value (checked with
+`ExprValue::contains_unresolved`, so a list containing an unresolved
+element does not count as concrete). It follows the
+[`resolve_with`](#resolve_with--preserves-typed-values-for-single-expression-strings)
+typed-passthrough rule: a format string that is exactly one expression
+segment and nothing else keeps the typed value (which may be a list or
+`null`); anything else produces the concatenated string with `null`
+segments interpolated as empty. When `static_value` is `Some`,
+`min_resolved_len` is exact. The values come from the evaluation the
+method already performs for type checking — no second evaluation occurs.
+
+The bound is per-segment, not per-subexpression: a single expression
+mixing static and unresolved parts (e.g.
+`{{ 'A' * 10000000 + Session.WorkingDirectory }}`) evaluates to
+`Unresolved` as a whole and contributes 0.
+
 ### validate_comprehension_vars — let binding shadowing check
 
 ```rust

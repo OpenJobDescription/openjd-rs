@@ -686,6 +686,9 @@ impl ExprValue {
     /// Construct an `Unresolved(constraint)` value.
     pub fn unresolved(constraint: ExprType) -> Self;
     pub fn is_unresolved(&self) -> bool;
+    /// True if the value contains any unresolved value, either directly
+    /// or nested. `false` means fully concrete.
+    pub fn contains_unresolved(&self) -> bool;
 
     // ── List construction ──
 
@@ -995,10 +998,13 @@ impl FormatString {
     /// Validate every interpolation against a type-checking symbol table
     /// (typically populated with `ExprValue::unresolved(T)` values).
     /// Returns structured errors with the position of the first failing
-    /// interpolation so callers can produce diagnostics.
+    /// interpolation so callers can produce diagnostics. On success,
+    /// returns a `StaticResolution` describing what evaluation determined
+    /// statically (resolved-length lower bound; exact value when fully
+    /// static); pass/fail-only callers ignore it.
     pub fn validate_expressions(
         &self, symtab: &SymbolTable, library: &FunctionLibrary,
-    ) -> Result<(), FormatStringValidationError>;
+    ) -> Result<StaticResolution, FormatStringValidationError>;
 
     /// Validate that list-comprehension loop variables in this format
     /// string's interpolations don't shadow names from the enclosing
@@ -1058,6 +1064,24 @@ impl<'a> FormatStringOptions<'a> {
 }
 
 impl<'a> Default for FormatStringOptions<'a> { /* ... */ }
+```
+
+```rust
+/// Outcome of statically evaluating a format string against a symbol
+/// table that may contain unresolved placeholders. Returned by
+/// `FormatString::validate_expressions`.
+#[derive(Debug, Clone)]
+pub struct StaticResolution {
+    /// Lower bound, in characters, on the length of any string this
+    /// format string can resolve to: literals + concrete-segment display
+    /// lengths (`null` → 0); unresolved segments contribute 0. Exact when
+    /// `static_value` is `Some`.
+    pub min_resolved_len: usize,
+    /// The fully resolved value, present iff every expression segment
+    /// evaluated concrete. Typed passthrough for single-expression format
+    /// strings (mirrors `resolve_with`); concatenated string otherwise.
+    pub static_value: Option<ExprValue>,
+}
 ```
 
 ```rust
@@ -1444,6 +1468,7 @@ pub use eval::{
 };
 pub use format_string::{
     escape_format_string, FormatString, FormatStringOptions, FormatStringValidationError,
+    StaticResolution,
 };
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};

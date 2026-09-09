@@ -177,6 +177,101 @@ fn validate_passes_with_unresolved_types() {
     assert!(fs.validate_expressions(&st, &lib).is_ok());
 }
 
+// === StaticResolution (lower bound + static value) ===
+
+fn static_resolution(input: &str, st: &SymbolTable) -> openjd_expr::StaticResolution {
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+    ));
+    FormatString::new(input)
+        .unwrap()
+        .validate_expressions(st, &lib)
+        .unwrap()
+}
+
+#[test]
+fn static_resolution_literal_only() {
+    let sr = static_resolution("hello", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 5);
+    assert!(matches!(sr.static_value, Some(ExprValue::String(ref s)) if s == "hello"));
+}
+
+#[test]
+fn static_resolution_fully_static_expression() {
+    let sr = static_resolution("{{ 'A' * 5 }}", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 5);
+    assert!(matches!(sr.static_value, Some(ExprValue::String(ref s)) if s == "AAAAA"));
+}
+
+#[test]
+fn static_resolution_single_expression_keeps_typed_value() {
+    let sr = static_resolution("{{ 1 + 2 }}", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 1); // "3"
+    assert!(matches!(sr.static_value, Some(ExprValue::Int(3))));
+}
+
+#[test]
+fn static_resolution_multi_segment_concatenates() {
+    let sr = static_resolution("x{{ 'A' * 3 }}y", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 5);
+    assert!(matches!(sr.static_value, Some(ExprValue::String(ref s)) if s == "xAAAy"));
+}
+
+#[test]
+fn static_resolution_unresolved_contributes_zero() {
+    // The static suffix bounds the resolved length even though the
+    // Session.* prefix is unknown until run time.
+    let st = symtab!("Session.WorkingDirectory" => ExprValue::unresolved(ExprType::PATH));
+    let sr = static_resolution("{{ Session.WorkingDirectory }}/{{ 'A' * 4 }}", &st);
+    assert_eq!(sr.min_resolved_len, 5); // "/" + "AAAA"
+    assert!(sr.static_value.is_none());
+}
+
+#[test]
+fn static_resolution_fully_unresolved() {
+    let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::STRING));
+    let sr = static_resolution("{{ Param.X }}", &st);
+    assert_eq!(sr.min_resolved_len, 0);
+    assert!(sr.static_value.is_none());
+}
+
+#[test]
+fn static_resolution_null_interpolates_as_empty() {
+    let sr = static_resolution("a{{ null }}b", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 2);
+    assert!(matches!(sr.static_value, Some(ExprValue::String(ref s)) if s == "ab"));
+}
+
+#[test]
+fn static_resolution_single_null_expression_is_typed_null() {
+    let sr = static_resolution("{{ null }}", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 0);
+    assert!(matches!(sr.static_value, Some(ExprValue::Null)));
+}
+
+#[test]
+fn static_resolution_concrete_list_value() {
+    let sr = static_resolution("{{ [1, 2, 3] }}", &SymbolTable::new());
+    let val = sr.static_value.expect("fully static");
+    assert!(val.is_list());
+    // Bound matches the interpolated display form ("[1, 2, 3]").
+    assert_eq!(sr.min_resolved_len, val.to_display_string().chars().count());
+}
+
+#[test]
+fn static_resolution_list_with_unresolved_element_is_not_static() {
+    let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::STRING));
+    let sr = static_resolution("{{ [Param.X, 'a'] }}", &st);
+    assert!(sr.static_value.is_none());
+    assert_eq!(sr.min_resolved_len, 0);
+}
+
+#[test]
+fn static_resolution_len_counts_characters_not_bytes() {
+    let sr = static_resolution("{{ 'é' * 4 }}", &SymbolTable::new());
+    assert_eq!(sr.min_resolved_len, 4);
+}
+
 // === Null handling ===
 
 #[test]

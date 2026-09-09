@@ -204,27 +204,87 @@ impl FormatString {
     /// The symbol table should contain `ExprValue::unresolved(T)` for symbols
     /// whose values are not yet known. This is the spec's approach to static
     /// type checking — just evaluate normally with unresolved types.
+    ///
+    /// On success, returns a [`StaticResolution`] describing what the
+    /// evaluation determined statically: a guaranteed lower bound on the
+    /// resolved length, and — when no segment depended on an unresolved
+    /// symbol — the exact resolved value. Callers that only need pass/fail
+    /// can ignore the returned value.
     pub fn validate_expressions(
         &self,
         symtab: &SymbolTable,
         lib: &crate::function_library::FunctionLibrary,
-    ) -> Result<(), FormatStringValidationError> {
+    ) -> Result<StaticResolution, FormatStringValidationError> {
+        let mut min_resolved_len = 0usize;
+        let mut all_concrete = true;
+        // Concrete value per segment (None for literals and unresolved
+        // segments), used to assemble `static_value` without re-evaluating.
+        let mut concrete_values: Vec<Option<ExprValue>> = Vec::with_capacity(self.segments.len());
         for seg in &self.segments {
             let (parsed, start, end) = match seg {
-                Segment::Literal(_) => continue,
+                Segment::Literal(text) => {
+                    min_resolved_len += text.chars().count();
+                    concrete_values.push(None);
+                    continue;
+                }
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
             };
-            if let Err(e) = parsed.with_library(lib).evaluate(&[symtab]) {
-                return Err(FormatStringValidationError {
-                    message: e.to_string(),
-                    input: self.raw.clone(),
-                    start,
-                    end,
-                    expression_error: Some(Box::new(e)),
-                });
+            match parsed.with_library(lib).evaluate(&[symtab]) {
+                Ok(val) => {
+                    if val.contains_unresolved() {
+                        // May resolve to anything, including the empty
+                        // string: contributes 0 to the lower bound.
+                        all_concrete = false;
+                        concrete_values.push(None);
+                    } else {
+                        // Null interpolates as the empty string (see
+                        // resolve_string_with), so it contributes 0.
+                        if !matches!(val, ExprValue::Null) {
+                            min_resolved_len += val.to_display_string().chars().count();
+                        }
+                        concrete_values.push(Some(val));
+                    }
+                }
+                Err(e) => {
+                    return Err(FormatStringValidationError {
+                        message: e.to_string(),
+                        input: self.raw.clone(),
+                        start,
+                        end,
+                        expression_error: Some(Box::new(e)),
+                    });
+                }
             }
         }
-        Ok(())
+
+        let static_value = if !all_concrete {
+            None
+        } else if self.segments.len() == 1 && matches!(self.segments[0], Segment::Expression { .. })
+        {
+            // Typed passthrough, mirroring resolve_with: exactly one
+            // expression segment and nothing else keeps the typed value.
+            concrete_values.pop().flatten()
+        } else {
+            // Concatenated string, mirroring resolve_string_with.
+            let mut s = String::new();
+            for (seg, val) in self.segments.iter().zip(&concrete_values) {
+                match (seg, val) {
+                    (Segment::Literal(text), _) => s.push_str(text),
+                    (Segment::Expression { .. }, Some(v)) => {
+                        if !matches!(v, ExprValue::Null) {
+                            s.push_str(&v.to_display_string());
+                        }
+                    }
+                    (Segment::Expression { .. }, None) => unreachable!("all segments concrete"),
+                }
+            }
+            Some(ExprValue::String(s))
+        };
+
+        Ok(StaticResolution {
+            min_resolved_len,
+            static_value,
+        })
     }
 
     /// Validate list comprehension loop variables in expressions.
@@ -536,6 +596,37 @@ fn parse_segments(input: &str, profile: &ExprProfile) -> Result<Vec<Segment>, Ex
         }
     }
     Ok(segments)
+}
+
+/// Outcome of statically evaluating a format string against a symbol table
+/// that may contain [`ExprValue::unresolved`] placeholders.
+///
+/// Returned by [`FormatString::validate_expressions`]. Callers that only
+/// care about pass/fail can ignore it. Callers enforcing resolved-value
+/// constraints (e.g. spec limits stated "after the format string has been
+/// resolved") use [`min_resolved_len`](Self::min_resolved_len) — a bound
+/// that holds even when parts of the string are unknown — and
+/// [`static_value`](Self::static_value), the exact resolved value when
+/// nothing is unknown.
+#[derive(Debug, Clone)]
+pub struct StaticResolution {
+    /// Lower bound, in characters, on the length of any string this format
+    /// string can resolve to. Literal segments contribute their character
+    /// count; expression segments that evaluated to a concrete value
+    /// contribute their interpolated display length (`null` interpolates as
+    /// the empty string, contributing 0); segments whose value is (or
+    /// contains) an unresolved placeholder contribute 0, since they may
+    /// resolve to the empty string. Exact when
+    /// [`static_value`](Self::static_value) is `Some`.
+    pub min_resolved_len: usize,
+    /// The fully resolved value, present iff every expression segment
+    /// evaluated to a concrete (non-unresolved) value. Follows the
+    /// [`resolve_with`](FormatString::resolve_with) typed-passthrough rule:
+    /// for a format string that is exactly one expression segment and
+    /// nothing else, this is the typed value (which may be a list or
+    /// `null`); otherwise it is the concatenated string, with `null`
+    /// segments interpolated as the empty string.
+    pub static_value: Option<ExprValue>,
 }
 
 /// Structured error from [`FormatString::validate_expressions`].
