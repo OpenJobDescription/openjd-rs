@@ -21,6 +21,12 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
+/// Queue slots shared by the stdout and stderr reader threads. Bounds the
+/// worst-case aggregate queue at 256 lines of at most `MAX_LINE_BYTES`
+/// (64 KiB) each, ~16 MiB, while staying far above what the 50 ms consumer
+/// poll drains per tick in normal operation.
+const OUT_QUEUE_LINES: usize = 256;
+
 /// Run a command, receiving cancel signals from the provided channel.
 ///
 /// Architecture:
@@ -76,8 +82,12 @@ pub fn run_command(
     let child_stdout = child.stdout.take().unwrap();
     let child_stderr = child.stderr.take().unwrap();
 
-    // Background threads frame child output into bounded lines, sent via channel.
-    let (out_tx, out_rx) = mpsc::channel::<String>();
+    // Background threads frame child output into bounded lines, sent via a
+    // bounded channel. The bound restores the backpressure the Unix runner
+    // gets for free (frame + emit in one loop): when the parent drains our
+    // stdout slowly, the queue fills, the reader threads park in `send`, and
+    // the child blocks on its full pipe instead of growing host memory.
+    let (out_tx, out_rx) = mpsc::sync_channel::<String>(OUT_QUEUE_LINES);
 
     let tx1 = out_tx.clone();
     let stdout_thread = std::thread::spawn(move || frame_child_output(child_stdout, tx1));
@@ -121,8 +131,15 @@ pub fn run_command(
         }
     }
 
-    // Drain any remaining output
-    while let Ok(line) = out_rx.try_recv() {
+    // Drain until both reader threads finish and drop their senders. With the
+    // bounded channel a `try_recv` pass followed by `join` could deadlock: a
+    // reader parked in `send` on a full queue would never exit, and nothing
+    // would drain. Blocking `recv` returns Err(Disconnected) only after both
+    // threads have flushed their final (possibly newline-less) line via
+    // `framer.finish()` and exited, so this delivers everything and makes the
+    // joins below immediate. Its wait is bounded by the readers reaching EOF,
+    // the same bound the joins already had.
+    while let Ok(line) = out_rx.recv() {
         send(&Response::Out { out: line });
     }
 
@@ -133,22 +150,17 @@ pub fn run_command(
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
 
-    // The joins guarantee both readers have flushed their final (possibly
-    // newline-less) line via framer.finish(); drain what landed after the
-    // first pass. Non-blocking, so a grandchild holding the pipe cannot stall us.
-    while let Ok(line) = out_rx.try_recv() {
-        send(&Response::Out { out: line });
-    }
-
     Ok(exit_code)
 }
 
 /// Frame `reader` into bounded lines, one Out payload per line sent via `tx`.
 ///
 /// Caps per-line memory at 64 KiB, escapes invalid UTF-8 instead of erroring
-/// the thread, and flushes the trailing partial line at EOF. Same bounding as
-/// the Unix runner; blocking 8 KiB reads on this dedicated thread are fine.
-fn frame_child_output<R: Read>(mut reader: R, tx: mpsc::Sender<String>) {
+/// the thread, and flushes the trailing partial line at EOF. Aggregate memory
+/// is bounded by the sync channel: `send` parks this thread when the queue is
+/// full, so a slow consumer backpressures into the child's pipe instead of
+/// growing the queue. Blocking 8 KiB reads on this dedicated thread are fine.
+fn frame_child_output<R: Read>(mut reader: R, tx: mpsc::SyncSender<String>) {
     let mut framer = LineFramer::new();
     let mut buf = [0u8; 8 * 1024];
     loop {
@@ -365,9 +377,10 @@ mod tests {
     /// Drive the real `frame_child_output` over `input` (a `&[u8]` is a
     /// `Read`), returning the payloads its thread would send. Both the stdout
     /// and stderr threads call this one function, so exercising it once covers
-    /// the framing both channels receive.
+    /// the framing both channels receive. Runs single-threaded, so the
+    /// capacity must exceed the lines any one test emits (all emit < 10).
     fn frame_reader(input: &[u8]) -> Vec<String> {
-        let (tx, rx) = mpsc::channel::<String>();
+        let (tx, rx) = mpsc::sync_channel::<String>(OUT_QUEUE_LINES);
         frame_child_output(input, tx);
         rx.into_iter().collect()
     }
