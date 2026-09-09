@@ -121,30 +121,41 @@ The following function families use this pattern:
   odd padding places the extra space on the left only when the requested width is
   also odd, matching Python; otherwise the extra space is on the right.
 - **`repr_py` output contract.** Expression Language §2.2.6 defines `repr_py` as
-  following Python's `repr`, and this is what that means here. The output always
-  parses as a Python literal equal to the input, for every Unicode scalar value.
-  The delimiter is `'`, switching to `"` only when the value holds a `'` and no
-  `"`, so a value holding both keeps `'` and escapes it. Inside the literal,
-  `\` and the delimiter are backslash-escaped, `\n`, `\r` and `\t` take their
-  named forms, and any other non-printable code point takes the narrowest
-  numeric form that fits: `\xNN` up to `U+00FF`, `\uNNNN` up to `U+FFFF`,
-  `\UNNNNNNNN` above. Non-printable means the Unicode general category is one of
-  `Cc`, `Cf`, `Cs`, `Co`, `Cn`, `Zl`, `Zp` or `Zs`, with `U+0020` excepted —
+  following Python's `repr`, and this is what that means here. For the
+  string-valued inputs — `string`, `path`, and lists of either — the output is
+  byte-identical to CPython's `repr` and parses back as a literal equal to the
+  input, for every Unicode scalar value. The delimiter is `'`, switching to `"`
+  only when the value holds a `'` and no `"`, so a value holding both keeps `'`
+  and escapes it. Inside the literal, `\` and the delimiter are
+  backslash-escaped, `\n`, `\r` and `\t` take their named forms, and any other
+  non-printable code point takes the narrowest numeric form that fits: `\xNN` up
+  to `U+00FF`, `\uNNNN` up to `U+FFFF`, `\UNNNNNNNN` above. Non-printable means
+  the Unicode general category is `C*` or `Z*` with `U+0020` excepted, which is
   `Py_UNICODE_ISPRINTABLE` inverted.
 
-  Byte-for-byte equality with a *particular* CPython holds only when that CPython
-  carries the same Unicode version as the `unicode-general-category` crate,
-  because `Cn` means "unassigned in this version" and shrinks as code points are
-  assigned. The drift is one-directional and cannot break the parse contract: a
-  newer table leaves verbatim what an older CPython would have escaped, and the
-  raw code point parses back identically. Below `U+0080` the answer is fixed for
-  all time and `py_escape` decides it arithmetically, without the tables.
+  The predicate reads the generated `NONPRINTABLE` table
+  (`functions/unicode_tables.rs`), so it answers from the same pinned CPython as
+  `str.isalpha`, `str.isspace` and every other Python-parity classifier in the
+  crate. That makes the parity exact rather than approximate, and it is why this
+  module does not read a Unicode-property crate: a second data source could drift
+  from the first with nothing in the build detecting it. The
+  `the_pinned_unicode_version_has_not_moved` test asserts the pin, so
+  regenerating on a newer Unicode fails a test instead of silently changing which
+  code points `repr_py` escapes. Below `U+0080` the answer is fixed for all time
+  and `py_escape` decides it arithmetically, skipping the table.
+
+  Numeric inputs do not take this path. `write_repr_py` renders `Float`'s
+  preserved `original` spelling verbatim and unquoted, on the assumption that a
+  `Float64`'s text is numeric; `Float64::with_str` does not enforce that, so the
+  assumption is a caller contract rather than an invariant. See
+  [issue 328](https://github.com/OpenJobDescription/openjd-rs/issues/328).
+  `RangeExpr` is quoted through the shared writer, and its `Display` emits only
+  digits and `-`, `:`, `,`, so nothing there can need escaping.
 
   `py_escape::write_py_string_literal` is the single implementation. `repr_py`
   and `ExprValue::repr_python` both call it, so the two cannot disagree about how
-  a value is spelled; before they shared it, `repr_py` escaped `\` and `'` while
-  `repr_python` escaped nothing. `repr_pwsh` deliberately does not share it,
-  because PowerShell doubles `''` and admits a raw newline.
+  a value is spelled. `repr_pwsh` deliberately does not share it, because
+  PowerShell doubles `''` and admits a raw newline.
 
 - **Representation functions** (`repr_py`, `repr_json`, `repr_sh`,
   `repr_cmd`, `repr_pwsh`) use `preflight_repr`. It first charges the recursive

@@ -34,6 +34,5 @@ serde-saphyr = "1.0.1"
 thiserror = "2"
 regex = "1"
 regex-syntax = "0.8"
-unicode-general-category = "1.1"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"

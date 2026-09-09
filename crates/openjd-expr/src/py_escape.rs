@@ -10,9 +10,15 @@
 //! delimiter per value and keeps printable non-ASCII verbatim, while JSON always
 //! quotes with `"` and escapes all non-ASCII. `repr_pwsh` is a third scheme and
 //! stays in `functions::repr`.
+//!
+//! The printability rule reads
+//! [`NONPRINTABLE`][crate::functions::unicode_tables::NONPRINTABLE], generated
+//! from the same pinned CPython as every other Python-parity table in the crate,
+//! so `repr_py` and `str.isalpha` can never answer from different Unicode
+//! versions.
 
+use crate::functions::unicode_tables::{in_table, NONPRINTABLE};
 use std::fmt::Write;
-use unicode_general_category::{get_general_category, GeneralCategory};
 
 /// Write `value` as a Python string literal, matching CPython's `repr` of a `str`.
 ///
@@ -76,47 +82,13 @@ fn select_quote(value: &str) -> char {
 /// `Py_UNICODE_ISPRINTABLE` inverted: not printable when the general category is
 /// `C*` or `Z*`, except `U+0020`.
 ///
-/// Above `U+0080` this moves with the Unicode version as `Cn` shrinks, which
-/// cannot break the parse contract: a raw code point parses back identically.
-///
-/// Enumerating the *printable* categories is deliberate. `GeneralCategory` is
-/// `#[non_exhaustive]`, so a wildcard on the non-printable side would emit a
-/// future variant raw, which is the defect class this module closes.
+/// Below `U+0080` the answer is fixed for all time, so that range is decided
+/// arithmetically and skips the table lookup.
 fn is_non_printable(c: char) -> bool {
     if c.is_ascii() {
         return (c as u32) < 0x20 || c == '\x7f';
     }
-    use GeneralCategory as G;
-    !matches!(
-        get_general_category(c),
-        // L*
-        G::UppercaseLetter
-            | G::LowercaseLetter
-            | G::TitlecaseLetter
-            | G::ModifierLetter
-            | G::OtherLetter
-            // M*
-            | G::NonspacingMark
-            | G::SpacingMark
-            | G::EnclosingMark
-            // N*
-            | G::DecimalNumber
-            | G::LetterNumber
-            | G::OtherNumber
-            // P*
-            | G::ConnectorPunctuation
-            | G::DashPunctuation
-            | G::OpenPunctuation
-            | G::ClosePunctuation
-            | G::InitialPunctuation
-            | G::FinalPunctuation
-            | G::OtherPunctuation
-            // S*
-            | G::MathSymbol
-            | G::CurrencySymbol
-            | G::ModifierSymbol
-            | G::OtherSymbol
-    )
+    in_table(NONPRINTABLE, c)
 }
 
 /// Write `c` as CPython's numeric escape, narrowest form that fits. The widest,
@@ -443,18 +415,32 @@ mod tests {
     }
 
     #[test]
-    fn ascii_fast_path_agrees_with_the_category_tables() {
-        // The fast path is an optimisation, so it must return what the tables
-        // would. Below U+0080 the only non-printable category is `Cc`.
+    fn ascii_fast_path_agrees_with_the_table() {
+        // The fast path is an optimisation, so it must return exactly what the
+        // generated table would. Skipping this range is only safe while so.
         for cp in 0u32..0x80 {
             let c = char::from_u32(cp).unwrap();
-            let want = matches!(get_general_category(c), GeneralCategory::Control) && c != ' ';
             assert_eq!(
                 is_non_printable(c),
-                want,
-                "U+{cp:04X} disagrees with its general category"
+                in_table(NONPRINTABLE, c),
+                "U+{cp:04X}: fast path disagrees with NONPRINTABLE"
             );
         }
+    }
+
+    #[test]
+    fn the_pinned_unicode_version_has_not_moved() {
+        // The reason this module reads the generated table rather than a
+        // Unicode-property crate is that the version is pinned and asserted.
+        // Regenerating on a newer Unicode fails here, so the move is a
+        // decision rather than a silent drift.
+        assert_eq!(
+            crate::functions::unicode_tables::UNICODE_VERSION,
+            "16.0.0",
+            "NONPRINTABLE was regenerated on a different Unicode version; \
+             confirm the repr_py expectations still match CPython and update \
+             this assertion"
+        );
     }
 
     // ── Escape width ──
