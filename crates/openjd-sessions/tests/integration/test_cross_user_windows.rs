@@ -881,6 +881,43 @@ async fn test_cross_user_session_cancel_during_partial_line() {
     session.cleanup();
 }
 
+/// Guards trailing-partial-line delivery on clean exit: a child that writes a
+/// newline-less final line then exits must still have that line captured. The
+/// reader's `framer.finish()` flush can land after the first drain pass, so it
+/// must be drained again once the reader threads have joined.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_session_trailing_partial_line_delivered_on_clean_exit() {
+    let user = require_windows_user();
+    let mut session = make_session(user);
+
+    let result = session
+        .run_subprocess(
+            "powershell",
+            Some(&["-Command".to_string(), "[Console]::Out.Write('x')".to_string()]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("powershell writing a partial line must run as the session user");
+
+    assert_eq!(
+        result.state,
+        ActionState::Success,
+        "clean-exit partial-line write must succeed; exit_code: {:?}, stdout: {}",
+        result.exit_code,
+        result.stdout
+    );
+    assert!(
+        result.stdout.contains('x'),
+        "trailing newline-less 'x' must be delivered post-join; stdout: {}",
+        result.stdout
+    );
+    session.cleanup();
+}
+
 /// `mark_action_failed=true` must convert a canceled helper subprocess to
 /// Failed, matching drive_action's conversion and the
 /// `SessionCancelHandle::cancel` contract.

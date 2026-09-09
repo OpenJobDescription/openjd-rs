@@ -133,6 +133,13 @@ pub fn run_command(
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
 
+    // The joins guarantee both readers have flushed their final (possibly
+    // newline-less) line via framer.finish(); drain what landed after the
+    // first pass. Non-blocking, so a grandchild holding the pipe cannot stall us.
+    while let Ok(line) = out_rx.try_recv() {
+        send(&Response::Out { out: line });
+    }
+
     Ok(exit_code)
 }
 
