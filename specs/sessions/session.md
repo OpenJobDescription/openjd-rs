@@ -187,30 +187,34 @@ when one exits. RFC 0008 still requires it in `WrappedAction.Environment`:
 runtimes must include every export from any earlier action in the session,
 "regardless of whether that action ran normally or via a wrap hook".
 
-`record_env_export` routes each export to the store that owns it. An export made
-while its environment is still on `environments_entered` goes to
-`created_env_vars[identifier]`, so `exit_environment` removes it from the wrap
-symbol. Everything else goes to the session-lifetime `session_env_vars`, which
-`live_session_env_vars` layers over the entered environments' replay.
+`record_env_export` appends every export to `env_write_log`, tagged with what keeps
+it in effect: the environment that made it, or `Session` when no environment did.
+`live_session_env_vars` folds that log in write order, skipping writes no longer in
+effect, so for each name the winner is the last write still counting. An unset is
+recorded as a `None` value and applies as a removal during the fold.
 
-Ownership is decided by the live stack, not by a `created_env_vars` lookup alone.
-`exit_environment` pops the identifier before running `onExit` and never removes
-the map entry, so an export made during `onExit` would otherwise be written to an
-entry no reader consults.
+The rule needs the order recorded, not reconstructed. RFC 0008 wants every earlier
+action's export in the symbol, and #362 wants an environment's exports gone when it
+exits. A pair of maps can satisfy either but not both: without write order, a task
+export of a name an entered environment also declared is either shadowed by the
+older environment value or resurfaces when that environment exits, and a plain
+`String` map cannot record an unset of a name a live environment owns.
 
-Last writer wins in both orders, which takes two rules together: an environment
-writing a name clears it from `session_env_vars`, and `session_env_vars` is
-layered on top of the replay rather than beneath it. With only the first rule, a
-task exporting a name an entered environment already declared would be shadowed
-by the environment's older value, and would then resurface when that environment
-exited.
+Ownership is decided by `environments_entered`, not by a `created_env_vars` lookup.
+`exit_environment` pops the identifier before running `onExit` and never removes the
+map entry, so an `onExit` export would otherwise be attributed to an environment
+that is already gone and written where no reader consults it.
 
-Three kinds of export reach `session_env_vars`, all of which openjd-sessions
-0.5.5 also surfaced through its cumulative `env_vars`: a task's `onRun`, an
-environment's `onExit`, and `run_subprocess`, whose
-`{session}:subprocess:{uuid}` identifier never has a `created_env_vars` entry.
-`run_subprocess` is not an OpenJD action, so RFC 0008 does not require the last
-one; it is kept for parity with the released crate.
+Writes owned by no environment last for the session: a task's `onRun`, an
+environment's `onExit`, and `run_subprocess`, whose `{session}:subprocess:{uuid}`
+identifier is never an entered environment. openjd-sessions 0.5.5 surfaced all
+three through its cumulative `env_vars`. `run_subprocess` is not an OpenJD action,
+so RFC 0008 does not require the last one; it is kept for parity with the released
+crate.
+
+An environment's exports also go to `created_env_vars[identifier]`, which is what
+`evaluate_env_vars` builds process environments from. `env_write_log` never feeds a
+process environment.
 
 `session_env_vars` never feeds a process environment. That is `evaluate_env_vars`,
 built from `created_env_vars` alone, so a task printing an `openjd_env:` line

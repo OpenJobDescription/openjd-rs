@@ -1502,7 +1502,10 @@ exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }
         "the task's superseded value must not also be listed; got:\n{while_entered}"
     );
 
-    // On exit the environment's value is pruned, and the task's does not return.
+    // On exit the environment's write stops counting, so the task's earlier write
+    // is the last one still in effect and takes over again. It was shadowed, never
+    // discarded — discarding it is what let an older environment's value resurface
+    // when a second environment declared the same name.
     session
         .exit_environment(&declarer_id, None, true, None)
         .await
@@ -1514,8 +1517,12 @@ exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }
         .unwrap();
     let after_exit = read_trace(&trace);
     assert!(
-        !after_exit.contains("SHARED="),
-        "neither value may survive the declaring environment's exit; got:\n{after_exit}"
+        after_exit.contains("ENVLINE=SHARED=from-task"),
+        "the task's write outlives the environment that shadowed it; got:\n{after_exit}"
+    );
+    assert!(
+        !after_exit.contains("SHARED=from-env"),
+        "the exited environment's value must be pruned; got:\n{after_exit}"
     );
 }
 
@@ -1686,6 +1693,167 @@ exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }
     assert!(
         !after_exit.contains("SHARED=from-env"),
         "the exited environment's value must be pruned; got:\n{after_exit}"
+    );
+}
+
+/// A task's `openjd_unset_env` must remove a name a live environment declared.
+///
+/// The unset direction of "last writer wins". A store of plain `String` cannot
+/// express a tombstone, so a task unset could only remove from the session map;
+/// when a still-entered environment owned the name, the replay put it straight
+/// back and the unset did nothing — while a task *set* of the same name in the
+/// same configuration did take effect.
+#[tokio::test]
+async fn task_emitted_unset_removes_a_live_environments_value() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    let mut declarer = plain_env("Declarer", Some(action_with_command("true", vec![])), None);
+    declarer.variables = Some(fs_map(&[("SHARED", "from-env"), ("UNTOUCHED", "keep-me")]));
+    session
+        .enter_environment(&declarer, None, None, None)
+        .await
+        .unwrap();
+
+    session
+        .run_task(
+            "unsetter",
+            &step("bash", vec!["-c", "echo 'openjd_unset_env: SHARED'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let contents = read_trace(&trace);
+
+    assert!(
+        !contents.contains("SHARED="),
+        "a task unset must remove a live environment's value, as the cumulative map did; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=UNTOUCHED=keep-me"),
+        "and must remove only the named variable; got:\n{contents}"
+    );
+}
+
+/// An environment writing a name, then exiting, must not resurrect an older
+/// environment's value over a task export that superseded it.
+///
+/// Clearing the session map on an environment write is lossy: with an outer
+/// environment also declaring the name, the task's later value is destroyed and
+/// the outer environment's older one silently takes over when the inner exits.
+/// The live writers at that point are the outer environment and the task, and the
+/// task wrote last.
+#[tokio::test]
+async fn an_inner_environments_exit_does_not_resurrect_a_superseded_value() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    // Outer declares FOO=outer.
+    let mut outer = plain_env("Outer", Some(action_with_command("true", vec![])), None);
+    outer.variables = Some(fs_map(&[("FOO", "from-outer")]));
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // A task supersedes it.
+    session
+        .run_task(
+            "overwriter",
+            &step("bash", vec!["-c", "echo 'openjd_env: FOO=from-task'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Inner declares the same name, then exits.
+    let mut inner = plain_env("Inner", Some(action_with_command("true", vec![])), None);
+    inner.variables = Some(fs_map(&[("FOO", "from-inner")]));
+    let inner_id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+    session
+        .exit_environment(&inner_id, None, true, None)
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let contents = read_trace(&trace);
+
+    assert!(
+        contents.contains("ENVLINE=FOO=from-task"),
+        "the task wrote after Outer, so its value must survive Inner's exit; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("FOO=from-outer"),
+        "Outer's superseded value must not resurrect; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("FOO=from-inner"),
+        "the exited environment's value must be pruned; got:\n{contents}"
     );
 }
 
