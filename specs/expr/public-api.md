@@ -230,6 +230,7 @@ pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 Additional per-module caps (see each module section below):
 - `format_string::MAX_FORMAT_STRING_LEN` (1 MB)
 - `format_string::MAX_FORMAT_STRING_SEGMENTS` (1,000)
+- `format_string::MAX_STATIC_RESOLVED_VALUE_LEN` (10 MiB — caps the concatenated `resolved_value` returned by `validate_expressions`; not an error)
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (10,000)
 - `range_expr::MAX_RANGE_VALUE_MAGNITUDE` (2^62 — value-domain bound, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
@@ -1084,11 +1085,14 @@ pub struct StaticResolution {
     /// `resolved_value` is `Some`. For a single-expression list value the
     /// bound measures the interpolated display form (`[1, 2, 3]`), so it
     /// only applies to fields consumed as strings.
-    pub min_resolved_len: usize,
+    pub min_resolved_string_len: usize,
     /// The fully resolved value, present iff every expression segment
-    /// evaluated concrete. Typed passthrough for single-expression format
-    /// strings, coerced toward the given `target_type` (mirrors
-    /// `resolve_with`); concatenated string otherwise. `path()` values
+    /// evaluated concrete and, in the concatenated case, the result is at
+    /// most `MAX_STATIC_RESOLVED_VALUE_LEN` bytes (past the cap this is `None`
+    /// while `min_resolved_string_len` keeps counting). Typed passthrough
+    /// for single-expression format strings, coerced toward the given
+    /// `target_type` (mirrors `resolve_with`; not subject to the cap);
+    /// concatenated string otherwise. `path()` values
     /// are rendered with the validating host's `PathFormat`, not the
     /// worker's.
     pub resolved_value: Option<ExprValue>,
@@ -1127,6 +1131,13 @@ pub const format_string::MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
 
 /// Maximum number of `{{...}}` segments in one format string.
 pub const format_string::MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
+
+/// Maximum size (in bytes) of the concatenated string materialized as
+/// `StaticResolution::resolved_value`. The per-segment evaluation memory
+/// limit does not compose across segments; past this cap validation
+/// reports `resolved_value: None` while `min_resolved_string_len` keeps
+/// counting. Does not apply to the typed single-expression passthrough.
+pub const format_string::MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
 
 /// Escape `{{` and `}}` in a string so the format-string parser treats
 /// them as literals — necessary when synthesizing format strings from
@@ -1598,6 +1609,7 @@ minor-version change; lowering them is a breaking change):
   than crate convenience.
 - `MAX_EXPRESSION_DEPTH`, `MAX_PARSE_INPUT_LEN`,
   `MAX_FORMAT_STRING_LEN`, `MAX_FORMAT_STRING_SEGMENTS`,
+  `MAX_STATIC_RESOLVED_VALUE_LEN`,
   `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`: defensive caps.
   Values may rise to accommodate new legitimate use cases; values will
   not drop without a breaking-change bump.

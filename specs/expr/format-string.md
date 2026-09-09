@@ -38,12 +38,14 @@ Errors include the position within the format string for precise error reporting
 
 `FormatString::new` enforces two size limits intended as defense-in-depth
 against pathological inputs whose total cost is bounded linearly by input size
-but unbounded in absolute terms:
+but unbounded in absolute terms, and `validate_expressions` enforces a third
+on the value it materializes:
 
 | Constant | Value | Check |
 |---|---|---|
 | [`MAX_FORMAT_STRING_LEN`](../../crates/openjd-expr/src/format_string.rs) | 1 MB | Input byte length |
 | [`MAX_FORMAT_STRING_SEGMENTS`](../../crates/openjd-expr/src/format_string.rs) | 1,000 | Count of `{{…}}` segments |
+| [`MAX_STATIC_RESOLVED_VALUE_LEN`](../../crates/openjd-expr/src/format_string.rs) | 10 MiB | Concatenated `resolved_value` byte length |
 
 The length cap is checked before `parse_segments` runs, so an oversized input
 is rejected without allocating a segment vector or touching the parser. The
@@ -51,6 +53,18 @@ segment cap is checked after parsing because the segment count is only known
 once the scan completes; by that point the `Vec<Segment>` allocation is
 already proportional to the input size, so rejecting here is purely a policy
 guard and not a further memory-protection measure.
+
+The resolved-value cap exists because the evaluator's per-`evaluate` memory
+limit does not compose across segments: `MAX_FORMAT_STRING_SEGMENTS` copies of
+`{{ 'A' * 99999999 }}` fit in a 1 MB format string, each evaluates within its
+own 100 MB limit, and the concatenation would be ~100 GB — reachable from
+untrusted template text at validation time. Past the cap,
+`validate_expressions` stops accumulating and reports `resolved_value: None`;
+`min_resolved_string_len` keeps counting the full length, which is by itself
+enough for a consumer to reject the string. Unlike the other two caps this is
+not an error: validation still succeeds and the bound is still exact. The
+typed single-expression passthrough performs no concatenation and is not
+subject to this cap (it is bounded by the evaluator's own memory limit).
 
 These limits are well above the size of any real template field. The spec's
 own examples fit in hundreds of bytes, with a handful of `{{…}}` interpolations
@@ -177,13 +191,13 @@ determined statically. Callers that only need pass/fail ignore it.
 
 ```rust
 pub struct StaticResolution {
-    pub min_resolved_len: usize,
+    pub min_resolved_string_len: usize,
     pub resolved_value: Option<ExprValue>,
     pub resolved_type: ExprType,
 }
 ```
 
-**`min_resolved_len`** is a lower bound, in characters, on the length of
+**`min_resolved_string_len`** is a lower bound, in characters, on the length of
 any string the format string can resolve to — computed per segment:
 
 | Segment | Contribution (characters) |
@@ -193,7 +207,7 @@ any string the format string can resolve to — computed per segment:
 | Expression → value that is or contains `Unresolved` | 0 (may resolve to the empty string) |
 
 Because unresolved segments contribute 0, the bound holds for **every**
-possible run-time resolution: if `min_resolved_len` already exceeds some
+possible run-time resolution: if `min_resolved_string_len` already exceeds some
 limit on the resolved value, no binding of the unresolved symbols can
 produce a conforming string. This lets the model layer enforce
 resolved-value constraints (spec limits phrased "after the format string
@@ -213,15 +227,22 @@ limits should only apply it to fields consumed as strings.
 **`resolved_value`** is the exact resolved value, present iff every
 expression segment evaluated to a concrete value (checked with
 `ExprValue::contains_unresolved`, so a list containing an unresolved
-element does not count as concrete). It follows the
+element does not count as concrete) **and**, in the concatenated case,
+the resulting string is at most `MAX_STATIC_RESOLVED_VALUE_LEN` bytes (see
+Defensive Caps). It follows the
 [`resolve_with`](#resolve_with--preserves-typed-values-for-single-expression-strings)
 typed-passthrough rule: a format string that is exactly one expression
 segment and nothing else keeps the typed value (which may be a list or
 `null`), coerced toward the given `target_type`; anything else produces
 the concatenated string with `null` segments interpolated as empty. When
-`resolved_value` is `Some`, `min_resolved_len` is exact. The values come
+`resolved_value` is `Some`, `min_resolved_string_len` is exact. The values come
 from the evaluation the method already performs for type checking — no
-second evaluation occurs.
+second evaluation occurs, and each segment renders exactly once into a
+single buffer that doubles as measuring scratch and the concatenation
+being built (segment values are dropped as they are consumed, so peak
+memory is bounded by one segment's evaluation plus the capped
+concatenation; `String` and `Path` values are counted in place without
+rendering at all).
 
 Note that `path()` values inside `resolved_value` are rendered with the
 *validating* host's `PathFormat` (the evaluator default), not the
@@ -244,7 +265,7 @@ is `string`. When a coercion's outcome depends on the unknown payload,
 the type is the union of the possible results — an unresolved
 `string | list[int]` under the args union resolves to
 `string | list[string]`, correctly excluding `nulltype`. This is what
-lets a consumer distinguish "resolves to a string, so `min_resolved_len`
+lets a consumer distinguish "resolves to a string, so `min_resolved_string_len`
 is a true string-length bound" from "resolves to a typed list, whose
 display form the bound merely measures" without inspecting
 `resolved_value` — which matters precisely when `resolved_value` is

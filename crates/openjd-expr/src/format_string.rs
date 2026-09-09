@@ -50,6 +50,24 @@ pub const MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
 /// See `specs/expr/format-string.md` (Defensive caps) for rationale.
 pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
 
+/// Maximum size, in bytes, of the concatenated string
+/// [`FormatString::validate_expressions`] will materialize as
+/// [`StaticResolution::resolved_value`] for a multi-segment format string.
+///
+/// Each segment's evaluation is individually memory-bounded, but the
+/// per-segment limit does not compose: [`MAX_FORMAT_STRING_SEGMENTS`]
+/// segments of `{{ 'A' * 99999999 }}` fit in a 1 MB format string yet
+/// concatenate to a multi-gigabyte value. Past this cap validation stops
+/// accumulating (and reports `resolved_value: None`);
+/// [`StaticResolution::min_resolved_string_len`] keeps counting and is,
+/// by itself, enough for a consumer to reject the string — any real
+/// resolved-value limit is far below this cap. The typed single-expression
+/// passthrough is not affected: it performs no concatenation and is bounded
+/// by the evaluator's own memory limit.
+///
+/// See `specs/expr/format-string.md` (Defensive caps) for rationale.
+pub const MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
+
 impl FormatString {
     /// Parse a format string using the "latest" profile
     /// ([`ExprProfile::latest`]): the current revision with every known
@@ -222,13 +240,19 @@ impl FormatString {
     /// resolved length, and — when no segment depended on an unresolved
     /// symbol — the exact resolved value. Callers that only need pass/fail
     /// can ignore the returned value.
+    ///
+    /// Memory: segments render once into a single buffer and are dropped
+    /// as they are consumed, so peak memory is bounded by one segment's
+    /// evaluation plus the concatenated value, which is itself capped at
+    /// [`MAX_STATIC_RESOLVED_VALUE_LEN`] — past the cap, `resolved_value` is
+    /// `None` and only the running length is tracked.
     pub fn validate_expressions(
         &self,
         symtab: &SymbolTable,
         lib: &crate::function_library::FunctionLibrary,
         target_type: Option<&crate::types::ExprType>,
     ) -> Result<StaticResolution, FormatStringValidationError> {
-        let mut min_resolved_len = 0usize;
+        let mut min_resolved_string_len = 0usize;
         let mut all_concrete = true;
         // The target type only applies in the single-expression typed
         // passthrough case, exactly as in resolve_inner: resolve_string_with
@@ -240,14 +264,38 @@ impl FormatString {
         // value (target-coerced), which is knowable even when the value is
         // an unresolved placeholder; every other shape resolves to a string.
         let mut resolved_type = crate::types::ExprType::STRING;
-        // Concrete value per segment (None for literals and unresolved
-        // segments), used to assemble `resolved_value` without re-evaluating.
-        let mut concrete_values: Vec<Option<ExprValue>> = Vec::with_capacity(self.segments.len());
+        // One buffer, two jobs: scratch for measuring a segment's rendered
+        // length, and — when one is being built — the concatenated
+        // `resolved_value` itself. Each segment renders exactly once, is
+        // dropped as soon as it has been consumed, and no per-segment
+        // values are retained: peak memory stays bounded by one segment's
+        // evaluation plus the (capped) concatenation.
+        let mut concat = String::new();
+        let mut building = !single_expression;
+        // Set when the concatenation passes MAX_STATIC_RESOLVED_VALUE_LEN: the
+        // per-segment evaluator memory limit does not compose across
+        // segments, so the concatenation needs its own ceiling. Past it,
+        // `resolved_value` is None and `min_resolved_string_len` — which
+        // keeps counting — is enough for consumers to reject the string.
+        let mut capped = false;
+        // The typed passthrough value for the single-expression case.
+        let mut single: Option<ExprValue> = None;
+        // Stop building and release the partial concatenation.
+        fn stop_building(building: &mut bool, concat: &mut String) {
+            *building = false;
+            *concat = String::new();
+        }
         for seg in &self.segments {
             let (parsed, start, end) = match seg {
                 Segment::Literal(text) => {
-                    min_resolved_len += text.chars().count();
-                    concrete_values.push(None);
+                    min_resolved_string_len += text.chars().count();
+                    if building {
+                        concat.push_str(text);
+                        if concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
+                            capped = true;
+                            stop_building(&mut building, &mut concat);
+                        }
+                    }
                     continue;
                 }
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
@@ -281,16 +329,52 @@ impl FormatString {
                     }
                     if val.contains_unresolved() {
                         // May resolve to anything, including the empty
-                        // string: contributes 0 to the lower bound.
+                        // string: contributes 0 to the lower bound, and no
+                        // resolved value is possible. Release the partial
+                        // concatenation rather than carrying it to the end.
                         all_concrete = false;
-                        concrete_values.push(None);
-                    } else {
+                        stop_building(&mut building, &mut concat);
+                    } else if matches!(val, ExprValue::Null) {
                         // Null interpolates as the empty string (see
                         // resolve_string_with), so it contributes 0.
-                        if !matches!(val, ExprValue::Null) {
-                            min_resolved_len += val.to_display_string().chars().count();
+                        if single_expression {
+                            single = Some(val);
                         }
-                        concrete_values.push(Some(val));
+                    } else {
+                        // String and Path already hold their rendered form,
+                        // so measure them in place. Everything else renders
+                        // into the shared buffer once, and the scratch
+                        // portion is truncated away when no concatenation
+                        // is being built.
+                        match &val {
+                            ExprValue::String(s) => {
+                                min_resolved_string_len += s.chars().count();
+                                if building {
+                                    concat.push_str(s);
+                                }
+                            }
+                            ExprValue::Path { value, .. } => {
+                                min_resolved_string_len += value.chars().count();
+                                if building {
+                                    concat.push_str(value);
+                                }
+                            }
+                            _ => {
+                                let at = concat.len();
+                                val.write_display(&mut concat);
+                                min_resolved_string_len += concat[at..].chars().count();
+                                if !building {
+                                    concat.truncate(at);
+                                }
+                            }
+                        }
+                        if building && concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
+                            capped = true;
+                            stop_building(&mut building, &mut concat);
+                        }
+                        if single_expression {
+                            single = Some(val);
+                        }
                     }
                 }
                 Err(e) => {
@@ -305,32 +389,19 @@ impl FormatString {
             }
         }
 
-        let resolved_value = if !all_concrete {
+        let resolved_value = if !all_concrete || capped {
             None
-        } else if self.segments.len() == 1 && matches!(self.segments[0], Segment::Expression { .. })
-        {
+        } else if single_expression {
             // Typed passthrough, mirroring resolve_with: exactly one
             // expression segment and nothing else keeps the typed value.
-            concrete_values.pop().flatten()
+            single
         } else {
             // Concatenated string, mirroring resolve_string_with.
-            let mut s = String::new();
-            for (seg, val) in self.segments.iter().zip(&concrete_values) {
-                match (seg, val) {
-                    (Segment::Literal(text), _) => s.push_str(text),
-                    (Segment::Expression { .. }, Some(v)) => {
-                        if !matches!(v, ExprValue::Null) {
-                            s.push_str(&v.to_display_string());
-                        }
-                    }
-                    (Segment::Expression { .. }, None) => unreachable!("all segments concrete"),
-                }
-            }
-            Some(ExprValue::String(s))
+            Some(ExprValue::String(concat))
         };
 
         Ok(StaticResolution {
-            min_resolved_len,
+            min_resolved_string_len,
             resolved_value,
             resolved_type,
         })
@@ -653,7 +724,7 @@ fn parse_segments(input: &str, profile: &ExprProfile) -> Result<Vec<Segment>, Ex
 /// Returned by [`FormatString::validate_expressions`]. Callers that only
 /// care about pass/fail can ignore it. Callers enforcing resolved-value
 /// constraints (e.g. spec limits stated "after the format string has been
-/// resolved") use [`min_resolved_len`](Self::min_resolved_len) — a bound
+/// resolved") use [`min_resolved_string_len`](Self::min_resolved_string_len) — a bound
 /// that holds even when parts of the string are unknown — and
 /// [`resolved_value`](Self::resolved_value), the exact resolved value when
 /// nothing is unknown.
@@ -677,13 +748,20 @@ pub struct StaticResolution {
     /// characters), while [`resolved_value`](Self::resolved_value) is the typed
     /// list. Consumers enforcing string-length limits should only apply the
     /// bound to fields consumed as strings.
-    pub min_resolved_len: usize,
+    pub min_resolved_string_len: usize,
     /// The fully resolved value, present iff every expression segment
-    /// evaluated to a concrete (non-unresolved) value. Follows the
-    /// [`resolve_with`](FormatString::resolve_with) typed-passthrough rule:
-    /// for a format string that is exactly one expression segment and
-    /// nothing else, this is the typed value (which may be a list or
-    /// `null`), coerced toward the `target_type` given to
+    /// evaluated to a concrete (non-unresolved) value **and**, in the
+    /// concatenated case, the resulting string is at most
+    /// [`MAX_STATIC_RESOLVED_VALUE_LEN`] bytes — a defensive cap, since the
+    /// per-segment evaluation memory limit does not compose across
+    /// segments. When the cap is exceeded this is `None` while
+    /// [`min_resolved_string_len`](Self::min_resolved_string_len) still
+    /// counts the full length, which is enough to reject the string.
+    /// Follows the [`resolve_with`](FormatString::resolve_with)
+    /// typed-passthrough rule: for a format string that is exactly one
+    /// expression segment and nothing else, this is the typed value (which
+    /// may be a list or `null`, and is not subject to the cap — no
+    /// concatenation occurs), coerced toward the `target_type` given to
     /// [`validate_expressions`](FormatString::validate_expressions);
     /// otherwise it is the concatenated string, with `null` segments
     /// interpolated as the empty string.
@@ -691,7 +769,7 @@ pub struct StaticResolution {
     /// `path()` values in this value are rendered with the *validating*
     /// host's [`PathFormat`](crate::PathFormat) (the evaluator default),
     /// not the worker's. Character counts are identical either way, so
-    /// [`min_resolved_len`](Self::min_resolved_len) is unaffected, but do
+    /// [`min_resolved_string_len`](Self::min_resolved_string_len) is unaffected, but do
     /// not treat the separators in this value as the value the job will see
     /// on another host.
     pub resolved_value: Option<ExprValue>,
@@ -715,7 +793,7 @@ pub struct StaticResolution {
     /// (literals, or two or more segments) resolves to a concatenated
     /// string, so this is [`ExprType::STRING`](crate::ExprType::STRING).
     /// Callers can use it to decide whether the resolved value is a string
-    /// (so [`min_resolved_len`](Self::min_resolved_len) is a true
+    /// (so [`min_resolved_string_len`](Self::min_resolved_string_len) is a true
     /// string-length bound) or a typed value whose display form the bound
     /// merely measures.
     pub resolved_type: crate::types::ExprType,

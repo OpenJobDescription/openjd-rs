@@ -192,28 +192,28 @@ fn static_resolution(input: &str, st: &SymbolTable) -> openjd_expr::StaticResolu
 #[test]
 fn static_resolution_literal_only() {
     let sr = static_resolution("hello", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 5);
+    assert_eq!(sr.min_resolved_string_len, 5);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "hello"));
 }
 
 #[test]
 fn static_resolution_fully_static_expression() {
     let sr = static_resolution("{{ 'A' * 5 }}", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 5);
+    assert_eq!(sr.min_resolved_string_len, 5);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "AAAAA"));
 }
 
 #[test]
 fn static_resolution_single_expression_keeps_typed_value() {
     let sr = static_resolution("{{ 1 + 2 }}", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 1); // "3"
+    assert_eq!(sr.min_resolved_string_len, 1); // "3"
     assert!(matches!(sr.resolved_value, Some(ExprValue::Int(3))));
 }
 
 #[test]
 fn static_resolution_multi_segment_concatenates() {
     let sr = static_resolution("x{{ 'A' * 3 }}y", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 5);
+    assert_eq!(sr.min_resolved_string_len, 5);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "xAAAy"));
 }
 
@@ -223,7 +223,7 @@ fn static_resolution_unresolved_contributes_zero() {
     // Session.* prefix is unknown until run time.
     let st = symtab!("Session.WorkingDirectory" => ExprValue::unresolved(ExprType::PATH));
     let sr = static_resolution("{{ Session.WorkingDirectory }}/{{ 'A' * 4 }}", &st);
-    assert_eq!(sr.min_resolved_len, 5); // "/" + "AAAA"
+    assert_eq!(sr.min_resolved_string_len, 5); // "/" + "AAAA"
     assert!(sr.resolved_value.is_none());
 }
 
@@ -231,21 +231,21 @@ fn static_resolution_unresolved_contributes_zero() {
 fn static_resolution_fully_unresolved() {
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::STRING));
     let sr = static_resolution("{{ Param.X }}", &st);
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     assert!(sr.resolved_value.is_none());
 }
 
 #[test]
 fn static_resolution_null_interpolates_as_empty() {
     let sr = static_resolution("a{{ null }}b", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 2);
+    assert_eq!(sr.min_resolved_string_len, 2);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "ab"));
 }
 
 #[test]
 fn static_resolution_single_null_expression_is_typed_null() {
     let sr = static_resolution("{{ null }}", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     assert!(matches!(sr.resolved_value, Some(ExprValue::Null)));
 }
 
@@ -255,7 +255,10 @@ fn static_resolution_concrete_list_value() {
     let val = sr.resolved_value.expect("fully static");
     assert!(val.is_list());
     // Bound matches the interpolated display form ("[1, 2, 3]").
-    assert_eq!(sr.min_resolved_len, val.to_display_string().chars().count());
+    assert_eq!(
+        sr.min_resolved_string_len,
+        val.to_display_string().chars().count()
+    );
 }
 
 #[test]
@@ -263,13 +266,13 @@ fn static_resolution_list_with_unresolved_element_is_not_static() {
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::STRING));
     let sr = static_resolution("{{ [Param.X, 'a'] }}", &st);
     assert!(sr.resolved_value.is_none());
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
 }
 
 #[test]
 fn static_resolution_len_counts_characters_not_bytes() {
     let sr = static_resolution("{{ 'é' * 4 }}", &SymbolTable::new());
-    assert_eq!(sr.min_resolved_len, 4);
+    assert_eq!(sr.min_resolved_string_len, 4);
 }
 
 // === StaticResolution under a target type (RFC 0005 coercion) ===
@@ -277,7 +280,7 @@ fn static_resolution_len_counts_characters_not_bytes() {
 // `resolve_with` coerces the root value of a single-expression format
 // string toward the caller's target type (e.g. a float literal in an
 // INT-typed template field resolves to `1`, not `1.0`). The
-// StaticResolution contract — `min_resolved_len` is a lower bound on the
+// StaticResolution contract — `min_resolved_string_len` is a lower bound on the
 // length of any string the format string can resolve to, and
 // `resolved_value` is the exact resolved value when everything is concrete
 // — must therefore hold for the *coerced* resolution a typed field
@@ -308,10 +311,10 @@ fn check_static_resolution_against_typed_resolution(
     let resolved_display = resolved.to_display_string();
     let resolved_len = resolved_display.chars().count();
     assert!(
-        sr.min_resolved_len <= resolved_len,
-        "min_resolved_len ({}) exceeds the actual resolved length ({}) for {input:?} \
+        sr.min_resolved_string_len <= resolved_len,
+        "min_resolved_string_len ({}) exceeds the actual resolved length ({}) for {input:?} \
          with target type {target}: resolves to {resolved_display:?}",
-        sr.min_resolved_len,
+        sr.min_resolved_string_len,
         resolved_len,
     );
     if let Some(ref sv) = sr.resolved_value {
@@ -341,7 +344,7 @@ fn static_resolution_bound_holds_for_float_literal_in_int_field() {
         &SymbolTable::new(),
         &ExprType::INT,
     );
-    assert_eq!(sr.min_resolved_len, 1);
+    assert_eq!(sr.min_resolved_string_len, 1);
     assert!(matches!(sr.resolved_value, Some(ExprValue::Int(1))));
     assert_eq!(sr.resolved_type, ExprType::INT);
 }
@@ -354,7 +357,7 @@ fn static_resolution_bound_holds_for_multi_digit_float_literal_in_int_field() {
         &SymbolTable::new(),
         &ExprType::INT,
     );
-    assert_eq!(sr.min_resolved_len, 3);
+    assert_eq!(sr.min_resolved_string_len, 3);
     assert!(matches!(sr.resolved_value, Some(ExprValue::Int(100))));
     assert_eq!(sr.resolved_type, ExprType::INT);
 }
@@ -367,7 +370,7 @@ fn static_resolution_bound_holds_for_int_literal_in_float_field() {
         &SymbolTable::new(),
         &ExprType::FLOAT,
     );
-    assert_eq!(sr.min_resolved_len, 3);
+    assert_eq!(sr.min_resolved_string_len, 3);
     assert!(matches!(sr.resolved_value, Some(ExprValue::Float(ref f)) if f.value() == 1.0));
     assert_eq!(sr.resolved_type, ExprType::FLOAT);
 }
@@ -380,7 +383,7 @@ fn static_resolution_bound_holds_for_bool_literal_in_string_field() {
         &SymbolTable::new(),
         &ExprType::STRING,
     );
-    assert_eq!(sr.min_resolved_len, 4);
+    assert_eq!(sr.min_resolved_string_len, 4);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "true"));
     // Coerced toward the string target.
     assert_eq!(sr.resolved_type, ExprType::STRING);
@@ -392,7 +395,7 @@ fn static_resolution_bound_holds_for_bool_literal_in_string_field() {
 // given target — the type of the value resolution will eventually produce.
 // The run-time value is never unresolved, so unresolved[T] placeholders
 // read through to their constraint T. This is what lets a consumer tell
-// "this field resolves to a string, so min_resolved_len is a true length
+// "this field resolves to a string, so min_resolved_string_len is a true length
 // bound" from "this resolves to a typed list, whose display form the bound
 // merely measures" — even when resolved_value is None.
 
@@ -410,7 +413,7 @@ fn resolved_type_is_string_for_literal_only() {
 
 #[test]
 fn resolved_type_is_list_for_single_list_expression() {
-    // The list case the report flags: min_resolved_len measures the display
+    // The list case the report flags: min_resolved_string_len measures the display
     // form, and resolved_type tells the consumer it is not a plain string.
     let sr = static_resolution("{{ [1, 2, 3] }}", &SymbolTable::new());
     assert_eq!(sr.resolved_type, ExprType::list(ExprType::INT));
@@ -483,7 +486,7 @@ fn args_union_target_unresolved_list_of_string_satisfies() {
         symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING)));
     let sr = static_resolution_with_target("{{ WrappedAction.Args }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING));
 }
 
@@ -519,7 +522,7 @@ fn args_union_target_unresolved_union_source_keeps_satisfying_members() {
     );
     let sr = static_resolution_with_target("{{ WrappedAction.Timeout }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     // Pin the exact result so any change to union coerce_type is visible.
     assert_eq!(
         sr.resolved_type,
@@ -558,7 +561,7 @@ fn args_union_target_concrete_null_passes_through() {
         &args_target(),
     );
     assert!(matches!(sr.resolved_value, Some(ExprValue::Null)));
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     assert_eq!(sr.resolved_type, ExprType::NULLTYPE);
 }
 
@@ -582,7 +585,7 @@ fn args_union_target_concrete_int_converts_to_string() {
         &args_target(),
     );
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "42"));
-    assert_eq!(sr.min_resolved_len, 2);
+    assert_eq!(sr.min_resolved_string_len, 2);
     assert_eq!(sr.resolved_type, ExprType::STRING);
 }
 
@@ -595,7 +598,7 @@ fn args_union_target_ignored_in_multi_segment() {
         symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING)));
     let sr = static_resolution_with_target("--flag {{ WrappedAction.Args }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
-    assert_eq!(sr.min_resolved_len, 7); // "--flag "
+    assert_eq!(sr.min_resolved_string_len, 7); // "--flag "
     assert_eq!(sr.resolved_type, ExprType::STRING);
 }
 
@@ -608,7 +611,7 @@ fn static_resolution_target_ignored_for_multi_segment() {
         &SymbolTable::new(),
         &ExprType::INT,
     );
-    assert_eq!(sr.min_resolved_len, 4); // "x1.0"
+    assert_eq!(sr.min_resolved_string_len, 4); // "x1.0"
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "x1.0"));
 }
 
@@ -621,7 +624,7 @@ fn static_resolution_target_ignored_for_single_literal_segment() {
         &SymbolTable::new(),
         &ExprType::INT,
     );
-    assert_eq!(sr.min_resolved_len, 5);
+    assert_eq!(sr.min_resolved_string_len, 5);
     assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s == "hello"));
 }
 
@@ -638,7 +641,7 @@ fn static_resolution_unresolved_symbol_coerces_at_type_level() {
         .unwrap()
         .validate_expressions(&st, &lib, Some(&ExprType::INT))
         .unwrap();
-    assert_eq!(sr.min_resolved_len, 0);
+    assert_eq!(sr.min_resolved_string_len, 0);
     assert!(sr.resolved_value.is_none());
 }
 
@@ -668,6 +671,77 @@ fn static_resolution_uncoercible_value_fails_validation_like_resolution() {
         resolve_err.to_string(),
         "validation must report the same failure resolution does",
     );
+}
+
+// === Resolved-value cap (MAX_STATIC_RESOLVED_VALUE_LEN) ===
+//
+// The per-segment evaluator memory limit does not compose across segments:
+// many small expressions can each evaluate within their own limit yet
+// concatenate to a huge string. validate_expressions caps the concatenation
+// it materializes; min_resolved_string_len keeps counting past the cap and
+// is enough to reject the string.
+
+#[test]
+fn resolved_value_capped_for_oversized_concatenation() {
+    // Two segments of 6,000,000 chars each: 12,000,000 bytes total, over
+    // the 10 MiB cap. Everything is concrete, but the concatenation is not
+    // materialized; the bound still counts the full length exactly.
+    let sr = static_resolution(
+        "{{ 'A' * 6000000 }}{{ 'A' * 6000000 }}",
+        &SymbolTable::new(),
+    );
+    assert_eq!(sr.min_resolved_string_len, 12_000_000);
+    assert!(
+        sr.resolved_value.is_none(),
+        "concatenation over MAX_STATIC_RESOLVED_VALUE_LEN must not be materialized",
+    );
+    assert_eq!(sr.resolved_type, ExprType::STRING);
+}
+
+#[test]
+fn resolved_value_at_cap_boundary_is_materialized() {
+    // Exactly MAX_STATIC_RESOLVED_VALUE_LEN bytes (1 literal + cap-1 from the
+    // expression) is allowed; the cap only excludes strictly larger values.
+    let n = openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN - 1;
+    let sr = static_resolution(&format!("x{{{{ 'A' * {n} }}}}"), &SymbolTable::new());
+    assert_eq!(
+        sr.min_resolved_string_len,
+        openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN
+    );
+    let val = sr.resolved_value.expect("at the cap is still materialized");
+    assert!(matches!(val, ExprValue::String(ref s)
+        if s.len() == openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN));
+}
+
+#[test]
+fn resolved_value_one_past_cap_is_dropped() {
+    let n = openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN;
+    let sr = static_resolution(&format!("x{{{{ 'A' * {n} }}}}"), &SymbolTable::new());
+    assert_eq!(sr.min_resolved_string_len, n + 1);
+    assert!(sr.resolved_value.is_none());
+}
+
+#[test]
+fn resolved_value_cap_does_not_apply_to_typed_passthrough() {
+    // A single-expression format string performs no concatenation: the
+    // typed value passes through regardless of size (it is bounded by the
+    // evaluator's own memory limit).
+    let n = openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN + 1;
+    let sr = static_resolution(&format!("{{{{ 'A' * {n} }}}}"), &SymbolTable::new());
+    assert_eq!(sr.min_resolved_string_len, n);
+    assert!(matches!(sr.resolved_value, Some(ExprValue::String(ref s)) if s.len() == n));
+}
+
+#[test]
+fn capped_concatenation_still_counts_later_segments() {
+    // Segments after the cap still contribute to the bound: the count is
+    // complete even though accumulation stopped.
+    let sr = static_resolution(
+        "{{ 'A' * 6000000 }}{{ 'A' * 6000000 }}tail{{ 'B' * 5 }}",
+        &SymbolTable::new(),
+    );
+    assert_eq!(sr.min_resolved_string_len, 12_000_009);
+    assert!(sr.resolved_value.is_none());
 }
 
 // === Null handling ===
