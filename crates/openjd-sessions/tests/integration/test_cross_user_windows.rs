@@ -897,7 +897,10 @@ async fn test_cross_user_session_trailing_partial_line_delivered_on_clean_exit()
     let result = session
         .run_subprocess(
             "powershell",
-            Some(&["-Command".to_string(), "[Console]::Out.Write('x')".to_string()]),
+            Some(&[
+                "-Command".to_string(),
+                "[Console]::Out.Write('x')".to_string(),
+            ]),
             None,
             None,
             true,
