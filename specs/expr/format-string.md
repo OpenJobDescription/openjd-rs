@@ -151,12 +151,26 @@ through an already-optional library value without unwrapping it.
 
 ```rust
 let fs = FormatString::new("{{Param.Frame + Param.Name}}")?;
-fs.validate_expressions(&unresolved_symtab, &library)?;
+fs.validate_expressions(&unresolved_symtab, &library, None)?;
 // → TypeError: cannot add int and string
 ```
 
 Evaluates each expression with unresolved values to catch type errors at template
 validation time, before parameter values are known.
+
+The third argument is the same optional target type the caller will later
+pass to `resolve_with`, so that validation observes exactly the values
+resolution will produce. It follows the same rule as resolution: for a
+format string that is exactly one expression segment and nothing else,
+the root value is coerced toward the target — `{{ 1.0 }}` validated with
+`Some(&ExprType::INT)` yields the int `1`, one character, not the
+three-character float `1.0`. In the concatenated multi-segment case the
+target is ignored, mirroring `resolve_string_with`. A value that cannot
+coerce to the target fails validation with the same diagnostic resolution
+would produce. Unresolved values coerce at the type level
+(`ExprValue::coerce` on an `Unresolved` checks the constraint against the
+target and stays unresolved), so passing a target also catches
+type-level coercion errors statically.
 
 On success, returns a `StaticResolution` describing what that evaluation
 determined statically. Callers that only need pass/fail ignore it.
@@ -164,7 +178,8 @@ determined statically. Callers that only need pass/fail ignore it.
 ```rust
 pub struct StaticResolution {
     pub min_resolved_len: usize,
-    pub static_value: Option<ExprValue>,
+    pub resolved_value: Option<ExprValue>,
+    pub resolved_type: ExprType,
 }
 ```
 
@@ -187,17 +202,53 @@ for partially-static strings such as
 `"{{ Session.WorkingDirectory }}/{{ 'A' * 10000000 }}"` — the static
 segment alone puts the bound over any plausible limit.
 
-**`static_value`** is the exact resolved value, present iff every
+Two caveats on interpreting the bound. It describes resolution under the
+same `target_type` that was passed to `validate_expressions` — it is only
+a valid bound for a resolution using that same target. And for a
+single-expression format string whose value is a list, the bound measures
+the interpolated display form (`[1, 2, 3]` → 9 characters) while
+`resolved_value` is the typed list, so consumers enforcing string-length
+limits should only apply it to fields consumed as strings.
+
+**`resolved_value`** is the exact resolved value, present iff every
 expression segment evaluated to a concrete value (checked with
 `ExprValue::contains_unresolved`, so a list containing an unresolved
 element does not count as concrete). It follows the
 [`resolve_with`](#resolve_with--preserves-typed-values-for-single-expression-strings)
 typed-passthrough rule: a format string that is exactly one expression
 segment and nothing else keeps the typed value (which may be a list or
-`null`); anything else produces the concatenated string with `null`
-segments interpolated as empty. When `static_value` is `Some`,
-`min_resolved_len` is exact. The values come from the evaluation the
-method already performs for type checking — no second evaluation occurs.
+`null`), coerced toward the given `target_type`; anything else produces
+the concatenated string with `null` segments interpolated as empty. When
+`resolved_value` is `Some`, `min_resolved_len` is exact. The values come
+from the evaluation the method already performs for type checking — no
+second evaluation occurs.
+
+Note that `path()` values inside `resolved_value` are rendered with the
+*validating* host's `PathFormat` (the evaluator default), not the
+worker's. Character counts are identical either way, so the bound is
+unaffected, but the separators in `resolved_value` are not necessarily the
+ones the job will see on another host.
+
+**`resolved_type`** is the static type the format string resolves to
+under the same target — the type of the value resolution will eventually
+produce. The run-time value is never unresolved, so `unresolved[T]`
+placeholders read through to their constraint `T` (the marker is a
+validation-time artifact; normalization hoists it to the root of a type,
+so a single unwrap suffices). Unlike `resolved_value`, the type is
+therefore available even when a segment is unresolved: for the
+single-expression passthrough it is that expression's value type after
+target coercion (`int` for `{{ 1.0 }}` under an `int` target,
+`list[string]` for an unresolved `list[string]` symbol under the args
+union `nulltype | string | list[string]`), and for every other shape it
+is `string`. When a coercion's outcome depends on the unknown payload,
+the type is the union of the possible results — an unresolved
+`string | list[int]` under the args union resolves to
+`string | list[string]`, correctly excluding `nulltype`. This is what
+lets a consumer distinguish "resolves to a string, so `min_resolved_len`
+is a true string-length bound" from "resolves to a typed list, whose
+display form the bound merely measures" without inspecting
+`resolved_value` — which matters precisely when `resolved_value` is
+`None`.
 
 The bound is per-segment, not per-subexpression: a single expression
 mixing static and unresolved parts (e.g.

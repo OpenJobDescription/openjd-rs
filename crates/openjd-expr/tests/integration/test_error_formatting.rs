@@ -1322,7 +1322,7 @@ fn format_string_validation_carries_expression_error_with_sub_errors() {
     st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
     let fs = FormatString::new("{{X + 'a' if cond else Y * 'b'}}").unwrap();
     let lib = FunctionLibrary::default();
-    let err = fs.validate_expressions(&st, &lib).unwrap_err();
+    let err = fs.validate_expressions(&st, &lib, None).unwrap_err();
     assert_eq!(err.start, 0);
     assert_eq!(err.end, 32);
     let expr_err = err

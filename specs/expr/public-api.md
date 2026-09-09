@@ -997,13 +997,18 @@ impl FormatString {
 
     /// Validate every interpolation against a type-checking symbol table
     /// (typically populated with `ExprValue::unresolved(T)` values).
-    /// Returns structured errors with the position of the first failing
-    /// interpolation so callers can produce diagnostics. On success,
-    /// returns a `StaticResolution` describing what evaluation determined
-    /// statically (resolved-length lower bound; exact value when fully
-    /// static); pass/fail-only callers ignore it.
+    /// `target_type` is the same target the caller will later resolve
+    /// with: applied (like `resolve_with`) only in the single-expression
+    /// typed-passthrough case, where the root value is coerced toward it;
+    /// a value that cannot coerce fails validation as it would fail
+    /// resolution. Returns structured errors with the position of the
+    /// first failing interpolation so callers can produce diagnostics.
+    /// On success, returns a `StaticResolution` describing what
+    /// evaluation determined statically (resolved-length lower bound;
+    /// exact value when fully static); pass/fail-only callers ignore it.
     pub fn validate_expressions(
         &self, symtab: &SymbolTable, library: &FunctionLibrary,
+        target_type: Option<&ExprType>,
     ) -> Result<StaticResolution, FormatStringValidationError>;
 
     /// Validate that list-comprehension loop variables in this format
@@ -1073,14 +1078,30 @@ impl<'a> Default for FormatStringOptions<'a> { /* ... */ }
 #[derive(Debug, Clone)]
 pub struct StaticResolution {
     /// Lower bound, in characters, on the length of any string this
-    /// format string can resolve to: literals + concrete-segment display
+    /// format string can resolve to under the same `target_type` given
+    /// to `validate_expressions`: literals + concrete-segment display
     /// lengths (`null` → 0); unresolved segments contribute 0. Exact when
-    /// `static_value` is `Some`.
+    /// `resolved_value` is `Some`. For a single-expression list value the
+    /// bound measures the interpolated display form (`[1, 2, 3]`), so it
+    /// only applies to fields consumed as strings.
     pub min_resolved_len: usize,
     /// The fully resolved value, present iff every expression segment
     /// evaluated concrete. Typed passthrough for single-expression format
-    /// strings (mirrors `resolve_with`); concatenated string otherwise.
-    pub static_value: Option<ExprValue>,
+    /// strings, coerced toward the given `target_type` (mirrors
+    /// `resolve_with`); concatenated string otherwise. `path()` values
+    /// are rendered with the validating host's `PathFormat`, not the
+    /// worker's.
+    pub resolved_value: Option<ExprValue>,
+    /// The static type the format string resolves to under the given
+    /// `target_type` — the type of the value resolution will produce.
+    /// Available even when a segment is unresolved: `unresolved[T]`
+    /// placeholders read through to `T` (the run-time value is never
+    /// unresolved). The single-expression passthrough value type after
+    /// target coercion (may be a union when the outcome depends on the
+    /// unknown payload, e.g. `string | list[string]`), or `string` for
+    /// any other shape. Lets a consumer tell a true string-length bound
+    /// from one that merely measures a typed value's display form.
+    pub resolved_type: ExprType,
 }
 ```
 

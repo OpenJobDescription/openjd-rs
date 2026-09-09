@@ -205,6 +205,18 @@ impl FormatString {
     /// whose values are not yet known. This is the spec's approach to static
     /// type checking — just evaluate normally with unresolved types.
     ///
+    /// `target_type` must be the same target type the caller will later pass
+    /// to [`resolve_with`](Self::resolve_with) (or `None` if the caller
+    /// resolves without one), so that validation observes exactly the values
+    /// resolution will produce. It follows the same rule as resolution: for a
+    /// format string that is exactly one expression segment and nothing else,
+    /// the root value is coerced toward the target (so `{{ 1.0 }}` in an
+    /// `int`-typed field validates as the int `1`, one character); in the
+    /// concatenated multi-segment case the target is ignored, mirroring
+    /// [`resolve_string_with`](Self::resolve_string_with). A value that
+    /// cannot coerce to the target fails validation, just as it would fail
+    /// resolution.
+    ///
     /// On success, returns a [`StaticResolution`] describing what the
     /// evaluation determined statically: a guaranteed lower bound on the
     /// resolved length, and — when no segment depended on an unresolved
@@ -214,11 +226,22 @@ impl FormatString {
         &self,
         symtab: &SymbolTable,
         lib: &crate::function_library::FunctionLibrary,
+        target_type: Option<&crate::types::ExprType>,
     ) -> Result<StaticResolution, FormatStringValidationError> {
         let mut min_resolved_len = 0usize;
         let mut all_concrete = true;
+        // The target type only applies in the single-expression typed
+        // passthrough case, exactly as in resolve_inner: resolve_string_with
+        // evaluates every segment with no target.
+        let single_expression =
+            self.segments.len() == 1 && matches!(self.segments[0], Segment::Expression { .. });
+        // The static type the format string resolves to. For the
+        // single-expression passthrough it is the type of that expression's
+        // value (target-coerced), which is knowable even when the value is
+        // an unresolved placeholder; every other shape resolves to a string.
+        let mut resolved_type = crate::types::ExprType::STRING;
         // Concrete value per segment (None for literals and unresolved
-        // segments), used to assemble `static_value` without re-evaluating.
+        // segments), used to assemble `resolved_value` without re-evaluating.
         let mut concrete_values: Vec<Option<ExprValue>> = Vec::with_capacity(self.segments.len());
         for seg in &self.segments {
             let (parsed, start, end) = match seg {
@@ -229,8 +252,33 @@ impl FormatString {
                 }
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
             };
-            match parsed.with_library(lib).evaluate(&[symtab]) {
+            let mut builder = parsed.with_library(lib);
+            if single_expression {
+                if let Some(tt) = target_type {
+                    builder = builder.with_target_type(tt);
+                }
+            }
+            match builder.evaluate(&[symtab]) {
                 Ok(val) => {
+                    if single_expression {
+                        // Passthrough: the value's type is the resolved
+                        // type. The `unresolved[...]` marker is a
+                        // validation-time artifact — the run-time value it
+                        // stands for will not be unresolved — so read
+                        // through it to the constraint. Normalization hoists
+                        // the marker to the root (`list[unresolved[T]]` →
+                        // `unresolved[list[T]]`, and likewise for unions),
+                        // so one unwrap suffices.
+                        let t = val.expr_type();
+                        resolved_type = if t.code() == crate::types::TypeCode::Unresolved {
+                            t.params()
+                                .first()
+                                .cloned()
+                                .expect("unresolved[T] always has exactly one parameter")
+                        } else {
+                            t
+                        };
+                    }
                     if val.contains_unresolved() {
                         // May resolve to anything, including the empty
                         // string: contributes 0 to the lower bound.
@@ -257,7 +305,7 @@ impl FormatString {
             }
         }
 
-        let static_value = if !all_concrete {
+        let resolved_value = if !all_concrete {
             None
         } else if self.segments.len() == 1 && matches!(self.segments[0], Segment::Expression { .. })
         {
@@ -283,7 +331,8 @@ impl FormatString {
 
         Ok(StaticResolution {
             min_resolved_len,
-            static_value,
+            resolved_value,
+            resolved_type,
         })
     }
 
@@ -606,7 +655,7 @@ fn parse_segments(input: &str, profile: &ExprProfile) -> Result<Vec<Segment>, Ex
 /// constraints (e.g. spec limits stated "after the format string has been
 /// resolved") use [`min_resolved_len`](Self::min_resolved_len) — a bound
 /// that holds even when parts of the string are unknown — and
-/// [`static_value`](Self::static_value), the exact resolved value when
+/// [`resolved_value`](Self::resolved_value), the exact resolved value when
 /// nothing is unknown.
 #[derive(Debug, Clone)]
 pub struct StaticResolution {
@@ -617,16 +666,59 @@ pub struct StaticResolution {
     /// the empty string, contributing 0); segments whose value is (or
     /// contains) an unresolved placeholder contribute 0, since they may
     /// resolve to the empty string. Exact when
-    /// [`static_value`](Self::static_value) is `Some`.
+    /// [`resolved_value`](Self::resolved_value) is `Some`.
+    ///
+    /// The bound describes resolution under the same `target_type` that was
+    /// passed to [`validate_expressions`](FormatString::validate_expressions)
+    /// — it is only a valid bound for a resolution using that same target.
+    ///
+    /// For a single-expression format string whose value is a list, the
+    /// bound measures the interpolated display form (e.g. `[1, 2, 3]`, 9
+    /// characters), while [`resolved_value`](Self::resolved_value) is the typed
+    /// list. Consumers enforcing string-length limits should only apply the
+    /// bound to fields consumed as strings.
     pub min_resolved_len: usize,
     /// The fully resolved value, present iff every expression segment
     /// evaluated to a concrete (non-unresolved) value. Follows the
     /// [`resolve_with`](FormatString::resolve_with) typed-passthrough rule:
     /// for a format string that is exactly one expression segment and
     /// nothing else, this is the typed value (which may be a list or
-    /// `null`); otherwise it is the concatenated string, with `null`
-    /// segments interpolated as the empty string.
-    pub static_value: Option<ExprValue>,
+    /// `null`), coerced toward the `target_type` given to
+    /// [`validate_expressions`](FormatString::validate_expressions);
+    /// otherwise it is the concatenated string, with `null` segments
+    /// interpolated as the empty string.
+    ///
+    /// `path()` values in this value are rendered with the *validating*
+    /// host's [`PathFormat`](crate::PathFormat) (the evaluator default),
+    /// not the worker's. Character counts are identical either way, so
+    /// [`min_resolved_len`](Self::min_resolved_len) is unaffected, but do
+    /// not treat the separators in this value as the value the job will see
+    /// on another host.
+    pub resolved_value: Option<ExprValue>,
+    /// The static type the format string resolves to under the same
+    /// `target_type` given to
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    ///
+    /// This is the type of the value resolution will eventually produce —
+    /// the run-time value is never unresolved, so `unresolved[T]`
+    /// placeholders read through to their constraint `T`. Unlike
+    /// [`resolved_value`](Self::resolved_value), it is therefore available
+    /// even when a segment is unresolved. For a format string that is
+    /// exactly one expression segment and nothing else, it is that
+    /// expression's value type after target-type coercion — `int` for
+    /// `{{ 1.0 }}` under an `int` target, `list[int]` for `{{ [1, 2] }}`,
+    /// and `list[string]` for an unresolved `list[string]` symbol. A
+    /// coercion whose outcome depends on the unknown payload yields a
+    /// union of the possible result types (e.g. an unresolved
+    /// `string | list[int]` under a `nulltype | string | list[string]`
+    /// target resolves to `string | list[string]`). Every other shape
+    /// (literals, or two or more segments) resolves to a concatenated
+    /// string, so this is [`ExprType::STRING`](crate::ExprType::STRING).
+    /// Callers can use it to decide whether the resolved value is a string
+    /// (so [`min_resolved_len`](Self::min_resolved_len) is a true
+    /// string-length bound) or a typed value whose display form the bound
+    /// merely measures.
+    pub resolved_type: crate::types::ExprType,
 }
 
 /// Structured error from [`FormatString::validate_expressions`].
@@ -826,7 +918,7 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         assert!(fs
-            .validate_expressions(&SymbolTable::new(), &host_lib)
+            .validate_expressions(&SymbolTable::new(), &host_lib, None)
             .is_err());
     }
     #[test]
@@ -846,7 +938,7 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         let fs = FormatString::new("{{ re_replace('hello', '', 'x') }}").unwrap();
-        let result = fs.validate_expressions(&SymbolTable::new(), &host_lib);
+        let result = fs.validate_expressions(&SymbolTable::new(), &host_lib, None);
         assert!(
             result.is_err(),
             "Format string validation should error, got: {:?}",
@@ -886,7 +978,7 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib).is_ok());
+        assert!(fs.validate_expressions(&st, &host_lib, None).is_ok());
     }
     #[test]
     fn validate_allows_arithmetic() {
@@ -901,7 +993,7 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib).is_ok());
+        assert!(fs.validate_expressions(&st, &host_lib, None).is_ok());
     }
 
     #[test]
