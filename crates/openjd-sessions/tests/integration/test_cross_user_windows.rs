@@ -826,10 +826,13 @@ async fn test_cross_user_session_cancel_handle_cancels_helper_subprocess() {
     session.cleanup();
 }
 
-/// Cancel stays responsive during a partial line: a newline-less write then a
-/// long sleep must still cancel promptly, because the chunked reader no longer
-/// blocks on the missing newline the way `BufReader::lines()` did. Mirrors the
-/// Unix `test_cross_user_cancel_during_partial_line`.
+/// Cancel stays prompt and classifies as Canceled while the framer holds a
+/// buffered partial line (newline-less write, then a long sleep). Unlike the
+/// Unix runner, Windows reader threads never gated cancel handling, so this is
+/// a forward guard on the new framing path rather than a before/after
+/// regression test; trailing partial-line delivery itself is covered by
+/// `test_cross_user_session_trailing_partial_line_delivered_on_clean_exit`.
+/// Mirrors the Unix `test_cross_user_cancel_during_partial_line`.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_session_cancel_during_partial_line() {
