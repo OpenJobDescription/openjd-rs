@@ -3469,3 +3469,164 @@ fn repr_sh_rejects_nested_lists() {
         ],
     );
 }
+
+// === repr_py escapes what CPython's repr escapes ===
+//
+// Expression Language §2.2.6 defines `repr_py` as following Python's `repr`.
+// Every expected value below was read out of CPython and agrees with 3.11.12,
+// 3.12.10, 3.13.7 and 3.14.0b4.
+//
+// These cover the evaluator path and the cases a reviewer will look for. The
+// escape table itself is owned by `py_escape`'s unit tests, which sweep every
+// scalar value; duplicating all of it here would pin the same fact twice.
+
+#[test]
+fn repr_py_escapes_newline() {
+    assert_eq!(
+        eval(r"repr_py('hello\nworld')").to_display_string(),
+        r"'hello\nworld'"
+    );
+}
+
+#[test]
+fn repr_py_escapes_carriage_return() {
+    assert_eq!(eval(r"repr_py('a\rb')").to_display_string(), r"'a\rb'");
+}
+
+#[test]
+fn repr_py_escapes_nul() {
+    assert_eq!(eval(r"repr_py('a\x00b')").to_display_string(), r"'a\x00b'");
+}
+
+#[test]
+fn repr_py_escapes_c1_controls_as_hex() {
+    // U+0085 NEL is `Cc` but not ASCII, so this is the first case that needs
+    // the Unicode general-category table rather than the arithmetic fast path.
+    assert_eq!(eval("repr_py('a\u{85}b')").to_display_string(), r"'a\x85b'");
+}
+
+#[test]
+fn repr_py_escapes_non_printable_non_ascii_at_each_escape_width() {
+    // Zs, Cf and Zl, chosen so the three escape widths are all exercised.
+    assert_eq!(eval("repr_py('a\u{a0}b')").to_display_string(), r"'a\xa0b'");
+    assert_eq!(
+        eval("repr_py('a\u{200b}b')").to_display_string(),
+        r"'a\u200bb'"
+    );
+    assert_eq!(
+        eval("repr_py('a\u{2028}b')").to_display_string(),
+        r"'a\u2028b'"
+    );
+}
+
+#[test]
+fn repr_py_escapes_astral_non_printable_with_capital_u() {
+    // U+100000 is `Co`. The only shape that reaches the `\U` branch.
+    assert_eq!(
+        eval("repr_py('a\u{100000}b')").to_display_string(),
+        r"'a\U00100000b'"
+    );
+}
+
+#[test]
+fn repr_py_keeps_printable_non_ascii_verbatim() {
+    // The negative control: an over-broad predicate would escape these.
+    assert_eq!(eval("repr_py('café')").to_display_string(), "'café'");
+    assert_eq!(eval("repr_py('a😀b')").to_display_string(), "'a😀b'");
+    assert_eq!(
+        eval("repr_py('a\u{e0100}b')").to_display_string(),
+        "'a\u{e0100}b'"
+    );
+}
+
+#[test]
+fn repr_py_switches_delimiter_for_an_embedded_single_quote() {
+    assert_eq!(eval(r#"repr_py("it's")"#).to_display_string(), "\"it's\"");
+}
+
+#[test]
+fn repr_py_keeps_single_quotes_when_both_quote_characters_appear() {
+    assert_eq!(
+        eval(r#"repr_py("it's a \"x\"")"#).to_display_string(),
+        r#"'it\'s a "x"'"#
+    );
+}
+
+#[test]
+fn repr_py_doubles_a_backslash() {
+    assert_eq!(eval(r"repr_py('a\\b')").to_display_string(), r"'a\\b'");
+}
+
+#[test]
+fn repr_py_escapes_inside_list_elements() {
+    assert_eq!(
+        eval(r"repr_py(['a\nb', 'c'])").to_display_string(),
+        r"['a\nb', 'c']"
+    );
+}
+
+#[test]
+fn repr_py_escapes_inside_a_path_value() {
+    // `Path` shares the string arm, so it must escape too.
+    let mut st = openjd_expr::SymbolTable::new();
+    st.set(
+        "P",
+        ExprValue::new_path("/tmp/a\nb.txt".to_string(), PathFormat::Posix),
+    )
+    .unwrap();
+    assert_eq!(
+        eval_posix_st("repr_py(P)", &st).to_display_string(),
+        r"'/tmp/a\nb.txt'"
+    );
+}
+
+#[test]
+fn repr_py_escapes_inside_list_of_path_elements() {
+    // `list[path]` reaches a different arm of `write_repr_py_ref` than
+    // `list[string]`. Splitting the two would go unnoticed without this.
+    let mut st = openjd_expr::SymbolTable::new();
+    st.set(
+        "L",
+        ExprValue::make_list(
+            vec![
+                ExprValue::new_path("/a\nb".to_string(), PathFormat::Posix),
+                ExprValue::new_path("/c".to_string(), PathFormat::Posix),
+            ],
+            openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        eval_posix_st("repr_py(L)", &st).to_display_string(),
+        r"['/a\nb', '/c']"
+    );
+}
+
+#[test]
+fn repr_py_escapes_inside_a_nested_list() {
+    // `write_repr_py_ref`'s list arm recurses. Replacing that recursion with a
+    // display-string fallback would drop the escaping one level down.
+    let mut st = openjd_expr::SymbolTable::new();
+    let inner = ExprValue::make_list(
+        vec![
+            ExprValue::String("a\nb".to_string()),
+            ExprValue::String("it's".to_string()),
+        ],
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    st.set(
+        "N",
+        ExprValue::make_list(
+            vec![inner],
+            openjd_expr::ExprType::list(openjd_expr::ExprType::list(openjd_expr::ExprType::STRING)),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        eval_posix_st("repr_py(N)", &st).to_display_string(),
+        r#"[['a\nb', "it's"]]"#
+    );
+}

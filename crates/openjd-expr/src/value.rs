@@ -5,6 +5,7 @@
 //! Runtime values for expression evaluation.
 
 use crate::path_mapping::PathFormat;
+use crate::py_escape::py_string_literal;
 use crate::range_expr::RangeExpr;
 use crate::types::{ExprType, TypeCode};
 
@@ -1274,15 +1275,19 @@ impl ExprValue {
             Self::Int(i) => format!("ExprValue({i})"),
             Self::Float(f) => {
                 if f.original.is_some() {
-                    format!("ExprValue('{}', type='float')", f.to_display_string())
+                    format!(
+                        "ExprValue({}, type='float')",
+                        py_string_literal(&f.to_display_string())
+                    )
                 } else {
                     format!("ExprValue({})", f.to_display_string())
                 }
             }
-            Self::String(s) => format!("ExprValue('{s}')"),
+            Self::String(s) => format!("ExprValue({})", py_string_literal(s)),
             Self::Path { value, format } => {
                 format!(
-                    "ExprValue('{value}', type='path', path_format=PathFormat.{})",
+                    "ExprValue({}, type='path', path_format=PathFormat.{})",
+                    py_string_literal(value),
                     match format {
                         PathFormat::Posix => "POSIX",
                         PathFormat::Windows => "WINDOWS",
@@ -1290,7 +1295,12 @@ impl ExprValue {
                     }
                 )
             }
-            Self::RangeExpr(r) => format!("ExprValue('{}', type='range_expr')", r),
+            Self::RangeExpr(r) => {
+                format!(
+                    "ExprValue({}, type='range_expr')",
+                    py_string_literal(&r.to_string())
+                )
+            }
             Self::Unresolved(t) => format!("ExprValue.unresolved(ExprType(\"{t}\"))"),
             val if val.is_list() => {
                 let type_str = val.expr_type().to_string();
@@ -1313,7 +1323,13 @@ impl ExprValue {
                     val.repr_python_list()
                 )
             }
-            _ => format!("ExprValue('{}')", self.to_display_string()),
+            // Unreachable: every variant is matched above, and the list arm's
+            // `if` guard is what stops the compiler proving it. Routed through
+            // the shared writer so it stays correct if that ever changes.
+            _ => format!(
+                "ExprValue({})",
+                py_string_literal(&self.to_display_string())
+            ),
         }
     }
 
@@ -1326,7 +1342,9 @@ impl ExprValue {
                     e.repr_python_list()
                 } else {
                     match e {
-                        ExprValue::String(s) | ExprValue::Path { value: s, .. } => format!("'{s}'"),
+                        ExprValue::String(s) | ExprValue::Path { value: s, .. } => {
+                            py_string_literal(s)
+                        }
                         ExprValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
                         ExprValue::Int(i) => i.to_string(),
                         ExprValue::Float(f) => f.to_display_string(),

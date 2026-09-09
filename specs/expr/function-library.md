@@ -120,14 +120,44 @@ The following function families use this pattern:
   succeeds, and calls the same crate-visible helper from `misc.rs`. For `center`,
   odd padding places the extra space on the left only when the requested width is
   also odd, matching Python; otherwise the extra space is on the right.
+- **`repr_py` output contract.** Expression Language §2.2.6 defines `repr_py` as
+  following Python's `repr`, and this is what that means here. The output always
+  parses as a Python literal equal to the input, for every Unicode scalar value.
+  The delimiter is `'`, switching to `"` only when the value holds a `'` and no
+  `"`, so a value holding both keeps `'` and escapes it. Inside the literal,
+  `\` and the delimiter are backslash-escaped, `\n`, `\r` and `\t` take their
+  named forms, and any other non-printable code point takes the narrowest
+  numeric form that fits: `\xNN` up to `U+00FF`, `\uNNNN` up to `U+FFFF`,
+  `\UNNNNNNNN` above. Non-printable means the Unicode general category is one of
+  `Cc`, `Cf`, `Cs`, `Co`, `Cn`, `Zl`, `Zp` or `Zs`, with `U+0020` excepted —
+  `Py_UNICODE_ISPRINTABLE` inverted.
+
+  Byte-for-byte equality with a *particular* CPython holds only when that CPython
+  carries the same Unicode version as the `unicode-general-category` crate,
+  because `Cn` means "unassigned in this version" and shrinks as code points are
+  assigned. The drift is one-directional and cannot break the parse contract: a
+  newer table leaves verbatim what an older CPython would have escaped, and the
+  raw code point parses back identically. Below `U+0080` the answer is fixed for
+  all time and `py_escape` decides it arithmetically, without the tables.
+
+  `py_escape::write_py_string_literal` is the single implementation. `repr_py`
+  and `ExprValue::repr_python` both call it, so the two cannot disagree about how
+  a value is spelled; before they shared it, `repr_py` escaped `\` and `'` while
+  `repr_python` escaped nothing. `repr_pwsh` deliberately does not share it,
+  because PowerShell doubles `''` and admits a raw newline.
+
 - **Representation functions** (`repr_py`, `repr_json`, `repr_sh`,
   `repr_cmd`, `repr_pwsh`) use `preflight_repr`. It first charges the recursive
   list item count from `count_list_items`, then obtains a byte bound from
   `output_bound`. Escaped strings use one deliberately broad six-times
   expansion ceiling plus structural delimiter overhead; the estimator does
-  not duplicate any renderer escape table. Unit tests render adversarial
-  strings and nested lists and assert that every bound covers the result, and
-  debug builds repeat that assertion at each function boundary. `repr_sh`
+  not duplicate any renderer escape table. Six covers every escape any renderer
+  emits: the widest is `repr_py`'s `\UNNNNNNNN` at ten characters, which only
+  applies above `U+FFFF` where the input is four UTF-8 bytes, and the worst
+  actual ratio is `\x00` at four bytes out for one in. Unit tests render
+  adversarial strings and nested lists and assert that every bound covers the
+  result, one string per escape width, and debug builds repeat that assertion at
+  each function boundary. `repr_sh`
   accepts only the canonical `string`, `path`, `list[string]`, and `list[path]`
   inputs, plus an internal `list[nulltype]` overload for an empty list literal.
   `repr_cmd` accepts `string` and `list[string]`; internal exact `path`,

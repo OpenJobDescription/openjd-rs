@@ -754,7 +754,9 @@ impl ExprValue {
     pub fn memory_size(&self) -> usize;
 
     /// Display / conversion.
-    pub fn repr_python(&self) -> String;       // matches Python repr
+    pub fn repr_python(&self) -> String;       // Rust-side debug form: `ExprValue('x')`.
+                                               // The embedded literal matches Python repr;
+                                               // the wrapper does not (see py_escape.rs)
     pub fn to_display_string(&self) -> String; // human-readable form; lists render
                                                // as JSON arrays (see values.md)
     pub fn as_str_repr(&self) -> std::borrow::Cow<'_, str>;

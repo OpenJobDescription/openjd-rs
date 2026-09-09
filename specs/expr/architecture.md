@@ -43,6 +43,7 @@ src/
 ├── uri_path.rs             URI-aware path operations
 ├── error.rs                ExpressionError with caret formatting
 ├── json_escape.rs          JSON string escaping shared by list display and repr_json
+├── py_escape.rs            Python literal rendering shared by repr_py and ExprValue::repr_python
 ├── edit_distance.rs        Levenshtein distance for "did you mean?" suggestions (see edit-distance.md)
 ├── profile.rs              ExprProfile, ExprRevision, ExprExtension, HostContext (see profile.md)
 ├── default_library.rs      Default FunctionLibrary construction
