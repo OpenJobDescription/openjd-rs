@@ -90,15 +90,22 @@ pub fn validate_structure(
         }
     }
 
-    // Environment name uniqueness across all environments
-    let mut env_names = HashSet::new();
+    // Environment name uniqueness (spec 2023-09 §1, §3):
+    //   - unique within jobEnvironments
+    //   - unique within each step's stepEnvironments
+    //   - a stepEnvironment must not share a name with a jobEnvironment
+    // Different steps may reuse a stepEnvironment name; only one step's environments
+    // are ever active in a session at a time. Matches openjd-model-for-python.
+    let mut job_env_names = HashSet::new();
+    let mut env_count: usize = 0;
     if let Some(envs) = &jt.job_environments {
         let envs_path = path_field(&root, "jobEnvironments");
         if envs.is_empty() {
             errors.add(&envs_path, "must not be empty.");
         }
         for (i, env) in envs.iter().enumerate() {
-            if !env_names.insert(env.name.clone()) {
+            env_count += 1;
+            if !job_env_names.insert(env.name.clone()) {
                 errors.add(
                     &path_index(&envs_path, i),
                     format!("duplicate environment name: '{}'", env.name),
@@ -115,8 +122,10 @@ pub fn validate_structure(
             if envs.is_empty() {
                 errors.add(&envs_path, "must not be empty.");
             }
+            let mut step_env_names = HashSet::new();
             for (j, env) in envs.iter().enumerate() {
-                if !env_names.insert(env.name.clone()) {
+                env_count += 1;
+                if job_env_names.contains(&env.name) || !step_env_names.insert(env.name.clone()) {
                     errors.add(
                         &path_index(&envs_path, j),
                         format!("duplicate environment name: '{}'", env.name),
@@ -126,15 +135,14 @@ pub fn validate_structure(
         }
     }
 
-    // Caller-imposed total environment count limit
+    // Caller-imposed total environment count limit (job + all step environments combined)
     if let Some(max) = ctx.caller_limits.max_env_count {
-        if env_names.len() > max {
+        if env_count > max {
             errors.add(
                 &root,
                 format!(
                     "total environments ({}) exceeds caller limit of {}.",
-                    env_names.len(),
-                    max
+                    env_count, max
                 ),
             );
         }

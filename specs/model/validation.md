@@ -99,7 +99,10 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Type-specific validation via `validate_definition(limits)`
 
 **Environment uniqueness:**
-- Names unique across ALL environments (job + all step environments)
+- Names unique within `jobEnvironments`
+- Names unique within each step's `stepEnvironments`
+- A `stepEnvironments` name must not match any `jobEnvironments` name
+- Different steps may reuse a `stepEnvironments` name (only one step's environments are active in a session at a time)
 
 **Step validation:**
 - No duplicate step names
