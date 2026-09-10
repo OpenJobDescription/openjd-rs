@@ -1154,58 +1154,8 @@ impl<'a> Evaluator<'a> {
             }
         }
         if elements.iter().any(|e| e.is_unresolved()) {
-            // Check type compatibility even with unresolved elements
-            if !elements.is_empty() {
-                let first_type = unwrap_unresolved(&elements[0].expr_type());
-                for (_i, e) in elements.iter().enumerate().skip(1) {
-                    let t = unwrap_unresolved(&e.expr_type());
-                    // Allow int/float and path/string mixing
-                    if (first_type == ExprType::INT && t == ExprType::FLOAT)
-                        || (first_type == ExprType::FLOAT && t == ExprType::INT)
-                        || (first_type == ExprType::PATH && t == ExprType::STRING)
-                        || (first_type == ExprType::STRING && t == ExprType::PATH)
-                    {
-                        continue;
-                    }
-                    if t.code() == crate::types::TypeCode::Unresolved
-                        || first_type.code() == crate::types::TypeCode::Unresolved
-                    {
-                        continue;
-                    }
-                    if t != first_type {
-                        return Err(ExpressionError::new(format!(
-                            "List literal contains incompatible types: {first_type}, {t}"
-                        )));
-                    }
-                }
-            }
-            let elem_type = if elements.is_empty() {
-                ExprType::NULLTYPE
-            } else {
-                // Compute coerced element type: int+float→float, path+string→string
-                let mut result = unwrap_unresolved(&elements[0].expr_type());
-                for e in elements.iter().skip(1) {
-                    let t = unwrap_unresolved(&e.expr_type());
-                    if t.code() == crate::types::TypeCode::Unresolved {
-                        continue;
-                    }
-                    if result.code() == crate::types::TypeCode::Unresolved {
-                        result = t;
-                        continue;
-                    }
-                    if (result == ExprType::INT && t == ExprType::FLOAT)
-                        || (result == ExprType::FLOAT && t == ExprType::INT)
-                    {
-                        result = ExprType::FLOAT;
-                    } else if (result == ExprType::PATH && t == ExprType::STRING)
-                        || (result == ExprType::STRING && t == ExprType::PATH)
-                    {
-                        result = ExprType::STRING;
-                    }
-                }
-                result
-            };
-            return self.track(ExprValue::unresolved(ExprType::list(elem_type)));
+            let val = unresolved_list_from_elements(&elements)?;
+            return self.track(val);
         }
         // If we have a list element target, coerce each element and skip homogeneity check
         if let Some(ref elem_t) = list_elem_target {
@@ -1581,6 +1531,15 @@ impl<'a> Evaluator<'a> {
                 }
             }
         }
+        // A body referencing an unresolved symbol produces unresolved
+        // elements even when the iterable is concrete (e.g.
+        // `[Param.X + i for i in [1, 2]]` during validation). Hoist to a
+        // top-level unresolved(list[T]), exactly as eval_list does —
+        // make_list rejects unresolved elements.
+        if result.iter().any(|e| e.is_unresolved()) {
+            let val = unresolved_list_from_elements(&result)?;
+            return self.track(val);
+        }
         let elem_type = if result.is_empty() {
             ExprType::NULLTYPE
         } else {
@@ -1680,6 +1639,71 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
     } else {
         t.clone()
     }
+}
+
+/// The validation-time result for a list whose elements include an
+/// `Unresolved` value: a **top-level** `unresolved(list[T])`, never a list
+/// nesting an `Unresolved` — the invariant that makes
+/// [`ExprValue::is_unresolved`] a complete concreteness check.
+///
+/// Checks element type compatibility (allowing int/float and path/string
+/// mixing) and computes the promoted element type the resolved list will
+/// have. Used by list literal evaluation and by list comprehensions whose
+/// body produced unresolved elements; `ExprValue::make_list` itself rejects
+/// unresolved elements, since it constructs concrete lists.
+fn unresolved_list_from_elements(elements: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+    // Check type compatibility even with unresolved elements
+    if !elements.is_empty() {
+        let first_type = unwrap_unresolved(&elements[0].expr_type());
+        for e in elements.iter().skip(1) {
+            let t = unwrap_unresolved(&e.expr_type());
+            // Allow int/float and path/string mixing
+            if (first_type == ExprType::INT && t == ExprType::FLOAT)
+                || (first_type == ExprType::FLOAT && t == ExprType::INT)
+                || (first_type == ExprType::PATH && t == ExprType::STRING)
+                || (first_type == ExprType::STRING && t == ExprType::PATH)
+            {
+                continue;
+            }
+            if t.code() == crate::types::TypeCode::Unresolved
+                || first_type.code() == crate::types::TypeCode::Unresolved
+            {
+                continue;
+            }
+            if t != first_type {
+                return Err(ExpressionError::new(format!(
+                    "List literal contains incompatible types: {first_type}, {t}"
+                )));
+            }
+        }
+    }
+    let elem_type = if elements.is_empty() {
+        ExprType::NULLTYPE
+    } else {
+        // Compute coerced element type: int+float→float, path+string→string
+        let mut result = unwrap_unresolved(&elements[0].expr_type());
+        for e in elements.iter().skip(1) {
+            let t = unwrap_unresolved(&e.expr_type());
+            if t.code() == crate::types::TypeCode::Unresolved {
+                continue;
+            }
+            if result.code() == crate::types::TypeCode::Unresolved {
+                result = t;
+                continue;
+            }
+            if (result == ExprType::INT && t == ExprType::FLOAT)
+                || (result == ExprType::FLOAT && t == ExprType::INT)
+            {
+                result = ExprType::FLOAT;
+            } else if (result == ExprType::PATH && t == ExprType::STRING)
+                || (result == ExprType::STRING && t == ExprType::PATH)
+            {
+                result = ExprType::STRING;
+            }
+        }
+        result
+    };
+    Ok(ExprValue::unresolved(ExprType::list(elem_type)))
 }
 
 /// Walks a chain of `ExprAttribute` nodes by reference and returns the dotted

@@ -508,6 +508,14 @@ impl ExprValue {
     /// Uses `hint_type` for empty lists to determine the element type.
     /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
     ///
+    /// An `Unresolved` element is rejected with an error: `make_list`
+    /// constructs concrete lists, so no constructed value nests an
+    /// `Unresolved` inside a list and
+    /// [`is_unresolved`](Self::is_unresolved) is a complete concreteness
+    /// check. Validation-time list expressions with unknown elements are
+    /// handled by the evaluator, which hoists them to a top-level
+    /// `ExprValue::unresolved(list[T])` before any list is built.
+    ///
     /// When called from an evaluator or function implementation that has
     /// an [`EvalContext`](crate::function_library::EvalContext), prefer
     /// [`make_list_checked`](Self::make_list_checked) so that an oversized
@@ -526,6 +534,18 @@ impl ExprValue {
         {
             return Err(crate::error::ExpressionError::new(
                 "Lists may be nested at most 2 levels deep",
+            ));
+        }
+        // make_list constructs concrete lists: an `Unresolved` element is
+        // rejected — uniformly, rather than silently nesting inside a
+        // `ListList` (which would break the invariant that a top-level
+        // `is_unresolved()` check is a complete concreteness test).
+        // Validation-time list expressions with unknown elements are the
+        // evaluator's job: `eval_list` and the comprehension evaluator hoist
+        // to a top-level `unresolved(list[T])` before any list is built.
+        if elements.iter().any(Self::is_unresolved) {
+            return Err(crate::error::ExpressionError::type_error(
+                "make_list expected concrete elements, got unresolved",
             ));
         }
         // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
@@ -729,6 +749,16 @@ impl ExprValue {
         Self::Unresolved(constraint)
     }
     /// Returns `true` if this is an `Unresolved` value.
+    ///
+    /// This is a complete concreteness check: unresolved values never nest
+    /// inside lists. The evaluator hoists list expressions and
+    /// comprehensions with any unresolved element to a top-level
+    /// `unresolved(list[T])` before a list is built, function calls return
+    /// a top-level unresolved whenever any argument is unresolved, and
+    /// [`make_list`](Self::make_list) rejects unresolved elements outright.
+    /// A value for which this returns `false` is therefore fully concrete —
+    /// exactly the value run-time resolution would produce from the same
+    /// inputs.
     pub fn is_unresolved(&self) -> bool {
         matches!(self, Self::Unresolved(_))
     }

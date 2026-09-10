@@ -277,7 +277,7 @@ fn validate_fs(
     if fs.is_literal() {
         return;
     }
-    if let Err(e) = fs.validate_expressions(symtab, lib) {
+    if let Err(e) = fs.validate_expressions(symtab, lib, None) {
         let mut spans = Vec::new();
         if let Some(ref expr_err) = e.expression_error {
             if !expr_err.sub_errors().is_empty() {
