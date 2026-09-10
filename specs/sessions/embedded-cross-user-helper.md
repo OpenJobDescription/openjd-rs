@@ -259,25 +259,33 @@ to handle data already buffered by the main loop's `read_line`.
 fn main() {
     // Parse --auth-token from argv. Exit immediately on missing/malformed.
     // Token is a 22-char ASCII string from the URL-safe alphabet.
-    let expected_token: [u8; 22] = parse_auth_token_arg_or_exit();
+    let expected_token: String = parse_auth_token_or_exit();
 
     let stdin = std::io::stdin();
     let mut reader = BufReader::new(stdin.lock());
+    let mut line = String::new();
 
     loop {
-        // Read next command
-        let mut line = String::new();
-        if reader.read_line(&mut line).unwrap_or(0) == 0 { break; }
-        let cmd: Command = serde_json::from_str(line.trim())?;
+        // Read next command, capped at MAX_LINE_LENGTH (128 KiB)
+        match read_bounded_line(&mut reader, &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => { send(&Response::Error { error: format!("stdin read error: {e}") }); continue; }
+        }
+        if line.trim().is_empty() { continue; }
+        let cmd: Command = match serde_json::from_str(line.trim()) {
+            Ok(c) => c,
+            Err(e) => { send(&Response::Error { error: format!("parse error: {e}") }); continue; }
+        };
 
         // Every command must carry the shared token. Bad token → log and skip.
-        if !constant_time_eq(cmd.token_bytes(), &expected_token) {
+        if !constant_time_eq(cmd.token().as_bytes(), expected_token.as_bytes()) {
             send(&Response::Error { error: "invalid token".into() });
             continue;
         }
 
         match cmd {
-            Command::Run(run) => {
+            Command::Run { run, .. } => {
                 // Pass the SAME reader AND the expected token to run_command;
                 // cancel commands read during the run are verified the same way.
                 match runner::run_command(&run, &mut reader, &expected_token) {
@@ -285,12 +293,15 @@ fn main() {
                     Err(e) => send(&Response::Error { error: e }),
                 }
             }
-            Command::Shutdown => break,
-            Command::Cancel(_) => {} // only meaningful inside run_command
+            Command::Shutdown { .. } => break,
+            Command::Cancel { .. } => {} // only meaningful inside run_command
         }
     }
 }
 ```
+
+Command lines are capped at `MAX_LINE_LENGTH` (128 KiB); an over-long line is
+drained to its newline and rejected so the stream stays aligned.
 
 ### Runner: poll(2) for concurrent stdin + child stdout
 
@@ -299,7 +310,7 @@ fn main() {
 fn run_command(
     cmd: &RunCommand,
     stdin_buf: &mut BufReader<StdinLock>,
-    expected_token: &[u8; 22],
+    expected_token: &str,
 ) -> Result<i32, String> {
     let mut child = Command::new(&cmd.command)
         .args(&cmd.args)
@@ -324,18 +335,30 @@ fn run_command(
 
         if !stdin_has_buffered { poll([stdin_fd, child_fd], timeout); }
 
-        // Cancel on stdin → parse, verify token, then killpg(child_pgid, signal).
+        // Cancel on stdin → parse, verify token, then signal the child's group.
         // A cancel with a bad token is dropped (send {"error":"invalid token"})
         // so an attacker with write access to the pipe cannot unauthenticatedly
         // cancel a running action.
-        if stdin ready { read line, parse Command::Cancel(sig), verify token, killpg, child_killed = true }
+        // Cancel from stdin (token checked first)
+        //   Terminate            -> killpg(SIGKILL); child_killed = true
+        //   NotifyThenTerminate  -> killpg(SIGTERM); escalation_deadline = now + period
+        // poll timeout: 100ms if child_killed, until escalation_deadline if set
+        // (SIGKILL when it passes), else block
+        if stdin ready { read line, parse Command::Cancel { method, .. }, verify token, signal as above }
 
-        // Child output → send {"out": line}
-        if child ready { read line, send }
+        // Child output → one bounded fill_buf chunk through LineFramer,
+        // each completed line sent as {"out": line}, then back to poll
+        if child ready { fill_buf (retry on EINTR); framer.push(chunk, emit); consume }
 
-        // Child exited (POLLHUP or try_wait after kill)
-        // Kill process group to clean up descendants (e.g. grandchild shells)
-        if child done { killpg(child_pgid, SIGKILL); return child.wait().code() }
+        // fill_buf returned EOF inside POLLIN: flush, reap, then kill the group
+        if eof { framer.finish(emit); code = child.wait().code(); killpg(SIGKILL); return code }
+
+        // POLLHUP/POLLERR: all writers closed, so drain to EOF, flush, reap, kill the group
+        if hungup { drain; framer.finish(emit); code = child.wait().code(); killpg(SIGKILL); return code }
+
+        // after a kill or soft signal: try_wait reports exit; killpg first so group
+        // members close their write ends and the drain reaches EOF
+        if try_wait -> Some(status) { killpg(SIGKILL); drain; framer.finish(emit); return status.code() }
     }
 }
 ```
@@ -346,8 +369,18 @@ Key details:
 - After `killpg`, uses `try_wait()` with a 100ms poll timeout to detect exit
   even when POLLHUP isn't delivered
 - Checks `POLLHUP | POLLERR` for child stdout close
-- Drains remaining buffered output before returning exit code
+- Drains remaining buffered output through the framer and flushes the
+  trailing partial line before returning the exit code. On EOF the flush, and
+  on POLLHUP the drain and flush, run before `wait()` and `killpg`; on the
+  post-kill `try_wait` path `killpg` runs first so group members release the
+  pipe. A grandchild that left the group (`setsid`) can still hold the pipe
+  open and stall the drain; this is a pre-existing limitation.
 - Kills the child's process group on exit to clean up descendants
+- Child stdout is read in bounded chunks (one `fill_buf` per `POLLIN`, EINTR
+  retried) and framed by `LineFramer`: lines capped at 64 KiB, invalid UTF-8
+  escaped as `\xNN`, JSON payload capped at the 128 KiB response limit. This
+  keeps the loop returning to `poll(2)` so cancel stays responsive on
+  newline-free output, and bounds per-line memory. See `framer.rs`.
 - Every cancel line read inside the runner is passed through the same
   constant-time token check the main loop uses. The Windows runner
   (`runner_win.rs`) receives already-validated `CancelMethod` values
@@ -673,23 +706,27 @@ struct UnixAsyncHelperReader {
 }
 
 impl UnixAsyncHelperReader {
-    fn new(stdout: ChildStdout) -> Self {
+    fn new(stdout: ChildStdout) -> Result<Self, SessionError> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let thread = std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
                 let mut line = String::new();
-                match reader.read_line(&mut line) {
+                match Read::take(&mut reader, MAX_RESPONSE_LINE_LENGTH as u64).read_line(&mut line) {
                     Ok(0) => break,
                     Ok(_) => { if tx.send(serde_json::from_str(&line)).is_err() { break; } }
                     Err(_) => break,
                 }
             }
         });
-        Self { rx, _thread: Some(thread) }
+        Ok(Self { rx, _thread: Some(thread) })
     }
 }
 ```
+
+A response line reaching `MAX_RESPONSE_LINE_LENGTH` (128 KiB) without a
+newline is a `SessionError::HelperCommunication`; the helper's
+`fit_out_payload` keeps every `Out` under that bound.
 
 The reader thread performs blocking I/O on the anonymous pipe. The async code
 receives from the channel with `.recv().await`, which yields to the tokio
@@ -777,14 +814,13 @@ The existing per-action sudo path remains as fallback for non-helper sessions.
 
 ## Testing
 
-All 13 cross-user tests in `tests/test_cross_user.rs` pass in the Docker
-localuser container, validating the helper end-to-end:
+All 48 cross-user tests in `tests/integration/test_cross_user.rs` pass in
+the Docker localuser container, validating the helper end-to-end:
 
 ```bash
 cd ~/openjd-rs
 docker build -t openjd-cross-user -f testing_containers/localuser_sudo_environment/Dockerfile .
 docker run --rm openjd-cross-user
-# test result: ok. 12 passed; 0 failed
 ```
 
 Tests cover: basic execution, stdout streaming, notify-then-terminate cancel,
@@ -807,9 +843,15 @@ Additional token-focused tests added in `helper/tests/test_helper_protocol.rs`:
   command with the correct token, send a cancel with the wrong token,
   verify the command is still running, then send a cancel with the
   correct token and verify the command exits.
-- **`test_helper_happy_path_includes_token`** — the pre-existing echo /
-  terminate / nonexistent-command tests updated to include the token on
-  every request.
+- **`test_helper_rejects_malformed_auth_token`**: spawn the helper with
+  an `--auth-token` value of the wrong length; expect a nonzero exit.
+- **`test_helper_shutdown_requires_token`**: a shutdown with the wrong
+  token gets `{"error":"invalid token"}` and the helper keeps serving; a
+  shutdown with the correct token exits it.
+
+The pre-existing `test_helper_echo_command`,
+`test_helper_cancel_terminates_quickly` and `test_helper_nonexistent_command`
+carry the token on every request.
 
 ## Resolved Decisions
 
@@ -840,29 +882,44 @@ openjd-sessions/
   Cargo.toml            ← build = "build.rs"
   build.rs              ← compiles helper, copies to OUT_DIR
   src/
-    lib.rs              ← #[cfg(unix)] pub(crate) mod helper_binary;
+    lib.rs              ← pub(crate) mod cross_user_helper; pub(crate) mod helper_binary;
     helper_binary.rs    ← include_bytes! + create_helpers_dir() + write_helper()
-    session.rs          ← CrossUserHelper, run_via_helper, cancel_writer
+    cross_user_helper.rs ← CrossUserHelper, CrossUserHelperWin, AsyncHelper,
+                          run_via_helper, helper_cancel_line
+    session.rs          ← cross_user state (cancel_writer, helper_auth_token),
+                          send_helper_cancel_command
     helper/
-      Cargo.toml        ← standalone crate with [workspace] = {}
+      Cargo.bundled.toml ← standalone crate manifest with [workspace] = {};
+                          build.rs copies the tree to OUT_DIR and renames it
+                          Cargo.toml
       src/
         main.rs         ← argv parse (--auth-token), shared stdin reader,
                           command dispatch with token verification
         protocol.rs     ← Command/Response serde types, token field
         runner.rs       ← poll(2) loop, child management, cancel with
                           per-command token check
+        framer.rs       ← bounded LineFramer + fit_out_payload, both platforms
+        runner_win.rs   ← Windows runner
+        job_object.rs   ← Windows Job Object guard for the helper process tree
+        process_tree.rs ← PID-reuse-safe process tree collection for Windows
+                          tree kills
+        process_tree_win.rs ← the Windows calls around process_tree's walk
+        win32_which.rs  ← Windows command search mirroring `shutil.which`
 ```
 
 ### build.rs
 
-Compiles the helper as a standalone binary via `cargo build --release`,
+Copies the helper source tree to `$OUT_DIR/helper_src`, renames
+`Cargo.bundled.toml` to `Cargo.toml` there, then compiles the helper as a
+standalone binary via `cargo build --release`,
 targeting `$OUT_DIR/helper_build` with `--target $TARGET` for cross-compilation.
 On non-unix targets, writes an empty placeholder so `include_bytes!` doesn't fail.
 
 ### Binary size
 
 425KB with `opt-level = "s"`, LTO, strip, `panic = "abort"`.
-Dependencies: serde, serde_json, nix. The token comparison is hand-rolled
+Dependencies: serde, serde_json, nix, and, on Windows, the `windows` crate.
+The token comparison is hand-rolled
 (no `subtle` or similar crate) to keep the dependency set unchanged.
 
 ### Session-side dependencies

@@ -76,7 +76,7 @@ The helper maps these to the appropriate OS primitives internally:
   escalates to SIGKILL / kill_process_tree after the notify period.
 - `TERMINATE` → SIGKILL on POSIX, kill_process_tree on Windows.
 
-### Helper binary (`helper/src/runner.rs`) — add `#[cfg(windows)]`
+### Helper binary (`helper/src/runner_win.rs`, `#[cfg(windows)]`)
 
 The POSIX runner uses `poll()` on raw fds to multiplex stdin and child stdout.
 Windows doesn't have `poll()` on pipe handles. The Windows runner uses two
@@ -85,13 +85,23 @@ threads instead:
 ```
                     Helper process (job-user)
                     ┌─────────────────────────────┐
-  stdin ──────────> │  Main thread                │
-  (cancel cmds)     │  - reads stdin lines        │
-                    │  - on cancel: signal child  │
+  stdin ──────────> │  Stdin thread               │
+  (commands)        │  - reads and parses cmds    │
+                    │  - forwards cancels to main │
                     │                             │
-                    │  Stdout thread              │
-                    │  - reads child stdout       │ ──> stdout
-                    │  - sends {"out":...} lines  │     (to session)
+                    │  Main thread                │
+                    │  - receives parsed cancels, │
+                    │    signals child            │
+                    │  - drains bounded queue,    │ ──> stdout
+                    │    sends {"out":...} lines  │     (to session)
+                    │                             │
+                    │  Stdout thread, Stderr      │
+                    │  thread                     │
+                    │  - read child pipe in 8 KiB │
+                    │    chunks, each through its │
+                    │    own LineFramer           │
+                    │  - push lines to the queue  │
+                    │    (bounded)                │
                     │                             │
                     │  Child process (job-user)   │
                     │  - CREATE_NEW_PROCESS_GROUP │
@@ -114,10 +124,39 @@ inside the helper.
   in-process kill (see
   [sessions/subprocess.md](sessions/subprocess.md#process-tree-killing)).
 
-**I/O multiplexing**: Two threads sharing a channel:
-- Thread 1 (main): reads stdin for cancel commands, signals child on cancel
-- Thread 2: reads child stdout line-by-line, sends `{"out":...}` responses
-- Main thread joins stdout thread after child exits, then sends `{"exited":...}`
+**Job Object**: Before serving commands, the helper puts itself in a Job
+Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+(`job_object::JobObject::setup_for_current_process()` in `main.rs`), and the
+runner assigns each workload to it (`job.assign_process` in `runner_win.rs`),
+so helper death kills every descendant. See
+[Windows runner: Job Object kill-on-close](sessions/embedded-cross-user-helper.md#windows-runner-job-object-kill-on-close).
+
+**I/O multiplexing**: Four threads. Output flows through a bounded channel
+(`sync_channel`, capacity `OUT_QUEUE_LINES`):
+- Main: `try_recv`s cancels, drains the output channel, sends each line as
+  `{"out":...}`, signals child on cancel
+- Stdin reader: parses commands, forwards cancels to main
+- Stdout reader and stderr reader: each reads its pipe in 8 KiB chunks
+  through its own `LineFramer` instance, pushes framed lines to the channel
+- After the child exits, main drains the channel with a blocking `recv()`
+  until both senders disconnect, waits the child, joins the reader threads,
+  then sends `{"exited":...}`. The senders disconnect when both child pipes
+  reach EOF, so a grandchild still holding an inherited write handle can delay
+  the drain indefinitely (the Unix drain has the same limitation)
+
+**Output bounds** (same `LineFramer` type as the Unix runner, one instance
+per reader thread):
+- Per line: 64 KiB cap (excess dropped to the next `\n`), invalid UTF-8
+  escaped as `\xNN`, trailing partial line flushed at EOF, JSON payload capped
+  at the 128 KiB response limit
+- Aggregate: `OUT_QUEUE_LINES` (256) × 64 KiB ≈ 16 MiB. A full channel parks
+  the reader threads, the child's pipe fills, and the child stalls
+- CRLF: `to_payload` strips one trailing `\r` before the JSON payload cap, so
+  `\r\n` lines lose the `\r`; a lone `\r` is kept (runner_win.rs:198-200).
+  The Unix runner uses `trim_end` instead.
+- Why a bounded channel: the Unix runner reads and emits in one `poll()` loop,
+  so a blocked write back-pressures the read for free. Threads break that
+  link; the bound restores it
 
 ### Helper launch (`cross_user_helper.rs`) — add `#[cfg(windows)]` spawn
 
@@ -130,8 +169,8 @@ pub fn spawn(
     user: &dyn SessionUser,
 ) -> Result<(Self, /* cancel_writer */), SessionError> {
     let wu = user.as_any().downcast_ref::<WindowsSessionUser>().unwrap();
-    let spawned = win32::spawn_as_user(
-        &[helper_path.to_string_lossy().to_string()],
+    let spawned = win32::spawn_as_user_with_stdin(
+        &[helper_path.to_string_lossy().to_string(), "--auth-token", &auth_token],
         &HashMap::new(),  // env
         None,             // working_dir
         wu.password(),
@@ -189,15 +228,22 @@ to the child's `hStdInput`, the write end is returned in
 
 ### Step 2: Add `#[cfg(windows)]` runner in `helper/src/runner_win.rs` ✅
 
-Implemented `run_command` for Windows using two threads for I/O multiplexing.
+Implemented `run_command` for Windows using two reader threads plus the main
+drain loop for I/O multiplexing.
 Handle cancel commands by calling `GenerateConsoleCtrlEvent` or
-`kill_process_tree`. Three integration tests pass (echo, cancel, nonexistent).
+`kill_process_tree`. 29 cross-user Windows integration tests
+(`tests/integration/test_cross_user_windows.rs`, `#[ignore]`, run by the
+`cross-user-windows` CI job) cover identity, exit codes, environment, cancel,
+process-tree kill, DACLs, and output framing.
+Reader threads route child stdout and stderr, each through its own
+`LineFramer`, into a bounded channel; see "Output bounds" above.
 
 ### Step 3: Add `#[cfg(windows)]` spawn in `cross_user_helper.rs` ✅
 
 Added `CrossUserHelperWin` struct that launches the helper via
 `spawn_as_user_with_stdin`. Uses `DuplicateHandle` to create the cancel
-writer (analogous to POSIX `dup()`). Extracted `HelperIO` trait so
+writer (analogous to POSIX `dup()`). Extracted the `AsyncHelper` trait (with
+`AsyncHelperReader`) so
 `run_via_helper` works with both POSIX and Windows helper types.
 
 ### Step 4: Wire up in `session.rs` and runner modules ✅
@@ -207,8 +253,8 @@ Removed all `#[cfg(unix)]` guards on helper usage. The session now spawns
 `CrossUserHelperWin::spawn`), passes it to runners, and routes all
 cross-user subprocess execution through `run_via_helper`.
 
-Updated `build.rs` to compile the helper binary on Windows too, using
-`include_bytes!` just like POSIX.
+Updated `build.rs` to compile the helper binary on Windows too;
+`helper_binary.rs` embeds it with `include_bytes!` just like POSIX.
 
 ### Step 5: Remove in-process `send_ctrl_break` for cross-user
 
@@ -252,7 +298,7 @@ binary's protected DACL still enforces read-only for the session user.
 - Integration test: helper protocol round-trip (spawn helper, send command,
   read output, send cancel, verify exit)
 - E2E: the existing worker agent cancellation tests that currently fail
-- DACL tests in `tests/test_cross_user_windows.rs`:
+- DACL tests in `tests/integration/test_cross_user_windows.rs`:
   - `test_cross_user_helpers_dir_dacl_protects_from_session_user`
   - `test_cross_user_helper_binary_dacl_protects_from_session_user`
   - `test_cross_user_session_user_cannot_overwrite_helper_binary`
