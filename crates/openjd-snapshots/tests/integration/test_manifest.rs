@@ -257,15 +257,10 @@ fn validate_accepts_positive_chunk_size() {
 #[test]
 fn deserialization_accepts_mismatched_paths_and_validate_rejects_them() {
     let abs: AbsSnapshot =
-        Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![FileEntry {
-            path: "/absolute/path.txt".into(),
-            hash: Some("abc123".into()),
-            size: Some(100),
-            mtime: Some(1000),
-            chunk_hashes: None,
-            symlink_target: None,
-            runnable: false,
-            deleted: false,
+        Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE).with_files(vec![{
+            let mut e = FileEntry::file("/absolute/path.txt", 100, 1000);
+            e.hash = Some("abc123".into());
+            e
         }]);
 
     let json = serde_json::to_string(&abs).unwrap();

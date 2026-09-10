@@ -33,6 +33,10 @@ pub const MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
 
 /// Error raised when parsing a range expression fails.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct RangeExprError {
     pub expr: String,
     pub message: String,

@@ -55,6 +55,7 @@ impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for NullableVec<T> {
 /// types are available (BOOL, RANGE_EXPR, `LIST[*]`).
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
+#[non_exhaustive]
 pub enum JobParameterDefinition {
     STRING(JobStringParameterDefinition),
     INT(JobIntParameterDefinition),
@@ -553,6 +554,7 @@ impl JobParameterDefinition {
 /// User interface definition for STRING parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StringUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -562,6 +564,7 @@ pub struct StringUserInterface {
 /// User interface definition for INT parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct IntUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -572,6 +575,7 @@ pub struct IntUserInterface {
 /// User interface definition for FLOAT parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct FloatUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -583,6 +587,7 @@ pub struct FloatUserInterface {
 /// User interface definition for PATH parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct PathUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -594,6 +599,7 @@ pub struct PathUserInterface {
 /// §2.7 JobPathParameterFileFilter
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct FileFilter {
     pub label: String,
     pub patterns: Vec<String>,
@@ -628,6 +634,7 @@ pub(crate) fn validate_ui_label(
 /// §2.1 JobStringParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobStringParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -833,6 +840,12 @@ impl JobStringParameterDefinition {
 /// An `i64` that deserializes from YAML integers, integer-valued floats (e.g. `42.0`), or
 /// numeric strings (e.g. `"42"`). Rejects booleans, nulls, and non-integer floats.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "single-field wrapper over one validated value; it cannot gain a second \
+              field without ceasing to be a newtype, and callers construct and \
+              destructure it directly"
+)]
 pub struct FlexInt(pub i64);
 
 impl<'de> Deserialize<'de> for FlexInt {
@@ -878,6 +891,12 @@ impl std::fmt::Display for FlexInt {
 /// Preserves the original string representation when parsed from a string, which is needed
 /// for round-trip fidelity in constraint checking. Rejects NaN, Infinity, booleans, and nulls.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed pair: a validated value plus the original string representation it \
+              was parsed from, kept for round-trip fidelity. Both fields are inherent \
+              to what the type is, and callers construct and destructure it directly"
+)]
 pub struct FlexFloat(pub f64, pub Option<String>);
 
 /// Reject NaN and Infinity float values.
@@ -935,6 +954,7 @@ impl std::fmt::Display for FlexFloat {
 /// §2.3 JobIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -1077,6 +1097,7 @@ impl JobIntParameterDefinition {
 /// §2.4 JobFloatParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobFloatParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -1251,6 +1272,7 @@ impl JobFloatParameterDefinition {
 /// §2.2 JobPathParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct JobPathParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,

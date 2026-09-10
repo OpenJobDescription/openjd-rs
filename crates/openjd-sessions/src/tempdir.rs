@@ -15,6 +15,10 @@ use crate::session_user::SessionUser;
 /// user to rename or delete files belonging to other users. This is a security risk
 /// for session working directories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum StickyBitPolicy {
     /// Refuse to create the session if a parent directory is unsafe.
     /// This is the default — fail-closed is the secure choice.

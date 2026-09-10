@@ -92,12 +92,17 @@ fn preallocate_file(path: &std::path::Path, size: u64) -> std::io::Result<()> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileConflictResolution {
     Skip,
     Overwrite,
     CreateCopy,
 }
 
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct DownloadOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub file_conflict_resolution: FileConflictResolution,
@@ -123,12 +128,14 @@ impl Default for DownloadOptions {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct DownloadResult {
     pub manifest: AbsManifest,
     pub statistics: DownloadStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct DownloadStatistics {
     pub total_files: usize,
     pub total_bytes: u64,

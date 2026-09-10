@@ -26,6 +26,30 @@ authors = ["Amazon Web Services"]
 keywords = ["openjd", "openjobdescription", "render-farm", "job-template", "rendering"]
 categories = ["command-line-utilities", "parser-implementations"]
 
+# Workspace lints. Inherited by each crate via `[lints] workspace = true`.
+#
+# `exhaustive_enums` / `exhaustive_structs` are `restriction`-group lints that
+# fire only on *exported* (publicly reachable) types — private and `pub(crate)`
+# items never trigger them. Enabling them here makes the SemVer growth question
+# an explicit, reviewed decision for every new public type instead of something
+# a contributor has to remember. Every existing site is either marked
+# `#[non_exhaustive]` or carries an `#[expect(..., reason = "...")]` recording
+# why it is intentionally closed.
+#
+# The rule for which way to go is documented in
+# `specs/non-exhaustive-policy.md`. In short: types that mirror a numbered
+# OpenJD spec section grow by extension RFC and are marked `#[non_exhaustive]`;
+# types representing a decidable logical concept, and runtime state machines a
+# consumer must react to, stay closed.
+#
+# Level is `deny`, not `warn`: a new public type that has not made this
+# decision is a hard error at every invocation, not just under CI's
+# `-D warnings`. Local `cargo clippy` / `cargo build` fails too, so the
+# decision surfaces while the type is being written rather than in CI.
+[workspace.lints.clippy]
+exhaustive_enums = "deny"
+exhaustive_structs = "deny"
+
 [workspace.dependencies]
 shlex = "2"
 serde = { version = "1", features = ["derive"] }

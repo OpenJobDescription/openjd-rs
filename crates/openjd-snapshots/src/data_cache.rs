@@ -12,6 +12,10 @@ use async_trait::async_trait;
 
 /// Result of a copy_from attempt.
 #[derive(Debug, PartialEq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum CopyResult {
     /// Server-side copy completed (no data transited through client)
     ServerSideCopy,
@@ -75,6 +79,10 @@ const DEFAULT_COPY_CONCURRENCY: usize = 64;
 /// to [`S3_MAX_SINGLE_COPY_BYTES`] (5 GiB), so the threshold is always capped
 /// at 5 GiB regardless of the configured value.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct S3CopyConfig {
     /// Sources strictly larger than this use multipart `UploadPartCopy`.
     /// Defaults to 5 MiB — a performance cutoff, since parallel multipart copy
@@ -281,6 +289,10 @@ pub trait RangeReadDataCache: AsyncDataCache {
 }
 
 /// Content-addressed storage backed by a local or network filesystem.
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "internal mechanics, publicly reachable but not a spec surface"
+)]
 pub struct FileSystemDataCache {
     pub root_path: PathBuf,
 }

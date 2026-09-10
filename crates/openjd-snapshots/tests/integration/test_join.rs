@@ -153,10 +153,7 @@ fn abs_symlink_targets_prefixed() {
 fn diff_preserves_deleted_markers() {
     let m = snap_diff(
         vec![FileEntry::deleted("old.txt")],
-        vec![DirEntry {
-            path: "old_dir".into(),
-            deleted: true,
-        }],
+        vec![DirEntry::deleted("old_dir")],
     );
     let result = join_snapshot_diff_rel(&m, "prefix").unwrap();
     assert_eq!(result.files[0].path, "prefix/old.txt");

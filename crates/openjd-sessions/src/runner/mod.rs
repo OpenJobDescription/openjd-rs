@@ -40,6 +40,12 @@ use crate::subprocess::{run_subprocess, SubprocessConfig, SubprocessResult};
 /// assert!(matches!(method, CancelMethod::NotifyThenTerminate { .. }));
 /// ```
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "runtime state machine: consumers match on these to react, and a new state \
+              must be a compile error rather than a silently ignored `_` arm. Not \
+              extension-gated."
+)]
 pub enum CancelMethod {
     /// Immediately terminate via SIGKILL.
     Terminate,
@@ -60,6 +66,12 @@ impl std::fmt::Display for CancelMethod {
 
 /// State of a script runner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "runtime state machine: consumers match on these to react, and a new state \
+              must be a compile error rather than a silently ignored `_` arm. Not \
+              extension-gated."
+)]
 pub enum ScriptRunnerState {
     Ready,
     Running,

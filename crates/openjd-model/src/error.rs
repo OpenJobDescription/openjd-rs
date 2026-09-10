@@ -78,6 +78,10 @@ impl From<openjd_expr::FormatStringValidationError> for ModelError {
 
 /// An element in a validation error path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum PathElement {
     Field(String),
     Index(usize),
@@ -85,6 +89,10 @@ pub enum PathElement {
 
 /// A single validation error with its location in the template.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct ValidationError {
     /// Location of the error in the template structure (e.g., which field
     /// in the JSON/YAML tree). Used by consumers to navigate to or annotate
@@ -101,6 +109,10 @@ pub struct ValidationError {
 
 /// Structured diagnostic data for a validation error.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct ErrorDetail {
     /// Human-readable error summary without source pointers.
     pub summary: String,
@@ -111,6 +123,10 @@ pub struct ErrorDetail {
 
 /// A diagnostic span identifying a specific character range in source text.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct DiagnosticSpan {
     /// Human-readable description of the diagnostic at this source location.
     pub summary: String,

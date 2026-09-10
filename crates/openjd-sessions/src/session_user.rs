@@ -19,6 +19,10 @@ pub trait SessionUser: Send + Sync + std::fmt::Debug {
 /// POSIX session user identity for cross-user execution via sudo.
 #[cfg(unix)]
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct PosixSessionUser {
     pub user: String,
     pub group: String,
@@ -78,6 +82,7 @@ impl SessionUser for PosixSessionUser {
 /// Error for incorrect username or password.
 #[cfg(windows)]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum BadCredentialsError {
     #[error("The username or password is incorrect.")]
     LogonFailure,

@@ -244,6 +244,11 @@ use windows::Win32::System::Threading::{
 };
 
 /// Result of spawning a cross-user process.
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of what a spawn returns; callers destructure it to take \
+              ownership of the handles. See specs/non-exhaustive-policy.md."
+)]
 pub struct SpawnedProcess {
     pub process_handle: HANDLE,
     pub pid: u32,

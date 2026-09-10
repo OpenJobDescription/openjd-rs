@@ -157,6 +157,9 @@ impl JsPathFormat {
             openjd_expr::PathFormat::Posix => JsPathFormat::Posix,
             openjd_expr::PathFormat::Windows => JsPathFormat::Windows,
             openjd_expr::PathFormat::Uri => JsPathFormat::Uri,
+            // `PathFormat` is `#[non_exhaustive]`; POSIX is the safe default
+            // for any future path flavor the JS binding does not yet model.
+            _ => JsPathFormat::Posix,
         }
     }
 }
@@ -178,11 +181,11 @@ impl JsPathMappingRule {
         dest_path: &str,
     ) -> JsPathMappingRule {
         JsPathMappingRule {
-            inner: openjd_expr::PathMappingRule {
-                source_path_format: source_format.into_inner(),
-                source_path: source_path.to_string(),
-                destination_path: dest_path.to_string(),
-            },
+            inner: openjd_expr::PathMappingRule::new(
+                source_format.into_inner(),
+                source_path,
+                dest_path,
+            ),
         }
     }
 }

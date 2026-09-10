@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 /// Options controlling the DIFF operation ([`diff_snapshots`]).
 #[derive(Default)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct DiffOptions {
     /// Hash of the parent manifest to record in the diff's
     /// `parent_manifest_hash` field. The caller computes this from the

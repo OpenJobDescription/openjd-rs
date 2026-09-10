@@ -283,6 +283,9 @@ fn test_tempdir_windows_nonvalid_principal_raises_error() {
              returns ERROR_LOGON_FAILURE for unknown accounts to avoid \
              leaking account existence). got Other({msg:?})."
         ),
+        // `BadCredentialsError` is `#[non_exhaustive]`; a new variant
+        // must not silently satisfy this assertion.
+        Err(e) => panic!("expected LogonFailure, got {e:?}"),
         Ok(_) => panic!("Non-existent user should fail credential validation, but got Ok"),
     }
 }

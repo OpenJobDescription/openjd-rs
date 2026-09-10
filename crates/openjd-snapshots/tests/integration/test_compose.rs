@@ -47,10 +47,7 @@ fn hf(path: &str, hash: &str, size: u64, mtime: u64) -> FileEntry {
 }
 
 fn deleted_dir(path: &str) -> DirEntry {
-    DirEntry {
-        path: path.into(),
-        deleted: true,
-    }
+    DirEntry::deleted(path)
 }
 
 fn fpaths(m: &Snapshot) -> std::collections::HashSet<String> {

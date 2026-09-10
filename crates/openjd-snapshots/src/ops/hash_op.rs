@@ -13,6 +13,10 @@ use std::sync::{Arc, Mutex};
 use tracing::debug;
 
 #[derive(Default)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "caller-constructed configuration, not a spec-mirroring growth axis; see specs/non-exhaustive-policy.md"
+)]
 pub struct HashOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
@@ -22,6 +26,7 @@ pub struct HashOptions {
 }
 
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct HashStatistics {
     pub total_files: usize,
     pub total_bytes: u64,
@@ -47,6 +52,7 @@ pub struct HashStatistics {
 /// returns an [`AbsManifest`]. The default `M = AbsManifest` keeps the bare
 /// `HashResult` name usable as a shorthand for the enum-dispatch case.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct HashResult<M = AbsManifest> {
     pub manifest: M,
     pub statistics: HashStatistics,

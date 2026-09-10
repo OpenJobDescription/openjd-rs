@@ -12,6 +12,7 @@ use serde::Deserialize;
 /// §1.2 EnvironmentTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct EnvironmentTemplate {
     pub specification_version: String,
     pub extensions: Option<Vec<ExtensionName>>,
