@@ -24,6 +24,7 @@ pub mod functions;
 pub(crate) mod json_escape;
 pub mod path_mapping;
 pub mod profile;
+pub(crate) mod py_escape;
 pub mod range_expr;
 pub mod symbol_table;
 pub mod types;

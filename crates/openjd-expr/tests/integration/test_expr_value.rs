@@ -1559,3 +1559,148 @@ fn nonempty_list_elem_type_unchanged() {
     let v = ExprValue::ListString(vec!["a".into(), "b".into()], 2);
     assert_eq!(v.list_elem_type(), Some(ExprType::STRING));
 }
+
+// ══════════════════════════════════════════════════════════════
+// repr_python escapes its embedded literal
+// ══════════════════════════════════════════════════════════════
+//
+// `repr_python` builds Python literals but did not escape them, not even the
+// quote or the backslash. It shares `repr_py`'s writer now, so each expectation
+// below is CPython's `repr` of the inner string, dropped into the existing
+// wrapper. Checked against CPython 3.11.12, 3.12.10, 3.13.7 and 3.14.0b4.
+
+#[test]
+fn repr_python_switches_delimiter_for_an_embedded_single_quote() {
+    // Was `ExprValue('it's')`, which CPython refuses to parse.
+    assert_eq!(
+        ExprValue::String("it's".to_string()).repr_python(),
+        "ExprValue(\"it's\")"
+    );
+}
+
+#[test]
+fn repr_python_doubles_a_backslash() {
+    // Was `ExprValue('a\b')`, which parses as a backspace: silent corruption.
+    assert_eq!(
+        ExprValue::String("a\\b".to_string()).repr_python(),
+        r"ExprValue('a\\b')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_a_newline() {
+    assert_eq!(
+        ExprValue::String("hello\nworld".to_string()).repr_python(),
+        r"ExprValue('hello\nworld')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_a_nul() {
+    assert_eq!(
+        ExprValue::String("a\u{0}b".to_string()).repr_python(),
+        r"ExprValue('a\x00b')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_non_printable_non_ascii() {
+    assert_eq!(
+        ExprValue::String("a\u{a0}b".to_string()).repr_python(),
+        r"ExprValue('a\xa0b')"
+    );
+}
+
+#[test]
+fn repr_python_keeps_printable_non_ascii_verbatim() {
+    assert_eq!(
+        ExprValue::String("café".to_string()).repr_python(),
+        "ExprValue('café')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_a_path() {
+    let v = ExprValue::new_path("/tmp/a\nb.txt".to_string(), PathFormat::Posix);
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue('/tmp/a\nb.txt', type='path', path_format=PathFormat.POSIX)"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_list_elements() {
+    let v = ExprValue::make_list(
+        vec![
+            ExprValue::String("it's".to_string()),
+            ExprValue::String("a\nb".to_string()),
+        ],
+        ExprType::list(ExprType::STRING),
+    )
+    .unwrap();
+    // CPython selects a delimiter per element, so the two differ:
+    //   >>> repr(["it's", 'a\nb'])
+    //   ["it's", 'a\nb']
+    assert_eq!(
+        v.repr_python(),
+        r#"ExprValue(["it's", 'a\nb'], type='list[string]')"#
+    );
+}
+
+#[test]
+fn repr_python_leaves_a_float_original_spelling_unchanged() {
+    // Numeric text needs no escaping, so routing it through the shared writer
+    // must not alter it.
+    assert_eq!(
+        ExprValue::Float(Float64::with_str(3.5, "3.500".to_string()).unwrap()).repr_python(),
+        "ExprValue('3.500', type='float')"
+    );
+}
+
+#[test]
+fn repr_python_leaves_a_range_expression_unchanged() {
+    let v = ExprValue::RangeExpr("1-5".parse::<RangeExpr>().unwrap());
+    assert_eq!(v.repr_python(), "ExprValue('1-5', type='range_expr')");
+}
+
+#[test]
+fn repr_python_escapes_inside_list_of_path_elements() {
+    // `repr_python_list` matches `String` and `Path` in one arm. Splitting them
+    // would leave `list[path]` unescaped, which no `list[string]` test notices.
+    //
+    // The Windows format normalises the leading `/` to `\`, so the value is
+    // backslash, `a`, newline, `b`. That exercises backslash doubling and
+    // newline escaping together:
+    //   >>> repr(['\\a\nb'])
+    //   ['\\a\nb']
+    let v = ExprValue::make_list(
+        vec![ExprValue::new_path(
+            "/a\nb".to_string(),
+            PathFormat::Windows,
+        )],
+        ExprType::list(ExprType::PATH),
+    )
+    .unwrap();
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue(['\\a\nb'], type='list[path]', path_format=PathFormat.WINDOWS)"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_a_nested_list() {
+    let inner = ExprValue::make_list(
+        vec![ExprValue::String("a\nb".to_string())],
+        ExprType::list(ExprType::STRING),
+    )
+    .unwrap();
+    let v = ExprValue::make_list(
+        vec![inner],
+        ExprType::list(ExprType::list(ExprType::STRING)),
+    )
+    .unwrap();
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue([['a\nb']], type='list[list[string]]')"
+    );
+}

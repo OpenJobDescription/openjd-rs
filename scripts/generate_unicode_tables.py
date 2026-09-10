@@ -34,6 +34,14 @@ Table definitions (per CPython Objects/unicodectype.c semantics):
   (XID_Start plus '_'), probed via str.isidentifier()
 - IDENT_CONTINUE: valid non-first identifier characters (XID_Continue),
   probed via ('a' + c).isidentifier()
+- NONPRINTABLE: code points repr() escapes rather than emitting verbatim,
+  probed via `not chr(cp).isprintable()` — Py_UNICODE_ISPRINTABLE inverted,
+  i.e. general category C* or Z* excluding U+0020
+
+NONPRINTABLE backs `py_escape::is_non_printable`, the predicate deciding
+which code points repr_py emits as a numeric escape. Generating it here
+rather than reading a Unicode-property crate keeps the crate on one pinned
+Unicode version for every Python-parity decision it makes.
 
 IDENT_START/IDENT_CONTINUE back the regex capture-group-name validation:
 CPython's re module (sre_parse) checks group names with name.isidentifier(),
@@ -136,6 +144,12 @@ TABLES = [
         "IDENT_CONTINUE",
         "Valid non-first Python identifier characters (XID_Continue),\n/// probed via ('a' + c).isidentifier().",
         lambda c: ("a" + c).isidentifier(),
+    ),
+    (
+        "NONPRINTABLE",
+        "Code points repr() escapes rather than emitting verbatim\n"
+        "/// (Py_UNICODE_ISPRINTABLE inverted: category C* or Z*, less U+0020).",
+        lambda c: not c.isprintable(),
     ),
 ]
 
