@@ -7,6 +7,7 @@
 use super::StringOutputBudget;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
+use crate::py_escape::write_py_string_literal;
 use crate::value::ExprValue;
 
 type R = Result<ExprValue, ExpressionError>;
@@ -333,7 +334,7 @@ fn write_repr_py(val: &ExprValue, buf: &mut String) {
     use std::fmt::Write;
     match val {
         ExprValue::String(value) | ExprValue::Path { value, .. } => {
-            write_repr_py_string(value, buf)
+            write_py_string_literal(value, buf)
         }
         ExprValue::Bool(value) => buf.push_str(if *value { "True" } else { "False" }),
         ExprValue::Null => buf.push_str("None"),
@@ -349,23 +350,16 @@ fn write_repr_py(val: &ExprValue, buf: &mut String) {
         | ExprValue::ListList(_, _, _) => {
             write_delimited_list(val, buf, "[", ", ", "]", write_repr_py_ref);
         }
-        ExprValue::RangeExpr(value) => {
-            let _ = write!(buf, "'{value}'");
-        }
+        // Numeric by construction, so nothing here can need escaping. Routed
+        // through the shared writer anyway, so no reader has to re-derive that.
+        ExprValue::RangeExpr(value) => write_py_string_literal(&value.to_string(), buf),
+        // `Unresolved`. Unreachable through evaluation: the evaluator returns
+        // an unresolved result for a call with an unresolved argument, so it
+        // never reaches this renderer. Left exactly as it was rather than
+        // routed, because quoting `<unresolved[string]>` would change output
+        // that nothing produces and no test could reach.
         _ => buf.push_str(&val.to_display_string()),
     }
-}
-
-fn write_repr_py_string(value: &str, buf: &mut String) {
-    buf.push('\'');
-    for c in value.chars() {
-        match c {
-            '\\' => buf.push_str("\\\\"),
-            '\'' => buf.push_str("\\'"),
-            _ => buf.push(c),
-        }
-    }
-    buf.push('\'');
 }
 
 fn write_repr_py_ref(value: ValueRef<'_>, buf: &mut String) {
@@ -376,7 +370,7 @@ fn write_repr_py_ref(value: ValueRef<'_>, buf: &mut String) {
             let _ = write!(buf, "{value}");
         }
         ValueRef::Float(value) => write_float(value, buf),
-        ValueRef::String(value) | ValueRef::Path(value) => write_repr_py_string(value, buf),
+        ValueRef::String(value) | ValueRef::Path(value) => write_py_string_literal(value, buf),
         ValueRef::List(value) => write_repr_py(value, buf),
     }
 }
@@ -704,5 +698,34 @@ mod tests {
         check_bound(&ExprValue::Int(-1234567890));
         check_bound(&ExprValue::Bool(true));
         check_bound(&ExprValue::Null);
+    }
+
+    /// `repr_py` now escapes control and non-printable code points, which is
+    /// wider output than `escaped_bound` was written against. One string per
+    /// escape width, at the length where an overrun would show.
+    #[test]
+    fn escaped_code_point_bounds() {
+        // NUL is the worst ratio, four bytes out per byte in. The rest cover
+        // each escape width and the two backslash-escaped characters.
+        for s in [
+            "\u{0}",
+            "\u{7f}",
+            "\u{85}",
+            "\u{a0}",
+            "\u{2028}",
+            "\u{100000}",
+            "\\",
+            "'",
+        ] {
+            let repeated = s.repeat(1000);
+            check_bound(&ExprValue::String(repeated.clone()));
+            check_bound(
+                &ExprValue::make_list(
+                    vec![ExprValue::String(repeated)],
+                    ExprType::list(ExprType::STRING),
+                )
+                .unwrap(),
+            );
+        }
     }
 }
