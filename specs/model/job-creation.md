@@ -104,10 +104,13 @@ value is a `ListString` while an empty one is a `ListPath`. Accepted input and p
 therefore drift apart for that one type, and `value_matches_type` admits an **empty** `ListPath` for a
 `LIST[PATH]` parameter for exactly that reason.
 
-A non-empty `ListPath` stays refused, because this module never builds one: a non-empty `LIST[PATH]`
-value is always a `ListString`, so accepting a `ListPath` would admit a shape only a caller can
-construct and that nothing here produces. The round-trip requirement is one-directional — every output
-is an accepted input — and says nothing about accepting shapes that are never output.
+A non-empty `ListPath` stays refused, because **this crate** never builds one: `preprocess_job_parameters`
+represents a non-empty `LIST[PATH]` as a `ListString`, so accepting a `ListPath` would admit a shape only
+a caller can construct. Note the scope — `openjd-sessions` does build non-empty `ListPath` values, when
+it re-applies path mapping at session scope — so this is a statement about what reaches
+`preprocess_job_parameters`, not about the variant in general. The round-trip requirement is
+one-directional: every output is an accepted input, and it says nothing about accepting shapes that are
+never output.
 
 ### build_symbol_table
 
