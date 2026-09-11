@@ -5790,3 +5790,80 @@ fn test_create_job_range_element_limit_counts_characters_not_bytes() {
         other => panic!("expected STRING task parameter, got {other:?}"),
     }
 }
+
+#[test]
+fn test_create_job_amount_with_all_bounds_resolving_null_rejected() {
+    // `min` is present as a field, so the decode-time "at least one of
+    // min or max" check passes — but under `float?` targeting the
+    // whole-field null resolves to "bound unset". Both bounds unset is a
+    // shape the schema forbids; the resolved-value re-check must reject
+    // it rather than emit a vacuous host requirement that matches every
+    // worker.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("steps[0] -> hostRequirements -> amounts[0]:")
+            && err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_both_bounds_resolving_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_one_null_and_one_concrete_bound_ok() {
+    // A null min alongside a concrete max is fine: one bound remains.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ 4.0 }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let amt = &hr.amounts.as_ref().expect("amounts")[0];
+    assert_eq!(amt.min, None);
+    assert_eq!(amt.max, Some(4.0));
+}

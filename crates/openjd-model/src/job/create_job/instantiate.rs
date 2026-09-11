@@ -452,6 +452,19 @@ fn check_resolved_amount_bounds(
         PathElement::Index(amount_index),
     ];
     let mut errors = ValidationErrors::default();
+    // Decode enforces "at least one of min or max" on field *presence*,
+    // but a whole-field expression resolving to null under the `float?`
+    // target means "bound unset" — so a present field can still resolve
+    // away. Re-apply the rule on the resolved values; without it the job
+    // would carry a boundless amount requirement that matches every
+    // worker. The "after resolution" suffix distinguishes this from the
+    // decode-time message: the author *did* provide the field.
+    if min.is_none() && max.is_none() {
+        errors.add(
+            &amount_path,
+            "must have at least one of min or max after resolution.",
+        );
+    }
     if let Some(min) = min {
         if min < 0.0 {
             errors.add(&path_field(&amount_path, "min"), "must be non-negative.");
