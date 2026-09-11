@@ -774,6 +774,25 @@ pub(super) fn coerce_from_str(
 
 fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterType) -> bool {
     use openjd_expr::ExprValue;
+    // An empty LIST[PATH] is the one list value this module produces whose variant
+    // carries the declared element type rather than one inferred from its elements:
+    // `make_list` reads String elements as a `ListString`, so a non-empty LIST[PATH]
+    // is a `ListString` and only an empty one stays a `ListPath`. Accepting it is
+    // what lets `preprocess_job_parameters` take back a value it produced, which
+    // callers rely on because the PyO3 `create_job` binding re-runs preprocess over
+    // the values it is handed.
+    //
+    // Deliberately empty-only, not `matches!` over the whole variant. A non-empty
+    // `ListPath` can only be built by a caller, never by this module, and accepting
+    // one would store its elements and their `PathFormat` verbatim -- which nothing
+    // downstream reads, because `Session::build_symbol_table` re-applies path mapping
+    // to a LIST[PATH] only when the value is a `ListString`. Keep refusing it here
+    // rather than admitting a value that silently loses its `Param.<name>` binding at
+    // session scope. An empty list has no elements, so its `PathFormat` is inert and
+    // the same objection does not apply.
+    if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
+        return elements.is_empty();
+    }
     matches!(
         (value, param_type),
         (
@@ -787,13 +806,7 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
                 ExprValue::ListString(_, _),
                 JobParameterType::ListString | JobParameterType::ListPath
             )
-            // An empty LIST[PATH] is the only list value that keeps the PATH element
-            // hint: `make_list` infers `ListString` from String elements, so a
-            // non-empty one arrives on the arm above and only an empty one stays a
-            // `ListPath`. Without this arm the function refuses a value it produced
-            // itself, which callers hit because the PyO3 `create_job` binding
-            // re-runs `preprocess_job_parameters` over the values it is handed.
-            | (ExprValue::ListPath(_, _, _), JobParameterType::ListPath)
+            // `(ListPath, ListPath)` is handled above, empty-only.
             | (ExprValue::ListInt(_), JobParameterType::ListInt)
             | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
             | (ExprValue::ListBool(_), JobParameterType::ListBool)
