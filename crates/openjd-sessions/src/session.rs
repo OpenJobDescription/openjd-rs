@@ -1164,11 +1164,21 @@ impl Session {
         // Set static variables
         if let Some(vars) = &env.variables {
             for (key, fmt_str) in vars {
+                // Required string values (§4.4.2): a single whole-field
+                // expression resolves with target type `string`
+                // (Expression Language §1.3.2), so `null` and list values
+                // are errors rather than display renderings.
                 let value = fmt_str
-                    .resolve_string_with(
+                    .resolve_with(
                         &symtab,
-                        &openjd_expr::FormatStringOptions::new().with_library(self.lib()),
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_library(self.lib())
+                            .with_target_type(&openjd_expr::ExprType::STRING),
                     )
+                    .map(|v| match v {
+                        openjd_expr::ExprValue::String(s) => s,
+                        other => other.to_display_string(),
+                    })
                     .map_err(|e| SessionError::FormatString {
                         context: format!("env var '{key}'"),
                         reason: e.to_string(),

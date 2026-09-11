@@ -20,16 +20,27 @@ use crate::template;
 use crate::template::validate_v2023_09::EffectiveLimits;
 use openjd_expr::ExpressionError;
 
-/// Resolve a FormatString to f64.
+/// Resolve an optional float field (`hostRequirements` amount `min`/`max`).
+///
+/// A single whole-field expression resolves with target type `float?`
+/// (Expression Language §1.3.2 — optional field): `Ok(None)` means the
+/// expression resolved to `null` and the field is treated as omitted.
+/// Multi-segment strings concatenate and parse, whitespace-tolerated.
 pub(super) fn resolve_to_f64(
     fs: &openjd_expr::FormatString,
     symtab: &SymbolTable,
     context: &str,
-) -> Result<f64, ModelError> {
+) -> Result<Option<f64>, ModelError> {
+    let target = openjd_expr::ExprType::union(vec![
+        openjd_expr::ExprType::FLOAT,
+        openjd_expr::ExprType::NULLTYPE,
+    ]);
     let resolved = fs
-        .resolve_string_with(
+        .resolve_with(
             symtab,
-            &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            &openjd_expr::FormatStringOptions::new()
+                .with_path_format(PathFormat::Posix)
+                .with_target_type(&target),
         )
         .map_err(|e| ModelError::FormatStringError {
             message: format!("{context}: {e}"),
@@ -37,30 +48,48 @@ pub(super) fn resolve_to_f64(
             start: None,
             end: None,
         })?;
-    let value = resolved.trim().parse::<f64>().map_err(|_| {
-        ModelError::Expression(ExpressionError::new(format!(
-            "{context}: '{resolved}' is not a valid number"
-        )))
-    })?;
+    let value = match resolved {
+        openjd_expr::ExprValue::Null => return Ok(None),
+        openjd_expr::ExprValue::Float(f) => f.value(),
+        other => {
+            let s = other.to_display_string();
+            s.trim().parse::<f64>().map_err(|_| {
+                ModelError::Expression(ExpressionError::new(format!(
+                    "{context}: '{s}' is not a valid number"
+                )))
+            })?
+        }
+    };
     if !value.is_finite() {
         return Err(ModelError::Expression(ExpressionError::new(format!(
-            "{context}: '{resolved}' is not a finite number"
+            "{context}: '{value}' is not a finite number"
         ))));
     }
-    Ok(value)
+    Ok(Some(value))
 }
 
 /// Resolve a list of FormatStrings to strings.
+///
+/// Each element is a required string field: a single whole-field
+/// expression resolves with target type `string` (Expression Language
+/// §1.3.2), so non-convertible values — `null`, lists — are errors rather
+/// than silently rendering their display form.
 pub(super) fn resolve_string_list(
     vals: &[openjd_expr::FormatString],
     symtab: &SymbolTable,
 ) -> Result<Vec<String>, ModelError> {
     vals.iter()
         .map(|fs| {
-            fs.resolve_string_with(
+            fs.resolve_with(
                 symtab,
-                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+                &openjd_expr::FormatStringOptions::new()
+                    .with_path_format(PathFormat::Posix)
+                    .with_target_type(&openjd_expr::ExprType::STRING),
             )
+            .map(|v| match v {
+                openjd_expr::ExprValue::String(s) => s,
+                other => other.to_display_string(),
+            })
             .map_err(|e| ModelError::FormatStringError {
                 message: e.to_string(),
                 input: Some(fs.raw().to_string()),
@@ -134,25 +163,43 @@ fn resolve_task_parameter(
                     )));
                 }
             }
+            // Chunks fields are `<integer> | <intstring>`: a single
+            // whole-field expression resolves with target type `int`
+            // (Expression Language §1.2.3 — every field gives its
+            // expression a target type; there are no null semantics
+            // here), so `{{ 4.0 }}` coerces to 4. A multi-segment string
+            // concatenates and parses like Python's int(), tolerating
+            // surrounding whitespace. Gate-1 validation applies the same
+            // targeting, so the two stages accept identical values.
+            let resolve_chunk_int = |fs: &crate::FormatString,
+                                     field: &str|
+             -> Result<i64, ModelError> {
+                let value = fs
+                    .resolve_with(
+                        symtab,
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_path_format(PathFormat::Posix)
+                            .with_target_type(&openjd_expr::ExprType::INT),
+                    )
+                    .map_err(|e| {
+                        ModelError::Expression(ExpressionError::new(format!("chunks.{field}: {e}")))
+                    })?;
+                match value {
+                    openjd_expr::ExprValue::Int(n) => Ok(n),
+                    other => {
+                        let s = other.to_display_string();
+                        s.trim().parse::<i64>().map_err(|_| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "chunks.{field}: '{s}' is not a valid integer"
+                            )))
+                        })
+                    }
+                }
+            };
             let default_task_count = match &p.chunks.default_task_count {
                 template::IntOrFormatString::Int(n) => (*n).max(1) as usize,
                 template::IntOrFormatString::FormatString(fs) => {
-                    let resolved = fs
-                        .resolve_string_with(
-                            symtab,
-                            &openjd_expr::FormatStringOptions::new()
-                                .with_path_format(PathFormat::Posix),
-                        )
-                        .map_err(|e| {
-                            ModelError::Expression(ExpressionError::new(format!(
-                                "chunks.defaultTaskCount: {e}"
-                            )))
-                        })?;
-                    let count = resolved.trim().parse::<i64>().map_err(|_| {
-                        ModelError::Expression(ExpressionError::new(format!(
-                            "chunks.defaultTaskCount: '{resolved}' is not a valid integer"
-                        )))
-                    })?;
+                    let count = resolve_chunk_int(fs, "defaultTaskCount")?;
                     // §3.4.1.5 sets a minimum of 1. The bound cannot be applied
                     // at decode when the value is a format string, so it is
                     // applied here. Rejecting rather than clamping: a resolved 0
@@ -166,24 +213,56 @@ fn resolve_task_parameter(
                     count as usize
                 }
             };
-            let target_runtime_seconds = p.chunks.target_runtime_seconds.as_ref()
+            let target_runtime_seconds = p
+                .chunks
+                .target_runtime_seconds
+                .as_ref()
                 .map(|v| match v {
-                    template::IntOrFormatString::Int(n) => Ok((*n).max(0) as usize),
+                    template::IntOrFormatString::Int(n) => Ok(Some((*n).max(0) as usize)),
                     template::IntOrFormatString::FormatString(fs) => {
-                        let resolved = fs.resolve_string_with(symtab, &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix))
-                            .map_err(|e| ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: {e}"))))?;
-                        let seconds = resolved.trim().parse::<i64>()
-                            .map_err(|_| ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: '{resolved}' is not a valid integer"))))?;
+                        // Optional field: target type `int?` — a
+                        // whole-field null means "field omitted".
+                        let target = openjd_expr::ExprType::union(vec![
+                            openjd_expr::ExprType::INT,
+                            openjd_expr::ExprType::NULLTYPE,
+                        ]);
+                        let value = fs
+                            .resolve_with(
+                                symtab,
+                                &openjd_expr::FormatStringOptions::new()
+                                    .with_path_format(PathFormat::Posix)
+                                    .with_target_type(&target),
+                            )
+                            .map_err(|e| {
+                                ModelError::Expression(ExpressionError::new(format!(
+                                    "chunks.targetRuntimeSeconds: {e}"
+                                )))
+                            })?;
+                        let seconds = match value {
+                            openjd_expr::ExprValue::Null => return Ok(None),
+                            openjd_expr::ExprValue::Int(n) => n,
+                            other => {
+                                let s = other.to_display_string();
+                                s.trim().parse::<i64>().map_err(|_| {
+                                    ModelError::Expression(ExpressionError::new(format!(
+                                        "chunks.targetRuntimeSeconds: '{s}' is not a valid integer"
+                                    )))
+                                })?
+                            }
+                        };
                         // §3.4.1.5 sets a minimum of 0; same deferral as
                         // defaultTaskCount above, and the same reason to reject
                         // rather than clamp.
                         if seconds < 0 {
-                            return Err(ModelError::Expression(ExpressionError::new(format!("chunks.targetRuntimeSeconds: resolved to {seconds}, but must be >= 0"))));
+                            return Err(ModelError::Expression(ExpressionError::new(format!(
+                                "chunks.targetRuntimeSeconds: resolved to {seconds}, but must be >= 0"
+                            ))));
                         }
-                        Ok(seconds as usize)
+                        Ok(Some(seconds as usize))
                     }
                 })
-                .transpose()?;
+                .transpose()?
+                .flatten();
             let chunks = job::ResolvedChunks {
                 default_task_count,
                 target_runtime_seconds,
@@ -409,13 +488,22 @@ fn resolve_string_range(
     limits: &EffectiveLimits,
 ) -> Result<Vec<String>, ModelError> {
     let resolved: Vec<String> = match range {
+        // Each range element is a required string field (§3.4.2): a single
+        // whole-field expression resolves with target type `string`, so
+        // `null` and list values are errors rather than display renderings.
         template::StringRange::List(items) => items
             .iter()
             .map(|fs| {
-                fs.resolve_string_with(
+                fs.resolve_with(
                     symtab,
-                    &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+                    &openjd_expr::FormatStringOptions::new()
+                        .with_path_format(PathFormat::Posix)
+                        .with_target_type(&openjd_expr::ExprType::STRING),
                 )
+                .map(|v| match v {
+                    openjd_expr::ExprValue::String(s) => s,
+                    other => other.to_display_string(),
+                })
                 .map_err(ModelError::Expression)
             })
             .collect::<Result<Vec<_>, _>>()?,

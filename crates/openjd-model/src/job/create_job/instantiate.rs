@@ -362,12 +362,14 @@ fn resolve_host_requirements(
                         .min
                         .as_ref()
                         .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount min"))
-                        .transpose()?;
+                        .transpose()?
+                        .flatten();
                     let max = a
                         .max
                         .as_ref()
                         .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount max"))
-                        .transpose()?;
+                        .transpose()?
+                        .flatten();
                     check_resolved_amount_bounds(min, max, step_index, amount_index)?;
                     Ok(job::AmountRequirement {
                         name: a.name.clone(),

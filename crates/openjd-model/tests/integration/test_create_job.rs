@@ -3954,7 +3954,9 @@ fn test_create_job_host_req_amount_non_numeric() {
     }"#,
         &[("Mem", "notanumber")],
     );
-    assert!(err.contains("not a valid number"), "got: {err}");
+    // float? target: a non-numeric string fails coercion with the
+    // resolution diagnostic (union targets report the type pair).
+    assert!(err.contains("Cannot coerce string to float?"), "got: {err}");
 }
 
 #[test]
@@ -3976,11 +3978,12 @@ fn test_create_job_host_req_amount_non_finite() {
         }"#,
             &[("Mem", value)],
         );
-        assert_eq!(
-            err,
-            format!(
-                "Expression error: hostRequirements amount min: '{value}' is not a finite number"
-            )
+        // float? target: "nan"/"inf" strings fail coercion (Float64
+        // permits only finite values), reported with the resolution
+        // diagnostic.
+        assert!(
+            err.contains("Cannot coerce string to float?"),
+            "value {value}: got: {err}"
         );
     }
 }
