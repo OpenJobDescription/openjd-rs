@@ -390,7 +390,19 @@ pub(crate) fn resolve_action_timeout(
                 // action specified no timeout): the field is treated as
                 // not provided, so the positional default applies.
                 openjd_expr::ExprValue::Null => return Ok(default),
-                openjd_expr::ExprValue::Int(n) if n > 0 => n as u64,
+                openjd_expr::ExprValue::Int(n) => {
+                    // The `int?` target guarantees an integer, but not a
+                    // positive one; reject non-positive values with the
+                    // interpolated value, not a Debug rendering.
+                    if n <= 0 {
+                        return Err(SessionError::FormatString {
+                            context: "timeout".into(),
+                            reason: format!("timeout must be a positive integer, got '{n}'"),
+                        });
+                    }
+                    n as u64
+                }
+                // Multi-segment format strings concatenate to a string.
                 openjd_expr::ExprValue::String(ref s) => match s.trim().parse::<u64>() {
                     Ok(n) if n > 0 => n,
                     _ => {
@@ -400,6 +412,8 @@ pub(crate) fn resolve_action_timeout(
                         })
                     }
                 },
+                // Unreachable under the `int?` target; kept as a
+                // defensive arm for unexpected internal states.
                 other => {
                     return Err(SessionError::FormatString {
                         context: "timeout".into(),
@@ -570,6 +584,58 @@ mod tests {
 
     fn fs(s: &str) -> openjd_model::FormatString {
         openjd_model::FormatString::new(s).unwrap()
+    }
+
+    fn action_with_timeout(timeout: &str) -> Action {
+        Action {
+            command: fs("echo"),
+            args: None,
+            timeout: Some(fs(timeout)),
+            cancelation: None,
+        }
+    }
+
+    #[test]
+    fn timeout_nonpositive_int_reports_the_value() {
+        // Under the int? target, `{{ 0 }}`, `{{ '0' }}`, and `{{ 0 - 5 }}`
+        // all coerce to Int before the positivity check: the error must
+        // interpolate the value, not Debug-render the ExprValue.
+        let symtab = SymbolTable::default();
+        for (expr, shown) in [
+            ("{{ 0 }}", "'0'"),
+            ("{{ '0' }}", "'0'"),
+            ("{{ 0 - 5 }}", "'-5'"),
+        ] {
+            let err = resolve_action_timeout(&action_with_timeout(expr), &symtab, None, None)
+                .unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "Failed to resolve timeout: timeout must be a positive integer, got {shown}"
+                ),
+                "expr {expr}"
+            );
+        }
+    }
+
+    #[test]
+    fn timeout_positive_and_null_resolve() {
+        let symtab = SymbolTable::default();
+        assert_eq!(
+            resolve_action_timeout(&action_with_timeout("{{ 90 }}"), &symtab, None, None).unwrap(),
+            Some(Duration::from_secs(90))
+        );
+        // Whole-field null: field treated as not provided, default applies.
+        assert_eq!(
+            resolve_action_timeout(
+                &action_with_timeout("{{ null }}"),
+                &symtab,
+                None,
+                Some(Duration::from_secs(30))
+            )
+            .unwrap(),
+            Some(Duration::from_secs(30))
+        );
     }
 
     #[test]
