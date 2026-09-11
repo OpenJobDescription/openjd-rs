@@ -787,6 +787,13 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
                 ExprValue::ListString(_, _),
                 JobParameterType::ListString | JobParameterType::ListPath
             )
+            // An empty LIST[PATH] is the only list value that keeps the PATH element
+            // hint: `make_list` infers `ListString` from String elements, so a
+            // non-empty one arrives on the arm above and only an empty one stays a
+            // `ListPath`. Without this arm the function refuses a value it produced
+            // itself, which callers hit because the PyO3 `create_job` binding
+            // re-runs `preprocess_job_parameters` over the values it is handed.
+            | (ExprValue::ListPath(_, _, _), JobParameterType::ListPath)
             | (ExprValue::ListInt(_), JobParameterType::ListInt)
             | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
             | (ExprValue::ListBool(_), JobParameterType::ListBool)

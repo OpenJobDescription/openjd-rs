@@ -5755,3 +5755,215 @@ fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
         result["Strings"].value
     );
 }
+
+// === preprocess_job_parameters round trip ===
+//
+// preprocess_job_parameters both consumes and produces JobParameterValues, and
+// callers feed its output back in: the PyO3 `create_job` binding runs
+// preprocess over whatever values it is handed, so a service that preprocesses
+// and then calls create_job with the result preprocesses twice. That makes
+// "every value this function can emit, it can also accept" a real requirement,
+// and LIST[PATH] is where it first failed.
+
+/// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
+fn minimal_expr_job_template(params: &str) -> serde_json::Value {
+    yaml_val(&format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "test",
+        "parameterDefinitions": [{params}],
+        "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
+    }}"#
+    ))
+}
+
+/// Decode a template and fill its parameter defaults. Paired with
+/// [`preprocess_again`] to exercise the round trip; the two halves are kept
+/// separate so each test's body shows that it runs both passes, rather than
+/// delegating that to a helper which could be gutted without any test changing.
+fn preprocess_defaults(
+    template_json: &str,
+    td: &TestDirs,
+) -> (
+    openjd_model::template::JobTemplate,
+    openjd_model::JobParameterValues,
+) {
+    let jt = decode_job_template(
+        minimal_expr_job_template(template_json),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let filled = preprocess_job_parameters(
+        &jt,
+        &JobParameterInputValues::new(),
+        &[],
+        &round_trip_options(td),
+    )
+    .expect("first pass fills defaults");
+    assert!(!filled.is_empty(), "nothing to round trip");
+    (jt, filled)
+}
+
+/// Feed a previous pass's output back in as submitted input values.
+fn preprocess_again(
+    jt: &openjd_model::template::JobTemplate,
+    values: &openjd_model::JobParameterValues,
+    td: &TestDirs,
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let mut resubmitted = JobParameterInputValues::new();
+    for (name, jpv) in values {
+        resubmitted.insert(name.clone(), jpv.value.clone());
+    }
+    preprocess_job_parameters(jt, &resubmitted, &[], &round_trip_options(td))
+}
+
+fn round_trip_options<'a>(td: &'a TestDirs) -> openjd_model::PathParameterOptions<'a> {
+    openjd_model::PathParameterOptions {
+        job_template_dir: td.template(),
+        current_working_dir: td.cwd(),
+        allow_template_dir_walk_up: false,
+        path_format: PathFormat::host(),
+        allow_uri_path_values: true,
+    }
+}
+
+#[test]
+fn preprocess_accepts_its_own_empty_list_path_output() {
+    // An empty LIST[PATH] is the one list value whose variant carries the
+    // declared element type: make_list infers ListString from String elements,
+    // so a non-empty LIST[PATH] comes back as ListString, and only an empty one
+    // stays an openjd_expr::ExprValue::ListPath. Feeding that back in used to be refused with
+    // "Cannot coerce list to LIST[PATH]".
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Empty", "type": "LIST[PATH]", "default": []}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td)
+        .expect("an empty LIST[PATH] this function produced must be a value it accepts");
+    assert!(
+        matches!(
+            &result["Empty"].value,
+            openjd_expr::ExprValue::ListPath(v, _, _) if v.is_empty()
+        ),
+        "Empty arrived as {:?}, expected an empty ListPath",
+        result["Empty"].value
+    );
+}
+
+#[test]
+fn preprocess_accepts_its_own_non_empty_list_path_output() {
+    // Control for the case above. This half already worked, because make_list
+    // promotes the String elements to a ListString, which the matcher accepted.
+    // It has to keep working: a fix that only moved the failure would show up here.
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["/tmp/a.exr", "/tmp/b.exr"]}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td).expect("a non-empty LIST[PATH] round trips");
+    assert!(
+        matches!(
+            &result["Paths"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v == &["/tmp/a.exr", "/tmp/b.exr"]
+        ),
+        "Paths arrived as {:?}, expected ListString of both paths",
+        result["Paths"].value
+    );
+}
+
+#[test]
+fn preprocess_accepts_its_own_output_for_every_list_type() {
+    // The requirement is not specific to LIST[PATH]; it is that the function's
+    // output type is a subset of its input type. Assert it across the list types
+    // at once, with empty defaults so each value carries its declared element
+    // type rather than one inferred from elements.
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Bools", "type": "LIST[BOOL]", "default": []},
+           {"name": "Ints", "type": "LIST[INT]", "default": []},
+           {"name": "Floats", "type": "LIST[FLOAT]", "default": []},
+           {"name": "Strings", "type": "LIST[STRING]", "default": []},
+           {"name": "Paths", "type": "LIST[PATH]", "default": []},
+           {"name": "IntLists", "type": "LIST[LIST[INT]]", "default": []}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td)
+        .expect("every empty list value this function produced must be one it accepts");
+    // Assert the variant, not just the length. `list_len()` answers `Some(0)` for
+    // every empty list variant, so a length-only assertion would accept a value
+    // that came back having discarded its declared element type -- which is the
+    // defect this file is about.
+    for (name, ok) in [
+        (
+            "Bools",
+            matches!(&result["Bools"].value, openjd_expr::ExprValue::ListBool(v) if v.is_empty()),
+        ),
+        (
+            "Ints",
+            matches!(&result["Ints"].value, openjd_expr::ExprValue::ListInt(v) if v.is_empty()),
+        ),
+        (
+            "Floats",
+            matches!(&result["Floats"].value, openjd_expr::ExprValue::ListFloat(v) if v.is_empty()),
+        ),
+        (
+            "Strings",
+            matches!(&result["Strings"].value, openjd_expr::ExprValue::ListString(v, _) if v.is_empty()),
+        ),
+        (
+            "Paths",
+            matches!(&result["Paths"].value, openjd_expr::ExprValue::ListPath(v, _, _) if v.is_empty()),
+        ),
+        (
+            "IntLists",
+            matches!(&result["IntLists"].value, openjd_expr::ExprValue::ListList(v, _, _) if v.is_empty()),
+        ),
+    ] {
+        assert!(
+            ok,
+            "{name} arrived as {:?}, which is not an empty list of its declared element type",
+            result[name].value
+        );
+    }
+}
+
+#[test]
+fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
+    // Guard against widening the fix. LIST[STRING] accepting an openjd_expr::ExprValue::ListPath
+    // would let a PATH-typed value satisfy a STRING-typed parameter, and PATH and
+    // STRING differ in what session-time path mapping does to them.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Strings", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Strings".into(),
+        openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::PATH)
+            .expect("an empty ListPath"),
+    );
+    let err = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .expect_err("a LIST[PATH] value must not satisfy a LIST[STRING] parameter");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Strings") && msg.contains("LIST[STRING]"),
+        "expected a diagnostic naming the parameter and its declared type, got: {msg}"
+    );
+}
