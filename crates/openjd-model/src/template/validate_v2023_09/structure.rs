@@ -367,7 +367,7 @@ pub fn validate_single_environment(
     if env.name.is_empty() {
         errors.add(&name_path, "must not be empty.");
     }
-    if env.name.len() > limits.max_env_name_len {
+    if env.name.chars().count() > limits.max_env_name_len {
         errors.add(
             &name_path,
             format!("exceeds {} characters.", limits.max_env_name_len),
@@ -678,7 +678,7 @@ fn validate_host_requirements(
                             if s.is_empty() {
                                 errors.add(&v_path, "must not be empty.");
                             }
-                            if s.len() > 100 {
+                            if s.chars().count() > 100 {
                                 errors.add(&v_path, "exceeds 100 characters.");
                             }
                         }

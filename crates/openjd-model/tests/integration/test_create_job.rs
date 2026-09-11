@@ -5758,3 +5758,35 @@ fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
         result["Strings"].value
     );
 }
+
+#[test]
+fn test_create_job_range_element_limit_counts_characters_not_bytes() {
+    // Spec limits are stated in characters, and the reference
+    // implementation's len() counts characters. 600 two-byte characters
+    // (1,200 bytes) is well under the 1,024-character element limit and
+    // must be accepted; a byte-based check would falsely reject it.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ 'é' * 600 }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let step = &job.steps[0];
+    let space = step.parameter_space.as_ref().expect("parameter space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range.len(), 1);
+            assert_eq!(range[0].chars().count(), 600);
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}

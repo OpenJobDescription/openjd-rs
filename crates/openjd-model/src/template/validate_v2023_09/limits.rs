@@ -15,7 +15,7 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
 
     // Job name
     let name = jt.name.raw();
-    if name.len() > limits.max_job_name_len {
+    if name.chars().count() > limits.max_job_name_len {
         errors.add(
             &path_field(&root, "name"),
             format!("exceeds {} characters.", limits.max_job_name_len),
@@ -36,7 +36,7 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
         let pd_path = path_field(&root, "parameterDefinitions");
         for (i, p) in params.iter().enumerate() {
             let p_path = path_index(&pd_path, i);
-            if p.name().len() > limits.max_identifier_len {
+            if p.name().chars().count() > limits.max_identifier_len {
                 errors.add(
                     &p_path,
                     format!("name exceeds {} characters.", limits.max_identifier_len),
@@ -49,7 +49,7 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
         let name = &step.name;
-        if name.len() > limits.max_step_name_len {
+        if name.chars().count() > limits.max_step_name_len {
             errors.add(
                 &path_field(&step_path, "name"),
                 format!("exceeds {} characters.", limits.max_step_name_len),
@@ -71,14 +71,14 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
                 let files_path = path_field(&path_field(&step_path, "script"), "embeddedFiles");
                 for (j, f) in files.iter().enumerate() {
                     let f_path = path_index(&files_path, j);
-                    if f.name.len() > limits.max_identifier_len {
+                    if f.name.chars().count() > limits.max_identifier_len {
                         errors.add(
                             &path_field(&f_path, "name"),
                             format!("exceeds {} characters.", limits.max_identifier_len),
                         );
                     }
                     if let Some(filename) = &f.filename {
-                        if filename.len() > limits.max_filename_len {
+                        if filename.chars().count() > limits.max_filename_len {
                             errors.add(
                                 &path_field(&f_path, "filename"),
                                 format!("exceeds {} characters.", limits.max_filename_len),
@@ -95,7 +95,7 @@ pub fn enforce_limits(jt: &JobTemplate, limits: &EffectiveLimits, errors: &mut V
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let tp_path = path_index(&tpd_path, j);
-                if tp.name().len() > limits.max_identifier_len {
+                if tp.name().chars().count() > limits.max_identifier_len {
                     errors.add(
                         &tp_path,
                         format!("name exceeds {} characters.", limits.max_identifier_len),
@@ -121,7 +121,7 @@ fn enforce_environment_limits(
     limits: &EffectiveLimits,
     errors: &mut ValidationErrors,
 ) {
-    if env.name.len() > limits.max_env_name_len {
+    if env.name.chars().count() > limits.max_env_name_len {
         errors.add(
             &path_field(path, "name"),
             format!("exceeds {} characters.", limits.max_env_name_len),
@@ -132,14 +132,14 @@ fn enforce_environment_limits(
             let files_path = path_field(&path_field(path, "script"), "embeddedFiles");
             for (j, f) in files.iter().enumerate() {
                 let f_path = path_index(&files_path, j);
-                if f.name.len() > limits.max_identifier_len {
+                if f.name.chars().count() > limits.max_identifier_len {
                     errors.add(
                         &path_field(&f_path, "name"),
                         format!("exceeds {} characters.", limits.max_identifier_len),
                     );
                 }
                 if let Some(filename) = &f.filename {
-                    if filename.len() > limits.max_filename_len {
+                    if filename.chars().count() > limits.max_filename_len {
                         errors.add(
                             &path_field(&f_path, "filename"),
                             format!("exceeds {} characters.", limits.max_filename_len),
