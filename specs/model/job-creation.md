@@ -86,9 +86,16 @@ pub struct PathParameterOptions<'a> {
 **Round trip:** every value `preprocess_job_parameters` returns is a value it accepts as input. Callers
 rely on this: the PyO3 `create_job` binding re-runs `preprocess_job_parameters` over the values it is
 handed, so a caller that preprocesses and then calls `create_job` with the result preprocesses twice.
-The requirement is not automatic — an empty `LIST[PATH]` is the one list value whose variant carries
-the declared element type rather than one inferred from its elements, so it is the case where accepted
-input and produced output can drift apart.
+
+The requirement is not automatic. Every empty list carries its declared element type, since there are
+no elements to infer one from, but `LIST[PATH]` is the only type where empty and non-empty produce
+*different variants*: `make_list` reads String elements as a `ListString`, so a non-empty `LIST[PATH]`
+value is a `ListString` while an empty one is a `ListPath`. Accepted input and produced output can
+therefore drift apart for that one type, and `value_matches_type` admits an **empty** `ListPath` for a
+`LIST[PATH]` parameter for exactly that reason. A non-empty `ListPath` stays refused: this module never
+builds one, and `Session::build_symbol_table` re-applies path mapping to a `LIST[PATH]` only when the
+value is a `ListString`, so accepting one would drop its `Param.<name>` binding at session scope
+without an error.
 
 ### build_symbol_table
 
