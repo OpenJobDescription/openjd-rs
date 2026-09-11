@@ -150,8 +150,17 @@ Path-related operations in the expression language:
 | `with_number(n)` | `(path, int) -> path` / `(string, int) -> path` | Append frame number |
 | `as_posix()` | `(path) -> string` | Convert to POSIX string |
 | `is_absolute()` | `(path) -> bool` | Check if path is absolute |
-| `is_relative_to(other)` | `(path, path) -> bool` | Check prefix relationship |
+| `is_relative_to(other)` | `(path, path) -> bool` | Lexical prefix test (see note below) |
 | `relative_to(other)` | `(path, path) -> path` | Compute relative path |
+
+> **`is_relative_to` is a lexical prefix test, not a containment
+> check.** `..` segments are ordinary components (see
+> [`path-parse.md`](path-parse.md#normalization)), so
+> `path("/allowed/../etc/passwd").is_relative_to(path("/allowed"))`
+> returns `true`. This matches `PurePosixPath.is_relative_to()`.
+> To reject traversal, combine with a `..` check:
+> `p.is_relative_to(base) and not ("..") in p.parts`
+> (note: `.parts` is a property, not a function).
 
 > **URI paths in path methods.** The path properties and the
 > `with_*` methods all detect URI inputs (`uri_path::is_uri`) and
