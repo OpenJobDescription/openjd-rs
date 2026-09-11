@@ -774,12 +774,14 @@ pub(super) fn coerce_from_str(
 
 fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterType) -> bool {
     use openjd_expr::ExprValue;
-    // Empty-only, deliberately. `make_list` reads String elements as a `ListString`, so
-    // a non-empty LIST[PATH] value is a `ListString` and only an empty one is a
-    // `ListPath` -- which this module produces from `default: []` and so has to accept
-    // back. Nothing in *this* module produces a non-empty `ListPath`, so widening this to
-    // `matches!` over the variant would admit a shape only a caller can build.
-    // See "Round trip" in specs/model/job-creation.md.
+    // Empty-only, deliberately. `make_list` reads String elements as a `ListString`, so a
+    // non-empty LIST[PATH] is a `ListString`, while `default: []` yields a `ListPath` this
+    // module has to accept back. Widening to `matches!` over the variant would admit a
+    // non-empty `ListPath`, which nothing in *this* module produces.
+    //
+    // The empty variant is not settled by the declared type -- the `ListString` arm below
+    // takes an empty `ListString` here too. Issue #389, and "Round trip" in
+    // specs/model/job-creation.md.
     if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
         return elements.is_empty();
     }
