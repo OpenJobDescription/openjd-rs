@@ -403,16 +403,32 @@ fn resolve_host_requirements(
                         .as_ref()
                         .map(|vals| ranges::resolve_string_list(vals, symtab))
                         .transpose()?;
+                    let attr_lower = a.name.to_lowercase();
+                    let is_single_valued = attr_lower == "attr.worker.os.family"
+                        || attr_lower == "attr.worker.cpu.arch";
                     for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
                         if let Some(values) = values {
-                            // Decode enforces non-emptiness on field
-                            // presence, but a whole-field expression
-                            // resolving to null skips its element
-                            // (Expression Language §1.3.2), so a present
-                            // list can still resolve away.
+                            // Decode checks these counts on the template's
+                            // element list, but a whole-field expression
+                            // flattens a list inline (Expression Language
+                            // §1.3.2), so the resolved count is unrelated
+                            // to the count decode saw. Re-apply the rules
+                            // on the resolved list, like the emptiness
+                            // check below and the range-element cap in
+                            // resolve_string_range.
                             if values.is_empty() {
                                 return Err(ModelError::DecodeValidation(format!(
                                     "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: has no elements after resolution"
+                                )));
+                            }
+                            if values.len() > 50 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: exceeds 50 elements after resolution"
+                                )));
+                            }
+                            if is_single_valued && field == "allOf" && values.len() > 1 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: single-valued attribute cannot have more than 1 element after resolution"
                                 )));
                             }
                             check_resolved_attribute_values(

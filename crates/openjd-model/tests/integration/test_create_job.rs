@@ -6028,3 +6028,213 @@ fn test_create_job_range_element_too_long_reports_characters() {
         "Validation error: Task parameter 'P' range[0]: resolved value exceeds 1024 characters (1200 chars)"
     );
 }
+
+#[test]
+fn test_create_job_single_valued_attr_flatten_past_one_rejected() {
+    // Decode's single-valued rule counts template elements, but a
+    // flattening expression makes the resolved count unrelated to the
+    // decode-time count: allOf with one template element resolving to two
+    // values must be rejected after resolution.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": ["{{ RawParam.Arches }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_past_50_elements_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 51 }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: exceeds 50 elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_within_counts_ok() {
+    // Exactly 50 elements passes, and a single-valued anyOf may flatten
+    // to several candidates (only allOf is restricted to one).
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [
+                {"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 50 }}"]},
+                {"name": "attr.worker.cpu.arch", "anyOf": ["{{ RawParam.Arches }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attrs = hr.attributes.as_ref().expect("attributes");
+    assert_eq!(attrs[0].any_of.as_ref().expect("anyOf").len(), 50);
+    assert_eq!(
+        attrs[1].any_of.as_ref().expect("anyOf"),
+        &["x86_64", "arm64"]
+    );
+}
+
+#[test]
+fn test_create_job_range_conditional_elements_skip_down() {
+    // The skip direction also shrinks lists: three template elements
+    // where the conditionals resolve one branch to null yield two range
+    // elements, selected by the parameter.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "BoolValue", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": [
+                    "first",
+                    "{{ 'second' if Param.BoolValue else null }}",
+                    "{{ 'third' if not Param.BoolValue else null }}"
+                ]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [
+        ("true", vec!["first", "second"]),
+        ("false", vec!["first", "third"]),
+    ] {
+        let job = parse_and_create(template, &[("BoolValue", value)]);
+        let space = job.steps[0].parameter_space.as_ref().expect("space");
+        match &space.task_parameter_definitions["P"] {
+            job::TaskParameter::String { range } => {
+                assert_eq!(range, &expected, "BoolValue={value}");
+            }
+            other => panic!("expected STRING task parameter, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_conditional_collapse_ok() {
+    // Two template elements whose conditionals are complementary always
+    // resolve to exactly one — decode defers the single-valued count to
+    // job creation for expression-bearing lists, and the resolved count
+    // here is 1.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if not Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [("true", "x86_64"), ("false", "arm64")] {
+        let job = parse_and_create(template, &[("B", value)]);
+        let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+        let attr = &hr.attributes.as_ref().expect("attributes")[0];
+        assert_eq!(
+            attr.all_of.as_ref().expect("allOf"),
+            &[expected],
+            "B={value}"
+        );
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_both_elements_survive_rejected() {
+    // Same shape, but both conditionals resolve non-null: the resolved
+    // count is 2 and the post-resolution re-check rejects it.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("B", "true")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_single_valued_attr_deferred_count_still_capped_at_50_at_decode() {
+    // Deferring the single-valued "> 1" count for expression-bearing
+    // lists does not unbound the template: the generic 50-element cap
+    // applies to the template element count regardless of expressions.
+    let elems: Vec<String> = (0..51)
+        .map(|_| r#""{{ 'x86_64' if Param.B else null }}""#.to_string())
+        .collect();
+    let tmpl = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "B", "type": "BOOL"}}],
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"attributes": [{{"name": "attr.worker.cpu.arch", "allOf": [{}]}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#,
+        elems.join(", ")
+    );
+    let v: serde_json::Value = serde_saphyr::from_str(&tmpl).unwrap();
+    let err = openjd_model::decode_job_template(
+        v,
+        Some(&["EXPR"]),
+        &openjd_model::CallerLimits::default(),
+    )
+    .expect_err("expected decode rejection");
+    assert!(
+        err.to_string().contains(
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf:\n\texceeds 50 elements."
+        ),
+        "got: {err}"
+    );
+}
