@@ -5758,13 +5758,14 @@ fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
 
 // === preprocess_job_parameters round trip ===
 //
-// Callers feed this function its own output: the PyO3 `create_job` binding runs
-// preprocess over whatever values it is handed, so preprocessing and then calling
-// create_job with the result preprocesses twice. "Every value it emits, it accepts"
-// is therefore a requirement, and LIST[PATH] is where it first failed.
+// This function both consumes and produces `JobParameterValues`, and both are public,
+// so a caller can hand its output straight back to it. `create_job` does something
+// adjacent already: it re-runs `check_constraints` over every value it is given
+// (create_job/mod.rs:54-60). "Every value it emits, it accepts" is therefore a
+// requirement, and LIST[PATH] is where it first failed.
 //
-// The requirement is a goal rather than an invariant -- scalar PATH violates it, see
-// SuperDaveDocs pr/wip/openjd-rs-384 and issue #388.
+// A goal rather than an invariant: scalar PATH violates it, see issue #388 and
+// "Round trip" in specs/model/job-creation.md.
 
 /// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
 fn minimal_expr_job_template(params: &str) -> serde_json::Value {
@@ -5976,8 +5977,8 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
     let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
         .expect_err("a LIST[PATH] value must not satisfy a LIST[STRING] parameter");
     let msg = err.to_string();
-    // Finding 10: assert the whole diagnostic, not two substrings. A degraded message
-    // that happened to name both would satisfy a substring pair.
+    // The whole diagnostic, not two substrings: a degraded message naming both would
+    // satisfy a substring pair.
     assert!(
         msg.contains("Parameter 'Strings': Cannot coerce list to LIST[STRING]"),
         "unexpected diagnostic: {msg}"
@@ -5998,13 +5999,19 @@ fn a_non_empty_list_path_value_is_still_refused() {
     )
     .expect("template decodes");
     let mut input = JobParameterInputValues::new();
+    // Through make_list rather than the variant directly: ListPath's third field is a
+    // cached heap size that make_list computes, so a hand-built 0 is a shape the crate
+    // never produces. PathFormat comes from the PATH element type.
     input.insert(
         "Paths".into(),
-        openjd_expr::ExprValue::ListPath(
-            vec!["/a/b.exr".into(), "/a/c.exr".into()],
-            PathFormat::Windows,
-            0,
-        ),
+        openjd_expr::ExprValue::make_list(
+            vec![
+                openjd_expr::ExprValue::new_path("/a/b.exr", PathFormat::Windows),
+                openjd_expr::ExprValue::new_path("/a/c.exr", PathFormat::Windows),
+            ],
+            openjd_expr::ExprType::PATH,
+        )
+        .expect("a non-empty ListPath"),
     );
     let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
         .expect_err("a non-empty ListPath must not be accepted verbatim");
@@ -6041,7 +6048,7 @@ fn an_empty_list_path_still_meets_its_length_constraints() {
         .expect_err("an empty list cannot satisfy minLength: 1");
     let msg = err.to_string();
     assert!(
-        msg.contains("Parameter 'Paths'") && msg.contains("minimum 1"),
+        msg.contains("Parameter 'Paths': list length 0 is less than minimum 1"),
         "expected the list-length rule rather than a coercion failure, got: {msg}"
     );
 }

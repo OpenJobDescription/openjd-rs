@@ -777,9 +777,9 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
     // Empty-only, deliberately. `make_list` reads String elements as a `ListString`, so
     // a non-empty LIST[PATH] value is a `ListString` and only an empty one is a
     // `ListPath` -- which this module produces from `default: []` and so has to accept
-    // back. Nothing here produces a non-empty `ListPath`, so it stays refused; widening
-    // this to `matches!` over the variant would admit a caller-only shape.
-    // Rationale and measurements: SuperDaveDocs pr/wip/openjd-rs-384.
+    // back. Nothing in *this* module produces a non-empty `ListPath`, so widening this to
+    // `matches!` over the variant would admit a shape only a caller can build.
+    // See "Round trip" in specs/model/job-creation.md.
     if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
         return elements.is_empty();
     }
