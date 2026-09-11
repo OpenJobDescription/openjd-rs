@@ -391,10 +391,10 @@ pub fn validate_single_environment(
                     "value contains a NUL byte, which cannot be represented in a process environment.",
                 );
             }
-            if value.raw().chars().count() > limits.max_description_len {
+            if value.raw().chars().count() > limits.max_env_var_value_len {
                 errors.add(
                     &var_path,
-                    format!("value exceeds {} characters.", limits.max_description_len),
+                    format!("value exceeds {} characters.", limits.max_env_var_value_len),
                 );
             }
         }
