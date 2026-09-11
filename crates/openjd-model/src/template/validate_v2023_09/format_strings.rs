@@ -889,6 +889,7 @@ pub fn validate_format_strings(
                 &template_lib,
                 &path_index(&envs_path, i),
                 expr_active,
+                limits.max_env_var_value_len,
                 errors,
             );
         }
@@ -1346,6 +1347,7 @@ pub fn validate_format_strings(
                     &template_lib,
                     &path_index(&envs_path, j),
                     expr_active,
+                    limits.max_env_var_value_len,
                     errors,
                 );
             }
@@ -1499,6 +1501,7 @@ pub fn validate_format_strings_environment_template(
         &template_lib,
         &env_path,
         expr_active,
+        super::EffectiveLimits::from_context(ctx).max_env_var_value_len,
         errors,
     );
 
@@ -1528,6 +1531,7 @@ fn validate_env_format_strings(
     template_lib: &FunctionLibrary,
     path: &[PathElement],
     expr_active: bool,
+    max_env_var_value_len: usize,
     errors: &mut ValidationErrors,
 ) {
     if let Some(vars) = &env.variables {
@@ -1537,18 +1541,19 @@ fn validate_env_format_strings(
             if !expr_active && value.has_complex_expressions() {
                 errors.add(&var_path, "complex expressions require the EXPR extension.");
             }
-            // §4.4.2: an environment variable value is at most 2048
-            // characters. The value is `@fmtstring[host]`, so the limit
-            // describes the resolved value; the raw-text pass checks
-            // literal values, this checks what interpolated values can
-            // resolve to.
+            // §4.4.2: an environment variable value is at most
+            // `max_env_var_value_len` (2048) characters. The value is
+            // `@fmtstring[host]`, so the limit describes the resolved
+            // value; the raw-text pass checks literal values against the
+            // same EffectiveLimits field, this checks what interpolated
+            // values can resolve to.
             validate_fs_with(
                 value,
                 symtab,
                 lib,
                 &var_path,
                 Some(&ResolvedConstraint::Text {
-                    max_len: 2048,
+                    max_len: max_env_var_value_len,
                     forbid_control_chars: false,
                 }),
                 errors,

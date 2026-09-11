@@ -238,7 +238,7 @@ checked against a per-field `ResolvedConstraint` (gate 1 of
 | job `name` (§1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | no Cc control characters |
 | attribute `anyOf`/`allOf` values (§3.3.2.2) | `string` | ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) |
 | task param STRING/PATH range items (§3.4.2) | `string` | ≤ 1024 | (length is the whole constraint) |
-| environment variable values (§4.4.2) | `string` | ≤ 2048 | (length is the whole constraint) |
+| environment variable values (§4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
 | `notifyPeriodInSeconds` (§5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
 | cancelation `mode` (FB1 deferred) | `string?` | ≤ 21 chars (longest valid value) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = cancelation unset |
