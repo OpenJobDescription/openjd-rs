@@ -92,10 +92,12 @@ no elements to infer one from, but `LIST[PATH]` is the only type where empty and
 *different variants*: `make_list` reads String elements as a `ListString`, so a non-empty `LIST[PATH]`
 value is a `ListString` while an empty one is a `ListPath`. Accepted input and produced output can
 therefore drift apart for that one type, and `value_matches_type` admits an **empty** `ListPath` for a
-`LIST[PATH]` parameter for exactly that reason. A non-empty `ListPath` stays refused: this module never
-builds one, and `Session::build_symbol_table` re-applies path mapping to a `LIST[PATH]` only when the
-value is a `ListString`, so accepting one would drop its `Param.<name>` binding at session scope
-without an error.
+`LIST[PATH]` parameter for exactly that reason.
+
+A non-empty `ListPath` stays refused, because this module never builds one: a non-empty `LIST[PATH]`
+value is always a `ListString`, so accepting a `ListPath` would admit a shape only a caller can
+construct and that nothing here produces. The round-trip requirement is one-directional — every output
+is an accepted input — and says nothing about accepting shapes that are never output.
 
 ### build_symbol_table
 

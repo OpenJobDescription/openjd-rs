@@ -6004,12 +6004,14 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
 #[test]
 fn a_non_empty_list_path_value_is_still_refused() {
     // The empty-list acceptance above is deliberately empty-only. A non-empty
-    // ExprValue::ListPath can only come from a caller, never from this module, and
-    // accepting one would store its PathFormat verbatim while nothing downstream
-    // reads it: Session::build_symbol_table re-applies path mapping to a LIST[PATH]
-    // only when the value is a ListString, so a non-empty ListPath would lose its
-    // Param.<name> binding at session scope without any error. Refusing it here is
-    // the behaviour that predates the empty-list fix, and this pins it.
+    // ExprValue::ListPath has no producer inside this crate -- a non-empty LIST[PATH]
+    // value is always a ListString -- so accepting one would admit a shape only a
+    // caller can construct. Refusing it is the behaviour that predates the empty-list
+    // fix, and this pins that the fix did not widen it.
+    //
+    // PathFormat::Windows here on purpose: it is the case where accepting the value
+    // verbatim would carry a foreign path format past every check, since LIST[PATH]
+    // never enters the path_format-sensitive branches at all.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]"}"#),
