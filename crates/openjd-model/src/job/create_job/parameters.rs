@@ -792,10 +792,11 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
     // `Session::build_symbol_table` has two paths. On the resolved-symtab path it
     // re-applies path mapping to a LIST[PATH] only when the value is a `ListString`,
     // with no else, so a `ListPath` is skipped and `Param.<name>` is never set. On the
-    // other path a `_ =>` arm falls through to `coerce_param_value` and the binding is
-    // set. So a `ListPath` loses its binding on one path and not the other, which is a
-    // pre-existing asymmetry an empty list already reaches -- filed separately, and not
-    // a reason to accept a non-empty one on top of it.
+    // other path the LIST[PATH] arm's own fall-through hands the value to
+    // `apply_path_mapping_to_value`, which has a real `ListPath` arm, so the binding is
+    // set and correctly mapped. A `ListPath` therefore loses its binding on one path of
+    // two, which is a pre-existing asymmetry an empty list already reaches -- filed
+    // separately, and not a reason to accept a non-empty one on top of it.
     if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
         return elements.is_empty();
     }
