@@ -251,14 +251,12 @@ fn list_path_rawparam_in_job_name() {
 
 #[test]
 fn list_path_rawparam_in_parameter_space_range() {
-    // The symbol IS in scope for range expressions — but a range element
-    // is a required string field, and its whole-field expression resolves
-    // with target type `string` (Expression Language §1.3.2). There is no
-    // list → string coercion, so a bare LIST[*] parameter reference in a
-    // single range element is a validation error (it previously rendered
-    // the list's display form as one element). Use the parameter inside
-    // an expression producing a string, or index an element, instead.
-    check_err_ext(
+    // A range element is a list item, so its whole-field expression
+    // targets `string? | list[string]` (Expression Language §1.3.2, the
+    // same rule as `args` items): a LIST[*] parameter reference flattens
+    // into one range element per list element at job creation. Validation
+    // accepts it; see test_create_job for the flatten behavior.
+    check_ok_ext(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
@@ -271,7 +269,6 @@ fn list_path_rawparam_in_parameter_space_range() {
         }]
     }"#,
         &["EXPR"],
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tFailed to parse interpolation expression at [0, 16]. Cannot coerce list[string] to string"],
     );
 }
 

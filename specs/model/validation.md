@@ -239,16 +239,16 @@ deferring it to job submission or the worker. Two stages of checking:
 
 | Field | Target type | Bound | Fully-static check |
 |---|---|---|---|
-| job `name` (§1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | no Cc control characters |
-| attribute `anyOf`/`allOf` values (§3.3.2.2) | `string` | ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) |
-| task param STRING/PATH range items (§3.4.2) | `string` | ≤ 1024 | (length is the whole constraint) |
-| environment variable values (§4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
-| action `timeout` (FB1 `<posintstring>`) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
-| `notifyPeriodInSeconds` (§5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
-| cancelation `mode` (FB1 deferred) | `string?` | ≤ 21 chars (longest valid value) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = cancelation unset |
-| chunks `defaultTaskCount` (TASK_CHUNKING) | `int` | soft cap: 100 chars | coerced integer ≥ 1 |
-| chunks `targetRuntimeSeconds` (TASK_CHUNKING) | `int?` | soft cap: 100 chars | coerced integer ≥ 0; `null` = unset |
-| amount `min` / `max` (FB1 float strings) | `float?` | soft cap: 100 chars | finite float, ≥ 0 / > 0; `null` = unset |
+| job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | no Cc control characters |
+| attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
+| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 per element when a list flattens; `null` skips the element |
+| environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
+| action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
+| `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
+| cancelation `mode` (FB1 deferred, Template Schemas §5.3) | `string?` | ≤ 21 chars (longest valid value) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = cancelation unset |
+| chunks `defaultTaskCount` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int` | soft cap: 100 chars | coerced integer ≥ 1 |
+| chunks `targetRuntimeSeconds` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int?` | soft cap: 100 chars | coerced integer ≥ 0; `null` = unset |
+| amount `min` / `max` (FB1 float strings, Template Schemas §3.3.1) | `float?` | soft cap: 100 chars | finite float, ≥ 0 / > 0; `null` = unset |
 
 Numeric fields have no exact length maximum — leading zeros are legal and
 surrounding whitespace is tolerated in string forms — so they use a soft
@@ -264,7 +264,8 @@ derived from the schema context:
 - a required field of type `T` targets `T`;
 - an optional field targets `T?` — a `null` result means "field omitted";
 - a list item targets `T? | list[T]` — `null` skips the item, a list
-  flattens inline (the spec's example is `args`);
+  flattens inline (the spec's worked example is `args`; range elements
+  and attribute values are list items under the same rule);
 - a format string with surrounding text always concatenates to a string,
   with each expression evaluated unconstrained.
 
@@ -272,31 +273,34 @@ Every constrained field follows the rule (for
 `timeout`/`notifyPeriodInSeconds`/`mode` the Template Schemas doc also
 mandates the target explicitly), and **the later processing stages
 resolve each field with the same target validation checks it with** —
-job name and range items in `create_job`, attribute values and amounts
+job name and range elements in `create_job`, attribute values and amounts
 in `instantiate`, environment variable values and the action numeric
 fields in `openjd-sessions`. A field's validation-time target must
 always equal its resolution-time target, or validation rejects values
 resolution accepts (or vice versa).
 
-Consequences of the `string` targets worth naming:
+Consequences of the target types worth naming:
 
-- There is no `list[T] → string` conversion, so a whole-field list-valued
-  expression in a string field (e.g. a bare `LIST[*]` parameter reference
-  as a range element) is an error — it does not render the list's
-  display form as the field's value.
-- `null` does not coerce to `string`, so a whole-field `null` in a
-  required string field is an error — every one of these string fields
-  has a spec minimum length of 1 character, so an empty rendering could
-  never conform anyway. Null (and lists) *inside* surrounding text remain
+- For the scalar `string` fields (job name, environment variable
+  values), there is no `list[T] → string` or `null → string` conversion,
+  so a whole-field list or `null` is an error. Both fields have a spec
+  minimum length of 1 character, so an empty rendering could never
+  conform anyway. Null (and lists) *inside* surrounding text remain
   ordinary interpolation and render their display form.
-
-Range items and attribute values are list *items*; under §1.3.2's
-list-item reading their targets would be `string? | list[string]` with
-skip/flatten semantics. They currently target plain `string` (no
-skip/flatten); adopting the list-item reading is an open question — it
-needs reference-implementation cross-checking, an upstream
-clarification, and flattening support in `create_job`'s range
-resolution.
+- For the list-item fields (range elements, attribute values), a
+  whole-field `null` skips the element and a list flattens inline —
+  `range: ["first", "{{ RawParam.Paths }}", "last"]` yields one element
+  per path between the literals. The per-element constraints apply to
+  each flattened element. Because null-skips can empty a list whose
+  non-emptiness was checked on field presence at decode, job creation
+  re-checks after resolution ("has no elements after resolution"). A
+  range that is entirely one expression can also use the whole-field
+  `<ListExpressionString>` form (Expression Language §1.3.12 "Task
+  Parameter Range Field Extensions").
+- The length bound for list-item fields only applies when the resolution
+  is certainly a string (`StaticResolution::resolved_type` is `string`):
+  a list-valued resolution distributes its characters across elements,
+  so the display-form length says nothing about any single element.
 
 One further deliberate exclusion: **literals**. `validate_fs` skips
 literal format strings; the raw-text passes (structure/limits) already

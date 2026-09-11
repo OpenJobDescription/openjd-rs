@@ -339,9 +339,18 @@ enum ResolvedConstraint<'a> {
         max_len: usize,
         forbid_control_chars: bool,
     },
+    /// A list-item string field (task-parameter range elements,
+    /// Template Schemas §3.4.2). Per Expression Language §1.3.2 a
+    /// whole-field expression targets `string? | list[string]`: `null`
+    /// skips the element, a list flattens inline, and `max_len` applies
+    /// to each resulting element.
+    TextListItem { max_len: usize },
     /// A `hostRequirements` attribute value (§3.3.2.2): 100-char
     /// identifier-like values, or membership in the allowed set for a
-    /// standard capability.
+    /// standard capability. Also a list item, with the same
+    /// `string? | list[string]` skip/flatten semantics as
+    /// [`Self::TextListItem`]; the §3.3.2.2 checks apply to each
+    /// resulting element.
     AttributeValue {
         capability_name: &'a str,
         standard: &'static [(&'static str, &'static [&'static str])],
@@ -371,7 +380,9 @@ impl ResolvedConstraint<'_> {
     /// The target type the field's resolution uses, per Expression
     /// Language §1.3.2 (single whole-field expressions only —
     /// multi-segment strings concatenate regardless, exactly as in
-    /// resolution): `string` for the required string fields, `float?`
+    /// resolution): `string` for the required scalar string fields,
+    /// `string? | list[string]` for list items (range elements,
+    /// attribute values — `null` skips, a list flattens), `float?`
     /// for the optional amount bounds, `int?` for `timeout` and
     /// `notifyPeriodInSeconds` (§5/§5.3.2 — `null` means "not
     /// provided"), plain `int` for the required `defaultTaskCount`, and
@@ -381,7 +392,12 @@ impl ResolvedConstraint<'_> {
     /// target.
     fn target_type(&self) -> ExprType {
         match self {
-            Self::Text { .. } | Self::AttributeValue { .. } => ExprType::STRING,
+            Self::Text { .. } => ExprType::STRING,
+            Self::TextListItem { .. } | Self::AttributeValue { .. } => ExprType::union(vec![
+                ExprType::NULLTYPE,
+                ExprType::STRING,
+                ExprType::list(ExprType::STRING),
+            ]),
             Self::Float { .. } => ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE]),
             Self::Int { nullable, .. } => {
                 if *nullable {
@@ -436,6 +452,43 @@ fn check_resolved_constraint(
                 }
             }
         }
+        ResolvedConstraint::TextListItem { max_len } => {
+            // The length bound is only sound when the resolution is
+            // certainly a string: a list-valued resolution distributes
+            // its characters across elements, so the display-form length
+            // says nothing about any single element. Multi-segment
+            // strings are always strings, and a fully static string is
+            // exact.
+            if sr.resolved_type == ExprType::STRING && sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+            }
+            // A fully static list flattens into one element per member
+            // (Expression Language §1.3.2): the limit applies to each.
+            if let Some(v) = &sr.resolved_value {
+                if let Some(elements) = v.list_elements() {
+                    for (i, elem) in elements.iter().enumerate() {
+                        let n = elem.to_display_string().chars().count();
+                        if n > *max_len {
+                            errors.add(
+                                path,
+                                format!(
+                                    "list element {i} resolves to {n} characters, exceeding the maximum of {max_len}."
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+            // A fully static `null` skips the element: valid here; job
+            // creation re-checks that the list is non-empty after all
+            // skips are applied.
+        }
         ResolvedConstraint::AttributeValue {
             capability_name,
             standard,
@@ -445,43 +498,61 @@ fn check_resolved_constraint(
                 .iter()
                 .find(|(n, _)| *n == lower)
                 .map(|(_, vals)| *vals);
-            match allowed {
-                // Standard capability: values come from a fixed set, so no
-                // resolution longer than the longest member can conform.
-                Some(vals) => {
-                    let longest = vals.iter().map(|v| v.chars().count()).max().unwrap_or(0);
-                    if sr.min_resolved_string_len > longest {
-                        errors.add(
-                            path,
-                            format!(
-                                "resolves to at least {} characters; no valid value for {} is longer than {} characters.",
-                                sr.min_resolved_string_len, lower, longest
-                            ),
-                        );
-                        return;
+            // Length bounds gated on a certainly-string resolution, as in
+            // TextListItem: list-valued resolutions are checked
+            // per-element below.
+            if sr.resolved_type == ExprType::STRING {
+                match allowed {
+                    // Standard capability: values come from a fixed set,
+                    // so no resolution longer than the longest member can
+                    // conform.
+                    Some(vals) => {
+                        let longest = vals.iter().map(|v| v.chars().count()).max().unwrap_or(0);
+                        if sr.min_resolved_string_len > longest {
+                            errors.add(
+                                path,
+                                format!(
+                                    "resolves to at least {} characters; no valid value for {} is longer than {} characters.",
+                                    sr.min_resolved_string_len, lower, longest
+                                ),
+                            );
+                            return;
+                        }
                     }
-                }
-                // Identifier-like capability: §3.3.2.2 max of 100.
-                None => {
-                    if sr.min_resolved_string_len > 100 {
-                        errors.add(
-                            path,
-                            format!(
-                                "resolves to at least {} characters, exceeding the maximum of 100.",
-                                sr.min_resolved_string_len
-                            ),
-                        );
-                        return;
+                    // Identifier-like capability: §3.3.2.2 max of 100.
+                    None => {
+                        if sr.min_resolved_string_len > 100 {
+                            errors.add(
+                                path,
+                                format!(
+                                    "resolves to at least {} characters, exceeding the maximum of 100.",
+                                    sr.min_resolved_string_len
+                                ),
+                            );
+                            return;
+                        }
                     }
                 }
             }
-            if let Some(s) = static_text() {
-                if let Err(message) = crate::capabilities::validate_attribute_capability_value(
-                    capability_name,
-                    &s,
-                    standard,
-                ) {
-                    errors.add(path, message);
+            // Fully static: the §3.3.2.2 check runs on the value — or on
+            // each element when the item flattens (Expression Language
+            // §1.3.2). A static `null` skips the element; job creation
+            // re-checks non-emptiness after skips.
+            match &sr.resolved_value {
+                None | Some(ExprValue::Null) => {}
+                Some(v) => {
+                    let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                    for elem in &elements {
+                        if let Err(message) =
+                            crate::capabilities::validate_attribute_capability_value(
+                                capability_name,
+                                &elem.to_display_string(),
+                                standard,
+                            )
+                        {
+                            errors.add(path, message);
+                        }
+                    }
                 }
             }
         }
@@ -945,10 +1016,11 @@ pub fn validate_format_strings(
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
                 // §3.4.2: a STRING/PATH range element may be at most 1024
-                // characters after the format string has been resolved.
-                let range_item_constraint = ResolvedConstraint::Text {
+                // characters after the format string has been resolved. As
+                // a list item it may also resolve to `null` (skipped) or a
+                // list (flattened) per Expression Language §1.3.2.
+                let range_item_constraint = ResolvedConstraint::TextListItem {
                     max_len: limits.max_task_param_string_len,
-                    forbid_control_chars: false,
                 };
                 match tp {
                     TaskParameterDefinition::INT(t) => {

@@ -153,18 +153,42 @@ fn job_name_list_inside_text_passes() {
 }
 
 #[test]
-fn attr_value_whole_field_null_fails() {
+fn attr_value_whole_field_null_skips_element() {
+    // Attribute values are list items: a whole-field null skips the
+    // element at validation time (job creation rejects the requirement
+    // if every element skips away).
+    check_ok(&job_with_attr("attr.custom.tag", "{{ null }}"));
+}
+
+#[test]
+fn attr_value_static_list_flattens_and_checks_each_element() {
+    check_ok(&job_with_attr(
+        "attr.custom.tag",
+        "{{ ['tag_a', 'tag_b'] }}",
+    ));
+    // Each flattened element gets the §3.3.2.2 charset check.
     check_err(
-        &job_with_attr("attr.custom.tag", "{{ null }}"),
-        &["steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tFailed to parse interpolation expression at [0, 10]. Cannot coerce nulltype to string"],
+        &job_with_attr("attr.custom.tag", "{{ ['tag_a', 'has space'] }}"),
+        &["steps[0] -> hostRequirements -> attributes[0] -> anyOf[0]:\n\tvalue 'has space' contains invalid characters."],
     );
 }
 
 #[test]
-fn string_range_item_whole_field_null_fails() {
+fn string_range_item_whole_field_null_skips_element() {
+    // Range elements are list items: a whole-field null skips the
+    // element at validation time (job creation rejects the range if
+    // every element skips away).
+    check_ok(&job_with_range_item("STRING", "{{ null }}"));
+}
+
+#[test]
+fn string_range_item_static_list_checks_each_element() {
+    check_ok(&job_with_range_item("STRING", "{{ ['a', 'b'] }}"));
+    // The 1024-character limit applies to each flattened element, not to
+    // the list's display form.
     check_err(
-        &job_with_range_item("STRING", "{{ null }}"),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tFailed to parse interpolation expression at [0, 10]. Cannot coerce nulltype to string"],
+        &job_with_range_item("STRING", "{{ ['ok', 'x' * 1100] }}"),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tlist element 1 resolves to 1100 characters, exceeding the maximum of 1024."],
     );
 }
 
