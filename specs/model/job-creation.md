@@ -83,6 +83,13 @@ pub struct PathParameterOptions<'a> {
 - `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
   widening (int → float), list element type validation
 
+**Round trip:** every value `preprocess_job_parameters` returns is a value it accepts as input. Callers
+rely on this: the PyO3 `create_job` binding re-runs `preprocess_job_parameters` over the values it is
+handed, so a caller that preprocesses and then calls `create_job` with the result preprocesses twice.
+The requirement is not automatic — an empty `LIST[PATH]` is the one list value whose variant carries
+the declared element type rather than one inferred from its elements, so it is the case where accepted
+input and produced output can drift apart.
+
 ### build_symbol_table
 
 ```rust
