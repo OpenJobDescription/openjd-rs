@@ -83,9 +83,19 @@ pub struct PathParameterOptions<'a> {
 - `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
   widening (int → float), list element type validation
 
-**Round trip:** every value `preprocess_job_parameters` returns is a value it accepts as input. Callers
-rely on this: the PyO3 `create_job` binding re-runs `preprocess_job_parameters` over the values it is
-handed, so a caller that preprocesses and then calls `create_job` with the result preprocesses twice.
+**Round trip:** a value `preprocess_job_parameters` returns should be a value it accepts as input.
+Callers rely on this: the PyO3 `create_job` binding re-runs `preprocess_job_parameters` over the values
+it is handed, so a caller that preprocesses and then calls `create_job` with the result preprocesses
+twice.
+
+It is a goal rather than an established invariant, and one case is known to violate it. A scalar `PATH`
+with a **relative** default plus a `maxLength`, `minLength` or `allowedValues` constraint fails the
+second pass: the first pass joins the default to `job_template_dir` and does not constrain-check a
+default, while the second pass receives the joined absolute path as a submitted value and measures the
+constraint against that. Measured, with a relative default of `out` and `maxLength: 8`, the second pass
+reports `value length 72 exceeds maximum 8`. Constraints on a `PATH` parameter are validated against
+the unjoined default at decode and against the joined value at create, so the two disagree by
+construction.
 
 The requirement is not automatic. Every empty list carries its declared element type, since there are
 no elements to infer one from, but `LIST[PATH]` is the only type where empty and non-empty produce
