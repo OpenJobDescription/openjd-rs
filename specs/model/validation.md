@@ -219,11 +219,15 @@ right `ExprProfile` from a model profile.
 
 ### Spec-Mandated Resolved-Value Constraints
 
-Pass 8 no longer discards what static evaluation computes: for fields with
-spec-mandated post-resolution constraints, the
+Pass 8 uses the values that static evaluation can resolve: for fields
+whose spec constraints apply to the *resolved* value — "after the format
+string has been resolved" in the spec's wording — the
 `openjd_expr::StaticResolution` returned by `validate_expressions` is
-checked against a per-field `ResolvedConstraint` (gate 1 of
-`specs/resolved-value-limits.md` — the fields whose spec constraints apply to the *resolved* value, "after the format string has been resolved" in the spec's wording). Two stages:
+checked against a per-field `ResolvedConstraint`. This makes template
+validation the earliest of the spec's three processing stages (Template
+Schemas §7.4: template validation, job creation, task execution on the
+worker host) to catch a violation that is already knowable, instead of
+deferring it to job submission or the worker. Two stages of checking:
 
 1. **Lower bound** — `min_resolved_string_len` holds for every possible
    run-time resolution (unresolved segments contribute 0), so a bound
@@ -266,31 +270,33 @@ derived from the schema context:
 
 Every constrained field follows the rule (for
 `timeout`/`notifyPeriodInSeconds`/`mode` the Template Schemas doc also
-mandates the target explicitly), and **gates 2/3 resolve each field with
-the same target gate 1 validates with** — job name and range items in
-`create_job`, attribute values and amounts in `instantiate`, environment
-variable values and the action numeric fields in `openjd-sessions`. A
-field's gate-1 target must always equal its gate-2/3 target, or
-validation rejects values resolution accepts (or vice versa).
+mandates the target explicitly), and **the later processing stages
+resolve each field with the same target validation checks it with** —
+job name and range items in `create_job`, attribute values and amounts
+in `instantiate`, environment variable values and the action numeric
+fields in `openjd-sessions`. A field's validation-time target must
+always equal its resolution-time target, or validation rejects values
+resolution accepts (or vice versa).
 
 Consequences of the `string` targets worth naming:
 
 - There is no `list[T] → string` conversion, so a whole-field list-valued
   expression in a string field (e.g. a bare `LIST[*]` parameter reference
-  as a range element) is an error. It previously rendered the list's
-  display form; the targeted behavior is a deliberate breaking change.
+  as a range element) is an error — it does not render the list's
+  display form as the field's value.
 - `null` does not coerce to `string`, so a whole-field `null` in a
-  required string field is an error — previously it silently rendered as
-  the empty string, which every one of these string fields' minimum length of
-  1 forbids anyway. Null (and lists) *inside* surrounding text remain
+  required string field is an error — every one of these string fields
+  has a spec minimum length of 1 character, so an empty rendering could
+  never conform anyway. Null (and lists) *inside* surrounding text remain
   ordinary interpolation and render their display form.
 
 Range items and attribute values are list *items*; under §1.3.2's
 list-item reading their targets would be `string? | list[string]` with
 skip/flatten semantics. They currently target plain `string` (no
-skip/flatten); adopting the list-item reading is tracked as an open
-question in the resolved-value limits design (it needs
-reference-implementation cross-checking and gate-2 flattening support).
+skip/flatten); adopting the list-item reading is an open question — it
+needs reference-implementation cross-checking, an upstream
+clarification, and flattening support in `create_job`'s range
+resolution.
 
 One further deliberate exclusion: **literals**. `validate_fs` skips
 literal format strings; the raw-text passes (structure/limits) already
