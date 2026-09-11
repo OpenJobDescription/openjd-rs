@@ -783,13 +783,19 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
     // the values it is handed.
     //
     // Deliberately empty-only, not `matches!` over the whole variant. A non-empty
-    // `ListPath` can only be built by a caller, never by this module, and accepting
-    // one would store its elements and their `PathFormat` verbatim -- which nothing
-    // downstream reads, because `Session::build_symbol_table` re-applies path mapping
-    // to a LIST[PATH] only when the value is a `ListString`. Keep refusing it here
-    // rather than admitting a value that silently loses its `Param.<name>` binding at
-    // session scope. An empty list has no elements, so its `PathFormat` is inert and
-    // the same objection does not apply.
+    // `ListPath` has no producer: this module builds a non-empty LIST[PATH] as a
+    // `ListString`, so accepting one would admit a value only a caller can construct,
+    // for no behaviour this module needs. Refusing it is what the code did before the
+    // empty-list case was fixed, and narrowing to the empty case keeps that.
+    //
+    // There is a downstream reason too, and it is narrower than it first looks.
+    // `Session::build_symbol_table` has two paths. On the resolved-symtab path it
+    // re-applies path mapping to a LIST[PATH] only when the value is a `ListString`,
+    // with no else, so a `ListPath` is skipped and `Param.<name>` is never set. On the
+    // other path a `_ =>` arm falls through to `coerce_param_value` and the binding is
+    // set. So a `ListPath` loses its binding on one path and not the other, which is a
+    // pre-existing asymmetry an empty list already reaches -- filed separately, and not
+    // a reason to accept a non-empty one on top of it.
     if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
         return elements.is_empty();
     }
