@@ -6001,3 +6001,30 @@ fn test_create_job_attr_value_list_flattens() {
         &["tag_a", "tag_b", "tag_c"]
     );
 }
+
+#[test]
+fn test_create_job_range_element_too_long_reports_characters() {
+    // The limit comparison and the count in the diagnostic must agree:
+    // 1,200 two-byte characters is 2,400 bytes, and the message reports
+    // 1200 — the character count the limit is stated in.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "V", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{Param.V * 2}}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("V", &"é".repeat(600))],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range[0]: resolved value exceeds 1024 characters (1200 chars)"
+    );
+}

@@ -586,13 +586,11 @@ fn resolve_string_range(
         )));
     }
     for (i, s) in resolved.iter().enumerate() {
-        if s.chars().count() > limits.max_task_param_string_len {
+        let char_count = s.chars().count();
+        if char_count > limits.max_task_param_string_len {
             return Err(ModelError::DecodeValidation(format!(
                 "Task parameter '{}' range[{}]: resolved value exceeds {} characters ({} chars)",
-                param_name,
-                i,
-                limits.max_task_param_string_len,
-                s.len()
+                param_name, i, limits.max_task_param_string_len, char_count
             )));
         }
         // §3.4.2 minimum length 1: applies to STRING and PATH elements

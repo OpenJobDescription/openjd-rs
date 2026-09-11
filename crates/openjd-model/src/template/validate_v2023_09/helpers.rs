@@ -59,7 +59,7 @@ pub fn validate_env_var_name(name: &str, path: &[PathElement], errors: &mut Vali
         errors.add(path, "variable name must not be empty.");
         return;
     }
-    if name.len() > 256 {
+    if name.chars().count() > 256 {
         errors.add(
             path,
             format!("variable name '{name}' exceeds 256 characters."),

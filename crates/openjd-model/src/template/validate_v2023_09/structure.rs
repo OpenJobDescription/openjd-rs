@@ -450,7 +450,7 @@ fn validate_action(
     if cmd.is_empty() {
         errors.add(&path_field(path, "command"), "must not be empty.");
     }
-    if cmd.len() > limits.max_command_len {
+    if cmd.chars().count() > limits.max_command_len {
         errors.add(
             &path_field(path, "command"),
             format!("exceeds {} characters.", limits.max_command_len),
@@ -556,7 +556,7 @@ fn validate_host_requirements(
             if !names.insert(amt.name.to_lowercase()) {
                 errors.add(&amt_path, format!("duplicate amount name '{}'.", amt.name));
             }
-            if amt.name.len() > 100 {
+            if amt.name.chars().count() > 100 {
                 errors.add(
                     &amt_path,
                     format!("name '{}' exceeds 100 characters.", amt.name),
@@ -634,7 +634,7 @@ fn validate_host_requirements(
                     format!("duplicate attribute name '{}'.", attr.name),
                 );
             }
-            if attr.name.len() > 100 {
+            if attr.name.chars().count() > 100 {
                 errors.add(
                     &attr_path,
                     format!("name '{}' exceeds 100 characters.", attr.name),
@@ -811,7 +811,7 @@ fn validate_combination_expr(
             return;
         }
     }
-    if expr.len() > 1280 {
+    if expr.chars().count() > 1280 {
         errors.add(path, "exceeds 1280 characters.");
     }
     let mut depth = 0i32;
