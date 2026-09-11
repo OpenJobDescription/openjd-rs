@@ -84,9 +84,10 @@ pub struct PathParameterOptions<'a> {
   widening (int → float), list element type validation
 
 **Round trip:** a value `preprocess_job_parameters` returns should be a value it accepts as input.
-Callers rely on this: the PyO3 `create_job` binding re-runs `preprocess_job_parameters` over the values
-it is handed, so a caller that preprocesses and then calls `create_job` with the result preprocesses
-twice.
+Both its input and output types are public, so a caller can hand its output straight back to it.
+`create_job` does something adjacent already, and for every caller: it re-runs `check_constraints` over
+each value it is given (`create_job/mod.rs:54`-`:59`), with no second preprocess required. So the
+broader requirement is that every value this function emits also satisfies `check_constraints`.
 
 It is a goal rather than an established invariant, and one case is known to violate it. A scalar `PATH`
 with a **relative** default plus a `maxLength`, `minLength` or `allowedValues` constraint fails the
@@ -100,9 +101,22 @@ construction.
 The requirement is not automatic. Every empty list carries its declared element type, since there are
 no elements to infer one from, but `LIST[PATH]` is the only type where empty and non-empty produce
 *different variants*: `make_list` reads String elements as a `ListString`, so a non-empty `LIST[PATH]`
-value is a `ListString` while an empty one is a `ListPath`. Accepted input and produced output can
+value is a `ListString`, while `default: []` yields a `ListPath`. Accepted input and produced output can
 therefore drift apart for that one type, and `value_matches_type` admits an **empty** `ListPath` for a
 `LIST[PATH]` parameter for exactly that reason.
+
+Only the *non-empty* variant is settled by the declared type. A caller may submit an empty `ListString`
+for a `LIST[PATH]` parameter, which the `ListString` arm accepts and stores verbatim, so an empty value
+of that type can be either variant depending on how it was expressed. Measured:
+
+| Route | Stored value | `param_type` |
+|---|---|---|
+| `default: []` | `ListPath([])` | `ListPath` |
+| caller submits `make_list([], STRING)` | `ListString([])` | `ListPath` |
+| caller submits `make_list([], PATH)` | `ListPath([])` | `ListPath` |
+
+Nothing normalizes between the two, and `openjd-sessions::build_symbol_table` discriminates on the
+variant, so which one arrived decides whether `Param.<name>` is bound. See issue #389.
 
 A non-empty `ListPath` stays refused, because **this crate** never builds one: `preprocess_job_parameters`
 represents a non-empty `LIST[PATH]` as a `ListString`, so accepting a `ListPath` would admit a shape only
