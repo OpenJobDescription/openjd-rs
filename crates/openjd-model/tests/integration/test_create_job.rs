@@ -5856,13 +5856,22 @@ fn round_trip_options<'a>(td: &'a TestDirs) -> openjd_model::PathParameterOption
 
 #[test]
 fn preprocess_accepts_its_own_empty_list_path_output() {
-    // Only an empty LIST[PATH] stays an ExprValue::ListPath; a non-empty one is a
-    // ListString. Feeding the empty one back used to fail with "Cannot coerce list to
-    // LIST[PATH]".
+    // A LIST[PATH] is a ListString at every length. An empty default used to come out a
+    // ListPath, which the second pass then refused with "Cannot coerce list to LIST[PATH]".
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Empty", "type": "LIST[PATH]", "default": []}"#,
         &td,
+    );
+    // The variant on the way out, so a fix that only taught the second pass to accept a
+    // ListPath would fail here rather than pass.
+    assert!(
+        matches!(
+            &filled["Empty"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
+        ),
+        "the first pass emitted {:?}, expected an empty ListString",
+        filled["Empty"].value
     );
     let result = preprocess_again(&jt, &filled, &td)
         .expect("an empty LIST[PATH] this function produced must be a value it accepts");
@@ -5870,9 +5879,9 @@ fn preprocess_accepts_its_own_empty_list_path_output() {
     assert!(
         matches!(
             &result["Empty"].value,
-            openjd_expr::ExprValue::ListPath(v, _, _) if v.is_empty()
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
         ),
-        "Empty arrived as {:?}, expected an empty ListPath",
+        "Empty arrived as {:?}, expected an empty ListString",
         result["Empty"].value
     );
 }
@@ -5905,8 +5914,8 @@ fn preprocess_accepts_its_own_non_empty_list_path_output() {
 #[test]
 fn preprocess_accepts_its_own_output_for_every_list_type() {
     // The requirement is not specific to LIST[PATH]: the function's output type is a
-    // subset of its input type. Empty defaults so each value carries its declared
-    // element type rather than one inferred from elements.
+    // subset of its input type. Empty defaults so the variant comes from the declared
+    // type rather than from elements -- except LIST[PATH], whose elements are Strings.
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Bools", "type": "LIST[BOOL]", "default": []},
@@ -5942,7 +5951,7 @@ fn preprocess_accepts_its_own_output_for_every_list_type() {
         ),
         (
             "Paths",
-            matches!(&result["Paths"].value, openjd_expr::ExprValue::ListPath(v, _, _) if v.is_empty()),
+            matches!(&result["Paths"].value, openjd_expr::ExprValue::ListString(v, _) if v.is_empty()),
         ),
         (
             "IntLists",
@@ -5986,10 +5995,14 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
 }
 
 #[test]
-fn a_non_empty_list_path_value_is_still_refused() {
-    // Nothing in this crate builds a non-empty ExprValue::ListPath, so accepting one
-    // would admit a caller-only shape. This pins that the empty-list fix did not widen
-    // it. PathFormat::Windows on purpose: LIST[PATH] never enters the
+fn a_submitted_list_path_value_is_refused_at_any_length() {
+    // This crate never builds an ExprValue::ListPath, so accepting one would admit a
+    // caller-only shape whose PathFormat nothing here validates. Both lengths, because
+    // fixing the empty case at the producer is what let the rule become one rule.
+    //
+    // Through make_list rather than the variant directly: ListPath's third field is a
+    // cached heap size make_list computes, so a hand-built 0 is a shape the crate never
+    // produces. PathFormat::Windows on purpose -- LIST[PATH] never enters the
     // path_format-sensitive branches, so a foreign format would pass every check.
     let td = TestDirs::new();
     let jt = decode_job_template(
@@ -5998,35 +6011,37 @@ fn a_non_empty_list_path_value_is_still_refused() {
         &CallerLimits::default(),
     )
     .expect("template decodes");
-    let mut input = JobParameterInputValues::new();
-    // Through make_list rather than the variant directly: ListPath's third field is a
-    // cached heap size that make_list computes, so a hand-built 0 is a shape the crate
-    // never produces. PathFormat comes from the PATH element type.
-    input.insert(
-        "Paths".into(),
-        openjd_expr::ExprValue::make_list(
+    for (label, elements) in [
+        ("empty", vec![]),
+        (
+            "non-empty",
             vec![
                 openjd_expr::ExprValue::new_path("/a/b.exr", PathFormat::Windows),
                 openjd_expr::ExprValue::new_path("/a/c.exr", PathFormat::Windows),
             ],
-            openjd_expr::ExprType::PATH,
-        )
-        .expect("a non-empty ListPath"),
-    );
-    let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
-        .expect_err("a non-empty ListPath must not be accepted verbatim");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("Parameter 'Paths': Cannot coerce list to LIST[PATH]"),
-        "unexpected diagnostic: {msg}"
-    );
+        ),
+    ] {
+        let mut input = JobParameterInputValues::new();
+        input.insert(
+            "Paths".into(),
+            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::PATH)
+                .expect("a ListPath"),
+        );
+        let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+            .expect_err("a ListPath must not be accepted verbatim");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Parameter 'Paths': Cannot coerce list to LIST[PATH]"),
+            "unexpected diagnostic for the {label} case: {msg}"
+        );
+    }
 }
 
 #[test]
 fn an_empty_list_path_still_meets_its_length_constraints() {
-    // Accepting an empty ListPath makes check_constraints reachable for input that used
-    // to be refused a step earlier, so the diagnostic now names the length rule rather
-    // than a coercion failure.
+    // An empty LIST[PATH] reaches check_constraints rather than failing coercion, so the
+    // diagnostic names the length rule. ListString because that is the representation the
+    // crate emits -- an empty ListPath is refused a step earlier, by design.
     //
     // Submitted rather than defaulted: decode refuses an empty `default` under
     // `minLength: 1` outright, so submitting is the only way to reach the constraint
@@ -6041,8 +6056,8 @@ fn an_empty_list_path_still_meets_its_length_constraints() {
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Paths".into(),
-        openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::PATH)
-            .expect("an empty ListPath"),
+        openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::STRING)
+            .expect("an empty ListString"),
     );
     let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
         .expect_err("an empty list cannot satisfy minLength: 1");

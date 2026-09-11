@@ -98,30 +98,28 @@ reports `value length 72 exceeds maximum 8`. Constraints on a `PATH` parameter a
 the unjoined default at decode and against the joined value at create, so the two disagree by
 construction.
 
-The requirement is not automatic. Every empty list carries its declared element type, since there are
-no elements to infer one from, but `LIST[PATH]` is the only type where empty and non-empty produce
-*different variants*: `make_list` reads String elements as a `ListString`, so a non-empty `LIST[PATH]`
-value is a `ListString`, while `default: []` yields a `ListPath`. Accepted input and produced output can
-therefore drift apart for that one type, and `value_matches_type` admits an **empty** `ListPath` for a
-`LIST[PATH]` parameter for exactly that reason.
-
-Only the *non-empty* variant is settled by the declared type. A caller may submit an empty `ListString`
-for a `LIST[PATH]` parameter, which the `ListString` arm accepts and stores verbatim, so an empty value
-of that type can be either variant depending on how it was expressed. Measured:
+For lists it holds by construction. An empty list has no elements to infer a variant from, so
+`coerce_json_to_job_parameter_type` gives `make_list` a hint, and the hint names the variant the
+*coerced elements* would have produced rather than the declared element type. The two differ for
+exactly one type: a PATH element coerces to an `ExprValue::String`, so a `LIST[PATH]` value is a
+`ListString` at every length, and its hint is `STRING`. Measured, one `LIST[PATH]` parameter, three
+routes:
 
 | Route | Stored value | `param_type` |
 |---|---|---|
-| `default: []` | `ListPath([])` | `ListPath` |
-| caller submits `make_list([], STRING)` | `ListString([])` | `ListPath` |
-| caller submits `make_list([], PATH)` | `ListPath([])` | `ListPath` |
+| `default: []` | `ListString([], 0)` | `ListPath` |
+| caller submits `make_list([], STRING)` | `ListString([], 0)` | `ListPath` |
+| caller submits `make_list([], PATH)` | refused | -- |
 
-Nothing normalizes between the two, and `openjd-sessions::build_symbol_table` discriminates on the
-variant, so which one arrived decides whether `Param.<name>` is bound. See issue #389.
+A `LIST[PATH]` parameter therefore has one stored representation. Passing `PATH` as the hint gave the
+empty case a second one, which nothing normalized and which `openjd-sessions::build_symbol_table` drops:
+its base-symtab branch gates the whole `LIST[PATH]` body on `if let ExprValue::ListString(..)` with no
+`else`, so a stored `ListPath` left `Param.<name>` unbound at session scope. That divergence is issue
+#387; the two representations were issue #389.
 
-A non-empty `ListPath` stays refused, because **this crate** never builds one: `preprocess_job_parameters`
-represents a non-empty `LIST[PATH]` as a `ListString`, so accepting a `ListPath` would admit a shape only
-a caller can construct. Note the scope — `openjd-sessions` does build non-empty `ListPath` values, when
-it re-applies path mapping at session scope — so this is a statement about what reaches
+An `ExprValue::ListPath` submitted as an input value is refused at any length, because **this crate**
+never builds one. Note the scope -- `openjd-sessions` does build non-empty `ListPath` values, when it
+re-applies path mapping at session scope -- so this is a statement about what reaches
 `preprocess_job_parameters`, not about the variant in general. The round-trip requirement is
 one-directional: every output is an accepted input, and it says nothing about accepting shapes that are
 never output.
