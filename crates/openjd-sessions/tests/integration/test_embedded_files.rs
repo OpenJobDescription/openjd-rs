@@ -381,6 +381,62 @@ mod path_traversal {
         assert_rejects("C:\\Windows\\evil.exe", "must not contain path separators");
     }
 
+    // Windows drive-relative anchors and NTFS alternate-data-stream names
+    // contain a colon but no `/` or `\`, so they slip past the separator check.
+    // The colon check rejects them explicitly. This is platform-specific: on
+    // POSIX `:` is an ordinary filename character, so the tests only run on
+    // Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative() {
+        assert_rejects("D:relative", "must not contain ':'");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative_with_name() {
+        assert_rejects("C:evil.exe", "must not contain ':'");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_bare_drive() {
+        assert_rejects("C:", "must not contain ':'");
+    }
+
+    // NTFS alternate data stream: `script.sh:evil` opens the `evil` stream of
+    // the `script.sh` file object rather than a file of that literal name.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_ads_stream() {
+        assert_rejects("script.sh:evil", "must not contain ':'");
+    }
+
+    // A colon is a legitimate filename character on POSIX and must be accepted
+    // there — the rejection is Windows-only.
+    #[cfg(unix)]
+    #[test]
+    fn accepts_colon_on_posix() {
+        allocate_with_tainted("a:b").expect("colon filename should be accepted on POSIX");
+    }
+
+    // Windows strips trailing dots and spaces from the final path component, so
+    // a name made only of dots and spaces collapses to `.`/`..` at the OS layer
+    // and escapes the target directory. Any name with a separator is already
+    // caught above, so only these standalone forms reach the dedicated check.
+    // On POSIX they are ordinary filenames, so the tests only run on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_dotdot_trailing_space() {
+        assert_rejects(".. ", "must not consist only of dots and spaces");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_triple_dot() {
+        assert_rejects("...", "must not consist only of dots and spaces");
+    }
+
     #[test]
     fn rejects_nested_subdirectory() {
         assert_rejects("sub/evil.sh", "must not contain path separators");
