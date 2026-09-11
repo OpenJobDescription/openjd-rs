@@ -92,8 +92,15 @@ pub fn create_job(
         return Err(ModelError::DecodeValidation(format!(
             "Job name exceeds maximum length of {} characters (got {})",
             limits.max_job_name_len,
-            job_name.len()
+            job_name.chars().count()
         )));
+    }
+    // §1.1.1 minimum length 1: the raw-text pass rejects an empty literal,
+    // but an interpolated name is only known here.
+    if job_name.is_empty() {
+        return Err(ModelError::DecodeValidation(
+            "Job name must not resolve to an empty string".to_string(),
+        ));
     }
 
     if has_expr {

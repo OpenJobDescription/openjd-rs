@@ -333,11 +333,14 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 /// resolved value coincide.
 enum ResolvedConstraint<'a> {
     /// A string field with a maximum resolved length in characters.
-    /// `forbid_control_chars` adds the §1.1.1 Cc-category check for the
-    /// job name when the value is fully static.
+    /// `forbid_control_chars` and `forbid_empty` add the §1.1.1 checks
+    /// for the job name when the value is fully static (environment
+    /// variable values set neither: §4.4.2's minimum length is 0 and any
+    /// character is allowed).
     Text {
         max_len: usize,
         forbid_control_chars: bool,
+        forbid_empty: bool,
     },
     /// A list-item string field (task-parameter range elements,
     /// Template Schemas §3.4.2). Per Expression Language §1.3.2 a
@@ -432,6 +435,7 @@ fn check_resolved_constraint(
         ResolvedConstraint::Text {
             max_len,
             forbid_control_chars,
+            forbid_empty,
         } => {
             // The bound is exact when the value is fully static, so this
             // one check covers both the bound-only and static cases.
@@ -444,11 +448,16 @@ fn check_resolved_constraint(
                     ),
                 );
             }
-            if *forbid_control_chars {
-                if let Some(s) = static_text() {
-                    if s.chars().any(char::is_control) {
-                        errors.add(path, "contains control characters.");
-                    }
+            if let Some(s) = static_text() {
+                // §1.1.1 minimum length 1: a fully static empty
+                // resolution can never conform. (Partially unresolved
+                // strings may still resolve empty; job creation
+                // re-checks the resolved value.)
+                if *forbid_empty && s.is_empty() {
+                    errors.add(path, "must not resolve to an empty string.");
+                }
+                if *forbid_control_chars && s.chars().any(char::is_control) {
+                    errors.add(path, "contains control characters.");
                 }
             }
         }
@@ -468,20 +477,34 @@ fn check_resolved_constraint(
                     ),
                 );
             }
-            // A fully static list flattens into one element per member
-            // (Expression Language §1.3.2): the limit applies to each.
+            // §3.4.2 constrains each element to 1..=1024 characters. A
+            // fully static list flattens into one element per member
+            // (Expression Language §1.3.2): both limits apply to each.
             if let Some(v) = &sr.resolved_value {
-                if let Some(elements) = v.list_elements() {
-                    for (i, elem) in elements.iter().enumerate() {
-                        let n = elem.to_display_string().chars().count();
-                        if n > *max_len {
-                            errors.add(
-                                path,
-                                format!(
-                                    "list element {i} resolves to {n} characters, exceeding the maximum of {max_len}."
-                                ),
-                            );
-                        }
+                let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                let is_list = v.is_list();
+                for (i, elem) in elements.iter().enumerate() {
+                    if matches!(elem, ExprValue::Null) {
+                        continue;
+                    }
+                    let n = elem.to_display_string().chars().count();
+                    let element_label = if is_list {
+                        format!("list element {i} ")
+                    } else {
+                        String::new()
+                    };
+                    if n > *max_len {
+                        errors.add(
+                            path,
+                            format!(
+                                "{element_label}resolves to {n} characters, exceeding the maximum of {max_len}."
+                            ),
+                        );
+                    } else if n == 0 {
+                        errors.add(
+                            path,
+                            format!("{element_label}must not resolve to an empty string."),
+                        );
                     }
                 }
             }
@@ -800,6 +823,7 @@ pub fn validate_format_strings(
         Some(&ResolvedConstraint::Text {
             max_len: limits.max_job_name_len,
             forbid_control_chars: true,
+            forbid_empty: true,
         }),
         errors,
     );
@@ -1617,6 +1641,7 @@ fn validate_env_format_strings(
                 Some(&ResolvedConstraint::Text {
                     max_len: max_env_var_value_len,
                     forbid_control_chars: false,
+                    forbid_empty: false,
                 }),
                 errors,
             );

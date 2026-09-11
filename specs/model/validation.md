@@ -239,9 +239,9 @@ deferring it to job submission or the worker. Two stages of checking:
 
 | Field | Target type | Bound | Fully-static check |
 |---|---|---|---|
-| job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | no Cc control characters |
+| job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | non-empty (§1.1.1 min 1); no Cc control characters |
 | attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
-| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 per element when a list flattens; `null` skips the element |
+| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | 1..=1024 chars per element (a list flattens); `null` skips the element |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
 | `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
@@ -281,11 +281,13 @@ resolution accepts (or vice versa).
 
 Consequences of the target types worth naming:
 
-- For the scalar `string` fields (job name, environment variable
-  values), there is no `list[T] → string` or `null → string` conversion,
-  so a whole-field list or `null` is an error. Both fields have a spec
-  minimum length of 1 character, so an empty rendering could never
-  conform anyway. Null (and lists) *inside* surrounding text remain
+- For the scalar `string` fields, there is no `list[T] → string` or
+  `null → string` conversion, so a whole-field list or `null` is an
+  error. The job name additionally may not resolve to an empty string
+  (§1.1.1 minimum length 1; checked statically here, and on the resolved
+  value at job creation). Environment variable values have **no**
+  minimum — §4.4.2's minimum length is 0 characters, so an empty
+  resolution is legal. Null (and lists) *inside* surrounding text remain
   ordinary interpolation and render their display form.
 - For the list-item fields (range elements, attribute values), a
   whole-field `null` skips the element and a list flattens inline —
