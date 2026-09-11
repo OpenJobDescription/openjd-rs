@@ -294,6 +294,18 @@ fn string_range_item_bound_too_long_fails_with_unresolved_part() {
 fn range_item_under_limit_and_unresolved_pass() {
     check_ok(&job_with_range_item("STRING", "{{ 'A' * 1024 }}"));
     check_ok(&job_with_range_item("STRING", "{{ Param.X }}"));
+    // Limits count characters, not bytes (spec §3.4.2; the reference
+    // implementation's len() counts characters): 1024 two-byte chars is
+    // 2048 bytes but exactly at the limit.
+    check_ok(&job_with_range_item("STRING", "{{ 'é' * 1024 }}"));
+}
+
+#[test]
+fn range_item_char_count_over_limit_fails() {
+    check_err(
+        &job_with_range_item("STRING", "{{ 'é' * 1025 }}"),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tresolves to at least 1025 characters, exceeding the maximum of 1024."],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════

@@ -426,7 +426,7 @@ fn resolve_float_range(
                     // <floatstring> was parsed to an f64 and its text discarded,
                     // so erroring would reject templates that were valid, whereas
                     // a STRING element over the cap was always an error.
-                    if text.len() > limits.max_task_param_string_len {
+                    if text.chars().count() > limits.max_task_param_string_len {
                         return float64(value, param_name);
                     }
                     Float64::with_str(value, text.into_owned()).map_err(ModelError::Expression)
@@ -540,7 +540,7 @@ fn resolve_string_range(
         )));
     }
     for (i, s) in resolved.iter().enumerate() {
-        if s.len() > limits.max_task_param_string_len {
+        if s.chars().count() > limits.max_task_param_string_len {
             return Err(ModelError::DecodeValidation(format!(
                 "Task parameter '{}' range[{}]: resolved value exceeds {} characters ({} chars)",
                 param_name,

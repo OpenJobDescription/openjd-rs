@@ -88,7 +88,7 @@ pub fn create_job(
             end: None,
         })?;
 
-    if job_name.len() > limits.max_job_name_len {
+    if job_name.chars().count() > limits.max_job_name_len {
         return Err(ModelError::DecodeValidation(format!(
             "Job name exceeds maximum length of {} characters (got {})",
             limits.max_job_name_len,

@@ -954,7 +954,7 @@ pub fn validate_format_strings(
                 // §3.4.2: a STRING/PATH range element may be at most 1024
                 // characters after the format string has been resolved.
                 let range_item_constraint = ResolvedConstraint::Text {
-                    max_len: limits.max_task_param_range_len,
+                    max_len: limits.max_task_param_string_len,
                     forbid_control_chars: false,
                 };
                 match tp {
