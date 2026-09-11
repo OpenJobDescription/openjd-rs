@@ -266,6 +266,338 @@ fn build_task_scope_symtab(
     symtab
 }
 
+/// Soft cap, in characters, on the resolved length of a numeric
+/// (`<posintstring>` / `<intstring>` / float-string) format-string field.
+///
+/// There is no exact maximum: leading zeros are permitted and values are
+/// trimmed, so a conforming integer string can be padded arbitrarily. Any
+/// resolution longer than this is unreasonable for a numeric field, though —
+/// an i64 needs at most 20 characters — so a lower bound past it is reported
+/// at template validation time rather than failing later at job creation or
+/// on the worker.
+const MAX_RESOLVED_NUMERIC_LEN: usize = 100;
+
+/// Longest valid resolved cancelation `mode` value.
+const MODE_MAX_LEN: usize = "NOTIFY_THEN_TERMINATE".len();
+
+/// §5 action `timeout` (`<posintstring>` with FEATURE_BUNDLE_1): the
+/// resolved value must be a positive integer; whole-field `null` is unset.
+const TIMEOUT_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint::Int {
+    min: 1,
+    min_msg: "timeout must be > 0.",
+    max: None,
+    parse_msg: "timeout must be a positive integer.",
+    nullable: true,
+    targeted: true,
+};
+
+/// §5.3.2 `notifyPeriodInSeconds`: positive integer with a spec-mandated
+/// maximum of 600; whole-field `null` is unset.
+const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint::Int {
+    min: 1,
+    min_msg: "notifyPeriodInSeconds must be > 0.",
+    max: Some((600, "notifyPeriodInSeconds must not exceed 600.")),
+    parse_msg: "notifyPeriodInSeconds must be a positive integer.",
+    nullable: true,
+    targeted: true,
+};
+
+/// A spec-mandated constraint on the value a format string resolves to
+/// — a constraint the spec applies to the value the format string
+/// resolves to, "after the format string has been resolved" in the
+/// spec's wording (gate 1 of `specs/resolved-value-limits.md`).
+///
+/// Applied to the [`openjd_expr::StaticResolution`] that
+/// `validate_expressions` returns, in two stages:
+///
+/// 1. **Lower bound** — if `min_resolved_string_len` already exceeds the
+///    field's limit, no run-time resolution can conform, so validation
+///    fails without knowing the unresolved parts. Numeric fields use the
+///    soft [`MAX_RESOLVED_NUMERIC_LEN`] (no exact maximum exists — leading
+///    zeros); the cancelation mode uses the longest valid enum literal.
+/// 2. **Full value check** — when `resolved_value` is present the field is
+///    fully static, and the same check job creation or the worker would
+///    run on the resolved value runs here.
+///
+/// Target types match resolution: the spec mandates `int?` for `timeout`
+/// and `notifyPeriodInSeconds` and `string?` for the deferred cancelation
+/// `mode` (single whole-field expressions), and gates 2/3 resolve those
+/// fields with the same targets. Every other field resolves untargeted
+/// downstream (`resolve_string_with`, then trim-and-parse for numerics),
+/// so its static evaluation here is untargeted too and the stage-2 checks
+/// mirror the downstream `display → trim → parse` handling exactly.
+///
+/// Literal (non-interpolated) fields are excluded: the raw-text passes
+/// (structure/limits) already check those, and for literals raw text and
+/// resolved value coincide.
+enum ResolvedConstraint<'a> {
+    /// A string field with a maximum resolved length in characters.
+    /// `forbid_control_chars` adds the §1.1.1 Cc-category check for the
+    /// job name when the value is fully static.
+    Text {
+        max_len: usize,
+        forbid_control_chars: bool,
+    },
+    /// A `hostRequirements` attribute value (§3.3.2.2): 100-char
+    /// identifier-like values, or membership in the allowed set for a
+    /// standard capability.
+    AttributeValue {
+        capability_name: &'a str,
+        standard: &'static [(&'static str, &'static [&'static str])],
+    },
+    /// An integer field (`<posintstring>` / `<intstring>`). `nullable`
+    /// fields treat a whole-field `null` resolution as unset (schema
+    /// defaults apply). `targeted` fields resolve single whole-field
+    /// expressions with target type `int?` — the spec mandates this for
+    /// `timeout` and `notifyPeriodInSeconds` — so a static `{{ 120.0 }}`
+    /// coerces to the int it denotes; untargeted fields (chunks) mirror
+    /// job creation's display → trim → parse handling. The messages match
+    /// the raw-text checks for the literal forms of the same fields.
+    Int {
+        min: i64,
+        min_msg: &'static str,
+        max: Option<(i64, &'static str)>,
+        parse_msg: &'static str,
+        nullable: bool,
+        targeted: bool,
+    },
+    /// An amount capability bound (`min`/`max`): non-negative or
+    /// strictly-positive finite float.
+    Float { positive: bool, msg: &'static str },
+    /// The cancelation `mode` enum (FEATURE_BUNDLE_1 deferred form):
+    /// resolves to `TERMINATE`, `NOTIFY_THEN_TERMINATE`, or `null`.
+    CancelationMode,
+}
+
+impl ResolvedConstraint<'_> {
+    /// The target type the field's resolution uses, per Expression
+    /// Language §1.3.2 (single whole-field expressions only —
+    /// multi-segment strings concatenate regardless, exactly as in
+    /// resolution): `string` for the required string fields, `float?`
+    /// for the optional amount bounds, `int?` for `timeout` and
+    /// `notifyPeriodInSeconds` (§5/§5.3.2 — `null` means "not
+    /// provided"), plain `int` for the required `defaultTaskCount`, and
+    /// `string?` for the deferred cancelation `mode`. Gates 2/3 resolve
+    /// with the same targets — a field's gate-1 target must always equal
+    /// its gate-2/3 target.
+    fn target_type(&self) -> Option<ExprType> {
+        match self {
+            Self::Text { .. } | Self::AttributeValue { .. } => Some(ExprType::STRING),
+            Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
+            Self::Int {
+                targeted: true,
+                nullable,
+                ..
+            } => Some(if *nullable {
+                ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+            } else {
+                ExprType::INT
+            }),
+            Self::Int {
+                targeted: false, ..
+            } => None,
+            Self::CancelationMode => {
+                Some(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]))
+            }
+        }
+    }
+}
+
+/// Apply a [`ResolvedConstraint`] to what static evaluation determined.
+fn check_resolved_constraint(
+    sr: &openjd_expr::StaticResolution,
+    constraint: &ResolvedConstraint<'_>,
+    path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    // The fully-static resolved text, exactly as job creation's
+    // `resolve_string_with` would produce it: the display form, with a
+    // whole-field `null` interpolating as unset (`None` here).
+    let static_text = || -> Option<String> {
+        match &sr.resolved_value {
+            None | Some(ExprValue::Null) => None,
+            Some(v) => Some(v.to_display_string()),
+        }
+    };
+
+    match constraint {
+        ResolvedConstraint::Text {
+            max_len,
+            forbid_control_chars,
+        } => {
+            // The bound is exact when the value is fully static, so this
+            // one check covers both the bound-only and static cases.
+            if sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+            }
+            if *forbid_control_chars {
+                if let Some(s) = static_text() {
+                    if s.chars().any(char::is_control) {
+                        errors.add(path, "contains control characters.");
+                    }
+                }
+            }
+        }
+        ResolvedConstraint::AttributeValue {
+            capability_name,
+            standard,
+        } => {
+            let lower = capability_name.to_lowercase();
+            let allowed = standard
+                .iter()
+                .find(|(n, _)| *n == lower)
+                .map(|(_, vals)| *vals);
+            match allowed {
+                // Standard capability: values come from a fixed set, so no
+                // resolution longer than the longest member can conform.
+                Some(vals) => {
+                    let longest = vals.iter().map(|v| v.chars().count()).max().unwrap_or(0);
+                    if sr.min_resolved_string_len > longest {
+                        errors.add(
+                            path,
+                            format!(
+                                "resolves to at least {} characters; no valid value for {} is longer than {} characters.",
+                                sr.min_resolved_string_len, lower, longest
+                            ),
+                        );
+                        return;
+                    }
+                }
+                // Identifier-like capability: §3.3.2.2 max of 100.
+                None => {
+                    if sr.min_resolved_string_len > 100 {
+                        errors.add(
+                            path,
+                            format!(
+                                "resolves to at least {} characters, exceeding the maximum of 100.",
+                                sr.min_resolved_string_len
+                            ),
+                        );
+                        return;
+                    }
+                }
+            }
+            if let Some(s) = static_text() {
+                if let Err(message) = crate::capabilities::validate_attribute_capability_value(
+                    capability_name,
+                    &s,
+                    standard,
+                ) {
+                    errors.add(path, message);
+                }
+            }
+        }
+        ResolvedConstraint::Int {
+            min,
+            min_msg,
+            max,
+            parse_msg,
+            nullable,
+            targeted: _,
+        } => {
+            // Stage 1: soft character bound. No exact maximum exists
+            // (leading zeros, trimming), but a resolution this long
+            // cannot be a reasonable integer.
+            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, which cannot be a reasonable integer value.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            // Stage 2: exact value check when fully static, mirroring the
+            // downstream handling: a targeted whole-field expression is
+            // already the coerced int (or null); anything else resolves
+            // to text and parses (trimmed only on the untargeted paths,
+            // matching job creation's chunks handling).
+            let value = match &sr.resolved_value {
+                None => return,
+                Some(ExprValue::Null) => {
+                    if !nullable {
+                        errors.add(path, *parse_msg);
+                    }
+                    return;
+                }
+                Some(ExprValue::Int(v)) => *v,
+                Some(other) => {
+                    let s = other.to_display_string();
+                    // Multi-segment strings parse like Python's int():
+                    // surrounding whitespace is tolerated, matching the
+                    // downstream gates.
+                    match s.trim().parse::<i64>() {
+                        Ok(v) => v,
+                        Err(_) => {
+                            errors.add(path, *parse_msg);
+                            return;
+                        }
+                    }
+                }
+            };
+            if value < *min {
+                errors.add(path, *min_msg);
+            } else if let Some((max_v, max_msg)) = max {
+                if value > *max_v {
+                    errors.add(path, *max_msg);
+                }
+            }
+        }
+        ResolvedConstraint::Float { positive, msg } => {
+            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, which cannot be a reasonable number.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            if let Some(s) = static_text() {
+                match s.trim().parse::<f64>() {
+                    Ok(v) if !v.is_finite() => errors.add(path, "must be a finite number."),
+                    Ok(v) if (*positive && v <= 0.0) || (!*positive && v < 0.0) => {
+                        errors.add(path, *msg);
+                    }
+                    Ok(_) => {}
+                    Err(_) => errors.add(path, "must be a finite number."),
+                }
+            }
+        }
+        ResolvedConstraint::CancelationMode => {
+            if sr.min_resolved_string_len > MODE_MAX_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "mode resolves to at least {} characters; valid values are TERMINATE and NOTIFY_THEN_TERMINATE.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            // Whole-field null: cancelation treated as not provided.
+            if let Some(s) = static_text() {
+                if s != "TERMINATE" && s != "NOTIFY_THEN_TERMINATE" {
+                    errors.add(
+                        path,
+                        format!(
+                            "mode must resolve to TERMINATE or NOTIFY_THEN_TERMINATE, got '{s}'."
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Validate a format string against a symbol table, reporting errors at the given path.
 fn validate_fs(
     fs: &FormatString,
@@ -274,53 +606,75 @@ fn validate_fs(
     path: &[PathElement],
     errors: &mut ValidationErrors,
 ) {
+    validate_fs_with(fs, symtab, lib, path, None, errors);
+}
+
+/// [`validate_fs`] plus a spec-mandated resolved-value constraint
+/// (see `specs/resolved-value-limits.md`), applied to the
+/// [`openjd_expr::StaticResolution`] the validation already computes.
+fn validate_fs_with(
+    fs: &FormatString,
+    symtab: &SymbolTable,
+    lib: &FunctionLibrary,
+    path: &[PathElement],
+    constraint: Option<&ResolvedConstraint<'_>>,
+    errors: &mut ValidationErrors,
+) {
     if fs.is_literal() {
         return;
     }
-    if let Err(e) = fs.validate_expressions(symtab, lib, None) {
-        let mut spans = Vec::new();
-        if let Some(ref expr_err) = e.expression_error {
-            if !expr_err.sub_errors().is_empty() {
-                // Compound error (e.g., if/else both branches fail) — one span per sub-error
-                for sub in expr_err.sub_errors() {
-                    if let (Some(expr), Some(col), Some(end_col)) =
-                        (sub.expr(), sub.col_offset(), sub.end_col_offset())
-                    {
-                        spans.push(crate::error::DiagnosticSpan {
-                            summary: sub.message(),
-                            source: expr.to_string(),
-                            start: col,
-                            end: end_col,
-                            caret: sub.caret_offset().unwrap_or(0),
-                        });
+    let target = constraint.and_then(ResolvedConstraint::target_type);
+    match fs.validate_expressions(symtab, lib, target.as_ref()) {
+        Ok(sr) => {
+            if let Some(c) = constraint {
+                check_resolved_constraint(&sr, c, path, errors);
+            }
+        }
+        Err(e) => {
+            let mut spans = Vec::new();
+            if let Some(ref expr_err) = e.expression_error {
+                if !expr_err.sub_errors().is_empty() {
+                    // Compound error (e.g., if/else both branches fail) — one span per sub-error
+                    for sub in expr_err.sub_errors() {
+                        if let (Some(expr), Some(col), Some(end_col)) =
+                            (sub.expr(), sub.col_offset(), sub.end_col_offset())
+                        {
+                            spans.push(crate::error::DiagnosticSpan {
+                                summary: sub.message(),
+                                source: expr.to_string(),
+                                start: col,
+                                end: end_col,
+                                caret: sub.caret_offset().unwrap_or(0),
+                            });
+                        }
                     }
                 }
             }
+            // Fallback: single span covering the whole interpolation
+            if spans.is_empty() {
+                spans.push(crate::error::DiagnosticSpan {
+                    summary: e.message.clone(),
+                    source: e.input.clone(),
+                    start: e.start,
+                    end: e.end,
+                    caret: 0,
+                });
+            }
+            let summary = if let Some(ref expr_err) = e.expression_error {
+                expr_err.message()
+            } else {
+                e.message.clone()
+            };
+            let detail = crate::error::ErrorDetail { summary, spans };
+            errors.add_with_detail(
+                path,
+                format!(
+                    "Failed to parse interpolation expression at [{}, {}]. {}",
+                    e.start, e.end, e.message
+                ),
+                detail,
+            );
         }
-        // Fallback: single span covering the whole interpolation
-        if spans.is_empty() {
-            spans.push(crate::error::DiagnosticSpan {
-                summary: e.message.clone(),
-                source: e.input.clone(),
-                start: e.start,
-                end: e.end,
-                caret: 0,
-            });
-        }
-        let summary = if let Some(ref expr_err) = e.expression_error {
-            expr_err.message()
-        } else {
-            e.message.clone()
-        };
-        let detail = crate::error::ErrorDetail { summary, spans };
-        errors.add_with_detail(
-            path,
-            format!(
-                "Failed to parse interpolation expression at [{}, {}]. {}",
-                e.start, e.end, e.message
-            ),
-            detail,
-        );
     }
 }
 
@@ -362,14 +716,28 @@ pub fn validate_format_strings(
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
     let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+    let limits = super::EffectiveLimits::from_context(ctx);
+    // Standard attribute capability table for resolved-value checks
+    // (§3.3.2.2). Only errs for an unsupported revision, which cannot
+    // reach v2023-09 validation.
+    let standard_attrs: &'static [(&'static str, &'static [&'static str])] =
+        crate::capabilities::standard_attribute_capabilities(
+            ctx.profile.revision(),
+            ctx.profile.extensions(),
+        )
+        .unwrap_or(&[]);
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-    validate_fs(
+    validate_fs_with(
         &jt.name,
         &template_symtab,
         &template_lib,
         &path_field(&[], "name"),
+        Some(&ResolvedConstraint::Text {
+            max_len: limits.max_job_name_len,
+            forbid_control_chars: true,
+        }),
         errors,
     );
 
@@ -406,20 +774,28 @@ pub fn validate_format_strings(
                 for (j, amt) in amounts.iter().enumerate() {
                     let amt_path = path_index(&path_field(&hr_path, "amounts"), j);
                     if let Some(min) = &amt.min {
-                        validate_fs(
+                        validate_fs_with(
                             min,
                             &hr_symtab,
                             &template_lib,
                             &path_field(&amt_path, "min"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: false,
+                                msg: "must be non-negative.",
+                            }),
                             errors,
                         );
                     }
                     if let Some(max) = &amt.max {
-                        validate_fs(
+                        validate_fs_with(
                             max,
                             &hr_symtab,
                             &template_lib,
                             &path_field(&amt_path, "max"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: true,
+                                msg: "must be positive.",
+                            }),
                             errors,
                         );
                     }
@@ -428,24 +804,30 @@ pub fn validate_format_strings(
             if let Some(attrs) = &hr.attributes {
                 for (j, attr) in attrs.iter().enumerate() {
                     let attr_path = path_index(&path_field(&hr_path, "attributes"), j);
+                    let attr_constraint = ResolvedConstraint::AttributeValue {
+                        capability_name: &attr.name,
+                        standard: standard_attrs,
+                    };
                     if let Some(any_of) = &attr.any_of {
                         for (k, v) in any_of.iter().enumerate() {
-                            validate_fs(
+                            validate_fs_with(
                                 v,
                                 &hr_symtab,
                                 &template_lib,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
+                                Some(&attr_constraint),
                                 errors,
                             );
                         }
                     }
                     if let Some(all_of) = &attr.all_of {
                         for (k, v) in all_of.iter().enumerate() {
-                            validate_fs(
+                            validate_fs_with(
                                 v,
                                 &hr_symtab,
                                 &template_lib,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
+                                Some(&attr_constraint),
                                 errors,
                             );
                         }
@@ -569,6 +951,12 @@ pub fn validate_format_strings(
             }
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
+                // §3.4.2: a STRING/PATH range element may be at most 1024
+                // characters after the format string has been resolved.
+                let range_item_constraint = ResolvedConstraint::Text {
+                    max_len: limits.max_task_param_range_len,
+                    forbid_control_chars: false,
+                };
                 match tp {
                     TaskParameterDefinition::INT(t) => {
                         if let crate::template::IntRange::Expression(expr) = &t.range {
@@ -584,11 +972,12 @@ pub fn validate_format_strings(
                     TaskParameterDefinition::STRING(t) => {
                         if let crate::template::StringRange::List(items) = &t.range {
                             for (k, item) in items.iter().enumerate() {
-                                validate_fs(
+                                validate_fs_with(
                                     item,
                                     &range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
+                                    Some(&range_item_constraint),
                                     errors,
                                 );
                             }
@@ -597,11 +986,12 @@ pub fn validate_format_strings(
                     TaskParameterDefinition::PATH(t) => {
                         if let crate::template::StringRange::List(items) = &t.range {
                             for (k, item) in items.iter().enumerate() {
-                                validate_fs(
+                                validate_fs_with(
                                     item,
                                     &range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
+                                    Some(&range_item_constraint),
                                     errors,
                                 );
                             }
@@ -614,6 +1004,49 @@ pub fn validate_format_strings(
                                 &range_symtab,
                                 &template_lib,
                                 &path_field(&p_path, "range"),
+                                errors,
+                            );
+                        }
+                        // TASK_CHUNKING chunks fields are `<intstring>`
+                        // format strings resolved at job creation; their
+                        // literal forms are checked in the task-chunking
+                        // pass, the format-string forms here.
+                        let chunks_path = path_field(&p_path, "chunks");
+                        if let crate::template::IntOrFormatString::FormatString(fs) =
+                            &t.chunks.default_task_count
+                        {
+                            validate_fs_with(
+                                fs,
+                                &range_symtab,
+                                &template_lib,
+                                &path_field(&chunks_path, "defaultTaskCount"),
+                                Some(&ResolvedConstraint::Int {
+                                    min: 1,
+                                    min_msg: "defaultTaskCount must be >= 1.",
+                                    max: None,
+                                    parse_msg: "defaultTaskCount must be an integer.",
+                                    nullable: false,
+                                    targeted: true,
+                                }),
+                                errors,
+                            );
+                        }
+                        if let Some(crate::template::IntOrFormatString::FormatString(fs)) =
+                            &t.chunks.target_runtime_seconds
+                        {
+                            validate_fs_with(
+                                fs,
+                                &range_symtab,
+                                &template_lib,
+                                &path_field(&chunks_path, "targetRuntimeSeconds"),
+                                Some(&ResolvedConstraint::Int {
+                                    min: 0,
+                                    min_msg: "targetRuntimeSeconds must be >= 0.",
+                                    max: None,
+                                    parse_msg: "targetRuntimeSeconds must be an integer.",
+                                    nullable: true,
+                                    targeted: true,
+                                }),
                                 errors,
                             );
                         }
@@ -742,11 +1175,12 @@ pub fn validate_format_strings(
             // they validate against the template-scope symtab: no
             // Session.*, no Task.*, no Env.File.*, no host functions.
             if let Some(timeout) = &script.actions.on_run.timeout {
-                validate_fs(
+                validate_fs_with(
                     timeout,
                     &step_template_symtab,
                     &template_lib,
                     &path_field(&action_path, "timeout"),
+                    Some(&TIMEOUT_CONSTRAINT),
                     errors,
                 );
             }
@@ -761,20 +1195,22 @@ pub fn validate_format_strings(
                 _ => (None, None),
             };
             if let Some(mode) = mode_fs {
-                validate_fs(
+                validate_fs_with(
                     mode,
                     &step_template_symtab,
                     &template_lib,
                     &path_field(&action_path, "cancelation"),
+                    Some(&ResolvedConstraint::CancelationMode),
                     errors,
                 );
             }
             if let Some(notify) = notify_fs {
-                validate_fs(
+                validate_fs_with(
                     notify,
                     &step_template_symtab,
                     &template_lib,
                     &path_field(&action_path, "cancelation"),
+                    Some(&NOTIFY_PERIOD_CONSTRAINT),
                     errors,
                 );
             }
@@ -1101,7 +1537,22 @@ fn validate_env_format_strings(
             if !expr_active && value.has_complex_expressions() {
                 errors.add(&var_path, "complex expressions require the EXPR extension.");
             }
-            validate_fs(value, symtab, lib, &var_path, errors);
+            // §4.4.2: an environment variable value is at most 2048
+            // characters. The value is `@fmtstring[host]`, so the limit
+            // describes the resolved value; the raw-text pass checks
+            // literal values, this checks what interpolated values can
+            // resolve to.
+            validate_fs_with(
+                value,
+                symtab,
+                lib,
+                &var_path,
+                Some(&ResolvedConstraint::Text {
+                    max_len: 2048,
+                    forbid_control_chars: false,
+                }),
+                errors,
+            );
         }
     }
     if let Some(script) = &env.script {
@@ -1190,11 +1641,12 @@ fn validate_env_format_strings(
                 template_symtab
             };
             if let Some(timeout) = &action.timeout {
-                validate_fs(
+                validate_fs_with(
                     timeout,
                     field_symtab,
                     template_lib,
                     &path_field(&action_path, "timeout"),
+                    Some(&TIMEOUT_CONSTRAINT),
                     errors,
                 );
             }
@@ -1209,20 +1661,22 @@ fn validate_env_format_strings(
                 _ => (None, None),
             };
             if let Some(mode) = mode_fs {
-                validate_fs(
+                validate_fs_with(
                     mode,
                     field_symtab,
                     template_lib,
                     &path_field(&action_path, "cancelation"),
+                    Some(&ResolvedConstraint::CancelationMode),
                     errors,
                 );
             }
             if let Some(notify) = notify_fs {
-                validate_fs(
+                validate_fs_with(
                     notify,
                     field_symtab,
                     template_lib,
                     &path_field(&action_path, "cancelation"),
+                    Some(&NOTIFY_PERIOD_CONSTRAINT),
                     errors,
                 );
             }
