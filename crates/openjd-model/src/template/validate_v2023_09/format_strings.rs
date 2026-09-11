@@ -303,7 +303,10 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 /// A spec-mandated constraint on the value a format string resolves to
 /// — a constraint the spec applies to the value the format string
 /// resolves to, "after the format string has been resolved" in the
-/// spec's wording (gate 1 of `specs/resolved-value-limits.md`).
+/// spec's wording. Enforcing it here makes template validation the
+/// earliest of the spec's three processing stages (Template Schemas
+/// §7.4: template validation, job creation, task execution on the
+/// worker host) to catch a violation that is already knowable.
 ///
 /// Applied to the [`openjd_expr::StaticResolution`] that
 /// `validate_expressions` returns, in two stages:
@@ -319,8 +322,9 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 ///
 /// Target types match resolution: every constrained field resolves its
 /// single whole-field expressions with the schema-derived target type
-/// from Expression Language §1.3.2 ([`Self::target_type`]), and gates
-/// 2/3 resolve with the same targets. Multi-segment strings concatenate
+/// from Expression Language §1.3.2 ([`Self::target_type`]), and job
+/// creation and the session runtime resolve with the same targets.
+/// Multi-segment strings concatenate
 /// to a string regardless, and the stage-2 checks mirror the downstream
 /// `display → trim → parse` handling for that case exactly.
 ///
@@ -371,9 +375,10 @@ impl ResolvedConstraint<'_> {
     /// for the optional amount bounds, `int?` for `timeout` and
     /// `notifyPeriodInSeconds` (§5/§5.3.2 — `null` means "not
     /// provided"), plain `int` for the required `defaultTaskCount`, and
-    /// `string?` for the deferred cancelation `mode`. Gates 2/3 resolve
-    /// with the same targets — a field's gate-1 target must always equal
-    /// its gate-2/3 target.
+    /// `string?` for the deferred cancelation `mode`. Job creation and
+    /// the session runtime resolve with the same targets — a field's
+    /// validation-time target must always equal its resolution-time
+    /// target.
     fn target_type(&self) -> ExprType {
         match self {
             Self::Text { .. } | Self::AttributeValue { .. } => ExprType::STRING,
@@ -504,7 +509,7 @@ fn check_resolved_constraint(
             // downstream handling: a whole-field expression is already
             // the coerced int (or null); a multi-segment string resolves
             // to text and parses with surrounding whitespace tolerated,
-            // matching the downstream gates.
+            // matching job creation and the session runtime.
             let value = match &sr.resolved_value {
                 None => return,
                 Some(ExprValue::Null) => {
@@ -518,7 +523,7 @@ fn check_resolved_constraint(
                     let s = other.to_display_string();
                     // Multi-segment strings parse like Python's int():
                     // surrounding whitespace is tolerated, matching the
-                    // downstream gates.
+                    // downstream handling at job creation and in the session runtime.
                     match s.trim().parse::<i64>() {
                         Ok(v) => v,
                         Err(_) => {
@@ -596,7 +601,8 @@ fn validate_fs(
 }
 
 /// [`validate_fs`] plus a spec-mandated resolved-value constraint
-/// (see `specs/resolved-value-limits.md`), applied to the
+/// (see the Spec-Mandated Resolved-Value Constraints section of
+/// `specs/model/validation.md`), applied to the
 /// [`openjd_expr::StaticResolution`] the validation already computes.
 fn validate_fs_with(
     fs: &FormatString,

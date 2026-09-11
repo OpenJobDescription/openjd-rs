@@ -2,10 +2,11 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! Gate-1 resolved-value constraint tests: the fields whose spec
-//! constraints apply to the value a format string resolves to — "after
-//! the format string has been resolved" in the spec's wording (see
-//! `specs/resolved-value-limits.md`).
+//! Resolved-value constraint tests for template validation: the fields
+//! whose spec constraints apply to the value a format string resolves
+//! to — "after the format string has been resolved" in the spec's
+//! wording (see the Spec-Mandated Resolved-Value Constraints section of
+//! `specs/model/validation.md`).
 //!
 //! Every such field carries a spec-mandated constraint on the value its
 //! format string resolves to. Template validation (`openjd check`) must

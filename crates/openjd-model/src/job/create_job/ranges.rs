@@ -176,7 +176,7 @@ fn resolve_task_parameter(
             // expression a target type; there are no null semantics
             // here), so `{{ 4.0 }}` coerces to 4. A multi-segment string
             // concatenates and parses like Python's int(), tolerating
-            // surrounding whitespace. Gate-1 validation applies the same
+            // surrounding whitespace. Template validation applies the same
             // targeting, so the two stages accept identical values.
             let resolve_chunk_int = |fs: &crate::FormatString,
                                      field: &str|
