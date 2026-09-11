@@ -127,7 +127,13 @@ calling this function.
      The amount bound constraints (`min` non-negative, `max` positive, `min <= max`) are
      re-applied on the resolved value by `check_resolved_amount_bounds`, and the
      `chunks.defaultTaskCount` / `targetRuntimeSeconds` minimums are re-applied by
-     `resolve_parameter_space` — see [validation.md](validation.md).
+     `resolve_parameter_space` — see [validation.md](validation.md). Chunks fields
+     resolve single whole-field expressions with the target type Expression Language
+     §1.3.2 derives from the schema: `int` for the required `defaultTaskCount`
+     (so `{{ 4.0 }}` coerces to 4) and `int?` for the optional
+     `targetRuntimeSeconds` (a whole-field `null` means the field is omitted);
+     multi-segment strings concatenate and parse with surrounding whitespace
+     tolerated.
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
      String-backed FLOAT range elements are trimmed and must resolve to finite `f64` values.
    - Step-level let bindings
