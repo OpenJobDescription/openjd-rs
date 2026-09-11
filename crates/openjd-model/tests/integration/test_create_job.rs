@@ -1897,9 +1897,9 @@ fn test_path_task_param_empty_value() {
     }"#,
         &[],
     );
-    assert!(
-        err.contains("must not be empty"),
-        "Expected empty path error, got: {err}"
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Val' range[0]: value must not resolve to an empty string"
     );
 }
 

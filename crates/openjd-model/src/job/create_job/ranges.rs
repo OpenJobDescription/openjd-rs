@@ -157,11 +157,11 @@ fn resolve_task_parameter(
             Ok(job::TaskParameter::Float { range })
         }
         template::TaskParameterDefinition::STRING(p) => {
-            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), false, limits)?;
+            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), limits)?;
             Ok(job::TaskParameter::String { range })
         }
         template::TaskParameterDefinition::PATH(p) => {
-            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), true, limits)?;
+            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), limits)?;
             Ok(job::TaskParameter::Path { range })
         }
         template::TaskParameterDefinition::CHUNK_INT(p) => {
@@ -505,7 +505,6 @@ fn resolve_string_range(
     range: &template::StringRange,
     symtab: &SymbolTable,
     param_name: &str,
-    is_path: bool,
     limits: &EffectiveLimits,
 ) -> Result<Vec<String>, ModelError> {
     let resolved: Vec<String> = match range {
@@ -596,9 +595,12 @@ fn resolve_string_range(
                 s.len()
             )));
         }
-        if is_path && s.is_empty() {
+        // §3.4.2 minimum length 1: applies to STRING and PATH elements
+        // alike (an interpolated element is only known here; literal
+        // empties are rejected at decode).
+        if s.is_empty() {
             return Err(ModelError::DecodeValidation(format!(
-                "Task parameter '{}' range[{}]: PATH value must not be empty",
+                "Task parameter '{}' range[{}]: value must not resolve to an empty string",
                 param_name, i
             )));
         }

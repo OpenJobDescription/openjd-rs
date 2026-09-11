@@ -128,6 +128,39 @@ fn job_name_null_inside_text_passes() {
 }
 
 #[test]
+fn job_name_static_empty_fails() {
+    // §1.1.1 minimum length 1 applies to the resolved value.
+    check_err(
+        &job_with_name("{{ '' }}"),
+        &["name:\n\tmust not resolve to an empty string."],
+    );
+}
+
+#[test]
+fn env_var_value_static_empty_passes() {
+    // §4.4.2's minimum length is 0: empty environment variable values
+    // are legal.
+    check_ok(&job_with_env_var("{{ '' }}"));
+}
+
+#[test]
+fn string_range_item_static_empty_fails() {
+    // §3.4.2 minimum length 1 applies to each element.
+    check_err(
+        &job_with_range_item("STRING", "{{ '' }}"),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tmust not resolve to an empty string."],
+    );
+}
+
+#[test]
+fn string_range_item_static_list_with_empty_element_fails() {
+    check_err(
+        &job_with_range_item("STRING", "{{ ['ok', ''] }}"),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tlist element 1 must not resolve to an empty string."],
+    );
+}
+
+#[test]
 fn job_name_whole_field_list_fails() {
     // No list → string coercion exists: a required string field rejects
     // list-valued whole-field expressions.
