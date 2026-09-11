@@ -50,21 +50,28 @@ pub(super) fn resolve_to_f64(
         })?;
     let value = match resolved {
         openjd_expr::ExprValue::Null => return Ok(None),
+        // A coerced Float is always finite: Float64 excludes NaN and the
+        // infinities by construction.
         openjd_expr::ExprValue::Float(f) => f.value(),
+        // Multi-segment string: parse the concatenated text. Only this
+        // path can produce a non-finite value (e.g. "1e999" parses to
+        // inf), so the finite check lives here where the user's text is
+        // available for the message.
         other => {
             let s = other.to_display_string();
-            s.trim().parse::<f64>().map_err(|_| {
+            let value = s.trim().parse::<f64>().map_err(|_| {
                 ModelError::Expression(ExpressionError::new(format!(
                     "{context}: '{s}' is not a valid number"
                 )))
-            })?
+            })?;
+            if !value.is_finite() {
+                return Err(ModelError::Expression(ExpressionError::new(format!(
+                    "{context}: '{s}' is not a finite number"
+                ))));
+            }
+            value
         }
     };
-    if !value.is_finite() {
-        return Err(ModelError::Expression(ExpressionError::new(format!(
-            "{context}: '{value}' is not a finite number"
-        ))));
-    }
     Ok(Some(value))
 }
 

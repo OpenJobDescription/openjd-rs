@@ -271,7 +271,7 @@ fn list_path_rawparam_in_parameter_space_range() {
         }]
     }"#,
         &["EXPR"],
-        &["Cannot coerce list[string] to string"],
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tFailed to parse interpolation expression at [0, 16]. Cannot coerce list[string] to string"],
     );
 }
 
