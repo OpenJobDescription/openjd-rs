@@ -288,7 +288,6 @@ const TIMEOUT_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint::Int 
     max: None,
     parse_msg: "timeout must be a positive integer.",
     nullable: true,
-    targeted: true,
 };
 
 /// §5.3.2 `notifyPeriodInSeconds`: positive integer with a spec-mandated
@@ -299,7 +298,6 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
     max: Some((600, "notifyPeriodInSeconds must not exceed 600.")),
     parse_msg: "notifyPeriodInSeconds must be a positive integer.",
     nullable: true,
-    targeted: true,
 };
 
 /// A spec-mandated constraint on the value a format string resolves to
@@ -319,13 +317,12 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 ///    fully static, and the same check job creation or the worker would
 ///    run on the resolved value runs here.
 ///
-/// Target types match resolution: the spec mandates `int?` for `timeout`
-/// and `notifyPeriodInSeconds` and `string?` for the deferred cancelation
-/// `mode` (single whole-field expressions), and gates 2/3 resolve those
-/// fields with the same targets. Every other field resolves untargeted
-/// downstream (`resolve_string_with`, then trim-and-parse for numerics),
-/// so its static evaluation here is untargeted too and the stage-2 checks
-/// mirror the downstream `display → trim → parse` handling exactly.
+/// Target types match resolution: every constrained field resolves its
+/// single whole-field expressions with the schema-derived target type
+/// from Expression Language §1.3.2 ([`Self::target_type`]), and gates
+/// 2/3 resolve with the same targets. Multi-segment strings concatenate
+/// to a string regardless, and the stage-2 checks mirror the downstream
+/// `display → trim → parse` handling for that case exactly.
 ///
 /// Literal (non-interpolated) fields are excluded: the raw-text passes
 /// (structure/limits) already check those, and for literals raw text and
@@ -345,21 +342,18 @@ enum ResolvedConstraint<'a> {
         capability_name: &'a str,
         standard: &'static [(&'static str, &'static [&'static str])],
     },
-    /// An integer field (`<posintstring>` / `<intstring>`). `nullable`
-    /// fields treat a whole-field `null` resolution as unset (schema
-    /// defaults apply). `targeted` fields resolve single whole-field
-    /// expressions with target type `int?` — the spec mandates this for
-    /// `timeout` and `notifyPeriodInSeconds` — so a static `{{ 120.0 }}`
-    /// coerces to the int it denotes; untargeted fields (chunks) mirror
-    /// job creation's display → trim → parse handling. The messages match
-    /// the raw-text checks for the literal forms of the same fields.
+    /// An integer field (`<posintstring>` / `<intstring>`), resolved
+    /// with target `int` — or `int?` when `nullable`, where a
+    /// whole-field `null` resolution means the field is unset (schema
+    /// defaults apply) — so a static `{{ 120.0 }}` coerces to the int it
+    /// denotes. The messages match the raw-text checks for the literal
+    /// forms of the same fields.
     Int {
         min: i64,
         min_msg: &'static str,
         max: Option<(i64, &'static str)>,
         parse_msg: &'static str,
         nullable: bool,
-        targeted: bool,
     },
     /// An amount capability bound (`min`/`max`): non-negative or
     /// strictly-positive finite float.
@@ -380,25 +374,18 @@ impl ResolvedConstraint<'_> {
     /// `string?` for the deferred cancelation `mode`. Gates 2/3 resolve
     /// with the same targets — a field's gate-1 target must always equal
     /// its gate-2/3 target.
-    fn target_type(&self) -> Option<ExprType> {
+    fn target_type(&self) -> ExprType {
         match self {
-            Self::Text { .. } | Self::AttributeValue { .. } => Some(ExprType::STRING),
-            Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
-            Self::Int {
-                targeted: true,
-                nullable,
-                ..
-            } => Some(if *nullable {
-                ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
-            } else {
-                ExprType::INT
-            }),
-            Self::Int {
-                targeted: false, ..
-            } => None,
-            Self::CancelationMode => {
-                Some(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]))
+            Self::Text { .. } | Self::AttributeValue { .. } => ExprType::STRING,
+            Self::Float { .. } => ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE]),
+            Self::Int { nullable, .. } => {
+                if *nullable {
+                    ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+                } else {
+                    ExprType::INT
+                }
             }
+            Self::CancelationMode => ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]),
         }
     }
 }
@@ -499,7 +486,6 @@ fn check_resolved_constraint(
             max,
             parse_msg,
             nullable,
-            targeted: _,
         } => {
             // Stage 1: soft character bound. No exact maximum exists
             // (leading zeros, trimming), but a resolution this long
@@ -515,10 +501,10 @@ fn check_resolved_constraint(
                 return;
             }
             // Stage 2: exact value check when fully static, mirroring the
-            // downstream handling: a targeted whole-field expression is
-            // already the coerced int (or null); anything else resolves
-            // to text and parses (trimmed only on the untargeted paths,
-            // matching job creation's chunks handling).
+            // downstream handling: a whole-field expression is already
+            // the coerced int (or null); a multi-segment string resolves
+            // to text and parses with surrounding whitespace tolerated,
+            // matching the downstream gates.
             let value = match &sr.resolved_value {
                 None => return,
                 Some(ExprValue::Null) => {
@@ -623,7 +609,7 @@ fn validate_fs_with(
     if fs.is_literal() {
         return;
     }
-    let target = constraint.and_then(ResolvedConstraint::target_type);
+    let target = constraint.map(ResolvedConstraint::target_type);
     match fs.validate_expressions(symtab, lib, target.as_ref()) {
         Ok(sr) => {
             if let Some(c) = constraint {
@@ -1027,7 +1013,6 @@ pub fn validate_format_strings(
                                     max: None,
                                     parse_msg: "defaultTaskCount must be an integer.",
                                     nullable: false,
-                                    targeted: true,
                                 }),
                                 errors,
                             );
@@ -1046,7 +1031,6 @@ pub fn validate_format_strings(
                                     max: None,
                                     parse_msg: "targetRuntimeSeconds must be an integer.",
                                     nullable: true,
-                                    targeted: true,
                                 }),
                                 errors,
                             );
