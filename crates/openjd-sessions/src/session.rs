@@ -89,6 +89,24 @@ impl std::fmt::Display for SessionState {
 /// Identifier for an environment within a session.
 pub type EnvironmentIdentifier = String;
 
+/// What keeps an `openjd_env` write in effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EnvWriteOwner {
+    /// An environment, for as long as it is on `environments_entered`.
+    Environment(EnvironmentIdentifier),
+    /// No owning environment, so it lasts the session: a task's `onRun`, an
+    /// `onExit` script (its identifier is already popped), or `run_subprocess`.
+    Session,
+}
+
+/// One `openjd_env` or `openjd_unset_env` write. `None` is an unset.
+#[derive(Debug, Clone)]
+struct EnvWrite {
+    owner: EnvWriteOwner,
+    key: String,
+    value: Option<String>,
+}
+
 /// Callback invoked when action status changes.
 pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 
@@ -484,6 +502,24 @@ pub struct Session {
     env_vars: HashMap<String, String>,
     process_env: HashMap<String, String>,
     created_env_vars: HashMap<EnvironmentIdentifier, EnvVarChanges>,
+    /// Every `openjd_env` / `openjd_unset_env` write, in the order it happened,
+    /// tagged with what keeps it in effect. Input to `live_session_env_vars`, and
+    /// so to `WrappedAction.Environment`.
+    ///
+    /// RFC 0008 requires the symbol to carry every export from any earlier action
+    /// in the session, and #362 requires an environment's exports to disappear when
+    /// it exits. Satisfying both means knowing, per name, which write was last
+    /// among the writes still in effect — so the order has to be recorded rather
+    /// than reconstructed from a pair of maps.
+    ///
+    /// One entry per `(owner, key)`: a repeat write replaces its predecessor and
+    /// moves to the end, so the log is bounded by distinct pairs while still
+    /// reading in write order.
+    ///
+    /// This never feeds a process environment. That is `evaluate_env_vars`, built
+    /// from `created_env_vars` alone, so a task printing an `openjd_env:` line
+    /// behaves the same wrapped and unwrapped.
+    env_write_log: Vec<EnvWrite>,
     // Expression evaluation
     //
     // `library` is the cached derived library, built from the session's
@@ -531,6 +567,7 @@ impl Session {
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
+            env_write_log: Vec::new(),
             library: derive_library(None, &Arc::new(Vec::new())),
             path_mapping_rules: Arc::new(Vec::new()),
             job_parameter_values: HashMap::new(),
@@ -741,6 +778,7 @@ impl Session {
             env_vars: HashMap::new(),
             process_env,
             created_env_vars: HashMap::new(),
+            env_write_log: Vec::new(),
             library,
             path_mapping_rules,
             job_parameter_values: config.job_parameter_values,
@@ -1185,9 +1223,9 @@ impl Session {
                 }
                 let norm_key = normalize_env_key(key);
                 self.env_vars.insert(norm_key.clone(), value.clone());
-                if let Some(changes) = self.created_env_vars.get_mut(&identifier) {
-                    changes.insert(norm_key, Some(value));
-                }
+                // Same routing as an `openjd_env` export: owned by this
+                // environment, and it supersedes any task export of the name.
+                self.record_env_export(&identifier, norm_key, Some(value));
             }
         }
 
@@ -2217,24 +2255,18 @@ impl Session {
             ActionMessage::SetEnv { name, value } => {
                 let key = normalize_env_key(&name);
                 self.env_vars.insert(key.clone(), value.clone());
-                if let Some(changes) = self.created_env_vars.get_mut(identifier) {
-                    changes.insert(key, Some(value));
-                }
+                self.record_env_export(identifier, key, Some(value));
             }
             ActionMessage::UnsetEnv { name } => {
                 let key = normalize_env_key(&name);
                 self.env_vars.remove(&key);
-                if let Some(changes) = self.created_env_vars.get_mut(identifier) {
-                    changes.insert(key, None);
-                }
+                self.record_env_export(identifier, key, None);
             }
             ActionMessage::RedactedEnv { name, value } => {
                 if self.redactions_enabled() {
                     let key = normalize_env_key(&name);
                     self.env_vars.insert(key.clone(), value.clone());
-                    if let Some(changes) = self.created_env_vars.get_mut(identifier) {
-                        changes.insert(key, Some(value.clone()));
-                    }
+                    self.record_env_export(identifier, key, Some(value.clone()));
                 }
                 self.redacted_values.insert(value);
             }
@@ -2340,30 +2372,81 @@ impl Session {
         result
     }
 
-    /// Compute the live session-defined env vars — only variables from
-    /// environments that are still on the `environments_entered` stack.
+    /// Route an `openjd_env` export to the store that owns it.
+    ///
+    /// An environment's own export goes to `created_env_vars[identifier]`, so
+    /// `exit_environment` drops it from the wrap symbol. Anything else — a task's
+    /// `onRun`, or an `onWrapTaskRun` hook standing in for one — has no such
+    /// entry, and goes to the session-lifetime `session_env_vars`.
+    ///
+    /// Ownership is decided by the live stack, not by a map lookup alone.
+    /// `exit_environment` pops the identifier off `environments_entered` before
+    /// running `onExit` and never removes its `created_env_vars` entry, so an
+    /// export made during `onExit` would otherwise land in an entry nothing reads
+    /// any more. Such an export belongs to no live environment and is
+    /// session-lifetime, which is also what the released crate did with it.
+    ///
+    /// An environment writing a name clears it from `session_env_vars`, so the
+    /// name is not held in both stores at once. Combined with
+    /// `live_session_env_vars` layering the session-lifetime map over the replay,
+    /// the later writer is the one in effect in both orders: environment after
+    /// task, and task after environment.
+    fn record_env_export(&mut self, identifier: &str, key: String, value: Option<String>) {
+        let is_live = self.environments_entered.iter().any(|id| id == identifier);
+        let owner = if is_live {
+            // Also record it where `evaluate_env_vars` will see it, so the
+            // environment's own processes get the variable.
+            if let Some(changes) = self.created_env_vars.get_mut(identifier) {
+                changes.insert(key.clone(), value.clone());
+            }
+            EnvWriteOwner::Environment(identifier.to_string())
+        } else {
+            EnvWriteOwner::Session
+        };
+        // One entry per (owner, key), at the end: the latest write in write order.
+        self.env_write_log
+            .retain(|w| !(w.owner == owner && w.key == key));
+        self.env_write_log.push(EnvWrite { owner, key, value });
+    }
+
+    /// Compute the live session-defined env vars — variables from environments
+    /// still on the `environments_entered` stack, plus the session-lifetime
+    /// exports no environment owns.
     ///
     /// Unlike `evaluate_env_vars`, this excludes `process_env` (host-inherited)
     /// and `extra` (caller-supplied overrides), producing only the session's own
     /// `openjd_env` exports and declarative `variables:` maps. This is the
-    /// correct input for `WrappedAction.Environment` per RFC 0008.
+    /// correct input for `WrappedAction.Environment` per RFC 0008, which requires
+    /// every export from any earlier action in the session "regardless of whether
+    /// that action ran normally or via a wrap hook".
     fn live_session_env_vars(&self) -> HashMap<String, String> {
         let mut result = HashMap::new();
-        for id in &self.environments_entered {
-            if let Some(changes) = self.created_env_vars.get(id) {
-                for (name, value) in changes {
-                    match value {
-                        Some(v) => {
-                            result.insert(name.clone(), v.clone());
-                        }
-                        None => {
-                            result.remove(name);
-                        }
-                    }
+        for write in &self.env_write_log {
+            if !self.env_write_in_effect(&write.owner) {
+                continue;
+            }
+            match &write.value {
+                Some(v) => {
+                    result.insert(write.key.clone(), v.clone());
+                }
+                None => {
+                    result.remove(&write.key);
                 }
             }
         }
         result
+    }
+
+    /// Whether a recorded write still counts: an environment's only while it is
+    /// entered, anything else for the rest of the session.
+    fn env_write_in_effect(&self, owner: &EnvWriteOwner) -> bool {
+        match owner {
+            EnvWriteOwner::Session => true,
+            EnvWriteOwner::Environment(id) => self
+                .environments_entered
+                .iter()
+                .any(|entered| entered == id),
+        }
     }
 
     /// Get the job parameter values.
@@ -2865,12 +2948,14 @@ pub(crate) enum WrappedContext<'a> {
 /// `phase` names the wrapped lifecycle action for error messages
 /// ("onEnter", "onExit", or "task").
 ///
-/// `session_env_vars` MUST be the session's **live** session-defined variables
-/// — only `openjd_env` exports and declarative `variables:` maps from
-/// environments that are still on the `environments_entered` stack.
-/// Host-inherited variables and exited environments' variables are
-/// intentionally excluded per RFC 0008. Use `live_session_env_vars()`
-/// rather than the cumulative `self.env_vars`.
+/// `session_env_vars` MUST be the session's **in-effect** session-defined
+/// variables, which is what `live_session_env_vars()` returns: for each name, the
+/// last write still in effect. An environment's `openjd_env` exports and
+/// declarative `variables:` map count only while it is on `environments_entered`
+/// (RFC 0008, and openjd-rs #362); exports owned by no environment — a task's
+/// `onRun`, an `onExit` script, `run_subprocess` — count for the rest of the
+/// session. Host-inherited variables are excluded throughout. Do not pass the
+/// cumulative `self.env_vars`.
 #[allow(clippy::too_many_arguments)]
 fn seed_wrapped_action_symbols(
     action_symtab: &mut SymbolTable,

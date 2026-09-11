@@ -1311,6 +1311,714 @@ async fn exited_env_vars_absent_from_later_wrapped_action_environment() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Task-emitted openjd_env exports, which no environment owns
+// ────────────────────────────────────────────────────────────────────
+
+/// A task's `openjd_env` export must reach the NEXT task's
+/// `WrappedAction.Environment`.
+///
+/// RFC 0008 requires every export from any earlier action in the session
+/// "regardless of whether that action ran normally or via a wrap hook". A task
+/// runs under a step identifier with no `created_env_vars` entry, so #362's
+/// `live_session_env_vars` replay dropped these exports and the next hook saw
+/// nothing. Upstream conformance fixture, on branch
+/// `conformance-wrap-actions-gaps`:
+/// `2023-09/WRAP_ACTIONS/jobs/wrap-openjd-env-task-grand-child-visible-next-task`.
+#[tokio::test]
+async fn task_emitted_env_var_present_in_next_wrapped_action_environment() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // Dump the forwarded variables, then run the wrapped command so the task's
+    // own macro is emitted and forwarded through this hook's stdout -- the shape
+    // the conformance fixture uses.
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+    let exporting_task = step(
+        "bash",
+        vec!["-c", "echo 'openjd_env: TASK_EXPORT=from-task'"],
+    );
+    let first = session
+        .run_task("exporter", &exporting_task, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(first.state, ActionState::Success);
+
+    // Only the second task's hook can see it: the first hook's symbols were
+    // built before its own wrapped action ran.
+    let before = read_trace(&trace);
+    assert!(
+        !before.contains("TASK_EXPORT"),
+        "a hook must not see its own task's export; got:\n{before}"
+    );
+
+    std::fs::write(&trace, "").unwrap();
+    let second = session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(second.state, ActionState::Success);
+
+    let after = read_trace(&trace);
+    assert!(
+        after.contains("ENVLINE=TASK_EXPORT=from-task"),
+        "a task's openjd_env export must reach the next hook's WrappedAction.Environment; got:\n{after}"
+    );
+}
+
+/// A task's export must not reach any subprocess environment.
+///
+/// `evaluate_env_vars` builds process environments from `created_env_vars`
+/// alone, and a task export deliberately never lands there — so a task printing
+/// an `openjd_env:` line behaves the same wrapped and unwrapped. Negative
+/// control for the test above: attributing the export to the entered
+/// environment would satisfy that one while changing later processes.
+#[tokio::test]
+async fn task_emitted_env_var_absent_from_later_subprocess_environment() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    // A plain environment, so created_env_vars holds a key a mis-attributed
+    // export could be written into.
+    let base = plain_env("Base", Some(action_with_command("true", vec![])), None);
+    session
+        .enter_environment(&base, None, None, None)
+        .await
+        .unwrap();
+
+    let exporting_task = step("bash", vec!["-c", "echo 'openjd_env: TASK_ONLY=from-task'"]);
+    session
+        .run_task("exporter", &exporting_task, None, None, None)
+        .await
+        .unwrap();
+
+    let reader = step(
+        "bash",
+        vec![
+            "-c",
+            &format!(r#"echo "SAW=[$TASK_ONLY]" >> '{}'"#, trace.display()),
+        ],
+    );
+    let result = session
+        .run_task("reader", &reader, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.state, ActionState::Success);
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("SAW=[]"),
+        "a task's openjd_env export must not reach a later subprocess environment; got:\n{contents}"
+    );
+}
+
+/// An environment writing a name supersedes a task's earlier export of it, in
+/// both directions across the two stores.
+///
+/// Without that, the task's value either shadows the environment's while the
+/// environment is entered, or reappears when it exits — states neither the
+/// pre-#362 cumulative map nor the post-#362 replay produces.
+#[tokio::test]
+async fn environment_export_supersedes_an_earlier_task_export() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    // A task exports SHARED, then an environment declares the same name.
+    session
+        .run_task(
+            "exporter",
+            &step("bash", vec!["-c", "echo 'openjd_env: SHARED=from-task'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let mut declarer = plain_env("Declarer", Some(action_with_command("true", vec![])), None);
+    declarer.variables = Some(fs_map(&[("SHARED", "from-env")]));
+    let declarer_id = session
+        .enter_environment(&declarer, None, None, None)
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("while-entered", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let while_entered = read_trace(&trace);
+    assert!(
+        while_entered.contains("ENVLINE=SHARED=from-env"),
+        "the environment's value must be in effect while it is entered; got:\n{while_entered}"
+    );
+    assert!(
+        !while_entered.contains("SHARED=from-task"),
+        "the task's superseded value must not also be listed; got:\n{while_entered}"
+    );
+
+    // On exit the environment's write stops counting, so the task's earlier write
+    // is the last one still in effect and takes over again. It was shadowed, never
+    // discarded — discarding it is what let an older environment's value resurface
+    // when a second environment declared the same name.
+    session
+        .exit_environment(&declarer_id, None, true, None)
+        .await
+        .unwrap();
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("after-exit", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let after_exit = read_trace(&trace);
+    assert!(
+        after_exit.contains("ENVLINE=SHARED=from-task"),
+        "the task's write outlives the environment that shadowed it; got:\n{after_exit}"
+    );
+    assert!(
+        !after_exit.contains("SHARED=from-env"),
+        "the exited environment's value must be pruned; got:\n{after_exit}"
+    );
+}
+
+/// A task's `openjd_unset_env` removes the name from the session-lifetime
+/// exports, and only that name.
+#[tokio::test]
+async fn task_emitted_unset_removes_only_the_named_task_export() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    session
+        .run_task(
+            "exporter",
+            &step(
+                "bash",
+                vec![
+                    "-c",
+                    "echo 'openjd_env: DOOMED=doomed-value'; echo 'openjd_env: KEPT=kept-value'",
+                ],
+            ),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    session
+        .run_task(
+            "unsetter",
+            &step("bash", vec!["-c", "echo 'openjd_unset_env: DOOMED'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        !contents.contains("DOOMED"),
+        "an unset task export must not be listed; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=KEPT=kept-value"),
+        "an unset must remove only the named export; got:\n{contents}"
+    );
+}
+
+/// A task export must win over a value an ALREADY-ENTERED environment declared,
+/// and must still be there after that environment exits.
+///
+/// The mirror of `environment_export_supersedes_an_earlier_task_export`, and the
+/// direction that a one-sided "last writer wins" gets wrong: clearing the overlay
+/// only when an environment writes leaves both stores holding the name, so a
+/// replay layered over the overlay serves the environment's older value and the
+/// task's export resurfaces when the environment exits. Pre-#362's cumulative map
+/// returned the task value throughout, which is the behaviour pinned here.
+#[tokio::test]
+async fn task_export_supersedes_an_entered_environments_value() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    // An environment declares SHARED first, so created_env_vars owns the name.
+    let mut declarer = plain_env("Declarer", Some(action_with_command("true", vec![])), None);
+    declarer.variables = Some(fs_map(&[("SHARED", "from-env")]));
+    let declarer_id = session
+        .enter_environment(&declarer, None, None, None)
+        .await
+        .unwrap();
+
+    // Then a task exports the same name, making it the later writer.
+    session
+        .run_task(
+            "overwriter",
+            &step("bash", vec!["-c", "echo 'openjd_env: SHARED=from-task'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("while-entered", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let while_entered = read_trace(&trace);
+    assert!(
+        while_entered.contains("ENVLINE=SHARED=from-task"),
+        "the task is the later writer, so its value must be in effect; got:\n{while_entered}"
+    );
+    assert!(
+        !while_entered.contains("SHARED=from-env"),
+        "the superseded environment value must not also be listed; got:\n{while_entered}"
+    );
+
+    // The environment exits. Its value goes; the task's does not come back,
+    // because it never left.
+    session
+        .exit_environment(&declarer_id, None, true, None)
+        .await
+        .unwrap();
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("after-exit", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let after_exit = read_trace(&trace);
+    assert!(
+        after_exit.contains("ENVLINE=SHARED=from-task"),
+        "the task's export must survive an unrelated environment's exit; got:\n{after_exit}"
+    );
+    assert!(
+        !after_exit.contains("SHARED=from-env"),
+        "the exited environment's value must be pruned; got:\n{after_exit}"
+    );
+}
+
+/// A task's `openjd_unset_env` must remove a name a live environment declared.
+///
+/// The unset direction of "last writer wins". A store of plain `String` cannot
+/// express a tombstone, so a task unset could only remove from the session map;
+/// when a still-entered environment owned the name, the replay put it straight
+/// back and the unset did nothing — while a task *set* of the same name in the
+/// same configuration did take effect.
+#[tokio::test]
+async fn task_emitted_unset_removes_a_live_environments_value() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    let mut declarer = plain_env("Declarer", Some(action_with_command("true", vec![])), None);
+    declarer.variables = Some(fs_map(&[("SHARED", "from-env"), ("UNTOUCHED", "keep-me")]));
+    session
+        .enter_environment(&declarer, None, None, None)
+        .await
+        .unwrap();
+
+    session
+        .run_task(
+            "unsetter",
+            &step("bash", vec!["-c", "echo 'openjd_unset_env: SHARED'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let contents = read_trace(&trace);
+
+    assert!(
+        !contents.contains("SHARED="),
+        "a task unset must remove a live environment's value, as the cumulative map did; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=UNTOUCHED=keep-me"),
+        "and must remove only the named variable; got:\n{contents}"
+    );
+}
+
+/// An environment writing a name, then exiting, must not resurrect an older
+/// environment's value over a task export that superseded it.
+///
+/// Clearing the session map on an environment write is lossy: with an outer
+/// environment also declaring the name, the task's later value is destroyed and
+/// the outer environment's older one silently takes over when the inner exits.
+/// The live writers at that point are the outer environment and the task, and the
+/// task wrote last.
+#[tokio::test]
+async fn an_inner_environments_exit_does_not_resurrect_a_superseded_value() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    // Outer declares FOO=outer.
+    let mut outer = plain_env("Outer", Some(action_with_command("true", vec![])), None);
+    outer.variables = Some(fs_map(&[("FOO", "from-outer")]));
+    session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+
+    // A task supersedes it.
+    session
+        .run_task(
+            "overwriter",
+            &step("bash", vec!["-c", "echo 'openjd_env: FOO=from-task'"]),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Inner declares the same name, then exits.
+    let mut inner = plain_env("Inner", Some(action_with_command("true", vec![])), None);
+    inner.variables = Some(fs_map(&[("FOO", "from-inner")]));
+    let inner_id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+    session
+        .exit_environment(&inner_id, None, true, None)
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let contents = read_trace(&trace);
+
+    assert!(
+        contents.contains("ENVLINE=FOO=from-task"),
+        "the task wrote after Outer, so its value must survive Inner's exit; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("FOO=from-outer"),
+        "Outer's superseded value must not resurrect; got:\n{contents}"
+    );
+    assert!(
+        !contents.contains("FOO=from-inner"),
+        "the exited environment's value must be pruned; got:\n{contents}"
+    );
+}
+
+/// A `run_subprocess` export reaches `WrappedAction.Environment` too.
+///
+/// `run_subprocess` is not an OpenJD action, so RFC 0008 does not require this.
+/// It is pinned because the released crate surfaced these exports through its
+/// cumulative `env_vars` — the identifier it builds has no `created_env_vars`
+/// entry, so an unconditional write reached the wrap symbol — and dropping them
+/// would be a second, unrelated divergence from that behaviour.
+#[tokio::test]
+async fn run_subprocess_exports_reach_wrapped_action_environment() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    session
+        .run_subprocess(
+            "bash",
+            Some(&[
+                "-c".to_string(),
+                "echo 'openjd_env: FROM_SUBPROCESS=set-by-subprocess'".to_string(),
+            ]),
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+
+    let contents = read_trace(&trace);
+    assert!(
+        contents.contains("ENVLINE=FROM_SUBPROCESS=set-by-subprocess"),
+        "a run_subprocess export must reach the wrap symbol, as it did in 0.5.5; got:\n{contents}"
+    );
+}
+
+/// An `onExit` script's export must not delete a task's export.
+///
+/// `exit_environment` pops the identifier off `environments_entered` before
+/// running `onExit`, and never removes its `created_env_vars` entry. So an export
+/// made during `onExit` looks environment-owned by a map lookup alone, which
+/// routes it into an entry nothing reads any more and, worse, clears the name from
+/// the session-lifetime store. Ownership has to be decided by the live stack, not
+/// by the map.
+#[tokio::test]
+async fn an_exit_scripts_export_does_not_erase_a_task_export() {
+    let tmp = TempDir::new().unwrap();
+    let trace = tmp.path().join("trace.log");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let wrap_task_script = format!(
+        r#"for e in {{{{ repr_sh(WrappedAction.Environment) }}}}; do echo "ENVLINE=$e" >> '{}'; done
+exec {{{{ repr_sh(WrappedAction.Command) }}}} {{{{ repr_sh(WrappedAction.Args) }}}}"#,
+        trace.display()
+    );
+    let wrap_task = Action {
+        command: fs("bash"),
+        args: Some(vec![fs("-c"), fs(&wrap_task_script)]),
+        timeout: None,
+        cancelation: None,
+    };
+    let wrapper = wrap_env(
+        "Wrapper",
+        action_with_command("true", vec![]),
+        None,
+        Some(wrap_task),
+        None,
+    );
+    session
+        .enter_environment(&wrapper, None, None, None)
+        .await
+        .unwrap();
+
+    // A task exports two names.
+    session
+        .run_task(
+            "exporter",
+            &step(
+                "bash",
+                vec![
+                    "-c",
+                    "echo 'openjd_env: KEPT=from-task'; echo 'openjd_env: REPLACED=from-task'",
+                ],
+            ),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // An environment whose onExit exports one of those names, and one of its own.
+    let exiting = plain_env(
+        "Exiting",
+        Some(action_with_command("true", vec![])),
+        Some(action_with_command(
+            "bash",
+            vec![
+                "-c",
+                "echo 'openjd_env: REPLACED=from-exit'; echo 'openjd_env: FROM_EXIT=exit-only'",
+            ],
+        )),
+    );
+    let exiting_id = session
+        .enter_environment(&exiting, None, None, None)
+        .await
+        .unwrap();
+    session
+        .exit_environment(&exiting_id, None, true, None)
+        .await
+        .unwrap();
+
+    std::fs::write(&trace, "").unwrap();
+    session
+        .run_task("reader", &step("true", vec![]), None, None, None)
+        .await
+        .unwrap();
+    let contents = read_trace(&trace);
+
+    assert!(
+        contents.contains("ENVLINE=KEPT=from-task"),
+        "an onExit export of another name must not disturb this one; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=REPLACED=from-exit"),
+        "an onExit export must replace the value, not delete the name; got:\n{contents}"
+    );
+    assert!(
+        contents.contains("ENVLINE=FROM_EXIT=exit-only"),
+        "an onExit export of a fresh name must be visible, not written to a dead entry; got:\n{contents}"
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Wrap-hook default timeouts
 // ────────────────────────────────────────────────────────────────────
 

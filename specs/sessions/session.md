@@ -178,6 +178,48 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 5. Processes `ActionMessage` values via `drive_action()`
 6. On completion: state → `Ready` or `ReadyEnding` based on result
 
+### Env var exports a task makes
+
+A task runs under a step identifier, which has no `created_env_vars` entry, so an
+`openjd_env` export it emits — directly, or through an RFC 0008 `onWrapTaskRun`
+hook that forwards its stdout — belongs to no environment and cannot be pruned
+when one exits. RFC 0008 still requires it in `WrappedAction.Environment`:
+runtimes must include every export from any earlier action in the session,
+"regardless of whether that action ran normally or via a wrap hook".
+
+`record_env_export` appends every export to `env_write_log`, tagged with what keeps
+it in effect: the environment that made it, or `Session` when no environment did.
+`live_session_env_vars` folds that log in write order, skipping writes no longer in
+effect, so for each name the winner is the last write still counting. An unset is
+recorded as a `None` value and applies as a removal during the fold.
+
+The rule needs the order recorded, not reconstructed. RFC 0008 wants every earlier
+action's export in the symbol, and #362 wants an environment's exports gone when it
+exits. A pair of maps can satisfy either but not both: without write order, a task
+export of a name an entered environment also declared is either shadowed by the
+older environment value or resurfaces when that environment exits, and a plain
+`String` map cannot record an unset of a name a live environment owns.
+
+Ownership is decided by `environments_entered`, not by a `created_env_vars` lookup.
+`exit_environment` pops the identifier before running `onExit` and never removes the
+map entry, so an `onExit` export would otherwise be attributed to an environment
+that is already gone and written where no reader consults it.
+
+Writes owned by no environment last for the session: a task's `onRun`, an
+environment's `onExit`, and `run_subprocess`, whose `{session}:subprocess:{uuid}`
+identifier is never an entered environment. openjd-sessions 0.5.5 surfaced all
+three through its cumulative `env_vars`. `run_subprocess` is not an OpenJD action,
+so RFC 0008 does not require the last one; it is kept for parity with the released
+crate.
+
+An environment's exports also go to `created_env_vars[identifier]`, which is what
+`evaluate_env_vars` builds process environments from. `env_write_log` never feeds a
+process environment.
+
+`session_env_vars` never feeds a process environment. That is `evaluate_env_vars`,
+built from `created_env_vars` alone, so a task printing an `openjd_env:` line
+behaves the same wrapped and unwrapped.
+
 When a wrap hook is dispatched, the borrow of the active environment stack is
 released by copying only the wrapper data needed for symbol seeding: its name,
 frozen resolved symbol table, script `let` bindings, and selected hook action.
