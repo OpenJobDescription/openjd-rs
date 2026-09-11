@@ -135,7 +135,12 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 
 1. Validates state is `Ready`
 2. Sets state to `Running`
-3. Resolves environment `variables` format strings against the current symbol table
+3. Resolves environment `variables` format strings against the current symbol table,
+   with target type `string` for whole-field expressions (Expression Language §1.3.2),
+   and rejects a resolved value that contains a NUL byte or exceeds 2048 characters
+   (Template Schemas §4.4.2 — the session is the enforcement stage for values that
+   are unknown at template validation; the limit is kept in sync with the model's
+   `EffectiveLimits::max_env_var_value_len`)
 4. Stores the environment, folding the `resolved_symtab` argument onto the stored copy's
    `Environment::resolved_symtab` field. A caller may supply an environment's resolved
    symbol table either way, and the two are equivalent: readers that run after this call
