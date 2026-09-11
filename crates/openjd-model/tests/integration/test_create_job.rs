@@ -5758,12 +5758,13 @@ fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
 
 // === preprocess_job_parameters round trip ===
 //
-// preprocess_job_parameters both consumes and produces JobParameterValues, and
-// callers feed its output back in: the PyO3 `create_job` binding runs
-// preprocess over whatever values it is handed, so a service that preprocesses
-// and then calls create_job with the result preprocesses twice. That makes
-// "every value this function can emit, it can also accept" a real requirement,
-// and LIST[PATH] is where it first failed.
+// Callers feed this function its own output: the PyO3 `create_job` binding runs
+// preprocess over whatever values it is handed, so preprocessing and then calling
+// create_job with the result preprocesses twice. "Every value it emits, it accepts"
+// is therefore a requirement, and LIST[PATH] is where it first failed.
+//
+// The requirement is a goal rather than an invariant -- scalar PATH violates it, see
+// SuperDaveDocs pr/wip/openjd-rs-384 and issue #388.
 
 /// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
 fn minimal_expr_job_template(params: &str) -> serde_json::Value {
@@ -5778,23 +5779,17 @@ fn minimal_expr_job_template(params: &str) -> serde_json::Value {
     ))
 }
 
-/// The no-default parameter every round-trip template carries, and the value
-/// supplied for it.
+/// The no-default parameter every round-trip template carries, and its value.
 ///
-/// It makes the resubmission in [`preprocess_again`] load-bearing. A parameter
-/// with a default is re-filled from the template on any pass, so a second pass
-/// that ignored its input would still succeed and every assertion below would
-/// still hold. A parameter with no default can only be satisfied by the values
-/// carried over, so dropping them fails with "Values missing for required job
-/// parameters".
+/// It makes the resubmission in [`preprocess_again`] load-bearing: a parameter with a
+/// default is re-filled on any pass, so a second pass that ignored its input would
+/// still succeed. One with no default can only come from the values carried over.
 const CARRIED: &str = "Carried";
 const CARRIED_VALUE: &str = "carried-through";
 
-/// Decode a template and fill its parameter defaults, supplying the one parameter
-/// that has none. Paired with [`preprocess_again`] to exercise the round trip; the
-/// two halves are kept separate so each test's body shows that it runs both passes,
-/// rather than delegating that to a helper which could be gutted without any test
-/// changing.
+/// Decode a template and fill its parameter defaults, supplying the one parameter that
+/// has none. Paired with [`preprocess_again`]; kept as two functions so each test body
+/// shows that it runs both passes.
 fn preprocess_defaults(
     template_json: &str,
     td: &TestDirs,
@@ -5822,11 +5817,8 @@ fn preprocess_defaults(
 }
 
 /// Assert the no-default parameter came back with the value the first pass carried.
-///
-/// The `.expect` on [`preprocess_again`] is what catches a second pass that stops
-/// consuming its input, since `CARRIED` then has no value from any source and
-/// preprocess fails outright. This adds the narrower claim that the value survived
-/// unaltered rather than merely being present.
+/// The `.expect` on [`preprocess_again`] catches a second pass that ignores its input;
+/// this adds the narrower claim that the value survived unaltered.
 fn assert_carried_through(result: &openjd_model::JobParameterValues) {
     let carried = result
         .get(CARRIED)
@@ -5863,11 +5855,9 @@ fn round_trip_options<'a>(td: &'a TestDirs) -> openjd_model::PathParameterOption
 
 #[test]
 fn preprocess_accepts_its_own_empty_list_path_output() {
-    // An empty LIST[PATH] is the one list value whose variant carries the
-    // declared element type: make_list infers ListString from String elements,
-    // so a non-empty LIST[PATH] comes back as ListString, and only an empty one
-    // stays an openjd_expr::ExprValue::ListPath. Feeding that back in used to be refused with
-    // "Cannot coerce list to LIST[PATH]".
+    // Only an empty LIST[PATH] stays an ExprValue::ListPath; a non-empty one is a
+    // ListString. Feeding the empty one back used to fail with "Cannot coerce list to
+    // LIST[PATH]".
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Empty", "type": "LIST[PATH]", "default": []}"#,
@@ -5888,17 +5878,13 @@ fn preprocess_accepts_its_own_empty_list_path_output() {
 
 #[test]
 fn preprocess_accepts_its_own_non_empty_list_path_output() {
-    // Control for the case above. This half already worked, because make_list
-    // promotes the String elements to a ListString, which the matcher accepted.
-    // It has to keep working: a fix that only moved the failure would show up here.
+    // Control: this half already worked, since make_list promotes String elements to a
+    // ListString. A fix that only moved the failure would show up here.
+    //
+    // Relative defaults deliberately. LIST[PATH] skips every PATH default check, so
+    // absolute and `..` defaults are accepted where a scalar PATH refuses them -- issue
+    // #385. A test about round tripping should not pin that either way.
     let td = TestDirs::new();
-    // Relative defaults deliberately. LIST[PATH] currently skips every PATH default
-    // check, because both the default branch and the submitted-value branch of
-    // preprocess_job_parameters are gated on `param.param_type == JobParameterType::Path`,
-    // which is the scalar type only. Measured: a scalar PATH default of "/abs/out" is
-    // refused with allow_template_dir_walk_up: false, while a LIST[PATH] default of
-    // ["/abs/out"] is accepted, as is ["../escape"]. That asymmetry is out of scope
-    // here, and a test about round tripping should not pin it either way.
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "b.exr"]}"#,
         &td,
@@ -5917,10 +5903,9 @@ fn preprocess_accepts_its_own_non_empty_list_path_output() {
 
 #[test]
 fn preprocess_accepts_its_own_output_for_every_list_type() {
-    // The requirement is not specific to LIST[PATH]; it is that the function's
-    // output type is a subset of its input type. Assert it across the list types
-    // at once, with empty defaults so each value carries its declared element
-    // type rather than one inferred from elements.
+    // The requirement is not specific to LIST[PATH]: the function's output type is a
+    // subset of its input type. Empty defaults so each value carries its declared
+    // element type rather than one inferred from elements.
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Bools", "type": "LIST[BOOL]", "default": []},
@@ -5934,10 +5919,9 @@ fn preprocess_accepts_its_own_output_for_every_list_type() {
     let result = preprocess_again(&jt, &filled, &td)
         .expect("every empty list value this function produced must be one it accepts");
     assert_carried_through(&result);
-    // Assert the variant, not just the length. `list_len()` answers `Some(0)` for
-    // every empty list variant, so a length-only assertion would accept a value
-    // that came back having discarded its declared element type -- which is the
-    // defect this file is about.
+    // Assert the variant, not the length: `list_len()` answers `Some(0)` for every
+    // empty list variant, so a length-only assertion would accept a value that had
+    // discarded its declared element type.
     for (name, ok) in [
         (
             "Bools",
@@ -5974,9 +5958,8 @@ fn preprocess_accepts_its_own_output_for_every_list_type() {
 
 #[test]
 fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
-    // Guard against widening the fix. LIST[STRING] accepting an openjd_expr::ExprValue::ListPath
-    // would let a PATH-typed value satisfy a STRING-typed parameter, and PATH and
-    // STRING differ in what session-time path mapping does to them.
+    // Guard against widening the fix: a PATH-typed value must not satisfy a
+    // STRING-typed parameter, since session-time path mapping treats them differently.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Strings", "type": "LIST[STRING]"}"#),
@@ -6003,15 +5986,10 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
 
 #[test]
 fn a_non_empty_list_path_value_is_still_refused() {
-    // The empty-list acceptance above is deliberately empty-only. A non-empty
-    // ExprValue::ListPath has no producer inside this crate -- a non-empty LIST[PATH]
-    // value is always a ListString -- so accepting one would admit a shape only a
-    // caller can construct. Refusing it is the behaviour that predates the empty-list
-    // fix, and this pins that the fix did not widen it.
-    //
-    // PathFormat::Windows here on purpose: it is the case where accepting the value
-    // verbatim would carry a foreign path format past every check, since LIST[PATH]
-    // never enters the path_format-sensitive branches at all.
+    // Nothing in this crate builds a non-empty ExprValue::ListPath, so accepting one
+    // would admit a caller-only shape. This pins that the empty-list fix did not widen
+    // it. PathFormat::Windows on purpose: LIST[PATH] never enters the
+    // path_format-sensitive branches, so a foreign format would pass every check.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]"}"#),
@@ -6039,14 +6017,13 @@ fn a_non_empty_list_path_value_is_still_refused() {
 
 #[test]
 fn an_empty_list_path_still_meets_its_length_constraints() {
-    // Accepting an empty ListPath makes `check_constraints` reachable for a value that
-    // used to be refused one step earlier, so the diagnostic a caller sees for this input
-    // is new behaviour: it now names the length rule rather than a coercion failure.
+    // Accepting an empty ListPath makes check_constraints reachable for input that used
+    // to be refused a step earlier, so the diagnostic now names the length rule rather
+    // than a coercion failure.
     //
-    // Submitted rather than defaulted on purpose. An empty `default` under `minLength: 1`
-    // never reaches preprocess at all -- decode refuses the template with
-    // "Parameter 'Paths': default list length 0 < minLength 1." -- so the submitted-value
-    // path is the only way to get an empty list as far as the constraint check.
+    // Submitted rather than defaulted: decode refuses an empty `default` under
+    // `minLength: 1` outright, so submitting is the only way to reach the constraint
+    // check with an empty list.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]", "minLength": 1}"#),
@@ -6072,9 +6049,8 @@ fn an_empty_list_path_still_meets_its_length_constraints() {
 #[test]
 fn preprocess_accepts_its_own_nested_list_output() {
     // The all-list-types test uses an empty outer list, so the inner variant is never
-    // built. A nested value with one empty and one non-empty inner list exercises both,
-    // and pins that the inner lists come back as ListInt rather than as something the
-    // outer variant merely tolerates.
+    // built. One empty and one non-empty inner list exercises both, and pins that they
+    // come back as ListInt rather than something the outer variant merely tolerates.
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "IntLists", "type": "LIST[LIST[INT]]", "default": [[], [1, 2]]}"#,

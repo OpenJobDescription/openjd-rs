@@ -774,29 +774,12 @@ pub(super) fn coerce_from_str(
 
 fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterType) -> bool {
     use openjd_expr::ExprValue;
-    // An empty LIST[PATH] is the one list value this module produces whose variant
-    // carries the declared element type rather than one inferred from its elements:
-    // `make_list` reads String elements as a `ListString`, so a non-empty LIST[PATH]
-    // is a `ListString` and only an empty one stays a `ListPath`. Accepting it is
-    // what lets `preprocess_job_parameters` take back a value it produced, which
-    // callers rely on because the PyO3 `create_job` binding re-runs preprocess over
-    // the values it is handed.
-    //
-    // Deliberately empty-only, not `matches!` over the whole variant. A non-empty
-    // `ListPath` has no producer: this module builds a non-empty LIST[PATH] as a
-    // `ListString`, so accepting one would admit a value only a caller can construct,
-    // for no behaviour this module needs. Refusing it is what the code did before the
-    // empty-list case was fixed, and narrowing to the empty case keeps that.
-    //
-    // There is a downstream reason too, and it is narrower than it first looks.
-    // `Session::build_symbol_table` has two paths. On the resolved-symtab path it
-    // re-applies path mapping to a LIST[PATH] only when the value is a `ListString`,
-    // with no else, so a `ListPath` is skipped and `Param.<name>` is never set. On the
-    // other path the LIST[PATH] arm's own fall-through hands the value to
-    // `apply_path_mapping_to_value`, which has a real `ListPath` arm, so the binding is
-    // set and correctly mapped. A `ListPath` therefore loses its binding on one path of
-    // two, which is a pre-existing asymmetry an empty list already reaches -- filed
-    // separately, and not a reason to accept a non-empty one on top of it.
+    // Empty-only, deliberately. `make_list` reads String elements as a `ListString`, so
+    // a non-empty LIST[PATH] value is a `ListString` and only an empty one is a
+    // `ListPath` -- which this module produces from `default: []` and so has to accept
+    // back. Nothing here produces a non-empty `ListPath`, so it stays refused; widening
+    // this to `matches!` over the variant would admit a caller-only shape.
+    // Rationale and measurements: SuperDaveDocs pr/wip/openjd-rs-384.
     if let (ExprValue::ListPath(elements, _, _), JobParameterType::ListPath) = (value, param_type) {
         return elements.is_empty();
     }
