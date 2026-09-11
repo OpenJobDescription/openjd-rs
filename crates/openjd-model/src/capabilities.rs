@@ -123,7 +123,7 @@ pub fn validate_attribute_capability_value(
         }
     } else if value.is_empty() {
         Err("must not be empty.".to_string())
-    } else if value.len() > 100 {
+    } else if value.chars().count() > 100 {
         Err(format!("value '{value}' exceeds 100 characters."))
     } else if crate::template::validate_v2023_09::helpers::ATTR_VALUE_RE.is_match(value) {
         Ok(())

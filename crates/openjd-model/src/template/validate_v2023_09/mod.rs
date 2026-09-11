@@ -53,6 +53,8 @@ pub struct EffectiveLimits {
     pub max_job_param_string_len: usize,
     pub max_command_len: usize,
     pub max_description_len: usize,
+    /// §4.4.2: maximum characters in an environment variable value (resolved).
+    pub max_env_var_value_len: usize,
 }
 
 // Note: there is no `Default` impl for `EffectiveLimits`. All call sites
@@ -89,6 +91,11 @@ impl EffectiveLimits {
             max_job_param_string_len: 1024,
             max_command_len: 1024,
             max_description_len: 2048,
+            // §4.4.2: environment variable value, 2048 characters. Its own
+            // field even though it matches max_description_len today — the
+            // two limits come from different spec sections (§7.2 vs §4.4.2)
+            // and must be able to move independently.
+            max_env_var_value_len: 2048,
         }
     }
 }

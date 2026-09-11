@@ -63,6 +63,8 @@ mod test_range_expr;
 mod test_redacted_env_vars;
 #[path = "integration/test_resolved_bindings.rs"]
 mod test_resolved_bindings;
+#[path = "integration/test_resolved_value_constraints.rs"]
+mod test_resolved_value_constraints;
 #[path = "integration/test_scope_library_split.rs"]
 mod test_scope_library_split;
 #[path = "integration/test_simple_action_let.rs"]

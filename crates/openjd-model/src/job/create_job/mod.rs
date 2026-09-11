@@ -66,12 +66,21 @@ pub fn create_job(
         .has_extension(crate::types::ModelExtension::Expr);
     let limits = EffectiveLimits::from_context(ctx);
 
+    // Required string field (§1.1.1): a single whole-field expression
+    // resolves with target type `string` (Expression Language §1.3.2), so
+    // `null` and list values are errors rather than display renderings.
     let job_name = job_template
         .name
-        .resolve_string_with(
+        .resolve_with(
             &symtab,
-            &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            &openjd_expr::FormatStringOptions::new()
+                .with_path_format(PathFormat::Posix)
+                .with_target_type(&openjd_expr::ExprType::STRING),
         )
+        .map(|v| match v {
+            openjd_expr::ExprValue::String(s) => s,
+            other => other.to_display_string(),
+        })
         .map_err(|e| ModelError::FormatStringError {
             message: format!("Failed to resolve job name: {e}"),
             input: Some(job_template.name.raw().to_string()),
@@ -79,12 +88,19 @@ pub fn create_job(
             end: None,
         })?;
 
-    if job_name.len() > limits.max_job_name_len {
+    if job_name.chars().count() > limits.max_job_name_len {
         return Err(ModelError::DecodeValidation(format!(
             "Job name exceeds maximum length of {} characters (got {})",
             limits.max_job_name_len,
-            job_name.len()
+            job_name.chars().count()
         )));
+    }
+    // §1.1.1 minimum length 1: the raw-text pass rejects an empty literal,
+    // but an interpolated name is only known here.
+    if job_name.is_empty() {
+        return Err(ModelError::DecodeValidation(
+            "Job name must not resolve to an empty string".to_string(),
+        ));
     }
 
     if has_expr {

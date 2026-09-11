@@ -1897,9 +1897,9 @@ fn test_path_task_param_empty_value() {
     }"#,
         &[],
     );
-    assert!(
-        err.contains("must not be empty"),
-        "Expected empty path error, got: {err}"
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Val' range[0]: value must not resolve to an empty string"
     );
 }
 
@@ -3954,11 +3954,20 @@ fn test_create_job_host_req_amount_non_numeric() {
     }"#,
         &[("Mem", "notanumber")],
     );
-    assert!(err.contains("not a valid number"), "got: {err}");
+    // float? target: a non-numeric string fails coercion with the
+    // resolution diagnostic (union targets report the type pair).
+    assert_eq!(
+        err,
+        "Format string error: hostRequirements amount min: \
+         Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~"
+    );
 }
 
 #[test]
-fn test_create_job_host_req_amount_non_finite() {
+fn test_create_job_host_req_amount_non_finite_string_fails_coercion() {
+    // Under the float? target, whole-field expressions producing
+    // "nan"/"inf" strings fail at coercion — Float64 permits only finite
+    // values — so none of these reach the multi-segment parse path.
     for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
         let err = parse_and_create_err(
             r#"{
@@ -3978,11 +3987,39 @@ fn test_create_job_host_req_amount_non_finite() {
         );
         assert_eq!(
             err,
-            format!(
-                "Expression error: hostRequirements amount min: '{value}' is not a finite number"
-            )
+            "Format string error: hostRequirements amount min: \
+             Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~",
+            "value {value}"
         );
     }
+}
+
+#[test]
+fn test_create_job_host_req_amount_multi_segment_non_finite() {
+    // A multi-segment format string concatenates to text and parses
+    // rather than coercing, so it is the one path that can produce a
+    // non-finite f64 ("1e999" parses to inf). The error reports the
+    // resolved text the author can act on, not the parsed value.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Exp", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "1e{{Param.Exp}}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[("Exp", "999")],
+    );
+    assert_eq!(
+        err,
+        "Expression error: hostRequirements amount min: '1e999' is not a finite number"
+    );
 }
 
 #[test]
@@ -5753,5 +5790,451 @@ fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
         ),
         "Strings arrived as {:?}, expected an empty ListString",
         result["Strings"].value
+    );
+}
+
+#[test]
+fn test_create_job_range_element_limit_counts_characters_not_bytes() {
+    // Spec limits are stated in characters, and the reference
+    // implementation's len() counts characters. 600 two-byte characters
+    // (1,200 bytes) is well under the 1,024-character element limit and
+    // must be accepted; a byte-based check would falsely reject it.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ 'é' * 600 }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let step = &job.steps[0];
+    let space = step.parameter_space.as_ref().expect("parameter space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range.len(), 1);
+            assert_eq!(range[0].chars().count(), 600);
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_create_job_amount_with_all_bounds_resolving_null_rejected() {
+    // `min` is present as a field, so the decode-time "at least one of
+    // min or max" check passes — but under `float?` targeting the
+    // whole-field null resolves to "bound unset". Both bounds unset is a
+    // shape the schema forbids; the resolved-value re-check must reject
+    // it rather than emit a vacuous host requirement that matches every
+    // worker.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("steps[0] -> hostRequirements -> amounts[0]:")
+            && err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_both_bounds_resolving_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_one_null_and_one_concrete_bound_ok() {
+    // A null min alongside a concrete max is fine: one bound remains.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ 4.0 }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let amt = &hr.amounts.as_ref().expect("amounts")[0];
+    assert_eq!(amt.min, None);
+    assert_eq!(amt.max, Some(4.0));
+}
+
+#[test]
+fn test_create_job_range_element_list_param_flattens() {
+    // A range element is a list item (Expression Language §1.3.2, the
+    // same rule as `args` items): a LIST[*] parameter reference expands
+    // to one range element per list element, and literal elements can be
+    // mixed with expansions.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["/a", "/b"]}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["first", "{{RawParam.Paths}}", "last"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let space = job.steps[0].parameter_space.as_ref().expect("space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range, &["first", "/a", "/b", "last"]);
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_create_job_range_all_elements_null_rejected() {
+    // Null skips a range element; a range whose every element skips away
+    // is empty, which the schema's at-least-one-element rule forbids.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ null }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_all_values_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ null }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_value_list_flattens() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['tag_a', 'tag_b'] }}", "tag_c"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attr = &hr.attributes.as_ref().expect("attributes")[0];
+    assert_eq!(
+        attr.any_of.as_ref().expect("anyOf"),
+        &["tag_a", "tag_b", "tag_c"]
+    );
+}
+
+#[test]
+fn test_create_job_range_element_too_long_reports_characters() {
+    // The limit comparison and the count in the diagnostic must agree:
+    // 1,200 two-byte characters is 2,400 bytes, and the message reports
+    // 1200 — the character count the limit is stated in.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "V", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{Param.V * 2}}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("V", &"é".repeat(600))],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range[0]: resolved value exceeds 1024 characters (1200 chars)"
+    );
+}
+
+#[test]
+fn test_create_job_single_valued_attr_flatten_past_one_rejected() {
+    // Decode's single-valued rule counts template elements, but a
+    // flattening expression makes the resolved count unrelated to the
+    // decode-time count: allOf with one template element resolving to two
+    // values must be rejected after resolution.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": ["{{ RawParam.Arches }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_past_50_elements_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 51 }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: exceeds 50 elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_within_counts_ok() {
+    // Exactly 50 elements passes, and a single-valued anyOf may flatten
+    // to several candidates (only allOf is restricted to one).
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [
+                {"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 50 }}"]},
+                {"name": "attr.worker.cpu.arch", "anyOf": ["{{ RawParam.Arches }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attrs = hr.attributes.as_ref().expect("attributes");
+    assert_eq!(attrs[0].any_of.as_ref().expect("anyOf").len(), 50);
+    assert_eq!(
+        attrs[1].any_of.as_ref().expect("anyOf"),
+        &["x86_64", "arm64"]
+    );
+}
+
+#[test]
+fn test_create_job_range_conditional_elements_skip_down() {
+    // The skip direction also shrinks lists: three template elements
+    // where the conditionals resolve one branch to null yield two range
+    // elements, selected by the parameter.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "BoolValue", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": [
+                    "first",
+                    "{{ 'second' if Param.BoolValue else null }}",
+                    "{{ 'third' if not Param.BoolValue else null }}"
+                ]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [
+        ("true", vec!["first", "second"]),
+        ("false", vec!["first", "third"]),
+    ] {
+        let job = parse_and_create(template, &[("BoolValue", value)]);
+        let space = job.steps[0].parameter_space.as_ref().expect("space");
+        match &space.task_parameter_definitions["P"] {
+            job::TaskParameter::String { range } => {
+                assert_eq!(range, &expected, "BoolValue={value}");
+            }
+            other => panic!("expected STRING task parameter, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_conditional_collapse_ok() {
+    // Two template elements whose conditionals are complementary always
+    // resolve to exactly one — decode defers the single-valued count to
+    // job creation for expression-bearing lists, and the resolved count
+    // here is 1.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if not Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [("true", "x86_64"), ("false", "arm64")] {
+        let job = parse_and_create(template, &[("B", value)]);
+        let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+        let attr = &hr.attributes.as_ref().expect("attributes")[0];
+        assert_eq!(
+            attr.all_of.as_ref().expect("allOf"),
+            &[expected],
+            "B={value}"
+        );
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_both_elements_survive_rejected() {
+    // Same shape, but both conditionals resolve non-null: the resolved
+    // count is 2 and the post-resolution re-check rejects it.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("B", "true")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_single_valued_attr_deferred_count_still_capped_at_50_at_decode() {
+    // Deferring the single-valued "> 1" count for expression-bearing
+    // lists does not unbound the template: the generic 50-element cap
+    // applies to the template element count regardless of expressions.
+    let elems: Vec<String> = (0..51)
+        .map(|_| r#""{{ 'x86_64' if Param.B else null }}""#.to_string())
+        .collect();
+    let tmpl = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "B", "type": "BOOL"}}],
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"attributes": [{{"name": "attr.worker.cpu.arch", "allOf": [{}]}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#,
+        elems.join(", ")
+    );
+    let v: serde_json::Value = serde_saphyr::from_str(&tmpl).unwrap();
+    let err = openjd_model::decode_job_template(
+        v,
+        Some(&["EXPR"]),
+        &openjd_model::CallerLimits::default(),
+    )
+    .expect_err("expected decode rejection");
+    assert!(
+        err.to_string().contains(
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf:\n\texceeds 50 elements."
+        ),
+        "got: {err}"
     );
 }

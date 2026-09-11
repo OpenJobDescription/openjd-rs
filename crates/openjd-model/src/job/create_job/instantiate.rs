@@ -362,12 +362,14 @@ fn resolve_host_requirements(
                         .min
                         .as_ref()
                         .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount min"))
-                        .transpose()?;
+                        .transpose()?
+                        .flatten();
                     let max = a
                         .max
                         .as_ref()
                         .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount max"))
-                        .transpose()?;
+                        .transpose()?
+                        .flatten();
                     check_resolved_amount_bounds(min, max, step_index, amount_index)?;
                     Ok(job::AmountRequirement {
                         name: a.name.clone(),
@@ -401,8 +403,34 @@ fn resolve_host_requirements(
                         .as_ref()
                         .map(|vals| ranges::resolve_string_list(vals, symtab))
                         .transpose()?;
+                    let attr_lower = a.name.to_lowercase();
+                    let is_single_valued = attr_lower == "attr.worker.os.family"
+                        || attr_lower == "attr.worker.cpu.arch";
                     for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
                         if let Some(values) = values {
+                            // Decode checks these counts on the template's
+                            // element list, but a whole-field expression
+                            // flattens a list inline (Expression Language
+                            // §1.3.2), so the resolved count is unrelated
+                            // to the count decode saw. Re-apply the rules
+                            // on the resolved list, like the emptiness
+                            // check below and the range-element cap in
+                            // resolve_string_range.
+                            if values.is_empty() {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: has no elements after resolution"
+                                )));
+                            }
+                            if values.len() > 50 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: exceeds 50 elements after resolution"
+                                )));
+                            }
+                            if is_single_valued && field == "allOf" && values.len() > 1 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: single-valued attribute cannot have more than 1 element after resolution"
+                                )));
+                            }
                             check_resolved_attribute_values(
                                 &a.name, field, values, standard, step_index, attr_index,
                             )?;
@@ -450,6 +478,19 @@ fn check_resolved_amount_bounds(
         PathElement::Index(amount_index),
     ];
     let mut errors = ValidationErrors::default();
+    // Decode enforces "at least one of min or max" on field *presence*,
+    // but a whole-field expression resolving to null under the `float?`
+    // target means "bound unset" — so a present field can still resolve
+    // away. Re-apply the rule on the resolved values; without it the job
+    // would carry a boundless amount requirement that matches every
+    // worker. The "after resolution" suffix distinguishes this from the
+    // decode-time message: the author *did* provide the field.
+    if min.is_none() && max.is_none() {
+        errors.add(
+            &amount_path,
+            "must have at least one of min or max after resolution.",
+        );
+    }
     if let Some(min) = min {
         if min < 0.0 {
             errors.add(&path_field(&amount_path, "min"), "must be non-negative.");

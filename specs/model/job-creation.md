@@ -127,9 +127,22 @@ calling this function.
      The amount bound constraints (`min` non-negative, `max` positive, `min <= max`) are
      re-applied on the resolved value by `check_resolved_amount_bounds`, and the
      `chunks.defaultTaskCount` / `targetRuntimeSeconds` minimums are re-applied by
-     `resolve_parameter_space` — see [validation.md](validation.md).
+     `resolve_parameter_space` — see [validation.md](validation.md). Chunks fields
+     resolve single whole-field expressions with the target type Expression Language
+     §1.3.2 derives from the schema: `int` for the required `defaultTaskCount`
+     (so `{{ 4.0 }}` coerces to 4) and `int?` for the optional
+     `targetRuntimeSeconds` (a whole-field `null` means the field is omitted);
+     multi-segment strings concatenate and parse with surrounding whitespace
+     tolerated.
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
-     String-backed FLOAT range elements are trimmed and must resolve to finite `f64` values.
+     STRING/PATH range elements are list items (Expression Language §1.3.2): a
+     whole-field expression targets `string? | list[string]`, so `null` skips the
+     element and a list flattens inline — one range element per list element,
+     mixable with literal elements. A range emptied by null-skips is rejected
+     ("has no elements after resolution"), since the ≥1-element rule was checked
+     on field presence at decode. Attribute `anyOf`/`allOf` values get the same
+     treatment in `instantiate`. String-backed FLOAT range elements are trimmed
+     and must resolve to finite `f64` values.
    - Step-level let bindings
 3. Carry forward session/task-scope fields as FormatString (plus action
    `timeout`/`notifyPeriodInSeconds`, which validate in template scope but

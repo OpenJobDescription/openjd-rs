@@ -564,6 +564,40 @@ async fn test_enter_environment_with_resolved_variables() {
     assert!(!id.is_empty());
 }
 
+#[tokio::test]
+async fn test_enter_environment_env_var_value_over_2048_chars_rejected() {
+    // Template Schemas §4.4.2 caps environment variable values at 2048
+    // characters. The session runtime is the enforcement stage: template
+    // validation only catches statically knowable violations, and values
+    // interpolating session-time symbols are unknown until here. (This
+    // test's static expression exercises the session check because the
+    // Environment is constructed directly, bypassing model validation.)
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let mut vars = HashMap::new();
+    vars.insert("BIG".into(), fs("{{ 'A' * 2049 }}"));
+    let env = env_with_vars("env1", vars);
+    let err = s
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Failed to resolve env var 'BIG': resolved value is 2049 characters, exceeding the maximum of 2048."
+    );
+}
+
+#[tokio::test]
+async fn test_enter_environment_env_var_value_at_2048_chars_accepted() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let mut vars = HashMap::new();
+    vars.insert("BIG".into(), fs("{{ 'A' * 2048 }}"));
+    let env = env_with_vars("env1", vars);
+    let id = s.enter_environment(&env, None, None, None).await.unwrap();
+    assert!(!id.is_empty());
+}
+
 // === TestSessionExitEnvironment_2023_09 ===
 
 #[tokio::test]

@@ -46,6 +46,12 @@ use crate::embedded_files::{EmbeddedFiles, EmbeddedFilesScope};
 /// Default notify period (in seconds) for `NOTIFY_THEN_TERMINATE` cancel when
 /// no explicit time_limit is provided. Matches the OpenJD spec default.
 pub const DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
+
+/// Maximum characters in a resolved environment variable value (Template
+/// Schemas §4.4.2). The session runtime is the enforcement stage for
+/// interpolated values, which are unknown at template validation; kept in
+/// sync with the model's `EffectiveLimits::max_env_var_value_len`.
+const ENV_VAR_VALUE_MAX_LEN: usize = 2048;
 #[cfg(unix)]
 use crate::cross_user_helper::CrossUserHelper;
 #[cfg(windows)]
@@ -1164,11 +1170,21 @@ impl Session {
         // Set static variables
         if let Some(vars) = &env.variables {
             for (key, fmt_str) in vars {
+                // Required string values (§4.4.2): a single whole-field
+                // expression resolves with target type `string`
+                // (Expression Language §1.3.2), so `null` and list values
+                // are errors rather than display renderings.
                 let value = fmt_str
-                    .resolve_string_with(
+                    .resolve_with(
                         &symtab,
-                        &openjd_expr::FormatStringOptions::new().with_library(self.lib()),
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_library(self.lib())
+                            .with_target_type(&openjd_expr::ExprType::STRING),
                     )
+                    .map(|v| match v {
+                        openjd_expr::ExprValue::String(s) => s,
+                        other => other.to_display_string(),
+                    })
                     .map_err(|e| SessionError::FormatString {
                         context: format!("env var '{key}'"),
                         reason: e.to_string(),
@@ -1181,6 +1197,22 @@ impl Session {
                     return Err(SessionError::FormatString {
                         context: format!("env var '{key}'"),
                         reason: "resolved value contains a NUL byte, which cannot be represented in a process environment.".to_string(),
+                    });
+                }
+                // Template Schemas §4.4.2: at most 2048 characters. This is
+                // the enforcement stage — template validation only catches
+                // statically knowable violations (an interpolation of an
+                // unresolved symbol contributes 0 to its lower bound), so a
+                // value that only becomes long here must be rejected here.
+                // Kept in sync with the model's
+                // EffectiveLimits::max_env_var_value_len.
+                let char_count = value.chars().count();
+                if char_count > ENV_VAR_VALUE_MAX_LEN {
+                    return Err(SessionError::FormatString {
+                        context: format!("env var '{key}'"),
+                        reason: format!(
+                            "resolved value is {char_count} characters, exceeding the maximum of {ENV_VAR_VALUE_MAX_LEN}."
+                        ),
                     });
                 }
                 let norm_key = normalize_env_key(key);
