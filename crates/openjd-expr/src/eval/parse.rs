@@ -59,9 +59,13 @@ const PYTHON_KEYWORDS: &[&str] = &[
 
 /// Generate a same-length replacement identifier that doesn't appear in the source.
 fn make_replacement(keyword: &str, source: &str) -> String {
-    // Use a deterministic scheme: prefix with underscores to match length
-    // e.g., "if" → "xf", "def" → "xef", "else" → "xlse"
-    // If that collides, try incrementing the first char
+    // Same length as the keyword, so every other offset in the source is preserved.
+    // Replace the first character with 'a'..='z' in turn and take the first candidate
+    // that is absent from the source and is not itself a keyword: "if" -> "af",
+    // "else" -> "alse".
+    //
+    // The fallback below is not checked against either condition, so it can collide.
+    // Tracked in https://github.com/OpenJobDescription/openjd-rs/issues/333.
     let len = keyword.len();
     for prefix in b'a'..=b'z' {
         let mut replacement = String::with_capacity(len);
@@ -77,8 +81,22 @@ fn make_replacement(keyword: &str, source: &str) -> String {
             return replacement;
         }
     }
-    // Fallback: all x's
+    // Unchecked fallback -- see issue #333.
     "x".repeat(len)
+}
+
+/// How far every parser-reported offset is shifted, for `source`.
+///
+/// Multi-line expressions are wrapped in parentheses for implicit line continuation, so the
+/// parser sees one extra leading byte and every offset it reports -- AST ranges and error
+/// locations alike -- is one greater than the corresponding offset in `source`.
+///
+/// Anything that takes an offset or a range from the parser and uses it against the
+/// unwrapped source has to subtract this. Call it rather than open-coding the newline test:
+/// the caret formatter went without any compensation for a while precisely because the rule
+/// lived in four places instead of one.
+pub(crate) fn parser_offset_shift(source: &str) -> usize {
+    usize::from(source.contains('\n'))
 }
 
 /// Rewrite the contextual keyword at `kw_start` (a byte offset into `source`,
@@ -99,6 +117,7 @@ fn rename_keyword_at(
     source: &mut String,
     kw_start: usize,
     renames: &mut HashMap<String, String>,
+    placeholders: &mut HashMap<String, String>,
 ) -> bool {
     // Range-guard the offset rather than trusting it: because the multi-line
     // wrap is undone by subtracting one, the parser reporting an error at the
@@ -123,15 +142,30 @@ fn rename_keyword_at(
     }
     // Reuse the placeholder already chosen for this keyword, so that repeated
     // accesses (`A.class + B.class`) map back through a single rename entry.
-    let replacement = renames
-        .iter()
-        .find(|(_, original)| original.as_str() == token)
-        .map(|(placeholder, _)| placeholder.clone())
-        .unwrap_or_else(|| {
+    //
+    // Two maps because the two directions are both wanted: `renames` is
+    // placeholder -> keyword, which is what every reader downstream looks up, and
+    // `placeholders` is the inverse, which is what this write path needs.
+    let replacement = match placeholders.get(token) {
+        Some(existing) => existing.clone(),
+        None => {
             let placeholder = make_replacement(token, source);
+            // The two maps have to stay inverses. A placeholder already present in
+            // `renames` means `make_replacement` handed out one that belongs to a
+            // different keyword, which would overwrite that keyword's entry here while
+            // `placeholders` kept both -- the surviving mapping then resolves one keyword
+            // under the other's name. `make_replacement`'s fallback does not check for
+            // collisions, so this is reachable: see issue #333.
+            debug_assert!(
+                !renames.contains_key(&placeholder),
+                "placeholder {placeholder:?} is already taken by {:?}",
+                renames.get(&placeholder)
+            );
             renames.insert(placeholder.clone(), token.to_string());
+            placeholders.insert(token.to_string(), placeholder.clone());
             placeholder
-        });
+        }
+    };
     // Same length, so every other offset in `source` is preserved and the next
     // parse attempt reports positions that still line up with the original.
     debug_assert_eq!(replacement.len(), token_len);
@@ -552,32 +586,12 @@ fn parse_inner(
 ) -> Result<ParsedExpression, ExpressionError> {
     let mut source = expr_str.to_string();
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
+    // Inverse of `keyword_renames`, for the rename write path. See `rename_keyword_at`.
+    let mut keyword_placeholders: HashMap<String, String> = HashMap::new();
 
-    // Wrap multi-line expressions in parentheses for implicit line continuation.
-    //
-    // NOTE: the wrap shifts every offset the parser reports — AST ranges and
-    // error locations alike — by +1 relative to the unwrapped expression text.
-    // There is no single place that undoes it; each consumer compensates on its
-    // own, and one of them does not compensate at all:
-    //
-    //   - `Display for ExpressionError` (error.rs:314) subtracts 1 from the
-    //     column when the expression contains a newline.
-    //   - `eval_number`'s float passthrough (evaluator.rs:508) subtracts a
-    //     shift derived the same way, before slicing the unwrapped source.
-    //   - the keyword retry below subtracts 1 from the parser's error offset.
-    //   - `compute_caret_offset` (error.rs:403) does NOT compensate. It indexes
-    //     `expr.as_bytes()` with raw, still-shifted AST offsets while `expr` is
-    //     the unwrapped source, so its backwards operator scan reads bytes one
-    //     position right of the intended ones. The BinOp arm is affected: the
-    //     caret for a multi-line `**` or `//` lands on the operator's second
-    //     character. The Attribute/Call/Subscript arms are unaffected because
-    //     they subtract two shifted offsets from each other, which cancels.
-    //
-    // Do not read this list as "handled". Centralizing the adjustment — record
-    // the shift on ParsedExpression at parse time, or normalize AST ranges once
-    // after a successful multi-line parse — would fix the caret defect and
-    // remove three copies of the same `- 1`, but it changes the diagnostic
-    // output of every multi-line BinOp error and so needs its own tests.
+    // Wrap multi-line expressions in parentheses for implicit line continuation. The wrap
+    // shifts every offset the parser reports by one; `parser_offset_shift` is that rule, and
+    // anything converting a parser offset back to a position in `source` goes through it.
     let is_multiline = source.contains('\n');
 
     loop {
@@ -631,11 +645,16 @@ fn parse_inner(
                 // + ")", so every offset the parser reports sits one byte to
                 // the right of the same character in `source`.
                 let kw_start = if is_multiline {
-                    error_offset.saturating_sub(1)
+                    error_offset.saturating_sub(parser_offset_shift(&source))
                 } else {
                     error_offset
                 };
-                let found = rename_keyword_at(&mut source, kw_start, &mut keyword_renames);
+                let found = rename_keyword_at(
+                    &mut source,
+                    kw_start,
+                    &mut keyword_renames,
+                    &mut keyword_placeholders,
+                );
                 if !found {
                     let msg = format!("Syntax error: {}", e.error);
                     let start = e.location.start().to_usize();
@@ -1141,7 +1160,15 @@ mod tests {
     fn rename_once(source: &str, kw_start: usize) -> (bool, String, Option<(String, String)>) {
         let mut s = source.to_string();
         let mut renames = HashMap::new();
-        let found = rename_keyword_at(&mut s, kw_start, &mut renames);
+        let mut placeholders = HashMap::new();
+        let found = rename_keyword_at(&mut s, kw_start, &mut renames, &mut placeholders);
+        // The two maps must stay inverses of each other, or a repeated keyword access
+        // would get a second placeholder and the reuse this index exists for would be
+        // silently lost.
+        assert_eq!(renames.len(), placeholders.len());
+        for (placeholder, original) in &renames {
+            assert_eq!(placeholders.get(original), Some(placeholder));
+        }
         let pair = renames.iter().next().map(|(p, o)| (p.clone(), o.clone()));
         (found, s, pair)
     }
@@ -1165,6 +1192,46 @@ mod tests {
         assert_eq!(placeholder.len(), "assert".len());
         assert_eq!(source, format!("X.{placeholder}"));
         assert_eq!(source.len(), "X.assert".len());
+    }
+
+    #[test]
+    fn rename_keyword_at_reuses_one_placeholder_per_keyword() {
+        // Two accesses of the same keyword share a placeholder, so `renames` holds one entry
+        // rather than one per occurrence, and both occurrences read back as the same keyword.
+        //
+        // A regression guard, not a fix: the lookup this pins has always reused. It is here
+        // because the reuse now depends on `placeholders` staying an inverse of `renames`,
+        // and nothing else would notice the two drifting apart.
+        let mut source = String::from("A.class + B.class");
+        let mut renames = HashMap::new();
+        let mut placeholders = HashMap::new();
+
+        let first = source.find(".class").unwrap() + 1;
+        assert!(rename_keyword_at(
+            &mut source,
+            first,
+            &mut renames,
+            &mut placeholders
+        ));
+        let second = source.rfind(".class").unwrap() + 1;
+        assert!(rename_keyword_at(
+            &mut source,
+            second,
+            &mut renames,
+            &mut placeholders
+        ));
+
+        assert_eq!(
+            renames.len(),
+            1,
+            "expected one rename entry for one keyword, got {renames:?}"
+        );
+        let placeholder = renames.keys().next().unwrap();
+        assert_eq!(
+            source,
+            format!("A.{placeholder} + B.{placeholder}"),
+            "both occurrences should carry the same placeholder"
+        );
     }
 
     #[test]
