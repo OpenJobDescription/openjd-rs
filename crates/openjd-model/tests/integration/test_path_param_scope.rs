@@ -251,7 +251,14 @@ fn list_path_rawparam_in_job_name() {
 
 #[test]
 fn list_path_rawparam_in_parameter_space_range() {
-    check_ok_ext(
+    // The symbol IS in scope for range expressions — but a range element
+    // is a required string field, and its whole-field expression resolves
+    // with target type `string` (Expression Language §1.3.2). There is no
+    // list → string coercion, so a bare LIST[*] parameter reference in a
+    // single range element is a validation error (it previously rendered
+    // the list's display form as one element). Use the parameter inside
+    // an expression producing a string, or index an element, instead.
+    check_err_ext(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
@@ -264,6 +271,7 @@ fn list_path_rawparam_in_parameter_space_range() {
         }]
     }"#,
         &["EXPR"],
+        &["Cannot coerce list[string] to string"],
     );
 }
 
