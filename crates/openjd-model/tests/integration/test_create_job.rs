@@ -5901,3 +5901,103 @@ fn test_create_job_amount_with_one_null_and_one_concrete_bound_ok() {
     assert_eq!(amt.min, None);
     assert_eq!(amt.max, Some(4.0));
 }
+
+#[test]
+fn test_create_job_range_element_list_param_flattens() {
+    // A range element is a list item (Expression Language §1.3.2, the
+    // same rule as `args` items): a LIST[*] parameter reference expands
+    // to one range element per list element, and literal elements can be
+    // mixed with expansions.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["/a", "/b"]}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["first", "{{RawParam.Paths}}", "last"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let space = job.steps[0].parameter_space.as_ref().expect("space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range, &["first", "/a", "/b", "last"]);
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_create_job_range_all_elements_null_rejected() {
+    // Null skips a range element; a range whose every element skips away
+    // is empty, which the schema's at-least-one-element rule forbids.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ null }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_all_values_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ null }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_value_list_flattens() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['tag_a', 'tag_b'] }}", "tag_c"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attr = &hr.attributes.as_ref().expect("attributes")[0];
+    assert_eq!(
+        attr.any_of.as_ref().expect("anyOf"),
+        &["tag_a", "tag_b", "tag_c"]
+    );
+}

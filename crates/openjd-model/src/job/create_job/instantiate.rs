@@ -405,6 +405,16 @@ fn resolve_host_requirements(
                         .transpose()?;
                     for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
                         if let Some(values) = values {
+                            // Decode enforces non-emptiness on field
+                            // presence, but a whole-field expression
+                            // resolving to null skips its element
+                            // (Expression Language §1.3.2), so a present
+                            // list can still resolve away.
+                            if values.is_empty() {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: has no elements after resolution"
+                                )));
+                            }
                             check_resolved_attribute_values(
                                 &a.name, field, values, standard, step_index, attr_index,
                             )?;

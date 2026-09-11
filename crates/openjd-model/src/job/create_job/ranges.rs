@@ -77,34 +77,48 @@ pub(super) fn resolve_to_f64(
 
 /// Resolve a list of FormatStrings to strings.
 ///
-/// Each element is a required string field: a single whole-field
-/// expression resolves with target type `string` (Expression Language
-/// §1.3.2), so non-convertible values — `null`, lists — are errors rather
-/// than silently rendering their display form.
+/// Each element is a list item, so per Expression Language §1.3.2 a
+/// whole-field expression resolves with target type
+/// `string? | list[string]`: a `null` result skips the element, a list
+/// result flattens inline, and a string is a single element. Callers
+/// enforcing a non-empty list must re-check after resolution, since
+/// null-skips can empty it.
 pub(super) fn resolve_string_list(
     vals: &[openjd_expr::FormatString],
     symtab: &SymbolTable,
 ) -> Result<Vec<String>, ModelError> {
-    vals.iter()
-        .map(|fs| {
-            fs.resolve_with(
+    let target = openjd_expr::ExprType::union(vec![
+        openjd_expr::ExprType::NULLTYPE,
+        openjd_expr::ExprType::STRING,
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+    ]);
+    let mut out = Vec::new();
+    for fs in vals {
+        let value = fs
+            .resolve_with(
                 symtab,
                 &openjd_expr::FormatStringOptions::new()
                     .with_path_format(PathFormat::Posix)
-                    .with_target_type(&openjd_expr::ExprType::STRING),
+                    .with_target_type(&target),
             )
-            .map(|v| match v {
-                openjd_expr::ExprValue::String(s) => s,
-                other => other.to_display_string(),
-            })
             .map_err(|e| ModelError::FormatStringError {
                 message: e.to_string(),
                 input: Some(fs.raw().to_string()),
                 start: None,
                 end: None,
-            })
-        })
-        .collect()
+            })?;
+        match value {
+            openjd_expr::ExprValue::Null => continue,
+            val if val.is_list() => {
+                for elem in val.list_elements().unwrap_or_default() {
+                    out.push(elem.to_display_string());
+                }
+            }
+            openjd_expr::ExprValue::String(s) => out.push(s),
+            other => out.push(other.to_display_string()),
+        }
+    }
+    Ok(out)
 }
 
 /// Resolve a StepParameterSpaceDefinition into a StepParameterSpace with concrete ranges.
@@ -495,25 +509,51 @@ fn resolve_string_range(
     limits: &EffectiveLimits,
 ) -> Result<Vec<String>, ModelError> {
     let resolved: Vec<String> = match range {
-        // Each range element is a required string field (§3.4.2): a single
-        // whole-field expression resolves with target type `string`, so
-        // `null` and list values are errors rather than display renderings.
-        template::StringRange::List(items) => items
-            .iter()
-            .map(|fs| {
-                fs.resolve_with(
-                    symtab,
-                    &openjd_expr::FormatStringOptions::new()
-                        .with_path_format(PathFormat::Posix)
-                        .with_target_type(&openjd_expr::ExprType::STRING),
-                )
-                .map(|v| match v {
-                    openjd_expr::ExprValue::String(s) => s,
-                    other => other.to_display_string(),
-                })
-                .map_err(ModelError::Expression)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        // Each range element is a list item, so per Expression Language
+        // §1.3.2 a whole-field expression resolves with target type
+        // `string? | list[string]`: a `null` result skips the element, a
+        // list result flattens inline (one range element per list
+        // element), and a string is a single element. This is what lets a
+        // template mix literal elements with expansions, e.g.
+        // `range: ["first", "{{ RawParam.Paths }}", "last"]`; a range
+        // that is entirely one expression can also use the whole-field
+        // `<ListExpressionString>` form (§1.3.12) handled below.
+        template::StringRange::List(items) => {
+            let target = openjd_expr::ExprType::union(vec![
+                openjd_expr::ExprType::NULLTYPE,
+                openjd_expr::ExprType::STRING,
+                openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+            ]);
+            let mut out = Vec::new();
+            for fs in items {
+                let value = fs
+                    .resolve_with(
+                        symtab,
+                        &openjd_expr::FormatStringOptions::new()
+                            .with_path_format(PathFormat::Posix)
+                            .with_target_type(&target),
+                    )
+                    .map_err(ModelError::Expression)?;
+                match value {
+                    openjd_expr::ExprValue::Null => continue,
+                    val if val.is_list() => {
+                        for elem in val.list_elements().unwrap_or_default() {
+                            out.push(elem.to_display_string());
+                        }
+                    }
+                    openjd_expr::ExprValue::String(s) => out.push(s),
+                    other => out.push(other.to_display_string()),
+                }
+            }
+            // The ≥1-element rule is checked on field presence at decode,
+            // but null-skips can empty the list after resolution.
+            if out.is_empty() {
+                return Err(ModelError::DecodeValidation(format!(
+                    "Task parameter '{param_name}' range has no elements after resolution"
+                )));
+            }
+            out
+        }
         template::StringRange::Expression(expr) => {
             // Typed evaluation — must yield a list. Propagate the actual error
             // if evaluation fails (e.g., division by zero, undefined variable).
