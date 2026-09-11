@@ -3956,11 +3956,18 @@ fn test_create_job_host_req_amount_non_numeric() {
     );
     // float? target: a non-numeric string fails coercion with the
     // resolution diagnostic (union targets report the type pair).
-    assert!(err.contains("Cannot coerce string to float?"), "got: {err}");
+    assert_eq!(
+        err,
+        "Format string error: hostRequirements amount min: \
+         Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~"
+    );
 }
 
 #[test]
-fn test_create_job_host_req_amount_non_finite() {
+fn test_create_job_host_req_amount_non_finite_string_fails_coercion() {
+    // Under the float? target, whole-field expressions producing
+    // "nan"/"inf" strings fail at coercion — Float64 permits only finite
+    // values — so none of these reach the multi-segment parse path.
     for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
         let err = parse_and_create_err(
             r#"{
@@ -3978,14 +3985,41 @@ fn test_create_job_host_req_amount_non_finite() {
         }"#,
             &[("Mem", value)],
         );
-        // float? target: "nan"/"inf" strings fail coercion (Float64
-        // permits only finite values), reported with the resolution
-        // diagnostic.
-        assert!(
-            err.contains("Cannot coerce string to float?"),
-            "value {value}: got: {err}"
+        assert_eq!(
+            err,
+            "Format string error: hostRequirements amount min: \
+             Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~",
+            "value {value}"
         );
     }
+}
+
+#[test]
+fn test_create_job_host_req_amount_multi_segment_non_finite() {
+    // A multi-segment format string concatenates to text and parses
+    // rather than coercing, so it is the one path that can produce a
+    // non-finite f64 ("1e999" parses to inf). The error reports the
+    // resolved text the author can act on, not the parsed value.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Exp", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "1e{{Param.Exp}}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[("Exp", "999")],
+    );
+    assert_eq!(
+        err,
+        "Expression error: hostRequirements amount min: '1e999' is not a finite number"
+    );
 }
 
 #[test]
