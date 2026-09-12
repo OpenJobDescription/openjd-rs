@@ -783,6 +783,8 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             | (ExprValue::Float(_), JobParameterType::Float)
             | (ExprValue::Bool(_), JobParameterType::Bool)
             | (ExprValue::RangeExpr(_), JobParameterType::RangeExpr)
+            // No `ListPath` arm: this crate represents every `LIST[PATH]` value as a
+            // `ListString`, empty or not, so a `ListPath` is a caller-only shape.
             | (
                 ExprValue::ListString(_, _),
                 JobParameterType::ListString | JobParameterType::ListPath
@@ -1200,10 +1202,15 @@ pub(super) fn coerce_json_to_job_parameter_type(
                 .iter()
                 .map(|element| coerce_json_to_job_parameter_type(element, element_type))
                 .collect::<Result<_, _>>()?;
-            // `make_list` consults the hint only for an empty list, which has no elements to
-            // infer from. Passing the declared element type is what keeps `LIST[BOOL]` of `[]`
-            // a `ListBool` rather than an untyped `ListList`.
-            openjd_expr::ExprValue::make_list(elements, element_type.expr_type())
+            // The hint types an empty list only, so it must name the variant the elements
+            // above produce: the declared element type, except PATH coerces to an
+            // `ExprValue::String`. `PATH` here made an empty LIST[PATH] a `ListPath`, a
+            // second representation that broke the round trip. Issues #389 and #387.
+            let hint = match element_type {
+                JobParameterType::Path => openjd_expr::ExprType::STRING,
+                other => other.expr_type(),
+            };
+            openjd_expr::ExprValue::make_list(elements, hint)
                 .map_err(|e| format!("Invalid list value: {e}"))
         }
         // A list type whose value is not a list. Refused here because nothing downstream
@@ -1558,9 +1565,10 @@ mod tests {
 
         #[test]
         fn empty_list_is_accepted_for_every_list_type() {
-            // An empty list has no elements to infer from, so the declared element type is
-            // the only thing that can type it. Assert the variant rather than just is_ok():
-            // an untyped ListList parses too, and would hide a LIST[T] that is not a list of T.
+            // An empty list has no elements to infer from, so the hint is the only thing that
+            // can type it. Assert the variant rather than just is_ok(): an untyped ListList
+            // parses too, and would hide a LIST[T] that is not a list of T. LIST[PATH] is a
+            // ListString, the same variant its non-empty form produces.
             for param_type in [
                 JobParameterType::ListString,
                 JobParameterType::ListPath,
@@ -1572,8 +1580,10 @@ mod tests {
                 let value = coerce("[]", param_type)
                     .unwrap_or_else(|e| panic!("empty list rejected for {param_type:?}: {e}"));
                 let typed = match (&value, param_type) {
-                    (ExprValue::ListString(v, _), JobParameterType::ListString) => v.is_empty(),
-                    (ExprValue::ListPath(v, _, _), JobParameterType::ListPath) => v.is_empty(),
+                    (
+                        ExprValue::ListString(v, _),
+                        JobParameterType::ListString | JobParameterType::ListPath,
+                    ) => v.is_empty(),
                     (ExprValue::ListInt(v), JobParameterType::ListInt) => v.is_empty(),
                     (ExprValue::ListFloat(v), JobParameterType::ListFloat) => v.is_empty(),
                     (ExprValue::ListBool(v), JobParameterType::ListBool) => v.is_empty(),
@@ -1582,8 +1592,8 @@ mod tests {
                 };
                 assert!(
                     typed,
-                    "empty list for {param_type:?} arrived as {value:?}, which does not carry \
-                     the declared element type"
+                    "empty list for {param_type:?} arrived as {value:?}, which is not the \
+                     variant its non-empty form produces"
                 );
             }
         }
