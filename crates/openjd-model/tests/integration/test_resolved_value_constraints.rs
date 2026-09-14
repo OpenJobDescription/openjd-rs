@@ -43,6 +43,16 @@ fn check_err(s: &str, expected: &[&str]) {
     }
 }
 
+/// Like [`check_err`], but asserts the *entire* error output. Use when a
+/// test must also pin the error count — e.g., that one violation is
+/// reported exactly once.
+fn check_err_exact(s: &str, expected: &str) {
+    let v = yaml_val(s);
+    let err = decode_job_template(v, Some(ALL_EXTS), &CallerLimits::default())
+        .expect_err("Expected validation error");
+    assert_eq!(err.to_string(), expected);
+}
+
 fn check_ok(s: &str) {
     let v = yaml_val(s);
     if let Err(e) = decode_job_template(v, Some(ALL_EXTS), &CallerLimits::default()) {
@@ -336,9 +346,12 @@ fn job_with_range_item(ptype: &str, item: &str) -> String {
 
 #[test]
 fn string_range_item_static_too_long_fails() {
-    check_err(
+    // Exact-output assertion: the violation must be reported exactly once
+    // (the bound check and the per-element check must not both fire for
+    // the same fully static string).
+    check_err_exact(
         &job_with_range_item("STRING", "{{ 'A' * 1100 }}"),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tresolves to at least 1100 characters, exceeding the maximum of 1024."],
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tresolves to at least 1100 characters, exceeding the maximum of 1024.",
     );
 }
 

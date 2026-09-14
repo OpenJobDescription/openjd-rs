@@ -473,7 +473,8 @@ fn check_resolved_constraint(
             // its characters across elements, so the display-form length
             // says nothing about any single element. Multi-segment
             // strings are always strings, and a fully static string is
-            // exact.
+            // exact — return so the per-element check below does not
+            // report the same violation twice (as in AttributeValue).
             if sr.resolved_type == ExprType::STRING && sr.min_resolved_string_len > *max_len {
                 errors.add(
                     path,
@@ -482,6 +483,7 @@ fn check_resolved_constraint(
                         sr.min_resolved_string_len, max_len
                     ),
                 );
+                return;
             }
             // §3.4.2 constrains each element to at most 1024 characters,
             // and (for PATH only — see the variant doc) to at least 1. A
