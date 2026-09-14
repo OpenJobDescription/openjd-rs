@@ -100,6 +100,13 @@ pub struct SessionConfig {
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
     pub os_env_vars: Option<HashMap<String, String>>,
+    /// Root directory under which the session's working and embedded-files
+    /// directories are created. If `None`, a temporary directory is used.
+    ///
+    /// A relative path is resolved to an absolute path (against the process
+    /// current working directory) when the session is created, so all derived
+    /// paths are always rooted — a requirement of the embedded-file
+    /// containment check.
     pub session_root_directory: Option<PathBuf>,
     pub user: Option<Arc<dyn SessionUser>>,
     /// Revision + extensions profile that drives expression-function
@@ -582,7 +589,19 @@ impl Session {
     /// Full constructor from SessionConfig.
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
-            Some(d) => d.clone(),
+            // Absolutize a caller-supplied root so every path derived from it
+            // (working directory, embedded-files directory) is rooted. The
+            // embedded-file containment check (`ensure_within`) is only sound
+            // for rooted paths and rejects relative ones outright; without this
+            // a relative `session_root_directory` would surface as a spurious
+            // "unsafe filename" error for every named embedded file. This is a
+            // purely lexical operation (`std::path::absolute` joins onto the
+            // current directory and does not touch the filesystem or resolve
+            // symlinks). `openjd_temp_dir` already returns an absolute path.
+            Some(d) => std::path::absolute(d).map_err(|source| SessionError::WorkingDirectory {
+                path: d.clone(),
+                source,
+            })?,
             None => crate::tempdir::openjd_temp_dir(None)?,
         };
 
