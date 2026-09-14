@@ -144,18 +144,28 @@ fn env_var_value_static_empty_passes() {
 }
 
 #[test]
-fn string_range_item_static_empty_fails() {
-    // §3.4.2 minimum length 1 applies to each element.
+fn string_range_item_static_empty_passes() {
+    // §3.4.2 sets a minimum length of 1, but the reference implementation
+    // enforces it only for PATH elements — empty STRING elements are
+    // accepted end to end. Matched for compatibility.
+    check_ok(&job_with_range_item("STRING", "{{ '' }}"));
+    check_ok(&job_with_range_item("STRING", "{{ ['ok', ''] }}"));
+}
+
+#[test]
+fn path_range_item_static_empty_fails() {
+    // §3.4.2 minimum length 1, PATH only: an empty string is not a valid
+    // path on any OS.
     check_err(
-        &job_with_range_item("STRING", "{{ '' }}"),
+        &job_with_range_item("PATH", "{{ '' }}"),
         &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tmust not resolve to an empty string."],
     );
 }
 
 #[test]
-fn string_range_item_static_list_with_empty_element_fails() {
+fn path_range_item_static_list_with_empty_element_fails() {
     check_err(
-        &job_with_range_item("STRING", "{{ ['ok', ''] }}"),
+        &job_with_range_item("PATH", "{{ ['ok', ''] }}"),
         &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tlist element 1 must not resolve to an empty string."],
     );
 }

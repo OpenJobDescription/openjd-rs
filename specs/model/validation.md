@@ -242,7 +242,7 @@ deferring it to job submission or the worker. Two stages of checking:
 |---|---|---|---|
 | job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | non-empty (§1.1.1 min 1); no Cc control characters |
 | attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
-| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | 1..=1024 chars per element (a list flattens); `null` skips the element |
+| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
 | `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
@@ -304,6 +304,17 @@ Consequences of the target types worth naming:
   is certainly a string (`StaticResolution::resolved_type` is `string`):
   a list-valued resolution distributes its characters across elements,
   so the display-form length says nothing about any single element.
+- **Empty range elements are rejected for PATH only.** §3.4.2 sets a
+  minimum length of 1 on `<TaskParameterStringValue>` (which STRING and
+  PATH ranges share), but the reference implementation enforces it only
+  for PATH — its rationale being that an empty string is not a valid
+  path on any OS — and accepts empty STRING elements end to end
+  (`TaskParameterStringValueAsJob` is explicitly `min_length=0`). We
+  match that for compatibility. PATH elements are rejected at every
+  stage where they become knowable: a literal `""` at raw-text
+  validation (structure), a static resolution here, and an interpolated
+  value at job creation (`resolve_string_range`). STRING elements are
+  never rejected for emptiness.
 
 One further deliberate exclusion: **literals**. `validate_fs` skips
 literal format strings; the raw-text passes (structure/limits) already

@@ -1904,6 +1904,36 @@ fn test_path_task_param_empty_value() {
 }
 
 #[test]
+fn test_string_task_param_empty_value_accepted() {
+    // §3.4.2 sets a minimum length of 1 on <TaskParameterStringValue>, but
+    // the reference implementation enforces it only for PATH — a STRING
+    // range may contain empty elements, literal or resolved, and the job
+    // is created successfully.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "E", "type": "STRING", "default": ""}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "Val", "type": "STRING", "range": ["", "{{Param.E}}", "x"]}]
+            },
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["Val"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range, &["".to_string(), "".to_string(), "x".to_string()]);
+        }
+        other => panic!("Expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_path_task_param_value_too_long() {
     let long_val = "x".repeat(1025);
     let err = parse_and_create_err(

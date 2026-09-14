@@ -346,8 +346,11 @@ enum ResolvedConstraint<'a> {
     /// Template Schemas §3.4.2). Per Expression Language §1.3.2 a
     /// whole-field expression targets `string? | list[string]`: `null`
     /// skips the element, a list flattens inline, and `max_len` applies
-    /// to each resulting element.
-    TextListItem { max_len: usize },
+    /// to each resulting element. `forbid_empty` applies §3.4.2's
+    /// minimum length of 1 — set for PATH elements only, matching the
+    /// reference implementation, which accepts empty STRING elements
+    /// (see `resolve_string_range` in create_job/ranges.rs).
+    TextListItem { max_len: usize, forbid_empty: bool },
     /// A `hostRequirements` attribute value (§3.3.2.2): 100-char
     /// identifier-like values, or membership in the allowed set for a
     /// standard capability. Also a list item, with the same
@@ -461,7 +464,10 @@ fn check_resolved_constraint(
                 }
             }
         }
-        ResolvedConstraint::TextListItem { max_len } => {
+        ResolvedConstraint::TextListItem {
+            max_len,
+            forbid_empty,
+        } => {
             // The length bound is only sound when the resolution is
             // certainly a string: a list-valued resolution distributes
             // its characters across elements, so the display-form length
@@ -477,9 +483,10 @@ fn check_resolved_constraint(
                     ),
                 );
             }
-            // §3.4.2 constrains each element to 1..=1024 characters. A
+            // §3.4.2 constrains each element to at most 1024 characters,
+            // and (for PATH only — see the variant doc) to at least 1. A
             // fully static list flattens into one element per member
-            // (Expression Language §1.3.2): both limits apply to each.
+            // (Expression Language §1.3.2): the limits apply to each.
             if let Some(v) = &sr.resolved_value {
                 let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
                 let is_list = v.is_list();
@@ -500,7 +507,7 @@ fn check_resolved_constraint(
                                 "{element_label}resolves to {n} characters, exceeding the maximum of {max_len}."
                             ),
                         );
-                    } else if n == 0 {
+                    } else if n == 0 && *forbid_empty {
                         errors.add(
                             path,
                             format!("{element_label}must not resolve to an empty string."),
@@ -1042,9 +1049,16 @@ pub fn validate_format_strings(
                 // §3.4.2: a STRING/PATH range element may be at most 1024
                 // characters after the format string has been resolved. As
                 // a list item it may also resolve to `null` (skipped) or a
-                // list (flattened) per Expression Language §1.3.2.
-                let range_item_constraint = ResolvedConstraint::TextListItem {
+                // list (flattened) per Expression Language §1.3.2. The
+                // §3.4.2 minimum of 1 is enforced for PATH only, matching
+                // the reference implementation (see the TextListItem doc).
+                let string_range_item_constraint = ResolvedConstraint::TextListItem {
                     max_len: limits.max_task_param_string_len,
+                    forbid_empty: false,
+                };
+                let path_range_item_constraint = ResolvedConstraint::TextListItem {
+                    max_len: limits.max_task_param_string_len,
+                    forbid_empty: true,
                 };
                 match tp {
                     TaskParameterDefinition::INT(t) => {
@@ -1066,7 +1080,7 @@ pub fn validate_format_strings(
                                     &range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
-                                    Some(&range_item_constraint),
+                                    Some(&string_range_item_constraint),
                                     errors,
                                 );
                             }
@@ -1080,7 +1094,7 @@ pub fn validate_format_strings(
                                     &range_symtab,
                                     &template_lib,
                                     &path_index(&path_field(&p_path, "range"), k),
-                                    Some(&range_item_constraint),
+                                    Some(&path_range_item_constraint),
                                     errors,
                                 );
                             }
