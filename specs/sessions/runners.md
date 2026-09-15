@@ -224,8 +224,17 @@ pub(crate) fn resolve_action_timeout(
 ```
 
 Resolves an action's `timeout` format string to a `Duration`. If the action has no
-timeout field, returns the `default`. The resolved value must be a positive integer
-(seconds). Zero is rejected with an error.
+timeout field, returns the `default`. A single whole-field expression resolves with
+target type `int?` (Template Schemas §5): a `null` result means "not provided" (the
+default applies), and coercible values like `{{ 120.0 }}` or `{{ '120' }}` become the
+int they denote. A multi-segment format string concatenates to a string and is parsed
+as an integer. The resolved value must be a positive integer (seconds); zero is
+rejected with an error.
+
+The same target-typing applies to the other numeric/enum cancelation fields:
+`resolve_notify_period_seconds` resolves with `int?` (§5.3.2; additionally enforcing
+the 600-second maximum), and `resolve_effective_cancelation` resolves a deferred
+`mode` with `string?` (a `null` drops the whole cancelation object).
 
 ## Runner Builder Methods
 
