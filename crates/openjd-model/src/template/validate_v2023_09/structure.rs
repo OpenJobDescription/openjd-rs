@@ -44,7 +44,19 @@ pub fn validate_structure(
     if jt.name.raw().is_empty() {
         errors.add(&path_field(&root, "name"), "must not be empty.");
     }
-    if jt.name.raw().chars().any(|c| c.is_control()) {
+    // §1.1.1: no Cc characters in the job name. Checked on the literal
+    // segments only: literal text appears verbatim in every possible
+    // resolution, so a control character there is a certain violation —
+    // even for an otherwise-interpolated name. Expression *source* text
+    // is exempt (a multi-line expression is legal); what an expression
+    // *resolves to* is checked on the resolved value instead — statically
+    // in the format-string pass when the name is fully static, and at job
+    // creation otherwise.
+    if jt
+        .name
+        .literal_segments()
+        .any(|s| s.chars().any(|c| c.is_control()))
+    {
         errors.add(&path_field(&root, "name"), "contains control characters.");
     }
 
@@ -697,20 +709,22 @@ fn validate_host_requirements(
                 attr_lower == "attr.worker.os.family" || attr_lower == "attr.worker.cpu.arch";
             if is_single_valued {
                 if let Some(vals) = &attr.all_of {
-                    // Counted on literal elements only, for the same reason as
-                    // the value checks above: a whole-field expression may
-                    // resolve to null (skipping its element) or flatten a
-                    // list, so an expression element's contribution to the
-                    // resolved count is only knowable at job creation, which
-                    // re-checks it there. Literal elements cannot skip, so
-                    // they each contribute exactly one resolved element —
-                    // more than one literal means every possible resolution
-                    // violates the single-valued rule, whatever any expression
-                    // elements resolve to. The generic 50-element cap above is
-                    // not relaxed — it applies to the template element count
-                    // regardless of expressions, so a deferred single-valued
-                    // list is still bounded here.
-                    if vals.iter().filter(|v| v.is_literal()).count() > 1 {
+                    // Counted on the elements that certainly contribute
+                    // exactly one resolved element: literals, and
+                    // multi-segment format strings (which always
+                    // concatenate to a single string — Expression
+                    // Language §1.3.2). Only a whole-field
+                    // single-expression element can null-skip or
+                    // list-flatten, so its contribution is unknowable
+                    // here and job creation re-checks the resolved
+                    // count. Two or more certain elements violate the
+                    // single-valued rule under every possible
+                    // resolution. The generic 50-element cap above is
+                    // not relaxed — it applies to the template element
+                    // count regardless of expressions, so a deferred
+                    // single-valued list is still bounded here.
+                    let certain = |v: &crate::FormatString| v.is_literal() || v.segment_count() > 1;
+                    if vals.iter().filter(|v| certain(v)).count() > 1 {
                         errors.add(
                             &path_field(&attr_path, "allOf"),
                             "single-valued attribute cannot have more than 1 element.",

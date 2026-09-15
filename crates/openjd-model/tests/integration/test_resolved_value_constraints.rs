@@ -108,6 +108,28 @@ fn job_name_static_control_chars_fail() {
 }
 
 #[test]
+fn job_name_literal_control_char_fails_even_when_interpolated() {
+    // A control character in the name's *literal* text appears verbatim
+    // in every possible resolution, so decode rejects it even though the
+    // interpolated part is unknowable (`\t` here is a JSON escape — a
+    // real tab in the literal segment).
+    check_err(
+        &job_with_name("render-{{ Param.X }}\t"),
+        &["name:\n\tcontains control characters."],
+    );
+}
+
+#[test]
+fn job_name_control_char_in_expression_source_passes_when_resolution_clean() {
+    // A control character inside expression *source* text never appears
+    // in a resolved value — only what the expression evaluates to does.
+    // This name's expression source contains a real tab (JSON `\t`), but
+    // it statically resolves to "xa": legal, and previously
+    // over-rejected when the check ran on the whole raw text.
+    check_ok(&job_with_name("x{{ 'a' if 1 == 1 else '\t' }}"));
+}
+
+#[test]
 fn job_name_under_limit_and_unresolved_pass() {
     check_ok(&job_with_name("{{ 'A' * 500 }}"));
     check_ok(&job_with_name("{{ Param.X }}{{ 'A' * 100 }}"));
