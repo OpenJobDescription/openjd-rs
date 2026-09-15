@@ -6509,14 +6509,14 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
 
 #[test]
 fn a_submitted_list_path_value_is_refused_at_any_length() {
-    // This crate never builds an ExprValue::ListPath, so accepting one would admit a
-    // caller-only shape whose PathFormat nothing here validates. Both lengths, because
-    // fixing the empty case at the producer is what let the rule become one rule.
+    // A stored LIST[PATH] is a ListString, because a job parameter holds a path as a
+    // string until there is a host context to interpret it in. ListPath carries a
+    // PathFormat, so it is refused at both lengths, not just the one the fix touched.
     //
     // Through make_list rather than the variant directly: ListPath's third field is a
     // cached heap size make_list computes, so a hand-built 0 is a shape the crate never
-    // produces. PathFormat::Windows on purpose -- LIST[PATH] never enters the
-    // path_format-sensitive branches, so a foreign format would pass every check.
+    // produces. PathFormat::Windows on purpose -- it is exactly the format that has no
+    // meaning at job creation, and nothing here would check it.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]"}"#),
@@ -6553,8 +6553,8 @@ fn a_submitted_list_path_value_is_refused_at_any_length() {
 #[test]
 fn an_empty_list_path_still_meets_its_length_constraints() {
     // An empty LIST[PATH] reaches check_constraints rather than failing coercion, so the
-    // diagnostic names the length rule. ListString because that is the representation the
-    // crate emits -- an empty ListPath is refused a step earlier, by design.
+    // diagnostic names the length rule. ListString because that is how a job parameter
+    // stores a path -- an empty ListPath is refused a step earlier, by design.
     //
     // Submitted rather than defaulted: decode refuses an empty `default` under
     // `minLength: 1` outright, so submitting is the only way to reach the constraint

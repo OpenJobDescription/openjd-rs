@@ -783,8 +783,11 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             | (ExprValue::Float(_), JobParameterType::Float)
             | (ExprValue::Bool(_), JobParameterType::Bool)
             | (ExprValue::RangeExpr(_), JobParameterType::RangeExpr)
-            // No `ListPath` arm: this crate represents every `LIST[PATH]` value as a
-            // `ListString`, empty or not, so a `ListPath` is a caller-only shape.
+            // No `ListPath` arm: a stored `LIST[PATH]` is a `ListString` at every length.
+            // A path is context-sensitive, and job parameters are settled before there is
+            // a host context, so paths stay POSIX strings until template evaluation on the
+            // host. `ListPath` carries a `PathFormat`, which only means something after
+            // that boundary.
             | (
                 ExprValue::ListString(_, _),
                 JobParameterType::ListString | JobParameterType::ListPath
@@ -1203,9 +1206,10 @@ pub(super) fn coerce_json_to_job_parameter_type(
                 .map(|element| coerce_json_to_job_parameter_type(element, element_type))
                 .collect::<Result<_, _>>()?;
             // The hint types an empty list only, so it must name the variant the elements
-            // above produce: the declared element type, except PATH coerces to an
-            // `ExprValue::String`. `PATH` here made an empty LIST[PATH] a `ListPath`, a
-            // second representation that broke the round trip. Issues #389 and #387.
+            // above produce. A PATH element coerces to an `ExprValue::String`, because a
+            // job parameter stores a path as a string -- see `value_matches_type` -- so
+            // `STRING` is the hint for `LIST[PATH]`. `PATH` here gave the empty case a
+            // `ListPath`, a second representation. Issue #389.
             let hint = match element_type {
                 JobParameterType::Path => openjd_expr::ExprType::STRING,
                 other => other.expr_type(),
