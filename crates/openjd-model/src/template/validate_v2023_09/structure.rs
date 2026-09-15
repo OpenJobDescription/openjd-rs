@@ -367,7 +367,7 @@ pub fn validate_single_environment(
     if env.name.is_empty() {
         errors.add(&name_path, "must not be empty.");
     }
-    if env.name.len() > limits.max_env_name_len {
+    if env.name.chars().count() > limits.max_env_name_len {
         errors.add(
             &name_path,
             format!("exceeds {} characters.", limits.max_env_name_len),
@@ -391,10 +391,10 @@ pub fn validate_single_environment(
                     "value contains a NUL byte, which cannot be represented in a process environment.",
                 );
             }
-            if value.raw().chars().count() > limits.max_description_len {
+            if value.raw().chars().count() > limits.max_env_var_value_len {
                 errors.add(
                     &var_path,
-                    format!("value exceeds {} characters.", limits.max_description_len),
+                    format!("value exceeds {} characters.", limits.max_env_var_value_len),
                 );
             }
         }
@@ -450,7 +450,7 @@ fn validate_action(
     if cmd.is_empty() {
         errors.add(&path_field(path, "command"), "must not be empty.");
     }
-    if cmd.len() > limits.max_command_len {
+    if cmd.chars().count() > limits.max_command_len {
         errors.add(
             &path_field(path, "command"),
             format!("exceeds {} characters.", limits.max_command_len),
@@ -556,7 +556,7 @@ fn validate_host_requirements(
             if !names.insert(amt.name.to_lowercase()) {
                 errors.add(&amt_path, format!("duplicate amount name '{}'.", amt.name));
             }
-            if amt.name.len() > 100 {
+            if amt.name.chars().count() > 100 {
                 errors.add(
                     &amt_path,
                     format!("name '{}' exceeds 100 characters.", amt.name),
@@ -634,7 +634,7 @@ fn validate_host_requirements(
                     format!("duplicate attribute name '{}'.", attr.name),
                 );
             }
-            if attr.name.len() > 100 {
+            if attr.name.chars().count() > 100 {
                 errors.add(
                     &attr_path,
                     format!("name '{}' exceeds 100 characters.", attr.name),
@@ -678,7 +678,7 @@ fn validate_host_requirements(
                             if s.is_empty() {
                                 errors.add(&v_path, "must not be empty.");
                             }
-                            if s.len() > 100 {
+                            if s.chars().count() > 100 {
                                 errors.add(&v_path, "exceeds 100 characters.");
                             }
                         }
@@ -697,7 +697,17 @@ fn validate_host_requirements(
                 attr_lower == "attr.worker.os.family" || attr_lower == "attr.worker.cpu.arch";
             if is_single_valued {
                 if let Some(vals) = &attr.all_of {
-                    if vals.len() > 1 {
+                    // Gated on all-literal for the same reason as the value
+                    // checks above: a whole-field expression may resolve to
+                    // null (skipping its element) or flatten a list, so for
+                    // an expression-bearing list the resolved count is only
+                    // knowable at job creation, which re-checks it there.
+                    // Literal elements cannot skip, so their template count
+                    // is the resolved count. The generic 50-element cap
+                    // above is not relaxed — it applies to the template
+                    // element count regardless of expressions, so a
+                    // deferred single-valued list is still bounded here.
+                    if vals.len() > 1 && vals.iter().all(|v| v.is_literal()) {
                         errors.add(
                             &path_field(&attr_path, "allOf"),
                             "single-valued attribute cannot have more than 1 element.",
@@ -811,7 +821,7 @@ fn validate_combination_expr(
             return;
         }
     }
-    if expr.len() > 1280 {
+    if expr.chars().count() > 1280 {
         errors.add(path, "exceeds 1280 characters.");
     }
     let mut depth = 0i32;
