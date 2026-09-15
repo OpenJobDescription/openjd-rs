@@ -58,7 +58,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 tempfile = "3"
 s3s = "0.14"
 s3s-fs = "0.14"
-s3s-aws = "0.14"
+s3s-aws = "0.15"
 aws-config = "1"
 
 [[bin]]

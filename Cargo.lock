@@ -623,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-types-convert"
-version = "0.60.14"
+version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e50da9f5e3ecf145b4f6eb04963e6fbf52f528017de0784a28c56b9407414b1"
+checksum = "f09916ff010d43086d52ec7d38899a5bc2ad21a2cb5428f85f1ee84a44008ba0"
 dependencies = [
  "aws-smithy-types",
  "time",
@@ -2126,7 +2126,7 @@ dependencies = [
  "rand 0.10.2",
  "rayon",
  "rusqlite",
- "s3s",
+ "s3s 0.14.1",
  "s3s-aws",
  "s3s-fs",
  "serde",
@@ -2734,10 +2734,64 @@ dependencies = [
 ]
 
 [[package]]
-name = "s3s-aws"
-version = "0.14.1"
+name = "s3s"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91781ad97c7ab37bb932a2644a8831607677a91d1341271ef216459b9bb32559"
+checksum = "652451a66fefda01a13dc7df24aa2af9e70c7058f98bc08fe2f7c552eaa9f1e3"
+dependencies = [
+ "arc-swap",
+ "arrayvec",
+ "async-trait",
+ "atoi",
+ "base64-simd",
+ "bytes",
+ "bytestring",
+ "cfg-if",
+ "chrono",
+ "crc-fast",
+ "futures",
+ "hex-simd",
+ "hmac 0.13.0",
+ "http 1.4.2",
+ "http-body 1.1.0",
+ "http-body-util",
+ "httparse",
+ "hyper",
+ "itoa",
+ "md-5",
+ "memchr",
+ "mime",
+ "nom",
+ "numeric_cast",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "smallvec",
+ "std-next",
+ "subtle",
+ "sync_wrapper",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "transform-stream",
+ "url",
+ "urlencoding",
+ "xxhash-rust",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s-aws"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "132f4a5bfd0b3b164780fcbf64f2c7007d9add410855df6318b217b30f1432c0"
 dependencies = [
  "async-trait",
  "aws-sdk-s3",
@@ -2745,7 +2799,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "hyper",
- "s3s",
+ "s3s 0.15.0",
  "std-next",
  "sync_wrapper",
  "tracing",
@@ -2768,7 +2822,7 @@ dependencies = [
  "mime",
  "numeric_cast",
  "path-absolutize",
- "s3s",
+ "s3s 0.14.1",
  "serde",
  "serde_json",
  "std-next",
