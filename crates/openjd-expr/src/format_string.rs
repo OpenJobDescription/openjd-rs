@@ -455,6 +455,34 @@ impl FormatString {
             .all(|s| matches!(s, Segment::Literal(_)))
     }
 
+    /// Number of parsed segments — literal runs and `{{...}}` expressions.
+    ///
+    /// Useful for reasoning statically about resolution shape: a format
+    /// string with **more than one** segment always concatenates to a
+    /// single string (Expression Language §1.3.2 — only a whole-field
+    /// single-expression format string resolves as a typed passthrough,
+    /// where a `null` result can skip a list element and a list result
+    /// can flatten). [`is_literal`](Self::is_literal) distinguishes the
+    /// two single-segment cases.
+    pub fn segment_count(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// The literal (non-expression) text runs of this format string, in
+    /// order.
+    ///
+    /// Literal runs appear verbatim in every possible resolution, so a
+    /// property that holds for a literal run (e.g. "contains a control
+    /// character") holds for every string the format string can resolve
+    /// to. Expression *source* text is not included — it never appears
+    /// in a resolved value, only what it evaluates to does.
+    pub fn literal_segments(&self) -> impl Iterator<Item = &str> {
+        self.segments.iter().filter_map(|s| match s {
+            Segment::Literal(text) => Some(text.as_str()),
+            Segment::Expression { .. } => None,
+        })
+    }
+
     /// Copy symbol table entries referenced by this format string's expressions
     /// from `source` into `dest`. Only copies the actual symtab values that are
     /// referenced, not properties/methods called on them.
@@ -948,6 +976,51 @@ mod tests {
             fs.resolve_string_with(&SymbolTable::new(), &FormatStringOptions::default())
                 .unwrap(),
             "hello"
+        );
+    }
+    #[test]
+    fn segment_count_by_shape() {
+        // Single literal run and whole-field single expression are both
+        // one segment; is_literal() distinguishes them.
+        assert_eq!(FormatString::new("hello").unwrap().segment_count(), 1);
+        assert_eq!(FormatString::new("{{Param.X}}").unwrap().segment_count(), 1);
+        // Any surrounding text makes it multi-segment — the shape that
+        // always concatenates to a single string on resolution.
+        assert_eq!(
+            FormatString::new("v{{Param.X}}").unwrap().segment_count(),
+            2
+        );
+        assert_eq!(
+            FormatString::new("{{Param.X}}-{{Param.Y}}")
+                .unwrap()
+                .segment_count(),
+            3
+        );
+        // Empty input parses to zero segments (and is literal).
+        let empty = FormatString::new("").unwrap();
+        assert_eq!(empty.segment_count(), 0);
+        assert!(empty.is_literal());
+    }
+
+    #[test]
+    fn literal_segments_excludes_expression_source() {
+        let fs = FormatString::new("a-{{ Param.X }}-b{{ 'y' }}").unwrap();
+        let literals: Vec<&str> = fs.literal_segments().collect();
+        assert_eq!(literals, vec!["a-", "-b"]);
+        // Expression-only and literal-only shapes.
+        assert_eq!(
+            FormatString::new("{{ Param.X }}")
+                .unwrap()
+                .literal_segments()
+                .count(),
+            0
+        );
+        assert_eq!(
+            FormatString::new("plain")
+                .unwrap()
+                .literal_segments()
+                .collect::<Vec<_>>(),
+            vec!["plain"]
         );
     }
     #[test]

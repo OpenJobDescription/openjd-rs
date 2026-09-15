@@ -1037,6 +1037,18 @@ impl FormatString {
     /// True iff this format string contains no `{{...}}` interpolations.
     pub fn is_literal(&self) -> bool;
 
+    /// Number of parsed segments — literal runs and `{{...}}` expressions.
+    /// A format string with more than one segment always concatenates to
+    /// a single string on resolution (only a whole-field single-expression
+    /// format string can resolve to `null` or to a list); `is_literal`
+    /// distinguishes the two single-segment cases.
+    pub fn segment_count(&self) -> usize;
+
+    /// The literal (non-expression) text runs, in order. Literal runs
+    /// appear verbatim in every possible resolution; expression source
+    /// text is not included (it never appears in a resolved value).
+    pub fn literal_segments(&self) -> impl Iterator<Item = &str>;
+
     /// All symbol names accessed across every interpolation.
     pub fn accessed_symbols(&self) -> std::collections::HashSet<String>;
 
