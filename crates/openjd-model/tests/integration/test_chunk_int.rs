@@ -884,3 +884,202 @@ fn range_list_is_still_capped() {
         &["range exceeds 1024 elements"],
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// NONCONTIGUOUS chunk rendering parity with the Python reference
+// (IntRangeExpr.from_list). Expected strings measured against the
+// Python source. The old compressor rendered an interior consecutive
+// pair absorbed into a following progression ("1,2-6:2"); the
+// reference consumes the pair atomically ("1,2,4,6").
+// ══════════════════════════════════════════════════════════════
+
+fn chunk_strings(template_json: &str) -> Vec<String> {
+    let job = create_chunked_job(template_json);
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let iter = StepParameterSpaceIterator::new(ps).unwrap();
+    iter.map(|set| match &set["P"].value {
+        openjd_expr::ExprValue::RangeExpr(r) => r.to_string(),
+        other => panic!("expected a RangeExpr chunk value, got {other:?}"),
+    })
+    .collect()
+}
+
+/// Static path: one chunk holding a pair followed by a stepped progression.
+#[test]
+fn noncontiguous_static_interior_pair_renders_like_python() {
+    let chunks = chunk_strings(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1,2,4,6",
+                 "chunks": {"defaultTaskCount": 4, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    assert_eq!(chunks, vec!["1,2,4,6"]);
+}
+
+/// Static path, list-form range: a stepped pair followed by a step-1 run.
+/// The reference's greedy pair-commit eats the 3, so no "3-5" appears.
+#[test]
+fn noncontiguous_static_stepped_pair_renders_like_python() {
+    let chunks = chunk_strings(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": [1, 3, 4, 5],
+                 "chunks": {"defaultTaskCount": 4, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    assert_eq!(chunks, vec!["1,3,4,5"]);
+}
+
+/// The conformance fixture shape (noncontiguous-format.test.yaml): range 1-8,
+/// defaultTaskCount 3. The trailing pair must render comma-separated.
+#[test]
+fn noncontiguous_static_trailing_pair_renders_comma_separated() {
+    let chunks = chunk_strings(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1-8",
+                 "chunks": {"defaultTaskCount": 3, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    assert_eq!(chunks, vec!["1-3", "4-6", "7,8"]);
+}
+
+/// Adaptive path (targetRuntimeSeconds > 0) goes through
+/// AdaptiveChunkIterator::make_chunk, not the static node. Same contract.
+#[test]
+fn noncontiguous_adaptive_interior_pair_renders_like_python() {
+    let chunks = chunk_strings(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1,2,4,6",
+                 "chunks": {"defaultTaskCount": 4, "targetRuntimeSeconds": 100, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    assert_eq!(chunks, vec!["1,2,4,6"]);
+}
+
+/// Differential guard: CONTIGUOUS rendering is unchanged by the parity fix.
+/// An even 1-8 split under CONTIGUOUS keeps dash form for the trailing pair.
+#[test]
+fn contiguous_trailing_pair_still_renders_dash_form() {
+    let chunks = chunk_strings(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1-8",
+                 "chunks": {"defaultTaskCount": 3, "rangeConstraint": "CONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+    );
+    assert_eq!(chunks, vec!["1-3", "4-6", "7-8"]);
+}
+
+/// A chunk must pass `validate_containment` after a round trip through its
+/// own rendered string: consumers (e.g. `--task-params` on the CLI) hand
+/// chunk values back as strings. This range splits into a stepped-pair
+/// chunk ("6,9"), which `from_values` groups as one stepped IntRange while
+/// the parser reads two singletons — structural comparison would reject it,
+/// so containment must compare by value sequence.
+#[test]
+fn noncontiguous_chunk_string_round_trips_through_validate_containment() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1,2,4,6,9,12,13",
+                 "chunks": {"defaultTaskCount": 3, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    // Enforce the premise: the middle chunk is the stepped pair.
+    assert_eq!(chunk_strings(template), vec!["1,2,4", "6,9", "12,13"]);
+    let job = create_chunked_job(template);
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let iter = StepParameterSpaceIterator::new(ps).unwrap();
+    let mut seen = 0;
+    for set in StepParameterSpaceIterator::new(ps).unwrap() {
+        let openjd_expr::ExprValue::RangeExpr(r) = &set["P"].value else {
+            panic!("expected a RangeExpr chunk value");
+        };
+        let reparsed: openjd_expr::RangeExpr = r.to_string().parse().unwrap();
+        let mut round_trip = set.clone();
+        round_trip.insert(
+            "P".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type: set["P"].param_type,
+                value: openjd_expr::ExprValue::RangeExpr(reparsed),
+            },
+        );
+        iter.validate_containment(&round_trip)
+            .unwrap_or_else(|e| panic!("chunk '{r}' failed its own round trip: {e}"));
+        seen += 1;
+    }
+    assert_eq!(seen, 3);
+}
+
+/// Random access must render identically to sequential iteration: the
+/// static node's `get(i)` and the iterator share `build_chunk_range_expr`.
+#[test]
+fn noncontiguous_chunk_get_matches_iteration() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{"name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "CHUNK[INT]", "range": "1,2,4,6,9,12,13",
+                 "chunks": {"defaultTaskCount": 3, "rangeConstraint": "NONCONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let job = create_chunked_job(template);
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let iter = StepParameterSpaceIterator::new(ps).unwrap();
+    let iterated: Vec<String> = chunk_strings(template);
+    assert_eq!(iterated, vec!["1,2,4", "6,9", "12,13"]);
+    let accessed: Vec<String> = (0..iterated.len())
+        .map(|i| match &iter.get(i).unwrap()["P"].value {
+            openjd_expr::ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("expected a RangeExpr chunk value, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(accessed, iterated);
+}

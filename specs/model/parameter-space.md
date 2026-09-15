@@ -179,9 +179,12 @@ remainder count (`leftovers = total % num_chunks`). Both `StaticChunkNode` and
 `StaticChunkIterator` delegate to a shared `build_chunk_range_expr()` function.
 
 On `get(i)`, the node slices into the underlying range at the computed offset and builds
-a `RangeExpr` string on the fly. `compress_range_expr()` compresses the slice into compact
-form, detecting constant-step arithmetic sequences (e.g., `[1,3,5]` → `"1-5:2"`,
-`[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`). Step detection requires 3+ values in a run.
+a `RangeExpr` on the fly. `chunk_values_to_range_expr()` groups the slice via
+`RangeExpr::from_values`, which mirrors the Python reference's `IntRangeExpr.from_list`
+(e.g., `[1,3,5]` → `"1-5:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7,8,9"`), so NONCONTIGUOUS
+chunk strings are byte-identical across the two implementations. The reference's grouping
+is greedy on the first gap: a consecutive pair is consumed atomically (`[1,2,4,6]` →
+`"1,2,4,6"`, never `"1,2-6:2"`), and a 2-element sub-range renders in comma form.
 
 ### Adaptive Chunking
 
@@ -195,6 +198,13 @@ Adaptive chunking disables random access (`get()` returns `None` and `len()` ret
 because chunk boundaries aren't known in advance.
 
 `AdaptiveChunkNode::validate_containment()` uses a `HashSet` for O(N) lookup.
+
+`StaticChunkNode::validate_containment()` compares a candidate against each generated
+chunk by value sequence, not by `RangeExpr` structural equality. The two differ for a
+stepped pair: `from_values` groups `[6,9]` as one stepped range, while parsing its
+rendered form `"6,9"` yields two singletons. Value comparison keeps the invariant that
+a chunk string printed by the iterator passes validation when handed back (e.g. via the
+CLI's `--task-params`).
 
 ### Chunk Override
 
