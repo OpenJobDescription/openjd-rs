@@ -569,3 +569,66 @@ fn list_containment_empty_list_accepts_any_item_type() {
     assert_eq!(eval("[] in [[]]").to_display_string(), "true");
 }
 
+#[test]
+fn list_containment_unresolved_item_is_type_checked() {
+    // Static type checking: an unresolved item whose constraint can never
+    // match the element type is refused at validation, while a compatible
+    // one yields unresolved[bool].
+    let mut st = SymbolTable::new();
+    st.set("Param.N", ExprValue::unresolved(openjd_expr::ExprType::INT))
+        .unwrap();
+    st.set(
+        "Param.S",
+        ExprValue::unresolved(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    for expr in [
+        "Param.N in [1, 2]",
+        "Param.N in [1.0, 2.0]",
+        "Param.N in []",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+    let e = eval_err_with("Param.S in [1, 2]", &st);
+    assert!(
+        e.contains("Cannot use 'in' operator with list[int] and string"),
+        "got {e}"
+    );
+}
+
+#[test]
+fn ordering_with_unresolved_operand_yields_unresolved_bool() {
+    // Comparison operands now go through dispatch even when unresolved. The
+    // ordering operators are registered `(T1, T2)`, so any pair matches at
+    // the signature and a cross-type pair the spec calls an error
+    // (`Param.S < 1`) is still only refused at run time by `do_compare`.
+    // Tightening that is a separate change; this pins that dispatch with
+    // unresolved operands does not regress the well-typed cases.
+    let mut st = SymbolTable::new();
+    st.set(
+        "Param.S",
+        ExprValue::unresolved(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    st.set("Param.N", ExprValue::unresolved(openjd_expr::ExprType::INT))
+        .unwrap();
+    for expr in [
+        "Param.N < 2",
+        "Param.N < 2.5",
+        "Param.S == 1",
+        "1 < Param.N < 3",
+        "Param.S < 'b'",
+        "Param.S in 'abc'",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+    // The string overload of `in` is `(string, string)`, so this one IS
+    // caught at the signature.
+    let e = eval_err_with("Param.N in 'abc'", &st);
+    assert!(
+        e.contains("Cannot use 'in' operator with string and int"),
+        "got {e}"
+    );
+}

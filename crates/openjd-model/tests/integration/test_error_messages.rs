@@ -523,3 +523,24 @@ fn membership_item_type_mismatch_is_refused_at_validation() {
         ],
     );
 }
+
+#[test]
+fn membership_unresolved_parameter_of_wrong_type_is_refused_at_validation() {
+    // The static check reaches parameter references: a STRING parameter
+    // tested against a list[int] can never match, so it fails at check
+    // rather than on the worker.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "S", "type": "STRING", "default": "a"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {
+            "command": "echo", "args": ["{{ Param.S in [1, 2] }}"]}}}}]
+    }"#,
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "Cannot use 'in' operator with list[int] and string",
+        ],
+    );
+}
