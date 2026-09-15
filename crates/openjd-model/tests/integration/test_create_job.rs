@@ -2404,6 +2404,37 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
     );
 }
 
+#[test]
+fn test_create_job_resolved_name_with_control_chars_rejected() {
+    // §1.1.1 forbids control (Cc) characters in the *resolved* job name.
+    // Template validation checks this only when the name is fully static;
+    // an interpolated name is only known at job creation.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "render-{{ Param.Suffix }}",
+        "parameterDefinitions": [{"name": "Suffix", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let err = parse_and_create_err(template, &[("Suffix", "a\nb")]);
+    assert_eq!(
+        err,
+        "Validation error: Job name must not contain control characters"
+    );
+}
+
+#[test]
+fn test_create_job_resolved_name_without_control_chars_ok() {
+    // Passing control for the job-creation control-character check.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "render-{{ Param.Suffix }}",
+        "parameterDefinitions": [{"name": "Suffix", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let job = parse_and_create(template, &[("Suffix", "final")]);
+    assert_eq!(job.name, "render-final");
+}
+
 // === Tests ported from Python _internal/test_create_job.py ===
 // The _internal tests test instantiate_model internals. Most are Python-specific
 // (Pydantic model construction). The key behavioral tests are already covered above.

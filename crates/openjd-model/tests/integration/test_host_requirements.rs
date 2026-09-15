@@ -264,6 +264,72 @@ fn test_attr_cpu_arch_all_of_multiple() {
 }
 
 #[test]
+fn test_attr_os_family_all_of_two_literals_plus_expr() {
+    // Two literal elements alone already violate the single-valued rule
+    // under every possible resolution: only a whole-field
+    // single-expression element can null-skip or list-flatten, and a
+    // literal always contributes exactly one resolved element. Rejected
+    // at decode even though the list is not all-literal.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Foo", "type": "STRING", "default": "linux"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}, "hostRequirements": {"attributes": [{"name": "attr.worker.os.family", "allOf": ["linux", "windows", "{{ Param.Foo }}"]}]}}]
+    }"#,
+    );
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("Expected validation error");
+    assert!(
+        err.to_string().contains(
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf:\n\tsingle-valued attribute cannot have more than 1 element."
+        ),
+        "Got:\n{err}"
+    );
+}
+
+#[test]
+fn test_attr_os_family_all_of_literal_plus_multisegment_rejected() {
+    // A multi-segment format string always concatenates to exactly one
+    // string (Expression Language §1.3.2 — it can never null-skip or
+    // flatten), so it counts toward the single-valued rule just like a
+    // literal: one literal + one multi-segment element is a certain
+    // violation, rejected at decode.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Foo", "type": "STRING", "default": "linux"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}, "hostRequirements": {"attributes": [{"name": "attr.worker.os.family", "allOf": ["linux", "windows{{ Param.Foo }}"]}]}}]
+    }"#,
+    );
+    let err = decode_job_template(v, None, &CallerLimits::default())
+        .expect_err("Expected validation error");
+    assert!(
+        err.to_string().contains(
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf:\n\tsingle-valued attribute cannot have more than 1 element."
+        ),
+        "Got:\n{err}"
+    );
+}
+
+#[test]
+fn test_attr_os_family_all_of_one_literal_plus_expr_deferred() {
+    // One literal plus one whole-field expression may still resolve to a
+    // single element (the expression can null-skip), so decode defers
+    // the single-valued count to job creation.
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Foo", "type": "STRING", "default": "linux"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}, "hostRequirements": {"attributes": [{"name": "attr.worker.os.family", "allOf": ["linux", "{{ Param.Foo }}"]}]}}]
+    }"#,
+    );
+    decode_job_template(v, None, &CallerLimits::default()).expect("Expected success");
+}
+
+#[test]
 fn test_vendor_attr_missing_any_all() {
     check_err(&job_with_host_req(r#"{"attributes": [{"name": "vendor:attr.somecapability"}]}"#), &[
         "steps[0] -> hostRequirements -> attributes[0]:\n\tmust have at least one of anyOf or allOf.",

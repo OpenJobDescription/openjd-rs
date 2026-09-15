@@ -140,7 +140,12 @@ calling this function.
 
 1. Build symbol table from parameter values
 2. Resolve template-scope fields:
-   - Job name (evaluate FormatString)
+   - Job name (evaluate FormatString). The resolved name is checked against §1.1.1:
+     length vs `max_job_name_len`, non-empty, and no Cc control characters. Decode
+     already rejects an empty literal name, control characters in the name's literal
+     text (verbatim in every resolution), and a fully static name resolving to an
+     empty or control-character-bearing value — what remains only knowable here is
+     an emptiness or control character *introduced by an interpolated value*.
    - Step names
    - Host requirement values (amounts min/max, attribute values). Resolved amount bounds
      must be finite `f64` values; non-numeric, NaN, and infinite results are rejected.

@@ -102,6 +102,16 @@ pub fn create_job(
             "Job name must not resolve to an empty string".to_string(),
         ));
     }
+    // §1.1.1 forbids control (Cc) characters in the resolved name. The
+    // raw-text pass rejects control characters in the literal text, and
+    // the format-string pass checks the resolved value when the name is
+    // fully static — but a control character introduced by an
+    // interpolated value is only known here.
+    if job_name.chars().any(char::is_control) {
+        return Err(ModelError::DecodeValidation(
+            "Job name must not contain control characters".to_string(),
+        ));
+    }
 
     if has_expr {
         symtab.set("Job.Name", openjd_expr::ExprValue::String(job_name.clone()))?;
