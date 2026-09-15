@@ -7,19 +7,11 @@
 use openjd_sessions::path_mapping::{PathFormat, PathMappingRule};
 
 fn posix_rule(src: &str, dst: &str) -> PathMappingRule {
-    PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: src.to_string(),
-        destination_path: dst.to_string(),
-    }
+    PathMappingRule::new(PathFormat::Posix, src, dst)
 }
 
 fn windows_rule(src: &str, dst: &str) -> PathMappingRule {
-    PathMappingRule {
-        source_path_format: PathFormat::Windows,
-        source_path: src.to_string(),
-        destination_path: dst.to_string(),
-    }
+    PathMappingRule::new(PathFormat::Windows, src, dst)
 }
 
 // === test_remaps: posix->posix ===

@@ -158,6 +158,7 @@ fn is_root_path(path: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct FileEntry {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,6 +232,7 @@ impl std::fmt::Display for FileEntry {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct DirEntry {
     pub path: String,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -266,12 +268,28 @@ impl std::fmt::Display for DirEntry {
 // --- Marker types ---
 
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "zero-field marker type; there is nothing to add"
+)]
 pub struct Abs;
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "zero-field marker type; there is nothing to add"
+)]
 pub struct Rel;
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "zero-field marker type; there is nothing to add"
+)]
 pub struct Full;
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "zero-field marker type; there is nothing to add"
+)]
 pub struct Diff;
 
 // --- Manifest ---
@@ -648,6 +666,7 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
 // --- SymlinkPolicy ---
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SymlinkPolicy {
     CollapseEscaping,
     CollapseAll,
@@ -682,12 +701,20 @@ pub trait ManifestRef {
 // --- Enum wrappers ---
 
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum AbsManifest {
     Snapshot(AbsSnapshot),
     Diff(AbsSnapshotDiff),
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum RelManifest {
     Snapshot(Snapshot),
     Diff(SnapshotDiff),
@@ -753,6 +780,10 @@ impl_manifest_accessors!(RelManifest, Snapshot, SnapshotDiff);
 
 // --- ManifestEntry enum for filter operations ---
 
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed dichotomy: matching every arm is the API"
+)]
 pub enum ManifestEntry<'a> {
     File(&'a FileEntry),
     Dir(&'a DirEntry),

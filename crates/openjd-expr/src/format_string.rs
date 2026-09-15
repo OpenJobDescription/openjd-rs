@@ -815,6 +815,10 @@ pub struct StaticResolution {
 /// Carries the position of the failing interpolation within the format string
 /// so callers can produce caret-style diagnostics or structured error responses.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct FormatStringValidationError {
     /// Description of what went wrong (e.g. "Undefined variable 'Param.X'").
     pub message: String,

@@ -14,6 +14,12 @@
 /// assert_ne!(state, ActionState::Failed);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "runtime state machine: consumers match on these to react, and a new state \
+              must be a compile error rather than a silently ignored `_` arm. Not \
+              extension-gated."
+)]
 pub enum ActionState {
     Running,
     Success,
@@ -36,6 +42,12 @@ impl std::fmt::Display for ActionState {
 
 /// A parsed openjd stdout message from a running action.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "runtime state machine: consumers match on these to react, and a new state \
+              must be a compile error rather than a silently ignored `_` arm. Not \
+              extension-gated."
+)]
 pub enum ActionMessage {
     /// `openjd_progress: <number>`
     Progress(f64),
@@ -71,6 +83,10 @@ impl std::fmt::Display for ActionMessage {
 
 /// Result of running an action.
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct ActionResult {
     pub state: ActionState,
     pub exit_code: Option<i32>,

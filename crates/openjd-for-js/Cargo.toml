@@ -26,3 +26,10 @@ js-sys = "0.3"
 [dependencies.web-sys]
 version = "0.3"
 features = ["console"]
+
+# Exempt: `publish = false` WASM bindings whose Rust surface is an implementation
+# detail of the npm package; JS callers use plain-object literals.
+# See specs/non-exhaustive-policy.md.
+[lints.clippy]
+exhaustive_enums = "allow"
+exhaustive_structs = "allow"

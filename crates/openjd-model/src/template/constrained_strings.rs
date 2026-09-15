@@ -11,6 +11,11 @@ use std::sync::LazyLock;
 
 /// §7.1 Identifier: `[A-Za-z_][A-Za-z0-9_]*`, length 1..=512 (64 base, 512 with FEATURE_BUNDLE_1)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// `#[allow]`, not `#[expect]`: the lint fires only in test-enabled builds of
+// this crate, so an `#[expect]` would be unfulfilled in the plain lib build.
+// Same rationale as the other newtypes here — a single-field wrapper cannot
+// gain a second field. See specs/non-exhaustive-policy.md.
+#[allow(clippy::exhaustive_structs)]
 pub struct Identifier(pub String);
 
 static IDENTIFIER_RE: LazyLock<Regex> =
@@ -58,6 +63,12 @@ impl std::fmt::Display for Identifier {
 
 /// §7.2 Description: any unicode except Cc category, length 0..=2048
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "single-field wrapper over one validated value; it cannot gain a second \
+              field without ceasing to be a newtype, and callers construct and \
+              destructure it directly"
+)]
 pub struct Description(pub String);
 
 impl Description {
@@ -93,6 +104,12 @@ impl serde::Serialize for Description {
 
 /// §1.1.2 ExtensionName: `[A-Z_0-9]{3,128}`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "single-field wrapper over one validated value; it cannot gain a second \
+              field without ceasing to be a newtype, and callers construct and \
+              destructure it directly"
+)]
 pub struct ExtensionName(pub String);
 
 static EXTENSION_NAME_RE: LazyLock<Regex> =

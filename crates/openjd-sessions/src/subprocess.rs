@@ -112,6 +112,10 @@ pub(crate) fn decode_backslashreplace(bytes: &[u8]) -> Cow<'_, str> {
 
 /// Result of running a subprocess action.
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct SubprocessResult {
     pub state: ActionState,
     pub exit_code: Option<i32>,

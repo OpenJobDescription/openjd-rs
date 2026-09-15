@@ -30,3 +30,6 @@ serde_json = { workspace = true }
 ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
 ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
 ruff_text_size = { package = "rustpython-ruff_text_size", version = "0.15.8" }
+
+[lints]
+workspace = true

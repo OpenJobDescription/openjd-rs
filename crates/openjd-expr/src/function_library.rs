@@ -45,6 +45,10 @@ pub type FunctionImpl = Arc<
 
 /// A registered function overload.
 #[derive(Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct FunctionEntry {
     pub signature: ExprType, // TypeCode::Signature
     pub implementation: FunctionImpl,

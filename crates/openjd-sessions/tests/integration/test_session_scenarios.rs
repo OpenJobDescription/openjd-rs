@@ -123,11 +123,7 @@ fn parse_path_mapping_rules(rules: &[serde_json::Value]) -> Vec<PathMappingRule>
                 "WINDOWS" => openjd_sessions::PathFormat::Windows,
                 _ => return None,
             };
-            Some(PathMappingRule {
-                source_path_format: format,
-                source_path: src.to_string(),
-                destination_path: dst.to_string(),
-            })
+            Some(PathMappingRule::new(format, src, dst))
         })
         .collect()
 }
@@ -185,9 +181,7 @@ async fn run_scenario(scenario_path: &Path) {
         .first()
         .map(|r| match r.source_path_format {
             openjd_sessions::PathFormat::Windows => openjd_expr::path_mapping::PathFormat::Windows,
-            openjd_sessions::PathFormat::Posix | openjd_sessions::PathFormat::Uri => {
-                openjd_expr::path_mapping::PathFormat::Posix
-            }
+            _ => openjd_expr::path_mapping::PathFormat::Posix,
         })
         .unwrap_or(openjd_expr::path_mapping::PathFormat::Posix);
 

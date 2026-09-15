@@ -40,6 +40,10 @@ impl fmt::Display for FileType {
 /// End-of-line mode for embedded files (FEATURE_BUNDLE_1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum EndOfLine {
     Lf,
     Crlf,
@@ -59,6 +63,10 @@ impl fmt::Display for EndOfLine {
 /// §2.2 PATH parameter objectType.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum ObjectType {
     File,
     Directory,
@@ -76,6 +84,10 @@ impl fmt::Display for ObjectType {
 /// §2.2 PATH parameter dataFlow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum DataFlow {
     None,
     In,
@@ -314,6 +326,10 @@ impl fmt::Display for TaskParameterType {
 
 /// A processed job parameter value.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct JobParameterValue {
     pub param_type: JobParameterType,
     pub value: openjd_expr::ExprValue,
@@ -321,6 +337,10 @@ pub struct JobParameterValue {
 
 /// A processed task parameter value.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::exhaustive_structs,
+    reason = "fixed tuple of a decidable concept"
+)]
 pub struct TaskParameterValue {
     pub param_type: TaskParameterType,
     pub value: openjd_expr::ExprValue,
@@ -416,6 +436,7 @@ impl serde::Serialize for ModelExtension {
 ///
 /// Caller limits can only add restrictions, never relax spec-defined ones.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CallerLimits {
     /// Maximum number of steps in a job template.
     pub max_step_count: Option<usize>,
@@ -431,6 +452,69 @@ pub struct CallerLimits {
     pub max_environment_size: Option<usize>,
     /// Maximum total template document size, in bytes.
     pub max_template_size: Option<usize>,
+}
+
+impl CallerLimits {
+    /// Start from "no additional restrictions" and set limits with the
+    /// `with_*` methods.
+    ///
+    /// `CallerLimits` is `#[non_exhaustive]` — new limits are added as the
+    /// specification grows — so other crates cannot use a struct literal.
+    /// This builder is the supported construction path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use openjd_model::CallerLimits;
+    ///
+    /// let limits = CallerLimits::new().with_max_step_count(50).with_max_task_count(10_000);
+    /// assert_eq!(limits.max_step_count, Some(50));
+    /// ```
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of steps in a job template.
+    #[must_use]
+    pub fn with_max_step_count(mut self, v: usize) -> Self {
+        self.max_step_count = Some(v);
+        self
+    }
+
+    /// Set the maximum number of environments (job + all step environments).
+    #[must_use]
+    pub fn with_max_env_count(mut self, v: usize) -> Self {
+        self.max_env_count = Some(v);
+        self
+    }
+
+    /// Set the maximum total task count across all steps.
+    #[must_use]
+    pub fn with_max_task_count(mut self, v: u64) -> Self {
+        self.max_task_count = Some(v);
+        self
+    }
+
+    /// Set the maximum JSON-encoded size of a step script, in bytes.
+    #[must_use]
+    pub fn with_max_step_script_size(mut self, v: usize) -> Self {
+        self.max_step_script_size = Some(v);
+        self
+    }
+
+    /// Set the maximum JSON-encoded size of an environment, in bytes.
+    #[must_use]
+    pub fn with_max_environment_size(mut self, v: usize) -> Self {
+        self.max_environment_size = Some(v);
+        self
+    }
+
+    /// Set the maximum total template document size, in bytes.
+    #[must_use]
+    pub fn with_max_template_size(mut self, v: usize) -> Self {
+        self.max_template_size = Some(v);
+        self
+    }
 }
 
 /// Model-side profile: the specification revision plus the set of
@@ -573,6 +657,7 @@ impl Default for ModelProfile {
 /// extensions) and the caller's policy overrides. When only the
 /// profile is needed, take `&ModelProfile` directly.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ValidationContext {
     pub profile: ModelProfile,
     pub caller_limits: CallerLimits,

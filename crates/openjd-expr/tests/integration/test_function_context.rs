@@ -177,11 +177,7 @@ fn method_syntax_with_host_context() {
 // === Path mapping rules ===
 #[test]
 fn with_path_mapping_rules() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/old".into(),
-        destination_path: "/new".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/old", "/new");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/old/file.txt".into()))
         .unwrap();
@@ -199,11 +195,7 @@ fn with_path_mapping_rules() {
 }
 #[test]
 fn unmatched_path_unchanged() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/old".into(),
-        destination_path: "/new".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/old", "/new");
     let mut st = SymbolTable::new();
     st.set("P", ExprValue::String("/other/file.txt".into()))
         .unwrap();
@@ -334,11 +326,7 @@ fn path_with_suffix_without_host_context() {
 // === Function-syntax apply_path_mapping with rules ===
 #[test]
 fn function_syntax_with_path_mapping_rules() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/old/path".into(),
-        destination_path: "/new/path".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/old/path", "/new/path");
     let lib = FunctionLibrary::for_profile(
         &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
     );
@@ -354,11 +342,7 @@ fn function_syntax_with_path_mapping_rules() {
 }
 #[test]
 fn function_syntax_unmatched_path_unchanged() {
-    let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/specific/path".into(),
-        destination_path: "/mapped/path".into(),
-    };
+    let rule = PathMappingRule::new(PathFormat::Posix, "/specific/path", "/mapped/path");
     let lib = FunctionLibrary::for_profile(
         &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
     );

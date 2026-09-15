@@ -10,6 +10,7 @@ use serde::Deserialize;
 /// §5 Action
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct Action {
     pub command: FormatString,
     pub args: Option<Vec<FormatString>>,
@@ -28,6 +29,7 @@ pub struct Action {
 /// rationale, and openjd-specifications Template Schemas §5.3 / RFC 0008
 /// "Cancelation behavior" for the normative rules.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum CancelationMode {
     /// §5.3.1 — immediate termination, no extra fields allowed.
     Terminate,
@@ -128,6 +130,7 @@ impl<'de> Deserialize<'de> for CancelationMode {
 /// §3.5.1 StepActions
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct StepActions {
     pub on_run: Action,
 }
@@ -135,6 +138,7 @@ pub struct StepActions {
 /// §4.1 EnvironmentActions
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
     /// RFC 0008 — wraps inner environments' `onEnter` actions. Requires the
@@ -152,6 +156,10 @@ pub struct EnvironmentActions {
 /// RFC 0008: the per-hook companion template variable a wrap hook exposes
 /// in addition to `WrappedAction.*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "decidable logical concept whose variants are not expected to change"
+)]
 pub enum WrapHookScope {
     /// `WrappedEnv.Name` — available in `onWrapEnvEnter` and `onWrapEnvExit`.
     EnvName,

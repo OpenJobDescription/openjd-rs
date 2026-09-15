@@ -42,12 +42,19 @@ use tracing::warn;
 ///   is expected to change before any stable release (its
 ///   `specificationVersion` strings carry the `beta-2025-12` tag).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ManifestFormat {
     V2023,
     V2025,
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed cross-product of (absolute|relative) x (snapshot|diff); matching \
+              every arm is the API, and a new arm would mean a new manifest kind that \
+              callers must handle explicitly"
+)]
 pub enum DecodedManifest {
     AbsSnapshot(AbsSnapshot),
     AbsSnapshotDiff(AbsSnapshotDiff),

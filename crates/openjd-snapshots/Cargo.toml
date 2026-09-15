@@ -85,3 +85,6 @@ optional = true
 
 [features]
 bench = ["clap", "rand", "tempfile", "aws-config"]
+
+[lints]
+workspace = true
