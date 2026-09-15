@@ -2126,7 +2126,7 @@ dependencies = [
  "rand 0.10.2",
  "rayon",
  "rusqlite",
- "s3s",
+ "s3s 0.15.0",
  "s3s-aws",
  "s3s-fs",
  "serde",
@@ -2734,6 +2734,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "s3s"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "652451a66fefda01a13dc7df24aa2af9e70c7058f98bc08fe2f7c552eaa9f1e3"
+dependencies = [
+ "arc-swap",
+ "arrayvec",
+ "async-trait",
+ "atoi",
+ "base64-simd",
+ "bytes",
+ "bytestring",
+ "cfg-if",
+ "chrono",
+ "crc-fast",
+ "futures",
+ "hex-simd",
+ "hmac 0.13.0",
+ "http 1.4.2",
+ "http-body 1.1.0",
+ "http-body-util",
+ "httparse",
+ "hyper",
+ "itoa",
+ "md-5",
+ "memchr",
+ "mime",
+ "nom",
+ "numeric_cast",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "smallvec",
+ "std-next",
+ "subtle",
+ "sync_wrapper",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "transform-stream",
+ "url",
+ "urlencoding",
+ "xxhash-rust",
+ "zeroize",
+]
+
+[[package]]
 name = "s3s-aws"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2745,7 +2799,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "hyper",
- "s3s",
+ "s3s 0.14.1",
  "std-next",
  "sync_wrapper",
  "tracing",
@@ -2768,7 +2822,7 @@ dependencies = [
  "mime",
  "numeric_cast",
  "path-absolutize",
- "s3s",
+ "s3s 0.14.1",
  "serde",
  "serde_json",
  "std-next",
