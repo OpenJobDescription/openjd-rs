@@ -64,42 +64,29 @@ fn tokenize(expr: &str) -> Vec<String> {
     tokens
 }
 
-/// Compress a slice of integers into a compact range expression string.
-/// e.g., [1,2,3,5,7,8,9] → "1-3,5,7-9"
-fn compress_range_expr(values: &[i64]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
-    if values.len() == 1 {
-        return values[0].to_string();
-    }
-
-    // Detect runs with a constant step. A run needs 3+ values to use step notation;
-    // with only 2 values, any step is trivially valid so we don't commit to it.
-    let mut parts = Vec::new();
-    let mut i = 0;
-    while i < values.len() {
-        if i + 2 < values.len() {
-            let step = values[i + 1] - values[i];
-            if step > 0 && values[i + 2] - values[i + 1] == step {
-                // Found a run of at least 3 with constant step
-                let mut end = i + 2;
-                while end + 1 < values.len() && values[end + 1] - values[end] == step {
-                    end += 1;
-                }
-                if step == 1 {
-                    parts.push(format!("{}-{}", values[i], values[end]));
-                } else {
-                    parts.push(format!("{}-{}:{}", values[i], values[end], step));
-                }
-                i = end + 1;
-                continue;
-            }
+/// Render a chunk's values as a `RangeExpr`.
+///
+/// CONTIGUOUS chunks span `first-last` and carry the contiguous display flag.
+/// NONCONTIGUOUS chunks group values via `RangeExpr::from_values`, which
+/// mirrors the Python reference's `IntRangeExpr.from_list`, so the rendered
+/// chunk string is byte-identical across the two implementations (e.g.
+/// `[1,2,4,6]` → `"1,2,4,6"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7,8,9"`).
+fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> RangeExpr {
+    match constraint {
+        RangeConstraint::Contiguous => {
+            // Always "{first}-{last}", including a single value ("3-3").
+            // with_contiguous(true) makes Display keep that form.
+            format!("{}-{}", vals[0], vals[vals.len() - 1])
+                .parse::<RangeExpr>()
+                .expect("range string built from valid integers")
+                .with_contiguous(true)
         }
-        parts.push(values[i].to_string());
-        i += 1;
+        // Chunk values are checked against the range value bound at job
+        // creation (see create_job/ranges.rs), so from_values cannot fail.
+        RangeConstraint::Noncontiguous => {
+            RangeExpr::from_values(vals.to_vec()).expect("chunk values validated at job creation")
+        }
     }
-    parts.join(",")
 }
 
 /// Build a `RangeExpr` for chunk `i` given the chunk layout parameters.
@@ -119,25 +106,7 @@ fn build_chunk_range_expr(
 ) -> RangeExpr {
     let size = small + if i < leftovers { 1 } else { 0 };
     let offset = i * small + i.min(leftovers);
-    let build = |vals: &[i64]| -> RangeExpr {
-        let range_str = match constraint {
-            RangeConstraint::Contiguous => {
-                if vals.len() == 1 {
-                    vals[0].to_string()
-                } else {
-                    format!("{}-{}", vals[0], vals[vals.len() - 1])
-                }
-            }
-            RangeConstraint::Noncontiguous => compress_range_expr(vals),
-        };
-        let expr = range_str
-            .parse::<RangeExpr>()
-            .expect("range string built from valid integers");
-        match constraint {
-            RangeConstraint::Contiguous => expr.with_contiguous(true),
-            RangeConstraint::Noncontiguous => expr,
-        }
-    };
+    let build = |vals: &[i64]| -> RangeExpr { chunk_values_to_range_expr(vals, constraint) };
     match range {
         job::TaskParamRange::RangeExpr(r) => {
             let vals: Vec<i64> = (offset..offset + size)
@@ -940,7 +909,12 @@ impl Node for StaticChunkNode {
         })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
-                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i) == *r) {
+                // Compare by value sequence, not structure: a chunk holding a
+                // stepped pair renders as "6,9", which parses back as two
+                // singleton ranges while from_values built one stepped range.
+                // A caller handing back a chunk string the iterator printed
+                // must pass validation.
+                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i).iter().eq(r.iter())) {
                     Ok(())
                 } else {
                     Err(format!(
@@ -1249,23 +1223,7 @@ struct AdaptiveChunkIterator {
 
 impl AdaptiveChunkIterator {
     fn make_chunk(&self, slice: &[i64]) -> RangeExpr {
-        let range_str = match self.range_constraint {
-            RangeConstraint::Contiguous => {
-                if slice.len() == 1 {
-                    slice[0].to_string()
-                } else {
-                    format!("{}-{}", slice[0], slice[slice.len() - 1])
-                }
-            }
-            RangeConstraint::Noncontiguous => compress_range_expr(slice),
-        };
-        let expr = range_str
-            .parse::<RangeExpr>()
-            .expect("range string built from valid integers");
-        match self.range_constraint {
-            RangeConstraint::Contiguous => expr.with_contiguous(true),
-            RangeConstraint::Noncontiguous => expr,
-        }
+        chunk_values_to_range_expr(slice, &self.range_constraint)
     }
 }
 
@@ -1886,13 +1844,52 @@ fn make_chunk_node(
 mod tests {
     use super::*;
 
+    /// Every expected string below was measured against the Python
+    /// reference's `IntRangeExpr.from_list`, which is the contract for
+    /// NONCONTIGUOUS chunk rendering.
     #[test]
-    fn test_compress_range_expr() {
-        assert_eq!(compress_range_expr(&[1, 2, 3]), "1-3");
-        assert_eq!(compress_range_expr(&[1, 2, 3, 5, 7, 8, 9]), "1-3,5,7-9");
-        assert_eq!(compress_range_expr(&[1]), "1");
-        assert_eq!(compress_range_expr(&[1, 3]), "1,3");
-        assert_eq!(compress_range_expr(&[]), "");
+    fn test_noncontiguous_chunk_rendering_matches_python_reference() {
+        let nc = RangeConstraint::Noncontiguous;
+        let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &nc).to_string();
+        assert_eq!(render(&[1]), "1");
+        assert_eq!(render(&[5]), "5");
+        assert_eq!(render(&[1, 3]), "1,3");
+        assert_eq!(render(&[7, 8]), "7,8");
+        assert_eq!(render(&[1, 2, 3]), "1-3");
+        assert_eq!(render(&[2, 4, 6]), "2-6:2");
+        // The from_list table from the Python reference's own test suite
+        // (test_range_expr.py), mirrored 1:1.
+        assert_eq!(render(&[1, 2, 3, 4, 5, 7]), "1-5,7");
+        assert_eq!(render(&[9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5]), "0-10");
+        assert_eq!(render(&[1, 3, 5, 6, 7, 8, 10, 13, 16]), "1-5:2,6-8,10-16:3");
+        assert_eq!(render(&[1, 3, 5, 10]), "1-5:2,10");
+        assert_eq!(render(&[1, 1, 1]), "1");
+        assert_eq!(render(&[9, 8, 7, 6]), "6-9");
+        // The reference consumes a leading consecutive pair atomically, so
+        // the pair's second value never seeds a later progression. The old
+        // Rust compressor rendered these as "1,2-6:2" and "1,3-5".
+        assert_eq!(render(&[1, 2, 4, 6]), "1,2,4,6");
+        assert_eq!(render(&[1, 3, 4, 5]), "1,3,4,5");
+        // A stepped pair stays a comma pair; only 3+ agreeing gaps collapse.
+        assert_eq!(render(&[1, 2, 3, 5, 7, 8, 9]), "1-3,5,7,8,9");
+        assert_eq!(render(&[1, 2, 4, 6, 8]), "1,2,4-8:2");
+        // Negative values render with the same rules.
+        assert_eq!(render(&[-5, -3, -1]), "-5--1:2");
+        assert_eq!(render(&[-3, -2]), "-3,-2");
+        assert_eq!(render(&[-5, -3, -1, 0, 1]), "-5--1:2,0,1");
+    }
+
+    #[test]
+    fn test_contiguous_chunk_rendering_keeps_dash_form() {
+        let c = RangeConstraint::Contiguous;
+        let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &c).to_string();
+        assert_eq!(render(&[7, 8]), "7-8");
+        assert_eq!(render(&[1, 2, 3]), "1-3");
+        // A single value keeps the dash form, including negative frames.
+        assert_eq!(render(&[5]), "5-5");
+        assert_eq!(render(&[1]), "1-1");
+        assert_eq!(render(&[-1]), "-1--1");
+        assert_eq!(render(&[-3, -2]), "-3--2");
     }
 
     #[test]
