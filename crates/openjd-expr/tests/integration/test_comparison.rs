@@ -542,13 +542,35 @@ fn list_containment_keeps_implicit_coercions() {
         ("3 in [1.0, 2.0]", "false"),
         ("1.0 in [1, 2]", "true"),
         ("1.5 in [1, 2]", "false"),
-        ("path(['/a']) in ['/a', '/b']", "true"),
-        ("'/a' in [path(['/a']), path(['/b'])]", "true"),
-        ("'/c' in [path(['/a']), path(['/b'])]", "false"),
         ("[1] in [[1.0], [2.0]]", "true"),
         ("[1.5] in [[1], [2]]", "false"),
     ] {
         assert_eq!(eval(expr).to_display_string(), expected, "{expr}");
+    }
+    // The path/string cases fix the path format: under the host default a
+    // Windows runner renders path(['/a']) as `\a`, which is the value
+    // comparison being wrong on purpose, not the signature check.
+    let st = SymbolTable::new();
+    for (expr, expected) in [
+        ("path(['/a']) in ['/a', '/b']", "true"),
+        ("'/a' in [path(['/a']), path(['/b'])]", "true"),
+        ("'/c' in [path(['/a']), path(['/b'])]", "false"),
+    ] {
+        assert_eq!(
+            eval_posix(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
+    for (expr, expected) in [
+        ("path(['C:\\a']) in ['C:\\a', 'C:\\b']", "true"),
+        ("'C:\\a' in [path(['C:\\a']), path(['C:\\b'])]", "true"),
+    ] {
+        assert_eq!(
+            eval_windows(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
     }
 }
 
