@@ -519,7 +519,7 @@ fn membership_item_type_mismatch_is_refused_at_validation() {
     }"#,
         &[
             "steps[0] -> script -> actions -> onRun -> args[1]:",
-            "Cannot use 'in' operator with list[int] and string",
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]",
         ],
     );
 }
@@ -540,7 +540,7 @@ fn membership_unresolved_parameter_of_wrong_type_is_refused_at_validation() {
     }"#,
         &[
             "steps[0] -> script -> actions -> onRun -> args[0]:",
-            "Cannot use 'in' operator with list[int] and string",
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]",
         ],
     );
 }

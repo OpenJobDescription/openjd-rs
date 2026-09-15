@@ -267,8 +267,11 @@ Operators are registered as dunder-named functions:
 The list overload uses one type variable, as the spec writes it
 (`__contains__(list: list[T], item: T)`): the item must be the list's element
 type or implicitly coercible to it, so `'1' in [1, 2, 3]` and `'a' in
-range_expr('1-3')` fail signature resolution at validation time (`Cannot use
-'in' operator with list[int] and string`) instead of evaluating to `false`.
+range_expr('1-3')` fail signature resolution at validation time instead of
+evaluating to `false`. Because membership dispatches container-first, the
+reverse of the source order, and a nested-list-in-flat-list test would print two
+identical types, the diagnostic names the roles: `Cannot use 'in' operator: item
+of type string is not compatible with the element type int of list[int]`.
 Membership is still decided by value equality once the types agree, and the
 language's non-destructive coercions are honoured when binding `T` from both
 arguments (see "Type variable unification" in type-system.md): `1 in [1.0,

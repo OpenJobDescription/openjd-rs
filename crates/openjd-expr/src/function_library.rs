@@ -318,6 +318,16 @@ impl FunctionLibrary {
 
         let type_strs: Vec<String> = arg_types.iter().map(|t| t.to_string()).collect();
         let display_name = friendly_op_name(name);
+        // Membership is dispatched container-first, the reverse of the source
+        // order, and a list-vs-list mismatch prints two identical types
+        // ("list[int] and list[int]"). Name the roles instead.
+        if let (Some(op @ ("in" | "not in")), [container, item]) =
+            (display_name, arg_types.as_slice())
+        {
+            if let Some(msg) = membership_mismatch_message(op, container, item) {
+                return Err(ExpressionError::new(msg));
+            }
+        }
         if let Some(op) = display_name {
             Err(ExpressionError::new(format!(
                 "Cannot use '{}' operator with {}",
@@ -480,6 +490,24 @@ impl FunctionLibrary {
             &format!("__property_{property_name}__"),
             std::slice::from_ref(base_type),
         )
+    }
+}
+
+/// The diagnostic for `item in container` when no `__contains__` signature
+/// matches and the container is a list or a range expression. Returns `None`
+/// for other containers (a string haystack keeps the generic message).
+fn membership_mismatch_message(op: &str, container: &ExprType, item: &ExprType) -> Option<String> {
+    match container.code() {
+        crate::types::TypeCode::List => {
+            let elem = container.params().first()?;
+            Some(format!(
+                "Cannot use '{op}' operator: item of type {item} is not compatible with the element type {elem} of {container}"
+            ))
+        }
+        crate::types::TypeCode::RangeExpr => Some(format!(
+            "Cannot use '{op}' operator: item of type {item} is not compatible with a range_expr container, which holds int values"
+        )),
+        _ => None,
     }
 }
 

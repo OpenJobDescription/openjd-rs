@@ -600,7 +600,7 @@ fn float_in_range_matches_python() {
         .unwrap_err()
         .message();
     assert!(
-        e.contains("Cannot use 'in' operator with range_expr and string"),
+        e.contains("Cannot use 'in' operator: item of type string is not compatible with a range_expr container"),
         "got {e}"
     );
     assert_eq!(

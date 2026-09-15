@@ -510,23 +510,50 @@ fn list_containment_uses_cross_type_range_equality() {
 
 #[test]
 fn list_containment_with_incompatible_item_type_is_refused() {
-    for (expr, types) in [
-        ("'1' in [1, 2, 3]", "list[int] and string"),
-        ("1 in ['a', 'b']", "list[string] and int"),
-        ("true in [1, 2]", "list[int] and bool"),
-        ("null in [1, 2]", "list[int] and nulltype"),
-        ("['a'] in [[1], [2]]", "list[list[int]] and list[string]"),
-        ("'a' in [x for x in [1, 2]]", "list[int] and string"),
+    for (expr, msg) in [
+        (
+            "'1' in [1, 2, 3]",
+            "item of type string is not compatible with the element type int of list[int]",
+        ),
+        (
+            "1 in ['a', 'b']",
+            "item of type int is not compatible with the element type string of list[string]",
+        ),
+        (
+            "true in [1, 2]",
+            "item of type bool is not compatible with the element type int of list[int]",
+        ),
+        (
+            "null in [1, 2]",
+            "item of type nulltype is not compatible with the element type int of list[int]",
+        ),
+        (
+            "['a'] in [[1], [2]]",
+            "item of type list[string] is not compatible with the element type list[int] of list[list[int]]",
+        ),
+        (
+            "'a' in [x for x in [1, 2]]",
+            "item of type string is not compatible with the element type int of list[int]",
+        ),
+        // A nested list against a flat one prints two identical types under
+        // the generic message ("list[int] and list[int]"); the role-naming
+        // one is what makes it readable.
+        (
+            "[1, 2] in [1, 2]",
+            "item of type list[int] is not compatible with the element type int of list[int]",
+        ),
     ] {
         let e = eval_err(expr);
         assert!(
-            e.contains(&format!("Cannot use 'in' operator with {types}")),
+            e.contains(&format!("Cannot use 'in' operator: {msg}")),
             "{expr}: got {e}"
         );
     }
     let e = eval_err("'a' not in [1, 2]");
     assert!(
-        e.contains("Cannot use 'not in' operator with list[int] and string"),
+        e.contains(
+            "Cannot use 'not in' operator: item of type string is not compatible with the element type int of list[int]"
+        ),
         "got {e}"
     );
 }
@@ -614,7 +641,9 @@ fn list_containment_unresolved_item_is_type_checked() {
     }
     let e = eval_err_with("Param.S in [1, 2]", &st);
     assert!(
-        e.contains("Cannot use 'in' operator with list[int] and string"),
+        e.contains(
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]"
+        ),
         "got {e}"
     );
 }
