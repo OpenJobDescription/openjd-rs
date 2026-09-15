@@ -406,6 +406,7 @@ impl FunctionLibrary {
                 &arg_type_sets,
                 0,
                 HashMap::new(),
+                HashMap::new(),
                 &mut result_types,
             );
         }
@@ -430,19 +431,30 @@ impl FunctionLibrary {
         arg_type_sets: &[Vec<ExprType>],
         idx: usize,
         bindings: HashMap<crate::types::TypeCode, ExprType>,
+        weak: HashMap<crate::types::TypeCode, ExprType>,
         result_types: &mut Vec<ExprType>,
     ) {
         if idx == arg_type_sets.len() {
-            result_types.push(sig.sig_return().substitute(&bindings));
+            let mut all = bindings;
+            crate::types::apply_weak_bindings(&mut all, weak);
+            result_types.push(sig.sig_return().substitute(&all));
             return;
         }
         let param = &sig_params[idx];
         for arg_type in &arg_type_sets[idx] {
             if let Some(new_binds) = param.match_type(arg_type) {
                 let mut merged = bindings.clone();
+                let mut merged_weak = weak.clone();
+                // The empty list binds a `list[<var>]` parameter only weakly,
+                // exactly as `ExprType::match_call` does.
+                let target = if crate::types::is_empty_list_against_list_var(param, arg_type) {
+                    &mut merged_weak
+                } else {
+                    &mut merged
+                };
                 let mut conflict = false;
                 for (k, v) in new_binds {
-                    if crate::types::merge_binding(&mut merged, k, v).is_none() {
+                    if crate::types::merge_binding(target, k, v).is_none() {
                         conflict = true;
                         break;
                     }
@@ -454,6 +466,7 @@ impl FunctionLibrary {
                         arg_type_sets,
                         idx + 1,
                         merged,
+                        merged_weak,
                         result_types,
                     );
                 }

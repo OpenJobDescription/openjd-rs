@@ -553,7 +553,7 @@ impl ExprType {
     /// Try to match a call's argument types against this signature.
     /// Returns type-variable bindings on success. A variable repeated across
     /// parameters must reconcile (same type, or a coercible pair such as
-    /// int/float, path/string, range_expr/list[int]); `[]` binds nothing.
+    /// int/float, path/string, range_expr/list[int]); `[]` binds only weakly.
     pub fn match_call(
         &self, arg_types: &[ExprType],
     ) -> Option<HashMap<TypeCode, ExprType>>;

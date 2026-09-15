@@ -620,6 +620,49 @@ fn list_containment_unresolved_item_is_type_checked() {
 }
 
 #[test]
+fn list_containment_with_any_typed_item_does_not_error() {
+    // A value of unknown type (`unresolved[any]`, which openjd-model uses for
+    // a `let` binding that already failed) must not turn membership into a
+    // second, misleading error.
+    let mut st = SymbolTable::new();
+    st.set("Foo", ExprValue::unresolved(openjd_expr::ExprType::ANY))
+        .unwrap();
+    for expr in [
+        "Foo in [1, 2]",
+        "Foo in ['a']",
+        "Foo not in [1.5]",
+        "1 in Foo",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+}
+
+#[test]
+fn empty_list_generics_keep_nulltype_return_type() {
+    // `sorted`/`reversed`/`unique` are `(list[T1]) -> list[T1]`; with an
+    // unresolved empty-list argument the static return type must stay
+    // `list[nulltype]`, which coerces to every `list[T]`, rather than leak
+    // the variable as `list[T1]`.
+    let mut st = SymbolTable::new();
+    st.set(
+        "E",
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::NULLTYPE)),
+    )
+    .unwrap();
+    for expr in ["sorted(E)", "reversed(E)", "unique(E)", "E * 2"] {
+        let v = eval_with(expr, &st);
+        assert_eq!(
+            v.expr_type(),
+            openjd_expr::ExprType::unresolved(openjd_expr::ExprType::list(
+                openjd_expr::ExprType::NULLTYPE
+            )),
+            "{expr}: got {v:?}"
+        );
+    }
+}
+
+#[test]
 fn ordering_with_unresolved_operand_yields_unresolved_bool() {
     // Comparison operands now go through dispatch even when unresolved. The
     // ordering operators are registered `(T1, T2)`, so any pair matches at

@@ -222,7 +222,9 @@ library.call(name, &args, ctx)
 3. **Generic match** — bind type variables (T, T1, T2, T3) and check consistency. A
    variable bound by two parameters reconciles through `types::unify_binding`: the
    same type, or a coercible pair (`int`/`float`, `path`/`string`, `range_expr`/`list[int]`)
-   which binds the wider type; `list[nulltype]` (the empty list) binds nothing
+   which binds the wider type, and `any` reconciles with anything; a `list[<var>]`
+   parameter matched by `list[nulltype]` (the empty list) binds only weakly, so a
+   sibling parameter's binding wins and a lone one still yields `nulltype`
 
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
