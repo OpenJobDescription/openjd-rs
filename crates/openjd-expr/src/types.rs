@@ -173,6 +173,12 @@ impl ExprType {
 
     /// Try to match a call's argument types against this signature.
     /// Returns type variable bindings if successful, None if no match.
+    ///
+    /// A type variable that appears in more than one parameter must bind
+    /// consistently across them. Two bindings are consistent when they are
+    /// the same type or an implicitly coercible pair (`int`/`float`,
+    /// `path`/`string`, `range_expr`/`list[int]`), and the empty list
+    /// literal `[]` binds nothing.
     pub fn match_call(&self, arg_types: &[ExprType]) -> Option<HashMap<TypeCode, ExprType>> {
         let sig_params = self.sig_params();
         if sig_params.len() != arg_types.len() {
@@ -182,12 +188,7 @@ impl ExprType {
         for (sig_p, arg_t) in sig_params.iter().zip(arg_types.iter()) {
             let sub = sig_p.match_type(arg_t)?;
             for (k, v) in sub {
-                if let Some(existing) = bindings.get(&k) {
-                    if *existing != v {
-                        return None;
-                    }
-                }
-                bindings.insert(k, v);
+                merge_binding(&mut bindings, k, v)?;
             }
         }
         Some(bindings)
@@ -198,6 +199,78 @@ impl ExprType {
     pub fn resolve_call(&self, arg_types: &[ExprType]) -> Option<ExprType> {
         let bindings = self.match_call(arg_types)?;
         Some(self.sig_return().substitute(&bindings))
+    }
+}
+
+// ── Type variable unification ──
+
+/// Record a binding for type variable `var`, reconciling it with any
+/// binding the same variable already has. Returns `None` on conflict.
+pub(crate) fn merge_binding(
+    bindings: &mut HashMap<TypeCode, ExprType>,
+    var: TypeCode,
+    new: ExprType,
+) -> Option<()> {
+    let merged = match bindings.get(&var) {
+        Some(existing) => unify_binding(existing, &new)?,
+        None => new,
+    };
+    bindings.insert(var, merged);
+    Some(())
+}
+
+/// Reconcile two candidate bindings for one type variable.
+///
+/// The bindings agree when they are the same type, or when one implicitly
+/// coerces to the other under the language's non-destructive rules
+/// (`int` → `float`, `path` → `string`, `range_expr` → `list[int]`), in
+/// which case the wider type is kept. Lists reconcile element-wise, where a
+/// `nulltype` element (the empty list literal `[]`) yields to the other
+/// element type because `list[nulltype]` is compatible with every `list[T]`.
+/// A union agrees if any member does. Anything else is a conflict, including
+/// a bare `nulltype` against a scalar: `null` is not an `int`.
+///
+/// This is what lets `__contains__(list[T], T)` accept `1 in [1.0, 2.0]`,
+/// `path([...]) in ["/a"]` and `[] in [[1]]` while refusing `"a" in [1, 2]`
+/// and `null in [1, 2]`.
+pub(crate) fn unify_binding(a: &ExprType, b: &ExprType) -> Option<ExprType> {
+    unify_inner(a, b, false)
+}
+
+fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<ExprType> {
+    if a == b {
+        return Some(a.clone());
+    }
+    match (a.code, b.code) {
+        (TypeCode::NullType, _) if as_list_element => Some(b.clone()),
+        (_, TypeCode::NullType) if as_list_element => Some(a.clone()),
+        (TypeCode::Int, TypeCode::Float) | (TypeCode::Float, TypeCode::Int) => {
+            Some(ExprType::FLOAT)
+        }
+        (TypeCode::Path, TypeCode::String) | (TypeCode::String, TypeCode::Path) => {
+            Some(ExprType::STRING)
+        }
+        (TypeCode::RangeExpr, TypeCode::List) if b.params[0].code == TypeCode::Int => {
+            Some(b.clone())
+        }
+        (TypeCode::List, TypeCode::RangeExpr) if a.params[0].code == TypeCode::Int => {
+            Some(a.clone())
+        }
+        (TypeCode::List, TypeCode::List) => {
+            let elem = unify_inner(&a.params[0], &b.params[0], true)?;
+            Some(ExprType::list(elem))
+        }
+        (TypeCode::Union, _) => a
+            .params
+            .iter()
+            .find_map(|m| unify_inner(m, b, as_list_element))
+            .map(|_| a.clone()),
+        (_, TypeCode::Union) => b
+            .params
+            .iter()
+            .find_map(|m| unify_inner(a, m, as_list_element))
+            .map(|_| b.clone()),
+        _ => None,
     }
 }
 
@@ -461,16 +534,26 @@ impl ExprType {
         if self.params.len() != other.params.len() {
             return None;
         }
+        // `list[<var>]` against the empty list literal's `list[nulltype]`
+        // matches and binds nothing: `[]` is compatible with every `list[T]`
+        // and must not pin `T` for the other arguments (`1 in []`).
+        if self.code == TypeCode::List
+            && other.params[0].code == TypeCode::NullType
+            && matches!(
+                self.params[0].code,
+                TypeCode::TypeVarT
+                    | TypeCode::TypeVarT1
+                    | TypeCode::TypeVarT2
+                    | TypeCode::TypeVarT3
+            )
+        {
+            return Some(HashMap::new());
+        }
         let mut bindings = HashMap::new();
         for (sp, cp) in self.params.iter().zip(other.params.iter()) {
             let sub = sp.match_type(cp)?;
             for (k, v) in sub {
-                if let Some(existing) = bindings.get(&k) {
-                    if *existing != v {
-                        return None;
-                    }
-                }
-                bindings.insert(k, v);
+                merge_binding(&mut bindings, k, v)?;
             }
         }
         Some(bindings)
@@ -1096,5 +1179,140 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert(TypeCode::TypeVarT1, ExprType::INT);
         assert_eq!(list_t1.substitute(&bindings), ExprType::list(ExprType::INT));
+    }
+
+    // === unify_binding: one type variable bound from two parameters ===
+
+    #[test]
+    fn unify_identical_types() {
+        assert_eq!(
+            unify_binding(&ExprType::INT, &ExprType::INT),
+            Some(ExprType::INT)
+        );
+    }
+
+    #[test]
+    fn unify_coercible_pairs_keep_the_wider_type() {
+        assert_eq!(
+            unify_binding(&ExprType::INT, &ExprType::FLOAT),
+            Some(ExprType::FLOAT)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::FLOAT, &ExprType::INT),
+            Some(ExprType::FLOAT)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::PATH, &ExprType::STRING),
+            Some(ExprType::STRING)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::STRING, &ExprType::PATH),
+            Some(ExprType::STRING)
+        );
+        let list_int = ExprType::list(ExprType::INT);
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &list_int),
+            Some(list_int.clone())
+        );
+        assert_eq!(
+            unify_binding(&list_int, &ExprType::RANGE_EXPR),
+            Some(list_int)
+        );
+    }
+
+    #[test]
+    fn unify_range_expr_only_with_list_int() {
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::FLOAT)),
+            None
+        );
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::STRING)),
+            None
+        );
+    }
+
+    #[test]
+    fn unify_incompatible_pairs_conflict() {
+        for (a, b) in [
+            (ExprType::INT, ExprType::STRING),
+            (ExprType::STRING, ExprType::INT),
+            (ExprType::BOOL, ExprType::INT),
+            (ExprType::BOOL, ExprType::FLOAT),
+            (ExprType::BOOL, ExprType::STRING),
+            (ExprType::PATH, ExprType::INT),
+            (ExprType::INT, ExprType::list(ExprType::INT)),
+        ] {
+            assert_eq!(unify_binding(&a, &b), None, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn unify_nulltype_is_a_scalar_at_top_level() {
+        // `null in [1, 2]`: the item is nulltype and the element type int.
+        // nulltype yields only as a list *element* (the empty list), not as
+        // a value standing on its own.
+        assert_eq!(unify_binding(&ExprType::NULLTYPE, &ExprType::INT), None);
+        assert_eq!(unify_binding(&ExprType::INT, &ExprType::NULLTYPE), None);
+    }
+
+    #[test]
+    fn unify_lists_element_wise_and_empty_list_yields() {
+        let list_int = ExprType::list(ExprType::INT);
+        let list_float = ExprType::list(ExprType::FLOAT);
+        let list_null = ExprType::list(ExprType::NULLTYPE);
+        assert_eq!(
+            unify_binding(&list_int, &list_float),
+            Some(list_float.clone())
+        );
+        assert_eq!(unify_binding(&list_int, &list_null), Some(list_int.clone()));
+        assert_eq!(unify_binding(&list_null, &list_int), Some(list_int.clone()));
+        assert_eq!(
+            unify_binding(
+                &ExprType::list(list_int.clone()),
+                &ExprType::list(list_null)
+            ),
+            Some(ExprType::list(list_int))
+        );
+        assert_eq!(
+            unify_binding(
+                &ExprType::list(ExprType::INT),
+                &ExprType::list(ExprType::STRING)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unify_union_agrees_if_any_member_does() {
+        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+        assert_eq!(unify_binding(&u, &ExprType::INT), Some(u.clone()));
+        assert_eq!(unify_binding(&ExprType::FLOAT, &u), Some(u.clone()));
+        assert_eq!(unify_binding(&u, &ExprType::BOOL), None);
+    }
+
+    #[test]
+    fn match_call_reconciles_repeated_type_variable() {
+        let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
+        let list_int = ExprType::list(ExprType::INT);
+        // Same type binds.
+        assert!(sig.match_call(&[list_int.clone(), ExprType::INT]).is_some());
+        // Coercible pair binds to the wider type.
+        let b = sig
+            .match_call(&[ExprType::list(ExprType::FLOAT), ExprType::INT])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::FLOAT);
+        // Incompatible pair does not match.
+        assert!(sig
+            .match_call(&[list_int.clone(), ExprType::STRING])
+            .is_none());
+        assert!(sig
+            .match_call(&[list_int.clone(), ExprType::NULLTYPE])
+            .is_none());
+        // The empty list binds nothing, so any item type matches.
+        let b = sig
+            .match_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::STRING])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::STRING);
     }
 }

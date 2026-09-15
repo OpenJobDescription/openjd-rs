@@ -1347,3 +1347,29 @@ fn simple_error_has_no_sub_errors() {
         .unwrap_err();
     assert!(err.sub_errors().is_empty());
 }
+
+// === Membership type mismatch points at the whole comparison ===
+
+#[test]
+fn membership_type_mismatch_caret_spans_comparison() {
+    assert_err(
+        "'a' in [1, 2]",
+        &[
+            "Cannot use 'in' operator with list[int] and string\n",
+            "  'a' in [1, 2]\n",
+            "  ^~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn membership_type_mismatch_caret_inside_larger_expression() {
+    assert_err(
+        "1 + int('a' in [1, 2])",
+        &[
+            "Cannot use 'in' operator with list[int] and string\n",
+            "  1 + int('a' in [1, 2])\n",
+            "          ^~~~~~~~~~~~~",
+        ],
+    );
+}

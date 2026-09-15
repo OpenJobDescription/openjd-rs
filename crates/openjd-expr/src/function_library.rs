@@ -442,13 +442,10 @@ impl FunctionLibrary {
                 let mut merged = bindings.clone();
                 let mut conflict = false;
                 for (k, v) in new_binds {
-                    if let Some(existing) = merged.get(&k) {
-                        if *existing != v {
-                            conflict = true;
-                            break;
-                        }
+                    if crate::types::merge_binding(&mut merged, k, v).is_none() {
+                        conflict = true;
+                        break;
                     }
-                    merged.insert(k, v);
                 }
                 if !conflict {
                     Self::match_signature_recursive(

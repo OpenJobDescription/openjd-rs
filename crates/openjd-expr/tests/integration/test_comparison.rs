@@ -499,7 +499,73 @@ fn list_containment_uses_cross_type_range_equality() {
     );
 }
 
+// === Membership type-checks its item against the list's element type ===
+//
+// `__contains__(list: list[T], item: T)` has one type variable, so an item
+// whose type is neither the element type nor implicitly coercible to it
+// has no signature and is refused, rather than evaluating to `false` via a
+// loop over `==` (which the spec makes total across types). openjd-rs
+// previously registered `(list[T1], T2)` and returned `false` for every
+// mismatched pair.
+
 #[test]
-fn list_containment_with_different_types_returns_false() {
-    assert_eq!(eval("'1' in [1, 2, 3]").to_display_string(), "false");
+fn list_containment_with_incompatible_item_type_is_refused() {
+    for (expr, types) in [
+        ("'1' in [1, 2, 3]", "list[int] and string"),
+        ("1 in ['a', 'b']", "list[string] and int"),
+        ("true in [1, 2]", "list[int] and bool"),
+        ("null in [1, 2]", "list[int] and nulltype"),
+        ("['a'] in [[1], [2]]", "list[list[int]] and list[string]"),
+        ("'a' in [x for x in [1, 2]]", "list[int] and string"),
+    ] {
+        let e = eval_err(expr);
+        assert!(
+            e.contains(&format!("Cannot use 'in' operator with {types}")),
+            "{expr}: got {e}"
+        );
+    }
+    let e = eval_err("'a' not in [1, 2]");
+    assert!(
+        e.contains("Cannot use 'not in' operator with list[int] and string"),
+        "got {e}"
+    );
 }
+
+#[test]
+fn list_containment_keeps_implicit_coercions() {
+    // int <-> float, path <-> string, and range_expr <-> list[int] are the
+    // language's non-destructive coercions; a type variable bound by the
+    // list reconciles with an item of the coercible type and membership is
+    // then decided by value, so these must not become signature errors.
+    for (expr, expected) in [
+        ("1 in [1.0, 2.0]", "true"),
+        ("3 in [1.0, 2.0]", "false"),
+        ("1.0 in [1, 2]", "true"),
+        ("1.5 in [1, 2]", "false"),
+        ("path(['/a']) in ['/a', '/b']", "true"),
+        ("'/a' in [path(['/a']), path(['/b'])]", "true"),
+        ("'/c' in [path(['/a']), path(['/b'])]", "false"),
+        ("[1] in [[1.0], [2.0]]", "true"),
+        ("[1.5] in [[1], [2]]", "false"),
+    ] {
+        assert_eq!(eval(expr).to_display_string(), expected, "{expr}");
+    }
+}
+
+#[test]
+fn list_containment_empty_list_accepts_any_item_type() {
+    // `[]` is `list[nulltype]`, compatible with every `list[T]`, so it binds
+    // nothing and any item type is a (false) membership test, not an error.
+    for expr in [
+        "1 in []",
+        "'a' in []",
+        "path(['/a']) in []",
+        "[1] in []",
+        "[] in []",
+    ] {
+        assert_eq!(eval(expr).to_display_string(), "false", "{expr}");
+    }
+    assert_eq!(eval("[] in [[1]]").to_display_string(), "false");
+    assert_eq!(eval("[] in [[]]").to_display_string(), "true");
+}
+

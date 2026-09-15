@@ -593,9 +593,15 @@ fn float_in_range_matches_python() {
         eval("1.5 in range_expr('1-3')").to_display_string(),
         "false"
     );
-    assert_eq!(
-        eval("'a' in range_expr('1-3')").to_display_string(),
-        "false"
+    // `__contains__(range_expr, int | float)`: a string item has no
+    // signature and is refused rather than reported as a non-member.
+    let e = ParsedExpression::new("'a' in range_expr('1-3')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .message();
+    assert!(
+        e.contains("Cannot use 'in' operator with range_expr and string"),
+        "got {e}"
     );
     assert_eq!(
         eval("4.0 not in range_expr('1-3')").to_display_string(),

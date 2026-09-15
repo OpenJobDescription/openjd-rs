@@ -219,7 +219,10 @@ library.call(name, &args, ctx)
 1. **Exact non-generic match** — signature params match arg types exactly (types derived from args)
 2. **Non-generic with coercion** — try implicit coercions (INT→FLOAT, PATH→STRING);
    skip receiver coercion for method calls to prevent `42.upper()`
-3. **Generic match** — bind type variables (T, T1, T2, T3) and check consistency
+3. **Generic match** — bind type variables (T, T1, T2, T3) and check consistency. A
+   variable bound by two parameters reconciles through `types::unify_binding`: the
+   same type, or a coercible pair (`int`/`float`, `path`/`string`, `range_expr`/`list[int]`)
+   which binds the wider type; `list[nulltype]` (the empty list) binds nothing
 
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
@@ -256,17 +259,28 @@ Operators are registered as dunder-named functions:
 | `>` | `__gt__` | `(T1, T2) -> bool` |
 | `>=` | `__ge__` | `(T1, T2) -> bool` |
 | `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
-| `in` | `__contains__` | `(list[T1], T2) -> bool`, `(string, string) -> bool`, `(range_expr, T1) -> bool` |
+| `in` | `__contains__` | `(list[T], T) -> bool`, `(string, string) -> bool`, `(range_expr, int \| float) -> bool` |
 | `not in` | `__not_contains__` | Same as `__contains__` |
 
-Containment item types are deliberately unconstrained (`T2`/`T1` rather than
-binding to the container's element type): membership is decided by value
-equality, matching Python, so `'1' in [1, 2, 3]` and `'a' in range_expr('1-3')`
-evaluate to `false` rather than failing type resolution, and `1.0 in
-range_expr('1-3')` is `true` (integral floats compare equal to ints). Note the
-trade-off: a template whose containment item type can never match the
-container's element type passes static validation and always evaluates false
-at job time.
+The list overload uses one type variable, as the spec writes it
+(`__contains__(list: list[T], item: T)`): the item must be the list's element
+type or implicitly coercible to it, so `'1' in [1, 2, 3]` and `'a' in
+range_expr('1-3')` fail signature resolution at validation time (`Cannot use
+'in' operator with list[int] and string`) instead of evaluating to `false`.
+Membership is still decided by value equality once the types agree, and the
+language's non-destructive coercions are honoured when binding `T` from both
+arguments (see "Type variable unification" in type-system.md): `1 in [1.0,
+2.0]`, `1.0 in [1, 2]`, `path(['/a']) in ['/a']` and `1.0 in range_expr('1-3')`
+all evaluate and compare by value, and the empty list `[]` accepts any item
+type. The earlier registration `(list[T1], T2)` matched Python's
+value-equality semantics and let a template whose item type could never match
+pass static validation; it was replaced because the spec's static type checking
+exists to catch exactly that.
+
+Comparison operands go through the same dispatch when they are unresolved, so
+the check reaches parameter references: `Param.Name in [1, 2]` with a STRING
+parameter is refused at validation. The ordering operators remain `(T1, T2)`
+and their cross-type refusal is still a run-time one inside `do_compare`.
 
 ## Property Access
 

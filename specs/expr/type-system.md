@@ -84,6 +84,28 @@ Key methods:
 | `substitute(&HashMap) -> ExprType` | Replace type variables with bound types |
 | `is_symbolic() -> bool` | Contains type variables (T, T1, T2, T3) |
 | `is_concrete() -> bool` | No type variables or unresolved wrappers |
+
+### Type variable unification
+
+A type variable that appears in more than one parameter must bind consistently.
+`match_call` reconciles the candidate bindings with `unify_binding`, which accepts:
+
+| Bindings | Result |
+|---|---|
+| identical types | that type |
+| `int` and `float` | `float` |
+| `path` and `string` | `string` |
+| `range_expr` and `list[int]` | `list[int]` |
+| `list[A]` and `list[B]` | `list[unify(A, B)]`, where a `nulltype` element (the empty list `[]`) yields to the other |
+| a union and a type any member unifies with | the union |
+| anything else, including a bare `nulltype` against a scalar | conflict, no match |
+
+`list[<variable>]` against `list[nulltype]` matches and binds nothing, so `[]`
+never pins `T` for the other arguments. The coercible pairs are the language's
+non-destructive implicit coercions (RFC 0005 §1.2.3), so `__contains__(list[T],
+T)` accepts `1 in [1.0, 2.0]` and `path(['/a']) in ['/a']` while refusing
+`'a' in [1, 2]` and `null in [1, 2]`. No other built-in signature currently
+repeats a variable across parameters.
 | `satisfies(&ExprType) -> bool` | Directional: may a value of this type pass unchanged where the argument is required? |
 | `sig_params() -> &[ExprType]` | Parameter types of a Signature |
 | `sig_return() -> &ExprType` | Return type of a Signature |
