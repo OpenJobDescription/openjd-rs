@@ -74,12 +74,9 @@ fn tokenize(expr: &str) -> Vec<String> {
 fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> RangeExpr {
     match constraint {
         RangeConstraint::Contiguous => {
-            let range_str = if vals.len() == 1 {
-                vals[0].to_string()
-            } else {
-                format!("{}-{}", vals[0], vals[vals.len() - 1])
-            };
-            range_str
+            // Always "{first}-{last}", including a single value ("3-3").
+            // with_contiguous(true) makes Display keep that form.
+            format!("{}-{}", vals[0], vals[vals.len() - 1])
                 .parse::<RangeExpr>()
                 .expect("range string built from valid integers")
                 .with_contiguous(true)
@@ -1855,10 +1852,19 @@ mod tests {
         let nc = RangeConstraint::Noncontiguous;
         let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &nc).to_string();
         assert_eq!(render(&[1]), "1");
+        assert_eq!(render(&[5]), "5");
         assert_eq!(render(&[1, 3]), "1,3");
         assert_eq!(render(&[7, 8]), "7,8");
         assert_eq!(render(&[1, 2, 3]), "1-3");
         assert_eq!(render(&[2, 4, 6]), "2-6:2");
+        // The from_list table from the Python reference's own test suite
+        // (test_range_expr.py), mirrored 1:1.
+        assert_eq!(render(&[1, 2, 3, 4, 5, 7]), "1-5,7");
+        assert_eq!(render(&[9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5]), "0-10");
+        assert_eq!(render(&[1, 3, 5, 6, 7, 8, 10, 13, 16]), "1-5:2,6-8,10-16:3");
+        assert_eq!(render(&[1, 3, 5, 10]), "1-5:2,10");
+        assert_eq!(render(&[1, 1, 1]), "1");
+        assert_eq!(render(&[9, 8, 7, 6]), "6-9");
         // The reference consumes a leading consecutive pair atomically, so
         // the pair's second value never seeds a later progression. The old
         // Rust compressor rendered these as "1,2-6:2" and "1,3-5".
@@ -1876,8 +1882,14 @@ mod tests {
     #[test]
     fn test_contiguous_chunk_rendering_keeps_dash_form() {
         let c = RangeConstraint::Contiguous;
-        assert_eq!(chunk_values_to_range_expr(&[7, 8], &c).to_string(), "7-8");
-        assert_eq!(chunk_values_to_range_expr(&[5], &c).to_string(), "5-5");
+        let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &c).to_string();
+        assert_eq!(render(&[7, 8]), "7-8");
+        assert_eq!(render(&[1, 2, 3]), "1-3");
+        // A single value keeps the dash form, including negative frames.
+        assert_eq!(render(&[5]), "5-5");
+        assert_eq!(render(&[1]), "1-1");
+        assert_eq!(render(&[-1]), "-1--1");
+        assert_eq!(render(&[-3, -2]), "-3--2");
     }
 
     #[test]
