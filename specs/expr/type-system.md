@@ -84,6 +84,9 @@ Key methods:
 | `substitute(&HashMap) -> ExprType` | Replace type variables with bound types |
 | `is_symbolic() -> bool` | Contains type variables (T, T1, T2, T3) |
 | `is_concrete() -> bool` | No type variables or unresolved wrappers |
+| `satisfies(&ExprType) -> bool` | Directional: may a value of this type pass unchanged where the argument is required? |
+| `sig_params() -> &[ExprType]` | Parameter types of a Signature |
+| `sig_return() -> &ExprType` | Return type of a Signature |
 
 ### Type variable unification
 
@@ -111,9 +114,6 @@ non-destructive implicit coercions (RFC 0005 §1.2.3), so `__contains__(list[T],
 T)` accepts `1 in [1.0, 2.0]` and `path(['/a']) in ['/a']` while refusing
 `'a' in [1, 2]` and `null in [1, 2]`. No other built-in signature currently
 repeats a variable across parameters.
-| `satisfies(&ExprType) -> bool` | Directional: may a value of this type pass unchanged where the argument is required? |
-| `sig_params() -> &[ExprType]` | Parameter types of a Signature |
-| `sig_return() -> &ExprType` | Return type of a Signature |
 
 Crate-internal helpers (`pub(crate)`, not part of the public API):
 
