@@ -282,6 +282,15 @@ in  → __contains__(container, item)    # note: args swapped
 not in → __not_contains__(container, item)
 ```
 
+An unresolved operand does not short-circuit a comparison. The operands still
+go through library dispatch, which matches their types (the constraint of an
+unresolved value) against the operator's signatures and returns
+`Unresolved(BOOL)` on success, so a pair with no signature — `Param.Name in
+[1, 2]` for a STRING parameter, or `Param.N in 'abc'` — is refused at
+validation time. Only the value is deferred, not the type check. A chain with
+any unresolved link evaluates to `Unresolved(BOOL)` unless an earlier link is
+statically `false`.
+
 Chained comparisons short-circuit: `a < b < c` evaluates `a < b`, and only if true,
 evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
 are evaluated unconstrained (see [Target Type

@@ -88,6 +88,33 @@ Key methods:
 | `sig_params() -> &[ExprType]` | Parameter types of a Signature |
 | `sig_return() -> &ExprType` | Return type of a Signature |
 
+### Type variable unification
+
+A type variable that appears in more than one parameter must bind consistently.
+`match_call` reconciles the candidate bindings with `unify_binding`, which accepts:
+
+| Bindings | Result |
+|---|---|
+| identical types | that type |
+| `int` and `float` | `float` |
+| `path` and `string` | `string` |
+| `range_expr` and `list[int]` | `list[int]` |
+| `list[A]` and `list[B]` | `list[unify(A, B)]`, where a `nulltype` element (the empty list `[]`) yields to the other |
+| a union and a type any member unifies with | the union |
+| `any` and anything | the other type; `any` is an unknown, not a conflict |
+| anything else, including a bare `nulltype` against a scalar, or a malformed `List` with no element type | conflict, no match |
+
+A `list[<variable>]` parameter matched by the empty list literal `list[nulltype]`
+binds the variable only *weakly*: a binding from any other parameter wins
+outright, so `[]` never pins `T` for a sibling argument (`1 in []` binds
+`T = int`), while a variable nothing else binds is `nulltype` as before, so
+`sorted([])` and `[] * 3` still resolve to `list[nulltype]`. This applies to
+every signature, not only membership. The coercible pairs are the language's
+non-destructive implicit coercions (RFC 0005 §1.2.3), so `__contains__(list[T],
+T)` accepts `1 in [1.0, 2.0]` and `path(['/a']) in ['/a']` while refusing
+`'a' in [1, 2]` and `null in [1, 2]`. No other built-in signature currently
+repeats a variable across parameters.
+
 Crate-internal helpers (`pub(crate)`, not part of the public API):
 
 | Method | Purpose |

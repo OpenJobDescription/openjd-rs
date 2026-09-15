@@ -500,3 +500,47 @@ fn extensions_errors_use_environment_template_model_name() {
         ],
     );
 }
+
+// === EXPR: list membership type-checks the item against the element type ===
+
+#[test]
+fn membership_item_type_mismatch_is_refused_at_validation() {
+    // openjd-specifications expr2.1.3--membership-element-type-mismatch:
+    // `__contains__(list: list[T], item: T)` admits no signature for a
+    // string item against list[int], so the template is refused at
+    // validation instead of the expression evaluating to false.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {
+            "command": "python", "args": ["-c", "print(r'{{ \"a\" in [1, 2] }}')"]}}}}]
+    }"#,
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[1]:",
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]",
+        ],
+    );
+}
+
+#[test]
+fn membership_unresolved_parameter_of_wrong_type_is_refused_at_validation() {
+    // The static check reaches parameter references: a STRING parameter
+    // tested against a list[int] can never match, so it fails at check
+    // rather than on the worker.
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "S", "type": "STRING", "default": "a"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {
+            "command": "echo", "args": ["{{ Param.S in [1, 2] }}"]}}}}]
+    }"#,
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]",
+        ],
+    );
+}

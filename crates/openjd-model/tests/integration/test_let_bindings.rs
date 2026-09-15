@@ -1215,3 +1215,27 @@ fn test_let_name_multibyte_under_cap_reports_only_charset() {
         "600 bytes is only 200 characters; the length error must not fire:\n{msg}"
     );
 }
+
+#[test]
+fn failed_let_binding_does_not_cascade_into_membership() {
+    // A failed binding is rebound as unresolved(ANY) so later bindings do not
+    // cascade. Membership against it must therefore report only the first
+    // error, not a second `Cannot use 'in' operator with list[int] and any`.
+    let err = decode_job_template(
+        yaml_val(&job_with_step_let(
+            r#""Foo = 1 + 'x'", "Bar = Foo in [1, 2]""#,
+        )),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("the first binding is invalid");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Cannot use '+' operator with int and string"),
+        "{msg}"
+    );
+    assert!(
+        !msg.contains("Cannot use 'in' operator"),
+        "membership against a failed binding cascaded:\n{msg}"
+    );
+}

@@ -499,7 +499,230 @@ fn list_containment_uses_cross_type_range_equality() {
     );
 }
 
+// === Membership type-checks its item against the list's element type ===
+//
+// `__contains__(list: list[T], item: T)` has one type variable, so an item
+// whose type is neither the element type nor implicitly coercible to it
+// has no signature and is refused, rather than evaluating to `false` via a
+// loop over `==` (which the spec makes total across types). openjd-rs
+// previously registered `(list[T1], T2)` and returned `false` for every
+// mismatched pair.
+
 #[test]
-fn list_containment_with_different_types_returns_false() {
-    assert_eq!(eval("'1' in [1, 2, 3]").to_display_string(), "false");
+fn list_containment_with_incompatible_item_type_is_refused() {
+    for (expr, msg) in [
+        (
+            "'1' in [1, 2, 3]",
+            "item of type string is not compatible with the element type int of list[int]",
+        ),
+        (
+            "1 in ['a', 'b']",
+            "item of type int is not compatible with the element type string of list[string]",
+        ),
+        (
+            "true in [1, 2]",
+            "item of type bool is not compatible with the element type int of list[int]",
+        ),
+        (
+            "null in [1, 2]",
+            "item of type nulltype is not compatible with the element type int of list[int]",
+        ),
+        (
+            "['a'] in [[1], [2]]",
+            "item of type list[string] is not compatible with the element type list[int] of list[list[int]]",
+        ),
+        (
+            "'a' in [x for x in [1, 2]]",
+            "item of type string is not compatible with the element type int of list[int]",
+        ),
+        // A nested list against a flat one prints two identical types under
+        // the generic message ("list[int] and list[int]"); the role-naming
+        // one is what makes it readable.
+        (
+            "[1, 2] in [1, 2]",
+            "item of type list[int] is not compatible with the element type int of list[int]",
+        ),
+    ] {
+        let e = eval_err(expr);
+        assert!(
+            e.contains(&format!("Cannot use 'in' operator: {msg}")),
+            "{expr}: got {e}"
+        );
+    }
+    let e = eval_err("'a' not in [1, 2]");
+    assert!(
+        e.contains(
+            "Cannot use 'not in' operator: item of type string is not compatible with the element type int of list[int]"
+        ),
+        "got {e}"
+    );
+}
+
+#[test]
+fn list_containment_keeps_implicit_coercions() {
+    // int <-> float, path <-> string, and range_expr <-> list[int] are the
+    // language's non-destructive coercions; a type variable bound by the
+    // list reconciles with an item of the coercible type and membership is
+    // then decided by value, so these must not become signature errors.
+    for (expr, expected) in [
+        ("1 in [1.0, 2.0]", "true"),
+        ("3 in [1.0, 2.0]", "false"),
+        ("1.0 in [1, 2]", "true"),
+        ("1.5 in [1, 2]", "false"),
+        ("[1] in [[1.0], [2.0]]", "true"),
+        ("[1.5] in [[1], [2]]", "false"),
+    ] {
+        assert_eq!(eval(expr).to_display_string(), expected, "{expr}");
+    }
+    // The path/string cases fix the path format: under the host default a
+    // Windows runner renders path(['/a']) as `\a`, which is the value
+    // comparison being wrong on purpose, not the signature check.
+    let st = SymbolTable::new();
+    for (expr, expected) in [
+        ("path(['/a']) in ['/a', '/b']", "true"),
+        ("'/a' in [path(['/a']), path(['/b'])]", "true"),
+        ("'/c' in [path(['/a']), path(['/b'])]", "false"),
+    ] {
+        assert_eq!(
+            eval_posix(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
+    for (expr, expected) in [
+        ("path(['C:\\a']) in ['C:\\a', 'C:\\b']", "true"),
+        ("'C:\\a' in [path(['C:\\a']), path(['C:\\b'])]", "true"),
+    ] {
+        assert_eq!(
+            eval_windows(expr, &st).to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn list_containment_empty_list_accepts_any_item_type() {
+    // `[]` is `list[nulltype]`, compatible with every `list[T]`, so it binds
+    // nothing and any item type is a (false) membership test, not an error.
+    for expr in [
+        "1 in []",
+        "'a' in []",
+        "path(['/a']) in []",
+        "[1] in []",
+        "[] in []",
+    ] {
+        assert_eq!(eval(expr).to_display_string(), "false", "{expr}");
+    }
+    assert_eq!(eval("[] in [[1]]").to_display_string(), "false");
+    assert_eq!(eval("[] in [[]]").to_display_string(), "true");
+}
+
+#[test]
+fn list_containment_unresolved_item_is_type_checked() {
+    // Static type checking: an unresolved item whose constraint can never
+    // match the element type is refused at validation, while a compatible
+    // one yields unresolved[bool].
+    let mut st = SymbolTable::new();
+    st.set("Param.N", ExprValue::unresolved(openjd_expr::ExprType::INT))
+        .unwrap();
+    st.set(
+        "Param.S",
+        ExprValue::unresolved(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    for expr in [
+        "Param.N in [1, 2]",
+        "Param.N in [1.0, 2.0]",
+        "Param.N in []",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+    let e = eval_err_with("Param.S in [1, 2]", &st);
+    assert!(
+        e.contains(
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]"
+        ),
+        "got {e}"
+    );
+}
+
+#[test]
+fn list_containment_with_any_typed_item_does_not_error() {
+    // A value of unknown type (`unresolved[any]`, which openjd-model uses for
+    // a `let` binding that already failed) must not turn membership into a
+    // second, misleading error.
+    let mut st = SymbolTable::new();
+    st.set("Foo", ExprValue::unresolved(openjd_expr::ExprType::ANY))
+        .unwrap();
+    for expr in [
+        "Foo in [1, 2]",
+        "Foo in ['a']",
+        "Foo not in [1.5]",
+        "1 in Foo",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+}
+
+#[test]
+fn empty_list_generics_keep_nulltype_return_type() {
+    // `sorted`/`reversed`/`unique` are `(list[T1]) -> list[T1]`; with an
+    // unresolved empty-list argument the static return type must stay
+    // `list[nulltype]`, which coerces to every `list[T]`, rather than leak
+    // the variable as `list[T1]`.
+    let mut st = SymbolTable::new();
+    st.set(
+        "E",
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::NULLTYPE)),
+    )
+    .unwrap();
+    for expr in ["sorted(E)", "reversed(E)", "unique(E)", "E * 2"] {
+        let v = eval_with(expr, &st);
+        assert_eq!(
+            v.expr_type(),
+            openjd_expr::ExprType::unresolved(openjd_expr::ExprType::list(
+                openjd_expr::ExprType::NULLTYPE
+            )),
+            "{expr}: got {v:?}"
+        );
+    }
+}
+
+#[test]
+fn ordering_with_unresolved_operand_yields_unresolved_bool() {
+    // Comparison operands now go through dispatch even when unresolved. The
+    // ordering operators are registered `(T1, T2)`, so any pair matches at
+    // the signature and a cross-type pair the spec calls an error
+    // (`Param.S < 1`) is still only refused at run time by `do_compare`.
+    // Tightening that is a separate change; this pins that dispatch with
+    // unresolved operands does not regress the well-typed cases.
+    let mut st = SymbolTable::new();
+    st.set(
+        "Param.S",
+        ExprValue::unresolved(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    st.set("Param.N", ExprValue::unresolved(openjd_expr::ExprType::INT))
+        .unwrap();
+    for expr in [
+        "Param.N < 2",
+        "Param.N < 2.5",
+        "Param.S == 1",
+        "1 < Param.N < 3",
+        "Param.S < 'b'",
+        "Param.S in 'abc'",
+    ] {
+        let v = eval_with(expr, &st);
+        assert!(v.is_unresolved(), "{expr}: got {v:?}");
+    }
+    // The string overload of `in` is `(string, string)`, so this one IS
+    // caught at the signature.
+    let e = eval_err_with("Param.N in 'abc'", &st);
+    assert!(
+        e.contains("Cannot use 'in' operator with string and int"),
+        "got {e}"
+    );
 }

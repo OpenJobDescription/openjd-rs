@@ -114,19 +114,22 @@ fn range_contains(a: &[ExprValue]) -> Result<bool, ExpressionError> {
             ))
         }
     };
-    // Membership by value equality, mirroring list containment (and
-    // Python, where `1.0 in range(1, 4)` is True): integral floats can
-    // match via the same exact int↔float equality rule the equality
-    // operators use, and any non-integer item is simply not a member.
-    Ok(match &a[1] {
-        ExprValue::Int(i) => r.contains(*i),
-        ExprValue::Float(f) => crate::value::float_as_exact_i64(f.value())
+    // The signature is `(range_expr, int | float)`, so dispatch has already
+    // refused every other item type; the error arm guards a direct call.
+    // A float item is a member when it is exactly an integer in the range,
+    // the same exact int↔float rule the equality operators use (and
+    // Python's `1.0 in range(1, 4)`), so `1.0 in range_expr('1-3')` agrees
+    // with `1.0 in [1, 2, 3]`.
+    match &a[1] {
+        ExprValue::Int(i) => Ok(r.contains(*i)),
+        ExprValue::Float(f) => Ok(crate::value::float_as_exact_i64(f.value())
             .map(|i| r.contains(i))
-            .unwrap_or(false),
-        _ => false,
-    })
+            .unwrap_or(false)),
+        _ => Err(ExpressionError::type_error(
+            "__contains__ on a range_expr requires an int or float item",
+        )),
+    }
 }
-
 pub fn contains_range(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(range_contains(a)?))
 }
@@ -346,6 +349,16 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "__contains__ requires a range_expr container"
+        );
+    }
+    #[test]
+    fn range_contains_direct_call_rejects_non_int_item() {
+        let r = ExprValue::RangeExpr("1-5".parse().unwrap());
+        let err =
+            contains_range(&mut TestContext, &[r, ExprValue::String("3".into())]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "__contains__ on a range_expr requires an int or float item"
         );
     }
 }

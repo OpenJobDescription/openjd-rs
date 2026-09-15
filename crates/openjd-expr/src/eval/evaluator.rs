@@ -794,20 +794,25 @@ impl<'a> Evaluator<'a> {
     fn eval_compare(&mut self, c: &ast::ExprCompare) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         let table = OperatorTable::current();
+
         // Reject unsupported operators early
         for op in &c.ops {
             table.cmpop(*op)?;
         }
+
         let mut left = self.eval_node(&c.left, None)?;
+        // An unresolved operand still goes through dispatch: the library
+        // matches the operand types against the operator's signatures and
+        // returns `unresolved[bool]` on success, so a comparison whose types
+        // can never match (`Param.Name in [1, 2]` with a STRING parameter,
+        // or `Param.Path < 1`) is refused at validation time rather than on
+        // the worker. Only the value is deferred, not the type check.
+        let mut seen_unresolved = false;
         for (op, right_node) in c.ops.iter().zip(c.comparators.iter()) {
             let right = self.eval_node(right_node, None)?;
-            if left.is_unresolved() || right.is_unresolved() {
-                self.release(&left);
-                self.release(&right);
-                return self.track(ExprValue::unresolved(ExprType::BOOL));
-            }
             let dispatch = table.cmpop(*op)?;
             let op_name = dispatch.dunder;
+
             // For 'in'/'not in', container is first arg (right), item is second (left)
             let args = if dispatch.container_first {
                 vec![right.clone(), left.clone()]
@@ -821,10 +826,14 @@ impl<'a> Evaluator<'a> {
             let result_val = self.dispatch_with_span(op_name, args, c.range())?;
             let result = match &result_val {
                 ExprValue::Bool(b) => *b,
-                _ => true,
+                other => {
+                    if other.is_unresolved() {
+                        seen_unresolved = true;
+                    }
+                    true
+                }
             };
             self.release(&result_val);
-
             if !result {
                 self.release(&left);
                 self.release(&right);
@@ -834,6 +843,9 @@ impl<'a> Evaluator<'a> {
             left = right;
         }
         self.release(&left);
+        if seen_unresolved {
+            return self.track(ExprValue::unresolved(ExprType::BOOL));
+        }
         self.track(ExprValue::Bool(true))
     }
 

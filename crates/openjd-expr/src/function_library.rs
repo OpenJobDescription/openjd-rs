@@ -318,6 +318,16 @@ impl FunctionLibrary {
 
         let type_strs: Vec<String> = arg_types.iter().map(|t| t.to_string()).collect();
         let display_name = friendly_op_name(name);
+        // Membership is dispatched container-first, the reverse of the source
+        // order, and a list-vs-list mismatch prints two identical types
+        // ("list[int] and list[int]"). Name the roles instead.
+        if let (Some(op @ ("in" | "not in")), [container, item]) =
+            (display_name, arg_types.as_slice())
+        {
+            if let Some(msg) = membership_mismatch_message(op, container, item) {
+                return Err(ExpressionError::new(msg));
+            }
+        }
         if let Some(op) = display_name {
             Err(ExpressionError::new(format!(
                 "Cannot use '{}' operator with {}",
@@ -406,6 +416,7 @@ impl FunctionLibrary {
                 &arg_type_sets,
                 0,
                 HashMap::new(),
+                HashMap::new(),
                 &mut result_types,
             );
         }
@@ -430,25 +441,33 @@ impl FunctionLibrary {
         arg_type_sets: &[Vec<ExprType>],
         idx: usize,
         bindings: HashMap<crate::types::TypeCode, ExprType>,
+        weak: HashMap<crate::types::TypeCode, ExprType>,
         result_types: &mut Vec<ExprType>,
     ) {
         if idx == arg_type_sets.len() {
-            result_types.push(sig.sig_return().substitute(&bindings));
+            let mut all = bindings;
+            crate::types::apply_weak_bindings(&mut all, weak);
+            result_types.push(sig.sig_return().substitute(&all));
             return;
         }
         let param = &sig_params[idx];
         for arg_type in &arg_type_sets[idx] {
             if let Some(new_binds) = param.match_type(arg_type) {
                 let mut merged = bindings.clone();
+                let mut merged_weak = weak.clone();
+                // The empty list binds a `list[<var>]` parameter only weakly,
+                // exactly as `ExprType::match_call` does.
+                let target = if crate::types::is_empty_list_against_list_var(param, arg_type) {
+                    &mut merged_weak
+                } else {
+                    &mut merged
+                };
                 let mut conflict = false;
                 for (k, v) in new_binds {
-                    if let Some(existing) = merged.get(&k) {
-                        if *existing != v {
-                            conflict = true;
-                            break;
-                        }
+                    if crate::types::merge_binding(target, k, v).is_none() {
+                        conflict = true;
+                        break;
                     }
-                    merged.insert(k, v);
                 }
                 if !conflict {
                     Self::match_signature_recursive(
@@ -457,6 +476,7 @@ impl FunctionLibrary {
                         arg_type_sets,
                         idx + 1,
                         merged,
+                        merged_weak,
                         result_types,
                     );
                 }
@@ -470,6 +490,24 @@ impl FunctionLibrary {
             &format!("__property_{property_name}__"),
             std::slice::from_ref(base_type),
         )
+    }
+}
+
+/// The diagnostic for `item in container` when no `__contains__` signature
+/// matches and the container is a list or a range expression. Returns `None`
+/// for other containers (a string haystack keeps the generic message).
+fn membership_mismatch_message(op: &str, container: &ExprType, item: &ExprType) -> Option<String> {
+    match container.code() {
+        crate::types::TypeCode::List => {
+            let elem = container.params().first()?;
+            Some(format!(
+                "Cannot use '{op}' operator: item of type {item} is not compatible with the element type {elem} of {container}"
+            ))
+        }
+        crate::types::TypeCode::RangeExpr => Some(format!(
+            "Cannot use '{op}' operator: item of type {item} is not compatible with a range_expr container, which holds int values"
+        )),
+        _ => None,
     }
 }
 
