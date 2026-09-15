@@ -469,6 +469,7 @@ async fn test_env_with_resolved_variables() {
         },
     );
     let session_config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: job_params,
         path_mapping_rules: None,

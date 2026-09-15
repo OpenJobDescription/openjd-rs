@@ -211,6 +211,7 @@ fn test_session_root() -> PathBuf {
 fn make_session(user: Arc<WindowsSessionUser>) -> Session {
     let root = test_session_root();
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "cross-user-win-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,

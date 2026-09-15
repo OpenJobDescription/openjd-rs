@@ -52,13 +52,13 @@ fn check_err(s: &str, expected: &[&str]) {
 
 fn env_decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_environment_template(v, Some(ALLOWED))
+    decode_environment_template(v, Some(ALLOWED), &CallerLimits::default())
         .unwrap_or_else(|e| panic!("Expected success for:\n{s}\nGot: {e}"));
 }
 
 fn env_check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, Some(ALLOWED))
+    let err = decode_environment_template(v, Some(ALLOWED), &CallerLimits::default())
         .expect_err(&format!("Expected error for:\n{s}"));
     let msg = err.to_string();
     for line in expected {

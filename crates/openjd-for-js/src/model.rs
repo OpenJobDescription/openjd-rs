@@ -210,6 +210,14 @@ pub struct JsCallerLimits {
     pub max_environment_size: Option<usize>,
     #[serde(default)]
     pub max_template_size: Option<usize>,
+    #[serde(default)]
+    pub max_resolved_arg_len: Option<usize>,
+    #[serde(default)]
+    pub max_resolved_data_len: Option<usize>,
+    #[serde(default)]
+    pub max_eval_memory_bytes: Option<usize>,
+    #[serde(default)]
+    pub max_eval_operations: Option<usize>,
 }
 
 impl JsCallerLimits {
@@ -220,7 +228,7 @@ impl JsCallerLimits {
     }
 
     /// Convert to the Rust-side struct for a call into
-    /// `openjd_model`. Cheap — copies six `Option` scalars.
+    /// `openjd_model`. Cheap — copies ten `Option` scalars.
     pub fn as_rust(&self) -> openjd_model::CallerLimits {
         openjd_model::CallerLimits {
             max_step_count: self.max_step_count,
@@ -229,6 +237,10 @@ impl JsCallerLimits {
             max_step_script_size: self.max_step_script_size,
             max_environment_size: self.max_environment_size,
             max_template_size: self.max_template_size,
+            max_resolved_arg_len: self.max_resolved_arg_len,
+            max_resolved_data_len: self.max_resolved_data_len,
+            max_eval_memory_bytes: self.max_eval_memory_bytes,
+            max_eval_operations: self.max_eval_operations,
         }
     }
 
@@ -553,17 +565,17 @@ pub fn decode_environment_template_str(
     let value =
         openjd_model::template::parse::document_string_to_object(input, doc_type, &rust_limits)
             .map_err(|e| e.to_string())?;
-    let template =
-        openjd_model::decode_environment_template(value, Some(&exts)).map_err(|e| e.to_string())?;
+    let template = openjd_model::decode_environment_template(value, Some(&exts), &rust_limits)
+        .map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })
 }
 
 /// Decode and validate an environment template from a pre-parsed JS object.
 ///
 /// Mirrors the Python binding `decode_environment_template_dict(template)`.
-/// `limits` is accepted for API uniformity with the other decode
-/// entry points, but no cap in `CallerLimits` currently applies to
-/// the object path for environment templates.
+/// `limits` applies the caller's validation-time caps and evaluation
+/// budgets (the document-size caps don't apply on the object path,
+/// since no string parsing occurs).
 #[wasm_bindgen(js_name = "decodeEnvironmentTemplateFromObject")]
 pub fn decode_environment_template_from_object_js(
     obj: JsValue,
@@ -580,15 +592,16 @@ pub fn decode_environment_template_from_object_js(
 /// Rust-native helper for [`decode_environment_template_from_object_js`].
 pub fn decode_environment_template_from_object(
     value: serde_json::Value,
-    _limits: Option<&JsCallerLimits>,
+    limits: Option<&JsCallerLimits>,
     supported_extensions: Option<&[String]>,
 ) -> Result<JsEnvironmentTemplate, String> {
     if !value.is_object() {
         return Err("Template must be a JSON/YAML object".to_string());
     }
+    let rust_limits = limits.map(|l| l.as_rust()).unwrap_or_default();
     let exts = resolve_supported_extensions(supported_extensions);
-    let template =
-        openjd_model::decode_environment_template(value, Some(&exts)).map_err(|e| e.to_string())?;
+    let template = openjd_model::decode_environment_template(value, Some(&exts), &rust_limits)
+        .map_err(|e| e.to_string())?;
     Ok(JsEnvironmentTemplate { inner: template })
 }
 

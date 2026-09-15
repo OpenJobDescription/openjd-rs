@@ -54,7 +54,8 @@ fn check_job_err_with_ext(s: &str, supported: &[&str], expected: &[&str]) {
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -238,7 +239,7 @@ fn env_decode_success() {
         }
     }"#,
     );
-    decode_environment_template(v, None).unwrap();
+    decode_environment_template(v, None, &CallerLimits::default()).unwrap();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -388,7 +389,7 @@ fn empty_extensions_job_template() {
     }"#,
     );
     assert!(
-        decode_environment_template(v2, None).is_err(),
+        decode_environment_template(v2, None, &CallerLimits::default()).is_err(),
         "Env template with empty extensions should be rejected"
     );
 }

@@ -57,6 +57,13 @@ impl StepScriptRunner {
         self
     }
 
+    /// Caller-policy caps and evaluation budgets enforced during action
+    /// resolution. See [`crate::session::SessionConfig::limits`].
+    pub fn with_limits(mut self, limits: crate::limits::SessionLimits) -> Self {
+        self.base.limits = limits;
+        self
+    }
+
     pub fn with_initial_redacted_values(mut self, values: Vec<String>) -> Self {
         self.base.initial_redacted_values = values;
         self
@@ -132,7 +139,8 @@ impl StepScriptRunner {
                 self.base.files_directory.clone(),
                 &self.base.session_id,
             )
-            .with_user(self.base.user.clone());
+            .with_user(self.base.user.clone())
+            .with_limits(self.base.limits);
             ef.allocate_file_paths(files, &mut final_symtab)?;
             Some(ef)
         } else {

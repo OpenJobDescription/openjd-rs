@@ -474,3 +474,85 @@ mod path_traversal {
         allocate_with_tainted("my.file.sh").expect("dotted filename should be accepted");
     }
 }
+
+// === SessionLimits: resolved-data cap and evaluation budgets (run time) ===
+
+/// Helper for the SessionLimits tests: a Step-scope materializer over a
+/// fresh temp dir with the given limits, holding one TEXT file whose
+/// `data` is the given format string.
+fn materialize_with_limits(
+    data: &str,
+    limits: openjd_sessions::SessionLimits,
+) -> Result<(), openjd_sessions::SessionError> {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::EmbeddedFile;
+    use openjd_model::symbol_table::SymbolTable;
+    use openjd_model::types::FileType;
+
+    let tmp = TempDir::new().unwrap();
+    let mut ef = EmbeddedFiles::new(
+        EmbeddedFilesScope::Step,
+        tmp.path().to_path_buf(),
+        "test-session",
+    )
+    .with_limits(limits);
+    let file = EmbeddedFile {
+        name: "F".to_string(),
+        file_type: FileType::Text,
+        filename: Some("f.txt".to_string()),
+        data: Some(FormatString::new(data).unwrap()),
+        runnable: None,
+        end_of_line: None,
+    };
+    let mut st = SymbolTable::new();
+    ef.allocate_file_paths(&[file], &mut st)?;
+    ef.write_file_contents(&st, None)
+}
+
+#[test]
+fn data_over_resolved_cap_rejected() {
+    // §6.1.2 sets no spec limit; the cap is the caller's opt-in
+    // (SessionLimits::max_resolved_data_len), enforced here at task
+    // execution — the enforcement boundary — on the final resolved value.
+    let limits = openjd_sessions::SessionLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    let err = materialize_with_limits("{{ 'A' * 200 }}", limits).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Failed to resolve embedded file 'F' data: resolved value is 200 characters, exceeding the maximum of 100."
+    );
+}
+
+#[test]
+fn data_at_resolved_cap_accepted() {
+    let limits = openjd_sessions::SessionLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    materialize_with_limits("{{ 'A' * 100 }}", limits).expect("at-cap data must be accepted");
+}
+
+#[test]
+fn data_over_cap_accepted_without_opt_in() {
+    materialize_with_limits("{{ 'A' * 200 }}", Default::default())
+        .expect("no cap by default (§6.1.2 sets no limit)");
+}
+
+#[test]
+fn data_evaluation_respects_memory_budget() {
+    // The evaluation memory budget bounds `data` expression evaluation
+    // exactly as it bounds every other format-string evaluation.
+    let limits = openjd_sessions::SessionLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    };
+    let err = materialize_with_limits("{{ 'A' * 100000 }}", limits).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("Failed to resolve embedded file 'F' data:")
+            && msg.contains("exceeded limit (1000 bytes)"),
+        "got: {msg}"
+    );
+}

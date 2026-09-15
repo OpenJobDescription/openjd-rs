@@ -52,6 +52,7 @@ fn make_session(user: Arc<PosixSessionUser>) -> Session {
     // Leak so the dir outlives the session constructor
     std::mem::forget(tmp);
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "cross-user-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,

@@ -459,8 +459,12 @@ fn environment_template_env_var_value_static_too_long_fails() {
         "extensions": ["EXPR"],
         "environment": {"name": "E", "variables": {"FOO": "{{ 'A' * 3000 }}"}}
     }"#;
-    let err = decode_environment_template(yaml_val(tmpl), Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected validation error");
+    let err = decode_environment_template(
+        yaml_val(tmpl),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected validation error");
     let msg = err.to_string();
     assert!(
         msg.contains("variables -> FOO:\n\tresolves to at least 3000 characters, exceeding the maximum of 2048."),
@@ -756,4 +760,238 @@ fn amount_valid_and_unresolved_pass() {
     check_ok(&job_with_amount("min", "{{ 1.5 }}"));
     check_ok(&job_with_amount("max", "{{ 4.0 * 2 }}"));
     check_ok(&job_with_amount("min", "{{ Param.X }}"));
+}
+
+// ══════════════════════════════════════════════════════════════
+// Opt-in caller caps (Group B): action command/args (§5.1/§5.2)
+// and embedded-file data (§6.1.2) under CallerLimits
+// ══════════════════════════════════════════════════════════════
+//
+// The spec sets no maximum on these fields, so the caps are opt-in —
+// `CallerLimits::max_resolved_arg_len` / `max_resolved_data_len` —
+// and the default (`None`) imposes nothing. When set, template
+// validation fails as soon as the guaranteed lower bound on any
+// possible resolution exceeds the cap.
+
+fn check_err_limits(s: &str, limits: &CallerLimits, expected: &[&str]) {
+    let v = yaml_val(s);
+    let err =
+        decode_job_template(v, Some(ALL_EXTS), limits).expect_err("Expected validation error");
+    let msg = err.to_string();
+    for line in expected {
+        assert!(
+            msg.contains(line),
+            "Missing in error output: {line:?}\nGot:\n{msg}"
+        );
+    }
+}
+
+fn check_ok_limits(s: &str, limits: &CallerLimits) {
+    let v = yaml_val(s);
+    if let Err(e) = decode_job_template(v, Some(ALL_EXTS), limits) {
+        panic!("Expected template to validate, got:\n{e}");
+    }
+}
+
+fn arg_cap(n: usize) -> CallerLimits {
+    CallerLimits {
+        max_resolved_arg_len: Some(n),
+        ..Default::default()
+    }
+}
+
+/// Minimal job template with one STRING parameter `X` and the given
+/// (pre-escaped JSON) `args` array element.
+fn job_with_arg(arg: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo", "args": ["{arg}"]}}}}}}}}]
+    }}"#
+    )
+}
+
+fn job_with_command(command: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "{command}"}}}}}}}}]
+    }}"#
+    )
+}
+
+fn job_with_data(data: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "steps": [{{"name": "S", "script": {{
+            "actions": {{"onRun": {{"command": "echo"}}}},
+            "embeddedFiles": [{{"name": "F", "type": "TEXT", "data": "{data}"}}]
+        }}}}]
+    }}"#
+    )
+}
+
+#[test]
+fn arg_static_over_cap_fails() {
+    check_err_limits(
+        &job_with_arg("{{ 'A' * 200 }}"),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:\n\tresolves to at least 200 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
+fn arg_bound_with_unresolved_part_fails() {
+    // The Session.WorkingDirectory segment only
+    // resolves on the worker (contributes 0 to the bound), but the
+    // static segment alone already exceeds the cap — no possible
+    // resolution conforms.
+    check_err_limits(
+        &job_with_arg("{{ Session.WorkingDirectory }}/{{ 'A' * 200 }}"),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:\n\tresolves to at least 201 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
+fn arg_unresolved_and_under_cap_pass() {
+    check_ok_limits(&job_with_arg("{{ Param.X }}"), &arg_cap(100));
+    check_ok_limits(&job_with_arg("{{ 'A' * 100 }}"), &arg_cap(100));
+}
+
+#[test]
+fn arg_over_cap_passes_without_opt_in() {
+    // The library default imposes no cap (§5.2 sets no maximum).
+    check_ok_limits(&job_with_arg("{{ 'A' * 200 }}"), &CallerLimits::default());
+}
+
+#[test]
+fn arg_list_flatten_element_over_cap_fails() {
+    // A list-valued args element flattens into one argv entry per
+    // member: the cap applies to each entry, not to the list's display
+    // form.
+    check_err_limits(
+        &job_with_arg("{{ ['A' * 150] * 2 }}"),
+        &arg_cap(100),
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:\n\tlist element 0 resolves to 150 characters, exceeding the maximum of 100.",
+            "list element 1 resolves to 150 characters, exceeding the maximum of 100.",
+        ],
+    );
+}
+
+#[test]
+fn arg_list_flatten_elements_under_cap_pass() {
+    // The list's display form is over the cap, but each flattened argv
+    // entry is under it — the whole-string bound must not apply to a
+    // list-valued resolution.
+    check_ok_limits(&job_with_arg("{{ ['A' * 90] * 3 }}"), &arg_cap(100));
+}
+
+#[test]
+fn command_static_over_cap_fails() {
+    check_err_limits(
+        &job_with_command("{{ 'A' * 200 }}"),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> command:\n\tresolves to at least 200 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
+fn data_static_over_cap_fails() {
+    let limits = CallerLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    check_err_limits(
+        &job_with_data("{{ 'A' * 200 }}"),
+        &limits,
+        &["steps[0] -> script -> embeddedFiles[0] -> data:\n\tresolves to at least 200 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
+fn data_over_cap_passes_without_opt_in() {
+    check_ok_limits(&job_with_data("{{ 'A' * 200 }}"), &CallerLimits::default());
+}
+
+#[test]
+fn env_template_arg_over_cap_fails() {
+    // decode_environment_template applies the same caps (it now carries
+    // CallerLimits like decode_job_template).
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name": "E", "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{ 'A' * 200 }}"]}}}}
+    }"#,
+    );
+    let err = decode_environment_template(v, Some(ALL_EXTS), &arg_cap(100))
+        .expect_err("Expected validation error");
+    assert!(
+        err.to_string().contains(
+            "environment -> script -> actions -> onEnter -> args[0]:\n\tresolves to at least 200 characters, exceeding the maximum of 100."
+        ),
+        "Got:\n{err}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Evaluation budgets (Expression Language "Memory-bounded
+// evaluation"): CallerLimits::max_eval_memory_bytes / max_eval_operations
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn lowered_memory_budget_fails_static_blowup_at_validation() {
+    // With no cap opted in, a lowered evaluation
+    // memory budget — the spec's own lever against `'A' * N` blowups —
+    // fails the template at validation time.
+    let limits = CallerLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    };
+    check_err_limits(
+        &job_with_arg("{{ 'A' * 100000 }}"),
+        &limits,
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:\n\tFailed to parse interpolation expression at [0, 18].",
+            "exceeded limit (1000 bytes)",
+        ],
+    );
+}
+
+#[test]
+fn lowered_operation_budget_fails_at_validation() {
+    let limits = CallerLimits {
+        max_eval_operations: Some(50),
+        ..Default::default()
+    };
+    check_err_limits(
+        &job_with_arg("{{ sum([1] * 1000) }}"),
+        &limits,
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "exceeded limit (50)",
+        ],
+    );
+}
+
+#[test]
+fn default_budgets_pass_static_blowup() {
+    // Under the spec-default 100 MB budget a 100 KB string is fine, and
+    // with no cap opted in nothing else rejects it.
+    check_ok_limits(
+        &job_with_arg("{{ 'A' * 100000 }}"),
+        &CallerLimits::default(),
+    );
 }

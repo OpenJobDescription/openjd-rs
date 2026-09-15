@@ -47,8 +47,12 @@ fn expect_job_err(template: &str, allowed_exts: &[&str], expected_substrings: &[
 }
 
 fn expect_env_err(template: &str, allowed_exts: &[&str], expected_substrings: &[&str]) {
-    let err = decode_environment_template(yaml_val(template), Some(allowed_exts))
-        .expect_err("Expected validation error");
+    let err = decode_environment_template(
+        yaml_val(template),
+        Some(allowed_exts),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected validation error");
     let msg = err.to_string();
     for line in expected_substrings {
         assert!(
@@ -68,8 +72,12 @@ fn expect_job_ok(template: &str, allowed_exts: &[&str]) {
 }
 
 fn expect_env_ok(template: &str, allowed_exts: &[&str]) {
-    decode_environment_template(yaml_val(template), Some(allowed_exts))
-        .expect("expected successful decode");
+    decode_environment_template(
+        yaml_val(template),
+        Some(allowed_exts),
+        &CallerLimits::default(),
+    )
+    .expect("expected successful decode");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1012,6 +1020,7 @@ environment:
 "#,
         ),
         Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
     )
     .expect("env template should decode");
 
@@ -1102,6 +1111,7 @@ environment:
 "#,
         ),
         Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
     )
     .expect("env template should decode");
 

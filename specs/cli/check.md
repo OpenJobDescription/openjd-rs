@@ -60,11 +60,26 @@ execute(args)
   ├── Parse specificationVersion into TemplateSpecificationVersion
   │
   ├── Dispatch on template type
-  │   ├── Job template → parse::decode_job_template(value, extensions)
-  │   └── Environment template → parse::decode_environment_template(value, extensions)
+  │   ├── Job template → parse::decode_job_template(value, extensions, caller_limits)
+  │   └── Environment template → parse::decode_environment_template(value, extensions, caller_limits)
   │
   └── Print "Template at '<path>' passes validation checks."
 ```
+
+## Caller-Limits Policy
+
+Every decode call passes `common::caller_limits()` — the library defaults
+plus `max_resolved_arg_len` set to `common::OS_MAX_ARG_LEN`, the maximum
+single-argument length the host operating system accepts (Linux 131072 =
+`MAX_ARG_STRLEN`; Windows 32767 = the `CreateProcess` command-line limit;
+other platforms 1048576 = `ARG_MAX`). Template Schemas §5.1/§5.2 set no
+maximum of their own but note the OS imposes one; the CLI surfaces it at
+`check` time whenever an action `command`/`args` value is *guaranteed* to
+exceed it (the lower bound of every possible resolution is over the cap).
+Library users of `openjd-model` get no cap by default — this is CLI
+policy, and it describes the machine running the CLI: a template checked
+on Linux may still fail on a Windows worker, whose own run-time
+enforcement is authoritative.
 
 ## Template Type Detection
 

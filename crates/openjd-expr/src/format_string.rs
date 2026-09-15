@@ -138,7 +138,7 @@ impl FormatString {
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_inner(symtab, opts.library, opts.path_format, opts.target_type)
+        self.resolve_inner(symtab, opts)
     }
 
     /// Resolve to `String`, concatenating every segment.
@@ -156,17 +156,12 @@ impl FormatString {
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError> {
-        let FormatStringOptions {
-            library,
-            path_format,
-            target_type: _,
-        } = *opts;
         let mut result = String::new();
         for seg in &self.segments {
             match seg {
                 Segment::Literal(s) => result.push_str(s),
                 Segment::Expression { parsed, .. } => {
-                    let val = self.eval_parsed(parsed, symtab, library, path_format, None)?;
+                    let val = self.eval_parsed(parsed, symtab, opts, None)?;
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
                         result.push_str(&val.to_display_string());
@@ -180,40 +175,38 @@ impl FormatString {
     fn resolve_inner(
         &self,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_format: crate::path_mapping::PathFormat,
-        target_type: Option<&crate::types::ExprType>,
+        opts: &FormatStringOptions<'_>,
     ) -> Result<ExprValue, ExpressionError> {
         if self.segments.len() == 1 {
             if let Segment::Expression { parsed, .. } = &self.segments[0] {
-                return self.eval_parsed(parsed, symtab, library, path_format, target_type);
+                return self.eval_parsed(parsed, symtab, opts, opts.target_type);
             }
         }
-        self.resolve_string_with(
-            symtab,
-            &FormatStringOptions {
-                library,
-                path_format,
-                target_type: None,
-            },
-        )
-        .map(ExprValue::String)
+        // The target type only applies to the single-expression typed
+        // passthrough; resolve_string_with ignores it.
+        self.resolve_string_with(symtab, opts)
+            .map(ExprValue::String)
     }
 
     fn eval_parsed(
         &self,
         parsed: &crate::eval::ParsedExpression,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_format: crate::path_mapping::PathFormat,
+        opts: &FormatStringOptions<'_>,
         target_type: Option<&crate::types::ExprType>,
     ) -> Result<ExprValue, ExpressionError> {
-        let mut builder = parsed.with_path_format(path_format);
-        if let Some(lib) = library {
+        let mut builder = parsed.with_path_format(opts.path_format);
+        if let Some(lib) = opts.library {
             builder = builder.with_library(lib);
         }
         if let Some(tt) = target_type {
             builder = builder.with_target_type(tt);
+        }
+        if let Some(limit) = opts.memory_limit {
+            builder = builder.with_memory_limit(limit);
+        }
+        if let Some(limit) = opts.operation_limit {
+            builder = builder.with_operation_limit(limit);
         }
         builder.evaluate(&[symtab])
     }
@@ -223,17 +216,19 @@ impl FormatString {
     /// whose values are not yet known. This is the spec's approach to static
     /// type checking — just evaluate normally with unresolved types.
     ///
-    /// `target_type` must be the same target type the caller will later pass
-    /// to [`resolve_with`](Self::resolve_with) (or `None` if the caller
-    /// resolves without one), so that validation observes exactly the values
-    /// resolution will produce. It follows the same rule as resolution: for a
-    /// format string that is exactly one expression segment and nothing else,
-    /// the root value is coerced toward the target (so `{{ 1.0 }}` in an
-    /// `int`-typed field validates as the int `1`, one character); in the
-    /// concatenated multi-segment case the target is ignored, mirroring
+    /// `opts` must be the same options the caller will later pass to
+    /// [`resolve_with`](Self::resolve_with) (or defaults if the caller
+    /// resolves without any), so that validation observes exactly the values
+    /// resolution will produce. In particular the target type follows the
+    /// same rule as resolution: for a format string that is exactly one
+    /// expression segment and nothing else, the root value is coerced toward
+    /// the target (so `{{ 1.0 }}` in an `int`-typed field validates as the
+    /// int `1`, one character); in the concatenated multi-segment case the
+    /// target is ignored, mirroring
     /// [`resolve_string_with`](Self::resolve_string_with). A value that
     /// cannot coerce to the target fails validation, just as it would fail
-    /// resolution.
+    /// resolution. The evaluation memory/operation limits on `opts` bound
+    /// each segment's evaluation exactly as they do during resolution.
     ///
     /// On success, returns a [`StaticResolution`] describing what the
     /// evaluation determined statically: a guaranteed lower bound on the
@@ -249,8 +244,7 @@ impl FormatString {
     pub fn validate_expressions(
         &self,
         symtab: &SymbolTable,
-        lib: &crate::function_library::FunctionLibrary,
-        target_type: Option<&crate::types::ExprType>,
+        opts: &FormatStringOptions<'_>,
     ) -> Result<StaticResolution, FormatStringValidationError> {
         let mut min_resolved_string_len = 0usize;
         let mut all_concrete = true;
@@ -301,11 +295,20 @@ impl FormatString {
                 }
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
             };
-            let mut builder = parsed.with_library(lib);
+            let mut builder = parsed.with_path_format(opts.path_format);
+            if let Some(lib) = opts.library {
+                builder = builder.with_library(lib);
+            }
             if single_expression {
-                if let Some(tt) = target_type {
+                if let Some(tt) = opts.target_type {
                     builder = builder.with_target_type(tt);
                 }
+            }
+            if let Some(limit) = opts.memory_limit {
+                builder = builder.with_memory_limit(limit);
+            }
+            if let Some(limit) = opts.operation_limit {
+                builder = builder.with_operation_limit(limit);
             }
             match builder.evaluate(&[symtab]) {
                 Ok(val) => {
@@ -891,6 +894,8 @@ pub struct FormatStringOptions<'a> {
     library: Option<&'a crate::function_library::FunctionLibrary>,
     path_format: crate::path_mapping::PathFormat,
     target_type: Option<&'a crate::types::ExprType>,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 }
 
 impl<'a> Default for FormatStringOptions<'a> {
@@ -899,6 +904,8 @@ impl<'a> Default for FormatStringOptions<'a> {
             library: None,
             path_format: crate::path_mapping::PathFormat::host(),
             target_type: None,
+            memory_limit: None,
+            operation_limit: None,
         }
     }
 }
@@ -941,6 +948,32 @@ impl<'a> FormatStringOptions<'a> {
     #[must_use]
     pub fn with_target_type(mut self, t: &'a crate::types::ExprType) -> Self {
         self.target_type = Some(t);
+        self
+    }
+
+    /// Cap the memory used to evaluate each expression segment, in bytes.
+    /// Default: [`DEFAULT_MEMORY_LIMIT`](crate::DEFAULT_MEMORY_LIMIT).
+    ///
+    /// This is the Expression Language spec's "Memory-bounded evaluation"
+    /// budget — its configurable lever against expressions like
+    /// `'a' * 10000000`. The limit applies per expression segment, both
+    /// during resolution and during
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    #[must_use]
+    pub fn with_memory_limit(mut self, limit: usize) -> Self {
+        self.memory_limit = Some(limit);
+        self
+    }
+
+    /// Cap the number of operations used to evaluate each expression
+    /// segment. Default:
+    /// [`DEFAULT_OPERATION_LIMIT`](crate::DEFAULT_OPERATION_LIMIT).
+    ///
+    /// Applies per expression segment, both during resolution and during
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    #[must_use]
+    pub fn with_operation_limit(mut self, limit: usize) -> Self {
+        self.operation_limit = Some(limit);
         self
     }
 }
@@ -1080,7 +1113,10 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         assert!(fs
-            .validate_expressions(&SymbolTable::new(), &host_lib, None)
+            .validate_expressions(
+                &SymbolTable::new(),
+                &FormatStringOptions::new().with_library(&*host_lib)
+            )
             .is_err());
     }
     #[test]
@@ -1100,7 +1136,10 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         let fs = FormatString::new("{{ re_replace('hello', '', 'x') }}").unwrap();
-        let result = fs.validate_expressions(&SymbolTable::new(), &host_lib, None);
+        let result = fs.validate_expressions(
+            &SymbolTable::new(),
+            &FormatStringOptions::new().with_library(&*host_lib),
+        );
         assert!(
             result.is_err(),
             "Format string validation should error, got: {:?}",
@@ -1140,7 +1179,9 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib, None).is_ok());
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
+            .is_ok());
     }
     #[test]
     fn validate_allows_arithmetic() {
@@ -1155,7 +1196,9 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib, None).is_ok());
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
+            .is_ok());
     }
 
     #[test]
@@ -1534,6 +1577,71 @@ mod tests {
         assert!(
             fs.resolve_with(&st, &opts).is_err(),
             "should reject unknown function"
+        );
+    }
+
+    #[test]
+    fn options_with_memory_limit_bounds_resolution() {
+        // The Expression Language spec's memory-bounded evaluation lever:
+        // a lowered budget rejects 'a' * N blowups during resolution.
+        let fs = FormatString::new("{{ 'a' * 100000 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (1000 bytes)"),
+            "got: {err}"
+        );
+        // The same format string resolves fine under the default budget.
+        assert!(fs.resolve_with(&st, &FormatStringOptions::new()).is_ok());
+    }
+
+    #[test]
+    fn options_with_memory_limit_bounds_validation() {
+        // validate_expressions applies the same per-segment budget as
+        // resolution, so a lowered budget fails statically too.
+        let fs = FormatString::new("{{ 'a' * 100000 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert!(
+            err.message.contains("exceeded limit (1000 bytes)"),
+            "got: {}",
+            err.message
+        );
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new())
+            .is_ok());
+    }
+
+    #[test]
+    fn options_with_operation_limit_bounds_resolution_and_validation() {
+        let fs = FormatString::new("{{ sum([1] * 1000) }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_operation_limit(50);
+        let err = fs.resolve_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (50)"),
+            "got: {err}"
+        );
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert!(
+            err.message.contains("exceeded limit (50)"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn options_with_memory_limit_applies_per_segment_in_string_resolution() {
+        // resolve_string_with evaluates each segment under the same budget.
+        let fs = FormatString::new("prefix {{ 'a' * 100000 }} suffix").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_string_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (1000 bytes)"),
+            "got: {err}"
         );
     }
 }

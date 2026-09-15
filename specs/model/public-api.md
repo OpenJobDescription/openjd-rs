@@ -104,6 +104,7 @@ pub fn decode_job_template(
 pub fn decode_environment_template(
     template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError>;
 
 pub fn decode_template(
@@ -117,9 +118,11 @@ Each function takes a generic JSON value (typically produced from YAML by
 [`parse::document_string_to_object`]) and returns the parsed template struct
 on success. `supported_extensions` is an allowlist of extension names the
 application is willing to honor — template extensions not in this list are
-rejected. `caller_limits` constrains document size beyond any spec-defined
-limits; it's an optional per-deployment policy hook, not something defined
-by the spec.
+rejected. `caller_limits` layers per-deployment policy on top of the
+spec-defined limits: document/segment size caps, the opt-in resolved-value
+caps (`max_resolved_arg_len`/`max_resolved_data_len`), and the expression
+evaluation budgets. None of it is defined by the spec, and none of it can
+loosen a spec limit.
 
 [`decode_template`] auto-detects the template kind from
 `specificationVersion` and dispatches to the matching decoder.
@@ -711,6 +714,30 @@ pub struct CallerLimits {
     pub max_step_script_size: Option<usize>,
     pub max_environment_size: Option<usize>,
     pub max_template_size: Option<usize>,
+    /// Cap on any resolved string destined for a process argument: the
+    /// action `command` (§5.1) and each argv entry an `args` element
+    /// produces (§5.2, after null-skip / list-flatten). The spec sets no
+    /// maximum but notes the OS imposes one (Linux `MAX_ARG_STRLEN`
+    /// 131072; Windows command line 32767). Enforced at validation and
+    /// job creation on the guaranteed lower bound of every possible
+    /// resolution, and at run time by `openjd-sessions` on the final
+    /// values.
+    pub max_resolved_arg_len: Option<usize>,
+    /// Cap on each resolved embedded-file `data` value (§6.1.2 sets no
+    /// spec limit). Same three-stage enforcement as
+    /// `max_resolved_arg_len`.
+    pub max_resolved_data_len: Option<usize>,
+    /// Evaluation memory budget in bytes for each format-string
+    /// expression (Expression Language "Memory-bounded evaluation").
+    /// `None` = the spec-recommended default
+    /// (`openjd_expr::DEFAULT_MEMORY_LIMIT`, 100 MB). Lowering it is
+    /// spec-sanctioned; all three stages evaluate under the same budget,
+    /// so a violation fails at the earliest stage that evaluates.
+    pub max_eval_memory_bytes: Option<usize>,
+    /// Evaluation operation budget per expression. `None` = the
+    /// spec-recommended default (`openjd_expr::DEFAULT_OPERATION_LIMIT`,
+    /// 10 million).
+    pub max_eval_operations: Option<usize>,
 }
 
 /// The thing every validation and instantiation function takes — a

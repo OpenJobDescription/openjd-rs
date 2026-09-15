@@ -431,6 +431,39 @@ pub struct CallerLimits {
     pub max_environment_size: Option<usize>,
     /// Maximum total template document size, in bytes.
     pub max_template_size: Option<usize>,
+    /// Maximum character length of any resolved string destined for a
+    /// process argument: an action `command` (Template Schemas §5.1) or
+    /// each argv entry an `args` element produces (§5.2, after null-skip
+    /// and list-flatten). `None` (default) imposes no limit beyond the
+    /// spec — §5.1/§5.2 set no maximum but note that the operating system
+    /// the command runs on imposes its own. Callers targeting Linux may
+    /// want 131072 (`MAX_ARG_STRLEN`); Windows 32767 (the command-line
+    /// length limit).
+    ///
+    /// Enforced at template validation and job creation on the
+    /// guaranteed lower bound of every possible resolution (early
+    /// failure), and at run time by `openjd-sessions` on the final
+    /// resolved values (the enforcement boundary).
+    pub max_resolved_arg_len: Option<usize>,
+    /// Maximum character length of any resolved embedded-file `data`
+    /// value (Template Schemas §6.1.2, which sets no limit of its own).
+    /// `None` (default) imposes no limit beyond the spec. Enforced at
+    /// the same three stages as [`max_resolved_arg_len`](Self::max_resolved_arg_len).
+    pub max_resolved_data_len: Option<usize>,
+    /// Memory budget, in bytes, for evaluating each format-string
+    /// expression (the Expression Language spec's "Memory-bounded
+    /// evaluation" lever — its own defense against expressions like
+    /// `'a' * 10000000`). `None` (default) uses the spec-recommended
+    /// default ([`openjd_expr::DEFAULT_MEMORY_LIMIT`], 100 MB). Lowering
+    /// it is spec-sanctioned configuration: template validation, job
+    /// creation, and the session runtime all evaluate under the same
+    /// budget, so a violation fails at the earliest stage that evaluates
+    /// the expression.
+    pub max_eval_memory_bytes: Option<usize>,
+    /// Operation budget for evaluating each format-string expression.
+    /// `None` (default) uses the spec-recommended default
+    /// ([`openjd_expr::DEFAULT_OPERATION_LIMIT`], 10 million).
+    pub max_eval_operations: Option<usize>,
 }
 
 /// Model-side profile: the specification revision plus the set of

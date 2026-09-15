@@ -380,6 +380,24 @@ enum ResolvedConstraint<'a> {
     /// The cancelation `mode` enum (FEATURE_BUNDLE_1 deferred form):
     /// resolves to `TERMINATE`, `NOTIFY_THEN_TERMINATE`, or `null`.
     CancelationMode,
+    /// A field consumed as one whole string with an opt-in caller cap:
+    /// an action `command` (§5.1, `CallerLimits::max_resolved_arg_len`)
+    /// or an embedded-file `data` value (§6.1.2,
+    /// `CallerLimits::max_resolved_data_len`). The spec sets no maximum
+    /// of its own. Resolution is `resolve_string_with` with **no**
+    /// target type — every value renders inline into a single string —
+    /// so the length bound applies unconditionally and there are no
+    /// skip/flatten semantics.
+    ResolvedString { max_len: usize },
+    /// An action `args` element (§5.2) under the opt-in
+    /// `CallerLimits::max_resolved_arg_len` cap. The session runtime
+    /// (`resolve_action_args`) resolves each element with `resolve_with`
+    /// and **no** target type: `null` skips the element, a list flattens
+    /// into one argv entry per element, and anything else becomes one
+    /// argv entry via its display form — so the cap applies to each
+    /// resulting entry, with the same certainly-a-string gating as
+    /// [`Self::TextListItem`].
+    ArgListItem { max_len: usize },
 }
 
 impl ResolvedConstraint<'_> {
@@ -395,24 +413,30 @@ impl ResolvedConstraint<'_> {
     /// `string?` for the deferred cancelation `mode`. Job creation and
     /// the session runtime resolve with the same targets — a field's
     /// validation-time target must always equal its resolution-time
-    /// target.
-    fn target_type(&self) -> ExprType {
+    /// target. `None` for the fields whose resolution passes no target
+    /// type at all (action `command`/`args`, embedded-file `data` —
+    /// see `resolve_action_args` and embedded-file materialization in
+    /// `openjd-sessions`).
+    fn target_type(&self) -> Option<ExprType> {
         match self {
-            Self::Text { .. } => ExprType::STRING,
-            Self::TextListItem { .. } | Self::AttributeValue { .. } => ExprType::union(vec![
+            Self::Text { .. } => Some(ExprType::STRING),
+            Self::TextListItem { .. } | Self::AttributeValue { .. } => Some(ExprType::union(vec![
                 ExprType::NULLTYPE,
                 ExprType::STRING,
                 ExprType::list(ExprType::STRING),
-            ]),
-            Self::Float { .. } => ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE]),
+            ])),
+            Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
             Self::Int { nullable, .. } => {
                 if *nullable {
-                    ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+                    Some(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]))
                 } else {
-                    ExprType::INT
+                    Some(ExprType::INT)
                 }
             }
-            Self::CancelationMode => ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]),
+            Self::CancelationMode => {
+                Some(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]))
+            }
+            Self::ResolvedString { .. } | Self::ArgListItem { .. } => None,
         }
     }
 }
@@ -520,6 +544,66 @@ fn check_resolved_constraint(
             // A fully static `null` skips the element: valid here; job
             // creation re-checks that the list is non-empty after all
             // skips are applied.
+        }
+        ResolvedConstraint::ResolvedString { max_len } => {
+            // `resolve_string_with` renders every value inline into one
+            // string, so the display-form bound is a true lower bound on
+            // the final string whatever the segment types — no gating
+            // needed. Exact when fully static.
+            if sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+            }
+        }
+        ResolvedConstraint::ArgListItem { max_len } => {
+            // Same shape as TextListItem: the whole-string bound is only
+            // sound when the resolution is certainly one string — a
+            // list-valued resolution flattens into one argv entry per
+            // element, distributing its characters. Return on the bound
+            // error so the per-element check cannot report the same
+            // violation twice.
+            if sr.resolved_type == ExprType::STRING && sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+                return;
+            }
+            // Fully static: the cap applies to each argv entry the
+            // element produces — one per list member after flattening,
+            // one for any other value via its display form. A static
+            // `null` produces no entry.
+            if let Some(v) = &sr.resolved_value {
+                let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                let is_list = v.is_list();
+                for (i, elem) in elements.iter().enumerate() {
+                    if matches!(elem, ExprValue::Null) {
+                        continue;
+                    }
+                    let n = elem.to_display_string().chars().count();
+                    if n > *max_len {
+                        let element_label = if is_list {
+                            format!("list element {i} ")
+                        } else {
+                            String::new()
+                        };
+                        errors.add(
+                            path,
+                            format!(
+                                "{element_label}resolves to {n} characters, exceeding the maximum of {max_len}."
+                            ),
+                        );
+                    }
+                }
+            }
         }
         ResolvedConstraint::AttributeValue {
             capability_name,
@@ -692,15 +776,55 @@ fn check_resolved_constraint(
     }
 }
 
+/// Function library plus caller evaluation budgets for one validation
+/// scope. Pass 8 evaluates every format-string expression; the budgets
+/// (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`) bound
+/// each of those evaluations exactly as they bound resolution at job
+/// creation and run time, so a lowered budget fails at this gate first.
+struct FsEval<'a> {
+    lib: &'a FunctionLibrary,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
+}
+
+impl<'a> FsEval<'a> {
+    fn new(lib: &'a FunctionLibrary, caller_limits: &crate::types::CallerLimits) -> Self {
+        Self {
+            lib,
+            memory_limit: caller_limits.max_eval_memory_bytes,
+            operation_limit: caller_limits.max_eval_operations,
+        }
+    }
+
+    /// Evaluation options matching how the field will later resolve,
+    /// with this scope's library and the caller budgets applied.
+    fn options(
+        &self,
+        target: Option<&'a openjd_expr::ExprType>,
+    ) -> openjd_expr::FormatStringOptions<'a> {
+        let mut opts = openjd_expr::FormatStringOptions::new().with_library(self.lib);
+        if let Some(t) = target {
+            opts = opts.with_target_type(t);
+        }
+        if let Some(m) = self.memory_limit {
+            opts = opts.with_memory_limit(m);
+        }
+        if let Some(o) = self.operation_limit {
+            opts = opts.with_operation_limit(o);
+        }
+        opts
+    }
+}
+
 /// Validate a format string against a symbol table, reporting errors at the given path.
 fn validate_fs(
     fs: &FormatString,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     path: &[PathElement],
     errors: &mut ValidationErrors,
 ) {
-    validate_fs_with(fs, symtab, lib, path, None, errors);
+    validate_fs_with(fs, symtab, ev, path, None, errors);
 }
 
 /// [`validate_fs`] plus a spec-mandated resolved-value constraint
@@ -710,7 +834,7 @@ fn validate_fs(
 fn validate_fs_with(
     fs: &FormatString,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     path: &[PathElement],
     constraint: Option<&ResolvedConstraint<'_>>,
     errors: &mut ValidationErrors,
@@ -718,8 +842,8 @@ fn validate_fs_with(
     if fs.is_literal() {
         return;
     }
-    let target = constraint.map(ResolvedConstraint::target_type);
-    match fs.validate_expressions(symtab, lib, target.as_ref()) {
+    let target = constraint.and_then(ResolvedConstraint::target_type);
+    match fs.validate_expressions(symtab, &ev.options(target.as_ref())) {
         Ok(sr) => {
             if let Some(c) = constraint {
                 check_resolved_constraint(&sr, c, path, errors);
@@ -773,25 +897,42 @@ fn validate_fs_with(
     }
 }
 
-/// Validate a format string in an action (command + args).
+/// Validate a format string in an action (command + args). When the
+/// caller opted into `CallerLimits::max_resolved_arg_len`, the resolved
+/// command string and each argv entry the args produce are bounded by it
+/// (§5.1/§5.2 set no spec maximum — see the `ResolvedString` /
+/// `ArgListItem` constraint docs).
 fn validate_action_fs(
     action: &Action,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     action_path: &[PathElement],
+    max_resolved_arg_len: Option<usize>,
     errors: &mut ValidationErrors,
 ) {
-    validate_fs(
+    let command_constraint =
+        max_resolved_arg_len.map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+    let arg_constraint =
+        max_resolved_arg_len.map(|max_len| ResolvedConstraint::ArgListItem { max_len });
+    validate_fs_with(
         &action.command,
         symtab,
-        lib,
+        ev,
         &path_field(action_path, "command"),
+        command_constraint.as_ref(),
         errors,
     );
     if let Some(args) = &action.args {
         let args_path = path_field(action_path, "args");
         for (j, arg) in args.iter().enumerate() {
-            validate_fs(arg, symtab, lib, &path_index(&args_path, j), errors);
+            validate_fs_with(
+                arg,
+                symtab,
+                ev,
+                &path_index(&args_path, j),
+                arg_constraint.as_ref(),
+                errors,
+            );
         }
     }
 }
@@ -811,6 +952,8 @@ pub fn validate_format_strings(
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
     let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
+    let host_ev = FsEval::new(&host_lib, &ctx.caller_limits);
     let limits = super::EffectiveLimits::from_context(ctx);
     // Standard attribute capability table for resolved-value checks
     // (§3.3.2.2). Only errs for an unsupported revision, which cannot
@@ -827,7 +970,7 @@ pub fn validate_format_strings(
     validate_fs_with(
         &jt.name,
         &template_symtab,
-        &template_lib,
+        &template_ev,
         &path_field(&[], "name"),
         Some(&ResolvedConstraint::Text {
             max_len: limits.max_job_name_len,
@@ -873,7 +1016,7 @@ pub fn validate_format_strings(
                         validate_fs_with(
                             min,
                             &hr_symtab,
-                            &template_lib,
+                            &template_ev,
                             &path_field(&amt_path, "min"),
                             Some(&ResolvedConstraint::Float {
                                 positive: false,
@@ -886,7 +1029,7 @@ pub fn validate_format_strings(
                         validate_fs_with(
                             max,
                             &hr_symtab,
-                            &template_lib,
+                            &template_ev,
                             &path_field(&amt_path, "max"),
                             Some(&ResolvedConstraint::Float {
                                 positive: true,
@@ -909,7 +1052,7 @@ pub fn validate_format_strings(
                             validate_fs_with(
                                 v,
                                 &hr_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
                                 Some(&attr_constraint),
                                 errors,
@@ -921,7 +1064,7 @@ pub fn validate_format_strings(
                             validate_fs_with(
                                 v,
                                 &hr_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
                                 Some(&attr_constraint),
                                 errors,
@@ -980,12 +1123,14 @@ pub fn validate_format_strings(
             validate_env_format_strings(
                 env,
                 &env_symtab,
-                &host_lib,
+                &host_ev,
                 &env_template_symtab,
-                &template_lib,
+                &template_ev,
                 &path_index(&envs_path, i),
                 expr_active,
                 limits.max_env_var_value_len,
+                ctx.caller_limits.max_resolved_arg_len,
+                ctx.caller_limits.max_resolved_data_len,
                 errors,
             );
         }
@@ -1068,7 +1213,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&p_path, "range"),
                                 errors,
                             );
@@ -1080,7 +1225,7 @@ pub fn validate_format_strings(
                                 validate_fs_with(
                                     item,
                                     &range_symtab,
-                                    &template_lib,
+                                    &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&string_range_item_constraint),
                                     errors,
@@ -1094,7 +1239,7 @@ pub fn validate_format_strings(
                                 validate_fs_with(
                                     item,
                                     &range_symtab,
-                                    &template_lib,
+                                    &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&path_range_item_constraint),
                                     errors,
@@ -1107,7 +1252,7 @@ pub fn validate_format_strings(
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&p_path, "range"),
                                 errors,
                             );
@@ -1123,7 +1268,7 @@ pub fn validate_format_strings(
                             validate_fs_with(
                                 fs,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&chunks_path, "defaultTaskCount"),
                                 Some(&ResolvedConstraint::Int {
                                     min: 1,
@@ -1141,7 +1286,7 @@ pub fn validate_format_strings(
                             validate_fs_with(
                                 fs,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&chunks_path, "targetRuntimeSeconds"),
                                 Some(&ResolvedConstraint::Int {
                                     min: 0,
@@ -1268,8 +1413,9 @@ pub fn validate_format_strings(
             validate_action_fs(
                 &script.actions.on_run,
                 &task_symtab,
-                &host_lib,
+                &host_ev,
                 &action_path,
+                ctx.caller_limits.max_resolved_arg_len,
                 errors,
             );
 
@@ -1281,7 +1427,7 @@ pub fn validate_format_strings(
                 validate_fs_with(
                     timeout,
                     &step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &path_field(&action_path, "timeout"),
                     Some(&TIMEOUT_CONSTRAINT),
                     errors,
@@ -1301,7 +1447,7 @@ pub fn validate_format_strings(
                 validate_fs_with(
                     mode,
                     &step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &path_field(&action_path, "cancelation"),
                     Some(&ResolvedConstraint::CancelationMode),
                     errors,
@@ -1311,7 +1457,7 @@ pub fn validate_format_strings(
                 validate_fs_with(
                     notify,
                     &step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &path_field(&action_path, "cancelation"),
                     Some(&NOTIFY_PERIOD_CONSTRAINT),
                     errors,
@@ -1321,14 +1467,19 @@ pub fn validate_format_strings(
             // Embedded files
             if let Some(files) = &script.embedded_files {
                 let files_path = path_field(&script_path, "embeddedFiles");
+                let data_constraint = ctx
+                    .caller_limits
+                    .max_resolved_data_len
+                    .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
                 for (j, f) in files.iter().enumerate() {
                     let f_path = path_index(&files_path, j);
                     if let Some(data) = &f.data {
-                        validate_fs(
+                        validate_fs_with(
                             data,
                             &task_symtab,
-                            &host_lib,
+                            &host_ev,
                             &path_field(&f_path, "data"),
+                            data_constraint.as_ref(),
                             errors,
                         );
                     }
@@ -1444,12 +1595,14 @@ pub fn validate_format_strings(
                 validate_env_format_strings(
                     env,
                     &env_symtab,
-                    &host_lib,
+                    &host_ev,
                     &step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &path_index(&envs_path, j),
                     expr_active,
                     limits.max_env_var_value_len,
+                    ctx.caller_limits.max_resolved_arg_len,
+                    ctx.caller_limits.max_resolved_data_len,
                     errors,
                 );
             }
@@ -1559,6 +1712,8 @@ pub fn validate_format_strings_environment_template(
     let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
     let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
     let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
+    let host_ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
 
     let env = &et.environment;
     let env_path = vec![PathElement::Field("environment".into())];
@@ -1598,12 +1753,14 @@ pub fn validate_format_strings_environment_template(
     validate_env_format_strings(
         env,
         &env_symtab,
-        &host_lib,
+        &host_ev,
         &env_template_symtab,
-        &template_lib,
+        &template_ev,
         &env_path,
         expr_active,
         super::EffectiveLimits::from_context(ctx).max_env_var_value_len,
+        ctx.caller_limits.max_resolved_arg_len,
+        ctx.caller_limits.max_resolved_data_len,
         errors,
     );
 
@@ -1620,20 +1777,22 @@ pub fn validate_format_strings_environment_template(
 ///
 /// Two symbol tables are needed because an environment mixes resolution
 /// stages: `command`/`args`/`variables`/embedded-file fields are
-/// `@fmtstring[host]` (session scope — `symtab`/`lib`), while `timeout` and
+/// `@fmtstring[host]` (session scope — `symtab`/`ev`), while `timeout` and
 /// `notifyPeriodInSeconds` are plain `@fmtstring` (job-creation scope —
-/// `template_symtab`/`template_lib`, no Session.*, no Env.File.*, no host
+/// `template_symtab`/`template_ev`, no Session.*, no Env.File.*, no host
 /// functions).
 #[allow(clippy::too_many_arguments)]
 fn validate_env_format_strings(
     env: &Environment,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     template_symtab: &SymbolTable,
-    template_lib: &FunctionLibrary,
+    template_ev: &FsEval<'_>,
     path: &[PathElement],
     expr_active: bool,
     max_env_var_value_len: usize,
+    max_resolved_arg_len: Option<usize>,
+    max_resolved_data_len: Option<usize>,
     errors: &mut ValidationErrors,
 ) {
     if let Some(vars) = &env.variables {
@@ -1652,7 +1811,7 @@ fn validate_env_format_strings(
             validate_fs_with(
                 value,
                 symtab,
-                lib,
+                ev,
                 &var_path,
                 Some(&ResolvedConstraint::Text {
                     max_len: max_env_var_value_len,
@@ -1692,8 +1851,9 @@ fn validate_env_format_strings(
             validate_action_fs(
                 action,
                 symtab,
-                lib,
+                ev,
                 &path_field(&actions_path, "onEnter"),
+                max_resolved_arg_len,
                 errors,
             );
         }
@@ -1712,8 +1872,9 @@ fn validate_env_format_strings(
                 validate_action_fs(
                     action,
                     &st,
-                    lib,
+                    ev,
                     &path_field(&actions_path, hook_name),
+                    max_resolved_arg_len,
                     errors,
                 );
             }
@@ -1722,8 +1883,9 @@ fn validate_env_format_strings(
             validate_action_fs(
                 action,
                 symtab,
-                lib,
+                ev,
                 &path_field(&actions_path, "onExit"),
+                max_resolved_arg_len,
                 errors,
             );
         }
@@ -1752,7 +1914,7 @@ fn validate_env_format_strings(
                 validate_fs_with(
                     timeout,
                     field_symtab,
-                    template_lib,
+                    template_ev,
                     &path_field(&action_path, "timeout"),
                     Some(&TIMEOUT_CONSTRAINT),
                     errors,
@@ -1772,7 +1934,7 @@ fn validate_env_format_strings(
                 validate_fs_with(
                     mode,
                     field_symtab,
-                    template_lib,
+                    template_ev,
                     &path_field(&action_path, "cancelation"),
                     Some(&ResolvedConstraint::CancelationMode),
                     errors,
@@ -1782,7 +1944,7 @@ fn validate_env_format_strings(
                 validate_fs_with(
                     notify,
                     field_symtab,
-                    template_lib,
+                    template_ev,
                     &path_field(&action_path, "cancelation"),
                     Some(&NOTIFY_PERIOD_CONSTRAINT),
                     errors,
@@ -1801,7 +1963,16 @@ fn validate_env_format_strings(
                             "complex expressions require the EXPR extension.",
                         );
                     }
-                    validate_fs(data, symtab, lib, &data_path, errors);
+                    let data_constraint = max_resolved_data_len
+                        .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+                    validate_fs_with(
+                        data,
+                        symtab,
+                        ev,
+                        &data_path,
+                        data_constraint.as_ref(),
+                        errors,
+                    );
                 }
                 // `filename` is a plain string per the 2023-09 schema
                 // (not @fmtstring) — no format-string validation.

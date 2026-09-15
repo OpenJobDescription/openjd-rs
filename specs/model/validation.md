@@ -259,6 +259,26 @@ deferring it to job submission or the worker. Two stages of checking:
 | chunks `defaultTaskCount` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int` | soft cap: 100 chars | coerced integer ≥ 1 |
 | chunks `targetRuntimeSeconds` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int?` | soft cap: 100 chars | coerced integer ≥ 0; `null` = unset |
 | amount `min` / `max` (FB1 float strings, Template Schemas §3.3.1) | `float?` | soft cap: 100 chars | finite float, ≥ 0 / > 0; `null` = unset |
+| action `command` (Template Schemas §5.1) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally (everything renders inline into one string) | (length is the whole constraint) |
+| action `args[*]` (Template Schemas §5.2) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_with` with no target) | when certainly a string: ≤ cap | ≤ cap per final argv entry (a list flattens into one entry per element; `null` skips) |
+| embedded file `data` (Template Schemas §6.1.2) — **opt-in** `CallerLimits::max_resolved_data_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally | (length is the whole constraint) |
+
+The three opt-in rows are **caller policy, not spec constraints**: §5.1,
+§5.2 and §6.1.2 deliberately set no maximum (the OS imposes its own on
+process arguments), so the caps default to `None` and impose nothing.
+When a caller sets one, the same three-stage early-failure model applies
+as for the spec-mandated rows. The `openjd` CLI sets
+`max_resolved_arg_len` to the host OS maximum by default (see
+`specs/cli/`).
+
+Separately from per-field constraints, pass 8 evaluates every
+format-string expression under the caller's **evaluation budgets**
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`, defaults:
+the Expression Language spec's 100 MB / 10 M). These bound each segment's
+evaluation identically at validation, job creation, and run time — the
+spec's own lever against expression blowups like `'A' * 10000000` — so a
+lowered budget fails at this gate first, as an ordinary
+`Failed to parse interpolation expression` error at the field path.
 
 Numeric fields have no exact length maximum — leading zeros are legal and
 surrounding whitespace is tolerated in string forms — so they use a soft

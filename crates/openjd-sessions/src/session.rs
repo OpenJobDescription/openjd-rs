@@ -153,6 +153,13 @@ pub struct SessionConfig {
     /// redacted. Setting this flag to `false` does not improve security —
     /// it just removes the directive lines from operator-facing output.
     pub echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets enforced by this session
+    /// — the enforcement boundary for resolved-value limits, since a
+    /// worker can run a job that never passed through this client's
+    /// template validation or job creation. Mirrors the corresponding
+    /// `openjd_model::CallerLimits` fields a submitting service would
+    /// set. Defaults to no limits beyond the OpenJD specification.
+    pub limits: crate::limits::SessionLimits,
 }
 
 fn format_exit_code(code: Option<i32>) -> String {
@@ -416,12 +423,14 @@ fn declared_terminate_delay(
     cancelation: &Option<openjd_model::job::CancelationMode>,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     default_notify_period: Duration,
 ) -> Option<Duration> {
     match crate::runner::cancel_method_for_action(
         cancelation,
         symtab,
         library,
+        limits,
         default_notify_period,
     ) {
         Ok(crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay }) => {
@@ -520,6 +529,9 @@ pub struct Session {
     /// Whether to echo `openjd_*` directive lines to the log. See
     /// [`SessionConfig::echo_openjd_directives`].
     echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets (see
+    /// [`SessionConfig::limits`]).
+    limits: crate::limits::SessionLimits,
 }
 
 impl Session {
@@ -560,6 +572,7 @@ impl Session {
             redacted_values: HashSet::new(),
             profile: None,
             debug_collect_stdout: true, // test constructor — tests need captured stdout
+            limits: crate::limits::SessionLimits::default(),
             echo_openjd_directives: true, // matches default in production config
         }
     }
@@ -783,6 +796,7 @@ impl Session {
             profile,
             debug_collect_stdout: config.debug_collect_stdout,
             echo_openjd_directives: config.echo_openjd_directives,
+            limits: config.limits,
         })
     }
 
@@ -1196,8 +1210,7 @@ impl Session {
                 let value = fmt_str
                     .resolve_with(
                         &symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_library(self.lib())
+                        &crate::limits::fs_options(self.lib(), &self.limits)
                             .with_target_type(&openjd_expr::ExprType::STRING),
                     )
                     .map(|v| match v {
@@ -1322,6 +1335,7 @@ impl Session {
                     WrappedContext::Env(&env.name),
                     &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "onEnter",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
@@ -1346,6 +1360,7 @@ impl Session {
                     .cancelation,
                 &action_symtab,
                 Some(&lib),
+                &self.limits,
                 Duration::from_secs(30),
             ));
 
@@ -1362,6 +1377,7 @@ impl Session {
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_echo_openjd_directives(self.echo_openjd_directives)
+            .with_limits(self.limits)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1594,6 +1610,7 @@ impl Session {
                     WrappedContext::Env(&env.name),
                     &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "onExit",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
@@ -1616,6 +1633,7 @@ impl Session {
                     .cancelation,
                 &action_symtab,
                 Some(&lib),
+                &self.limits,
                 Duration::from_secs(30),
             ));
 
@@ -1631,6 +1649,7 @@ impl Session {
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_echo_openjd_directives(self.echo_openjd_directives)
+            .with_limits(self.limits)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1844,6 +1863,7 @@ impl Session {
                     WrappedContext::Step(step_name),
                     &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "task",
                 )?;
                 Ok::<_, SessionError>(action)
@@ -1873,6 +1893,7 @@ impl Session {
         .with_redactions(self.redactions_enabled())
         .with_debug_collect_stdout(self.debug_collect_stdout)
         .with_echo_openjd_directives(self.echo_openjd_directives)
+        .with_limits(self.limits)
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
@@ -1924,6 +1945,7 @@ impl Session {
             &effective_script.actions.on_run.cancelation,
             &action_symtab,
             Some(&lib),
+            &self.limits,
             Duration::from_secs(120),
         ));
 
@@ -2706,7 +2728,8 @@ impl Session {
         let mut st = base.clone();
         let ef = if let Some(files) = embedded_files {
             let mut ef = EmbeddedFiles::new(scope, self.files_directory.clone(), &self.session_id)
-                .with_user(self.cross_user.user.clone());
+                .with_user(self.cross_user.user.clone())
+                .with_limits(self.limits);
             ef.allocate_file_paths(files, &mut st)?;
             Some(ef)
         } else {
@@ -2826,7 +2849,8 @@ impl Session {
                 self.files_directory.clone(),
                 &self.session_id,
             )
-            .with_user(self.cross_user.user.clone());
+            .with_user(self.cross_user.user.clone())
+            .with_limits(self.limits);
             ef.allocate_file_paths(files, symtab)?;
             self.wrap_env_file_records.insert(wrap_env_id.clone(), ef);
         }
@@ -2931,6 +2955,7 @@ fn seed_wrapped_action_symbols(
     context: WrappedContext<'_>,
     session_env_vars: &HashMap<String, String>,
     lib: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     phase: &str,
 ) -> Result<(), SessionError> {
     // Layer the wrap env's frozen symtab on top of the hook's table so the
@@ -2973,11 +2998,13 @@ fn seed_wrapped_action_symbols(
 
     // Resolve the wrapped action's command/args against the INNER scope.
     // These seed WrappedAction.Command/Args.
-    let resolved_cmd = crate::runner::resolve_action_args(wrapped_action, inner_symtab, lib)
-        .map_err(|e| SessionError::FormatString {
-            context: format!("wrapped {phase} command"),
-            reason: e.to_string(),
-        })?;
+    let resolved_cmd =
+        crate::runner::resolve_action_args(wrapped_action, inner_symtab, lib, limits).map_err(
+            |e| SessionError::FormatString {
+                context: format!("wrapped {phase} command"),
+                reason: e.to_string(),
+            },
+        )?;
     let (cmd, args) = match resolved_cmd.split_first() {
         Some((head, tail)) => (head.clone(), tail.to_vec()),
         None => (String::new(), Vec::new()),
@@ -2991,7 +3018,7 @@ fn seed_wrapped_action_symbols(
     // action specified no timeout — int? per the EXPR optional-data
     // semantics, so whole-field forwarding drops the field.
     let wrapped_timeout_secs: Option<i64> =
-        crate::runner::resolve_action_timeout(wrapped_action, inner_symtab, lib, None)
+        crate::runner::resolve_action_timeout(wrapped_action, inner_symtab, lib, limits, None)
             .map_err(|e| SessionError::FormatString {
                 context: format!("wrapped {phase} timeout"),
                 reason: e.to_string(),
@@ -3018,6 +3045,7 @@ fn seed_wrapped_action_symbols(
             &wrapped_action.cancelation,
             inner_symtab,
             lib,
+            limits,
         )? {
             crate::runner::EffectiveCancelation::Undeclared => (None, None),
             crate::runner::EffectiveCancelation::Terminate => (Some("TERMINATE"), None),

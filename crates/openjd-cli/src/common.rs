@@ -21,6 +21,53 @@ use openjd_model::template::parse::DocumentType;
 /// document and small enough to prevent runaway allocation.
 pub const MAX_FILE_INPUT_SIZE: u64 = 10 * 1024 * 1024;
 
+/// The maximum character length of a single process argument the host
+/// operating system will accept.
+///
+/// Template Schemas §5.1/§5.2 set no maximum on `command`/`args` but note
+/// that "the specific operating system that the command is run on will
+/// impose its own maximum length". The CLI surfaces that OS limit early —
+/// at `check`, at job creation, and at run time — instead of letting
+/// process spawning fail opaquely (`E2BIG` on POSIX, a silent truncation
+/// or spawn failure on Windows):
+///
+/// - **Linux**: `MAX_ARG_STRLEN` — a single argv string may be at most
+///   32 pages (131072 bytes with 4 KiB pages).
+/// - **Windows**: the `CreateProcess` command line is limited to 32767
+///   UTF-16 code units, so no single argument can exceed that.
+/// - **macOS** (and other platforms): `ARG_MAX` is 1 MiB total for argv +
+///   environment, which is also the ceiling for any single argument.
+pub const OS_MAX_ARG_LEN: usize = {
+    #[cfg(target_os = "linux")]
+    {
+        131072
+    }
+    #[cfg(target_os = "windows")]
+    {
+        32767
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        1048576
+    }
+};
+
+/// The CLI's opinionated caller limits: library defaults plus
+/// `max_resolved_arg_len` set to [`OS_MAX_ARG_LEN`]. Library callers of
+/// `openjd-model` default to no cap (spec-conforming permissiveness); the
+/// CLI always executes on this host, so a resolved argument the host OS
+/// cannot pass to a process is fail-early material at every stage.
+///
+/// Note the cap describes the machine running the CLI. A template checked
+/// on Linux (131072) may still fail on a Windows worker (32767); run-time
+/// enforcement on the worker is the authoritative gate.
+pub fn caller_limits() -> openjd_model::CallerLimits {
+    openjd_model::CallerLimits {
+        max_resolved_arg_len: Some(OS_MAX_ARG_LEN),
+        ..Default::default()
+    }
+}
+
 /// Infer the template document format from its filename extension.
 pub fn document_type(path: &Path) -> DocumentType {
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
@@ -189,5 +236,31 @@ pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
             Ok(exts)
         }
         None => Ok(supported.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+#[cfg(test)]
+mod limits_tests {
+    use super::*;
+
+    #[test]
+    fn os_max_arg_len_matches_host_os() {
+        #[cfg(target_os = "linux")]
+        assert_eq!(OS_MAX_ARG_LEN, 131072); // MAX_ARG_STRLEN
+        #[cfg(target_os = "windows")]
+        assert_eq!(OS_MAX_ARG_LEN, 32767); // CreateProcess command-line limit
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        assert_eq!(OS_MAX_ARG_LEN, 1048576); // ARG_MAX
+    }
+
+    #[test]
+    fn cli_caller_limits_cap_resolved_args_only() {
+        // CLI policy: an opinionated resolved-argument cap at the host OS
+        // maximum; everything else stays at the library default (None).
+        let limits = caller_limits();
+        assert_eq!(limits.max_resolved_arg_len, Some(OS_MAX_ARG_LEN));
+        assert_eq!(limits.max_resolved_data_len, None);
+        assert_eq!(limits.max_eval_memory_bytes, None);
+        assert_eq!(limits.max_eval_operations, None);
     }
 }

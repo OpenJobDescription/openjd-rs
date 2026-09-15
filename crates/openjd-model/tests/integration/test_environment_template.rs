@@ -8,6 +8,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_environment_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_json::Value {
     serde_saphyr::from_str(s).unwrap()
@@ -15,12 +16,14 @@ fn yaml_val(s: &str) -> serde_json::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_environment_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_environment_template(v, None, &CallerLimits::default())
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -512,14 +515,14 @@ fn test_embedded_duplicate_names() {
 
 fn decode_with_exts(s: &str, exts: &[&str]) {
     let v = yaml_val(s);
-    decode_environment_template(v, Some(exts))
+    decode_environment_template(v, Some(exts), &CallerLimits::default())
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err_with_exts(s: &str, exts: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err =
-        decode_environment_template(v, Some(exts)).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, Some(exts), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
