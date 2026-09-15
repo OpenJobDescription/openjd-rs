@@ -83,6 +83,33 @@ pub struct PathParameterOptions<'a> {
 - `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
   widening (int → float), list element type validation
 
+**Round trip:** a value `preprocess_job_parameters` returns should be a value it accepts as input.
+Both its input and output types are public, so a caller can hand its output straight back to it.
+`create_job` relies on something adjacent for every caller: it re-runs `check_constraints` over each
+value it is given (`create_job/mod.rs:54`-`:59`).
+
+A goal rather than an established invariant. One case is known to violate it: a scalar `PATH` with a
+**relative** default plus a `maxLength`, `minLength` or `allowedValues` constraint. The first pass joins
+the default to `job_template_dir` and does not constrain-check a default, while the second pass receives
+the joined absolute path as submitted input and measures the constraint against it. Measured, a relative
+default of `out` under `maxLength: 8` reports `value length 72 exceeds maximum 8` on the second pass.
+
+For lists it holds by construction, because **a job parameter stores a path as a string.** A path is
+context-sensitive: the same value does not denote the same file on a Windows submitter and a Linux
+worker, and job parameters are settled before there is a host to ask. OpenJD keeps paths POSIX until
+template evaluation on the host -- every `with_path_format` call in this crate passes
+`PathFormat::Posix`, and `openjd-sessions` passes `PathFormat::host()` -- and stores `PATH` and
+`LIST[PATH]` parameter values as strings. `build_symbol_table` does not bind `Param.*` for those two
+types at all, for the same reason.
+
+So a `LIST[PATH]` value is an `ExprValue::ListString` at every length, and `ExprValue::ListPath`, which
+carries a `PathFormat`, is not a shape a stored parameter value has. It is refused as input at any
+length. An empty list is where that could drift, having no elements to infer a variant from:
+`coerce_json_to_job_parameter_type` types it from a hint, and the hint must name `STRING`, the variant
+the coerced elements produce, rather than the declared `PATH`. Passing `PATH` gave the empty case a
+`ListPath` that `openjd-sessions::build_symbol_table` then dropped, leaving `Param.<name>` unbound at
+session scope (issue #387). That was issue #389.
+
 ### build_symbol_table
 
 ```rust
