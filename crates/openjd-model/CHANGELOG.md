@@ -4,6 +4,26 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.8.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.7.1...openjd-model-v0.8.0) - 2026-09-15
+
+### Bug fixes
+
+- Render NONCONTIGUOUS chunks identically to the Python reference  ([#398](https://github.com/OpenJobDescription/openjd-rs/pull/398))
+
+- [**breaking**] Type-check a membership item against the list's element type ([#396](https://github.com/OpenJobDescription/openjd-rs/pull/396))
+
+- Implement PR #383 review follow-ups for resolved-value checks ([#397](https://github.com/OpenJobDescription/openjd-rs/pull/397))
+
+- Accept an empty LIST[PATH] that preprocess itself produced ([#384](https://github.com/OpenJobDescription/openjd-rs/pull/384))
+
+- Reject embedded filenames that aren't a safe single path component ([#359](https://github.com/OpenJobDescription/openjd-rs/pull/359))
+
+
+### Features
+
+- [**breaking**] Enforce resolved-value constraints at template validation ([#383](https://github.com/OpenJobDescription/openjd-rs/pull/383))
+
+
 ## [0.7.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.7.0...openjd-model-v0.7.1) - 2026-09-11
 
 ### Bug fixes

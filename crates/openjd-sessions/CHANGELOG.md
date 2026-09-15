@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.8...openjd-sessions-v0.6.0) - 2026-09-15
+
+### Bug fixes
+
+- Reject embedded filenames that aren't a safe single path component ([#359](https://github.com/OpenJobDescription/openjd-rs/pull/359))
+
+
+### Features
+
+- [**breaking**] Enforce resolved-value constraints at template validation ([#383](https://github.com/OpenJobDescription/openjd-rs/pull/383))
+
+
 ## [0.5.8](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.7...openjd-sessions-v0.5.8) - 2026-09-11
 
 ### Miscellaneous
