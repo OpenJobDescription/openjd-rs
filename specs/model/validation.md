@@ -118,7 +118,14 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
   Two deferrals behave differently, so they are worth stating separately. An
   `attributes[].anyOf` / `.allOf` element that is a format string skips the
   `<AttributeCapabilityValue>` pattern, length and standard-value checks here, and job
-  creation resumes all three (see [job-creation.md](job-creation.md)). An amount `min`/`max`
+  creation resumes all three (see [job-creation.md](job-creation.md)). The single-valued
+  standard-attribute rule (`attr.worker.os.family` / `attr.worker.cpu.arch` `allOf` may
+  have at most one element) fires at decode when the list has **more than one literal
+  element**: an expression element may null-skip or flatten so its resolved count is
+  unknowable here, but a literal always contributes exactly one resolved element, so two
+  or more literals violate the rule under every possible resolution. Lists with at most
+  one literal defer the count to job creation, which re-checks after resolution. An
+  amount `min`/`max`
   that is a format string skips the non-negative, positive and `min <= max` bound checks
   here, and job creation re-applies all three on the resolved value
   (`check_resolved_amount_bounds`). The same holds for `chunks.defaultTaskCount` and
@@ -286,7 +293,10 @@ Consequences of the target types worth naming:
   `null → string` conversion, so a whole-field list or `null` is an
   error. The job name additionally may not resolve to an empty string
   (§1.1.1 minimum length 1; checked statically here, and on the resolved
-  value at job creation). Environment variable values have **no**
+  value at job creation) and may not contain Cc control characters
+  (checked statically here when the name is fully static, and on the
+  resolved value at job creation — an interpolated name is only fully
+  known there). Environment variable values have **no**
   minimum — §4.4.2's minimum length is 0 characters, so an empty
   resolution is legal. Null (and lists) *inside* surrounding text remain
   ordinary interpolation and render their display form.

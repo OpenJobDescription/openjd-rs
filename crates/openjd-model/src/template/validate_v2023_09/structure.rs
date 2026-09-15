@@ -697,17 +697,20 @@ fn validate_host_requirements(
                 attr_lower == "attr.worker.os.family" || attr_lower == "attr.worker.cpu.arch";
             if is_single_valued {
                 if let Some(vals) = &attr.all_of {
-                    // Gated on all-literal for the same reason as the value
-                    // checks above: a whole-field expression may resolve to
-                    // null (skipping its element) or flatten a list, so for
-                    // an expression-bearing list the resolved count is only
-                    // knowable at job creation, which re-checks it there.
-                    // Literal elements cannot skip, so their template count
-                    // is the resolved count. The generic 50-element cap
-                    // above is not relaxed — it applies to the template
-                    // element count regardless of expressions, so a
-                    // deferred single-valued list is still bounded here.
-                    if vals.len() > 1 && vals.iter().all(|v| v.is_literal()) {
+                    // Counted on literal elements only, for the same reason as
+                    // the value checks above: a whole-field expression may
+                    // resolve to null (skipping its element) or flatten a
+                    // list, so an expression element's contribution to the
+                    // resolved count is only knowable at job creation, which
+                    // re-checks it there. Literal elements cannot skip, so
+                    // they each contribute exactly one resolved element —
+                    // more than one literal means every possible resolution
+                    // violates the single-valued rule, whatever any expression
+                    // elements resolve to. The generic 50-element cap above is
+                    // not relaxed — it applies to the template element count
+                    // regardless of expressions, so a deferred single-valued
+                    // list is still bounded here.
+                    if vals.iter().filter(|v| v.is_literal()).count() > 1 {
                         errors.add(
                             &path_field(&attr_path, "allOf"),
                             "single-valued attribute cannot have more than 1 element.",
