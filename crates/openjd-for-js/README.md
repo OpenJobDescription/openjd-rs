@@ -48,7 +48,7 @@ and `.d.ts` files.
 
 ## Minimum supported Rust version
 
-Rust **1.94.1**. Enforced in CI.
+Rust **1.96.0**. Enforced in CI.
 
 ## License
 

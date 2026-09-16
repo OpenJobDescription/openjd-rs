@@ -25,8 +25,8 @@ project republishes it under this name. Users seeing `rustpython-ruff_python_par
 - rustpython-parser has had no substantive code changes since early 2025
 
 ```toml
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
+ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.16.5" }
+ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.16.5" }
 ```
 
 ## Parsing Pipeline
