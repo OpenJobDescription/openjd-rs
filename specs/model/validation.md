@@ -266,7 +266,10 @@ deferring it to job submission or the worker. Two stages of checking:
 The three opt-in rows are **caller policy, not spec constraints**: §5.1,
 §5.2 and §6.1.2 deliberately set no maximum (the OS imposes its own on
 process arguments), so the caps default to `None` and impose nothing.
-When a caller sets one, this pass fails early on the lower bound, and the
+When a caller sets one, this pass fails early on the lower bound — and,
+unlike the spec-mandated rows (whose literal cases the raw-text passes
+cover), also checks a purely-literal field's exact raw length, since no
+other pass length-checks args or data. The
 session runtime enforces the cap on the final resolved values (job
 creation carries these `@fmtstring[host]` fields forward without
 resolving them, so it applies no check of its own). The `openjd` CLI sets

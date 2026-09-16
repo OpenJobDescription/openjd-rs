@@ -328,9 +328,12 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 /// to a string regardless, and the stage-2 checks mirror the downstream
 /// `display → trim → parse` handling for that case exactly.
 ///
-/// Literal (non-interpolated) fields are excluded: the raw-text passes
-/// (structure/limits) already check those, and for literals raw text and
-/// resolved value coincide.
+/// Literal (non-interpolated) fields are excluded for the spec-mandated
+/// constraints: the raw-text passes (structure/limits) already check
+/// those, and for literals raw text and resolved value coincide. The
+/// opt-in caps ([`Self::ResolvedString`] / [`Self::ArgListItem`]) have no
+/// raw-text pass, so `validate_fs_with` checks a literal field's exact
+/// raw length against them instead.
 enum ResolvedConstraint<'a> {
     /// A string field with a maximum resolved length in characters.
     /// `forbid_control_chars` and `forbid_empty` add the §1.1.1 checks
@@ -840,6 +843,25 @@ fn validate_fs_with(
     errors: &mut ValidationErrors,
 ) {
     if fs.is_literal() {
+        // Spec-mandated constraints are covered for literal fields by the
+        // raw-text passes (structure/limits) — raw text and resolved value
+        // coincide, so re-checking here would double-report. The opt-in
+        // caps have no raw-text pass, and a literal is the one case where
+        // the resolved value is known exactly: one argv entry / one data
+        // blob of exactly the raw text.
+        if let Some(
+            ResolvedConstraint::ResolvedString { max_len }
+            | ResolvedConstraint::ArgListItem { max_len },
+        ) = constraint
+        {
+            let n = fs.raw().chars().count();
+            if n > *max_len {
+                errors.add(
+                    path,
+                    format!("is {n} characters, exceeding the maximum of {max_len}."),
+                );
+            }
+        }
         return;
     }
     let target = constraint.and_then(ResolvedConstraint::target_type);

@@ -876,6 +876,44 @@ fn arg_over_cap_passes_without_opt_in() {
 }
 
 #[test]
+fn literal_arg_over_cap_fails() {
+    // A purely-literal element never reaches expression validation, but
+    // its resolved value is known exactly — the raw text — so the opt-in
+    // cap applies to it directly (no other pass length-checks args).
+    check_err_limits(
+        &job_with_arg(&"A".repeat(200)),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:\n\tis 200 characters, exceeding the maximum of 100."],
+    );
+    check_ok_limits(&job_with_arg(&"A".repeat(100)), &arg_cap(100));
+}
+
+#[test]
+fn literal_command_over_cap_fails() {
+    // The raw-text pass caps command text at 1024; an opted-in cap below
+    // that still applies to a literal command.
+    check_err_limits(
+        &job_with_command(&"A".repeat(150)),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> command:\n\tis 150 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
+fn literal_data_over_cap_fails() {
+    let limits = CallerLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    check_err_limits(
+        &job_with_data(&"A".repeat(200)),
+        &limits,
+        &["steps[0] -> script -> embeddedFiles[0] -> data:\n\tis 200 characters, exceeding the maximum of 100."],
+    );
+    check_ok_limits(&job_with_data(&"A".repeat(200)), &CallerLimits::default());
+}
+
+#[test]
 fn arg_list_flatten_element_over_cap_fails() {
     // A list-valued args element flattens into one argv entry per
     // member: the cap applies to each entry, not to the list's display
