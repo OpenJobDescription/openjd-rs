@@ -6,6 +6,11 @@ version = 2
 confidence-threshold = 0.8
 allow = [
     "Apache-2.0",
+    # Build-only dependency of `stacker` (via rustpython-ruff_python_parser
+    # 0.16+): ar_archive_writer. The LLVM exception only relaxes Apache-2.0's
+    # §4 notice requirements for binary redistribution; it is used by rustc
+    # itself and is strictly more permissive than plain Apache-2.0.
+    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "MIT-0",
     "BSD-2-Clause",

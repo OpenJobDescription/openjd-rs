@@ -153,8 +153,8 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;  // 10M ops
 
 | Crate | Purpose | Source |
 |-------|---------|--------|
-| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` v0.15.8) |
-| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` v0.15.8) |
+| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` v0.16.5) |
+| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` v0.16.5) |
 | `regex` | Regular expression evaluation | crates.io |
 | `xxhash-rust` | Fast hashing (internal) | crates.io |
 | `serde` | Serialization (FormatString, PathMappingRule) | crates.io |
