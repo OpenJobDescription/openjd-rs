@@ -296,8 +296,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - name: Install MSRV toolchain
         run: |
-          rustup toolchain install 1.94.1 --profile minimal
-          rustup override set 1.94.1
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup override set 1.96.0
       - uses: actions/cache@v6
         with:
           path: |
@@ -442,7 +442,7 @@ jobs:
             target
           key: wasm-${{ hashFiles('Cargo.lock') }}
       - name: Install wasm-bindgen-cli
-        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.126
+        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.128
       - name: Install JS deps
         run: cd crates/openjd-for-js && npm install
       - name: Build WASM + generate JS bindings

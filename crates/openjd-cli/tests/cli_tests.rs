@@ -152,7 +152,7 @@ fn resolve_python_interpreter() -> Option<PathBuf> {
 
 fn cli_command(args: &[&str]) -> Command {
     let mut cmd = Command::new(openjd_bin());
-    cmd.args(args).env("RUSTUP_TOOLCHAIN", "1.94.1");
+    cmd.args(args).env("RUSTUP_TOOLCHAIN", "1.96.0");
     if let Some(shim) = python_shim_dir() {
         // Only rewrite PATH when it's actually defined. If PATH is unset
         // (extremely rare), skip — prepending the shim to an empty PATH would
