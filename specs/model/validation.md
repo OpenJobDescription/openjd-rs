@@ -266,8 +266,10 @@ deferring it to job submission or the worker. Two stages of checking:
 The three opt-in rows are **caller policy, not spec constraints**: §5.1,
 §5.2 and §6.1.2 deliberately set no maximum (the OS imposes its own on
 process arguments), so the caps default to `None` and impose nothing.
-When a caller sets one, the same three-stage early-failure model applies
-as for the spec-mandated rows. The `openjd` CLI sets
+When a caller sets one, this pass fails early on the lower bound, and the
+session runtime enforces the cap on the final resolved values (job
+creation carries these `@fmtstring[host]` fields forward without
+resolving them, so it applies no check of its own). The `openjd` CLI sets
 `max_resolved_arg_len` to the host OS maximum by default (see
 `specs/cli/`).
 
@@ -275,10 +277,11 @@ Separately from per-field constraints, pass 8 evaluates every
 format-string expression under the caller's **evaluation budgets**
 (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`, defaults:
 the Expression Language spec's 100 MB / 10 M). These bound each segment's
-evaluation identically at validation, job creation, and run time — the
-spec's own lever against expression blowups like `'A' * 10000000` — so a
-lowered budget fails at this gate first, as an ordinary
-`Failed to parse interpolation expression` error at the field path.
+evaluation here and — when the caller mirrors them into `SessionLimits` —
+at run time; they are the spec's own lever against expression blowups
+like `'A' * 10000000`. A lowered budget fails at this pass first, as an
+ordinary `Failed to parse interpolation expression` error at the field
+path. (Job creation currently evaluates under the spec defaults.)
 
 Numeric fields have no exact length maximum — leading zeros are legal and
 surrounding whitespace is tolerated in string forms — so they use a soft

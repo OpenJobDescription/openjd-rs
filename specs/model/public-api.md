@@ -718,21 +718,23 @@ pub struct CallerLimits {
     /// action `command` (§5.1) and each argv entry an `args` element
     /// produces (§5.2, after null-skip / list-flatten). The spec sets no
     /// maximum but notes the OS imposes one (Linux `MAX_ARG_STRLEN`
-    /// 131072; Windows command line 32767). Enforced at validation and
-    /// job creation on the guaranteed lower bound of every possible
-    /// resolution, and at run time by `openjd-sessions` on the final
-    /// values.
+    /// 131072; Windows command line 32767). Enforced at validation on
+    /// the guaranteed lower bound of every possible resolution, and at
+    /// run time by `openjd-sessions` on the final values (job creation
+    /// carries these host-scope fields forward unresolved, so it applies
+    /// no check of its own).
     pub max_resolved_arg_len: Option<usize>,
     /// Cap on each resolved embedded-file `data` value (§6.1.2 sets no
-    /// spec limit). Same three-stage enforcement as
+    /// spec limit). Same two-stage enforcement as
     /// `max_resolved_arg_len`.
     pub max_resolved_data_len: Option<usize>,
     /// Evaluation memory budget in bytes for each format-string
     /// expression (Expression Language "Memory-bounded evaluation").
     /// `None` = the spec-recommended default
     /// (`openjd_expr::DEFAULT_MEMORY_LIMIT`, 100 MB). Lowering it is
-    /// spec-sanctioned; all three stages evaluate under the same budget,
-    /// so a violation fails at the earliest stage that evaluates.
+    /// spec-sanctioned; applied to every evaluation at template
+    /// validation, and at run time when mirrored into `SessionLimits`
+    /// (job creation currently evaluates under the spec defaults).
     pub max_eval_memory_bytes: Option<usize>,
     /// Evaluation operation budget per expression. `None` = the
     /// spec-recommended default (`openjd_expr::DEFAULT_OPERATION_LIMIT`,

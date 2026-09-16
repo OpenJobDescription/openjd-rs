@@ -82,9 +82,9 @@ All evaluation runs under the limits' memory/operation budgets. When
 maximum, but the OS imposes one), the resolved command and **every
 final argv entry** — after null-skips and list-flattening — are
 checked against it. Task execution is the enforcement boundary for
-resolved-value limits: template validation and job creation
-fail early on statically-knowable violations, but only this check holds
-for jobs that never passed through those stages. A violation is
+resolved-value limits: template validation fails early on
+statically-knowable violations, but only this check holds
+for jobs that never passed through that stage. A violation is
 `SessionError::FormatString` with context `command` / `args[j]` and
 reason `resolved value is {n} characters, exceeding the maximum of
 {max}.`.
