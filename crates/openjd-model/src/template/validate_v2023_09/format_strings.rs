@@ -817,6 +817,22 @@ impl<'a> FsEval<'a> {
         }
         opts
     }
+
+    /// Apply the caller budgets to a raw [`openjd_expr::EvalBuilder`] —
+    /// for the evaluation sites (let bindings) that parse expressions
+    /// directly rather than resolving a `FormatString`.
+    fn budgeted<'b>(
+        &self,
+        mut builder: openjd_expr::EvalBuilder<'b>,
+    ) -> openjd_expr::EvalBuilder<'b> {
+        if let Some(m) = self.memory_limit {
+            builder = builder.with_memory_limit(m);
+        }
+        if let Some(o) = self.operation_limit {
+            builder = builder.with_operation_limit(o);
+        }
+        builder
+    }
 }
 
 /// Validate a format string against a symbol table, reporting errors at the given path.
@@ -1024,7 +1040,7 @@ pub fn validate_format_strings(
                         &HashSet::new(),
                         &mut hr_let_names,
                         &mut hr_symtab,
-                        &template_lib,
+                        &template_ev,
                         &template_profile,
                         errors,
                     );
@@ -1135,7 +1151,7 @@ pub fn validate_format_strings(
                             &HashSet::new(),
                             &mut env_let_names,
                             &mut env_symtab,
-                            &host_lib,
+                            &host_ev,
                             &host_profile,
                             errors,
                         );
@@ -1360,7 +1376,7 @@ pub fn validate_format_strings(
                     &HashSet::new(),
                     &mut step_let_names,
                     &mut step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &template_profile,
                     errors,
                 );
@@ -1401,7 +1417,7 @@ pub fn validate_format_strings(
                         &enclosing,
                         &mut script_let_names,
                         &mut task_symtab,
-                        &host_lib,
+                        &host_ev,
                         &host_profile,
                         errors,
                     );
@@ -1604,7 +1620,7 @@ pub fn validate_format_strings(
                                 &enclosing,
                                 &mut env_let_names,
                                 &mut env_symtab,
-                                &host_lib,
+                                &host_ev,
                                 &host_profile,
                                 errors,
                             );
@@ -1670,7 +1686,7 @@ pub fn validate_format_strings(
                             &enclosing,
                             &mut new_names,
                             &mut task_symtab,
-                            &host_lib,
+                            &host_ev,
                             &host_profile,
                             errors,
                         );
@@ -1764,7 +1780,7 @@ pub fn validate_format_strings_environment_template(
                     &HashSet::new(),
                     &mut env_let_names,
                     &mut env_symtab,
-                    &host_lib,
+                    &host_ev,
                     &host_profile,
                     errors,
                 );
@@ -2103,7 +2119,7 @@ fn validate_let_bindings(
     enclosing_names: &HashSet<String>,
     out_names: &mut HashSet<String>,
     symtab: &mut SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
 ) {
@@ -2177,7 +2193,10 @@ fn validate_let_bindings(
                 if parsed.accessed_symbols().contains(name) {
                     errors.add(&b_path, format!("'{name}' references itself."));
                 }
-                match parsed.with_library(lib).evaluate(&[symtab as &SymbolTable]) {
+                match ev
+                    .budgeted(parsed.with_library(ev.lib))
+                    .evaluate(&[symtab as &SymbolTable])
+                {
                     Ok(result) => {
                         // Set the binding in the symtab with its inferred value/type
                         // so subsequent bindings and format strings see the correct type.

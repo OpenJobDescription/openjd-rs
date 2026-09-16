@@ -3934,7 +3934,8 @@ fn test_build_symbol_table_list_path() {
 fn test_evaluate_let_bindings_basic() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 1 + 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(3)
@@ -3942,10 +3943,35 @@ fn test_evaluate_let_bindings_basic() {
 }
 
 #[test]
+fn test_evaluate_let_bindings_respects_memory_budget() {
+    // The caller's evaluation budgets bound each binding's expression —
+    // a lowered budget must reject the blowup the budgets exist for.
+    let symtab = openjd_expr::symbol_table::SymbolTable::new();
+    let bindings = vec!["x = 'a' * 100000".to_string()];
+    let err = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        None,
+        PathFormat::Posix,
+        Some(1000),
+        None,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("let binding 'x'") && msg.contains("exceeded limit (1000 bytes)"),
+        "got: {msg}"
+    );
+    // Default budgets accept the same binding.
+    assert!(evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).is_ok());
+}
+
+#[test]
 fn test_evaluate_let_bindings_chained() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 10".to_string(), "y = x * 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("y").unwrap(),
         openjd_expr::ExprValue::Int(20)
@@ -3957,7 +3983,15 @@ fn test_evaluate_let_bindings_with_library() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current());
     let bindings = vec!["x = len('hello')".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, Some(&lib), PathFormat::Posix).unwrap();
+    let result = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        Some(&lib),
+        PathFormat::Posix,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(5)
@@ -3968,7 +4002,8 @@ fn test_evaluate_let_bindings_with_library() {
 fn test_evaluate_let_bindings_missing_equals() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x 42".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(err.to_string().contains("Missing '='"), "got: {err}");
 }
 
@@ -3976,7 +4011,8 @@ fn test_evaluate_let_bindings_missing_equals() {
 fn test_evaluate_let_bindings_syntax_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = @@@".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"
@@ -3987,7 +4023,8 @@ fn test_evaluate_let_bindings_syntax_error() {
 fn test_evaluate_let_bindings_eval_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = undefined_var".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"

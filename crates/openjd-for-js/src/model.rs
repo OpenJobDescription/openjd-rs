@@ -752,6 +752,8 @@ pub fn evaluate_let_bindings(
         &symbols.inner,
         None,
         openjd_expr::PathFormat::Posix,
+        None,
+        None,
     )
     .map_err(to_js_error)?;
     Ok(JsSymbolTable { inner: result })

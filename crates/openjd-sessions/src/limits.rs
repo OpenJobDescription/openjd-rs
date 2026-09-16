@@ -44,8 +44,11 @@ pub struct SessionLimits {
 
 /// Format-string evaluation options carrying the session's library and
 /// the caller's evaluation budgets. Every format-string resolution in
-/// the session runtime must be built through this helper so that the
-/// budgets bound all expression evaluation uniformly.
+/// the session runtime must be built through this helper — and let
+/// bindings, which evaluate parsed expressions directly rather than
+/// resolving a `FormatString`, must pass the same budgets to
+/// `openjd_model::evaluate_let_bindings` — so that the budgets bound
+/// all expression evaluation uniformly.
 pub(crate) fn fs_options<'a>(
     library: Option<&'a FunctionLibrary>,
     limits: &SessionLimits,

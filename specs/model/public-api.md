@@ -157,6 +157,8 @@ pub fn evaluate_let_bindings(
     base: &SymbolTable,
     library: Option<&openjd_expr::FunctionLibrary>,
     path_format: openjd_expr::path_mapping::PathFormat,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 ) -> Result<SymbolTable, ModelError>;
 
 pub fn convert_environment(env: &template::Environment) -> job::Environment;

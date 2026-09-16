@@ -1033,3 +1033,36 @@ fn default_budgets_pass_static_blowup() {
         &CallerLimits::default(),
     );
 }
+
+#[test]
+fn lowered_memory_budget_bounds_let_bindings_at_validation() {
+    // Let-binding evaluation goes through the same budgets as
+    // format-string expressions — the budgets are the spec's lever
+    // against exactly this shape, so a `let` must not bypass them.
+    let limits = CallerLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    };
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "script": {
+                "let": ["x = 'a' * 100000"],
+                "actions": {"onRun": {"command": "echo"}}
+            }
+        }]
+    }"#;
+    check_err_limits(
+        template,
+        &limits,
+        &[
+            "Invalid expression in let binding 'x'",
+            "exceeded limit (1000 bytes)",
+        ],
+    );
+    // Same template under default budgets validates fine.
+    check_ok_limits(template, &CallerLimits::default());
+}

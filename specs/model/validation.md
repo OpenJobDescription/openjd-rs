@@ -277,7 +277,8 @@ resolving them, so it applies no check of its own). The `openjd` CLI sets
 `specs/cli/`).
 
 Separately from per-field constraints, pass 8 evaluates every
-format-string expression under the caller's **evaluation budgets**
+format-string expression — and every `let` binding, which is the same
+expression machinery — under the caller's **evaluation budgets**
 (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`, defaults:
 the Expression Language spec's 100 MB / 10 M). These bound each segment's
 evaluation here and — when the caller mirrors them into `SessionLimits` —

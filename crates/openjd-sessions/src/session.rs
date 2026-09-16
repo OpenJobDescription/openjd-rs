@@ -584,6 +584,13 @@ impl Session {
         self.cross_user.cancel_writer = Some(writer);
     }
 
+    /// Test-only: override the session's caller-policy limits (caps and
+    /// evaluation budgets) without going through `SessionConfig`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_limits_for_test(&mut self, limits: crate::limits::SessionLimits) {
+        self.limits = limits;
+    }
+
     /// Test-only: inject a `helper_auth_token` so `cancel_action` writes a
     /// tokenized cancel JSON object. Pairs with `set_cancel_writer_for_test`
     /// to exercise the token-in-cancel-JSON path without a real helper.
@@ -2741,6 +2748,8 @@ impl Session {
                 &st,
                 lib,
                 openjd_expr::PathFormat::host(),
+                self.limits.max_eval_memory_bytes,
+                self.limits.max_eval_operations,
             )
             .map_err(|e| SessionError::FormatString {
                 context: "let bindings".into(),
@@ -2988,6 +2997,8 @@ fn seed_wrapped_action_symbols(
             action_symtab,
             lib,
             openjd_expr::PathFormat::host(),
+            limits.max_eval_memory_bytes,
+            limits.max_eval_operations,
         )
         .map_err(|e| SessionError::FormatString {
             context: format!("wrap environment '{}' let bindings", wrap_env.name),

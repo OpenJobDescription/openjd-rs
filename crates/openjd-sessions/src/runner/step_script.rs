@@ -153,6 +153,8 @@ impl StepScriptRunner {
                 &final_symtab,
                 library,
                 openjd_expr::PathFormat::host(),
+                self.base.limits.max_eval_memory_bytes,
+                self.base.limits.max_eval_operations,
             )
             .map_err(|e| SessionError::FormatString {
                 context: "let bindings".into(),

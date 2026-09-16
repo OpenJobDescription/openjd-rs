@@ -511,6 +511,50 @@ async fn test_env_with_resolved_variables() {
 // === test_env_with_let_bindings_and_embedded_files (two-phase) ===
 
 #[tokio::test]
+async fn test_env_let_bindings_respect_lowered_memory_budget() {
+    // SessionLimits' evaluation budgets bound let-binding evaluation just
+    // like format-string resolution — a `let` blowup must not bypass the
+    // budgets the caller lowered specifically to prevent it.
+    let tmp = TempDir::new().unwrap();
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+    session.set_limits_for_test(openjd_sessions::SessionLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    });
+    let env = Environment {
+        name: "test_env".to_string(),
+        description: None,
+        script: Some(EnvironmentScript {
+            let_bindings: Some(vec!["x = 'a' * 100000".to_string()]),
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: fs("echo"),
+                    args: Some(vec![fs("{{ x }}")]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: None,
+            },
+            embedded_files: None,
+        }),
+        variables: None,
+        resolved_symtab: None,
+    };
+    let err = session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("let binding 'x'") && msg.contains("exceeded limit (1000 bytes)"),
+        "expected a budget error from let-binding evaluation; got: {msg}"
+    );
+}
+
+#[tokio::test]
 async fn test_env_with_let_bindings_and_embedded_files() {
     let tmp = TempDir::new().unwrap();
     let files_dir = tmp.path().join("embedded_files");
