@@ -137,15 +137,17 @@ Defaults:
 The memory/operation limits bound **each expression segment's** evaluation —
 the Expression Language spec's "Memory-bounded evaluation" lever against
 expressions like `'a' * 10000000`. Because the per-segment limit does not
-compose across segments, `resolve_string_with` also charges its
-concatenation buffer against the memory limit after each expression
-segment renders: resolution fails with `MemoryLimitExceeded` rather than
-materializing an unbounded string, so resolution as a whole is
-memory-bounded (validation's counterpart is the
-`MAX_STATIC_RESOLVED_VALUE_LEN` accumulation cap). Literal text is never
-charged (it is bounded by `MAX_FORMAT_STRING_LEN` and involves no
-evaluation). The limits apply identically during resolution
-and during `validate_expressions`, so a caller that lowers a budget fails at
+compose across segments, the accumulated **evaluated** bytes (each
+expression segment's rendered length) are also charged against the memory
+limit — identically in `resolve_string_with` and `validate_expressions`,
+so a fully static string that resolution rejects fails validation too,
+and resolution never materializes an unbounded string. Literal text is
+never charged (it is bounded by `MAX_FORMAT_STRING_LEN` and involves no
+evaluation), and unresolved segments contribute 0 at validation, which
+therefore only ever under-counts host-dependent content — the run-time
+check remains authoritative for it. (Validation's separate
+`MAX_STATIC_RESOLVED_VALUE_LEN` cap bounds the *retained*
+`resolved_value`.) A caller that lowers a budget fails at
 static validation, before any resolution runs.
 
 Example — configure every axis:

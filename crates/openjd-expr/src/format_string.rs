@@ -154,17 +154,18 @@ impl FormatString {
     ///
     /// Memory: each segment's evaluation is bounded by the options'
     /// memory limit, and — because the per-segment limit does not compose
-    /// across segments — the concatenation buffer is charged against the
-    /// same limit after each expression segment renders: resolution fails
-    /// with
+    /// across segments — the accumulated **evaluated** portion of the
+    /// result (each expression segment's rendered bytes) is charged
+    /// against the same limit: resolution fails with
     /// [`MemoryLimitExceeded`](crate::ExpressionErrorKind::MemoryLimitExceeded)
-    /// as soon as the accumulated result exceeds it, rather than
-    /// materializing an unbounded string. Literal text is never charged
-    /// on its own (it involves no evaluation and is already bounded by
-    /// [`MAX_FORMAT_STRING_LEN`]), so a purely-literal format string
-    /// cannot fail this check. Peak memory is therefore bounded by
-    /// roughly twice the limit plus the literal text (one segment's
-    /// evaluation plus the capped buffer).
+    /// as soon as the evaluated bytes exceed it, rather than
+    /// materializing an unbounded string. Literal text is never charged —
+    /// it involves no evaluation, is already bounded by
+    /// [`MAX_FORMAT_STRING_LEN`], and `validate_expressions` does not
+    /// charge it either, keeping validation and resolution in agreement
+    /// (a literal-heavy string with a small interpolation must not pass
+    /// `check` and then fail here). Peak memory is therefore bounded by
+    /// roughly twice the limit plus the literal text.
     pub fn resolve_string_with(
         &self,
         symtab: &SymbolTable,
@@ -174,6 +175,9 @@ impl FormatString {
             .memory_limit
             .unwrap_or(crate::eval::DEFAULT_MEMORY_LIMIT);
         let mut result = String::new();
+        // Bytes contributed by expression segments only — the quantity
+        // the memory budget bounds. Literal bytes are excluded.
+        let mut charged = 0usize;
         for seg in &self.segments {
             match seg {
                 Segment::Literal(s) => result.push_str(s),
@@ -181,12 +185,14 @@ impl FormatString {
                     let val = self.eval_parsed(parsed, symtab, opts, None)?;
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
-                        result.push_str(&val.to_display_string());
+                        let at = result.len();
+                        val.write_display(&mut result);
+                        charged = charged.saturating_add(result.len() - at);
                     }
-                    if result.len() > memory_limit {
+                    if charged > memory_limit {
                         return Err(ExpressionError::from_kind(
                             crate::error::ExpressionErrorKind::MemoryLimitExceeded {
-                                used: result.len(),
+                                used: charged,
                                 limit: memory_limit,
                             },
                         ));
@@ -253,7 +259,12 @@ impl FormatString {
     /// [`resolve_string_with`](Self::resolve_string_with). A value that
     /// cannot coerce to the target fails validation, just as it would fail
     /// resolution. The evaluation memory/operation limits on `opts` bound
-    /// each segment's evaluation exactly as they do during resolution.
+    /// each segment's evaluation exactly as they do during resolution, and
+    /// the accumulated evaluated bytes across concrete segments are charged
+    /// against the memory limit exactly as `resolve_string_with` charges
+    /// them — a fully static string that resolution rejects on this budget
+    /// fails here too. Unresolved segments contribute 0 to that charge, so
+    /// validation only ever under-counts host-dependent content.
     ///
     /// On success, returns a [`StaticResolution`] describing what the
     /// evaluation determined statically: a guaranteed lower bound on the
@@ -273,6 +284,13 @@ impl FormatString {
     ) -> Result<StaticResolution, FormatStringValidationError> {
         let mut min_resolved_string_len = 0usize;
         let mut all_concrete = true;
+        // Bytes contributed by concrete expression segments — the same
+        // quantity resolve_string_with charges against the memory limit.
+        // Literal text and unresolved segments contribute 0.
+        let mut charged = 0usize;
+        let memory_limit = opts
+            .memory_limit
+            .unwrap_or(crate::eval::DEFAULT_MEMORY_LIMIT);
         // The target type only applies in the single-expression typed
         // passthrough case, exactly as in resolve_inner: resolve_string_with
         // evaluates every segment with no target.
@@ -379,6 +397,7 @@ impl FormatString {
                             ExprValue::String(s) => {
                                 min_resolved_string_len =
                                     min_resolved_string_len.saturating_add(s.chars().count());
+                                charged = charged.saturating_add(s.len());
                                 if building {
                                     concat.push_str(s);
                                 }
@@ -386,6 +405,7 @@ impl FormatString {
                             ExprValue::Path { value, .. } => {
                                 min_resolved_string_len =
                                     min_resolved_string_len.saturating_add(value.chars().count());
+                                charged = charged.saturating_add(value.len());
                                 if building {
                                     concat.push_str(value);
                                 }
@@ -395,10 +415,35 @@ impl FormatString {
                                 val.write_display(&mut concat);
                                 min_resolved_string_len = min_resolved_string_len
                                     .saturating_add(concat[at..].chars().count());
+                                charged = charged.saturating_add(concat.len() - at);
                                 if !building {
                                     concat.truncate(at);
                                 }
                             }
+                        }
+                        // Mirror of resolve_string_with's evaluated-bytes
+                        // charge: the per-segment evaluator limit does not
+                        // compose across segments, and validation must
+                        // observe exactly what resolution will produce — a
+                        // fully static string that resolution rejects on
+                        // this budget must fail here too. (Unresolved
+                        // segments contribute 0, so validation only ever
+                        // under-counts; the run-time check remains
+                        // authoritative for host-dependent content.)
+                        if charged > memory_limit {
+                            let e = ExpressionError::from_kind(
+                                crate::error::ExpressionErrorKind::MemoryLimitExceeded {
+                                    used: charged,
+                                    limit: memory_limit,
+                                },
+                            );
+                            return Err(FormatStringValidationError {
+                                message: e.to_string(),
+                                input: self.raw.clone(),
+                                start,
+                                end,
+                                expression_error: Some(Box::new(e)),
+                            });
                         }
                         if building && concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
                             capped = true;
@@ -1673,9 +1718,10 @@ mod tests {
     #[test]
     fn memory_limit_bounds_the_concatenation_across_segments() {
         // The per-segment evaluator limit does not compose: each of these
-        // segments fits the budget on its own, but the concatenation must
-        // not materialize past it. The buffer is charged against the same
-        // limit, failing at the first expression checkpoint over it.
+        // segments fits the budget on its own, but the accumulated
+        // evaluated bytes must not materialize past it. Charged at the
+        // first expression checkpoint over the limit — identically at
+        // validation and at resolution.
         let fs = FormatString::new("{{ 'a' * 800 }}{{ 'b' * 800 }}{{ 'c' * 800 }}").unwrap();
         let st = SymbolTable::new();
         let opts = FormatStringOptions::new().with_memory_limit(1000);
@@ -1684,20 +1730,52 @@ mod tests {
             err.to_string(),
             "Expression memory usage (1600 bytes) exceeded limit (1000 bytes)"
         );
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert_eq!(
+            err.message,
+            "Expression memory usage (1600 bytes) exceeded limit (1000 bytes)"
+        );
         // The same shape under a sufficient budget resolves fine.
         let opts = FormatStringOptions::new().with_memory_limit(10_000);
         assert_eq!(fs.resolve_string_with(&st, &opts).unwrap().len(), 2400);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
     }
 
     #[test]
     fn memory_limit_does_not_charge_literal_text() {
         // Literal text involves no evaluation and is bounded by
-        // MAX_FORMAT_STRING_LEN — a purely-literal string resolves under
-        // any budget, matching validation (which never charges literals).
+        // MAX_FORMAT_STRING_LEN — only the evaluated portion is charged,
+        // identically at validation and at resolution, so a
+        // literal-heavy string with a small interpolation cannot pass
+        // `check` and then fail at run time.
         let text = "x".repeat(5000);
         let fs = FormatString::new(&text).unwrap();
         let st = SymbolTable::new();
         let opts = FormatStringOptions::new().with_memory_limit(1000);
         assert_eq!(fs.resolve_string_with(&st, &opts).unwrap(), text);
+
+        // The reviewer's embedded-file shape: a large literal body plus a
+        // tiny interpolation. The literal bytes are not charged.
+        let mixed = format!("{}{}", "x".repeat(2000), "{{ 1 }}");
+        let fs = FormatString::new(&mixed).unwrap();
+        let resolved = fs.resolve_string_with(&st, &opts).unwrap();
+        assert_eq!(resolved.len(), 2001);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
+    }
+
+    #[test]
+    fn validation_does_not_charge_unresolved_segments() {
+        // An unresolved segment's run-time size is unknowable: it
+        // contributes 0 at validation (which therefore only ever
+        // under-counts), and the run-time check stays authoritative.
+        let fs = FormatString::new("{{ Param.X }}{{ 'b' * 800 }}").unwrap();
+        let mut st = SymbolTable::new();
+        st.set(
+            "Param.X",
+            ExprValue::unresolved(crate::types::ExprType::STRING),
+        )
+        .unwrap();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
     }
 }
