@@ -404,6 +404,12 @@ pub struct SessionLimits {
     /// `openjd_expr::DEFAULT_OPERATION_LIMIT` (10 million).
     pub max_eval_operations: Option<usize>,
 }
+
+/// Mirror the run-time-relevant fields of a submitting service's
+/// `openjd_model::CallerLimits` (the four fields above); fields with
+/// no run-time counterpart are ignored. Lets one policy value drive
+/// both the model-side stages and the session runtime without drift.
+impl From<&openjd_model::CallerLimits> for SessionLimits;
 ```
 
 Violations surface as `SessionError::FormatString` with reason

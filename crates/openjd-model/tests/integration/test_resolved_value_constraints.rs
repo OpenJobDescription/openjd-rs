@@ -864,6 +864,44 @@ fn arg_bound_with_unresolved_part_fails() {
 }
 
 #[test]
+fn arg_bound_is_per_segment_not_per_subexpression() {
+    // Granularity limitation, pinned deliberately: the bound is computed
+    // per *segment*. A single expression mixing a huge static part with
+    // an unresolved part evaluates to Unresolved as a whole and
+    // contributes 0 — even though every possible resolution exceeds the
+    // cap. Splitting the same content into two segments (previous test)
+    // is caught; the single-segment form is deferred to the run-time
+    // check. Tightening this requires a min-size annotation on
+    // Unresolved values through every operator (future work).
+    check_ok_limits(
+        &job_with_arg("{{ Session.WorkingDirectory + 'A' * 200 }}"),
+        &arg_cap(100),
+    );
+}
+
+#[test]
+fn caps_are_measured_in_characters_not_bytes() {
+    // The caps count Unicode scalar values, not encoded bytes: 100
+    // three-byte CJK characters satisfy a 100-character cap even though
+    // they are 300 UTF-8 bytes, and 101 fail it. Callers encoding OS
+    // byte/UTF-16 limits into a cap must budget for that (see the
+    // CallerLimits field docs).
+    check_ok_limits(&job_with_arg("{{ '\u{4e16}' * 100 }}"), &arg_cap(100));
+    check_err_limits(
+        &job_with_arg("{{ '\u{4e16}' * 101 }}"),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:\n\tresolves to at least 101 characters, exceeding the maximum of 100."],
+    );
+    // Literal path measures the same unit.
+    check_ok_limits(&job_with_arg(&"\u{4e16}".repeat(100)), &arg_cap(100));
+    check_err_limits(
+        &job_with_arg(&"\u{4e16}".repeat(101)),
+        &arg_cap(100),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:\n\tis 101 characters, exceeding the maximum of 100."],
+    );
+}
+
+#[test]
 fn arg_unresolved_and_under_cap_pass() {
     check_ok_limits(&job_with_arg("{{ Param.X }}"), &arg_cap(100));
     check_ok_limits(&job_with_arg("{{ 'A' * 100 }}"), &arg_cap(100));

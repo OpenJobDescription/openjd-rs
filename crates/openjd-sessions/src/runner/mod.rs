@@ -799,6 +799,46 @@ mod tests {
     }
 
     #[test]
+    fn arg_cap_measures_characters_not_bytes() {
+        // The run-time cap counts Unicode scalar values, matching the
+        // validation-side checks: 100 three-byte CJK characters satisfy
+        // a 100-character cap (300 UTF-8 bytes), 101 fail it.
+        let symtab = SymbolTable::default();
+        let action = action_with_args("echo", &[&"\u{4e16}".repeat(100)]);
+        assert!(resolve_action_args(&action, &symtab, None, &arg_cap(100)).is_ok());
+        let action = action_with_args("echo", &[&"\u{4e16}".repeat(101)]);
+        let err = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Failed to resolve args[0]: resolved value is 101 characters, exceeding the maximum of 100."
+        );
+    }
+
+    #[test]
+    fn session_limits_from_caller_limits_mirrors_runtime_fields() {
+        // One policy value drives both stages: the conversion copies the
+        // four run-time-relevant fields and ignores the rest.
+        let caller = openjd_model::CallerLimits {
+            max_resolved_arg_len: Some(1),
+            max_resolved_data_len: Some(2),
+            max_eval_memory_bytes: Some(3),
+            max_eval_operations: Some(4),
+            max_step_count: Some(99), // no run-time counterpart
+            ..Default::default()
+        };
+        let session: crate::limits::SessionLimits = (&caller).into();
+        assert_eq!(
+            session,
+            crate::limits::SessionLimits {
+                max_resolved_arg_len: Some(1),
+                max_resolved_data_len: Some(2),
+                max_eval_memory_bytes: Some(3),
+                max_eval_operations: Some(4),
+            }
+        );
+    }
+
+    #[test]
     fn arg_evaluation_respects_memory_budget() {
         // The evaluation memory budget (the Expression Language spec's
         // lever against `'A' * N` blowups) bounds argument resolution.

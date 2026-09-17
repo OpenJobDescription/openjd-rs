@@ -291,14 +291,10 @@ fn create_session(
         sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,
         echo_openjd_directives: true,
-        // Run-time mirror of the CLI's caller-limits policy (see
-        // `common::caller_limits`): the resolved-argument cap is the
-        // CLI's uniform 32K-character default; no cap on embedded-file
-        // data.
-        limits: openjd_sessions::SessionLimits {
-            max_resolved_arg_len: Some(crate::common::DEFAULT_MAX_ARG_LEN),
-            ..Default::default()
-        },
+        // Run-time mirror of the CLI's caller-limits policy: derived from
+        // the same `common::caller_limits()` value the decode/creation
+        // stages use, so the two cannot drift.
+        limits: openjd_sessions::SessionLimits::from(&crate::common::caller_limits()),
     };
     Session::with_config(session_config)
         .map_err(|e| format!("Failed to create session: {e}").into())

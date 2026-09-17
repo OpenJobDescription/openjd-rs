@@ -81,8 +81,10 @@ line is UTF-16 code units), so no character count maps exactly onto
 them. 32K characters is at most 128 KiB of UTF-8 (within Linux's
 per-string limit) and approximately the Windows command-line capacity;
 the OS itself and the worker's run-time enforcement remain
-authoritative. Library users of `openjd-model` get no cap by default —
-this is CLI policy.
+authoritative. The cap bounds each single argument — nothing bounds the
+argv element count or the argv total (`ARG_MAX`-style budgets are
+possible future work). Library users of `openjd-model` get no cap by
+default — this is CLI policy.
 
 ## Template Type Detection
 

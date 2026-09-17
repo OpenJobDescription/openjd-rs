@@ -45,6 +45,22 @@ pub struct SessionLimits {
     pub max_eval_operations: Option<usize>,
 }
 
+/// Mirror the run-time-relevant fields of a submitting service's
+/// [`openjd_model::CallerLimits`], so one policy value can drive both
+/// validation/job-creation (model) and the session runtime without the
+/// two drifting apart. Fields of `CallerLimits` with no run-time
+/// counterpart (document-size caps, task counts) are ignored.
+impl From<&openjd_model::CallerLimits> for SessionLimits {
+    fn from(limits: &openjd_model::CallerLimits) -> Self {
+        Self {
+            max_resolved_arg_len: limits.max_resolved_arg_len,
+            max_resolved_data_len: limits.max_resolved_data_len,
+            max_eval_memory_bytes: limits.max_eval_memory_bytes,
+            max_eval_operations: limits.max_eval_operations,
+        }
+    }
+}
+
 /// Format-string evaluation options carrying the session's library and
 /// the caller's evaluation budgets. Every format-string resolution in
 /// the session runtime must be built through this helper — and let
