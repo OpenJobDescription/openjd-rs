@@ -29,6 +29,7 @@ use openjd_sessions::{ActionState, Session, SessionConfig, SessionState};
 /// Create a session with stdout collection enabled and no session user.
 fn make_session(root: PathBuf) -> Session {
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "win32-locate-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,

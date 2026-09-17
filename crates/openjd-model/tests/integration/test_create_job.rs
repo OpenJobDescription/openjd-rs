@@ -542,7 +542,7 @@ fn test_merge_env_and_job_same_param() {
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val =
         minimal_env_template(r#"{"name": "Foo", "type": "STRING", "default": "env_default"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
     assert_eq!(merged.len(), 1);
     // Job template is processed last, so its default wins
@@ -554,7 +554,7 @@ fn test_merge_type_conflict() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     assert!(merge_job_parameter_definitions(&jt, &[et]).is_err());
 }
 
@@ -569,7 +569,7 @@ fn test_merge_env_only_param() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "EnvParam", "type": "INT", "default": "5"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "EnvParam");
@@ -2458,7 +2458,7 @@ fn test_preprocess_reports_extra_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "ThisIsUnknown".into(),
@@ -2499,7 +2499,7 @@ fn test_preprocess_reports_missing_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let err = preprocess_job_parameters(
         &jt,
@@ -2538,7 +2538,7 @@ fn test_preprocess_collects_defaults_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -2573,7 +2573,7 @@ fn test_preprocess_checks_constraints_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     input.insert("Bar".into(), openjd_expr::ExprValue::String("one".into()));
@@ -2766,7 +2766,7 @@ fn test_preprocess_float_to_int_coercion_whole() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -2804,7 +2804,7 @@ fn test_preprocess_float_to_int_coercion_fractional_falls_through() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -3071,6 +3071,7 @@ fn test_preprocess_list_int_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3105,6 +3106,7 @@ fn test_preprocess_list_string_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[STRING]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3139,6 +3141,7 @@ fn test_preprocess_list_bool_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[BOOL]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3174,6 +3177,7 @@ fn test_preprocess_list_invalid_json_stays_string() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3930,7 +3934,8 @@ fn test_build_symbol_table_list_path() {
 fn test_evaluate_let_bindings_basic() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 1 + 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(3)
@@ -3938,10 +3943,35 @@ fn test_evaluate_let_bindings_basic() {
 }
 
 #[test]
+fn test_evaluate_let_bindings_respects_memory_budget() {
+    // The caller's evaluation budgets bound each binding's expression —
+    // a lowered budget must reject the blowup the budgets exist for.
+    let symtab = openjd_expr::symbol_table::SymbolTable::new();
+    let bindings = vec!["x = 'a' * 100000".to_string()];
+    let err = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        None,
+        PathFormat::Posix,
+        Some(1000),
+        None,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("let binding 'x'") && msg.contains("exceeded limit (1000 bytes)"),
+        "got: {msg}"
+    );
+    // Default budgets accept the same binding.
+    assert!(evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).is_ok());
+}
+
+#[test]
 fn test_evaluate_let_bindings_chained() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 10".to_string(), "y = x * 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("y").unwrap(),
         openjd_expr::ExprValue::Int(20)
@@ -3953,7 +3983,15 @@ fn test_evaluate_let_bindings_with_library() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current());
     let bindings = vec!["x = len('hello')".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, Some(&lib), PathFormat::Posix).unwrap();
+    let result = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        Some(&lib),
+        PathFormat::Posix,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(5)
@@ -3964,7 +4002,8 @@ fn test_evaluate_let_bindings_with_library() {
 fn test_evaluate_let_bindings_missing_equals() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x 42".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(err.to_string().contains("Missing '='"), "got: {err}");
 }
 
@@ -3972,7 +4011,8 @@ fn test_evaluate_let_bindings_missing_equals() {
 fn test_evaluate_let_bindings_syntax_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = @@@".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"
@@ -3983,7 +4023,8 @@ fn test_evaluate_let_bindings_syntax_error() {
 fn test_evaluate_let_bindings_eval_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = undefined_var".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"
@@ -4523,7 +4564,7 @@ fn test_preprocess_float_to_int_overflow_rejected() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     // 1e19 has fract() == 0.0 but exceeds i64::MAX
     input.insert(

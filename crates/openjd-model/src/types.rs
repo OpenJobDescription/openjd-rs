@@ -431,6 +431,45 @@ pub struct CallerLimits {
     pub max_environment_size: Option<usize>,
     /// Maximum total template document size, in bytes.
     pub max_template_size: Option<usize>,
+    /// Maximum character length of any resolved string destined for a
+    /// process argument: an action `command` (Template Schemas §5.1) or
+    /// each argv entry an `args` element produces (§5.2, after null-skip
+    /// and list-flatten). `None` (default) imposes no limit beyond the
+    /// spec — §5.1/§5.2 set no maximum but note that the operating system
+    /// the command runs on imposes its own. This cap counts **characters**
+    /// while the OS limits are measured in other units (Linux
+    /// `MAX_ARG_STRLEN` is 131072 bytes; the Windows command line is
+    /// 32767 UTF-16 code units), so pick a value with the encoding
+    /// headroom you need — e.g. 32768 characters is at most 128 KiB of
+    /// UTF-8, within Linux's per-string limit.
+    ///
+    /// Enforced at template validation on the guaranteed lower bound of
+    /// every possible resolution (early failure), and at run time by
+    /// `openjd-sessions` on the final resolved values (the enforcement
+    /// boundary). Job creation carries these `@fmtstring[host]` fields
+    /// forward without resolving them, so it applies no check of its
+    /// own.
+    pub max_resolved_arg_len: Option<usize>,
+    /// Maximum character length of any resolved embedded-file `data`
+    /// value (Template Schemas §6.1.2, which sets no limit of its own).
+    /// `None` (default) imposes no limit beyond the spec. Enforced at
+    /// the same two stages as [`max_resolved_arg_len`](Self::max_resolved_arg_len).
+    pub max_resolved_data_len: Option<usize>,
+    /// Memory budget, in bytes, for evaluating each format-string
+    /// expression (the Expression Language spec's "Memory-bounded
+    /// evaluation" lever — its own defense against expressions like
+    /// `'a' * 10000000`). `None` (default) uses the spec-recommended
+    /// default ([`openjd_expr::DEFAULT_MEMORY_LIMIT`], 100 MB). Lowering
+    /// it is spec-sanctioned configuration. Applied to every evaluation
+    /// at template validation, and by the session runtime when the
+    /// caller mirrors it into `SessionLimits`; job creation currently
+    /// evaluates under the spec defaults.
+    pub max_eval_memory_bytes: Option<usize>,
+    /// Operation budget for evaluating each format-string expression.
+    /// `None` (default) uses the spec-recommended default
+    /// ([`openjd_expr::DEFAULT_OPERATION_LIMIT`], 10 million). Applied at
+    /// the same stages as [`max_eval_memory_bytes`](Self::max_eval_memory_bytes).
+    pub max_eval_operations: Option<usize>,
 }
 
 /// Model-side profile: the specification revision plus the set of

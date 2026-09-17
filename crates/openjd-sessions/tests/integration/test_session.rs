@@ -115,6 +115,7 @@ async fn test_relative_session_root_is_absolutized() {
     assert!(rel_root.is_relative(), "test setup expects a relative root");
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-relative-root".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(rel_root),
@@ -144,6 +145,7 @@ async fn test_root_dir_permissions_posix() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = TempDir::new().unwrap();
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-perms".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(tmp.path().to_path_buf()),
@@ -186,6 +188,7 @@ async fn test_sticky_bit_policy_strict_rejects_unsafe_dir() {
     std::fs::create_dir(&root).unwrap();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-strict".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(root),
@@ -219,6 +222,7 @@ async fn test_sticky_bit_policy_strict_allows_safe_dir() {
     std::fs::create_dir(&root).unwrap();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-strict-ok".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(root),
@@ -251,6 +255,7 @@ async fn test_sticky_bit_policy_warn_allows_unsafe_dir() {
     std::fs::create_dir(&root).unwrap();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-warn".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(root),
@@ -293,6 +298,7 @@ async fn test_sticky_bit_policy_disabled_skips_check() {
     std::fs::create_dir(&root).unwrap();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "test-disabled".into(),
         job_parameter_values: Default::default(),
         session_root_directory: Some(root),
@@ -578,6 +584,7 @@ async fn test_enter_environment_with_resolved_variables() {
         },
     );
     let session_config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: job_params,
         path_mapping_rules: None,
@@ -1192,6 +1199,7 @@ async fn test_multiple_different_redacted_env_vars() {
 async fn test_run_subprocess_basic() {
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1227,6 +1235,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
     // Test that run_subprocess with use_session_env_vars=false ignores entered environment variables
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1268,6 +1277,7 @@ async fn test_run_subprocess_ignores_entered_environments() {
 async fn test_run_subprocess_with_os_env_vars() {
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1306,6 +1316,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
     let mut ctor_env = HashMap::new();
     ctor_env.insert("CTOR_VAR".into(), "ctor_value".into());
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1339,6 +1350,7 @@ async fn test_run_subprocess_includes_constructor_env_vars() {
 async fn test_run_subprocess_empty_command_fails() {
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1364,6 +1376,7 @@ async fn test_run_subprocess_empty_command_fails() {
 async fn test_run_subprocess_whitespace_command_fails() {
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1494,6 +1507,7 @@ fn realtime_test_config(
     let start = std::time::Instant::now();
     let ts = timestamps.clone();
     openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: session_id.into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -1746,6 +1760,7 @@ async fn test_cancel_action_not_running() {
 async fn test_cancel_action_mark_failed() {
     let tmp = TempDir::new().unwrap();
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "cancel-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -2085,6 +2100,7 @@ type CbLog = Vec<(ActionState, Option<f64>)>;
 
 fn cb_test_config(tmp: &TempDir, id: &str, log: Arc<Mutex<CbLog>>) -> SessionConfig {
     SessionConfig {
+        limits: Default::default(),
         session_id: id.into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -2504,6 +2520,7 @@ async fn test_parent_cancel_token_cancels_running_action() {
     let statuses_clone = statuses.clone();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "cancel-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -2562,6 +2579,7 @@ async fn test_cancel_action_with_mark_failed() {
     let failed_notify_clone = failed_notify.clone();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "mark-failed-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -3131,6 +3149,7 @@ async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
     let statuses_clone = statuses.clone();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "cancel-race-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -3186,6 +3205,7 @@ async fn test_callback_reports_intermediate_progress() {
     let updates_clone = updates.clone();
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "progress-test".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -3274,6 +3294,7 @@ fn echo_directives_test_config(
     echo: bool,
 ) -> openjd_sessions::session::SessionConfig {
     openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: session_id.into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -3389,6 +3410,7 @@ async fn test_echo_openjd_directives_true_redacts_redacted_env_in_log() {
         .with_extensions([ModelExtension::RedactedEnvVars].into_iter().collect());
 
     let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
         session_id: "redacted-echo".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
@@ -3592,6 +3614,7 @@ async fn test_wrap_seed_failure_reports_failed_action() {
     let statuses: Arc<Mutex<Vec<ActionState>>> = Arc::new(Mutex::new(Vec::new()));
     let statuses_clone = statuses.clone();
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "wrap-seed-fail".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,

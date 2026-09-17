@@ -119,6 +119,8 @@ impl<'a> FormatStringOptions<'a> {
     pub fn with_library(self, lib: impl Into<Option<&FunctionLibrary>>) -> Self;
     pub fn with_path_format(self, fmt: PathFormat) -> Self;
     pub fn with_target_type(self, t: &ExprType) -> Self;
+    pub fn with_memory_limit(self, limit: usize) -> Self;
+    pub fn with_operation_limit(self, limit: usize) -> Self;
 }
 ```
 
@@ -129,6 +131,24 @@ Defaults:
 | `library` | `None` (evaluator falls back to `FunctionLibrary::for_profile(&ExprProfile::current())`) |
 | `path_format` | `PathFormat::host()` |
 | `target_type` | `None` |
+| `memory_limit` | `None` (evaluator default: `DEFAULT_MEMORY_LIMIT`, 100 MB) |
+| `operation_limit` | `None` (evaluator default: `DEFAULT_OPERATION_LIMIT`, 10 M) |
+
+The memory/operation limits bound **each expression segment's** evaluation —
+the Expression Language spec's "Memory-bounded evaluation" lever against
+expressions like `'a' * 10000000`. Because the per-segment limit does not
+compose across segments, the accumulated **evaluated** bytes (each
+expression segment's rendered length) are also charged against the memory
+limit — identically in `resolve_string_with` and `validate_expressions`,
+so a fully static string that resolution rejects fails validation too,
+and resolution never materializes an unbounded string. Literal text is
+never charged (it is bounded by `MAX_FORMAT_STRING_LEN` and involves no
+evaluation), and unresolved segments contribute 0 at validation, which
+therefore only ever under-counts host-dependent content — the run-time
+check remains authoritative for it. (Validation's separate
+`MAX_STATIC_RESOLVED_VALUE_LEN` cap bounds the *retained*
+`resolved_value`.) A caller that lowers a budget fails at
+static validation, before any resolution runs.
 
 Example — configure every axis:
 
@@ -165,26 +185,29 @@ through an already-optional library value without unwrapping it.
 
 ```rust
 let fs = FormatString::new("{{Param.Frame + Param.Name}}")?;
-fs.validate_expressions(&unresolved_symtab, &library, None)?;
+fs.validate_expressions(&unresolved_symtab, &FormatStringOptions::new().with_library(&*library))?;
 // → TypeError: cannot add int and string
 ```
 
 Evaluates each expression with unresolved values to catch type errors at template
 validation time, before parameter values are known.
 
-The third argument is the same optional target type the caller will later
-pass to `resolve_with`, so that validation observes exactly the values
-resolution will produce. It follows the same rule as resolution: for a
+Validation takes the same `FormatStringOptions` the caller will later pass
+to `resolve_with`, so that validation observes exactly the values
+resolution will produce. The target type follows the same rule as
+resolution: for a
 format string that is exactly one expression segment and nothing else,
 the root value is coerced toward the target — `{{ 1.0 }}` validated with
-`Some(&ExprType::INT)` yields the int `1`, one character, not the
+`with_target_type(&ExprType::INT)` yields the int `1`, one character, not the
 three-character float `1.0`. In the concatenated multi-segment case the
 target is ignored, mirroring `resolve_string_with`. A value that cannot
 coerce to the target fails validation with the same diagnostic resolution
 would produce. Unresolved values coerce at the type level
 (`ExprValue::coerce` on an `Unresolved` checks the constraint against the
 target and stays unresolved), so passing a target also catches
-type-level coercion errors statically.
+type-level coercion errors statically. The options' memory/operation
+limits bound each segment's evaluation exactly as they do during
+resolution.
 
 On success, returns a `StaticResolution` describing what that evaluation
 determined statically. Callers that only need pass/fail ignore it.

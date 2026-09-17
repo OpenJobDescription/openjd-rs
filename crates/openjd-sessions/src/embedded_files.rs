@@ -343,6 +343,7 @@ pub struct EmbeddedFiles {
     records: Vec<FileRecord>,
     user: Option<Arc<dyn SessionUser>>,
     session_id: String,
+    limits: crate::limits::SessionLimits,
 }
 
 impl EmbeddedFiles {
@@ -365,11 +366,22 @@ impl EmbeddedFiles {
             records: Vec::new(),
             user: None,
             session_id: session_id.to_string(),
+            limits: crate::limits::SessionLimits::default(),
         }
     }
 
     pub fn with_user(mut self, user: Option<Arc<dyn SessionUser>>) -> Self {
         self.user = user;
+        self
+    }
+
+    /// Apply the session's caller-policy limits: the evaluation budgets
+    /// bound `data` format-string evaluation, and
+    /// [`SessionLimits::max_resolved_data_len`](crate::SessionLimits::max_resolved_data_len)
+    /// caps each resolved `data` value (run-time enforcement for §6.1.2,
+    /// which sets no spec limit of its own).
+    pub fn with_limits(mut self, limits: crate::limits::SessionLimits) -> Self {
+        self.limits = limits;
         self
     }
 
@@ -496,14 +508,24 @@ impl EmbeddedFiles {
         for record in &self.records {
             if let Some(ref data_fs) = record.file.data {
                 let resolved = data_fs
-                    .resolve_string_with(
-                        symtab,
-                        &openjd_expr::FormatStringOptions::new().with_library(library),
-                    )
+                    .resolve_string_with(symtab, &crate::limits::fs_options(library, &self.limits))
                     .map_err(|e| SessionError::FormatString {
                         context: format!("embedded file '{}' data", record.file.name),
                         reason: e.to_string(),
                     })?;
+                // Run-time enforcement of the opt-in resolved-data cap
+                // (§6.1.2 sets no spec limit of its own).
+                if let Some(max_len) = self.limits.max_resolved_data_len {
+                    let n = resolved.chars().count();
+                    if n > max_len {
+                        return Err(SessionError::FormatString {
+                            context: format!("embedded file '{}' data", record.file.name),
+                            reason: format!(
+                                "resolved value is {n} characters, exceeding the maximum of {max_len}."
+                            ),
+                        });
+                    }
+                }
                 session_log!(
                     info,
                     &self.session_id,

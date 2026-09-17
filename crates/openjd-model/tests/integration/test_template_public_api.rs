@@ -51,7 +51,8 @@ fn decode_jt_with_extensions(s: &str, exts: &[&str]) -> JobTemplate {
 }
 
 fn decode_et(s: &str) -> EnvironmentTemplate {
-    decode_environment_template(yaml(s), None).unwrap_or_else(|e| panic!("decode failure: {e}"))
+    decode_environment_template(yaml(s), None, &CallerLimits::default())
+        .unwrap_or_else(|e| panic!("decode failure: {e}"))
 }
 
 #[test]

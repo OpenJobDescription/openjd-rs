@@ -362,6 +362,7 @@ pub fn decode_job_template(
 pub fn decode_environment_template(
     template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError> {
     let version_str = template
         .get("specificationVersion")
@@ -414,7 +415,8 @@ pub fn decode_environment_template(
     check_type_name_canonical_case(&job_type_names, &task_type_names, &extensions, &mut errors);
     errors.into_result("EnvironmentTemplate")?;
 
-    let ctx = ValidationContext::with_extensions(version.revision(), extensions);
+    let mut ctx = ValidationContext::with_extensions(version.revision(), extensions);
+    ctx.caller_limits = caller_limits.clone();
     validate::validate_environment_template(&et, &ctx)?;
 
     Ok(et)
@@ -455,7 +457,7 @@ pub fn decode_template(
     if version.is_job_template() {
         decode_job_template(template, supported_extensions, caller_limits).map(DecodedTemplate::Job)
     } else {
-        decode_environment_template(template, supported_extensions)
+        decode_environment_template(template, supported_extensions, caller_limits)
             .map(DecodedTemplate::Environment)
     }
 }
@@ -561,19 +563,19 @@ mod tests {
     #[test]
     fn test_decode_env_template_missing_spec_version() {
         let v = yaml_val(r#"{"notspecversion": "badvalue"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_env_template_unknown_version() {
         let v = yaml_val(r#"{"specificationVersion": "badvalue"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_env_template_not_env_version() {
         let v = yaml_val(r#"{"specificationVersion": "jobtemplate-2023-09"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
@@ -588,7 +590,7 @@ mod tests {
             }
         }"#,
         );
-        let et = decode_environment_template(v, None).unwrap();
+        let et = decode_environment_template(v, None, &CallerLimits::default()).unwrap();
         assert_eq!(et.specification_version, "environment-2023-09");
     }
 

@@ -105,6 +105,9 @@ pub(crate) struct ScriptRunnerBase {
     /// [`crate::session::SessionConfig::echo_openjd_directives`]. Defaults
     /// to `true` to match the Python reference implementation.
     pub echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets enforced during action
+    /// resolution. See [`crate::session::SessionConfig::limits`].
+    pub limits: crate::limits::SessionLimits,
     #[cfg(unix)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
@@ -132,6 +135,7 @@ impl ScriptRunnerBase {
             initial_redacted_values: Vec::new(),
             debug_collect_stdout: false,
             echo_openjd_directives: true,
+            limits: crate::limits::SessionLimits::default(),
             helper: None,
             cancel_writer: None,
         }
@@ -151,10 +155,16 @@ impl ScriptRunnerBase {
     ) -> Result<SubprocessResult, SessionError> {
         self.state = ScriptRunnerState::Running;
         log_subsection_banner(&self.session_id, "Phase: Running action");
-        let args = resolve_action_args(action, symtab, library)?;
-        let timeout = resolve_action_timeout(action, symtab, library, default_timeout)?;
-        let cancel_method =
-            cancel_method_for_action(&action.cancelation, symtab, library, default_cancel_period)?;
+        let args = resolve_action_args(action, symtab, library, &self.limits)?;
+        let timeout =
+            resolve_action_timeout(action, symtab, library, &self.limits, default_timeout)?;
+        let cancel_method = cancel_method_for_action(
+            &action.cancelation,
+            symtab,
+            library,
+            &self.limits,
+            default_cancel_period,
+        )?;
         let config = SubprocessConfig {
             args,
             env_vars: env_vars.clone(),
@@ -247,6 +257,7 @@ pub(crate) fn resolve_effective_cancelation(
     cancelation: &Option<CancelationMode>,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
 ) -> Result<EffectiveCancelation, SessionError> {
     match cancelation {
         None => Ok(EffectiveCancelation::Undeclared),
@@ -258,6 +269,7 @@ pub(crate) fn resolve_effective_cancelation(
                 notify_period_in_seconds.as_ref(),
                 symtab,
                 library,
+                limits,
             )?,
         }),
         Some(CancelationMode::DeferredMode {
@@ -274,9 +286,7 @@ pub(crate) fn resolve_effective_cancelation(
             let value = mode
                 .resolve_with(
                     symtab,
-                    &openjd_expr::FormatStringOptions::new()
-                        .with_library(library)
-                        .with_target_type(&target),
+                    &crate::limits::fs_options(library, limits).with_target_type(&target),
                 )
                 .map_err(|e| SessionError::FormatString {
                     context: "cancelation mode".into(),
@@ -298,6 +308,7 @@ pub(crate) fn resolve_effective_cancelation(
                         notify_period_in_seconds.as_ref(),
                         symtab,
                         library,
+                        limits,
                     )?;
                     if period.is_some() {
                         return Err(SessionError::FormatString {
@@ -315,6 +326,7 @@ pub(crate) fn resolve_effective_cancelation(
                             notify_period_in_seconds.as_ref(),
                             symtab,
                             library,
+                            limits,
                         )?,
                     })
                 }
@@ -336,10 +348,11 @@ pub(crate) fn cancel_method_for_action(
     cancelation: &Option<CancelationMode>,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     default_notify_period: Duration,
 ) -> Result<CancelMethod, SessionError> {
     Ok(
-        match resolve_effective_cancelation(cancelation, symtab, library)? {
+        match resolve_effective_cancelation(cancelation, symtab, library, limits)? {
             EffectiveCancelation::Undeclared | EffectiveCancelation::Terminate => {
                 CancelMethod::Terminate
             }
@@ -365,6 +378,7 @@ pub(crate) fn resolve_action_timeout(
     action: &Action,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     default: Option<Duration>,
 ) -> Result<Option<Duration>, SessionError> {
     match &action.timeout {
@@ -376,9 +390,7 @@ pub(crate) fn resolve_action_timeout(
             let value = fmt
                 .resolve_with(
                     symtab,
-                    &openjd_expr::FormatStringOptions::new()
-                        .with_library(library)
-                        .with_target_type(&target),
+                    &crate::limits::fs_options(library, limits).with_target_type(&target),
                 )
                 .map_err(|e| SessionError::FormatString {
                     context: "timeout".into(),
@@ -445,6 +457,7 @@ pub(crate) fn resolve_notify_period_seconds(
     fs: Option<&openjd_model::FormatString>,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
 ) -> Result<Option<i64>, SessionError> {
     let Some(fs) = fs else {
         return Ok(None);
@@ -459,9 +472,7 @@ pub(crate) fn resolve_notify_period_seconds(
     let value = fs
         .resolve_with(
             symtab,
-            &openjd_expr::FormatStringOptions::new()
-                .with_library(library)
-                .with_target_type(&target),
+            &crate::limits::fs_options(library, limits).with_target_type(&target),
         )
         .map_err(|e| SessionError::FormatString {
             context: "notifyPeriodInSeconds".into(),
@@ -504,50 +515,72 @@ pub(crate) fn resolve_notify_period_seconds(
 }
 
 /// Resolve an Action's command and args into a flat argument list.
+///
+/// When the caller opted into
+/// [`SessionLimits::max_resolved_arg_len`](crate::SessionLimits::max_resolved_arg_len),
+/// the resolved command and every final argv entry (after null-skip and
+/// list-flatten) are checked against it — task execution is the
+/// enforcement boundary for §5.1/§5.2, which set no spec maximum but
+/// acknowledge the operating system's own limit.
 pub(crate) fn resolve_action_args(
     action: &Action,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
 ) -> Result<Vec<String>, SessionError> {
+    let opts = crate::limits::fs_options(library, limits);
+    let check_len = |context: String, s: &str| -> Result<(), SessionError> {
+        if let Some(max_len) = limits.max_resolved_arg_len {
+            let n = s.chars().count();
+            if n > max_len {
+                return Err(SessionError::FormatString {
+                    context,
+                    reason: format!(
+                        "resolved value is {n} characters, exceeding the maximum of {max_len}."
+                    ),
+                });
+            }
+        }
+        Ok(())
+    };
     let command = action
         .command
-        .resolve_string_with(
-            symtab,
-            &openjd_expr::FormatStringOptions::new().with_library(library),
-        )
+        .resolve_string_with(symtab, &opts)
         .map_err(|e| SessionError::FormatString {
             context: "command".into(),
             reason: e.to_string(),
         })?;
+    check_len("command".into(), &command)?;
     let mut args = vec![command];
     if let Some(arg_fmts) = &action.args {
-        for fs in arg_fmts {
-            if let Ok(val) = fs.resolve_with(
-                symtab,
-                &openjd_expr::FormatStringOptions::new().with_library(library),
-            ) {
+        for (j, fs) in arg_fmts.iter().enumerate() {
+            if let Ok(val) = fs.resolve_with(symtab, &opts) {
                 match val {
                     ExprValue::Null => continue,
                     val if val.is_list() => {
                         if let Some(elements) = val.list_elements() {
                             for elem in &elements {
-                                args.push(elem.to_display_string());
+                                let s = elem.to_display_string();
+                                check_len(format!("args[{j}]"), &s)?;
+                                args.push(s);
                             }
                         }
                         continue;
                     }
-                    val => args.push(val.to_display_string()),
+                    val => {
+                        let s = val.to_display_string();
+                        check_len(format!("args[{j}]"), &s)?;
+                        args.push(s);
+                    }
                 }
             } else {
-                let s = fs
-                    .resolve_string_with(
-                        symtab,
-                        &openjd_expr::FormatStringOptions::new().with_library(library),
-                    )
-                    .map_err(|e| SessionError::FormatString {
+                let s = fs.resolve_string_with(symtab, &opts).map_err(|e| {
+                    SessionError::FormatString {
                         context: "argument".into(),
                         reason: e.to_string(),
-                    })?;
+                    }
+                })?;
+                check_len(format!("args[{j}]"), &s)?;
                 args.push(s);
             }
         }
@@ -606,8 +639,14 @@ mod tests {
             ("{{ '0' }}", "'0'"),
             ("{{ 0 - 5 }}", "'-5'"),
         ] {
-            let err = resolve_action_timeout(&action_with_timeout(expr), &symtab, None, None)
-                .unwrap_err();
+            let err = resolve_action_timeout(
+                &action_with_timeout(expr),
+                &symtab,
+                None,
+                &Default::default(),
+                None,
+            )
+            .unwrap_err();
             assert_eq!(
                 err.to_string(),
                 format!(
@@ -622,7 +661,14 @@ mod tests {
     fn timeout_positive_and_null_resolve() {
         let symtab = SymbolTable::default();
         assert_eq!(
-            resolve_action_timeout(&action_with_timeout("{{ 90 }}"), &symtab, None, None).unwrap(),
+            resolve_action_timeout(
+                &action_with_timeout("{{ 90 }}"),
+                &symtab,
+                None,
+                &Default::default(),
+                None
+            )
+            .unwrap(),
             Some(Duration::from_secs(90))
         );
         // Whole-field null: field treated as not provided, default applies.
@@ -631,6 +677,7 @@ mod tests {
                 &action_with_timeout("{{ null }}"),
                 &symtab,
                 None,
+                &Default::default(),
                 Some(Duration::from_secs(30))
             )
             .unwrap(),
@@ -643,24 +690,30 @@ mod tests {
         let symtab = SymbolTable::default();
         // In-range values resolve.
         assert_eq!(
-            resolve_notify_period_seconds(Some(&fs("45")), &symtab, None).unwrap(),
+            resolve_notify_period_seconds(Some(&fs("45")), &symtab, None, &Default::default())
+                .unwrap(),
             Some(45)
         );
         // Omitted field is None.
         assert_eq!(
-            resolve_notify_period_seconds(None, &symtab, None).unwrap(),
+            resolve_notify_period_seconds(None, &symtab, None, &Default::default()).unwrap(),
             None
         );
         // The Template Schemas §5.3.2 cap applies to resolved values just
         // as the static validator applies it to literals: format-string
         // values could not be checked at parse time.
-        let err = resolve_notify_period_seconds(Some(&fs("9999")), &symtab, None).unwrap_err();
+        let err =
+            resolve_notify_period_seconds(Some(&fs("9999")), &symtab, None, &Default::default())
+                .unwrap_err();
         assert!(
             err.to_string().contains("must not exceed 600"),
             "expected cap error; got: {err}"
         );
         // Non-positive values are rejected.
-        assert!(resolve_notify_period_seconds(Some(&fs("0")), &symtab, None).is_err());
+        assert!(
+            resolve_notify_period_seconds(Some(&fs("0")), &symtab, None, &Default::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -670,8 +723,152 @@ mod tests {
             .set("X", openjd_expr::ExprValue::Null)
             .expect("symtab");
         assert_eq!(
-            resolve_notify_period_seconds(Some(&fs("{{X}}")), &symtab, None).unwrap(),
+            resolve_notify_period_seconds(Some(&fs("{{X}}")), &symtab, None, &Default::default())
+                .unwrap(),
             None
+        );
+    }
+
+    // === SessionLimits: resolved-argument cap and budgets (run-time enforcement) ===
+
+    fn action_with_args(command: &str, args: &[&str]) -> Action {
+        Action {
+            command: fs(command),
+            args: Some(args.iter().map(|a| fs(a)).collect()),
+            timeout: None,
+            cancelation: None,
+        }
+    }
+
+    fn arg_cap(n: usize) -> crate::limits::SessionLimits {
+        crate::limits::SessionLimits {
+            max_resolved_arg_len: Some(n),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolved_command_over_arg_cap_rejected() {
+        let symtab = SymbolTable::default();
+        let action = action_with_args("{{ 'A' * 200 }}", &[]);
+        let err = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Failed to resolve command: resolved value is 200 characters, exceeding the maximum of 100."
+        );
+    }
+
+    #[test]
+    fn resolved_arg_over_cap_rejected_with_index() {
+        let symtab = SymbolTable::default();
+        let action = action_with_args("echo", &["ok", "{{ 'A' * 200 }}"]);
+        let err = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Failed to resolve args[1]: resolved value is 200 characters, exceeding the maximum of 100."
+        );
+    }
+
+    #[test]
+    fn flattened_list_arg_elements_each_checked() {
+        // A list-valued args element flattens into one argv entry per
+        // member (§5.2 / resolve_string_list semantics): the cap applies
+        // to each final entry.
+        let symtab = SymbolTable::default();
+        let action = action_with_args("echo", &["{{ ['A' * 150] * 2 }}"]);
+        let err = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Failed to resolve args[0]: resolved value is 150 characters, exceeding the maximum of 100."
+        );
+        // Elements under the cap pass even though the list's display
+        // form is over it.
+        let action = action_with_args("echo", &["{{ ['A' * 90] * 3 }}"]);
+        let args = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap();
+        assert_eq!(args.len(), 4); // command + 3 flattened entries
+    }
+
+    #[test]
+    fn args_at_cap_and_uncapped_pass() {
+        let symtab = SymbolTable::default();
+        let action = action_with_args("echo", &["{{ 'A' * 100 }}"]);
+        assert!(resolve_action_args(&action, &symtab, None, &arg_cap(100)).is_ok());
+        // §5.1/§5.2 set no spec maximum: no cap by default.
+        let action = action_with_args("echo", &["{{ 'A' * 200 }}"]);
+        assert!(resolve_action_args(&action, &symtab, None, &Default::default()).is_ok());
+    }
+
+    #[test]
+    fn arg_cap_measures_characters_not_bytes() {
+        // The run-time cap counts Unicode scalar values, matching the
+        // validation-side checks: 100 three-byte CJK characters satisfy
+        // a 100-character cap (300 UTF-8 bytes), 101 fail it.
+        let symtab = SymbolTable::default();
+        let action = action_with_args("echo", &[&"\u{4e16}".repeat(100)]);
+        assert!(resolve_action_args(&action, &symtab, None, &arg_cap(100)).is_ok());
+        let action = action_with_args("echo", &[&"\u{4e16}".repeat(101)]);
+        let err = resolve_action_args(&action, &symtab, None, &arg_cap(100)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Failed to resolve args[0]: resolved value is 101 characters, exceeding the maximum of 100."
+        );
+    }
+
+    #[test]
+    fn session_limits_from_caller_limits_mirrors_runtime_fields() {
+        // One policy value drives both stages: the conversion copies the
+        // four run-time-relevant fields and ignores the rest.
+        let caller = openjd_model::CallerLimits {
+            max_resolved_arg_len: Some(1),
+            max_resolved_data_len: Some(2),
+            max_eval_memory_bytes: Some(3),
+            max_eval_operations: Some(4),
+            max_step_count: Some(99), // no run-time counterpart
+            ..Default::default()
+        };
+        let session: crate::limits::SessionLimits = (&caller).into();
+        assert_eq!(
+            session,
+            crate::limits::SessionLimits {
+                max_resolved_arg_len: Some(1),
+                max_resolved_data_len: Some(2),
+                max_eval_memory_bytes: Some(3),
+                max_eval_operations: Some(4),
+            }
+        );
+    }
+
+    #[test]
+    fn arg_evaluation_respects_memory_budget() {
+        // The evaluation memory budget (the Expression Language spec's
+        // lever against `'A' * N` blowups) bounds argument resolution.
+        let symtab = SymbolTable::default();
+        let limits = crate::limits::SessionLimits {
+            max_eval_memory_bytes: Some(1000),
+            ..Default::default()
+        };
+        let action = action_with_args("echo", &["{{ 'A' * 100000 }}"]);
+        let err = resolve_action_args(&action, &symtab, None, &limits).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exceeded limit (1000 bytes)"),
+            "expected memory-budget error; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn arg_evaluation_respects_operation_budget() {
+        let symtab = SymbolTable::default();
+        let limits = crate::limits::SessionLimits {
+            max_eval_operations: Some(50),
+            ..Default::default()
+        };
+        let action = action_with_args("echo", &["{{ sum([1] * 1000) }}"]);
+        let err = resolve_action_args(&action, &symtab, None, &limits).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exceeded limit (50)"),
+            "expected operation-budget error; got: {msg}"
         );
     }
 }

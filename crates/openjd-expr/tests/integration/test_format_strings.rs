@@ -161,7 +161,10 @@ fn validate_catches_undefined_variable() {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
         HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
     ));
-    let result = fs.validate_expressions(&SymbolTable::new(), &lib, None);
+    let result = fs.validate_expressions(
+        &SymbolTable::new(),
+        &FormatStringOptions::new().with_library(&*lib),
+    );
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("Param.Missing"), "got: {err}");
@@ -174,7 +177,9 @@ fn validate_passes_with_unresolved_types() {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
         HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
     ));
-    assert!(fs.validate_expressions(&st, &lib, None).is_ok());
+    assert!(fs
+        .validate_expressions(&st, &FormatStringOptions::new().with_library(&*lib))
+        .is_ok());
 }
 
 // === StaticResolution (lower bound + static value) ===
@@ -185,7 +190,7 @@ fn static_resolution(input: &str, st: &SymbolTable) -> openjd_expr::StaticResolu
     ));
     FormatString::new(input)
         .unwrap()
-        .validate_expressions(st, &lib, None)
+        .validate_expressions(st, &FormatStringOptions::new().with_library(&*lib))
         .unwrap()
 }
 
@@ -299,7 +304,14 @@ fn check_static_resolution_against_typed_resolution(
         HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
     ));
     let fs = FormatString::new(input).unwrap();
-    let sr = fs.validate_expressions(st, &lib, Some(target)).unwrap();
+    let sr = fs
+        .validate_expressions(
+            st,
+            &FormatStringOptions::new()
+                .with_library(&*lib)
+                .with_target_type(target),
+        )
+        .unwrap();
     let resolved = fs
         .resolve_with(
             st,
@@ -440,7 +452,12 @@ fn resolved_type_reflects_target_coercion_of_unresolved() {
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::FLOAT));
     let sr = FormatString::new("{{ Param.X }}")
         .unwrap()
-        .validate_expressions(&st, &lib, Some(&ExprType::INT))
+        .validate_expressions(
+            &st,
+            &FormatStringOptions::new()
+                .with_library(&*lib)
+                .with_target_type(&ExprType::INT),
+        )
         .unwrap();
     assert!(sr.resolved_value.is_none());
     assert_eq!(sr.resolved_type, ExprType::INT);
@@ -473,7 +490,12 @@ fn static_resolution_with_target(
     ));
     FormatString::new(input)
         .unwrap()
-        .validate_expressions(st, &lib, Some(target))
+        .validate_expressions(
+            st,
+            &FormatStringOptions::new()
+                .with_library(&*lib)
+                .with_target_type(target),
+        )
         .unwrap()
 }
 
@@ -639,7 +661,12 @@ fn static_resolution_unresolved_symbol_coerces_at_type_level() {
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::FLOAT));
     let sr = FormatString::new("{{ Param.X }}")
         .unwrap()
-        .validate_expressions(&st, &lib, Some(&ExprType::INT))
+        .validate_expressions(
+            &st,
+            &FormatStringOptions::new()
+                .with_library(&*lib)
+                .with_target_type(&ExprType::INT),
+        )
         .unwrap();
     assert_eq!(sr.min_resolved_string_len, 0);
     assert!(sr.resolved_value.is_none());
@@ -664,7 +691,12 @@ fn static_resolution_uncoercible_value_fails_validation_like_resolution() {
         )
         .unwrap_err();
     let validate_err = fs
-        .validate_expressions(&st, &lib, Some(&target))
+        .validate_expressions(
+            &st,
+            &FormatStringOptions::new()
+                .with_library(&*lib)
+                .with_target_type(&target),
+        )
         .unwrap_err();
     assert_eq!(
         validate_err.message,

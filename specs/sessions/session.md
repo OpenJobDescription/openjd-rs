@@ -69,8 +69,41 @@ pub struct SessionConfig {
     /// subprocess stdout to the session log. Default: `true`, matching
     /// the Python reference implementation. See [`echo_openjd_directives`](#echo_openjd_directives).
     pub echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets enforced by this session
+    /// (see [limits](#limits)). Default: no limits beyond the spec.
+    pub limits: SessionLimits,
 }
 ```
+
+### `limits` — run-time enforcement of caller policy
+
+Of the spec's three processing stages (Template Schemas §7.4: template
+validation, job creation, task execution on the worker host), task
+execution is the **enforcement boundary** for resolved-value limits
+(`SessionLimits`, from `openjd_sessions::limits`): a worker can receive
+a job that never passed through this client's template validation or
+job creation, so the checks must hold here on the final resolved values
+regardless of what earlier stages did. The four fields mirror the
+corresponding `openjd_model::CallerLimits` fields a submitting service
+would set:
+
+- `max_resolved_arg_len` — the resolved action `command` and every final
+  argv entry (after null-skip and list-flatten) — see
+  [runners.md](runners.md);
+- `max_resolved_data_len` — every resolved embedded-file `data` value —
+  see [embedded-files.md](embedded-files.md);
+- `max_eval_memory_bytes` / `max_eval_operations` — bound every
+  format-string expression evaluation the session performs (env var
+  values, command/args, timeout/cancelation fields, embedded data),
+  defaulting to the Expression Language spec's 100 MB / 10 M.
+
+All default to `None` — no restriction beyond the spec (§5.1/§5.2/§6.1.2
+set no maxima of their own). Violations surface as
+`SessionError::FormatString` with reason
+`resolved value is {n} characters, exceeding the maximum of {max}.`,
+following the `notifyPeriodInSeconds ≤ 600` and env-var §4.4.2
+precedents. (The §4.4.2 2048-char env-value cap is spec-mandated and
+always on — it is not part of `SessionLimits`.)
 
 ### Why `session_root_directory` instead of `working_directory`
 

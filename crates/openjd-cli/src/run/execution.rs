@@ -73,14 +73,14 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
     let exts = crate::common::parse_extensions(&args.extensions)?;
     let supported_exts: Vec<&str> = exts.iter().map(String::as_str).collect();
     let job_template = parse::decode_job_template(
         template_value,
         Some(&supported_exts),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let mut env_templates = Vec::new();
@@ -89,11 +89,12 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
         let env_value = parse::document_string_to_object(
             &env_content,
             crate::common::document_type(env_path),
-            &openjd_model::CallerLimits::default(),
+            &crate::common::caller_limits(),
         )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
+            &crate::common::caller_limits(),
         )?);
     }
 
@@ -290,6 +291,10 @@ fn create_session(
         sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,
         echo_openjd_directives: true,
+        // Run-time mirror of the CLI's caller-limits policy: derived from
+        // the same `common::caller_limits()` value the decode/creation
+        // stages use, so the two cannot drift.
+        limits: openjd_sessions::SessionLimits::from(&crate::common::caller_limits()),
     };
     Session::with_config(session_config)
         .map_err(|e| format!("Failed to create session: {e}").into())

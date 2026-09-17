@@ -41,7 +41,7 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let exts = crate::common::parse_extensions(&args.extensions)?;
@@ -50,7 +50,7 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let job_template = parse::decode_job_template(
         template_value,
         Some(&supported_exts),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     // Preserve template parameter definition order
@@ -72,11 +72,12 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         let env_value = parse::document_string_to_object(
             &env_content,
             crate::common::document_type(env_path),
-            &openjd_model::CallerLimits::default(),
+            &crate::common::caller_limits(),
         )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
+            &crate::common::caller_limits(),
         )?);
     }
 

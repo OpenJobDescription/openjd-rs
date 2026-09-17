@@ -37,8 +37,12 @@ fn check_err(s: &str, expected: &[&str]) {
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, Some(&["EXPR", "FEATURE_BUNDLE_1"]))
-        .expect_err("Expected validation error");
+    let err = decode_environment_template(
+        v,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected validation error");
     let msg = err.to_string();
     for line in expected {
         assert!(

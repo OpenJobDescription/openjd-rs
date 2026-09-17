@@ -19,6 +19,14 @@ pub struct EmbeddedFiles {
 impl EmbeddedFiles {
     pub fn new(scope: EmbeddedFilesScope, session_files_directory: PathBuf, session_id: &str) -> Self;
     pub fn with_user(self, user: Option<Arc<dyn SessionUser>>) -> Self;
+    /// Session limits: the evaluation budgets bound `data` expression
+    /// evaluation, and `max_resolved_data_len` (opt-in — §6.1.2 sets no
+    /// spec limit) caps each resolved `data` value at write time — the
+    /// run-time enforcement boundary. A violation is
+    /// `SessionError::FormatString` with context
+    /// `embedded file '{name}' data` and reason
+    /// `resolved value is {n} characters, exceeding the maximum of {max}.`.
+    pub fn with_limits(self, limits: SessionLimits) -> Self;
 
     pub fn allocate_file_paths(
         &mut self,

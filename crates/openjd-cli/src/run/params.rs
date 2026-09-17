@@ -34,7 +34,7 @@ pub fn parse_cli_parameters(
             let value = openjd_model::template::parse::document_string_to_object(
                 &content,
                 crate::common::document_type(&path),
-                &openjd_model::CallerLimits::default(),
+                &crate::common::caller_limits(),
             )
             .map_err(|_| format!("Job parameter file '{}' should contain a dictionary.", arg))?;
             for (k, v) in value.as_object().unwrap() {

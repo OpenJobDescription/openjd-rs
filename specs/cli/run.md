@@ -298,6 +298,12 @@ The `SessionConfig` struct is populated with:
 | `session_root_directory` | `None` (use system temp) |
 | `user` | `None` (run as current user) |
 | `profile` | `ModelProfile` built from the job template's declared extensions |
+| `limits` | `SessionLimits` with `max_resolved_arg_len = common::DEFAULT_MAX_ARG_LEN` (the CLI's uniform 32K-character default — see [check.md § Caller-Limits Policy](check.md#caller-limits-policy)); everything else `None` |
+
+The same OS-max cap applies at both enforcing stages the CLI drives:
+template decode uses `common::caller_limits()` (early failure on the
+lower bound), and the session mirrors it via `SessionConfig::limits`
+(the authoritative check on final values).
 
 ## Result Output
 

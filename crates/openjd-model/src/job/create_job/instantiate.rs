@@ -561,11 +561,18 @@ fn check_resolved_attribute_values(
 }
 
 /// Evaluate let bindings and return a new symbol table with bound values.
+///
+/// `memory_limit` / `operation_limit` bound each binding's expression
+/// evaluation (the Expression Language spec's "Memory-bounded evaluation"
+/// budgets — `CallerLimits::max_eval_memory_bytes` /
+/// `max_eval_operations`); `None` uses the spec-recommended defaults.
 pub fn evaluate_let_bindings(
     bindings: &[String],
     symtab: &SymbolTable,
     library: Option<&openjd_expr::function_library::FunctionLibrary>,
     path_format: PathFormat,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 ) -> Result<SymbolTable, ModelError> {
     let mut result = symtab.clone();
     for binding in bindings {
@@ -587,6 +594,12 @@ pub fn evaluate_let_bindings(
         let mut builder = parsed.with_path_format(path_format);
         if let Some(lib) = library {
             builder = builder.with_library(lib);
+        }
+        if let Some(m) = memory_limit {
+            builder = builder.with_memory_limit(m);
+        }
+        if let Some(o) = operation_limit {
+            builder = builder.with_operation_limit(o);
         }
         let value = builder.evaluate(&[&result as &SymbolTable]).map_err(|e| {
             ModelError::Expression(ExpressionError::new(format!(

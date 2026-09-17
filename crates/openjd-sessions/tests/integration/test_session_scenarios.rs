@@ -252,6 +252,7 @@ async fn run_scenario(scenario_path: &Path) {
     };
 
     let config = SessionConfig {
+        limits: Default::default(),
         session_id: "scenario-test".into(),
         job_parameter_values: job_params.clone(),
         path_mapping_rules: if path_rules.is_empty() {

@@ -999,25 +999,32 @@ impl FormatString {
 
     /// Resolve to a `String`. Single-expression forms that aren't
     /// naturally string-typed (int, float, list, path) are converted via
-    /// `ExprValue::to_display_string()`.
+    /// `ExprValue::to_display_string()`. The accumulated evaluated bytes
+    /// (expression-rendered content only; literals excluded) are charged
+    /// against the options' memory limit — the per-segment evaluator
+    /// limit does not compose across segments — so resolution is
+    /// memory-bounded end to end, in agreement with the identical charge
+    /// in `validate_expressions`.
     pub fn resolve_string_with(
         &self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError>;
 
     /// Validate every interpolation against a type-checking symbol table
     /// (typically populated with `ExprValue::unresolved(T)` values).
-    /// `target_type` is the same target the caller will later resolve
-    /// with: applied (like `resolve_with`) only in the single-expression
-    /// typed-passthrough case, where the root value is coerced toward it;
-    /// a value that cannot coerce fails validation as it would fail
-    /// resolution. Returns structured errors with the position of the
+    /// `opts` must be the same options the caller will later resolve
+    /// with, so validation observes exactly what resolution will produce:
+    /// the target type is applied (like `resolve_with`) only in the
+    /// single-expression typed-passthrough case, where the root value is
+    /// coerced toward it — a value that cannot coerce fails validation as
+    /// it would fail resolution — and the memory/operation limits bound
+    /// each segment's evaluation exactly as they do during resolution.
+    /// Returns structured errors with the position of the
     /// first failing interpolation so callers can produce diagnostics.
     /// On success, returns a `StaticResolution` describing what
     /// evaluation determined statically (resolved-length lower bound;
     /// exact value when fully static); pass/fail-only callers ignore it.
     pub fn validate_expressions(
-        &self, symtab: &SymbolTable, library: &FunctionLibrary,
-        target_type: Option<&ExprType>,
+        &self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>,
     ) -> Result<StaticResolution, FormatStringValidationError>;
 
     /// Validate that list-comprehension loop variables in this format
@@ -1070,8 +1077,11 @@ impl<'de> serde::Deserialize<'de> for FormatString;  // accepts str/int/float/bo
 ```
 
 ```rust
-/// Options for `FormatString::resolve_with` / `resolve_string_with`.
-/// Builder-style; each `with_*` returns the modified options by value.
+/// Options for `FormatString::resolve_with` / `resolve_string_with` /
+/// `validate_expressions`. Builder-style; each `with_*` returns the
+/// modified options by value. Validation and resolution take the same
+/// options value so that validation observes exactly the resolution
+/// the caller will perform.
 #[derive(Clone)]
 pub struct FormatStringOptions<'a> { /* private fields */ }
 
@@ -1087,6 +1097,16 @@ impl<'a> FormatStringOptions<'a> {
 
     #[must_use] pub fn with_path_format(self, fmt: PathFormat) -> Self;
     #[must_use] pub fn with_target_type(self, t: &'a ExprType) -> Self;
+
+    /// Cap the memory used to evaluate each expression segment, in
+    /// bytes (default: `DEFAULT_MEMORY_LIMIT`). The Expression Language
+    /// spec's "Memory-bounded evaluation" budget; applies per segment in
+    /// both resolution and `validate_expressions`.
+    #[must_use] pub fn with_memory_limit(self, limit: usize) -> Self;
+    /// Cap the operations used to evaluate each expression segment
+    /// (default: `DEFAULT_OPERATION_LIMIT`). Applies per segment in both
+    /// resolution and `validate_expressions`.
+    #[must_use] pub fn with_operation_limit(self, limit: usize) -> Self;
 }
 
 impl<'a> Default for FormatStringOptions<'a> { /* ... */ }
