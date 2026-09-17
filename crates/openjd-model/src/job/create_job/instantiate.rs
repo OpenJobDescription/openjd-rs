@@ -24,6 +24,7 @@ pub(super) fn instantiate_step(
     limits: &EffectiveLimits,
     ctx: &crate::types::ValidationContext,
     step_index: usize,
+    budgets: super::EvalBudgets,
 ) -> Result<job::Step, ModelError> {
     let mut step_symtab = symtab.clone();
 
@@ -55,15 +56,18 @@ pub(super) fn instantiate_step(
                                 "let binding '{name}': {e}"
                             )))
                         })?;
-                        let val = parsed
-                            .with_path_format(PathFormat::Posix)
-                            .with_library(&template_lib)
-                            .evaluate(&[&step_symtab as &SymbolTable])
-                            .map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "let binding '{name}': {e}"
-                                )))
-                            })?;
+                        let val = budgeted(
+                            parsed
+                                .with_path_format(PathFormat::Posix)
+                                .with_library(&template_lib),
+                            budgets,
+                        )
+                        .evaluate(&[&step_symtab as &SymbolTable])
+                        .map_err(|e| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "let binding '{name}': {e}"
+                            )))
+                        })?;
                         step_symtab.set(name, val)?;
                     }
                 }
@@ -74,146 +78,80 @@ pub(super) fn instantiate_step(
     let script_template = st.resolve_syntax_sugar()?.or_else(|| st.script.clone());
     let script = script_template.as_ref().map(convert_step_script);
 
-    // Type-check script-level let bindings with unresolved host context
-    if has_expr {
-        if let Some(s) = &script_template {
-            if let Some(bindings) = &s.let_bindings {
-                let mut check_symtab = step_symtab.clone();
-
-                // PATH Param.* are excluded from the template-scope symtab (they
-                // require session-time path mapping). Add them as Unresolved with
-                // the correct type so script-level let bindings can reference them
-                // for type-checking.
-                if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
-                    for name in raw_param_table.keys() {
-                        let param_key = format!("Param.{name}");
-                        if !step_symtab.contains(&param_key) {
-                            // Derive the Param type from the RawParam value: if it's
-                            // a list, use list(PATH); otherwise use PATH.
-                            let raw_key = format!("RawParam.{name}");
-                            let unresolved_type = match step_symtab.get_value(&raw_key) {
-                                Some(
-                                    openjd_expr::ExprValue::ListPath(..)
-                                    | openjd_expr::ExprValue::ListString(..),
-                                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
-                                _ => openjd_expr::ExprType::PATH,
-                            };
-                            let _ = check_symtab.set(
-                                &param_key,
-                                openjd_expr::ExprValue::Unresolved(unresolved_type),
-                            );
-                        }
-                    }
-                }
-
-                let _ = check_symtab.set(
-                    "Session.WorkingDirectory",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-                let _ = check_symtab.set(
-                    "Session.HasPathMappingRules",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
-                );
-                let _ = check_symtab.set(
-                    "Session.PathMappingRulesFile",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-
-                if let Some(ps) = &st.parameter_space {
-                    for tp in &ps.task_parameter_definitions {
-                        let tp_type = match tp {
-                            crate::template::TaskParameterDefinition::INT(_) => {
-                                openjd_expr::ExprType::INT
-                            }
-                            crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
-                                openjd_expr::ExprType::RANGE_EXPR
-                            }
-                            crate::template::TaskParameterDefinition::FLOAT(_) => {
-                                openjd_expr::ExprType::FLOAT
-                            }
-                            crate::template::TaskParameterDefinition::STRING(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::PATH
-                            }
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.Param.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(tp_type.clone()),
-                        );
-                        let raw_type = match tp {
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            _ => tp_type,
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.RawParam.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(raw_type),
-                        );
-                    }
-                }
-
-                if let Some(files) = &s.embedded_files {
-                    for f in files {
-                        let _ = check_symtab.set(
-                            &format!("Task.File.{}", f.name),
-                            openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                        );
-                    }
-                }
-
-                let host_profile = ctx
-                    .profile
-                    .to_expr_profile(openjd_expr::HostContext::Unresolved);
-                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
-                for binding in bindings {
-                    if let Some(eq_pos) = binding.find('=') {
-                        let name = binding[..eq_pos].trim();
-                        let expr = binding[eq_pos + 1..].trim();
-                        if !name.is_empty() && !expr.is_empty() {
-                            let parsed = openjd_expr::eval::ParsedExpression::with_profile(
-                                expr,
-                                &host_profile,
-                            )
-                            .map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "script let binding '{name}': {e}"
-                                )))
-                            })?;
-                            let val = parsed
-                                .with_path_format(PathFormat::Posix)
-                                .with_library(&host_lib)
-                                .evaluate(&[&check_symtab as &SymbolTable])
-                                .map_err(|e| {
-                                    ModelError::Expression(ExpressionError::new(format!(
-                                        "script let binding '{name}': {e}"
-                                    )))
-                                })?;
-                            check_symtab.set(name, val)?;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Check symbol table for the step script's carried-forward
+    // (session/task-scope) format strings: `step_symtab`'s concrete
+    // values plus `Unresolved` placeholders for everything only a
+    // session can bind. Building it also evaluates script-level `let`
+    // bindings (with unresolved host context), which doubles as the
+    // type check this stage has always performed on them.
+    let check_symtab = script_template
+        .as_ref()
+        .map(|s| build_task_check_symtab(st, s, &step_symtab, has_expr, ctx, budgets))
+        .transpose()?;
 
     let host_requirements = st
         .host_requirements
         .as_ref()
-        .map(|hr| resolve_host_requirements(hr, &step_symtab, ctx, step_index))
+        .map(|hr| resolve_host_requirements(hr, &step_symtab, ctx, step_index, budgets))
         .transpose()?;
 
     let parameter_space = st
         .parameter_space
         .as_ref()
-        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits))
+        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits, budgets))
         .transpose()?;
 
     // Validate the resolved parameter space (e.g. association length mismatches)
     if let Some(ref ps) = parameter_space {
         let _ = crate::job::step_param_space::StepParameterSpaceIterator::new(ps)?;
+    }
+
+    // Re-run the carried-forward format-string resolved-value checks —
+    // the `onRun` action's `command`/`args` and each embedded file's
+    // `data` — against the check symbol table, where job parameters are
+    // bound to real values. A violation template validation could only
+    // lower-bound is decidable here: fail at submission, not on every
+    // worker.
+    if let (Some(s), Some(cst)) = (&script_template, &check_symtab) {
+        let mut check_errors = ValidationErrors::default();
+        let script_path = [
+            PathElement::Field("steps".to_string()),
+            PathElement::Index(step_index),
+            PathElement::Field("script".to_string()),
+        ];
+        crate::template::validate_v2023_09::format_strings::check_carried_forward_step_script(
+            s,
+            cst,
+            ctx,
+            &script_path,
+            &mut check_errors,
+        );
+        check_errors.into_result("JobTemplate")?;
+    }
+
+    // The same checks for this step's environments (session scope):
+    // `variables` values, every action's `command`/`args`, embedded-file
+    // `data`.
+    if let Some(envs) = &st.step_environments {
+        let mut check_errors = ValidationErrors::default();
+        for (j, env) in envs.iter().enumerate() {
+            let env_symtab = build_env_check_symtab(env, &step_symtab, has_expr, ctx, budgets)?;
+            let env_path = [
+                PathElement::Field("steps".to_string()),
+                PathElement::Index(step_index),
+                PathElement::Field("stepEnvironments".to_string()),
+                PathElement::Index(j),
+            ];
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
+                env,
+                &env_symtab,
+                ctx,
+                limits.max_env_var_value_len,
+                &env_path,
+                &mut check_errors,
+            );
+        }
+        check_errors.into_result("JobTemplate")?;
     }
 
     let step_environments = st
@@ -251,6 +189,216 @@ pub(super) fn instantiate_step(
             &filtered_symtab,
         )),
     })
+}
+
+/// Apply the caller evaluation budgets to an expression evaluation
+/// builder (for the `let`-binding sites, which parse expressions
+/// directly rather than resolving a `FormatString`).
+fn budgeted(
+    mut builder: openjd_expr::EvalBuilder<'_>,
+    budgets: super::EvalBudgets,
+) -> openjd_expr::EvalBuilder<'_> {
+    if let Some(m) = budgets.memory {
+        builder = builder.with_memory_limit(m);
+    }
+    if let Some(o) = budgets.operations {
+        builder = builder.with_operation_limit(o);
+    }
+    builder
+}
+
+/// Add `Unresolved` placeholders for the symbols only a session can
+/// bind: `Session.*`, plus `Param.*` for PATH-typed job parameters
+/// (excluded from the job-creation symtab because they require
+/// session-time path mapping — the Param type is derived from the
+/// `RawParam.*` value that is present).
+fn add_unresolved_session_symbols(symtab: &mut SymbolTable) {
+    let raw_param_names: Vec<String> = symtab
+        .get_table("RawParam")
+        .map(|t| t.keys().map(str::to_string).collect())
+        .unwrap_or_default();
+    for name in raw_param_names {
+        let param_key = format!("Param.{name}");
+        if !symtab.contains(&param_key) {
+            let raw_key = format!("RawParam.{name}");
+            let unresolved_type = match symtab.get_value(&raw_key) {
+                Some(
+                    openjd_expr::ExprValue::ListPath(..) | openjd_expr::ExprValue::ListString(..),
+                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+                _ => openjd_expr::ExprType::PATH,
+            };
+            let _ = symtab.set(
+                &param_key,
+                openjd_expr::ExprValue::Unresolved(unresolved_type),
+            );
+        }
+    }
+    let _ = symtab.set(
+        "Session.WorkingDirectory",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    );
+    let _ = symtab.set(
+        "Session.HasPathMappingRules",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
+    );
+    let _ = symtab.set(
+        "Session.PathMappingRulesFile",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    );
+}
+
+/// Build the check symbol table for a step script's carried-forward
+/// format strings (task scope): the step's symtab (concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` / `Step.Name` / step-level `let`
+/// bindings) plus `Unresolved` placeholders for `Session.*`, PATH
+/// `Param.*`, `Task.Param.*` / `Task.RawParam.*`, and `Task.File.*` —
+/// the same scope the session runtime binds when it resolves these
+/// format strings at run time.
+///
+/// Script-level `let` bindings are evaluated into the table with
+/// unresolved host context, which is also the type check job creation
+/// has always performed on them: a binding that fails with the real
+/// parameter values fails here, deterministically, rather than in every
+/// session.
+fn build_task_check_symtab(
+    st: &template::StepTemplate,
+    script: &template::StepScript,
+    step_symtab: &SymbolTable,
+    has_expr: bool,
+    ctx: &crate::types::ValidationContext,
+    budgets: super::EvalBudgets,
+) -> Result<SymbolTable, ModelError> {
+    let mut check_symtab = step_symtab.clone();
+    add_unresolved_session_symbols(&mut check_symtab);
+
+    if let Some(ps) = &st.parameter_space {
+        for tp in &ps.task_parameter_definitions {
+            let tp_type = match tp {
+                crate::template::TaskParameterDefinition::INT(_) => openjd_expr::ExprType::INT,
+                crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
+                    openjd_expr::ExprType::RANGE_EXPR
+                }
+                crate::template::TaskParameterDefinition::FLOAT(_) => openjd_expr::ExprType::FLOAT,
+                crate::template::TaskParameterDefinition::STRING(_) => {
+                    openjd_expr::ExprType::STRING
+                }
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::PATH,
+            };
+            let _ = check_symtab.set(
+                &format!("Task.Param.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(tp_type.clone()),
+            );
+            let raw_type = match tp {
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::STRING,
+                _ => tp_type,
+            };
+            let _ = check_symtab.set(
+                &format!("Task.RawParam.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(raw_type),
+            );
+        }
+    }
+
+    if let Some(files) = &script.embedded_files {
+        for f in files {
+            let _ = check_symtab.set(
+                &format!("Task.File.{}", f.name),
+                openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+            );
+        }
+    }
+
+    if has_expr {
+        if let Some(bindings) = &script.let_bindings {
+            let host_profile = ctx
+                .profile
+                .to_expr_profile(openjd_expr::HostContext::Unresolved);
+            let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+            for binding in bindings {
+                if let Some(eq_pos) = binding.find('=') {
+                    let name = binding[..eq_pos].trim();
+                    let expr = binding[eq_pos + 1..].trim();
+                    if !name.is_empty() && !expr.is_empty() {
+                        let parsed =
+                            openjd_expr::eval::ParsedExpression::with_profile(expr, &host_profile)
+                                .map_err(|e| {
+                                    ModelError::Expression(ExpressionError::new(format!(
+                                        "script let binding '{name}': {e}"
+                                    )))
+                                })?;
+                        let val = budgeted(
+                            parsed
+                                .with_path_format(PathFormat::Posix)
+                                .with_library(&host_lib),
+                            budgets,
+                        )
+                        .evaluate(&[&check_symtab as &SymbolTable])
+                        .map_err(|e| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "script let binding '{name}': {e}"
+                            )))
+                        })?;
+                        check_symtab.set(name, val)?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(check_symtab)
+}
+
+/// Build the check symbol table for an environment's carried-forward
+/// format strings (session scope; job-level or step-level
+/// environments): the base symtab (concrete `Param.*` / `RawParam.*` /
+/// `Job.Name`, plus `Step.Name` when `base` is a step's table) with
+/// `Unresolved` placeholders for `Session.*`, PATH `Param.*`, and this
+/// environment's `Env.File.*`, and the environment's script-level
+/// `let` bindings evaluated in — mirroring what the session runtime
+/// binds when it resolves the environment at run time.
+///
+/// A `let` binding that fails to evaluate fails job creation (as the
+/// step-script `let` check always has): the bindings only evaluate
+/// when the context profile enables EXPR, their expressions already
+/// type-checked at pass 8 with everything unresolved, so a failure
+/// here comes from the real parameter values and would
+/// deterministically recur in every session entering the environment.
+pub(super) fn build_env_check_symtab(
+    env: &template::Environment,
+    base: &SymbolTable,
+    has_expr: bool,
+    ctx: &crate::types::ValidationContext,
+    budgets: super::EvalBudgets,
+) -> Result<SymbolTable, ModelError> {
+    let mut symtab = base.clone();
+    add_unresolved_session_symbols(&mut symtab);
+    if let Some(script) = &env.script {
+        if let Some(files) = &script.embedded_files {
+            for f in files {
+                let _ = symtab.set(
+                    &format!("Env.File.{}", f.name),
+                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+                );
+            }
+        }
+        if has_expr {
+            if let Some(bindings) = &script.let_bindings {
+                let host_profile = ctx
+                    .profile
+                    .to_expr_profile(openjd_expr::HostContext::Unresolved);
+                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+                symtab = evaluate_let_bindings(
+                    bindings,
+                    &symtab,
+                    Some(&host_lib),
+                    PathFormat::Posix,
+                    budgets.memory,
+                    budgets.operations,
+                )?;
+            }
+        }
+    }
+    Ok(symtab)
 }
 
 fn convert_action(a: &template::Action) -> job::Action {
@@ -350,6 +498,7 @@ fn resolve_host_requirements(
     symtab: &SymbolTable,
     ctx: &crate::types::ValidationContext,
     step_index: usize,
+    budgets: super::EvalBudgets,
 ) -> Result<job::HostRequirements, ModelError> {
     let amounts = hr
         .amounts
@@ -361,13 +510,27 @@ fn resolve_host_requirements(
                     let min = a
                         .min
                         .as_ref()
-                        .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount min"))
+                        .map(|fs| {
+                            ranges::resolve_to_f64(
+                                fs,
+                                symtab,
+                                "hostRequirements amount min",
+                                budgets,
+                            )
+                        })
                         .transpose()?
                         .flatten();
                     let max = a
                         .max
                         .as_ref()
-                        .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount max"))
+                        .map(|fs| {
+                            ranges::resolve_to_f64(
+                                fs,
+                                symtab,
+                                "hostRequirements amount max",
+                                budgets,
+                            )
+                        })
                         .transpose()?
                         .flatten();
                     check_resolved_amount_bounds(min, max, step_index, amount_index)?;
@@ -396,12 +559,12 @@ fn resolve_host_requirements(
                     let any_of = a
                         .any_of
                         .as_ref()
-                        .map(|vals| ranges::resolve_string_list(vals, symtab))
+                        .map(|vals| ranges::resolve_string_list(vals, symtab, budgets))
                         .transpose()?;
                     let all_of = a
                         .all_of
                         .as_ref()
-                        .map(|vals| ranges::resolve_string_list(vals, symtab))
+                        .map(|vals| ranges::resolve_string_list(vals, symtab, budgets))
                         .transpose()?;
                     let attr_lower = a.name.to_lowercase();
                     let is_single_valued = attr_lower == "attr.worker.os.family"

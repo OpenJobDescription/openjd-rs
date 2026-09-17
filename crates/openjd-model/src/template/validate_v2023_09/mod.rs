@@ -13,7 +13,7 @@
 //! - Pass 10: WRAP_ACTIONS (validate or reject, RFC 0008)
 
 mod feature_bundle_1;
-mod format_strings;
+pub(crate) mod format_strings;
 pub(crate) mod helpers;
 mod limits;
 mod structure;

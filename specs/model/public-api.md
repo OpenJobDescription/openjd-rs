@@ -170,11 +170,17 @@ pub fn convert_environment_with_symtab(
 ```
 
 [`create_job`] is the high-level entry point: it resolves the job name
-(template scope), instantiates every step, runs the final task-count
+(template scope), instantiates every step, runs the resolved-value
+checks on the carried-forward session/task-scope fields
+(action `command`/`args`, environment `variables`, embedded-file `data`
+— see the Resolved-Value Checks on Carried-Forward Fields section of
+[job-creation.md](job-creation.md)), runs the final task-count
 limit from [`CallerLimits`], and returns the complete [`job::Job`]. The
 `ctx` it takes is a full [`ValidationContext`] — i.e. revision +
 extensions + caller limits — and callers commonly get one from
-[`JobTemplate::default_validation_context`].
+[`JobTemplate::default_validation_context`]. Every expression
+evaluation it performs runs under the caller's evaluation budgets
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`).
 
 [`preprocess_job_parameters`] implements the parameter coercion and
 default-value pipeline from spec §2: type coercion, constraint checks,
@@ -723,13 +729,13 @@ pub struct CallerLimits {
     /// while OS limits use other units (Linux `MAX_ARG_STRLEN` is
     /// 131072 bytes; the Windows command line is 32767 UTF-16 units) —
     /// pick a value with encoding headroom. Enforced at validation on
-    /// the guaranteed lower bound of every possible resolution, and at
-    /// run time by `openjd-sessions` on the final values (job creation
-    /// carries these host-scope fields forward unresolved, so it applies
-    /// no check of its own).
+    /// the guaranteed lower bound of every possible resolution, at job
+    /// creation on the bound recomputed with the job parameters bound
+    /// to real values, and at run time by `openjd-sessions` on the
+    /// final values.
     pub max_resolved_arg_len: Option<usize>,
     /// Cap on each resolved embedded-file `data` value (§6.1.2 sets no
-    /// spec limit). Same two-stage enforcement as
+    /// spec limit). Same enforcement stages as
     /// `max_resolved_arg_len`.
     pub max_resolved_data_len: Option<usize>,
     /// Evaluation memory budget in bytes for each format-string
@@ -737,8 +743,8 @@ pub struct CallerLimits {
     /// `None` = the spec-recommended default
     /// (`openjd_expr::DEFAULT_MEMORY_LIMIT`, 100 MB). Lowering it is
     /// spec-sanctioned; applied to every evaluation at template
-    /// validation, and at run time when mirrored into `SessionLimits`
-    /// (job creation currently evaluates under the spec defaults).
+    /// validation and at job creation, and at run time when mirrored
+    /// into `SessionLimits`.
     pub max_eval_memory_bytes: Option<usize>,
     /// Evaluation operation budget per expression. `None` = the
     /// spec-recommended default (`openjd_expr::DEFAULT_OPERATION_LIMIT`,

@@ -788,6 +788,25 @@ struct FsEval<'a> {
     lib: &'a FunctionLibrary,
     memory_limit: Option<usize>,
     operation_limit: Option<usize>,
+    /// Whether evaluation/parse *errors* (as opposed to resolved-value
+    /// constraint violations) are reported. Pass 8 reports them — that
+    /// is its job. The job-creation re-checks do not: `create_job` may
+    /// deliberately run with a different profile than the template was
+    /// decoded with (see `create_job`'s `ctx` docs), so an evaluation
+    /// error there can be a context artifact rather than a template
+    /// defect, and the carried-forward strings resolve — and hard-fail —
+    /// on the worker anyway. The exception is a budget exceedance
+    /// (`MemoryLimitExceeded` / `OperationLimitExceeded`): the same
+    /// expression evaluates under the same budgets at run time with
+    /// strictly more symbols bound, so exceeding the budget here means
+    /// run-time resolution would too — the early failure these checks
+    /// exist for. (One coarseness caveat: for an unresolved-test
+    /// conditional the evaluator charges both branches against the
+    /// budget, while a run-time evaluation with the test resolved
+    /// charges one, so a budget within a branch-cost of the limit can
+    /// fail here and pass there. Callers lowering the budgets accept
+    /// that granularity.)
+    report_eval_errors: bool,
 }
 
 impl<'a> FsEval<'a> {
@@ -796,6 +815,20 @@ impl<'a> FsEval<'a> {
             lib,
             memory_limit: caller_limits.max_eval_memory_bytes,
             operation_limit: caller_limits.max_eval_operations,
+            report_eval_errors: true,
+        }
+    }
+
+    /// An `FsEval` for the job-creation re-checks: budgets applied,
+    /// but only budget exceedances reported as evaluation errors (see
+    /// [`Self::report_eval_errors`]).
+    fn for_job_creation(
+        lib: &'a FunctionLibrary,
+        caller_limits: &crate::types::CallerLimits,
+    ) -> Self {
+        Self {
+            report_eval_errors: false,
+            ..Self::new(lib, caller_limits)
         }
     }
 
@@ -888,6 +921,21 @@ fn validate_fs_with(
             }
         }
         Err(e) => {
+            if !ev.report_eval_errors {
+                // Job creation: only a budget exceedance is a defect
+                // this stage may report — see
+                // `FsEval::report_eval_errors`.
+                let budget_exceeded = e.expression_error.as_ref().is_some_and(|ee| {
+                    matches!(
+                        ee.kind(),
+                        openjd_expr::ExpressionErrorKind::MemoryLimitExceeded { .. }
+                            | openjd_expr::ExpressionErrorKind::OperationLimitExceeded { .. }
+                    )
+                });
+                if !budget_exceeded {
+                    return;
+                }
+            }
             let mut spans = Vec::new();
             if let Some(ref expr_err) = e.expression_error {
                 if !expr_err.sub_errors().is_empty() {
@@ -969,6 +1017,190 @@ fn validate_action_fs(
                 ev,
                 &path_index(&args_path, j),
                 arg_constraint.as_ref(),
+                errors,
+            );
+        }
+    }
+}
+
+// ── Job-creation resolved-value checks ──────────────────────────────
+//
+// `create_job` carries the session/task-scope format strings — action
+// `command`/`args`, environment `variables` values, embedded-file
+// `data` — forward unresolved (only a worker host can bind `Session.*`
+// / `Task.*` / `Env.File.*`). Of the spec's three processing stages
+// (Template Schemas §7.4: template validation, job creation, task
+// execution on the worker host), job creation is the first at which
+// `Param.*` / `RawParam.*` have real values. The two functions below
+// re-run exactly the resolved-value checks pass 8 applies to those
+// fields, against a symbol table with the parameters bound: a violation
+// pass 8 could only lower-bound becomes decidable at job creation, and
+// fails at submission instead of on every worker.
+//
+// Both walk the *template* types (the fields are carried forward
+// as-is), report at the same field paths as pass 8, and evaluate under
+// the same caller budgets (`FsEval`).
+
+/// Job-creation resolved-value checks for a step script: the `onRun` action's
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len` and
+/// each embedded file's `data` against
+/// `CallerLimits::max_resolved_data_len` (both opt-in, `None` = no
+/// check beyond evaluation itself).
+///
+/// `symtab` is the task-scope check table: concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` / `Step.Name` / `let` bindings, with
+/// `Unresolved` placeholders for `Session.*`, `Task.*`, and PATH
+/// `Param.*`.
+pub(crate) fn check_carried_forward_step_script(
+    script: &StepScript,
+    symtab: &SymbolTable,
+    ctx: &ValidationContext,
+    script_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let host_lib = FunctionLibrary::for_profile(&host_profile);
+    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action_fs(
+        &script.actions.on_run,
+        symtab,
+        &ev,
+        &action_path,
+        ctx.caller_limits.max_resolved_arg_len,
+        errors,
+    );
+    check_embedded_files_data(
+        script.embedded_files.as_deref(),
+        symtab,
+        &ev,
+        ctx.caller_limits.max_resolved_data_len,
+        script_path,
+        errors,
+    );
+}
+
+/// Job-creation resolved-value checks for an environment (job-level or
+/// step-level): each `variables` value against §4.4.2's
+/// `max_env_var_value_len` (spec-mandated, always on), every action's
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, and
+/// each embedded file's `data` against
+/// `CallerLimits::max_resolved_data_len`.
+///
+/// `symtab` is the session-scope check table: concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` (and `Step.Name` for step environments) /
+/// `let` bindings, with `Unresolved` placeholders for `Session.*`,
+/// `Env.File.*`, and PATH `Param.*`. The RFC 0008 wrap hooks
+/// additionally see their `WrappedAction.*` / `WrappedEnv.Name` /
+/// `WrappedStep.Name` scopes, unresolved, exactly as in pass 8.
+pub(crate) fn check_carried_forward_environment(
+    env: &Environment,
+    symtab: &SymbolTable,
+    ctx: &ValidationContext,
+    max_env_var_value_len: usize,
+    path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let host_lib = FunctionLibrary::for_profile(&host_profile);
+    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    if let Some(vars) = &env.variables {
+        let vars_path = path_field(path, "variables");
+        for (name, value) in vars {
+            validate_fs_with(
+                value,
+                symtab,
+                &ev,
+                &path_field(&vars_path, name),
+                Some(&ResolvedConstraint::Text {
+                    max_len: max_env_var_value_len,
+                    forbid_control_chars: false,
+                    forbid_empty: false,
+                }),
+                errors,
+            );
+        }
+    }
+    if let Some(script) = &env.script {
+        let script_path = path_field(path, "script");
+        let actions_path = path_field(&script_path, "actions");
+        if let Some(action) = &script.actions.on_enter {
+            validate_action_fs(
+                action,
+                symtab,
+                &ev,
+                &path_field(&actions_path, "onEnter"),
+                ctx.caller_limits.max_resolved_arg_len,
+                errors,
+            );
+        }
+        for (hook_name, action_opt, extra) in script.actions.wrap_hooks() {
+            if let Some(action) = action_opt {
+                let mut st = symtab.clone();
+                add_wrapped_action_scope(&mut st);
+                match extra {
+                    WrapHookScope::EnvName => add_wrapped_env_name_scope(&mut st),
+                    WrapHookScope::StepName => add_wrapped_step_name_scope(&mut st),
+                }
+                validate_action_fs(
+                    action,
+                    &st,
+                    &ev,
+                    &path_field(&actions_path, hook_name),
+                    ctx.caller_limits.max_resolved_arg_len,
+                    errors,
+                );
+            }
+        }
+        if let Some(action) = &script.actions.on_exit {
+            validate_action_fs(
+                action,
+                symtab,
+                &ev,
+                &path_field(&actions_path, "onExit"),
+                ctx.caller_limits.max_resolved_arg_len,
+                errors,
+            );
+        }
+        check_embedded_files_data(
+            script.embedded_files.as_deref(),
+            symtab,
+            &ev,
+            ctx.caller_limits.max_resolved_data_len,
+            &script_path,
+            errors,
+        );
+    }
+}
+
+/// Shared embedded-file `data` walk for the two job-creation checks above:
+/// each `data` value against the opt-in
+/// `CallerLimits::max_resolved_data_len` cap (`filename` is a plain
+/// string per the 2023-09 schema — no format-string check).
+fn check_embedded_files_data(
+    files: Option<&[EmbeddedFile]>,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    max_resolved_data_len: Option<usize>,
+    script_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let Some(files) = files else { return };
+    let files_path = path_field(script_path, "embeddedFiles");
+    let data_constraint =
+        max_resolved_data_len.map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+    for (j, f) in files.iter().enumerate() {
+        if let Some(data) = &f.data {
+            validate_fs_with(
+                data,
+                symtab,
+                ev,
+                &path_field(&path_index(&files_path, j), "data"),
+                data_constraint.as_ref(),
                 errors,
             );
         }
