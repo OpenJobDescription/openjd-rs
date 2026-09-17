@@ -999,7 +999,11 @@ impl FormatString {
 
     /// Resolve to a `String`. Single-expression forms that aren't
     /// naturally string-typed (int, float, list, path) are converted via
-    /// `ExprValue::to_display_string()`.
+    /// `ExprValue::to_display_string()`. The concatenation buffer is
+    /// charged against the options' memory limit after each expression
+    /// segment renders (the per-segment evaluator limit does not compose
+    /// across segments), so resolution is memory-bounded end to end;
+    /// literal text is never charged.
     pub fn resolve_string_with(
         &self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError>;

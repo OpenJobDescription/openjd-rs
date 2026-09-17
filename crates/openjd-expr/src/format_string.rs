@@ -151,11 +151,28 @@ impl FormatString {
     /// constructed:
     /// - `PathFormat::Posix` in template context (create_job, let bindings)
     /// - `PathFormat::host()` in session/host context (action execution)
+    ///
+    /// Memory: each segment's evaluation is bounded by the options'
+    /// memory limit, and — because the per-segment limit does not compose
+    /// across segments — the concatenation buffer is charged against the
+    /// same limit after each expression segment renders: resolution fails
+    /// with
+    /// [`MemoryLimitExceeded`](crate::ExpressionErrorKind::MemoryLimitExceeded)
+    /// as soon as the accumulated result exceeds it, rather than
+    /// materializing an unbounded string. Literal text is never charged
+    /// on its own (it involves no evaluation and is already bounded by
+    /// [`MAX_FORMAT_STRING_LEN`]), so a purely-literal format string
+    /// cannot fail this check. Peak memory is therefore bounded by
+    /// roughly twice the limit plus the literal text (one segment's
+    /// evaluation plus the capped buffer).
     pub fn resolve_string_with(
         &self,
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError> {
+        let memory_limit = opts
+            .memory_limit
+            .unwrap_or(crate::eval::DEFAULT_MEMORY_LIMIT);
         let mut result = String::new();
         for seg in &self.segments {
             match seg {
@@ -165,6 +182,14 @@ impl FormatString {
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
                         result.push_str(&val.to_display_string());
+                    }
+                    if result.len() > memory_limit {
+                        return Err(ExpressionError::from_kind(
+                            crate::error::ExpressionErrorKind::MemoryLimitExceeded {
+                                used: result.len(),
+                                limit: memory_limit,
+                            },
+                        ));
                     }
                 }
             }
@@ -1643,5 +1668,36 @@ mod tests {
             err.to_string().contains("exceeded limit (1000 bytes)"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn memory_limit_bounds_the_concatenation_across_segments() {
+        // The per-segment evaluator limit does not compose: each of these
+        // segments fits the budget on its own, but the concatenation must
+        // not materialize past it. The buffer is charged against the same
+        // limit, failing at the first expression checkpoint over it.
+        let fs = FormatString::new("{{ 'a' * 800 }}{{ 'b' * 800 }}{{ 'c' * 800 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_string_with(&st, &opts).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Expression memory usage (1600 bytes) exceeded limit (1000 bytes)"
+        );
+        // The same shape under a sufficient budget resolves fine.
+        let opts = FormatStringOptions::new().with_memory_limit(10_000);
+        assert_eq!(fs.resolve_string_with(&st, &opts).unwrap().len(), 2400);
+    }
+
+    #[test]
+    fn memory_limit_does_not_charge_literal_text() {
+        // Literal text involves no evaluation and is bounded by
+        // MAX_FORMAT_STRING_LEN — a purely-literal string resolves under
+        // any budget, matching validation (which never charges literals).
+        let text = "x".repeat(5000);
+        let fs = FormatString::new(&text).unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        assert_eq!(fs.resolve_string_with(&st, &opts).unwrap(), text);
     }
 }

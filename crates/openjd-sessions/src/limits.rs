@@ -31,9 +31,12 @@ pub struct SessionLimits {
     /// Maximum character length of each resolved embedded-file `data`
     /// value (§6.1.2 sets no limit of its own).
     pub max_resolved_data_len: Option<usize>,
-    /// Memory budget, in bytes, for evaluating each format-string
-    /// expression (the Expression Language spec's "Memory-bounded
-    /// evaluation" lever). `None` uses the spec-recommended default
+    /// Memory budget, in bytes, for each format-string expression
+    /// evaluation (the Expression Language spec's "Memory-bounded
+    /// evaluation" lever). Also bounds the concatenated resolution
+    /// buffer, so multi-segment strings cannot compose per-segment
+    /// allowances into an unbounded result. `None` uses the
+    /// spec-recommended default
     /// ([`openjd_expr::DEFAULT_MEMORY_LIMIT`], 100 MB).
     pub max_eval_memory_bytes: Option<usize>,
     /// Operation budget for evaluating each format-string expression.
