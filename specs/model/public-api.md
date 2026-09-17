@@ -719,8 +719,10 @@ pub struct CallerLimits {
     /// Cap on any resolved string destined for a process argument: the
     /// action `command` (§5.1) and each argv entry an `args` element
     /// produces (§5.2, after null-skip / list-flatten). The spec sets no
-    /// maximum but notes the OS imposes one (Linux `MAX_ARG_STRLEN`
-    /// 131072; Windows command line 32767). Enforced at validation on
+    /// maximum but notes the OS imposes one. The cap counts characters,
+    /// while OS limits use other units (Linux `MAX_ARG_STRLEN` is
+    /// 131072 bytes; the Windows command line is 32767 UTF-16 units) —
+    /// pick a value with encoding headroom. Enforced at validation on
     /// the guaranteed lower bound of every possible resolution, and at
     /// run time by `openjd-sessions` on the final values (job creation
     /// carries these host-scope fields forward unresolved, so it applies

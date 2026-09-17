@@ -436,9 +436,12 @@ pub struct CallerLimits {
     /// each argv entry an `args` element produces (§5.2, after null-skip
     /// and list-flatten). `None` (default) imposes no limit beyond the
     /// spec — §5.1/§5.2 set no maximum but note that the operating system
-    /// the command runs on imposes its own. Callers targeting Linux may
-    /// want 131072 (`MAX_ARG_STRLEN`); Windows 32767 (the command-line
-    /// length limit).
+    /// the command runs on imposes its own. This cap counts **characters**
+    /// while the OS limits are measured in other units (Linux
+    /// `MAX_ARG_STRLEN` is 131072 bytes; the Windows command line is
+    /// 32767 UTF-16 code units), so pick a value with the encoding
+    /// headroom you need — e.g. 32768 characters is at most 128 KiB of
+    /// UTF-8, within Linux's per-string limit.
     ///
     /// Enforced at template validation on the guaranteed lower bound of
     /// every possible resolution (early failure), and at run time by

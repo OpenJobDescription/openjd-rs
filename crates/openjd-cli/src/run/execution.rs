@@ -292,10 +292,11 @@ fn create_session(
         debug_collect_stdout: false,
         echo_openjd_directives: true,
         // Run-time mirror of the CLI's caller-limits policy (see
-        // `common::caller_limits`): the resolved-argument cap is the host
-        // OS maximum; no cap on embedded-file data.
+        // `common::caller_limits`): the resolved-argument cap is the
+        // CLI's uniform 32K-character default; no cap on embedded-file
+        // data.
         limits: openjd_sessions::SessionLimits {
-            max_resolved_arg_len: Some(crate::common::OS_MAX_ARG_LEN),
+            max_resolved_arg_len: Some(crate::common::DEFAULT_MAX_ARG_LEN),
             ..Default::default()
         },
     };

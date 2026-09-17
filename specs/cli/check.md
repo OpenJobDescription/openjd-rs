@@ -69,17 +69,20 @@ execute(args)
 ## Caller-Limits Policy
 
 Every decode call passes `common::caller_limits()` — the library defaults
-plus `max_resolved_arg_len` set to `common::OS_MAX_ARG_LEN`, the maximum
-single-argument length the host operating system accepts (Linux 131072 =
-`MAX_ARG_STRLEN`; Windows 32767 = the `CreateProcess` command-line limit;
-other platforms 1048576 = `ARG_MAX`). Template Schemas §5.1/§5.2 set no
-maximum of their own but note the OS imposes one; the CLI surfaces it at
-`check` time whenever an action `command`/`args` value is *guaranteed* to
-exceed it (the lower bound of every possible resolution is over the cap).
-Library users of `openjd-model` get no cap by default — this is CLI
-policy, and it describes the machine running the CLI: a template checked
-on Linux may still fail on a Windows worker, whose own run-time
-enforcement is authoritative.
+plus `max_resolved_arg_len` set to `common::DEFAULT_MAX_ARG_LEN` (32K
+characters, uniform across platforms). Template Schemas §5.1/§5.2 set no
+maximum of their own but note the OS imposes one; the CLI surfaces
+hopeless values at `check` time whenever an action `command`/`args` value
+is *guaranteed* to exceed the cap (the lower bound of every possible
+resolution is over it). 32K is an opinionated *reasonable default*, not
+an encoding of any particular OS limit — the real OS limits are measured
+in different units (Linux `MAX_ARG_STRLEN` is bytes; the Windows command
+line is UTF-16 code units), so no character count maps exactly onto
+them. 32K characters is at most 128 KiB of UTF-8 (within Linux's
+per-string limit) and approximately the Windows command-line capacity;
+the OS itself and the worker's run-time enforcement remain
+authoritative. Library users of `openjd-model` get no cap by default —
+this is CLI policy.
 
 ## Template Type Detection
 

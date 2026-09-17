@@ -21,49 +21,40 @@ use openjd_model::template::parse::DocumentType;
 /// document and small enough to prevent runaway allocation.
 pub const MAX_FILE_INPUT_SIZE: u64 = 10 * 1024 * 1024;
 
-/// The maximum character length of a single process argument the host
-/// operating system will accept.
+/// The CLI's default cap on the character length of a single resolved
+/// process argument: 32K characters, on every platform.
 ///
-/// Template Schemas §5.1/§5.2 set no maximum on `command`/`args` but note
-/// that "the specific operating system that the command is run on will
-/// impose its own maximum length". The CLI surfaces that OS limit early —
-/// at `check`, at job creation, and at run time — instead of letting
-/// process spawning fail opaquely (`E2BIG` on POSIX, a silent truncation
-/// or spawn failure on Windows):
+/// This is an opinionated *reasonable default*, not a promise about any
+/// particular operating system's limit. Template Schemas §5.1/§5.2 set
+/// no maximum on `command`/`args` but note that "the specific operating
+/// system that the command is run on will impose its own maximum
+/// length"; those OS limits are measured in different units than this
+/// cap (Linux `MAX_ARG_STRLEN` is 131072 **bytes**; the Windows command
+/// line is 32767 **UTF-16 code units**), so no character count maps
+/// exactly onto all of them. 32K characters is:
 ///
-/// - **Linux**: `MAX_ARG_STRLEN` — a single argv string may be at most
-///   32 pages (131072 bytes with 4 KiB pages).
-/// - **Windows**: the `CreateProcess` command line is limited to 32767
-///   UTF-16 code units, so no single argument can exceed that.
-/// - **macOS** (and other platforms): `ARG_MAX` is 1 MiB total for argv +
-///   environment, which is also the ceiling for any single argument.
-pub const OS_MAX_ARG_LEN: usize = {
-    #[cfg(target_os = "linux")]
-    {
-        131072
-    }
-    #[cfg(target_os = "windows")]
-    {
-        32767
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    {
-        1048576
-    }
-};
+/// - far beyond any reasonable single argument, while catching
+///   template-generated blowups at `check` instead of as an opaque
+///   spawn failure on a worker;
+/// - conservative for Linux/macOS byte limits (a `char` is at most 4
+///   UTF-8 bytes, so 32K characters is at most 128 KiB — within
+///   `MAX_ARG_STRLEN`);
+/// - approximately the Windows command-line capacity (exceedable in
+///   UTF-16 units only by astral-plane characters, which cost two
+///   units each).
+///
+/// The worker's own run-time enforcement and the OS itself remain the
+/// authoritative limits.
+pub const DEFAULT_MAX_ARG_LEN: usize = 32 * 1024;
 
 /// The CLI's opinionated caller limits: library defaults plus
-/// `max_resolved_arg_len` set to [`OS_MAX_ARG_LEN`]. Library callers of
-/// `openjd-model` default to no cap (spec-conforming permissiveness); the
-/// CLI always executes on this host, so a resolved argument the host OS
-/// cannot pass to a process is fail-early material at every stage.
-///
-/// Note the cap describes the machine running the CLI. A template checked
-/// on Linux (131072) may still fail on a Windows worker (32767); run-time
-/// enforcement on the worker is the authoritative gate.
+/// `max_resolved_arg_len` set to [`DEFAULT_MAX_ARG_LEN`]. Library
+/// callers of `openjd-model` default to no cap (spec-conforming
+/// permissiveness); the CLI applies the default cap at every stage it
+/// drives so a hopeless argument fails early with a field-path error.
 pub fn caller_limits() -> openjd_model::CallerLimits {
     openjd_model::CallerLimits {
-        max_resolved_arg_len: Some(OS_MAX_ARG_LEN),
+        max_resolved_arg_len: Some(DEFAULT_MAX_ARG_LEN),
         ..Default::default()
     }
 }
@@ -244,21 +235,18 @@ mod limits_tests {
     use super::*;
 
     #[test]
-    fn os_max_arg_len_matches_host_os() {
-        #[cfg(target_os = "linux")]
-        assert_eq!(OS_MAX_ARG_LEN, 131072); // MAX_ARG_STRLEN
-        #[cfg(target_os = "windows")]
-        assert_eq!(OS_MAX_ARG_LEN, 32767); // CreateProcess command-line limit
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        assert_eq!(OS_MAX_ARG_LEN, 1048576); // ARG_MAX
+    fn default_max_arg_len_is_32k_on_every_platform() {
+        // A uniform, opinionated default — not an exact encoding of any
+        // OS's limit (those are measured in bytes / UTF-16 units).
+        assert_eq!(DEFAULT_MAX_ARG_LEN, 32768);
     }
 
     #[test]
     fn cli_caller_limits_cap_resolved_args_only() {
-        // CLI policy: an opinionated resolved-argument cap at the host OS
-        // maximum; everything else stays at the library default (None).
+        // CLI policy: an opinionated resolved-argument cap; everything
+        // else stays at the library default (None).
         let limits = caller_limits();
-        assert_eq!(limits.max_resolved_arg_len, Some(OS_MAX_ARG_LEN));
+        assert_eq!(limits.max_resolved_arg_len, Some(DEFAULT_MAX_ARG_LEN));
         assert_eq!(limits.max_resolved_data_len, None);
         assert_eq!(limits.max_eval_memory_bytes, None);
         assert_eq!(limits.max_eval_operations, None);

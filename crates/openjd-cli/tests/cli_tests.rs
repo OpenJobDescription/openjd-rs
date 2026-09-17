@@ -3589,30 +3589,17 @@ mod wrap_actions {
 }
 
 /// The CLI's opinionated resolved-argument cap: `openjd check` rejects a
-/// template whose argument is guaranteed to exceed the maximum single-
-/// argument length of the host operating system (see
-/// `common::OS_MAX_ARG_LEN`), while the library default applies no cap.
+/// template whose argument is guaranteed to exceed the CLI's uniform 32K
+/// default (see `common::DEFAULT_MAX_ARG_LEN`), while the library
+/// default applies no cap.
 mod check_resolved_arg_cap {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    /// Mirror of `common::OS_MAX_ARG_LEN` (the binary crate's internals
-    /// are not linkable from an integration test).
-    const OS_MAX_ARG_LEN: usize = {
-        #[cfg(target_os = "linux")]
-        {
-            131072
-        }
-        #[cfg(target_os = "windows")]
-        {
-            32767
-        }
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        {
-            1048576
-        }
-    };
+    /// Mirror of `common::DEFAULT_MAX_ARG_LEN` (the binary crate's
+    /// internals are not linkable from an integration test).
+    const DEFAULT_MAX_ARG_LEN: usize = 32 * 1024;
 
     fn template_with_arg(arg: &str) -> NamedTempFile {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
@@ -3636,14 +3623,13 @@ steps:
     }
 
     #[test]
-    fn check_rejects_arg_over_host_os_maximum() {
-        // 2,000,000 characters exceeds the single-argument maximum of
-        // every supported OS (Linux 131072, Windows 32767, macOS 1048576).
+    fn check_rejects_arg_over_default_cap() {
+        // 2,000,000 characters is far over the CLI's uniform 32K default.
         let f = template_with_arg("{{ 'A' * 2000000 }}");
         let (code, _stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
-        assert_ne!(code, 0, "over-OS-max arg must fail check");
+        assert_ne!(code, 0, "over-cap arg must fail check");
         let expected = format!(
-            "steps[0] -> script -> actions -> onRun -> args[0]:\n\tresolves to at least 2000000 characters, exceeding the maximum of {OS_MAX_ARG_LEN}."
+            "steps[0] -> script -> actions -> onRun -> args[0]:\n\tresolves to at least 2000000 characters, exceeding the maximum of {DEFAULT_MAX_ARG_LEN}."
         );
         assert!(
             stderr.contains(&expected),
@@ -3652,13 +3638,10 @@ steps:
     }
 
     #[test]
-    fn check_accepts_arg_under_host_os_maximum() {
+    fn check_accepts_arg_under_default_cap() {
         let f = template_with_arg("{{ 'A' * 1000 }}");
         let (code, stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
-        assert_eq!(
-            code, 0,
-            "under-OS-max arg must pass check. stderr: {stderr}"
-        );
+        assert_eq!(code, 0, "under-cap arg must pass check. stderr: {stderr}");
         assert!(
             stdout.contains("passes validation checks"),
             "stdout: {stdout}"
