@@ -1203,9 +1203,12 @@ pub fn validate_format_strings(
                                     &template_profile,
                                 ) {
                                     Ok(parsed) => {
-                                        match parsed
-                                            .with_path_format(PathFormat::Posix)
-                                            .with_library(&template_lib)
+                                        match template_ev
+                                            .budgeted(
+                                                parsed
+                                                    .with_path_format(PathFormat::Posix)
+                                                    .with_library(template_ev.lib),
+                                            )
                                             .evaluate(&[&range_symtab as &SymbolTable])
                                         {
                                             Ok(val) => {

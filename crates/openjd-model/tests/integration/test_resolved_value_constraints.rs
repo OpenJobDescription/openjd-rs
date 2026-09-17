@@ -1066,3 +1066,37 @@ fn lowered_memory_budget_bounds_let_bindings_at_validation() {
     // Same template under default budgets validates fine.
     check_ok_limits(template, &CallerLimits::default());
 }
+
+#[test]
+fn lowered_memory_budget_bounds_parameter_space_let_prepass() {
+    // A step with both a parameterSpace and step-level `let` bindings
+    // evaluates those bindings twice at validation: once in the
+    // parameterSpace pre-pass (into the range scope, which runs first)
+    // and once in the step-level let pass. Both must run under the
+    // caller's budgets — the pre-pass is the ordering-sensitive one, so
+    // an unbudgeted evaluation there would do the full allocation before
+    // the budgeted pass ever fires.
+    let limits = CallerLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    };
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "let": ["x = 'a' * 100000"],
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "INT", "range": "1-2"}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    check_err_limits(
+        template,
+        &limits,
+        &["let binding 'x'", "exceeded limit (1000 bytes)"],
+    );
+    check_ok_limits(template, &CallerLimits::default());
+}
