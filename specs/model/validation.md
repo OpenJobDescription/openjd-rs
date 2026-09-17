@@ -269,12 +269,13 @@ process arguments), so the caps default to `None` and impose nothing.
 When a caller sets one, this pass fails early on the lower bound — and,
 unlike the spec-mandated rows (whose literal cases the raw-text passes
 cover), also checks a purely-literal field's exact raw length, since no
-other pass length-checks args or data. The
-session runtime enforces the cap on the final resolved values (job
-creation carries these `@fmtstring[host]` fields forward without
-resolving them, so it applies no check of its own). The `openjd` CLI sets
-`max_resolved_arg_len` to the host OS maximum by default (see
-`specs/cli/`).
+other pass length-checks args or data. Job creation re-runs the same
+checks with the job parameters bound to real values (see the
+Resolved-Value Checks on Carried-Forward Fields section of
+`specs/model/job-creation.md`), and the
+session runtime enforces the cap on the final resolved values. The
+`openjd` CLI sets `max_resolved_arg_len` to an opinionated 32K-character
+default on every platform (see `specs/cli/`).
 
 Separately from per-field constraints, pass 8 evaluates every
 format-string expression — and every `let` binding, which is the same
@@ -285,7 +286,8 @@ evaluation here and — when the caller mirrors them into `SessionLimits` —
 at run time; they are the spec's own lever against expression blowups
 like `'A' * 10000000`. A lowered budget fails at this pass first, as an
 ordinary `Failed to parse interpolation expression` error at the field
-path. (Job creation currently evaluates under the spec defaults.)
+path. Job creation applies the same budgets to every evaluation it
+performs (see `specs/model/job-creation.md`).
 
 Numeric fields have no exact length maximum — leading zeros are legal and
 surrounding whitespace is tolerated in string forms — so they use a soft

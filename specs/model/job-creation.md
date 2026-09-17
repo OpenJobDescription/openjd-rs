@@ -131,12 +131,23 @@ mapping is applied at session time. `RawParam.*` for PATH types is forced to STR
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
+    ctx: &ValidationContext,
 ) -> Result<job::Job, ModelError>
 ```
 
-Full template instantiation pipeline. Takes 2 arguments — environment templates should
+Full template instantiation pipeline. Environment templates should
 already be merged into `job_parameter_values` via `preprocess_job_parameters` before
-calling this function.
+calling this function. `ctx` carries the model profile and the
+`CallerLimits` that apply to this job instance — typically the same
+context the template was decoded with, but a caller may deliberately
+pass a different one (e.g. stricter queue-level limits).
+
+Every expression evaluation this stage performs — the job name, host
+requirement values, parameter-space ranges, `let` bindings, and the
+carried-forward checks below — runs under the caller's evaluation budgets
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`,
+defaults: the Expression Language spec's 100 MB / 10 M), the same
+budgets template validation and the session runtime apply.
 
 1. Build symbol table from parameter values
 2. Resolve template-scope fields:
@@ -176,13 +187,92 @@ calling this function.
      treatment in `instantiate`. String-backed FLOAT range elements are trimmed
      and must resolve to finite `f64` values.
    - Step-level let bindings
-3. Carry forward session/task-scope fields as FormatString (plus action
+3. With EXPR extension: inject `Job.Name` (before step instantiation)
+   and `Step.Name` (per step) into the symbol table
+4. Carry forward session/task-scope fields as FormatString (plus action
    `timeout`/`notifyPeriodInSeconds`, which validate in template scope but
    resolve on the worker)
-4. With EXPR extension: inject `Job.Name` and `Step.Name` into symbol table
-5. Convert environments from template to job types
-6. Build step dependency list
-7. Attach resolved symbol table to each step
+5. Run the resolved-value checks on the carried-forward fields
+   (next section)
+6. Convert environments from template to job types
+7. Build step dependency list
+8. Attach resolved symbol table to each step
+
+#### Resolved-value checks on carried-forward fields
+
+Of the spec's three processing stages (Template Schemas §7.4: template
+validation, job creation, task execution on the worker host), job
+creation is the first at which job parameters have real values. The
+session/task-scope format strings it carries forward unresolved —
+action `command`/`args`, environment `variables` values, embedded-file
+`data` — are statically evaluated against a **check symbol table**, and
+exactly the resolved-value checks pass 8 applies to those fields re-run
+on the result:
+
+| Field | Constraint |
+|---|---|
+| environment `variables` values | resolved-length bound vs 2048 (§4.4.2, spec-mandated, always on) |
+| action `command`, each `args[*]` entry | bound vs `CallerLimits::max_resolved_arg_len`, if set |
+| embedded file `data` | bound vs `CallerLimits::max_resolved_data_len`, if set |
+
+At template validation every `Param.*` is unresolved and contributes 0
+to the lower bound; here the parameters are bound to real values, so a
+violation that depends only on parameter values —
+`args: ["{{ 'A' * Param.N }}"]` submitted with a huge `N` — becomes
+decidable and fails at submission instead of on every worker (task
+execution remains the enforcement boundary). The
+walk covers step scripts (`onRun` + embedded files), step environments,
+and job environments — including the RFC 0008 wrap hooks, with their
+`WrappedAction.*` scopes seeded unresolved, exactly as in pass 8.
+
+The check symbol tables mirror what the session runtime binds at run
+time, with everything only a session can know left `Unresolved`:
+
+- **Task scope** (step scripts): concrete `Param.*` / `RawParam.*` /
+  `Job.Name` / `Step.Name` / step-level `let` bindings; `Unresolved`
+  `Session.*`, PATH `Param.*`, `Task.Param.*` / `Task.RawParam.*`,
+  `Task.File.*`. Script-level `let` bindings are evaluated into the
+  table (this subsumes the type check job creation has always run on
+  them: a binding that fails with the real parameter values fails
+  here, deterministically, rather than in every session).
+- **Session scope** (job and step environments): as above minus
+  `Task.*`, plus this environment's `Env.File.*` (`Unresolved`) and its
+  script-level `let` bindings evaluated in via `evaluate_let_bindings`.
+  An environment `let` binding that fails to evaluate fails job
+  creation (like the step-script `let` check above): the bindings only
+  evaluate when the context profile enables EXPR, their expressions
+  already type-checked at pass 8 with everything unresolved, so a
+  failure here comes from the real parameter values and would
+  deterministically recur in every session that enters the environment.
+
+Failures are `ModelError::ModelValidation` at the same field paths
+pass 8 uses, e.g.
+`steps[0] -> script -> actions -> onRun -> args[0]:` /
+`resolves to at least 100000 characters, exceeding the maximum of 1024.`
+Violations accumulate within one scope (a step script, one
+environment's fields), but the first failing scope stops instantiation
+— consistent with the fail-fast resolved-value re-checks `create_job`
+already performs, and unlike pass 8's whole-template aggregation.
+
+**Error policy.** Unlike pass 8, evaluation/parse errors are *not*
+reported by this pass: `create_job` may deliberately run with a
+different profile than the template was decoded with (see `ctx` above),
+so an evaluation error here can be a context artifact rather than a
+template defect — and the carried-forward strings hard-fail on the
+worker anyway. The exception is a budget exceedance
+(`MemoryLimitExceeded` / `OperationLimitExceeded`): the same expression
+evaluates under the same budgets at run time with strictly more symbols
+bound, so exceeding the budget here means run-time resolution would
+too, and it is reported. (One coarseness caveat: for an unresolved-test
+conditional the evaluator charges both branches against the budget,
+while a run-time evaluation with the test resolved charges one — a
+budget within a branch-cost of the limit can fail here and pass there;
+callers lowering the budgets accept that granularity.) Resolved-value
+constraint violations (the table above) are always reported.
+
+Cost note: job creation previously did not evaluate these fields, so the pass
+adds work proportional to what a single worker would do anyway — done
+once at submission instead of per-task-per-worker.
 
 ### convert_environment
 
@@ -204,6 +294,8 @@ pub fn evaluate_let_bindings(
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
     path_format: PathFormat,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 ) -> Result<SymbolTable, ModelError>
 ```
 
@@ -213,6 +305,9 @@ added.
 
 The `library` parameter is optional (pass `None` for template-scope bindings that don't
 need host functions). `path_format` controls path construction behavior.
+`memory_limit` / `operation_limit` bound each binding's evaluation
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`); `None`
+uses the spec-recommended defaults.
 
 ## Design Decisions
 

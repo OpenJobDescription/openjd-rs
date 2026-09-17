@@ -29,6 +29,43 @@ pub use parameters::{
     MergedParameterDefinition, PathParameterOptions,
 };
 
+/// Caller evaluation budgets applied to every expression evaluation job
+/// creation performs (format-string resolution, `let` bindings, task
+/// ranges) — `CallerLimits::max_eval_memory_bytes` /
+/// `max_eval_operations`, the Expression Language spec's
+/// "Memory-bounded evaluation" lever. `None` uses the spec-recommended
+/// defaults. Template validation and the session runtime apply the
+/// same budgets, so job creation is never the stage where a lowered
+/// budget silently stops applying.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EvalBudgets {
+    pub(crate) memory: Option<usize>,
+    pub(crate) operations: Option<usize>,
+}
+
+impl EvalBudgets {
+    pub(crate) fn from_ctx(ctx: &ValidationContext) -> Self {
+        Self {
+            memory: ctx.caller_limits.max_eval_memory_bytes,
+            operations: ctx.caller_limits.max_eval_operations,
+        }
+    }
+
+    /// The standard job-creation resolution options: POSIX path format
+    /// (job creation resolves no host paths) plus the caller budgets.
+    /// Call sites chain their field-specific target type onto it.
+    pub(crate) fn fs_options(&self) -> openjd_expr::FormatStringOptions<'static> {
+        let mut opts = openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix);
+        if let Some(m) = self.memory {
+            opts = opts.with_memory_limit(m);
+        }
+        if let Some(o) = self.operations {
+            opts = opts.with_operation_limit(o);
+        }
+        opts
+    }
+}
+
 /// Create an instantiated Job from a validated JobTemplate and preprocessed parameter values.
 ///
 /// Environment template parameters should already be merged into `job_parameter_values`
@@ -65,6 +102,7 @@ pub fn create_job(
         .profile
         .has_extension(crate::types::ModelExtension::Expr);
     let limits = EffectiveLimits::from_context(ctx);
+    let budgets = EvalBudgets::from_ctx(ctx);
 
     // Required string field (§1.1.1): a single whole-field expression
     // resolves with target type `string` (Expression Language §1.3.2), so
@@ -73,8 +111,8 @@ pub fn create_job(
         .name
         .resolve_with(
             &symtab,
-            &openjd_expr::FormatStringOptions::new()
-                .with_path_format(PathFormat::Posix)
+            &budgets
+                .fs_options()
                 .with_target_type(&openjd_expr::ExprType::STRING),
         )
         .map(|v| match v {
@@ -136,7 +174,7 @@ pub fn create_job(
         .iter()
         .enumerate()
         .map(|(step_index, st)| {
-            instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx, step_index)
+            instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx, step_index, budgets)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -162,6 +200,32 @@ pub fn create_job(
                 )),
             ));
         }
+    }
+
+    // Re-run the carried-forward format-string resolved-value checks on
+    // each job environment against a session-scope check symbol table,
+    // where job parameters are bound to real values. A violation
+    // template validation could only lower-bound is decidable here —
+    // fail at submission, not on the worker.
+    if let Some(envs) = &job_template.job_environments {
+        let mut check_errors = crate::error::ValidationErrors::default();
+        for (i, env) in envs.iter().enumerate() {
+            let env_symtab =
+                instantiate::build_env_check_symtab(env, &symtab, has_expr, ctx, budgets)?;
+            let env_path = [
+                crate::error::PathElement::Field("jobEnvironments".to_string()),
+                crate::error::PathElement::Index(i),
+            ];
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
+                env,
+                &env_symtab,
+                ctx,
+                limits.max_env_var_value_len,
+                &env_path,
+                &mut check_errors,
+            );
+        }
+        check_errors.into_result("JobTemplate")?;
     }
 
     let job_environments = job_template.job_environments.as_ref().map(|envs| {

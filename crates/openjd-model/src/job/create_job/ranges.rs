@@ -8,7 +8,6 @@ use std::borrow::Cow;
 
 use indexmap::IndexMap;
 
-use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 use openjd_expr::value::Float64;
 use openjd_expr::ExprValue;
@@ -30,18 +29,14 @@ pub(super) fn resolve_to_f64(
     fs: &openjd_expr::FormatString,
     symtab: &SymbolTable,
     context: &str,
+    budgets: super::EvalBudgets,
 ) -> Result<Option<f64>, ModelError> {
     let target = openjd_expr::ExprType::union(vec![
         openjd_expr::ExprType::FLOAT,
         openjd_expr::ExprType::NULLTYPE,
     ]);
     let resolved = fs
-        .resolve_with(
-            symtab,
-            &openjd_expr::FormatStringOptions::new()
-                .with_path_format(PathFormat::Posix)
-                .with_target_type(&target),
-        )
+        .resolve_with(symtab, &budgets.fs_options().with_target_type(&target))
         .map_err(|e| ModelError::FormatStringError {
             message: format!("{context}: {e}"),
             input: Some(fs.raw().to_string()),
@@ -86,6 +81,7 @@ pub(super) fn resolve_to_f64(
 pub(super) fn resolve_string_list(
     vals: &[openjd_expr::FormatString],
     symtab: &SymbolTable,
+    budgets: super::EvalBudgets,
 ) -> Result<Vec<String>, ModelError> {
     let target = openjd_expr::ExprType::union(vec![
         openjd_expr::ExprType::NULLTYPE,
@@ -95,12 +91,7 @@ pub(super) fn resolve_string_list(
     let mut out = Vec::new();
     for fs in vals {
         let value = fs
-            .resolve_with(
-                symtab,
-                &openjd_expr::FormatStringOptions::new()
-                    .with_path_format(PathFormat::Posix)
-                    .with_target_type(&target),
-            )
+            .resolve_with(symtab, &budgets.fs_options().with_target_type(&target))
             .map_err(|e| ModelError::FormatStringError {
                 message: e.to_string(),
                 input: Some(fs.raw().to_string()),
@@ -126,11 +117,12 @@ pub(super) fn resolve_parameter_space(
     ps: &template::StepParameterSpaceDefinition,
     symtab: &SymbolTable,
     limits: &EffectiveLimits,
+    budgets: super::EvalBudgets,
 ) -> Result<job::StepParameterSpace, ModelError> {
     let mut defs = IndexMap::new();
     for tp in &ps.task_parameter_definitions {
         let name = tp.name().to_string();
-        let param = resolve_task_parameter(tp, symtab, limits)?;
+        let param = resolve_task_parameter(tp, symtab, limits, budgets)?;
         defs.insert(name, param);
     }
     Ok(job::StepParameterSpace {
@@ -143,29 +135,32 @@ fn resolve_task_parameter(
     tp: &template::TaskParameterDefinition,
     symtab: &SymbolTable,
     limits: &EffectiveLimits,
+    budgets: super::EvalBudgets,
 ) -> Result<job::TaskParameter, ModelError> {
     match tp {
         template::TaskParameterDefinition::INT(p) => {
-            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits)?;
+            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
             Ok(job::TaskParameter::Int {
                 range,
                 chunks: None,
             })
         }
         template::TaskParameterDefinition::FLOAT(p) => {
-            let range = resolve_float_range(&p.range, symtab, p.name.as_str(), limits)?;
+            let range = resolve_float_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
             Ok(job::TaskParameter::Float { range })
         }
         template::TaskParameterDefinition::STRING(p) => {
-            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), false, limits)?;
+            let range =
+                resolve_string_range(&p.range, symtab, p.name.as_str(), false, limits, budgets)?;
             Ok(job::TaskParameter::String { range })
         }
         template::TaskParameterDefinition::PATH(p) => {
-            let range = resolve_string_range(&p.range, symtab, p.name.as_str(), true, limits)?;
+            let range =
+                resolve_string_range(&p.range, symtab, p.name.as_str(), true, limits, budgets)?;
             Ok(job::TaskParameter::Path { range })
         }
         template::TaskParameterDefinition::CHUNK_INT(p) => {
-            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits)?;
+            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
             // CHUNK[INT] regroups values into generated RangeExpr chunks,
             // which bound values to |v| < 2^62. List ranges accept full
             // i64, so reject out-of-bound values here — at job creation,
@@ -198,8 +193,8 @@ fn resolve_task_parameter(
                 let value = fs
                     .resolve_with(
                         symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_path_format(PathFormat::Posix)
+                        &budgets
+                            .fs_options()
                             .with_target_type(&openjd_expr::ExprType::INT),
                     )
                     .map_err(|e| {
@@ -250,9 +245,7 @@ fn resolve_task_parameter(
                         let value = fs
                             .resolve_with(
                                 symtab,
-                                &openjd_expr::FormatStringOptions::new()
-                                    .with_path_format(PathFormat::Posix)
-                                    .with_target_type(&target),
+                                &budgets.fs_options().with_target_type(&target),
                             )
                             .map_err(|e| {
                                 ModelError::Expression(ExpressionError::new(format!(
@@ -299,6 +292,7 @@ fn resolve_int_range(
     symtab: &SymbolTable,
     param_name: &str,
     limits: &EffectiveLimits,
+    budgets: super::EvalBudgets,
 ) -> Result<job::TaskParamRange<i64>, ModelError> {
     match range {
         template::IntRange::List(items) => {
@@ -320,10 +314,7 @@ fn resolve_int_range(
             // concatenates segments and parses the result as a range expression.
             // Any real evaluation errors (division by zero, type errors) will be
             // caught by the string resolution fallback path.
-            if let Ok(val) = expr.resolve_with(
-                symtab,
-                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
-            ) {
+            if let Ok(val) = expr.resolve_with(symtab, &budgets.fs_options()) {
                 match val {
                     // Range expressions are not length-capped; only the list
                     // forms are. See `EffectiveLimits::max_task_param_range_len`.
@@ -356,10 +347,7 @@ fn resolve_int_range(
                 }
             }
             let resolved = expr
-                .resolve_string_with(
-                    symtab,
-                    &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
-                )
+                .resolve_string_with(symtab, &budgets.fs_options())
                 .map_err(ModelError::Expression)?;
             let range_expr: RangeExpr = resolved
                 .parse()
@@ -407,6 +395,7 @@ fn resolve_float_range(
     symtab: &SymbolTable,
     param_name: &str,
     limits: &EffectiveLimits,
+    budgets: super::EvalBudgets,
 ) -> Result<Vec<Float64>, ModelError> {
     let floats: Vec<Float64> = match range {
         template::FloatRange::List(items) => items
@@ -417,11 +406,7 @@ fn resolve_float_range(
                 template::FloatRangeItem::Float(f) => float64(*f, param_name),
                 template::FloatRangeItem::FormatString(fs) => {
                     let resolved = fs
-                        .resolve_string_with(
-                            symtab,
-                            &openjd_expr::FormatStringOptions::new()
-                                .with_path_format(PathFormat::Posix),
-                        )
+                        .resolve_string_with(symtab, &budgets.fs_options())
                         .map_err(ModelError::Expression)?;
                     let trimmed = resolved.trim();
                     let value = trimmed.parse::<f64>().map_err(|_| {
@@ -457,10 +442,7 @@ fn resolve_float_range(
         template::FloatRange::Expression(expr) => {
             // Typed evaluation — must yield a list. Propagate the actual error
             // if evaluation fails.
-            match expr.resolve_with(
-                symtab,
-                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
-            ) {
+            match expr.resolve_with(symtab, &budgets.fs_options()) {
                 Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements
@@ -507,6 +489,7 @@ fn resolve_string_range(
     param_name: &str,
     is_path: bool,
     limits: &EffectiveLimits,
+    budgets: super::EvalBudgets,
 ) -> Result<Vec<String>, ModelError> {
     let resolved: Vec<String> = match range {
         // Each range element is a list item, so per Expression Language
@@ -527,12 +510,7 @@ fn resolve_string_range(
             let mut out = Vec::new();
             for fs in items {
                 let value = fs
-                    .resolve_with(
-                        symtab,
-                        &openjd_expr::FormatStringOptions::new()
-                            .with_path_format(PathFormat::Posix)
-                            .with_target_type(&target),
-                    )
+                    .resolve_with(symtab, &budgets.fs_options().with_target_type(&target))
                     .map_err(ModelError::Expression)?;
                 match value {
                     openjd_expr::ExprValue::Null => continue,
@@ -557,10 +535,7 @@ fn resolve_string_range(
         template::StringRange::Expression(expr) => {
             // Typed evaluation — must yield a list. Propagate the actual error
             // if evaluation fails (e.g., division by zero, undefined variable).
-            match expr.resolve_with(
-                symtab,
-                &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
-            ) {
+            match expr.resolve_with(symtab, &budgets.fs_options()) {
                 Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements.iter().map(|e| e.to_display_string()).collect()

@@ -444,16 +444,15 @@ pub struct CallerLimits {
     /// UTF-8, within Linux's per-string limit.
     ///
     /// Enforced at template validation on the guaranteed lower bound of
-    /// every possible resolution (early failure), and at run time by
-    /// `openjd-sessions` on the final resolved values (the enforcement
-    /// boundary). Job creation carries these `@fmtstring[host]` fields
-    /// forward without resolving them, so it applies no check of its
-    /// own.
+    /// every possible resolution (early failure), at job creation on the
+    /// bound recomputed with the job parameters bound to real values,
+    /// and at run time by `openjd-sessions` on the final resolved values
+    /// (the enforcement boundary).
     pub max_resolved_arg_len: Option<usize>,
     /// Maximum character length of any resolved embedded-file `data`
     /// value (Template Schemas §6.1.2, which sets no limit of its own).
     /// `None` (default) imposes no limit beyond the spec. Enforced at
-    /// the same two stages as [`max_resolved_arg_len`](Self::max_resolved_arg_len).
+    /// the same stages as [`max_resolved_arg_len`](Self::max_resolved_arg_len).
     pub max_resolved_data_len: Option<usize>,
     /// Memory budget, in bytes, for evaluating each format-string
     /// expression (the Expression Language spec's "Memory-bounded
@@ -461,9 +460,8 @@ pub struct CallerLimits {
     /// `'a' * 10000000`). `None` (default) uses the spec-recommended
     /// default ([`openjd_expr::DEFAULT_MEMORY_LIMIT`], 100 MB). Lowering
     /// it is spec-sanctioned configuration. Applied to every evaluation
-    /// at template validation, and by the session runtime when the
-    /// caller mirrors it into `SessionLimits`; job creation currently
-    /// evaluates under the spec defaults.
+    /// at template validation and at job creation, and by the session
+    /// runtime when the caller mirrors it into `SessionLimits`.
     pub max_eval_memory_bytes: Option<usize>,
     /// Operation budget for evaluating each format-string expression.
     /// `None` (default) uses the spec-recommended default
