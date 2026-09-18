@@ -4,6 +4,18 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.9.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.8.0...openjd-expr-v0.9.0) - 2026-09-18
+
+### Features
+
+- [**breaking**] Opt-in resolved-value caps and evaluation-budget plumbing ([#399](https://github.com/OpenJobDescription/openjd-rs/pull/399))
+
+
+### Miscellaneous
+
+- [**breaking**] Raise MSRV to 1.96.0; dep sweep (ruff 0.16, rusqlite 0.40) ([#403](https://github.com/OpenJobDescription/openjd-rs/pull/403))
+
+
 ## [0.8.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.7.0...openjd-expr-v0.8.0) - 2026-09-15
 
 ### Bug fixes
