@@ -85,10 +85,10 @@ pub trait EvalContext {
 ```
 
 `get_or_compile_regex` has a default implementation that compiles the pattern on every
-call via `RegexBuilder` with a 1 MiB compiled-program size limit (to defend against
-adversarial patterns). The evaluator overrides it with a caching version that stores
-compiled regexes for reuse across repeated calls with the same pattern — the cache
-is per-evaluation, not global.
+call via `RegexBuilder` with a **1 MiB compiled-program size limit** (to defend against
+adversarial NFA patterns). The evaluator overrides it with a caching version that charges
+each cached entry to the memory budget and caps the cache at 32 entries — see the
+evaluator spec's Regex Cache section for the full bounding design.
 
 The evaluator implements `EvalContext` directly. This trait boundary prevents function
 implementations from calling evaluation methods (like `evaluate` or `dispatch`),

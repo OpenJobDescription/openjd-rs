@@ -803,3 +803,98 @@ fn join_preflights_large_separator_output_memory() {
         .concat()
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Regex cache — bounded and budgeted (finding 01 regression tests)
+// ══════════════════════════════════════════════════════════════
+
+/// Distinct patterns in a comprehension must be charged to the memory budget.
+/// Before the fix, 100 distinct compiles consumed ~50 MB of real RSS while
+/// `peak_memory` reported a few hundred bytes.
+#[test]
+fn regex_cache_charged_to_memory_budget() {
+    // Even a single distinct-pattern compile charges REGEX_SIZE_LIMIT (1 MiB)
+    // to the memory budget.  With a 500 KiB limit, the first cache insert
+    // must be rejected.
+    let e = eval_bounded(
+        "[re_findall('x', string(i)) for i in range(100)]",
+        500_000, // 500 KiB — well below one 1 MiB entry
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        e.contains("exceeded limit (500000 bytes)"),
+        "expected memory-limit error for distinct-pattern comprehension, got:\n{e}"
+    );
+}
+
+/// A single repeated pattern should hit the cache and NOT be re-charged.
+/// This is the negative control: same expression shape, same iteration count,
+/// but one constant pattern.
+#[test]
+fn regex_cache_hit_not_recharged() {
+    // 100 iterations, same pattern 'x' every time → 1 compile, 1 charge.
+    // re_findall(haystack, pattern) — haystack varies, pattern is constant.
+    let r = eval_bounded(
+        "[re_findall(string(i), 'x') for i in range(100)]",
+        2_000_000,
+    )
+    .unwrap();
+    // The comprehension should succeed.  One cached compile charges ~1 MiB;
+    // 100 iterations reuse the cache hit with no re-charge, so peak stays
+    // well under 2 MiB.
+    assert!(r.peak_memory < 2_000_000);
+}
+
+/// The cache entry count is bounded at MAX_REGEX_CACHE_ENTRIES (32), so the
+/// memory charged for 50 distinct patterns must stay near the charge for 32
+/// (the cap) rather than scaling with 50 — the first 32 are cached and
+/// charged, the remaining 18 compile-and-discard without charge.
+#[test]
+fn regex_cache_cap_bounds_memory() {
+    // 50 distinct patterns — the first 32 are cached and charged to the
+    // memory budget; the remaining 18 compile-and-discard without charge.
+    // Peak memory should be bounded by ~32 × REGEX_SIZE_LIMIT, NOT 50 ×.
+    let peak = eval_peak("[re_findall('x', string(i)) for i in range(50)]");
+    let peak_at_cap = eval_peak("[re_findall('x', string(i)) for i in range(32)]");
+    // 50 patterns should cost roughly the same as 32 (the cap), not 50/32 more.
+    // Allow 20% headroom for per-iteration transient overhead.
+    // Integer form of `peak < peak_at_cap * 1.2`.
+    assert!(
+        peak * 5 < peak_at_cap * 6,
+        "peak memory with 50 patterns ({peak}) should be bounded near 32 patterns ({peak_at_cap}), \
+         not proportional to 50. The cache cap is not working."
+    );
+}
+
+/// The reported peak_memory for a distinct-pattern comprehension must be
+/// at least proportional to the number of distinct patterns compiled.
+/// This is the "assert the mechanism" test: if the cache ever becomes
+/// invisible to peak_memory again, this fails.
+#[test]
+fn regex_cache_peak_memory_proportional_to_distinct_patterns() {
+    // re_findall('x', string(i)) — pattern varies each iteration.
+    let peak_1 = eval_peak("[re_findall('x', string(i)) for i in range(1)]");
+    let peak_20 = eval_peak("[re_findall('x', string(i)) for i in range(20)]");
+    // 20 distinct patterns (all under the 32-entry cap) should charge
+    // substantially more than 1.  Conservative: at least 10×.
+    assert!(
+        peak_20 > peak_1 * 10,
+        "peak_memory should scale with distinct regex patterns: 1 pattern = {peak_1}, 20 patterns = {peak_20}"
+    );
+}
+
+/// REGEX_SIZE_LIMIT (1 MiB) rejects patterns whose compiled NFA exceeds the
+/// cap.  The adversarial pattern below is well over 1 MiB compiled.
+#[test]
+fn regex_size_limit_rejects_large_nfa() {
+    // The pattern `(?:a{200}){200}z` produces a compiled NFA well over 1 MiB.
+    let e = ParsedExpression::new("re_findall('a', '(?:a{200}){200}z')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Invalid regex:") && e.contains("size limit"),
+        "expected regex size-limit error for large NFA pattern, got:\n{e}"
+    );
+}
