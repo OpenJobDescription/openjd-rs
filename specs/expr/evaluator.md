@@ -361,7 +361,15 @@ Ternary: `x if condition else y`. Evaluates the condition unconstrained
 (see [Target Type Propagation](#target-type-propagation)) and asserts it
 is bool-compatible, then evaluates only the selected branch with the
 parent target type. When the condition is unresolved, both branches are
-evaluated and the result type is the union.
+evaluated and the result type is the union. If exactly one branch fails
+with a *value* error, the error is absorbed and the result is
+`Unresolved` of the healthy branch's type (a runtime with the condition
+resolved may never take the failing branch); if both fail, a compound
+error carries both as sub-errors. Budget exceedances
+(`MemoryLimitExceeded` / `OperationLimitExceeded`) are exempt from the
+single-branch absorption and always propagate: the memory/operations
+were spent in this evaluation no matter which branch a runtime would
+take.
 
 ### Call (`eval_call`)
 Handles both function calls (`len(x)`) and method calls (`x.upper()`).

@@ -803,3 +803,55 @@ fn join_preflights_large_separator_output_memory() {
         .concat()
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Budget errors propagate out of unresolved-test conditionals
+// ══════════════════════════════════════════════════════════════
+
+/// With an unresolved test, the evaluator runs both branches and
+/// normally absorbs a single failing branch into an `Unresolved`
+/// result (run time may select the healthy branch). Budget exceedances
+/// are exempt from that absorption: the memory/operations were spent
+/// in *this* evaluation no matter which branch run time takes.
+#[test]
+fn memory_limit_exceeded_in_one_branch_of_unresolved_conditional_propagates() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err = ParsedExpression::new("'A' * 10000000 if Session.Flag else 'B'")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect_err("the if-branch's budget exceedance must propagate");
+    assert!(
+        err.message()
+            .contains("Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"),
+        "Got: {}",
+        err.message()
+    );
+}
+
+/// Control: a plain value error in one branch is still absorbed — the
+/// resolved test may select the other branch at run time.
+#[test]
+fn value_error_in_one_branch_of_unresolved_conditional_is_absorbed() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let result = ParsedExpression::new("int('nope') if Session.Flag else 7")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect("a value error in one branch must be absorbed");
+    assert!(result.value.is_unresolved());
+}

@@ -39,6 +39,22 @@ fn append_sub_error(msg: &mut String, err: &ExpressionError, is_last: bool) {
     }
 }
 
+/// Whether an error is (or contains, through compound sub-errors) a
+/// budget exceedance. `eval_ifexp` uses this to decide whether a
+/// failing branch under an unresolved test may be absorbed into an
+/// `Unresolved` result: a *value* error may vanish at run time when the
+/// resolved test selects the other branch, but the budgets are global
+/// to the evaluation — the memory and operations were spent in this
+/// evaluation no matter which branch run time takes — so exhaustion
+/// must propagate.
+fn contains_budget_error(err: &ExpressionError) -> bool {
+    matches!(
+        err.kind(),
+        crate::error::ExpressionErrorKind::MemoryLimitExceeded { .. }
+            | crate::error::ExpressionErrorKind::OperationLimitExceeded { .. }
+    ) || err.sub_errors().iter().any(contains_budget_error)
+}
+
 /// Default memory limit: 100 million bytes.
 pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per spec
 
@@ -901,11 +917,19 @@ impl<'a> Evaluator<'a> {
                     }
                     Err(err)
                 }
-                (Ok(b), Err(_)) => {
+                (Ok(b), Err(oe)) => {
+                    if contains_budget_error(&oe) {
+                        self.release(&b);
+                        return Err(oe);
+                    }
                     let t = unwrap_unresolved(&b.expr_type());
                     self.track(ExprValue::unresolved(t))
                 }
-                (Err(_), Ok(o)) => {
+                (Err(be), Ok(o)) => {
+                    if contains_budget_error(&be) {
+                        self.release(&o);
+                        return Err(be);
+                    }
                     let t = unwrap_unresolved(&o.expr_type());
                     self.track(ExprValue::unresolved(t))
                 }

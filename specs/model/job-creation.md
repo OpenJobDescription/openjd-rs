@@ -138,9 +138,13 @@ pub fn create_job(
 Full template instantiation pipeline. Environment templates should
 already be merged into `job_parameter_values` via `preprocess_job_parameters` before
 calling this function. `ctx` carries the model profile and the
-`CallerLimits` that apply to this job instance — typically the same
-context the template was decoded with, but a caller may deliberately
-pass a different one (e.g. stricter queue-level limits).
+`CallerLimits` that apply to this job instance. Its revision must
+match the template's and its extensions must cover every extension the
+template declares — enforced with a `Compatibility` error, since a
+context enabling fewer extensions would make every downstream
+evaluation ambiguous (template defect vs context artifact). Enabling
+more extensions is allowed, as is layering caller policy on top (e.g.
+stricter queue-level limits via `with_caller_limits`).
 
 Every expression evaluation this stage performs — the job name, host
 requirement values, parameter-space ranges, `let` bindings, and the
@@ -239,11 +243,12 @@ time, with everything only a session can know left `Unresolved`:
   `Task.*`, plus this environment's `Env.File.*` (`Unresolved`) and its
   script-level `let` bindings evaluated in via `evaluate_let_bindings`.
   An environment `let` binding that fails to evaluate fails job
-  creation (like the step-script `let` check above): the bindings only
-  evaluate when the context profile enables EXPR, their expressions
-  already type-checked at pass 8 with everything unresolved, so a
-  failure here comes from the real parameter values and would
-  deterministically recur in every session that enters the environment.
+  creation, under the same error policy as every other evaluation this
+  stage performs (see below): the bindings only evaluate when the
+  context profile enables EXPR, their expressions already type-checked
+  at pass 8 with everything unresolved, so a failure here comes from
+  the real parameter values and would deterministically recur in every
+  session that enters the environment.
 
 Failures are `ModelError::ModelValidation` at the same field paths
 pass 8 uses, e.g.
@@ -254,21 +259,26 @@ environment's fields), but the first failing scope stops instantiation
 — consistent with the fail-fast resolved-value re-checks `create_job`
 already performs, and unlike pass 8's whole-template aggregation.
 
-**Error policy.** Unlike pass 8, evaluation/parse errors are *not*
-reported by this pass: `create_job` may deliberately run with a
-different profile than the template was decoded with (see `ctx` above),
-so an evaluation error here can be a context artifact rather than a
-template defect — and the carried-forward strings hard-fail on the
-worker anyway. The exception is a budget exceedance
-(`MemoryLimitExceeded` / `OperationLimitExceeded`): the same expression
-evaluates under the same budgets at run time with strictly more symbols
-bound, so exceeding the budget here means run-time resolution would
-too, and it is reported. (One coarseness caveat: for an unresolved-test
-conditional the evaluator charges both branches against the budget,
-while a run-time evaluation with the test resolved charges one — a
-budget within a branch-cost of the limit can fail here and pass there;
-callers lowering the budgets accept that granularity.) Resolved-value
-constraint violations (the table above) are always reported.
+**Error policy.** Evaluation/parse errors are reported exactly as in
+pass 8. `create_job` requires a context whose revision matches the
+template's and whose extensions cover everything the template declares
+(a `Compatibility` error otherwise — see `create_job`'s docs), so an
+evaluation error at this stage cannot be a context artifact: it is
+either a template defect pass 8 missed or a deterministic
+value-dependent failure that every session resolving the field would
+hit. Both are worth failing at submission. Budget exceedances
+(`MemoryLimitExceeded` / `OperationLimitExceeded`) are reported like
+any other error; the evaluator guarantees they propagate even from
+inside an unresolved-test conditional whose other branch succeeds
+(a value error there is absorbed — run time may select the healthy
+branch — but the budget was spent in this evaluation regardless; see
+IfExp in `specs/expr/evaluator.md`). One coarseness caveat:
+for an unresolved-test conditional the evaluator charges both branches
+against the budget, while a run-time evaluation with the test resolved
+charges one, so a budget within a branch-cost of the limit can fail
+here and pass there. Callers lowering the budgets accept that
+granularity. Resolved-value constraint violations (the table above)
+are always reported.
 
 Cost note: job creation previously did not evaluate these fields, so the pass
 adds work proportional to what a single worker would do anyway — done

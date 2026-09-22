@@ -212,7 +212,13 @@ fn budgeted(
 /// (excluded from the job-creation symtab because they require
 /// session-time path mapping — the Param type is derived from the
 /// `RawParam.*` value that is present).
-fn add_unresolved_session_symbols(symtab: &mut SymbolTable) {
+///
+/// Seed failures (a key path colliding with an existing scalar) are
+/// propagated rather than ignored — a silently failed seed would
+/// degrade the downstream checks to no-ops. The seed keys are
+/// uppercase-rooted and `let` bindings must start lowercase, so this
+/// only fails if an internal invariant is broken.
+fn add_unresolved_session_symbols(symtab: &mut SymbolTable) -> Result<(), ModelError> {
     let raw_param_names: Vec<String> = symtab
         .get_table("RawParam")
         .map(|t| t.keys().map(str::to_string).collect())
@@ -227,24 +233,25 @@ fn add_unresolved_session_symbols(symtab: &mut SymbolTable) {
                 ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
                 _ => openjd_expr::ExprType::PATH,
             };
-            let _ = symtab.set(
+            symtab.set(
                 &param_key,
                 openjd_expr::ExprValue::Unresolved(unresolved_type),
-            );
+            )?;
         }
     }
-    let _ = symtab.set(
+    symtab.set(
         "Session.WorkingDirectory",
         openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-    );
-    let _ = symtab.set(
+    )?;
+    symtab.set(
         "Session.HasPathMappingRules",
         openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
-    );
-    let _ = symtab.set(
+    )?;
+    symtab.set(
         "Session.PathMappingRulesFile",
         openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-    );
+    )?;
+    Ok(())
 }
 
 /// Build the check symbol table for a step script's carried-forward
@@ -269,7 +276,7 @@ fn build_task_check_symtab(
     budgets: super::EvalBudgets,
 ) -> Result<SymbolTable, ModelError> {
     let mut check_symtab = step_symtab.clone();
-    add_unresolved_session_symbols(&mut check_symtab);
+    add_unresolved_session_symbols(&mut check_symtab)?;
 
     if let Some(ps) = &st.parameter_space {
         for tp in &ps.task_parameter_definitions {
@@ -284,27 +291,27 @@ fn build_task_check_symtab(
                 }
                 crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::PATH,
             };
-            let _ = check_symtab.set(
+            check_symtab.set(
                 &format!("Task.Param.{}", tp.name()),
                 openjd_expr::ExprValue::Unresolved(tp_type.clone()),
-            );
+            )?;
             let raw_type = match tp {
                 crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::STRING,
                 _ => tp_type,
             };
-            let _ = check_symtab.set(
+            check_symtab.set(
                 &format!("Task.RawParam.{}", tp.name()),
                 openjd_expr::ExprValue::Unresolved(raw_type),
-            );
+            )?;
         }
     }
 
     if let Some(files) = &script.embedded_files {
         for f in files {
-            let _ = check_symtab.set(
+            check_symtab.set(
                 &format!("Task.File.{}", f.name),
                 openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-            );
+            )?;
         }
     }
 
@@ -371,14 +378,14 @@ pub(super) fn build_env_check_symtab(
     budgets: super::EvalBudgets,
 ) -> Result<SymbolTable, ModelError> {
     let mut symtab = base.clone();
-    add_unresolved_session_symbols(&mut symtab);
+    add_unresolved_session_symbols(&mut symtab)?;
     if let Some(script) = &env.script {
         if let Some(files) = &script.embedded_files {
             for f in files {
-                let _ = symtab.set(
+                symtab.set(
                     &format!("Env.File.{}", f.name),
                     openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
+                )?;
             }
         }
         if has_expr {

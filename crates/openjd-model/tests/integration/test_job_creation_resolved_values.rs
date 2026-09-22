@@ -541,3 +541,85 @@ fn lowered_memory_budget_fails_job_name_resolution() {
     .expect_err("expected job name resolution to exceed the memory budget");
     assert!(err.contains("Failed to resolve job name"), "Got:\n{err}");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Evaluation-error reporting — `create_job` requires a context
+// enabling the template's declared extensions, so every evaluation
+// error at this stage is a template defect or a deterministic
+// value-dependent failure, and all of them are reported.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn value_dependent_evaluation_error_fails_at_create_job() {
+    // Pass 8 sees Param.X unresolved and cannot evaluate; with X bound
+    // to "0" the division fails deterministically — the same failure
+    // every session would hit at resolution. Reported here instead.
+    assert_err_contains(
+        create_default(
+            &arg_template("{{ 1 / int(Param.X) }}"),
+            &[("X", "0"), ("N", "1")],
+        ),
+        &["steps[0] -> script -> actions -> onRun -> args[0]:"],
+    );
+    // Control: a non-zero value evaluates cleanly.
+    create_default(
+        &arg_template("{{ 1 / int(Param.X) }}"),
+        &[("X", "2"), ("N", "1")],
+    )
+    .expect("non-zero divisor must pass");
+}
+
+#[test]
+fn budget_error_inside_unresolved_conditional_is_reported() {
+    // With an unresolved test (Session.*), the evaluator runs both
+    // branches; a budget exceedance in either propagates even when the
+    // other branch succeeds, because the memory was spent in this
+    // evaluation no matter which branch run time takes (see IfExp in
+    // specs/expr/evaluator.md). This pins that a caller who lowers
+    // max_eval_memory_bytes is protected inside conditionals — the
+    // idiomatic construction, since Session.* tests are unresolved at
+    // job creation.
+    let err = create_with_limits(
+        &arg_template("{{ 'A' * Param.N if Session.HasPathMappingRules else 'B' }}"),
+        &[("X", "x"), ("N", "10000000")],
+        CallerLimits {
+            max_eval_memory_bytes: Some(1024 * 1024),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the branch's budget exceedance to be reported");
+    assert!(
+        err.contains("steps[0] -> script -> actions -> onRun -> args[0]:"),
+        "Got:\n{err}"
+    );
+    assert!(
+        err.contains("Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"),
+        "Got:\n{err}"
+    );
+}
+
+/// The job-creation checks evaluate under the POSIX path format —
+/// matching every other evaluation `create_job` performs, including
+/// the `let` bindings seeded into the check symbol tables. A
+/// host-format evaluation would reject the Posix-format path values in
+/// the symtab with a "Path format mismatch" error on Windows (the
+/// formats coincide elsewhere), so this pins the format agreement
+/// between the checks and the symtabs they read.
+#[test]
+fn path_valued_let_binding_in_arg_passes_job_creation_checks() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{"name": "S", "script": {
+            "let": ["out = path('/tmp/render/output.exr')"],
+            "actions": {"onRun": {"command": "echo", "args": ["{{ out.name }}"]}}
+        }}]
+    }"#;
+    create_default(template, &[("X", "x"), ("N", "1")])
+        .expect("Posix path values in the check symtab must evaluate cleanly");
+}
