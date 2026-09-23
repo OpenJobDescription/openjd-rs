@@ -275,11 +275,13 @@ partially-resolved input turns a valid template into a submission
 failure (as `eval_listcomp`'s concrete-iterable filter path once did —
 see ListComp in `specs/expr/evaluator.md`). Budget exceedances
 (`MemoryLimitExceeded` / `OperationLimitExceeded`) are reported like
-any other error; the evaluator guarantees they propagate even from
-inside an unresolved-test conditional whose other branch succeeds
-(a value error there is absorbed — run time may select the healthy
-branch — but the budget was spent in this evaluation regardless; see
-IfExp in `specs/expr/evaluator.md`). One coarseness caveat:
+any other error; the evaluator guarantees they propagate out of every
+construct that absorbs errors under an unresolved operand — an
+unresolved-test conditional whose other branch succeeds, and `and`/`or`
+operands past an unresolved one (a value error there is absorbed —
+run time may select the other branch or short-circuit — but the budget
+was spent in this evaluation regardless; see IfExp and BoolOp in
+`specs/expr/evaluator.md`). One coarseness caveat:
 for an unresolved-test conditional the evaluator charges both branches
 against the budget, while a run-time evaluation with the test resolved
 charges one, so a budget within a branch-cost of the limit can fail
