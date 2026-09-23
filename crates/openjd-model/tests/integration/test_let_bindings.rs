@@ -1239,3 +1239,32 @@ fn failed_let_binding_does_not_cascade_into_membership() {
         "membership against a failed binding cascaded:\n{msg}"
     );
 }
+
+/// Range-scope analogue of the job-creation path-format test
+/// (`path_valued_let_binding_in_arg_passes_job_creation_checks`):
+/// step-level `let` bindings are evaluated into the range symbol table
+/// under `PathFormat::Posix`, and the range format strings that read
+/// them must evaluate under the same format. Template validation used
+/// to evaluate them under the host format, so a path-valued binding
+/// referenced from a `parameterSpace` range drew "Path format
+/// mismatch" on Windows (the formats coincide on Linux/macOS, where
+/// this test is a no-op — the Windows CI lane is what exercises it).
+#[test]
+fn path_valued_step_let_in_range_passes_validation() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "let": ["out = path('/tmp/render/output.exr')"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "STRING", "range": ["{{ out.name }}", "b"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    decode_ok(s);
+}
