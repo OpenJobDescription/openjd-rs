@@ -227,6 +227,19 @@ Both libraries are obtained from
 `SpecificationProfile::to_expr_profile(host_context)` helper produces the
 right `ExprProfile` from a model profile.
 
+### Path Format
+
+Every evaluation this pass performs — format-string expressions and
+`let` bindings alike — runs under `PathFormat::Posix`. Template
+validation happens outside host context, where the model keeps all
+paths POSIX (see the path-parameters discussion in
+`specs/model/job-creation.md`); only `openjd-sessions` evaluates under
+`PathFormat::host()`. This keeps pass 8 consistent with job creation's
+re-checks (which read POSIX-format values out of their check symbol
+tables) and makes validation outcomes independent of the OS running
+them — a template accepted by `check` on Linux is accepted on Windows
+and vice versa.
+
 ### Spec-Mandated Resolved-Value Constraints
 
 Pass 8 uses the values that static evaluation can resolve: for fields

@@ -790,19 +790,19 @@ fn check_resolved_constraint(
 /// template's declared extensions (see `create_job`'s `ctx` docs), so
 /// an error at either stage is a template defect or a deterministic
 /// value-dependent failure that every session would hit.
+///
+/// Every evaluation runs under `PathFormat::Posix`: template validation
+/// and job creation happen outside host context, where the model keeps
+/// all paths POSIX (only `openjd-sessions` evaluates under
+/// `PathFormat::host()` — see the Path Parameters section of
+/// `specs/model/job-creation.md`). This keeps the two stages consistent
+/// with each other and with the POSIX-format values `create_job` seeds
+/// into its check symbol tables, and makes validation outcomes
+/// independent of the OS running them.
 struct FsEval<'a> {
     lib: &'a FunctionLibrary,
     memory_limit: Option<usize>,
     operation_limit: Option<usize>,
-    /// Path format for path values flowing through the evaluation.
-    /// Pass 8 uses the host format (its symtabs hold no concrete path
-    /// values, so this is inert today). The job-creation checks use
-    /// POSIX — `create_job` resolves *everything* under
-    /// `PathFormat::Posix` (it resolves no host paths), including the
-    /// `let` bindings seeded into the check symbol tables, and an
-    /// evaluation must use the same format as the values in its
-    /// symtab or path operations error with a format mismatch.
-    path_format: openjd_expr::path_mapping::PathFormat,
 }
 
 impl<'a> FsEval<'a> {
@@ -811,21 +811,6 @@ impl<'a> FsEval<'a> {
             lib,
             memory_limit: caller_limits.max_eval_memory_bytes,
             operation_limit: caller_limits.max_eval_operations,
-            path_format: openjd_expr::path_mapping::PathFormat::host(),
-        }
-    }
-
-    /// An `FsEval` for the job-creation checks: identical to pass 8's
-    /// (same library, same budgets, same strict error reporting), except
-    /// evaluating under the POSIX path format to match the check
-    /// symtabs `create_job` builds (see [`Self::path_format`]).
-    fn for_job_creation(
-        lib: &'a FunctionLibrary,
-        caller_limits: &crate::types::CallerLimits,
-    ) -> Self {
-        Self {
-            path_format: openjd_expr::path_mapping::PathFormat::Posix,
-            ..Self::new(lib, caller_limits)
         }
     }
 
@@ -837,7 +822,7 @@ impl<'a> FsEval<'a> {
     ) -> openjd_expr::FormatStringOptions<'a> {
         let mut opts = openjd_expr::FormatStringOptions::new()
             .with_library(self.lib)
-            .with_path_format(self.path_format);
+            .with_path_format(PathFormat::Posix);
         if let Some(t) = target {
             opts = opts.with_target_type(t);
         }
@@ -850,13 +835,15 @@ impl<'a> FsEval<'a> {
         opts
     }
 
-    /// Apply the caller budgets to a raw [`openjd_expr::EvalBuilder`] —
-    /// for the evaluation sites (let bindings) that parse expressions
+    /// Apply the caller budgets and the POSIX path format (see the
+    /// struct docs) to a raw [`openjd_expr::EvalBuilder`] — for the
+    /// evaluation sites (let bindings) that parse expressions
     /// directly rather than resolving a `FormatString`.
     fn budgeted<'b>(
         &self,
         mut builder: openjd_expr::EvalBuilder<'b>,
     ) -> openjd_expr::EvalBuilder<'b> {
+        builder = builder.with_path_format(PathFormat::Posix);
         if let Some(m) = self.memory_limit {
             builder = builder.with_memory_limit(m);
         }
@@ -1046,7 +1033,7 @@ pub(crate) fn check_carried_forward_step_script(
         .profile
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let host_lib = FunctionLibrary::for_profile(&host_profile);
-    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
     let action_path = path_field(&path_field(script_path, "actions"), "onRun");
     validate_action_fs(
         &script.actions.on_run,
@@ -1091,7 +1078,7 @@ pub(crate) fn check_carried_forward_environment(
         .profile
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let host_lib = FunctionLibrary::for_profile(&host_profile);
-    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
     if let Some(vars) = &env.variables {
         let vars_path = path_field(path, "variables");
         for (name, value) in vars {
@@ -1420,11 +1407,7 @@ pub fn validate_format_strings(
                                 ) {
                                     Ok(parsed) => {
                                         match template_ev
-                                            .budgeted(
-                                                parsed
-                                                    .with_path_format(PathFormat::Posix)
-                                                    .with_library(template_ev.lib),
-                                            )
+                                            .budgeted(parsed.with_library(template_ev.lib))
                                             .evaluate(&[&range_symtab as &SymbolTable])
                                         {
                                             Ok(val) => {
