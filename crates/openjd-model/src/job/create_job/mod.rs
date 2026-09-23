@@ -100,6 +100,10 @@ pub fn create_job(
     // error could be a context artifact instead of a template defect),
     // which is why evaluation errors can be reported strictly.
     let template_profile = job_template.profile();
+    // Unreachable until a second SpecificationRevision variant exists
+    // (V2023_09 is the only one today, so both sides are always equal);
+    // written now so revision coverage doesn't silently go missing when
+    // one is added. No test can pin this error message until then.
     if ctx.profile.revision() != template_profile.revision() {
         return Err(ModelError::Compatibility(format!(
             "create_job requires a context matching the template's specification revision: \

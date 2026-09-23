@@ -47,6 +47,11 @@ fn append_sub_error(msg: &mut String, err: &ExpressionError, is_last: bool) {
 /// to the evaluation — the memory and operations were spent in this
 /// evaluation no matter which branch run time takes — so exhaustion
 /// must propagate.
+///
+/// Deliberately coarse: when a *compound* error contains a budget
+/// exceedance among value sub-errors, the whole compound propagates
+/// unchanged rather than being trimmed to just the budget error — the
+/// caller sees the full diagnostic context of the failing branch.
 fn contains_budget_error(err: &ExpressionError) -> bool {
     matches!(
         err.kind(),
