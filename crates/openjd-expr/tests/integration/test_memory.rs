@@ -907,3 +907,80 @@ fn value_error_after_unresolved_boolop_operand_is_suppressed() {
         .expect("a value error after the unresolved operand must be suppressed");
     assert!(result.value.is_unresolved());
 }
+
+/// Mirror arm of `memory_limit_exceeded_in_one_branch_of_unresolved_-
+/// conditional_propagates`: the budget exceedance in the *else* branch
+/// (the evaluator's `(Ok, Err)` arm — the earlier test only exercised
+/// `(Err, Ok)`). Without this, deleting that arm's early return leaves
+/// the suite green.
+#[test]
+fn memory_limit_exceeded_in_else_branch_of_unresolved_conditional_propagates() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err = ParsedExpression::new("'B' if Session.Flag else 'A' * 10000000")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect_err("the else-branch's budget exceedance must propagate");
+    assert!(
+        err.message()
+            .contains("Expression memory usage (10000208 bytes) exceeded limit (1048576 bytes)"),
+        "Got: {}",
+        err.message()
+    );
+}
+
+/// `and` shares the suppression arm with `or`; pin it separately.
+#[test]
+fn memory_limit_exceeded_after_unresolved_and_operand_propagates() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err = ParsedExpression::new("Session.Flag and 'A' * 10000000 == 'x'")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect_err("the second operand's budget exceedance must propagate");
+    assert!(
+        err.message().contains("exceeded limit (1048576 bytes)"),
+        "Got: {}",
+        err.message()
+    );
+}
+
+/// A boolop wrapped around an unresolved-test conditional must not
+/// re-absorb the budget error the conditional just propagated — the
+/// suppression exemptions compose.
+#[test]
+fn boolop_does_not_reabsorb_budget_error_from_nested_conditional() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err =
+        ParsedExpression::new("Session.Flag or ('A' * 10000000 if Session.Flag else 'B') == 'x'")
+            .and_then(|p| {
+                p.with_memory_limit(1024 * 1024)
+                    .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                    .evaluate_with_metrics(&[&st])
+            })
+            .expect_err("the nested conditional's budget exceedance must survive the boolop");
+    assert!(
+        err.message().contains("exceeded limit (1048576 bytes)"),
+        "Got: {}",
+        err.message()
+    );
+}
