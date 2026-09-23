@@ -559,7 +559,12 @@ fn value_dependent_evaluation_error_fails_at_create_job() {
             &arg_template("{{ 1 / int(Param.X) }}"),
             &[("X", "0"), ("N", "1")],
         ),
-        &["steps[0] -> script -> actions -> onRun -> args[0]:"],
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "Division by zero\n",
+            "  1 / int(Param.X)\n",
+            "  ~~^~~~~~~~~~~~~~",
+        ],
     );
     // Control: a non-zero value evaluates cleanly.
     create_default(
