@@ -216,6 +216,14 @@ pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000;
 /// Constraint §3.
 pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
+/// Per-regex compiled-program size limit: 1 MiB. Passed to
+/// `RegexBuilder::size_limit` to reject adversarial NFA patterns.
+pub(crate) const REGEX_SIZE_LIMIT: usize = 1 << 20;
+
+/// Maximum number of cached regex patterns per evaluation: 32.
+/// Past this cap, patterns compile but are not retained.
+const MAX_REGEX_CACHE_ENTRIES: usize = 32;
+
 /// Maximum AST nesting depth. Bounds the stack use of the
 /// recursive-descent evaluator and the ruff parser's structural validator.
 /// Exceeding raises `ExpressionErrorKind::ExpressionTooDeep`.
@@ -1589,7 +1597,8 @@ merely recommendations:
    `ceil(len / 256)` ops. `OperationLimitExceeded` surfaces at the
    first op that crosses the limit.
 4. **Deterministic evaluation** — no mutable globals in the dispatch
-   path; regex caches are local to each `Evaluator` instance.
+   path; regex caches are local to each `Evaluator` instance, bounded to
+   32 entries, and charged to the memory budget.
 5. **No user-defined functions** — `FunctionLibrary::register` exists
    but is a *host-side* API for building custom libraries; the language
    itself has no function-definition syntax. The OpenJD subset of

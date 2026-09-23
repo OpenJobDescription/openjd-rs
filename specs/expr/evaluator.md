@@ -87,6 +87,12 @@ The `dispatch` method centralizes this: it releases input values, calls the func
 implementation, and tracks the output value. This keeps function implementations pure
 (values in, value out) with memory tracking handled by the evaluator.
 
+Compiled regex patterns cached by the evaluator are also charged to the memory
+budget.  Each cached entry charges `REGEX_SIZE_LIMIT` (1 MiB) plus the pattern
+string length.  The cache is capped at `MAX_REGEX_CACHE_ENTRIES` (32) entries;
+patterns compiled after the cap is reached are used once and discarded without
+a persistent memory charge.  See the [Regex Cache](#regex-cache) section below.
+
 ### Operation Counting
 
 Every function call increments the operation counter:
@@ -447,15 +453,36 @@ expressions must be simple dotted name lookups.
 
 The evaluator maintains a `HashMap<String, regex::Regex>` that caches compiled regex
 patterns across function calls within a single evaluation. When a regex function
-(`re_match`, `re_search`, `re_sub`) is called, the evaluator checks the cache
-before compiling. This avoids recompiling the same pattern when used multiple times,
-e.g., in a list comprehension like `[x for x in items if re_search(x, "shot") != null]`.
+(`re_match`, `re_search`, `re_sub`, `re_findall`) is called, the evaluator checks the
+cache before compiling. This avoids recompiling the same pattern when used multiple
+times, e.g., in a list comprehension like
+`[x for x in items if re_search(x, "shot") != null]`.
 
 The cache is per-evaluation, not global — it is created fresh for each `evaluate()` call
 and discarded afterward. Child evaluators (created for list comprehensions) share the
 parent's cache via move-and-return: the parent's cache is moved into the child before
 each iteration and moved back after, so patterns compiled in one iteration are available
 in subsequent iterations without recompilation.
+
+### Bounding
+
+The cache is bounded in two ways:
+
+1. **Entry count cap** — at most `MAX_REGEX_CACHE_ENTRIES` (32) patterns are retained.
+   When the cap is reached, new patterns compile normally but are not inserted into
+   the cache. They work correctly for the current call but pay the compile cost on
+   every subsequent call.
+
+2. **Memory charging** — each cached entry charges `REGEX_SIZE_LIMIT + pattern.len()`
+   bytes to the evaluator's memory budget (the same budget tracked by `current_memory`
+   and bounded by `memory_limit`). Patterns compiled past the cap are *not* charged,
+   since they are not retained. This ensures that expressions with many distinct
+   patterns hit the memory limit rather than silently consuming unbounded memory.
+
+The `regex_cache_bytes` counter tracks the total charge from cached entries. In list
+comprehensions, the iteration baseline reset preserves regex charges (via
+`regex_delta`) so they accumulate across iterations rather than being discarded with
+per-iteration transients.
 
 ## Divergence from Python
 
