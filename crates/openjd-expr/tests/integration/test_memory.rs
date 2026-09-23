@@ -855,3 +855,55 @@ fn value_error_in_one_branch_of_unresolved_conditional_is_absorbed() {
         .expect("a value error in one branch must be absorbed");
     assert!(result.value.is_unresolved());
 }
+
+// ══════════════════════════════════════════════════════════════
+// Budget errors propagate past unresolved boolop operands
+// ══════════════════════════════════════════════════════════════
+
+/// After an unresolved operand, `and`/`or` suppress errors in later
+/// operands (a runtime short-circuit could make them unreachable) —
+/// but budget exceedances are exempt, exactly as in unresolved-test
+/// conditionals: the memory/operations were spent in this evaluation
+/// no matter what a runtime short-circuit skips.
+#[test]
+fn memory_limit_exceeded_after_unresolved_boolop_operand_propagates() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err = ParsedExpression::new("Session.Flag or len('A' * 10000000) > 0")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect_err("the second operand's budget exceedance must propagate");
+    assert!(
+        err.message()
+            .contains("Expression memory usage (10000200 bytes) exceeded limit (1048576 bytes)"),
+        "Got: {}",
+        err.message()
+    );
+}
+
+/// Control: a plain value error after the unresolved operand is still
+/// suppressed — the runtime short-circuit may never evaluate it.
+#[test]
+fn value_error_after_unresolved_boolop_operand_is_suppressed() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let result = ParsedExpression::new("Session.Flag or int('nope') > 0")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&st])
+        })
+        .expect("a value error after the unresolved operand must be suppressed");
+    assert!(result.value.is_unresolved());
+}

@@ -777,7 +777,16 @@ impl<'a> Evaluator<'a> {
                             }
                         }
                     },
-                    Err(_) => { /* suppressed — unresolved might short-circuit */ }
+                    Err(e) => {
+                        // Suppressed — unresolved might short-circuit.
+                        // Except budget exceedances: the memory and
+                        // operations were spent in this evaluation no
+                        // matter what a runtime short-circuit skips
+                        // (same rule as `eval_ifexp`).
+                        if contains_budget_error(&e) {
+                            return Err(e);
+                        }
+                    }
                 }
                 continue;
             }
@@ -1402,6 +1411,55 @@ impl<'a> Evaluator<'a> {
         self.operation_count = child.operation_count;
     }
 
+    /// Conclude a list comprehension whose result cannot be computed at
+    /// this stage — because the iterable is unresolved, or because the
+    /// filter evaluated to an unresolved condition on a concrete
+    /// element (per-element inclusion is undecidable, so the whole
+    /// comprehension is unknown). Binds the loop variable to
+    /// `Unresolved(elem_type)`, type-checks the filter (it must be
+    /// bool-compatible), evaluates the body once for its type, and
+    /// returns `unresolved(list[body_type])`. Evaluation errors in the
+    /// filter or body — including budget exceedances — propagate.
+    fn eval_listcomp_unresolved(
+        &mut self,
+        lc: &ast::ExprListComp,
+        if_clause: Option<&ast::Expr>,
+        var_name: &str,
+        elem_type: ExprType,
+    ) -> Result<ExprValue, ExpressionError> {
+        let mut tmp = crate::symbol_table::SymbolTable::new();
+        tmp.set(var_name, ExprValue::unresolved(elem_type))
+            .map_err(|e| ExpressionError::new(e.to_string()))?;
+        let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
+        combined.push(&tmp);
+        let mut child = self.child_evaluator(&combined);
+        // Check filter clause type if present
+        if let Some(if_clause) = if_clause {
+            let cond = child.evaluate(if_clause)?;
+            let cond_inner = unwrap_unresolved(&cond.expr_type());
+            let is_bool_compatible = cond_inner == ExprType::BOOL
+                || cond_inner.code() == crate::types::TypeCode::Unresolved
+                || cond_inner.code() == crate::types::TypeCode::Any
+                || (cond_inner.code() == crate::types::TypeCode::Union
+                    && cond_inner.params().contains(&ExprType::BOOL));
+            if !is_bool_compatible {
+                let err = ExpressionError::new(format!(
+                    "List comprehension filter must be a boolean, got {}",
+                    cond_inner
+                ));
+                return Err(if let Some(src) = self.expr_source {
+                    err.with_node(src, if_clause)
+                } else {
+                    err
+                });
+            }
+        }
+        let body_val = child.evaluate(&lc.elt)?;
+        self.absorb_counters(&child);
+        let body_type = unwrap_unresolved(&body_val.expr_type());
+        self.track(ExprValue::unresolved(ExprType::list(body_type)))
+    }
+
     fn eval_listcomp(
         &mut self,
         lc: &ast::ExprListComp,
@@ -1451,41 +1509,12 @@ impl<'a> Evaluator<'a> {
             _ => unreachable!(),
         };
 
-        // Unresolved iterable: evaluate body once to determine output type
+        // Unresolved iterable: per-element evaluation is impossible, so
+        // the comprehension as a whole is unknown.
         if iterable.is_unresolved() {
             let inner = unwrap_unresolved(&iterable.expr_type());
             let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
-            let mut tmp = crate::symbol_table::SymbolTable::new();
-            tmp.set(&var_name, ExprValue::unresolved(elem_type))
-                .map_err(|e| ExpressionError::new(e.to_string()))?;
-            let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
-            combined.push(&tmp);
-            let mut child = self.child_evaluator(&combined);
-            // Check filter clause type if present
-            if let Some(if_clause) = gen.ifs.first() {
-                let cond = child.evaluate(if_clause)?;
-                let cond_inner = unwrap_unresolved(&cond.expr_type());
-                let is_bool_compatible = cond_inner == ExprType::BOOL
-                    || cond_inner.code() == crate::types::TypeCode::Unresolved
-                    || cond_inner.code() == crate::types::TypeCode::Any
-                    || (cond_inner.code() == crate::types::TypeCode::Union
-                        && cond_inner.params().contains(&ExprType::BOOL));
-                if !is_bool_compatible {
-                    let err = ExpressionError::new(format!(
-                        "List comprehension filter must be a boolean, got {}",
-                        cond_inner
-                    ));
-                    return Err(if let Some(src) = self.expr_source {
-                        err.with_node(src, if_clause)
-                    } else {
-                        err
-                    });
-                }
-            }
-            let body_val = child.evaluate(&lc.elt)?;
-            self.absorb_counters(&child);
-            let body_type = unwrap_unresolved(&body_val.expr_type());
-            return self.track(ExprValue::unresolved(ExprType::list(body_type)));
+            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
         }
 
         // Iterate the iterable in place — lists via a borrowing ListIter
@@ -1515,6 +1544,11 @@ impl<'a> Evaluator<'a> {
         // including projected capacity growth, before each push.
         let mut result = crate::budgeted_vec::BudgetedVec::new();
         let base_symtabs: Vec<&SymbolTable> = self.symtabs.to_vec();
+        // Set when a filter condition evaluates to an unresolved value:
+        // per-element inclusion is undecidable, so the loop is abandoned
+        // and the comprehension concludes unresolved (below, after the
+        // borrowing iterator is dropped).
+        let mut filter_unresolved = false;
         for item in iter {
             self.count_op()?;
             let memory_baseline = self.current_memory;
@@ -1530,6 +1564,18 @@ impl<'a> Evaluator<'a> {
                 let cond = child.evaluate(if_clause)?;
                 if let ExprValue::Bool(b) = cond {
                     include = b;
+                } else if cond.is_unresolved() {
+                    // E.g. `Param.*` bound but the filter references
+                    // `Task.*`/`Session.*` at job creation. The
+                    // accumulated elements are abandoned — BudgetedVec
+                    // only pre-checks the budget; the finished list
+                    // would be tracked by make_list_checked, which is
+                    // never reached.
+                    self.absorb_counters(&child);
+                    self.regex_cache = child.regex_cache;
+                    self.current_memory = memory_baseline;
+                    filter_unresolved = true;
+                    break;
                 } else {
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
@@ -1559,6 +1605,21 @@ impl<'a> Evaluator<'a> {
         // tracked memory now that iteration is done (the borrowing
         // iterators above held it until the loop ended).
         self.release(&iterable);
+        if filter_unresolved {
+            // Conclude exactly as the unresolved-iterable path does.
+            // The body's type is derived with the loop variable
+            // *unresolved*, not the concrete element that triggered the
+            // bail-out: evaluating the body on a concrete element the
+            // runtime filter may exclude could raise a spurious value
+            // error (e.g. `[1 // f for f in [0, 1] if f > Task.Param.N]`
+            // must not divide by zero here).
+            let elem_type = iterable
+                .expr_type()
+                .list_element_type()
+                .cloned()
+                .unwrap_or(ExprType::INT);
+            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
+        }
         let result = result.into_vec();
 
         // Check nesting depth

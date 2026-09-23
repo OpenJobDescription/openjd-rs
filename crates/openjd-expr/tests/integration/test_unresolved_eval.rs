@@ -225,6 +225,77 @@ fn comp_unknown_list_iterable() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Concrete iterable, unresolved filter — per-element inclusion is
+// undecidable, so the whole comprehension concludes unresolved,
+// exactly as the unresolved-iterable path does. The partially-bound
+// symbol state is what job creation evaluates under (`Param.*`
+// concrete, `Task.*`/`Session.*` unresolved); a hard error here
+// rejected templates at submission that pass template validation and
+// run cleanly.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn comp_concrete_iterable_unresolved_filter() {
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::unresolved(ExprType::STRING))
+        .unwrap();
+    let r = eval_u("[x for x in 'a,b,c'.split(',') if x != S]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[string]]"));
+}
+
+#[test]
+fn comp_concrete_range_iterable_unresolved_filter() {
+    let mut st = SymbolTable::new();
+    st.set("N", ExprValue::unresolved(ExprType::INT)).unwrap();
+    let r = eval_u("[x * 2 for x in range(3) if x > N]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}
+
+/// The body's type is derived with the loop variable unresolved, not
+/// with the concrete element that triggered the bail-out — evaluating
+/// the body on an element the runtime filter may exclude could raise a
+/// spurious value error.
+#[test]
+fn comp_unresolved_filter_shields_body_value_error_on_excluded_element() {
+    let mut st = SymbolTable::new();
+    st.set("N", ExprValue::unresolved(ExprType::INT)).unwrap();
+    let r = eval_u("[10 // x for x in [0, 2] if x > N]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}
+
+/// A filter that can never be a boolean is still refused, matching the
+/// unresolved-iterable path's type check.
+#[test]
+fn comp_concrete_iterable_unresolved_nonbool_filter_rejected() {
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::unresolved(ExprType::STRING))
+        .unwrap();
+    let e = ParsedExpression::new("[x for x in [1, 2] if S]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("List comprehension filter must be a boolean, got string"),
+        "got:\n{e}"
+    );
+    assert!(e.contains("[x for x in [1, 2] if S]"), "got:\n{e}");
+    assert!(e.contains("^"), "got:\n{e}");
+}
+
+/// Elements whose filter is decided concretely (short-circuit) before
+/// the first unresolved condition are abandoned, not returned as a
+/// partial list.
+#[test]
+fn comp_mixed_concrete_then_unresolved_filter_concludes_unresolved() {
+    let mut st = SymbolTable::new();
+    st.set("B", ExprValue::unresolved(ExprType::BOOL)).unwrap();
+    // For x=0: `x > 0 and B` short-circuits to false (concrete).
+    // For x=1: `1 > 0 and B` is unresolved — bail out.
+    let r = eval_u("[x for x in [0, 1, 2] if x > 0 and B]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}
+
+// ══════════════════════════════════════════════════════════════
 // TestUnknownSubscript
 // ══════════════════════════════════════════════════════════════
 

@@ -628,3 +628,44 @@ fn path_valued_let_binding_in_arg_passes_job_creation_checks() {
     create_default(template, &[("X", "x"), ("N", "1")])
         .expect("Posix path values in the check symtab must evaluate cleanly");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Partial resolution must not reject templates that validate and run
+// ══════════════════════════════════════════════════════════════
+
+/// Job creation evaluates under a symbol-table state that exists at no
+/// other stage: `Param.*` concrete, `Task.*`/`Session.*` unresolved. A
+/// comprehension over a now-concrete iterable whose filter references a
+/// task parameter is undecidable per element here — but validates at
+/// template validation (iterable unresolved) and resolves cleanly in
+/// every session (everything bound). It must pass job creation as an
+/// unresolved value, not fail it. Regression test: the concrete-
+/// iterable path in `eval_listcomp` used to hard-error on an
+/// unresolved filter condition, rejecting this template at submission.
+#[test]
+fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "LcFilter",
+        "parameterDefinitions": [
+            {"name": "Files", "type": "STRING"},
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{
+            "name": "Render",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Skip", "type": "STRING", "range": ["b"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": ["{{ [f for f in Param.Files.split(',') if f != Task.Param.Skip] }}"]
+            }}}
+        }]
+    }"#;
+    create_default(template, &[("Files", "a,b,c"), ("X", "x"), ("N", "1")])
+        .expect("an unresolved comprehension filter must not fail job creation");
+}

@@ -266,7 +266,14 @@ template's and whose extensions cover everything the template declares
 evaluation error at this stage cannot be a context artifact: it is
 either a template defect pass 8 missed or a deterministic
 value-dependent failure that every session resolving the field would
-hit. Both are worth failing at submission. Budget exceedances
+hit. Both are worth failing at submission. That disjunction being
+exhaustive additionally depends on the evaluator propagating
+`Unresolved` without error through every operator — this stage
+evaluates under a symbol state no other stage sees (`Param.*` concrete,
+`Task.*`/`Session.*` unresolved), so an operator that hard-errors on a
+partially-resolved input turns a valid template into a submission
+failure (as `eval_listcomp`'s concrete-iterable filter path once did —
+see ListComp in `specs/expr/evaluator.md`). Budget exceedances
 (`MemoryLimitExceeded` / `OperationLimitExceeded`) are reported like
 any other error; the evaluator guarantees they propagate even from
 inside an unresolved-test conditional whose other branch succeeds
