@@ -262,9 +262,9 @@ dependencies = [
 
 [[package]]
 name = "aws-runtime"
-version = "1.9.2"
+version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef47857a1d4488b528f4a5d5715fa7c3300820897824152234d3fa22b1426657"
+checksum = "25b43ad47adc2517efe3d706559d94b97e50e80e0321b3cadbc9f77cee88adcd"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
@@ -290,9 +290,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-s3"
-version = "1.146.1"
+version = "1.148.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cd651b4400d4011b8927b83a9552bf90ff11e6e5da0b9f0a7583247aceec971"
+checksum = "8a61c1db3987ab6c8740fb87f248864687d50549401115244a84f02c3047b2d5"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -379,9 +379,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.114.0"
+version = "1.116.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef45745026107ec30c4ef86bd8ae4b002e7e5f6a86e4225240bdf6b06a0b944a"
+checksum = "035c7392e751d20bf1060d625d023587eb14099646110a9cff7c697bfe4b253a"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -406,9 +406,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sigv4"
-version = "1.5.1"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723c2234ad7511ceef63eab016b7ba6ff7c55590fefb96fa8467af014a07309f"
+checksum = "31d955e76ff96acd555bf06fa0fa6d5bf9335fa84ae7c64481b20ae61d231f70"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-eventstream",
@@ -708,12 +708,6 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "base64-simd"
@@ -1548,9 +1542,9 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "granit-parser"
-version = "1.2.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48aa83cc6ac4dc610adf5501a5392b4bcc543b2c1f24eaf77469a96e31ec9abe"
+checksum = "e20f99e46474f56bd905c56e817ebddcf377a611f94c53ac4649e4d3fa3c0cd0"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -1775,7 +1769,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -3057,9 +3051,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "s3s"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d29a4db6a51f1cd3269a36354ce4aa7db2be8816cee42a642b9c85cd3769577"
+checksum = "87d22507a8ebd0ea64972c76dfedbc477418dc70afd98bfce928263894067d2f"
 dependencies = [
  "arc-swap",
  "arrayvec",
@@ -3116,9 +3110,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-aws"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f10f199f797b32e131bed6852214f17fbda3e416f3fd357fb6807672f3b5224c"
+checksum = "1ed20ddec71ccd7b923cf9ffcba0dade4032fa7dfad9498d42b26ea1e76feac6"
 dependencies = [
  "async-trait",
  "aws-sdk-s3",
@@ -3136,9 +3130,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-fs"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87a20465698edbec9956484667efb84d13cd77d01784ecee06eb93aa8fe93e94"
+checksum = "a33cc522e1766edd49e75234525f314fccd05647913358d6b96d5cf528eb0273"
 dependencies = [
  "async-trait",
  "base64-simd",
@@ -3167,9 +3161,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-rfc2047"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9370a2f353a7929b79ae7b5f692b4758c59aa19526b18feff6a977e8ff17da5a"
+checksum = "f9d3e6b36be7cca3da377b4cabcd668ffe5b16c3b73a83f7a8f7b63ff6a178ee"
 dependencies = [
  "base64-simd",
  "thiserror",
@@ -3177,9 +3171,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-sigv2"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f277b63ffc9a2135c49d52726199b7436c2f86746d625496984f5bb5cabef050"
+checksum = "d96880b5ad8d639c9224155126741708aeb62ad3682e0476d2fd14290af808ef"
 dependencies = [
  "base64-simd",
  "hmac 0.13.0",
@@ -3191,9 +3185,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-sigv4"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a979a401f6ae4035bc22e4ac0f7a9a5923ba93841c931e8e28652fe211d991bc"
+checksum = "fed605cbaaa1cf4d82e8ee15098fb3e42d49c92bb6215eb1359f63bfc0c6b020"
 dependencies = [
  "arrayvec",
  "base64-simd",
@@ -3211,9 +3205,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-test"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4646fe5e1df12500a3363b9fe9a1a293ef21348cfdbed1b18beb6a05a99f41ed"
+checksum = "8fd35fa7a24d0ce24b51e83b6e13ea7b5bbf6daca66e71e6c2c26392aeda472b"
 dependencies = [
  "backtrace",
  "clap",
@@ -3308,12 +3302,12 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "1.2.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3afb591f9cdb6223c88ba39269aff895620c7f0716dc42b705b5733d5c7c0823"
+checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
