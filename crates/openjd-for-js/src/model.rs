@@ -652,23 +652,13 @@ pub fn create_job_with_map(
         openjd_model::preprocess_job_parameters(&template.inner, &input_values, &[], &rust_opts)
             .map_err(|e| e.to_string())?;
 
-    // Build a ValidationContext from the template's declared extensions
-    // and the caller-supplied limits.
-    let ctx = {
-        let mut exts = std::collections::HashSet::new();
-        if let Some(ext_list) = &template.inner.extensions {
-            exts.extend(
-                ext_list
-                    .iter()
-                    .filter_map(|s| s.as_str().parse::<openjd_model::ModelExtension>().ok()),
-            );
-        }
-        openjd_model::ValidationContext::with_extensions(
-            openjd_model::SpecificationRevision::V2023_09,
-            exts,
-        )
-        .with_caller_limits(rust_limits)
-    };
+    // Derive the context from the template itself — `create_job`
+    // requires the context's revision/extensions to cover the
+    // template's — layering on the caller-supplied limits.
+    let ctx = template
+        .inner
+        .default_validation_context()
+        .with_caller_limits(rust_limits);
 
     let job = openjd_model::create_job(&template.inner, &param_values, &ctx)
         .map_err(|e| e.to_string())?;

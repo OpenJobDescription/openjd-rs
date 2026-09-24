@@ -354,14 +354,25 @@ When an earlier operand is unresolved, subsequent operands are still evaluated (
 catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
 subsequent concrete operand proves the result by short-circuiting (e.g.,
 `Unresolved and false` returns `false`). Errors in operands past the unresolved one
-are suppressed, since a runtime short-circuit could make them unreachable.
+are suppressed, since a runtime short-circuit could make them unreachable — except
+budget exceedances (`MemoryLimitExceeded` / `OperationLimitExceeded`), which always
+propagate: the memory/operations were spent in this evaluation no matter what a
+runtime short-circuit skips (the same rule as IfExp below).
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
 (see [Target Type Propagation](#target-type-propagation)) and asserts it
 is bool-compatible, then evaluates only the selected branch with the
 parent target type. When the condition is unresolved, both branches are
-evaluated and the result type is the union.
+evaluated and the result type is the union. If exactly one branch fails
+with a *value* error, the error is absorbed and the result is
+`Unresolved` of the healthy branch's type (a runtime with the condition
+resolved may never take the failing branch); if both fail, a compound
+error carries both as sub-errors. Budget exceedances
+(`MemoryLimitExceeded` / `OperationLimitExceeded`) are exempt from the
+single-branch absorption and always propagate: the memory/operations
+were spent in this evaluation no matter which branch a runtime would
+take.
 
 ### Call (`eval_call`)
 Handles both function calls (`len(x)`) and method calls (`x.upper()`).
@@ -391,6 +402,18 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - Single generator only (no nested `for` clauses)
 - Creates a local scope per iteration (loop variable doesn't leak)
 - Handles unresolved iterables by evaluating the body once with an unresolved loop variable
+- A filter condition that evaluates to an *unresolved* value on a
+  concrete element concludes the same way: per-element inclusion is
+  undecidable, so any accumulated elements are abandoned and the
+  comprehension returns `unresolved(list[body_type])`, with the body's
+  type derived under an unresolved loop variable (evaluating the body
+  on a concrete element the runtime filter may exclude could raise a
+  spurious value error). This state — iterable concrete, filter
+  unresolved — is exactly what job creation evaluates under when the
+  iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
+  a hard error here would reject templates that both validate and run.
+  A filter whose *type* can never be a boolean is still an error on
+  both paths.
 - Operation count: +1 per iteration
 - Iterates lists without copying and symbolic ranges lazily
 - Pre-checks the growing result vector's values and projected capacity against the memory limit

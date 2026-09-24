@@ -300,10 +300,14 @@ The `SessionConfig` struct is populated with:
 | `profile` | `ModelProfile` built from the job template's declared extensions |
 | `limits` | `SessionLimits` with `max_resolved_arg_len = common::DEFAULT_MAX_ARG_LEN` (the CLI's uniform 32K-character default — see [check.md § Caller-Limits Policy](check.md#caller-limits-policy)); everything else `None` |
 
-The same OS-max cap applies at both enforcing stages the CLI drives:
+The same OS-max cap applies at every enforcing stage the CLI drives:
 template decode uses `common::caller_limits()` (early failure on the
-lower bound), and the session mirrors it via `SessionConfig::limits`
-(the authoritative check on final values).
+lower bound), `create_job` carries the same limits on its
+`ValidationContext` (early failure once parameter values are bound),
+and the session mirrors them via `SessionConfig::limits` (the
+authoritative check on final values). As its `create_job` context the
+CLI passes `job_template.default_validation_context()`, with those
+caller limits layered on.
 
 ## Result Output
 

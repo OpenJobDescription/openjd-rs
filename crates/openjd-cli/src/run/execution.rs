@@ -121,18 +121,14 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
     )
     .map_err(|e| format!("{e}\n\n{}", crate::help::format_help(&job_template, path)))?;
 
-    let mut profile_extensions = std::collections::HashSet::new();
-    if let Some(ext_list) = &job_template.extensions {
-        profile_extensions.extend(ext_list.iter().filter_map(|e| {
-            e.as_str()
-                .parse::<openjd_model::types::ModelExtension>()
-                .ok()
-        }));
-    }
-    let revision_profile = ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
-        .with_extensions(profile_extensions);
-    let revision_ctx =
-        openjd_model::types::ValidationContext::from_profile(revision_profile.clone());
+    // Derive the profile and context from the template itself —
+    // `create_job` requires the context's revision/extensions to cover
+    // the template's — and carry the CLI's caller limits so job
+    // creation enforces the same caps the decode ran under.
+    let revision_profile = job_template.profile();
+    let revision_ctx = job_template
+        .default_validation_context()
+        .with_caller_limits(crate::common::caller_limits());
     let job = openjd_model::create_job(&job_template, &param_values, &revision_ctx)
         .map_err(|e| format!("{e}\n\n{}", crate::help::format_help(&job_template, path)))?;
 

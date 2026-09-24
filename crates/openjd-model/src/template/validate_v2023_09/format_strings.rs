@@ -780,33 +780,29 @@ fn check_resolved_constraint(
 }
 
 /// Function library plus caller evaluation budgets for one validation
-/// scope. Pass 8 evaluates every format-string expression; the budgets
+/// scope. Pass 8 and the job-creation re-checks both evaluate every
+/// format-string expression; the budgets
 /// (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`) bound
 /// each of those evaluations exactly as they bound resolution at job
-/// creation and run time, so a lowered budget fails at this gate first.
+/// creation and run time, so a lowered budget fails at the earliest
+/// stage that can detect it. Evaluation/parse errors are always
+/// reported: `create_job` requires a context that enables the
+/// template's declared extensions (see `create_job`'s `ctx` docs), so
+/// an error at either stage is a template defect or a deterministic
+/// value-dependent failure that every session would hit.
+///
+/// Every evaluation runs under `PathFormat::Posix`: template validation
+/// and job creation happen outside host context, where the model keeps
+/// all paths POSIX (only `openjd-sessions` evaluates under
+/// `PathFormat::host()` — see the Path Parameters section of
+/// `specs/model/job-creation.md`). This keeps the two stages consistent
+/// with each other and with the POSIX-format values `create_job` seeds
+/// into its check symbol tables, and makes validation outcomes
+/// independent of the OS running them.
 struct FsEval<'a> {
     lib: &'a FunctionLibrary,
     memory_limit: Option<usize>,
     operation_limit: Option<usize>,
-    /// Whether evaluation/parse *errors* (as opposed to resolved-value
-    /// constraint violations) are reported. Pass 8 reports them — that
-    /// is its job. The job-creation re-checks do not: `create_job` may
-    /// deliberately run with a different profile than the template was
-    /// decoded with (see `create_job`'s `ctx` docs), so an evaluation
-    /// error there can be a context artifact rather than a template
-    /// defect, and the carried-forward strings resolve — and hard-fail —
-    /// on the worker anyway. The exception is a budget exceedance
-    /// (`MemoryLimitExceeded` / `OperationLimitExceeded`): the same
-    /// expression evaluates under the same budgets at run time with
-    /// strictly more symbols bound, so exceeding the budget here means
-    /// run-time resolution would too — the early failure these checks
-    /// exist for. (One coarseness caveat: for an unresolved-test
-    /// conditional the evaluator charges both branches against the
-    /// budget, while a run-time evaluation with the test resolved
-    /// charges one, so a budget within a branch-cost of the limit can
-    /// fail here and pass there. Callers lowering the budgets accept
-    /// that granularity.)
-    report_eval_errors: bool,
 }
 
 impl<'a> FsEval<'a> {
@@ -815,20 +811,6 @@ impl<'a> FsEval<'a> {
             lib,
             memory_limit: caller_limits.max_eval_memory_bytes,
             operation_limit: caller_limits.max_eval_operations,
-            report_eval_errors: true,
-        }
-    }
-
-    /// An `FsEval` for the job-creation re-checks: budgets applied,
-    /// but only budget exceedances reported as evaluation errors (see
-    /// [`Self::report_eval_errors`]).
-    fn for_job_creation(
-        lib: &'a FunctionLibrary,
-        caller_limits: &crate::types::CallerLimits,
-    ) -> Self {
-        Self {
-            report_eval_errors: false,
-            ..Self::new(lib, caller_limits)
         }
     }
 
@@ -838,7 +820,9 @@ impl<'a> FsEval<'a> {
         &self,
         target: Option<&'a openjd_expr::ExprType>,
     ) -> openjd_expr::FormatStringOptions<'a> {
-        let mut opts = openjd_expr::FormatStringOptions::new().with_library(self.lib);
+        let mut opts = openjd_expr::FormatStringOptions::new()
+            .with_library(self.lib)
+            .with_path_format(PathFormat::Posix);
         if let Some(t) = target {
             opts = opts.with_target_type(t);
         }
@@ -851,13 +835,15 @@ impl<'a> FsEval<'a> {
         opts
     }
 
-    /// Apply the caller budgets to a raw [`openjd_expr::EvalBuilder`] —
-    /// for the evaluation sites (let bindings) that parse expressions
+    /// Apply the caller budgets and the POSIX path format (see the
+    /// struct docs) to a raw [`openjd_expr::EvalBuilder`] — for the
+    /// evaluation sites (let bindings) that parse expressions
     /// directly rather than resolving a `FormatString`.
     fn budgeted<'b>(
         &self,
         mut builder: openjd_expr::EvalBuilder<'b>,
     ) -> openjd_expr::EvalBuilder<'b> {
+        builder = builder.with_path_format(PathFormat::Posix);
         if let Some(m) = self.memory_limit {
             builder = builder.with_memory_limit(m);
         }
@@ -921,21 +907,6 @@ fn validate_fs_with(
             }
         }
         Err(e) => {
-            if !ev.report_eval_errors {
-                // Job creation: only a budget exceedance is a defect
-                // this stage may report — see
-                // `FsEval::report_eval_errors`.
-                let budget_exceeded = e.expression_error.as_ref().is_some_and(|ee| {
-                    matches!(
-                        ee.kind(),
-                        openjd_expr::ExpressionErrorKind::MemoryLimitExceeded { .. }
-                            | openjd_expr::ExpressionErrorKind::OperationLimitExceeded { .. }
-                    )
-                });
-                if !budget_exceeded {
-                    return;
-                }
-            }
             let mut spans = Vec::new();
             if let Some(ref expr_err) = e.expression_error {
                 if !expr_err.sub_errors().is_empty() {
@@ -1062,7 +1033,7 @@ pub(crate) fn check_carried_forward_step_script(
         .profile
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let host_lib = FunctionLibrary::for_profile(&host_profile);
-    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
     let action_path = path_field(&path_field(script_path, "actions"), "onRun");
     validate_action_fs(
         &script.actions.on_run,
@@ -1107,7 +1078,7 @@ pub(crate) fn check_carried_forward_environment(
         .profile
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let host_lib = FunctionLibrary::for_profile(&host_profile);
-    let ev = FsEval::for_job_creation(&host_lib, &ctx.caller_limits);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
     if let Some(vars) = &env.variables {
         let vars_path = path_field(path, "variables");
         for (name, value) in vars {
@@ -1436,11 +1407,7 @@ pub fn validate_format_strings(
                                 ) {
                                     Ok(parsed) => {
                                         match template_ev
-                                            .budgeted(
-                                                parsed
-                                                    .with_path_format(PathFormat::Posix)
-                                                    .with_library(template_ev.lib),
-                                            )
+                                            .budgeted(parsed.with_library(template_ev.lib))
                                             .evaluate(&[&range_symtab as &SymbolTable])
                                         {
                                             Ok(val) => {

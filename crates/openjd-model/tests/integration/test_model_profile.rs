@@ -5,10 +5,12 @@
 //! Integration tests verifying that `ModelProfile::current()` and
 //! `ModelProfile::latest()` drive distinct behavior through `create_job`.
 //!
-//! The key observable difference: `latest()` enables the Expr extension
-//! (`has_expr = true`), which causes `create_job` to populate `Job.Name`
-//! and `Step.Name` in the step's resolved symbol table. `current()` does
-//! not enable Expr, so those symbols are absent from the resolved output.
+//! `latest()` enables the Expr extension (`has_expr = true`), which
+//! causes `create_job` to populate `Job.Name` and `Step.Name` in the
+//! step's resolved symbol table. A context that does *not* enable an
+//! extension the template declares is rejected outright — `create_job`
+//! requires the context's extensions to cover the template's declared
+//! ones (matching revision likewise).
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::types::{ModelExtension, ModelProfile, ValidationContext};
@@ -107,11 +109,18 @@ fn latest_profile_populates_expr_symbols_in_symtab() {
     assert!(ModelProfile::latest().has_extension(ModelExtension::Expr));
 }
 
-// ─── Test C: current() does NOT populate Job.Name/Step.Name (Expr off) ──────
+// ─── Test C: a context missing a declared extension is rejected ─────────────
 
 #[test]
-fn current_profile_omits_expr_symbols_from_symtab() {
-    // Same EXPR template as Test B, but fed through current() context
+fn context_missing_declared_extension_is_rejected() {
+    // Same EXPR template as Test B, but fed through current() context,
+    // which has Expr OFF. create_job requires the context to enable
+    // every extension the template declares: a context enabling fewer
+    // would make downstream evaluation errors ambiguous (template
+    // defect vs context artifact), which is what lets the job-creation
+    // checks report them strictly. An application that does not
+    // support an extension rejects the template at decode via
+    // `supported_extensions` instead.
     let tpl = yaml_val(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -124,29 +133,13 @@ fn current_profile_omits_expr_symbols_from_symtab() {
     let jt = decode_job_template(tpl, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let params = preprocess_posix_defaults(&jt);
 
-    // Override with current() which has Expr OFF
     let ctx = ValidationContext::from_profile(ModelProfile::current());
-    let job = create_job(&jt, &params, &ctx).unwrap();
-
-    // Job name is still resolved (format strings always evaluate)
-    assert_eq!(job.name, "RenderJob");
-
-    // Without Expr, resolved_symtab does NOT contain Job.Name or Step.Name
-    let symtab = job.steps[0]
-        .resolved_symtab
-        .as_ref()
-        .unwrap()
-        .to_symtab(PathFormat::Posix)
-        .unwrap();
+    let err = create_job(&jt, &params, &ctx).unwrap_err();
     assert_eq!(
-        symtab.get_string("Job.Name"),
-        None,
-        "current() must NOT populate Job.Name (Expr disabled)"
-    );
-    assert_eq!(
-        symtab.get_string("Step.Name"),
-        None,
-        "current() must NOT populate Step.Name (Expr disabled)"
+        err.to_string(),
+        "Compatibility error: create_job requires a context enabling every extension the \
+         template declares: missing EXPR. An application that does not support an extension \
+         should reject the template at decode via its supported-extensions list."
     );
 }
 

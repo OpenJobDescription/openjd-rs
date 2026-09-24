@@ -102,20 +102,13 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let ctx = {
-        let mut exts = std::collections::HashSet::new();
-        if let Some(ext_list) = &job_template.extensions {
-            exts.extend(
-                ext_list
-                    .iter()
-                    .filter_map(|e| e.as_str().parse::<openjd_model::ModelExtension>().ok()),
-            );
-        }
-        openjd_model::ValidationContext::with_extensions(
-            openjd_model::SpecificationRevision::V2023_09,
-            exts,
-        )
-    };
+    // Derive the context from the template itself — `create_job`
+    // requires the context's revision/extensions to cover the
+    // template's — and carry the CLI's caller limits so job creation
+    // enforces the same caps the decode ran under.
+    let ctx = job_template
+        .default_validation_context()
+        .with_caller_limits(crate::common::caller_limits());
 
     let the_job = openjd_model::create_job(&job_template, &param_values, &ctx)?;
 

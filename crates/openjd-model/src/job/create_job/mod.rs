@@ -72,14 +72,20 @@ impl EvalBudgets {
 /// via [`preprocess_job_parameters`] before calling this function.
 ///
 /// The `ctx` parameter carries the specification revision, enabled
-/// extensions, and caller limits that apply to this job instance. It
-/// is the caller's responsibility to pass a `ValidationContext`
-/// compatible with the one the template was validated against —
-/// typically the same one. Passing a context whose extensions differ
-/// from the template's declared extensions allows application-level
-/// policy (e.g. "strip EXPR even if the template requests it" or
-/// "enforce stricter caller limits on this queue") to apply at
-/// job-creation time as well as at decode time.
+/// extensions, and caller limits that apply to this job instance. Its
+/// revision must match the template's, and it must enable every
+/// extension the template declares (enabling more is allowed — extra
+/// extensions only add symbols and functions the template never
+/// references); `create_job` returns a `Compatibility` error otherwise.
+/// A context enabling *fewer* extensions than the template declares
+/// would make every downstream evaluation ambiguous — an error could be
+/// a template defect or a context artifact. An application that does
+/// not support an extension already rejects such templates at decode
+/// via `supported_extensions`; the convenient "do what the template
+/// says" context is [`JobTemplate::default_validation_context`], with
+/// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
+/// layered on for caller policy (e.g. "enforce stricter caller limits
+/// on this queue").
 ///
 /// When `ctx.caller_limits.max_task_count` is set, the total task count
 /// across all steps is checked after parameter spaces are resolved.
@@ -88,6 +94,38 @@ pub fn create_job(
     job_parameter_values: &JobParameterValues,
     ctx: &ValidationContext,
 ) -> Result<job::Job, ModelError> {
+    // The context must be compatible with what the template declares:
+    // same revision, and at least the template's extensions enabled.
+    // Anything less makes the evaluation passes below ambiguous (an
+    // error could be a context artifact instead of a template defect),
+    // which is why evaluation errors can be reported strictly.
+    let template_profile = job_template.profile();
+    // Unreachable until a second SpecificationRevision variant exists
+    // (V2023_09 is the only one today, so both sides are always equal);
+    // written now so revision coverage doesn't silently go missing when
+    // one is added. No test can pin this error message until then.
+    if ctx.profile.revision() != template_profile.revision() {
+        return Err(ModelError::Compatibility(format!(
+            "create_job requires a context matching the template's specification revision: \
+             the template is {}, but the context is {}.",
+            template_profile.revision(),
+            ctx.profile.revision(),
+        )));
+    }
+    let missing: Vec<&str> = crate::types::ModelExtension::ALL
+        .iter()
+        .filter(|e| template_profile.has_extension(**e) && !ctx.profile.has_extension(**e))
+        .map(|e| e.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(ModelError::Compatibility(format!(
+            "create_job requires a context enabling every extension the template declares: \
+             missing {}. An application that does not support an extension should reject \
+             the template at decode via its supported-extensions list.",
+            missing.join(", "),
+        )));
+    }
+
     // Validate parameter values against template constraints.
     let merged = parameters::merge_job_parameter_definitions(job_template, &[])?;
     for param in &merged {

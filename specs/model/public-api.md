@@ -178,7 +178,12 @@ checks on the carried-forward session/task-scope fields
 limit from [`CallerLimits`], and returns the complete [`job::Job`]. The
 `ctx` it takes is a full [`ValidationContext`] — i.e. revision +
 extensions + caller limits — and callers commonly get one from
-[`JobTemplate::default_validation_context`]. Every expression
+[`JobTemplate::default_validation_context`]. The context's revision
+must match the template's and its extensions must cover every
+extension the template declares (enabling more is allowed);
+`create_job` returns a `Compatibility` error otherwise. An application
+that does not support an extension rejects such templates at decode
+via `supported_extensions` instead. Every expression
 evaluation it performs runs under the caller's evaluation budgets
 (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`).
 
