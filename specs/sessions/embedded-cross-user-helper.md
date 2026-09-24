@@ -323,12 +323,14 @@ fn run_command(
         // cancel a running action.
         if stdin ready { read line, parse Command::Cancel(sig), verify token, killpg, child_killed = true }
 
-        // Child output → send {"out": line}
-        if child ready { read line, send }
+        // Child output → one bounded fill_buf chunk through LineFramer,
+        // each completed line sent as {"out": line}, then back to poll
+        if child ready { fill_buf (retry on EINTR); framer.push(chunk, emit); consume }
 
         // Child exited (POLLHUP or try_wait after kill)
-        // Kill process group to clean up descendants (e.g. grandchild shells)
-        if child done { killpg(child_pgid, SIGKILL); return child.wait().code() }
+        // Kill process group first (closes write ends held by group members),
+        // then drain buffered output and flush the trailing partial line
+        if child done { killpg(child_pgid, SIGKILL); drain; framer.finish(emit); return child.wait().code() }
     }
 }
 ```
@@ -339,8 +341,14 @@ Key details:
 - After `killpg`, uses `try_wait()` with a 100ms poll timeout to detect exit
   even when POLLHUP isn't delivered
 - Checks `POLLHUP | POLLERR` for child stdout close
-- Drains remaining buffered output before returning exit code
+- Drains remaining buffered output through the framer and flushes the
+  trailing partial line before returning the exit code
 - Kills the child's process group on exit to clean up descendants
+- Child stdout is read in bounded chunks (one `fill_buf` per `POLLIN`, EINTR
+  retried) and framed by `LineFramer`: lines capped at 64 KiB, invalid UTF-8
+  escaped as `\xNN`, JSON payload capped at the 128 KiB response limit. This
+  keeps the loop returning to `poll(2)` so cancel stays responsive on
+  newline-free output, and bounds per-line memory. See `framer.rs`.
 - Every cancel line read inside the runner is passed through the same
   constant-time token check the main loop uses. The Windows runner
   (`runner_win.rs`) receives already-validated `CancelMethod` values
