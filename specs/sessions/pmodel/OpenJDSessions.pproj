@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectName>OpenJDSessions</ProjectName>
+  <InputFiles>
+    <PFile>PSrc</PFile>
+    <PFile>PSpec</PFile>
+    <PFile>PTst</PFile>
+  </InputFiles>
+  <OutputDir>PGenerated</OutputDir>
+</Project>
