@@ -16,19 +16,25 @@ pub struct HostRequirements {
 }
 
 /// §3.3.1 AmountRequirement
+///
+/// `name` is `@fmtstring`: a name containing expressions is resolved, and
+/// its §3.3.1.1 constraints checked, at job creation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AmountRequirement {
-    pub name: String,
+    pub name: FormatString,
     pub min: Option<FormatString>,
     pub max: Option<FormatString>,
 }
 
 /// §3.3.2 AttributeRequirement
+///
+/// `name` is `@fmtstring`: a name containing expressions is resolved, and
+/// its §3.3.2.1 constraints checked, at job creation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AttributeRequirement {
-    pub name: String,
+    pub name: FormatString,
     pub any_of: Option<Vec<FormatString>>,
     pub all_of: Option<Vec<FormatString>>,
 }

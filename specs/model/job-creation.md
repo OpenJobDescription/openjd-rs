@@ -162,6 +162,18 @@ budgets template validation and the session runtime apply.
      empty or control-character-bearing value — what remains only knowable here is
      an emptiness or control character *introduced by an interpolated value*.
    - Step names
+   - Host requirement names. Each amount and attribute `name` is `@fmtstring`
+     (§3.3.1 / §3.3.2) and resolves with target type `string`
+     (`resolve_capability_name`). The resolved name is checked against
+     §3.3.1.1 / §3.3.2.1 — at most 100 characters, the capability name pattern,
+     and the reserved scopes — through `helpers::check_capability_name`, the check
+     decode applies to a literal name and pass 8 to a fully static one, so the
+     wording matches. The resolved names are then checked for uniqueness within
+     `amounts` and within `attributes`, case-insensitively
+     (`check_resolved_names_unique`, §3.3), and the resolved name is what the
+     standard-capability value checks below and the job use. Decode can only
+     check a name it knows — a literal, or one that is fully static — so a name
+     depending on a job parameter is first checked here.
    - Host requirement values (amounts min/max, attribute values). Resolved amount bounds
      must be finite `f64` values; non-numeric, NaN, and infinite results are rejected.
      Resolved `attributes[].anyOf` / `.allOf` elements are re-checked against

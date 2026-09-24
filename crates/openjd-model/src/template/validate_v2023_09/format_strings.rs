@@ -23,6 +23,8 @@ use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
 use crate::types::{ModelExtension, ValidationContext};
 
+use super::helpers;
+
 /// Maximum length of a `let` binding's `<UserIdentifier>` (§3.6.1).
 ///
 /// Flat, so not `EffectiveLimits::max_identifier_len`: that is the §7.1 cap, 64
@@ -364,6 +366,16 @@ enum ResolvedConstraint<'a> {
         capability_name: &'a str,
         standard: &'static [(&'static str, &'static [&'static str])],
     },
+    /// A `hostRequirements` amount or attribute `name` (§3.3.1.1 /
+    /// §3.3.2.1): at most 100 characters, and when fully static, the
+    /// capability name pattern for `kind` and the reserved scopes, checked
+    /// by [`helpers::check_capability_name`] exactly as for a literal name
+    /// and the resolved name at job creation. `standard` holds the
+    /// standard capability names for `kind`.
+    CapabilityName {
+        kind: helpers::CapabilityKind,
+        standard: &'a [&'a str],
+    },
     /// An integer field (`<posintstring>` / `<intstring>`), resolved
     /// with target `int` — or `int?` when `nullable`, where a
     /// whole-field `null` resolution means the field is unset (schema
@@ -422,7 +434,7 @@ impl ResolvedConstraint<'_> {
     /// `openjd-sessions`).
     fn target_type(&self) -> Option<ExprType> {
         match self {
-            Self::Text { .. } => Some(ExprType::STRING),
+            Self::Text { .. } | Self::CapabilityName { .. } => Some(ExprType::STRING),
             Self::TextListItem { .. } | Self::AttributeValue { .. } => Some(ExprType::union(vec![
                 ExprType::NULLTYPE,
                 ExprType::STRING,
@@ -675,6 +687,27 @@ fn check_resolved_constraint(
                 }
             }
         }
+        ResolvedConstraint::CapabilityName { kind, standard } => {
+            // Fully static: run the check job creation runs on the resolved
+            // name. It includes the length, so the bound below would only
+            // report the same violation twice.
+            if let Some(name) = static_text() {
+                helpers::check_capability_name(&name, *kind, standard, path, errors);
+                return;
+            }
+            // The target type is `string`, so the resolution is certainly a
+            // string and the bound applies. The pattern and reserved-scope
+            // checks need the whole name, so job creation applies them.
+            if sr.min_resolved_string_len > 100 {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of 100.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+            }
+        }
         ResolvedConstraint::Int {
             min,
             min_msg,
@@ -865,10 +898,112 @@ fn validate_fs(
     validate_fs_with(fs, symtab, ev, path, None, errors);
 }
 
+/// A `hostRequirements` capability name whose value template validation
+/// knows: a literal, or a format string that is fully static.
+struct KnownCapabilityName {
+    name: String,
+    /// Structure already checked a literal name, including its uniqueness
+    /// against the other literal names.
+    literal: bool,
+}
+
+/// The value of a capability name, when template validation knows it. `sr`
+/// is what [`validate_fs_with`] returned for the name.
+fn known_capability_name(
+    name: &FormatString,
+    sr: Option<&openjd_expr::StaticResolution>,
+) -> Option<KnownCapabilityName> {
+    if name.is_literal() {
+        return Some(KnownCapabilityName {
+            name: name.raw().to_string(),
+            literal: true,
+        });
+    }
+    match sr?.resolved_value.as_ref()? {
+        ExprValue::Null => None,
+        v => Some(KnownCapabilityName {
+            name: v.to_display_string(),
+            literal: false,
+        }),
+    }
+}
+
+/// Check the §3.3 constraint that no two amounts, and no two attributes,
+/// have the same resolved name, for the names template validation knows.
+///
+/// Structure reports duplicates between literal names, so a pair is only
+/// reported here when at least one of its names is fully static. A name
+/// that is not known yet is compared at job creation. Comparison is
+/// case-insensitive, and the message matches the one for literal names.
+fn check_known_names_unique(
+    known: &[Option<KnownCapabilityName>],
+    kind: helpers::CapabilityKind,
+    list_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let mut seen: Vec<(String, bool)> = Vec::new();
+    for (index, k) in known.iter().enumerate() {
+        let Some(k) = k else { continue };
+        let lower = k.name.to_lowercase();
+        if seen
+            .iter()
+            .any(|(name, literal)| *name == lower && !(*literal && k.literal))
+        {
+            errors.add(
+                &path_index(list_path, index),
+                format!("duplicate {} name '{}'.", kind.noun(), k.name),
+            );
+        }
+        seen.push((lower, k.literal));
+    }
+}
+
+/// Apply the standard-capability checks on an attribute's literal values
+/// when its name is fully static.
+///
+/// Structure applies these for a literal name and cannot see a static one,
+/// and the `AttributeValue` constraint skips literal values. The checks are
+/// the ones job creation runs on the resolved values: membership in the
+/// standard capability's allowed values, and the single-valued `allOf`
+/// rule. A static name that is not a standard capability needs nothing
+/// here, since structure already checked the literal values' pattern.
+fn check_values_for_static_name(
+    capability_name: &str,
+    attr: &AttributeRequirement,
+    standard: &[(&str, &[&str])],
+    attr_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let lower = capability_name.to_lowercase();
+    if !standard.iter().any(|(name, _)| *name == lower) {
+        return;
+    }
+    for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
+        for (k, v) in vals.iter().flatten().enumerate() {
+            if !v.is_literal() {
+                continue;
+            }
+            if let Err(message) = crate::capabilities::validate_attribute_capability_value(
+                capability_name,
+                v.raw(),
+                standard,
+            ) {
+                errors.add(&path_index(&path_field(attr_path, field), k), message);
+            }
+        }
+    }
+    helpers::check_single_valued_all_of(capability_name, attr.all_of.as_deref(), attr_path, errors);
+}
+
 /// [`validate_fs`] plus a spec-mandated resolved-value constraint
 /// (see the Spec-Mandated Resolved-Value Constraints section of
 /// `specs/model/validation.md`), applied to the
 /// [`openjd_expr::StaticResolution`] the validation already computes.
+///
+/// Returns that resolution, so a caller can apply checks that span more
+/// than one field — such as the uniqueness of `hostRequirements` names —
+/// to the values that are fully static. `None` for a literal (its raw text
+/// is its value) or when the expressions fail to validate.
 fn validate_fs_with(
     fs: &FormatString,
     symtab: &SymbolTable,
@@ -876,7 +1011,7 @@ fn validate_fs_with(
     path: &[PathElement],
     constraint: Option<&ResolvedConstraint<'_>>,
     errors: &mut ValidationErrors,
-) {
+) -> Option<openjd_expr::StaticResolution> {
     if fs.is_literal() {
         // Spec-mandated constraints are covered for literal fields by the
         // raw-text passes (structure/limits) — raw text and resolved value
@@ -897,7 +1032,7 @@ fn validate_fs_with(
                 );
             }
         }
-        return;
+        return None;
     }
     let target = constraint.and_then(ResolvedConstraint::target_type);
     match fs.validate_expressions(symtab, &ev.options(target.as_ref())) {
@@ -905,6 +1040,7 @@ fn validate_fs_with(
             if let Some(c) = constraint {
                 check_resolved_constraint(&sr, c, path, errors);
             }
+            Some(sr)
         }
         Err(e) => {
             let mut spans = Vec::new();
@@ -950,6 +1086,7 @@ fn validate_fs_with(
                 ),
                 detail,
             );
+            None
         }
     }
 }
@@ -1205,6 +1342,12 @@ pub fn validate_format_strings(
             ctx.profile.extensions(),
         )
         .unwrap_or(&[]);
+    let standard_attr_names: Vec<&str> = standard_attrs.iter().map(|(name, _)| *name).collect();
+    let standard_amounts: &[&str] = crate::capabilities::standard_amount_capability_names(
+        ctx.profile.revision(),
+        ctx.profile.extensions(),
+    )
+    .unwrap_or(&[]);
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
@@ -1250,9 +1393,31 @@ pub fn validate_format_strings(
                 }
             }
             let hr_path = path_field(&step_path, "hostRequirements");
+            // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
+            // constraints apply to the resolved name. The name's
+            // expressions are checked against the symbols available when it
+            // is resolved at job creation, and the `CapabilityName`
+            // constraint runs the full name check when the name is fully
+            // static. Structure checks literal names, and job creation
+            // checks the resolved name.
             if let Some(amounts) = &hr.amounts {
+                let amounts_path = path_field(&hr_path, "amounts");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Amount,
+                    standard: standard_amounts,
+                };
+                let mut known_names = Vec::with_capacity(amounts.len());
                 for (j, amt) in amounts.iter().enumerate() {
-                    let amt_path = path_index(&path_field(&hr_path, "amounts"), j);
+                    let amt_path = path_index(&amounts_path, j);
+                    let sr = validate_fs_with(
+                        &amt.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&amt_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    known_names.push(known_capability_name(&amt.name, sr.as_ref()));
                     if let Some(min) = &amt.min {
                         validate_fs_with(
                             min,
@@ -1280,12 +1445,46 @@ pub fn validate_format_strings(
                         );
                     }
                 }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Amount,
+                    &amounts_path,
+                    errors,
+                );
             }
             if let Some(attrs) = &hr.attributes {
+                let attrs_path = path_field(&hr_path, "attributes");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Attribute,
+                    standard: &standard_attr_names,
+                };
+                let mut known_names = Vec::with_capacity(attrs.len());
                 for (j, attr) in attrs.iter().enumerate() {
-                    let attr_path = path_index(&path_field(&hr_path, "attributes"), j);
+                    let attr_path = path_index(&attrs_path, j);
+                    let sr = validate_fs_with(
+                        &attr.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&attr_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    let known = known_capability_name(&attr.name, sr.as_ref());
+                    // The values are checked against the name when it is
+                    // known here, and against the resolved name at job
+                    // creation otherwise.
+                    let capability_name = known.as_ref().map_or("", |k| k.name.as_str());
+                    if let Some(k) = known.as_ref().filter(|k| !k.literal) {
+                        check_values_for_static_name(
+                            &k.name,
+                            attr,
+                            standard_attrs,
+                            &attr_path,
+                            errors,
+                        );
+                    }
                     let attr_constraint = ResolvedConstraint::AttributeValue {
-                        capability_name: &attr.name,
+                        capability_name,
                         standard: standard_attrs,
                     };
                     if let Some(any_of) = &attr.any_of {
@@ -1312,7 +1511,14 @@ pub fn validate_format_strings(
                             );
                         }
                     }
+                    known_names.push(known);
                 }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Attribute,
+                    &attrs_path,
+                    errors,
+                );
             }
         }
     }

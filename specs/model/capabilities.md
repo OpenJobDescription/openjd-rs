@@ -62,7 +62,10 @@ Two exclusive branches, matching the reference implementation:
 
 Called from the job-creation path for `attributes[].anyOf` / `.allOf` elements whose
 value was a format string, because §3.3.2.2 cannot be applied to those at decode. See
-[job-creation.md](job-creation.md).
+[job-creation.md](job-creation.md). Template validation (pass 8) also calls it for a
+format-string element whose value is fully static, and for the literal values of an
+attribute whose name is a fully static standard capability name. See
+[validation.md](validation.md).
 
 ## Implementation Note
 

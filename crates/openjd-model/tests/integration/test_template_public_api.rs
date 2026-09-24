@@ -200,10 +200,10 @@ fn step_template_full_surface() {
 
     let hr: &HostRequirements = s.host_requirements.as_ref().unwrap();
     let amount: &AmountRequirement = &hr.amounts.as_ref().unwrap()[0];
-    assert_eq!(amount.name, "amount.worker.vcpu");
+    assert_eq!(amount.name.raw(), "amount.worker.vcpu");
     assert_eq!(amount.min.as_ref().unwrap().raw(), "4");
     let attr: &AttributeRequirement = &hr.attributes.as_ref().unwrap()[0];
-    assert_eq!(attr.name, "attr.worker.os.family");
+    assert_eq!(attr.name.raw(), "attr.worker.os.family");
     assert_eq!(attr.any_of.as_ref().unwrap()[0].raw(), "linux");
 
     let script: &StepScript = s.script.as_ref().unwrap();

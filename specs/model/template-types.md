@@ -243,17 +243,21 @@ pub struct HostRequirements {
 }
 
 pub struct AmountRequirement {
-    pub name: String,
+    pub name: FormatString,
     pub min: Option<FormatString>,
     pub max: Option<FormatString>,
 }
 
 pub struct AttributeRequirement {
-    pub name: String,
+    pub name: FormatString,
     pub any_of: Option<Vec<FormatString>>,
     pub all_of: Option<Vec<FormatString>>,
 }
 ```
+
+`name` is `@fmtstring` (§3.3.1 / §3.3.2): it is resolved at job creation, and
+the §3.3.1.1 / §3.3.2.1 constraints apply to the resolved name. The job types
+carry the resolved name as a `String`.
 
 ## Task Parameter Space (§3.4)
 

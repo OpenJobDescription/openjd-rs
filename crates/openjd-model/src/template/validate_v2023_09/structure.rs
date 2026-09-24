@@ -565,25 +565,24 @@ fn validate_host_requirements(
         let mut names = HashSet::new();
         for (i, amt) in amounts.iter().enumerate() {
             let amt_path = path_index(&amounts_path, i);
-            if !names.insert(amt.name.to_lowercase()) {
-                errors.add(&amt_path, format!("duplicate amount name '{}'.", amt.name));
-            }
-            if amt.name.chars().count() > 100 {
-                errors.add(
+            // `name` is `@fmtstring` (§3.3.1), and its §3.3.1.1
+            // constraints apply to the resolved name. A literal is its own
+            // resolved name, so it is checked here. Pass 8 checks a name
+            // that is fully static, and job creation checks the resolved
+            // name, including uniqueness.
+            if amt.name.is_literal() {
+                let name = amt.name.raw();
+                if !names.insert(name.to_lowercase()) {
+                    errors.add(&amt_path, format!("duplicate amount name '{name}'."));
+                }
+                check_capability_name(
+                    name,
+                    CapabilityKind::Amount,
+                    standard_amounts,
                     &amt_path,
-                    format!("name '{}' exceeds 100 characters.", amt.name),
+                    errors,
                 );
             }
-            if !AMOUNT_CAP_RE.is_match(&amt.name) {
-                errors.add(
-                    &amt_path,
-                    format!(
-                        "name '{}' does not match capability name pattern.",
-                        amt.name
-                    ),
-                );
-            }
-            check_capability_reserved_scope(&amt.name, standard_amounts, &amt_path, errors);
             if amt.min.is_none() && amt.max.is_none() {
                 errors.add(&amt_path, "must have at least one of min or max.");
             }
@@ -640,28 +639,24 @@ fn validate_host_requirements(
         let mut names = HashSet::new();
         for (i, attr) in attrs.iter().enumerate() {
             let attr_path = path_index(&attrs_path, i);
-            if !names.insert(attr.name.to_lowercase()) {
-                errors.add(
+            // `name` is `@fmtstring` (§3.3.2), and its §3.3.2.1
+            // constraints apply to the resolved name. A literal is its own
+            // resolved name, so it is checked here. Pass 8 checks a name
+            // that is fully static, and job creation checks the resolved
+            // name, including uniqueness.
+            if attr.name.is_literal() {
+                let name = attr.name.raw();
+                if !names.insert(name.to_lowercase()) {
+                    errors.add(&attr_path, format!("duplicate attribute name '{name}'."));
+                }
+                check_capability_name(
+                    name,
+                    CapabilityKind::Attribute,
+                    standard_attrs,
                     &attr_path,
-                    format!("duplicate attribute name '{}'.", attr.name),
+                    errors,
                 );
             }
-            if attr.name.chars().count() > 100 {
-                errors.add(
-                    &attr_path,
-                    format!("name '{}' exceeds 100 characters.", attr.name),
-                );
-            }
-            if !ATTR_CAP_RE.is_match(&attr.name) {
-                errors.add(
-                    &attr_path,
-                    format!(
-                        "name '{}' does not match capability name pattern.",
-                        attr.name
-                    ),
-                );
-            }
-            check_capability_reserved_scope(&attr.name, standard_attrs, &attr_path, errors);
             if attr.any_of.is_none() && attr.all_of.is_none() {
                 errors.add(&attr_path, "must have at least one of anyOf or allOf.");
             }
@@ -703,35 +698,18 @@ fn validate_host_requirements(
                     }
                 }
             }
-            // Standard capability value checks
-            let attr_lower = attr.name.to_lowercase();
-            let is_single_valued =
-                attr_lower == "attr.worker.os.family" || attr_lower == "attr.worker.cpu.arch";
-            if is_single_valued {
-                if let Some(vals) = &attr.all_of {
-                    // Counted on the elements that certainly contribute
-                    // exactly one resolved element: literals, and
-                    // multi-segment format strings (which always
-                    // concatenate to a single string — Expression
-                    // Language §1.3.2). Only a whole-field
-                    // single-expression element can null-skip or
-                    // list-flatten, so its contribution is unknowable
-                    // here and job creation re-checks the resolved
-                    // count. Two or more certain elements violate the
-                    // single-valued rule under every possible
-                    // resolution. The generic 50-element cap above is
-                    // not relaxed — it applies to the template element
-                    // count regardless of expressions, so a deferred
-                    // single-valued list is still bounded here.
-                    let certain = |v: &crate::FormatString| v.is_literal() || v.segment_count() > 1;
-                    if vals.iter().filter(|v| certain(v)).count() > 1 {
-                        errors.add(
-                            &path_field(&attr_path, "allOf"),
-                            "single-valued attribute cannot have more than 1 element.",
-                        );
-                    }
-                }
-            }
+            // Standard capability value checks, for a literal name. Pass 8
+            // applies them for a name that is fully static, and job creation
+            // for the resolved name.
+            let attr_lower = if attr.name.is_literal() {
+                attr.name.raw().to_lowercase()
+            } else {
+                String::new()
+            };
+            // The generic 50-element cap above is not relaxed — it applies
+            // to the template element count regardless of expressions, so a
+            // deferred single-valued list is still bounded here.
+            check_single_valued_all_of(&attr_lower, attr.all_of.as_deref(), &attr_path, errors);
             if attr_lower == "attr.worker.os.family" {
                 let valid = ["linux", "windows", "macos"];
                 for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
