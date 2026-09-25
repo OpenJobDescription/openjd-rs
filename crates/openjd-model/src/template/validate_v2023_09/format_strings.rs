@@ -827,8 +827,9 @@ fn check_resolved_constraint(
 /// Every evaluation runs under `PathFormat::Posix`: template validation
 /// and job creation happen outside host context, where the model keeps
 /// all paths POSIX (only `openjd-sessions` evaluates under
-/// `PathFormat::host()` — see the Path Parameters section of
-/// `specs/model/job-creation.md`). This keeps the two stages consistent
+/// `PathFormat::host()` — see `preprocess_job_parameters` in
+/// `specs/model/job-creation.md`, which explains why paths stay POSIX
+/// until template evaluation on the host). This keeps the two stages consistent
 /// with each other and with the POSIX-format values `create_job` seeds
 /// into its check symbol tables, and makes validation outcomes
 /// independent of the OS running them.

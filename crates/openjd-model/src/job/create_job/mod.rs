@@ -112,11 +112,17 @@ pub fn create_job(
             ctx.profile.revision(),
         )));
     }
-    let missing: Vec<&str> = crate::types::ModelExtension::ALL
+    // Iterate the template's own extension set rather than
+    // `ModelExtension::ALL`: exhaustive by construction, so a future
+    // variant omitted from `ALL` cannot escape the check. Sorted so the
+    // message is deterministic (the set is a HashSet).
+    let mut missing: Vec<&str> = template_profile
+        .extensions()
         .iter()
-        .filter(|e| template_profile.has_extension(**e) && !ctx.profile.has_extension(**e))
+        .filter(|e| !ctx.profile.has_extension(**e))
         .map(|e| e.as_str())
         .collect();
+    missing.sort_unstable();
     if !missing.is_empty() {
         return Err(ModelError::Compatibility(format!(
             "create_job requires a context enabling every extension the template declares: \
