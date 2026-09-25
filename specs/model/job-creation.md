@@ -253,7 +253,7 @@ time, with everything only a session can know left `Unresolved`:
   here, deterministically, rather than in every session).
 - **Session scope** (job and step environments): as above minus
   `Task.*`, plus this environment's `Env.File.*` (`Unresolved`) and its
-  script-level `let` bindings evaluated in via `evaluate_let_bindings`.
+  script-level `let` bindings evaluated in.
   An environment `let` binding that fails to evaluate fails job
   creation, under the same error policy as every other evaluation this
   stage performs (see below): the bindings only evaluate when the
@@ -261,6 +261,25 @@ time, with everything only a session can know left `Unresolved`:
   at pass 8 with everything unresolved, so a failure here comes from
   the real parameter values and would deterministically recur in every
   session that enters the environment.
+
+Both scopes evaluate their script-level `let` bindings through one
+shared path: each binding is **parsed under the context's host
+profile** — the same profile pass 8 parsed it with, never the latest
+profile, so syntax the profile does not enable is refused here exactly
+as at template validation (and a crate upgrade cannot make job creation
+accept what pass 8 refused, or vice versa) — then evaluated under
+`PathFormat::Posix` with the caller's budgets. Failures from either
+scope carry the same `script let binding '<name>': <error>` diagnostic,
+with the caret aligned to the bare expression (pass 8 and the run-time
+path align it to the full `name = expr` binding string; the check path
+reports the expression alone because its message already names the
+binding). Structurally malformed bindings — no `=`, empty name, empty
+expression — are skipped rather than reported: pass 8 rejects all three
+at decode, so they cannot reach a template that came through
+`decode_job_template`, and a hand-built `JobTemplate` that bypassed
+decode still fails on them at run time. The public
+`evaluate_let_bindings` (below) is the run-time entry point used by
+`openjd-sessions` and `openjd-for-js`; the check symtabs do not use it.
 
 Failures are `ModelError::ModelValidation` at the same field paths
 pass 8 uses, e.g.

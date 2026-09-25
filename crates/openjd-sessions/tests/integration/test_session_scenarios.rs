@@ -206,20 +206,7 @@ async fn run_scenario(scenario_path: &Path) {
     .unwrap_or_else(|e| panic!("Failed to preprocess params for '{}': {e}", scenario.name));
 
     // Create job
-    let ctx = {
-        let mut exts = std::collections::HashSet::new();
-        if let Some(ext_list) = &job_template.extensions {
-            exts.extend(
-                ext_list
-                    .iter()
-                    .filter_map(|e| e.as_str().parse::<openjd_model::ModelExtension>().ok()),
-            );
-        }
-        openjd_model::ValidationContext::with_extensions(
-            openjd_model::SpecificationRevision::V2023_09,
-            exts,
-        )
-    };
+    let ctx = job_template.default_validation_context();
     let job = create_job(&job_template, &job_params, &ctx)
         .unwrap_or_else(|e| panic!("Failed to create job for '{}': {e}", scenario.name));
 

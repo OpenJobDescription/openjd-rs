@@ -415,6 +415,17 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   A filter whose *type* can never be a boolean is still an error on
   both paths.
 - Operation count: +1 per iteration
+- Each iteration's child evaluator hands its counters (memory
+  high-water mark, operation count) back to the parent on **every**
+  exit — including when the filter or body errors, and before the
+  result push's budget pre-check. A failing iteration has still spent
+  its memory and operations in this evaluation; if an enclosing
+  construct absorbs the error (an unresolved-test conditional or
+  boolop) and continues, the parent's counters must include that
+  spend, or every absorbed comprehension failure evaluates
+  under-metered. Absorbing before the push also means a push-time
+  exceedance reports the loop variable's clone, which is still live in
+  the iteration's scope at that moment.
 - Iterates lists without copying and symbolic ranges lazily
 - Pre-checks the growing result vector's values and projected capacity against the memory limit
 
