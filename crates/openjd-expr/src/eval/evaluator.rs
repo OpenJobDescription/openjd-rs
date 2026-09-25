@@ -1411,6 +1411,22 @@ impl<'a> Evaluator<'a> {
         self.operation_count = child.operation_count;
     }
 
+    /// Absorb a child's counters and then pass its result through —
+    /// on the error path too. A failing child has still spent memory
+    /// and operations in this evaluation; if the caller of this
+    /// comprehension absorbs the error (an unresolved-test conditional
+    /// or boolop absorbing a value error) and continues, the parent's
+    /// counters must include that spend or the budget under-meters
+    /// every subsequent absorbed failure.
+    fn absorb_and_pass<T>(
+        &mut self,
+        child: &Evaluator,
+        result: Result<T, ExpressionError>,
+    ) -> Result<T, ExpressionError> {
+        self.absorb_counters(child);
+        result
+    }
+
     /// Conclude a list comprehension whose result cannot be computed at
     /// this stage — because the iterable is unresolved, or because the
     /// filter evaluated to an unresolved condition on a concrete
@@ -1435,7 +1451,8 @@ impl<'a> Evaluator<'a> {
         let mut child = self.child_evaluator(&combined);
         // Check filter clause type if present
         if let Some(if_clause) = if_clause {
-            let cond = child.evaluate(if_clause)?;
+            let cond = child.evaluate(if_clause);
+            let cond = self.absorb_and_pass(&child, cond)?;
             let cond_inner = unwrap_unresolved(&cond.expr_type());
             let is_bool_compatible = cond_inner == ExprType::BOOL
                 || cond_inner.code() == crate::types::TypeCode::Unresolved
@@ -1454,8 +1471,8 @@ impl<'a> Evaluator<'a> {
                 });
             }
         }
-        let body_val = child.evaluate(&lc.elt)?;
-        self.absorb_counters(&child);
+        let body_val = child.evaluate(&lc.elt);
+        let body_val = self.absorb_and_pass(&child, body_val)?;
         let body_type = unwrap_unresolved(&body_val.expr_type());
         self.track(ExprValue::unresolved(ExprType::list(body_type)))
     }
@@ -1561,7 +1578,17 @@ impl<'a> Evaluator<'a> {
             child.regex_cache = std::mem::take(&mut self.regex_cache);
             let mut include = true;
             if let Some(if_clause) = gen.ifs.first() {
-                let cond = child.evaluate(if_clause)?;
+                let cond = match child.evaluate(if_clause) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        // The child's spend counts even though it
+                        // failed (see `absorb_and_pass`); the regex
+                        // cache moved into the child comes back too.
+                        self.absorb_counters(&child);
+                        self.regex_cache = child.regex_cache;
+                        return Err(e);
+                    }
+                };
                 if let ExprValue::Bool(b) = cond {
                     include = b;
                 } else if cond.is_unresolved() {
@@ -1577,6 +1604,8 @@ impl<'a> Evaluator<'a> {
                     filter_unresolved = true;
                     break;
                 } else {
+                    self.absorb_counters(&child);
+                    self.regex_cache = child.regex_cache;
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
                         cond.expr_type()
@@ -1588,12 +1617,22 @@ impl<'a> Evaluator<'a> {
                     });
                 }
             }
-            if include {
-                let elt = child.eval_node(&lc.elt, elem_target.as_ref())?;
-                result.push(self, elt)?;
-            }
+            let elt = if include {
+                child.eval_node(&lc.elt, elem_target.as_ref()).map(Some)
+            } else {
+                Ok(None)
+            };
+            // Hand the child's counters and the regex cache back before
+            // *any* exit below — the body error, the push's budget
+            // pre-check, or the normal end of the iteration. The loop
+            // variable's clone is still live at the push, so absorbing
+            // first also makes a push-time exceedance report the true
+            // usage.
             self.absorb_counters(&child);
             self.regex_cache = child.regex_cache;
+            if let Some(elt) = elt? {
+                result.push(self, elt)?;
+            }
             // Restore the iteration baseline: the child's tracked
             // transients (the loop-variable clone and any intermediates)
             // do not survive the iteration, and the result elements are

@@ -243,8 +243,10 @@ right `ExprProfile` from a model profile.
 Every evaluation this pass performs — format-string expressions and
 `let` bindings alike — runs under `PathFormat::Posix`. Template
 validation happens outside host context, where the model keeps all
-paths POSIX (see the path-parameters discussion in
-`specs/model/job-creation.md`); only `openjd-sessions` evaluates under
+paths POSIX (see `preprocess_job_parameters` in
+`specs/model/job-creation.md`, which explains why paths stay POSIX
+until template evaluation on the host); only `openjd-sessions`
+evaluates under
 `PathFormat::host()`. This keeps pass 8 consistent with job creation's
 re-checks (which read POSIX-format values out of their check symbol
 tables) and makes validation outcomes independent of the OS running

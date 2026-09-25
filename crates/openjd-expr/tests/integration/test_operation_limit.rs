@@ -884,9 +884,10 @@ fn comprehension_over_huge_range_bounded_lazily() {
     assert_eq!(
         e,
         [
-            // 134217824 ~ 128 MiB: the Vec's projected post-doubling
-            // capacity, charged before the growth allocation happens.
-            "Expression memory usage (134217824 bytes) exceeded limit (100000000 bytes)
+            // 134217888 ~ 128 MiB: the Vec's projected post-doubling
+            // capacity, charged before the growth allocation happens,
+            // plus the 64-byte loop-variable clone live at the push.
+            "Expression memory usage (134217888 bytes) exceeded limit (100000000 bytes)
 ",
             "  [x for x in range_expr('0-4611686018427387902')]
 ",

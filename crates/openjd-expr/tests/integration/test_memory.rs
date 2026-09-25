@@ -577,10 +577,12 @@ fn comprehension_over_range_memory_bounded_incrementally() {
     assert_eq!(
         e,
         [
-            // 16480 = logical result bytes plus the Vec's projected
-            // post-doubling capacity slack: the check accounts for the
-            // buffer the push is about to allocate, not just elements.
-            "Expression memory usage (16480 bytes) exceeded limit (10000 bytes)
+            // 16544 = logical result bytes plus the Vec's projected
+            // post-doubling capacity slack (the check accounts for the
+            // buffer the push is about to allocate, not just elements)
+            // plus the 64-byte loop-variable clone, which is still live
+            // in the iteration's scope at the moment of the push.
+            "Expression memory usage (16544 bytes) exceeded limit (10000 bytes)
 ",
             "  [x for x in range_expr('1-2000000')]
 ",
@@ -983,4 +985,146 @@ fn boolop_does_not_reabsorb_budget_error_from_nested_conditional() {
         "Got: {}",
         err.message()
     );
+}
+
+/// `contains_budget_error` recurses into compound sub-errors. When
+/// *both* branches of an unresolved-test conditional fail — one with a
+/// budget exceedance, one with a value error — the conditional
+/// produces a compound "Both branches fail" error whose own kind is not
+/// a budget kind; only the recursion can see the budget exceedance
+/// inside it. Wrapped in a boolop suppression site, that compound must
+/// still propagate. (Without the recursion this test fails: the
+/// compound is swallowed as a plain value error.)
+#[test]
+fn budget_error_inside_compound_both_branches_fail_error_propagates_through_boolop() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let err = ParsedExpression::new(
+        "Session.Flag or ('A' * 10000000 if Session.Flag else int('nope')) == 'x'",
+    )
+    .and_then(|p| {
+        p.with_memory_limit(1024 * 1024)
+            .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+            .evaluate_with_metrics(&[&st])
+    })
+    .expect_err("a compound error carrying a budget exceedance must propagate");
+    let msg = err.message();
+    assert!(
+        msg.contains("Both branches fail in the if/else:"),
+        "Got: {msg}"
+    );
+    assert!(msg.contains("exceeded limit (1048576 bytes)"), "Got: {msg}");
+    assert!(msg.contains("Cannot convert 'nope' to int"), "Got: {msg}");
+}
+
+/// Control: a compound both-branches-fail error with *no* budget
+/// exceedance inside is still suppressed by the boolop.
+#[test]
+fn compound_both_branches_fail_without_budget_error_is_suppressed_by_boolop() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let result =
+        ParsedExpression::new("Session.Flag or (int('a') if Session.Flag else int('b')) == 7")
+            .and_then(|p| {
+                p.with_memory_limit(1024 * 1024)
+                    .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                    .evaluate_with_metrics(&[&st])
+            })
+            .expect("a compound value error must be suppressed");
+    assert!(result.value.is_unresolved());
+}
+
+// ══════════════════════════════════════════════════════════════
+// A failing comprehension's spend is absorbed into the parent
+// ══════════════════════════════════════════════════════════════
+
+/// A comprehension iteration that fails has still spent the memory and
+/// operations its filter/body consumed before failing. When an
+/// unresolved-test conditional absorbs the failure and continues, the
+/// parent's counters must include that spend — otherwise every absorbed
+/// comprehension failure evaluates under-metered. Observable through
+/// `peak_memory`: the failing iteration builds a 1 MB string before
+/// erroring, and that high-water mark must survive the failure.
+#[test]
+fn failing_comprehension_spend_is_absorbed_by_enclosing_conditional() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    // The body builds a 1 MB string and then fails converting it to int;
+    // the conditional absorbs the value error (Session.Flag might select
+    // the else branch at run time).
+    let result = ParsedExpression::new("[int('A' * 1000000) for x in [1]] if Session.Flag else []")
+        .and_then(|p| p.evaluate_with_metrics(&[&st]))
+        .expect("the conditional absorbs the if-branch's value error");
+    assert!(result.value.is_unresolved());
+    assert!(
+        result.peak_memory >= 1_000_000,
+        "the failed iteration's 1 MB allocation must be reflected in peak memory; got {}",
+        result.peak_memory
+    );
+}
+
+/// Shared shape for the four other absorption sites: an enclosing
+/// unresolved-test conditional swallows the comprehension's value
+/// error, and the 1 MB the failing site allocated before erroring must
+/// survive into the parent's high-water mark.
+fn assert_absorbed_spend(expr: &str) {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st.set(
+        "Session.List",
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT)),
+    )
+    .unwrap();
+    let result = ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate_with_metrics(&[&st]))
+        .unwrap_or_else(|e| panic!("the conditional must absorb the value error for {expr}: {e}"));
+    assert!(result.value.is_unresolved());
+    assert!(
+        result.peak_memory >= 1_000_000,
+        "{expr}: the failed site's 1 MB allocation must be reflected in peak memory; got {}",
+        result.peak_memory
+    );
+}
+
+/// Concrete loop, filter clause errors.
+#[test]
+fn failing_comprehension_filter_spend_is_absorbed() {
+    assert_absorbed_spend("[x for x in [1] if int('A' * 1000000) > 0] if Session.Flag else []");
+}
+
+/// Concrete loop, filter evaluates to a non-boolean (the type-error
+/// arm) after spending.
+#[test]
+fn nonbool_comprehension_filter_spend_is_absorbed() {
+    assert_absorbed_spend("[x for x in [1] if 'A' * 1000000] if Session.Flag else []");
+}
+
+/// Unresolved-iterable path, filter clause errors.
+#[test]
+fn failing_unresolved_comprehension_filter_spend_is_absorbed() {
+    assert_absorbed_spend(
+        "[x for x in Session.List if int('A' * 1000000) > 0] if Session.Flag else []",
+    );
+}
+
+/// Unresolved-iterable path, body errors.
+#[test]
+fn failing_unresolved_comprehension_body_spend_is_absorbed() {
+    assert_absorbed_spend("[int('A' * 1000000) for x in Session.List] if Session.Flag else []");
 }

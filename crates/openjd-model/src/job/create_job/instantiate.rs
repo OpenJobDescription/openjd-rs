@@ -255,6 +255,58 @@ fn add_unresolved_session_symbols(symtab: &mut SymbolTable) -> Result<(), ModelE
     Ok(())
 }
 
+/// Evaluate a script's `let` bindings into a check symbol table, for
+/// both check-symtab builders (step scripts and environments).
+///
+/// Parses under the caller's host profile — the same profile pass 8
+/// parsed the bindings with — so syntax the profile does not enable is
+/// refused here exactly as it was at template validation. (Parsing
+/// with the latest profile instead would accept at job creation what
+/// pass 8 refused, or vice versa after a crate upgrade.) Evaluates
+/// under `PathFormat::Posix` like every other job-creation evaluation,
+/// with the caller's budgets. A binding that fails to evaluate fails
+/// job creation: its expression type-checked at pass 8 with everything
+/// unresolved, so the failure comes from the real parameter values and
+/// would deterministically recur in every session.
+fn evaluate_check_let_bindings(
+    bindings: &[String],
+    check_symtab: &mut SymbolTable,
+    host_profile: &openjd_expr::ExprProfile,
+    budgets: super::EvalBudgets,
+) -> Result<(), ModelError> {
+    let host_lib = openjd_expr::FunctionLibrary::for_profile(host_profile);
+    for binding in bindings {
+        let Some(eq_pos) = binding.find('=') else {
+            continue;
+        };
+        let name = binding[..eq_pos].trim();
+        let expr = binding[eq_pos + 1..].trim();
+        if name.is_empty() || expr.is_empty() {
+            continue;
+        }
+        let parsed = openjd_expr::eval::ParsedExpression::with_profile(expr, host_profile)
+            .map_err(|e| {
+                ModelError::Expression(ExpressionError::new(format!(
+                    "script let binding '{name}': {e}"
+                )))
+            })?;
+        let val = budgeted(
+            parsed
+                .with_path_format(PathFormat::Posix)
+                .with_library(&host_lib),
+            budgets,
+        )
+        .evaluate(&[check_symtab as &SymbolTable])
+        .map_err(|e| {
+            ModelError::Expression(ExpressionError::new(format!(
+                "script let binding '{name}': {e}"
+            )))
+        })?;
+        check_symtab.set(name, val)?;
+    }
+    Ok(())
+}
+
 /// Build the check symbol table for a step script's carried-forward
 /// format strings (task scope): the step's symtab (concrete `Param.*` /
 /// `RawParam.*` / `Job.Name` / `Step.Name` / step-level `let`
@@ -321,35 +373,7 @@ fn build_task_check_symtab(
             let host_profile = ctx
                 .profile
                 .to_expr_profile(openjd_expr::HostContext::Unresolved);
-            let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
-            for binding in bindings {
-                if let Some(eq_pos) = binding.find('=') {
-                    let name = binding[..eq_pos].trim();
-                    let expr = binding[eq_pos + 1..].trim();
-                    if !name.is_empty() && !expr.is_empty() {
-                        let parsed =
-                            openjd_expr::eval::ParsedExpression::with_profile(expr, &host_profile)
-                                .map_err(|e| {
-                                    ModelError::Expression(ExpressionError::new(format!(
-                                        "script let binding '{name}': {e}"
-                                    )))
-                                })?;
-                        let val = budgeted(
-                            parsed
-                                .with_path_format(PathFormat::Posix)
-                                .with_library(&host_lib),
-                            budgets,
-                        )
-                        .evaluate(&[&check_symtab as &SymbolTable])
-                        .map_err(|e| {
-                            ModelError::Expression(ExpressionError::new(format!(
-                                "script let binding '{name}': {e}"
-                            )))
-                        })?;
-                        check_symtab.set(name, val)?;
-                    }
-                }
-            }
+            evaluate_check_let_bindings(bindings, &mut check_symtab, &host_profile, budgets)?;
         }
     }
 
@@ -394,15 +418,7 @@ pub(super) fn build_env_check_symtab(
                 let host_profile = ctx
                     .profile
                     .to_expr_profile(openjd_expr::HostContext::Unresolved);
-                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
-                symtab = evaluate_let_bindings(
-                    bindings,
-                    &symtab,
-                    Some(&host_lib),
-                    PathFormat::Posix,
-                    budgets.memory,
-                    budgets.operations,
-                )?;
+                evaluate_check_let_bindings(bindings, &mut symtab, &host_profile, budgets)?;
             }
         }
     }
