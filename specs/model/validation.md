@@ -115,6 +115,17 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
   parse as finite numbers; validation of values containing expressions is deferred until
   job creation.
 
+  A capability `name` is `@fmtstring` (§3.3.1 / §3.3.2), and its §3.3.1.1 / §3.3.2.1
+  constraints — at most 100 characters, the capability name pattern, and the reserved
+  scopes — apply to the resolved name. `helpers::check_capability_name` applies them in
+  three places, so the wording matches: here for a literal name, in pass 8 for a name
+  that is fully static (see the resolved-value table below), and at job creation for
+  the resolved name. Uniqueness within `amounts` and within `attributes` is checked
+  here between literal names, in pass 8 for any pair that includes a fully static name,
+  and at job creation between the resolved names. The standard-capability value checks
+  and the single-valued rule below key off the name, so they run for a literal name
+  here, for a fully static name in pass 8, and for every other name at job creation.
+
   Two deferrals behave differently, so they are worth stating separately. An
   `attributes[].anyOf` / `.allOf` element that is a format string skips the
   `<AttributeCapabilityValue>` pattern, length and standard-value checks here, and job
@@ -264,6 +275,7 @@ deferring it to job submission or the worker. Two stages of checking:
 |---|---|---|---|
 | job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | non-empty (§1.1.1 min 1); no Cc control characters |
 | attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
+| amount / attribute `name` (Template Schemas §3.3.1.1 / §3.3.2.1) | `string` | ≤ 100 | `helpers::check_capability_name` (length, pattern, reserved scope); then, across the requirements, uniqueness of the known names, and for a standard attribute name the standard-value and single-valued `allOf` checks on literal values |
 | task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |

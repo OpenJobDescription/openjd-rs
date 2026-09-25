@@ -11,6 +11,7 @@ use openjd_expr::symbol_table::SymbolTable;
 use crate::error::{path_field, ModelError, PathElement, ValidationErrors};
 use crate::job;
 use crate::template;
+use crate::template::validate_v2023_09::helpers::{check_capability_name, CapabilityKind};
 use crate::template::validate_v2023_09::EffectiveLimits;
 use openjd_expr::ExpressionError;
 
@@ -511,9 +512,30 @@ fn resolve_host_requirements(
         .amounts
         .as_ref()
         .map(|amts| {
-            amts.iter()
+            let standard = crate::capabilities::standard_amount_capability_names(
+                ctx.profile.revision(),
+                ctx.profile.extensions(),
+            )?;
+            let names = amts
+                .iter()
                 .enumerate()
                 .map(|(amount_index, a)| {
+                    resolve_capability_name(
+                        &a.name,
+                        CapabilityKind::Amount,
+                        standard,
+                        symtab,
+                        budgets,
+                        step_index,
+                        amount_index,
+                    )
+                })
+                .collect::<Result<Vec<_>, ModelError>>()?;
+            check_resolved_names_unique(&names, CapabilityKind::Amount, step_index)?;
+            amts.iter()
+                .zip(names)
+                .enumerate()
+                .map(|(amount_index, (a, name))| {
                     let min = a
                         .min
                         .as_ref()
@@ -541,11 +563,7 @@ fn resolve_host_requirements(
                         .transpose()?
                         .flatten();
                     check_resolved_amount_bounds(min, max, step_index, amount_index)?;
-                    Ok(job::AmountRequirement {
-                        name: a.name.clone(),
-                        min,
-                        max,
-                    })
+                    Ok(job::AmountRequirement { name, min, max })
                 })
                 .collect::<Result<Vec<_>, ModelError>>()
         })
@@ -559,10 +577,28 @@ fn resolve_host_requirements(
                 ctx.profile.revision(),
                 ctx.profile.extensions(),
             )?;
-            attrs
+            let standard_names: Vec<&str> = standard.iter().map(|(name, _)| *name).collect();
+            let names = attrs
                 .iter()
                 .enumerate()
                 .map(|(attr_index, a)| {
+                    resolve_capability_name(
+                        &a.name,
+                        CapabilityKind::Attribute,
+                        &standard_names,
+                        symtab,
+                        budgets,
+                        step_index,
+                        attr_index,
+                    )
+                })
+                .collect::<Result<Vec<_>, ModelError>>()?;
+            check_resolved_names_unique(&names, CapabilityKind::Attribute, step_index)?;
+            attrs
+                .iter()
+                .zip(names)
+                .enumerate()
+                .map(|(attr_index, (a, name))| {
                     let any_of = a
                         .any_of
                         .as_ref()
@@ -573,7 +609,7 @@ fn resolve_host_requirements(
                         .as_ref()
                         .map(|vals| ranges::resolve_string_list(vals, symtab, budgets))
                         .transpose()?;
-                    let attr_lower = a.name.to_lowercase();
+                    let attr_lower = name.to_lowercase();
                     let is_single_valued = attr_lower == "attr.worker.os.family"
                         || attr_lower == "attr.worker.cpu.arch";
                     for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
@@ -602,12 +638,12 @@ fn resolve_host_requirements(
                                 )));
                             }
                             check_resolved_attribute_values(
-                                &a.name, field, values, standard, step_index, attr_index,
+                                &name, field, values, standard, step_index, attr_index,
                             )?;
                         }
                     }
                     Ok(job::AttributeRequirement {
-                        name: a.name.clone(),
+                        name,
                         any_of,
                         all_of,
                     })
@@ -620,6 +656,86 @@ fn resolve_host_requirements(
         amounts,
         attributes,
     })
+}
+
+/// Resolve a `hostRequirements` capability name and check the §3.3.1.1 /
+/// §3.3.2.1 constraints on the resolved value.
+///
+/// `name` is `@fmtstring`, and template validation can only check a name
+/// whose value it knows: a literal, or one that is fully static. Job
+/// creation resolves every name, so the checks run here on the resolved
+/// value, through the same [`check_capability_name`] template validation
+/// uses, so a violation reads the same way whichever stage caught it.
+fn resolve_capability_name(
+    name: &openjd_expr::FormatString,
+    kind: CapabilityKind,
+    standard: &[&str],
+    symtab: &SymbolTable,
+    budgets: super::EvalBudgets,
+    step_index: usize,
+    index: usize,
+) -> Result<String, ModelError> {
+    // Required string field: a single whole-field expression resolves with
+    // target type `string` (Expression Language §1.3.2).
+    let resolved = name
+        .resolve_with(
+            symtab,
+            &budgets
+                .fs_options()
+                .with_target_type(&openjd_expr::ExprType::STRING),
+        )
+        .map(|v| match v {
+            openjd_expr::ExprValue::String(s) => s,
+            other => other.to_display_string(),
+        })
+        .map_err(|e| ModelError::FormatStringError {
+            message: format!("hostRequirements {} name: {e}", kind.noun()),
+            input: Some(name.raw().to_string()),
+            start: None,
+            end: None,
+        })?;
+    let path = vec![
+        PathElement::Field("steps".to_string()),
+        PathElement::Index(step_index),
+        PathElement::Field("hostRequirements".to_string()),
+        PathElement::Field(kind.field().to_string()),
+        PathElement::Index(index),
+    ];
+    let mut errors = ValidationErrors::default();
+    check_capability_name(&resolved, kind, standard, &path, &mut errors);
+    errors.into_result("JobTemplate")?;
+    Ok(resolved)
+}
+
+/// Check the §3.3 constraint that no two amounts, and no two attributes,
+/// have the same name after the name format strings have been resolved.
+///
+/// Decode compares literal names only, since a name containing expressions
+/// is unknown there. Two different templates names can resolve to the same
+/// capability, so the resolved names are compared here, case-insensitively
+/// as §3.3.1.1 / §3.3.2.1 require.
+fn check_resolved_names_unique(
+    names: &[String],
+    kind: CapabilityKind,
+    step_index: usize,
+) -> Result<(), ModelError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut errors = ValidationErrors::default();
+    for (index, name) in names.iter().enumerate() {
+        if !seen.insert(name.to_lowercase()) {
+            errors.add(
+                &[
+                    PathElement::Field("steps".to_string()),
+                    PathElement::Index(step_index),
+                    PathElement::Field("hostRequirements".to_string()),
+                    PathElement::Field(kind.field().to_string()),
+                    PathElement::Index(index),
+                ],
+                format!("duplicate {} name '{name}'.", kind.noun()),
+            );
+        }
+    }
+    errors.into_result("JobTemplate")
 }
 
 /// Re-check the `amounts[].min` / `amounts[].max` bounds (§3.3.1) on resolved
