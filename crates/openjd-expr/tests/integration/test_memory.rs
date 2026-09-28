@@ -1215,3 +1215,30 @@ fn comprehension_push_precheck_charges_each_element_once() {
         openjd_expr::ExprType::list(openjd_expr::ExprType::STRING)
     );
 }
+
+/// The reported `used` for a large-element exceedance is the honest
+/// figure: at the third push, two 600 KB elements are held plus the
+/// third being pushed plus the Vec's projected slack — ~1.8 MB. A
+/// double-charge of the pushed element would have reported the same
+/// ~1.8 MB one push *earlier*, at the second element, when only ~1.2 MB
+/// was live (pinned here indirectly: the two-element variant fits).
+#[test]
+fn large_element_comprehension_exceedance_reports_true_usage() {
+    let st = SymbolTable::new();
+    ParsedExpression::new("['A' * 600000 for x in [1, 2]]")
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .expect("two 600 KB elements must fit under a 1.5 MB limit");
+    let e = ParsedExpression::new("['A' * 600000 for x in [1, 2, 3]]")
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (1800768 bytes) exceeded limit (1500000 bytes)\n",
+            "  ['A' * 600000 for x in [1, 2, 3]]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
