@@ -422,18 +422,19 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   enclosing construct absorbs the error (an unresolved-test conditional
   or boolop) and continues, the parent's counters must include that
   spend, or every absorbed comprehension failure evaluates
-  under-metered. The child's *live footprint* is handled differently:
-  on any exit where the child's values are dropped (a failing
-  filter/body, an abandoned iteration, and every exit of the
-  unresolved-iterable path) the parent's `current_memory` is reset to
-  its pre-iteration baseline rather than absorbed — the loop-variable
-  clone and the failed sub-expression's intermediates are not live
-  after the exit, and the absorbing construct keeps evaluating on this
-  evaluator, so a stale footprint would charge every later allocation
-  for memory that is gone. On the success path the footprint *is*
-  absorbed before the result push (the loop variable's clone is live at
-  that moment, so a push-time exceedance reports it) and reset to the
-  baseline afterwards.
+  under-metered. The child's *live footprint* is never absorbed: on
+  every exit — success, failure, or abandonment, and on every exit of
+  the unresolved-iterable path — the parent's `current_memory` is reset
+  to its pre-iteration baseline. Nothing the child tracks survives the
+  iteration: the body's intermediates and its result are dropped (the
+  loop variable's own slot in the temp symbol table is never tracked;
+  what `eval_name` tracks is the clone it returns when the body reads
+  it), and the element being pushed is charged exactly once, by
+  `BudgetedVec`'s pre-check — not a second time through the child's
+  footprint, which would shrink the effective limit by one element per
+  push. The absorbing construct keeps evaluating on this evaluator, so
+  a stale footprint would charge every later allocation for memory
+  that is not live.
 - Iterates lists without copying and symbolic ranges lazily
 - Pre-checks the growing result vector's values and projected capacity against the memory limit
 

@@ -577,12 +577,14 @@ fn comprehension_over_range_memory_bounded_incrementally() {
     assert_eq!(
         e,
         [
-            // 16544 = logical result bytes plus the Vec's projected
-            // post-doubling capacity slack (the check accounts for the
-            // buffer the push is about to allocate, not just elements)
-            // plus the 64-byte loop-variable clone, which is still live
-            // in the iteration's scope at the moment of the push.
-            "Expression memory usage (16544 bytes) exceeded limit (10000 bytes)
+            // 16480 = logical result bytes (including the element being
+            // pushed, charged once by BudgetedVec) plus the Vec's
+            // projected post-doubling capacity slack: the check accounts
+            // for the buffer the push is about to allocate, not just
+            // elements. The iteration's own transients are not in the
+            // figure — the footprint is reset to the pre-iteration
+            // baseline before the push.
+            "Expression memory usage (16480 bytes) exceeded limit (10000 bytes)
 ",
             "  [x for x in range_expr('1-2000000')]
 ",
@@ -1189,5 +1191,27 @@ fn absorbed_unresolved_comprehension_body_failure_leaves_no_stale_footprint() {
 fn absorbed_unresolved_comprehension_filter_failure_leaves_no_stale_footprint() {
     assert_no_stale_footprint(
         "len([x for x in Session.List if 'A' * 1000000 - 1] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// The push pre-check charges each element once
+// ══════════════════════════════════════════════════════════════
+
+/// The element a comprehension is about to push is accounted by
+/// BudgetedVec's pre-check. It must not *also* sit in the parent's
+/// live footprint through the child's tracked result — that double-
+/// charge would shrink the effective memory limit by one element per
+/// push. Five 100 KB elements plus Vec slack fit comfortably under
+/// 560 KB; a double-charge needs ~600 KB and fails.
+#[test]
+fn comprehension_push_precheck_charges_each_element_once() {
+    let st = SymbolTable::new();
+    let r = ParsedExpression::new("['A' * 100000 for x in range(5)]")
+        .and_then(|p| p.with_memory_limit(560_000).evaluate_with_metrics(&[&st]))
+        .expect("five 100 KB elements must fit under a 560 KB limit");
+    assert_eq!(
+        r.value.expr_type(),
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING)
     );
 }

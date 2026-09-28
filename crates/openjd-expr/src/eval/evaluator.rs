@@ -1404,28 +1404,21 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// Propagate resource counters back from a child evaluator.
-    fn absorb_counters(&mut self, child: &Evaluator) {
-        self.current_memory = child.current_memory;
-        self.peak_memory = child.peak_memory;
-        self.operation_count = child.operation_count;
-    }
-
     /// Absorb a child's *spend* — peak memory and operation count —
-    /// while rolling the *live footprint* back to `baseline`. For the
-    /// exits where the child's values do not survive: the failing
-    /// filter/body of a comprehension iteration, or an iteration whose
-    /// result is abandoned. A failing child has still spent memory and
-    /// operations in this evaluation; if an enclosing construct absorbs
-    /// the error (an unresolved-test conditional or boolop) and
-    /// continues, the parent's peak and op count must include that
-    /// spend or every absorbed failure evaluates under-metered. But the
-    /// child's *tracked* values — the loop-variable clone, the
-    /// intermediates of the failed sub-expression — are dropped with
-    /// it, so `current_memory` must not carry them forward: the same
-    /// enclosing construct keeps evaluating on this evaluator, and a
-    /// stale footprint would charge every later allocation for memory
-    /// that is no longer live.
+    /// while resetting the *live footprint* to `baseline`. Every exit
+    /// from a comprehension iteration goes through this: the child's
+    /// tracked values never survive it. A child that spent memory and
+    /// operations has spent them whether or not it succeeded; if an
+    /// enclosing construct absorbs a failure (an unresolved-test
+    /// conditional or boolop) and continues, the parent's peak and op
+    /// count must include that spend or every absorbed failure evaluates
+    /// under-metered. But the child's *tracked* values — the body's
+    /// intermediates and result, the failed sub-expression's operands —
+    /// are dropped with it (a pushed element is charged separately, once,
+    /// by `BudgetedVec`), so `current_memory` must not carry them
+    /// forward: the enclosing construct keeps evaluating on this
+    /// evaluator, and a stale footprint would charge every later
+    /// allocation for memory that is not live.
     fn absorb_spend_and_reset(&mut self, child: &Evaluator, baseline: usize) {
         self.peak_memory = child.peak_memory;
         self.operation_count = child.operation_count;
@@ -1646,22 +1639,21 @@ impl<'a> Evaluator<'a> {
             } else {
                 None
             };
-            // Hand the child's counters and the regex cache back before
-            // the push's budget pre-check and the normal end of the
-            // iteration. The loop variable's clone is still live at the
-            // push, so absorbing first makes a push-time exceedance
-            // report the true usage.
-            self.absorb_counters(&child);
+            // Hand the child's spend and the regex cache back before the
+            // push's budget pre-check, so an exit there leaves the
+            // parent's peak/op counters current. The footprint resets to
+            // the iteration baseline: the child's tracked values — the
+            // body's intermediates and its result (`eval_name` tracks
+            // the clone it returns for `x`; the loop variable's own slot
+            // in the temp symtab is never tracked) — do not survive the
+            // iteration, and the element about to be pushed is charged
+            // once, by BudgetedVec's pre-check, not again through the
+            // child's footprint.
+            self.absorb_spend_and_reset(&child, memory_baseline);
             self.regex_cache = child.regex_cache;
             if let Some(elt) = elt {
                 result.push(self, elt)?;
             }
-            // Restore the iteration baseline: the child's tracked
-            // transients (the loop-variable clone and any intermediates)
-            // do not survive the iteration, and the result elements are
-            // accounted separately by BudgetedVec. Peak memory keeps
-            // the high-water mark absorbed above.
-            self.current_memory = memory_baseline;
         }
         // The iterable is consumed by the comprehension: release its
         // tracked memory now that iteration is done (the borrowing
