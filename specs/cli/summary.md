@@ -56,6 +56,9 @@ execute(args)
   ├── Resolve job_template_dir and current_working_dir
   ├── preprocess_job_parameters() → param_values
   ├── create_job() → Job
+  │     context: job_template.default_validation_context() with
+  │     common::caller_limits() layered on — the same limits the decode
+  │     ran under (see run.md § Session Configuration / check.md § Caller-Limits Policy)
   │
   └── Dispatch on --step
       ├── Some(step_name) → output_step_summary(&job, step_name, output_format)

@@ -143,6 +143,38 @@ fn context_missing_declared_extension_is_rejected() {
     );
 }
 
+#[test]
+fn context_missing_several_declared_extensions_lists_them_sorted() {
+    // The missing set is derived from the template's own extension set
+    // (a HashSet) and sorted, so the message is deterministic and
+    // exhaustive regardless of declaration order.
+    let tpl = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "RenderJob",
+        "extensions": ["FEATURE_BUNDLE_1", "EXPR"],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(
+        tpl,
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_posix_defaults(&jt);
+
+    let ctx = ValidationContext::from_profile(ModelProfile::current());
+    let err = create_job(&jt, &params, &ctx).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Compatibility error: create_job requires a context enabling every extension the \
+         template declares: missing EXPR, FEATURE_BUNDLE_1. An application that does not \
+         support an extension should reject the template at decode via its \
+         supported-extensions list."
+    );
+}
+
 // ─── Test D: latest() has all ModelExtension::ALL variants ──────────────────
 
 #[test]

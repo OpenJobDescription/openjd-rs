@@ -1404,11 +1404,25 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// Propagate resource counters back from a child evaluator.
-    fn absorb_counters(&mut self, child: &Evaluator) {
-        self.current_memory = child.current_memory;
+    /// Absorb a child's *spend* — peak memory and operation count —
+    /// while resetting the *live footprint* to `baseline`. Every exit
+    /// from a comprehension iteration goes through this: the child's
+    /// tracked values never survive it. A child that spent memory and
+    /// operations has spent them whether or not it succeeded; if an
+    /// enclosing construct absorbs a failure (an unresolved-test
+    /// conditional or boolop) and continues, the parent's peak and op
+    /// count must include that spend or every absorbed failure evaluates
+    /// under-metered. But the child's *tracked* values — the body's
+    /// intermediates and result, the failed sub-expression's operands —
+    /// are dropped with it (a pushed element is charged separately, once,
+    /// by `BudgetedVec`), so `current_memory` must not carry them
+    /// forward: the enclosing construct keeps evaluating on this
+    /// evaluator, and a stale footprint would charge every later
+    /// allocation for memory that is not live.
+    fn absorb_spend_and_reset(&mut self, child: &Evaluator, baseline: usize) {
         self.peak_memory = child.peak_memory;
         self.operation_count = child.operation_count;
+        self.current_memory = baseline;
     }
 
     /// Conclude a list comprehension whose result cannot be computed at
@@ -1427,6 +1441,10 @@ impl<'a> Evaluator<'a> {
         var_name: &str,
         elem_type: ExprType,
     ) -> Result<ExprValue, ExpressionError> {
+        // Nothing the child tracks survives this function: the loop
+        // variable is a placeholder and the filter/body values are
+        // evaluated only for their types. Every exit resets to here.
+        let memory_baseline = self.current_memory;
         let mut tmp = crate::symbol_table::SymbolTable::new();
         tmp.set(var_name, ExprValue::unresolved(elem_type))
             .map_err(|e| ExpressionError::new(e.to_string()))?;
@@ -1435,7 +1453,14 @@ impl<'a> Evaluator<'a> {
         let mut child = self.child_evaluator(&combined);
         // Check filter clause type if present
         if let Some(if_clause) = if_clause {
-            let cond = child.evaluate(if_clause)?;
+            let cond = child.evaluate(if_clause);
+            let cond = match cond {
+                Ok(c) => c,
+                Err(e) => {
+                    self.absorb_spend_and_reset(&child, memory_baseline);
+                    return Err(e);
+                }
+            };
             let cond_inner = unwrap_unresolved(&cond.expr_type());
             let is_bool_compatible = cond_inner == ExprType::BOOL
                 || cond_inner.code() == crate::types::TypeCode::Unresolved
@@ -1443,6 +1468,7 @@ impl<'a> Evaluator<'a> {
                 || (cond_inner.code() == crate::types::TypeCode::Union
                     && cond_inner.params().contains(&ExprType::BOOL));
             if !is_bool_compatible {
+                self.absorb_spend_and_reset(&child, memory_baseline);
                 let err = ExpressionError::new(format!(
                     "List comprehension filter must be a boolean, got {}",
                     cond_inner
@@ -1454,8 +1480,9 @@ impl<'a> Evaluator<'a> {
                 });
             }
         }
-        let body_val = child.evaluate(&lc.elt)?;
-        self.absorb_counters(&child);
+        let body_val = child.evaluate(&lc.elt);
+        self.absorb_spend_and_reset(&child, memory_baseline);
+        let body_val = body_val?;
         let body_type = unwrap_unresolved(&body_val.expr_type());
         self.track(ExprValue::unresolved(ExprType::list(body_type)))
     }
@@ -1503,6 +1530,14 @@ impl<'a> Evaluator<'a> {
                 None
             }
         });
+        // Footprint before the iterable is tracked. Every exit that
+        // abandons the comprehension — an error an enclosing construct
+        // may absorb — resets to *this*: the iterable is consumed by the
+        // comprehension and its charge must not outlive it. (The
+        // per-iteration baseline captured inside the loop still includes
+        // the iterable; the success path releases it explicitly after
+        // the loop.)
+        let comprehension_baseline = self.current_memory;
         let iterable = self.eval_node(&gen.iter, None)?;
         let var_name = match &gen.target {
             ast::Expr::Name(n) => n.id.to_string(),
@@ -1510,10 +1545,12 @@ impl<'a> Evaluator<'a> {
         };
 
         // Unresolved iterable: per-element evaluation is impossible, so
-        // the comprehension as a whole is unknown.
+        // the comprehension as a whole is unknown. The iterable is
+        // consumed here like everywhere else below.
         if iterable.is_unresolved() {
             let inner = unwrap_unresolved(&iterable.expr_type());
             let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
+            self.current_memory = comprehension_baseline;
             return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
         }
 
@@ -1530,6 +1567,9 @@ impl<'a> Evaluator<'a> {
             } else if let ExprValue::RangeExpr(r) = &iterable {
                 Box::new(r.iter().map(ExprValue::Int))
             } else {
+                // A type error an enclosing construct may absorb — the
+                // iterable's charge must not outlive the comprehension.
+                self.current_memory = comprehension_baseline;
                 return Err(ExpressionError::type_error(format!(
                     "Cannot iterate over {}",
                     iterable.expr_type()
@@ -1561,7 +1601,19 @@ impl<'a> Evaluator<'a> {
             child.regex_cache = std::mem::take(&mut self.regex_cache);
             let mut include = true;
             if let Some(if_clause) = gen.ifs.first() {
-                let cond = child.evaluate(if_clause)?;
+                let cond = match child.evaluate(if_clause) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        // The child's spend counts even though it
+                        // failed, but its tracked values are dropped
+                        // with it (see `absorb_spend_and_reset`), and so
+                        // is the iterable — the comprehension is
+                        // abandoned. The regex cache comes back.
+                        self.absorb_spend_and_reset(&child, comprehension_baseline);
+                        self.regex_cache = child.regex_cache;
+                        return Err(e);
+                    }
+                };
                 if let ExprValue::Bool(b) = cond {
                     include = b;
                 } else if cond.is_unresolved() {
@@ -1571,12 +1623,13 @@ impl<'a> Evaluator<'a> {
                     // only pre-checks the budget; the finished list
                     // would be tracked by make_list_checked, which is
                     // never reached.
-                    self.absorb_counters(&child);
+                    self.absorb_spend_and_reset(&child, memory_baseline);
                     self.regex_cache = child.regex_cache;
-                    self.current_memory = memory_baseline;
                     filter_unresolved = true;
                     break;
                 } else {
+                    self.absorb_spend_and_reset(&child, comprehension_baseline);
+                    self.regex_cache = child.regex_cache;
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
                         cond.expr_type()
@@ -1588,18 +1641,40 @@ impl<'a> Evaluator<'a> {
                     });
                 }
             }
-            if include {
-                let elt = child.eval_node(&lc.elt, elem_target.as_ref())?;
-                result.push(self, elt)?;
-            }
-            self.absorb_counters(&child);
+            let elt = if include {
+                match child.eval_node(&lc.elt, elem_target.as_ref()) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        self.absorb_spend_and_reset(&child, comprehension_baseline);
+                        self.regex_cache = child.regex_cache;
+                        return Err(e);
+                    }
+                }
+            } else {
+                None
+            };
+            // Hand the child's spend and the regex cache back before the
+            // push's budget pre-check, so an exit there leaves the
+            // parent's peak/op counters current. The footprint resets to
+            // the iteration baseline: the child's tracked values — the
+            // body's intermediates and its result (`eval_name` tracks
+            // the clone it returns for `x`; the loop variable's own slot
+            // in the temp symtab is never tracked) — do not survive the
+            // iteration, and the element about to be pushed is charged
+            // once, by BudgetedVec's pre-check, not again through the
+            // child's footprint.
+            self.absorb_spend_and_reset(&child, memory_baseline);
             self.regex_cache = child.regex_cache;
-            // Restore the iteration baseline: the child's tracked
-            // transients (the loop-variable clone and any intermediates)
-            // do not survive the iteration, and the result elements are
-            // accounted separately by BudgetedVec. Peak memory keeps
-            // the high-water mark absorbed above.
-            self.current_memory = memory_baseline;
+            if let Some(elt) = elt {
+                if let Err(e) = result.push(self, elt) {
+                    // Only a budget exceedance can land here, which no
+                    // enclosing construct absorbs — but the exit drops
+                    // the iterable like every other, so account for it
+                    // the same way.
+                    self.current_memory = comprehension_baseline;
+                    return Err(e);
+                }
+            }
         }
         // The iterable is consumed by the comprehension: release its
         // tracked memory now that iteration is done (the borrowing

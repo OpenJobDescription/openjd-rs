@@ -669,3 +669,75 @@ fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
     create_default(template, &[("Files", "a,b,c"), ("X", "x"), ("N", "1")])
         .expect("an unresolved comprehension filter must not fail job creation");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Step-script and environment `let` bindings share one check path
+// ══════════════════════════════════════════════════════════════
+
+/// Both check-symtab builders evaluate `let` bindings through the same
+/// helper: parsed under the caller's host profile (as pass 8 parsed
+/// them — never the latest profile, which would accept syntax pass 8
+/// refused or vice versa after a crate upgrade), evaluated under POSIX
+/// with the caller's budgets, and reported with one message format. A
+/// value-dependent failure in an environment `let` is therefore
+/// reported exactly like the same failure in a step-script `let`.
+fn let_failure_message(template: &str, params: &[(&str, &str)]) -> String {
+    let msg = create_default(template, params).expect_err("expected the let binding to fail");
+    // Isolate the let-binding diagnostic (path/context prefixes differ
+    // between the two scopes by design; the binding message must not).
+    let start = msg
+        .find("script let binding")
+        .unwrap_or_else(|| panic!("no let-binding diagnostic in:\n{msg}"));
+    msg[start..].to_string()
+}
+
+#[test]
+fn env_let_and_script_let_failures_report_identically_at_create_job() {
+    let script_let = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{"name": "S", "script": {
+            "let": ["q = 1 / int(Param.X)"],
+            "actions": {"onRun": {"command": "echo", "args": ["{{ q }}"]}}
+        }}]
+    }"#;
+    let env_let = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "jobEnvironments": [{"name": "Env", "script": {
+            "let": ["q = 1 / int(Param.X)"],
+            "actions": {"onEnter": {"command": "echo", "args": ["{{ q }}"]}}
+        }}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let params = [("X", "0"), ("N", "1")];
+    let from_script = let_failure_message(script_let, &params);
+    let from_env = let_failure_message(env_let, &params);
+    assert_eq!(
+        from_script, from_env,
+        "the two scopes must report identically"
+    );
+    assert!(
+        from_env.starts_with("script let binding 'q': Division by zero"),
+        "Got:\n{from_env}"
+    );
+    assert!(
+        from_env.contains("  1 / int(Param.X)\n"),
+        "Got:\n{from_env}"
+    );
+    assert!(from_env.contains("  ~~^~~~~~~~~~~~~~"), "Got:\n{from_env}");
+
+    // Control: a non-zero divisor passes both scopes.
+    create_default(script_let, &[("X", "2"), ("N", "1")]).expect("script let must pass");
+    create_default(env_let, &[("X", "2"), ("N", "1")]).expect("env let must pass");
+}
