@@ -1128,3 +1128,66 @@ fn failing_unresolved_comprehension_filter_spend_is_absorbed() {
 fn failing_unresolved_comprehension_body_spend_is_absorbed() {
     assert_absorbed_spend("[int('A' * 1000000) for x in Session.List] if Session.Flag else []");
 }
+
+// ══════════════════════════════════════════════════════════════
+// An absorbed comprehension failure leaves no live footprint behind
+// ══════════════════════════════════════════════════════════════
+
+/// Absorbing a failing iteration's *spend* (peak, ops) must not also
+/// carry its *live footprint* forward. The child's tracked values — the
+/// loop-variable clone and the failed sub-expression's intermediates —
+/// are dropped with it, and the enclosing construct that absorbs the
+/// error keeps evaluating on this evaluator. `'A' * 1000000 - 1` fails
+/// in the binop with the 1 MB string still tracked (dispatch releases
+/// inputs only on success), so a stale footprint would charge the
+/// later 600 KB allocation as 1.6 MB against a 1.5 MB limit.
+fn assert_no_stale_footprint(expr: &str) {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st.set(
+        "Session.List",
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT)),
+    )
+    .unwrap();
+    let result = ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate_with_metrics(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: the dropped footprint must not be charged: {e}"));
+    // Peak still reflects the failed iteration's genuine 1 MB spend.
+    assert!(
+        result.peak_memory >= 1_000_000,
+        "{expr}: peak must include the failed iteration's spend; got {}",
+        result.peak_memory
+    );
+}
+
+#[test]
+fn absorbed_comprehension_body_failure_leaves_no_stale_footprint() {
+    assert_no_stale_footprint(
+        "len(['A' * 1000000 - 1 for x in [1]] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+#[test]
+fn absorbed_comprehension_filter_failure_leaves_no_stale_footprint() {
+    assert_no_stale_footprint(
+        "len([x for x in [1] if 'A' * 1000000 - 1] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+#[test]
+fn absorbed_unresolved_comprehension_body_failure_leaves_no_stale_footprint() {
+    assert_no_stale_footprint(
+        "len(['A' * 1000000 - 1 for x in Session.List] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+#[test]
+fn absorbed_unresolved_comprehension_filter_failure_leaves_no_stale_footprint() {
+    assert_no_stale_footprint(
+        "len([x for x in Session.List if 'A' * 1000000 - 1] if Session.Flag else []) + len('B' * 600000)",
+    );
+}

@@ -1411,20 +1411,25 @@ impl<'a> Evaluator<'a> {
         self.operation_count = child.operation_count;
     }
 
-    /// Absorb a child's counters and then pass its result through —
-    /// on the error path too. A failing child has still spent memory
-    /// and operations in this evaluation; if the caller of this
-    /// comprehension absorbs the error (an unresolved-test conditional
-    /// or boolop absorbing a value error) and continues, the parent's
-    /// counters must include that spend or the budget under-meters
-    /// every subsequent absorbed failure.
-    fn absorb_and_pass<T>(
-        &mut self,
-        child: &Evaluator,
-        result: Result<T, ExpressionError>,
-    ) -> Result<T, ExpressionError> {
-        self.absorb_counters(child);
-        result
+    /// Absorb a child's *spend* — peak memory and operation count —
+    /// while rolling the *live footprint* back to `baseline`. For the
+    /// exits where the child's values do not survive: the failing
+    /// filter/body of a comprehension iteration, or an iteration whose
+    /// result is abandoned. A failing child has still spent memory and
+    /// operations in this evaluation; if an enclosing construct absorbs
+    /// the error (an unresolved-test conditional or boolop) and
+    /// continues, the parent's peak and op count must include that
+    /// spend or every absorbed failure evaluates under-metered. But the
+    /// child's *tracked* values — the loop-variable clone, the
+    /// intermediates of the failed sub-expression — are dropped with
+    /// it, so `current_memory` must not carry them forward: the same
+    /// enclosing construct keeps evaluating on this evaluator, and a
+    /// stale footprint would charge every later allocation for memory
+    /// that is no longer live.
+    fn absorb_spend_and_reset(&mut self, child: &Evaluator, baseline: usize) {
+        self.peak_memory = child.peak_memory;
+        self.operation_count = child.operation_count;
+        self.current_memory = baseline;
     }
 
     /// Conclude a list comprehension whose result cannot be computed at
@@ -1443,6 +1448,10 @@ impl<'a> Evaluator<'a> {
         var_name: &str,
         elem_type: ExprType,
     ) -> Result<ExprValue, ExpressionError> {
+        // Nothing the child tracks survives this function: the loop
+        // variable is a placeholder and the filter/body values are
+        // evaluated only for their types. Every exit resets to here.
+        let memory_baseline = self.current_memory;
         let mut tmp = crate::symbol_table::SymbolTable::new();
         tmp.set(var_name, ExprValue::unresolved(elem_type))
             .map_err(|e| ExpressionError::new(e.to_string()))?;
@@ -1452,7 +1461,13 @@ impl<'a> Evaluator<'a> {
         // Check filter clause type if present
         if let Some(if_clause) = if_clause {
             let cond = child.evaluate(if_clause);
-            let cond = self.absorb_and_pass(&child, cond)?;
+            let cond = match cond {
+                Ok(c) => c,
+                Err(e) => {
+                    self.absorb_spend_and_reset(&child, memory_baseline);
+                    return Err(e);
+                }
+            };
             let cond_inner = unwrap_unresolved(&cond.expr_type());
             let is_bool_compatible = cond_inner == ExprType::BOOL
                 || cond_inner.code() == crate::types::TypeCode::Unresolved
@@ -1460,6 +1475,7 @@ impl<'a> Evaluator<'a> {
                 || (cond_inner.code() == crate::types::TypeCode::Union
                     && cond_inner.params().contains(&ExprType::BOOL));
             if !is_bool_compatible {
+                self.absorb_spend_and_reset(&child, memory_baseline);
                 let err = ExpressionError::new(format!(
                     "List comprehension filter must be a boolean, got {}",
                     cond_inner
@@ -1472,7 +1488,8 @@ impl<'a> Evaluator<'a> {
             }
         }
         let body_val = child.evaluate(&lc.elt);
-        let body_val = self.absorb_and_pass(&child, body_val)?;
+        self.absorb_spend_and_reset(&child, memory_baseline);
+        let body_val = body_val?;
         let body_type = unwrap_unresolved(&body_val.expr_type());
         self.track(ExprValue::unresolved(ExprType::list(body_type)))
     }
@@ -1582,9 +1599,10 @@ impl<'a> Evaluator<'a> {
                     Ok(c) => c,
                     Err(e) => {
                         // The child's spend counts even though it
-                        // failed (see `absorb_and_pass`); the regex
-                        // cache moved into the child comes back too.
-                        self.absorb_counters(&child);
+                        // failed, but its tracked values are dropped
+                        // with it (see `absorb_spend_and_reset`); the
+                        // regex cache moved into the child comes back.
+                        self.absorb_spend_and_reset(&child, memory_baseline);
                         self.regex_cache = child.regex_cache;
                         return Err(e);
                     }
@@ -1598,13 +1616,12 @@ impl<'a> Evaluator<'a> {
                     // only pre-checks the budget; the finished list
                     // would be tracked by make_list_checked, which is
                     // never reached.
-                    self.absorb_counters(&child);
+                    self.absorb_spend_and_reset(&child, memory_baseline);
                     self.regex_cache = child.regex_cache;
-                    self.current_memory = memory_baseline;
                     filter_unresolved = true;
                     break;
                 } else {
-                    self.absorb_counters(&child);
+                    self.absorb_spend_and_reset(&child, memory_baseline);
                     self.regex_cache = child.regex_cache;
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
@@ -1618,19 +1635,25 @@ impl<'a> Evaluator<'a> {
                 }
             }
             let elt = if include {
-                child.eval_node(&lc.elt, elem_target.as_ref()).map(Some)
+                match child.eval_node(&lc.elt, elem_target.as_ref()) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        self.absorb_spend_and_reset(&child, memory_baseline);
+                        self.regex_cache = child.regex_cache;
+                        return Err(e);
+                    }
+                }
             } else {
-                Ok(None)
+                None
             };
             // Hand the child's counters and the regex cache back before
-            // *any* exit below — the body error, the push's budget
-            // pre-check, or the normal end of the iteration. The loop
-            // variable's clone is still live at the push, so absorbing
-            // first also makes a push-time exceedance report the true
-            // usage.
+            // the push's budget pre-check and the normal end of the
+            // iteration. The loop variable's clone is still live at the
+            // push, so absorbing first makes a push-time exceedance
+            // report the true usage.
             self.absorb_counters(&child);
             self.regex_cache = child.regex_cache;
-            if let Some(elt) = elt? {
+            if let Some(elt) = elt {
                 result.push(self, elt)?;
             }
             // Restore the iteration baseline: the child's tracked
