@@ -1242,3 +1242,75 @@ fn large_element_comprehension_exceedance_reports_true_usage() {
         .concat()
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// An abandoned comprehension's iterable is not charged afterwards
+// ══════════════════════════════════════════════════════════════
+
+/// The iterable is tracked before the loop and, on the success path,
+/// released after it ("consumed by the comprehension"). An error exit
+/// that an enclosing construct absorbs must drop it too: the
+/// comprehension is abandoned and nothing references the iterable, so
+/// leaving its 600 KB in `current_memory` would charge every later
+/// allocation for it — here the 600 KB `'B'` string, which then reads
+/// as 1.2 MB against a 1 MB limit. The failures are chosen to be cheap
+/// (`int()` releases its argument before dispatch; the type errors
+/// allocate nothing) so the iterable's residue is what is observed,
+/// not a body-time budget exceedance. The large list comes from the
+/// symbol table: a list *literal* is charged for both its element and
+/// itself while being built — a separate, pre-existing `eval_list`
+/// accounting matter — which would trip the limit before the
+/// comprehension runs.
+fn assert_iterable_not_charged_after_abandonment(expr: &str) {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st.set(
+        "Big",
+        ExprValue::make_list(
+            vec![ExprValue::String("C".repeat(600_000))],
+            openjd_expr::ExprType::STRING,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(1_000_000).evaluate(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: the abandoned iterable must not be charged: {e}"));
+}
+
+/// Body error over a large iterable.
+#[test]
+fn abandoned_comprehension_body_error_drops_iterable_charge() {
+    assert_iterable_not_charged_after_abandonment(
+        "len([int('nope') for x in Big] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+/// Filter error over a large iterable.
+#[test]
+fn abandoned_comprehension_filter_error_drops_iterable_charge() {
+    assert_iterable_not_charged_after_abandonment(
+        "len([x for x in Big if int('nope') > 0] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+/// Non-boolean filter over a large iterable.
+#[test]
+fn abandoned_comprehension_nonbool_filter_drops_iterable_charge() {
+    assert_iterable_not_charged_after_abandonment(
+        "len([x for x in Big if 1] if Session.Flag else []) + len('B' * 600000)",
+    );
+}
+
+/// "Cannot iterate" type error: the iterable itself is the large value
+/// (a string is tracked once, so a literal is fine here).
+#[test]
+fn abandoned_comprehension_cannot_iterate_drops_iterable_charge() {
+    assert_iterable_not_charged_after_abandonment(
+        "len([x for x in 'C' * 600000] if Session.Flag else []) + len('B' * 600000)",
+    );
+}

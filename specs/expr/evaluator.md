@@ -435,6 +435,13 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   push. The absorbing construct keeps evaluating on this evaluator, so
   a stale footprint would charge every later allocation for memory
   that is not live.
+- The iterable is consumed by the comprehension. The success path
+  releases it after the loop; every exit that *abandons* the
+  comprehension — an unresolved iterable, a non-iterable value, a
+  failing filter or body, a push-time exceedance — resets
+  `current_memory` to the footprint captured *before* the iterable was
+  evaluated, so an enclosing construct that absorbs the error is not
+  charged for a list nothing references.
 - Iterates lists without copying and symbolic ranges lazily
 - Pre-checks the growing result vector's values and projected capacity against the memory limit
 
