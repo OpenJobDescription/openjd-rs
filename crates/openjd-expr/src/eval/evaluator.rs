@@ -60,6 +60,17 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
+/// Outcome of evaluating a sub-expression whose failure an enclosing
+/// construct may absorb (see [`Evaluator::eval_speculative`]).
+enum Speculative {
+    /// Evaluated to a value; it is tracked.
+    Value(ExprValue),
+    /// Failed with a value error that the caller absorbs. The
+    /// evaluator's live footprint has been reset to what it was before
+    /// the attempt; the spend (peak memory, operation count) stands.
+    Absorbed(ExpressionError),
+}
+
 /// Default memory limit: 100 million bytes.
 pub const DEFAULT_MEMORY_LIMIT: usize = 100_000_000; // 100 million bytes per spec
 
@@ -464,24 +475,43 @@ impl<'a> Evaluator<'a> {
         self.current_memory = self.current_memory.saturating_sub(size);
     }
 
+    /// Call a library function. The arguments are consumed by the call,
+    /// so they are released from the live footprint whether the call
+    /// succeeds or fails; a successful result is tracked. Releasing on
+    /// failure matters when an enclosing construct absorbs the error and
+    /// keeps evaluating (see `eval_speculative`): the operands are gone
+    /// and must not stay charged. `eval_call` releases its arguments
+    /// before dispatch for the same reason.
+    ///
+    /// The operation-count check before the call is the one exit that
+    /// does not release. It fails only with a budget error, which is
+    /// never absorbed, so the footprint is not read afterwards.
+    fn dispatch_released(
+        &mut self,
+        name: &str,
+        args: Vec<ExprValue>,
+    ) -> Result<ExprValue, ExpressionError> {
+        self.count_op()?;
+        let input_size: usize = args.iter().map(|a| a.memory_size()).sum();
+        let lib = self.library;
+        let result = lib.call(name, &args, self);
+        self.current_memory = self.current_memory.saturating_sub(input_size);
+        self.track(result?)
+    }
+
     fn dispatch_with_node(
         &mut self,
         name: &str,
         args: Vec<ExprValue>,
         node: Option<&ast::Expr>,
     ) -> Result<ExprValue, ExpressionError> {
-        self.count_op()?;
-        let input_size: usize = args.iter().map(|a| a.memory_size()).sum();
-        let lib = self.library;
-        let result = lib.call(name, &args, self).map_err(|e| {
+        self.dispatch_released(name, args).map_err(|e| {
             if let (Some(src), Some(n)) = (self.expr_source, node) {
                 e.with_node(src, n)
             } else {
                 e
             }
-        })?;
-        self.current_memory = self.current_memory.saturating_sub(input_size);
-        self.track(result)
+        })
     }
 
     /// Like `dispatch_with_node` but uses a `TextRange` for error positioning,
@@ -492,18 +522,13 @@ impl<'a> Evaluator<'a> {
         args: Vec<ExprValue>,
         range: ruff_text_size::TextRange,
     ) -> Result<ExprValue, ExpressionError> {
-        self.count_op()?;
-        let input_size: usize = args.iter().map(|a| a.memory_size()).sum();
-        let lib = self.library;
-        let result = lib.call(name, &args, self).map_err(|e| {
+        self.dispatch_released(name, args).map_err(|e| {
             if let Some(src) = self.expr_source {
                 e.with_span(src, range.start().to_usize(), range.end().to_usize())
             } else {
                 e
             }
-        })?;
-        self.current_memory = self.current_memory.saturating_sub(input_size);
-        self.track(result)
+        })
     }
 
     fn eval_number(&mut self, n: &ast::ExprNumberLiteral) -> Result<ExprValue, ExpressionError> {
@@ -759,34 +784,31 @@ impl<'a> Evaluator<'a> {
             ast::BoolOp::Or => false,
         });
         let mut seen_unresolved = false;
-        for node in &b.values {
+        let last_index = b.values.len().saturating_sub(1);
+        for (index, node) in b.values.iter().enumerate() {
+            let is_last = index == last_index;
             if seen_unresolved {
-                // After an unresolved operand, suppress errors in subsequent operands
-                // (the unresolved value might short-circuit at runtime).
-                // But if a subsequent operand determines the result, return it.
-                match self.eval_node(node, None) {
-                    Ok(val) => match b.op {
+                // After an unresolved operand, later operands are still
+                // evaluated to catch type errors, but a value error is
+                // absorbed: the unresolved operand might short-circuit
+                // at runtime. A concrete operand that decides the result
+                // is still returned.
+                match self.eval_speculative(node, None)? {
+                    Speculative::Value(val) => match b.op {
                         ast::BoolOp::And => {
                             if matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
                                 return Ok(val);
                             }
+                            self.release(&val);
                         }
                         ast::BoolOp::Or => {
                             if !matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
                                 return Ok(val);
                             }
+                            self.release(&val);
                         }
                     },
-                    Err(e) => {
-                        // Suppressed — unresolved might short-circuit.
-                        // Except budget exceedances: the memory and
-                        // operations were spent in this evaluation no
-                        // matter what a runtime short-circuit skips
-                        // (same rule as `eval_ifexp`).
-                        if contains_budget_error(&e) {
-                            return Err(e);
-                        }
-                    }
+                    Speculative::Absorbed(_) => {}
                 }
                 continue;
             }
@@ -798,6 +820,9 @@ impl<'a> Evaluator<'a> {
             // `int` target must not try to coerce the `true`).
             last = self.eval_node(node, None)?;
             if last.is_unresolved() {
+                // The result will be a fresh `Unresolved(BOOL)`, so this
+                // placeholder is not kept.
+                self.release(&last);
                 seen_unresolved = true;
                 continue;
             }
@@ -813,6 +838,12 @@ impl<'a> Evaluator<'a> {
                         return Ok(last);
                     }
                 }
+            }
+            // This operand did not decide the result and is replaced by
+            // the next one. The final operand is returned, so it stays
+            // tracked.
+            if !is_last {
+                self.release(&last);
             }
         }
         if seen_unresolved {
@@ -838,16 +869,24 @@ impl<'a> Evaluator<'a> {
         // or `Param.Path < 1`) is refused at validation time rather than on
         // the worker. Only the value is deferred, not the type check.
         let mut seen_unresolved = false;
-        for (op, right_node) in c.ops.iter().zip(c.comparators.iter()) {
+        let last_index = c.ops.len().saturating_sub(1);
+        for (index, (op, right_node)) in c.ops.iter().zip(c.comparators.iter()).enumerate() {
             let right = self.eval_node(right_node, None)?;
             let dispatch = table.cmpop(*op)?;
             let op_name = dispatch.dunder;
 
+            // Dispatch consumes and releases both operands. When the
+            // chain continues, `right` is also the next link's `left`,
+            // so it is cloned first and the clone is tracked below as
+            // the value the chain carries. Each operand is therefore
+            // charged once and released by the link that consumes it.
+            let is_last = index == last_index;
+            let carried = if is_last { None } else { Some(right.clone()) };
             // For 'in'/'not in', container is first arg (right), item is second (left)
             let args = if dispatch.container_first {
-                vec![right.clone(), left.clone()]
+                vec![right, left]
             } else {
-                vec![left.clone(), right.clone()]
+                vec![left, right]
             };
 
             // Use the compare expression's range for error caret positioning
@@ -865,14 +904,14 @@ impl<'a> Evaluator<'a> {
             };
             self.release(&result_val);
             if !result {
-                self.release(&left);
-                self.release(&right);
                 return self.track(ExprValue::Bool(false));
             }
-            self.release(&left);
-            left = right;
+            match carried {
+                // The carried operand stays live for the next link.
+                Some(next_left) => left = self.track(next_left)?,
+                None => break,
+            }
         }
-        self.release(&left);
         if seen_unresolved {
             return self.track(ExprValue::unresolved(ExprType::BOOL));
         }
@@ -910,11 +949,15 @@ impl<'a> Evaluator<'a> {
                 });
             }
             self.release(&test);
-            // Try both branches, catching errors (e.g. fail() in one branch)
-            let body = self.eval_node(&i.body, target);
-            let orelse = self.eval_node(&i.orelse, target);
+            // Evaluate both branches speculatively. A budget error in
+            // either propagates immediately. A value error is absorbed,
+            // because a runtime with the test resolved may never take
+            // that branch. The result is an `Unresolved` carrying only a
+            // type, so every branch value is released.
+            let body = self.eval_speculative(&i.body, target)?;
+            let orelse = self.eval_speculative(&i.orelse, target)?;
             match (body, orelse) {
-                (Err(be), Err(oe)) => {
+                (Speculative::Absorbed(be), Speculative::Absorbed(oe)) => {
                     let mut msg = format!(
                         "Both branches fail in the if/else:\n  if-branch: {}\n",
                         be.message()
@@ -931,25 +974,21 @@ impl<'a> Evaluator<'a> {
                     }
                     Err(err)
                 }
-                (Ok(b), Err(oe)) => {
-                    if contains_budget_error(&oe) {
-                        self.release(&b);
-                        return Err(oe);
-                    }
+                (Speculative::Value(b), Speculative::Absorbed(_)) => {
                     let t = unwrap_unresolved(&b.expr_type());
+                    self.release(&b);
                     self.track(ExprValue::unresolved(t))
                 }
-                (Err(be), Ok(o)) => {
-                    if contains_budget_error(&be) {
-                        self.release(&o);
-                        return Err(be);
-                    }
+                (Speculative::Absorbed(_), Speculative::Value(o)) => {
                     let t = unwrap_unresolved(&o.expr_type());
+                    self.release(&o);
                     self.track(ExprValue::unresolved(t))
                 }
-                (Ok(b), Ok(o)) => {
+                (Speculative::Value(b), Speculative::Value(o)) => {
                     let bt = unwrap_unresolved(&b.expr_type());
                     let ot = unwrap_unresolved(&o.expr_type());
+                    self.release(&b);
+                    self.release(&o);
                     if bt == ot {
                         self.track(ExprValue::unresolved(bt))
                     } else {
@@ -1203,6 +1242,19 @@ impl<'a> Evaluator<'a> {
                 }
             }
         }
+        // The elements were tracked as they were evaluated. From here
+        // they are consumed into the list, which is charged as one value
+        // (or as a type-only placeholder when any element is
+        // unresolved), so release them first. Otherwise the literal would
+        // be charged for the list and for every element again, both in
+        // the construction pre-check and for as long as the list is
+        // held. The error returns above leave the elements charged like
+        // any failed sub-expression's operands; an enclosing construct
+        // that absorbs the error resets the footprint (see
+        // `eval_speculative`).
+        for e in &elements {
+            self.release(e);
+        }
         if elements.iter().any(|e| e.is_unresolved()) {
             let val = unresolved_list_from_elements(&elements)?;
             return self.track(val);
@@ -1423,6 +1475,38 @@ impl<'a> Evaluator<'a> {
         self.peak_memory = child.peak_memory;
         self.operation_count = child.operation_count;
         self.current_memory = baseline;
+    }
+
+    /// Evaluate `node` where the caller may absorb a failure: the
+    /// branches of an unresolved-test conditional, or the operands of a
+    /// boolop after an unresolved one. Both absorption rules live here so
+    /// that every absorbing construct applies both:
+    ///
+    /// - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`,
+    ///   directly or inside a compound error's sub-errors) is returned as
+    ///   `Err`. The memory and operations were spent regardless of what
+    ///   a runtime would skip.
+    /// - A value error is returned as `Absorbed`, and the live footprint
+    ///   is reset to what it was before the attempt. The failed
+    ///   sub-expression's values are gone. Peak memory and the operation
+    ///   count keep what the attempt consumed.
+    ///
+    /// The caller decides what an absorbed failure means: an `Unresolved`
+    /// result, a short-circuit, or a compound error.
+    fn eval_speculative(
+        &mut self,
+        node: &ast::Expr,
+        target: Option<&crate::types::ExprType>,
+    ) -> Result<Speculative, ExpressionError> {
+        let baseline = self.current_memory;
+        match self.eval_node(node, target) {
+            Ok(v) => Ok(Speculative::Value(v)),
+            Err(e) if contains_budget_error(&e) => Err(e),
+            Err(e) => {
+                self.current_memory = baseline;
+                Ok(Speculative::Absorbed(e))
+            }
+        }
     }
 
     /// Conclude a list comprehension whose result cannot be computed at

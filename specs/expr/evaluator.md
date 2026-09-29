@@ -296,6 +296,12 @@ evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
 are evaluated unconstrained (see [Target Type
 Propagation](#target-type-propagation)).
 
+Memory accounting: each link hands its two operands to dispatch, which releases
+them (see [Dispatch Flow](#dispatch-flow)). When the chain continues, the right
+operand is cloned first and the clone is tracked as the value carried into the
+next link, so each operand is charged once and released by the link that
+consumes it.
+
 Comparison stays in the evaluator (not fully delegated to the library) because the
 chaining logic requires control flow that doesn't fit the simple dispatch model.
 
@@ -353,26 +359,48 @@ would fail on the discarded ones (issue #291, case B).
 When an earlier operand is unresolved, subsequent operands are still evaluated (to
 catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
 subsequent concrete operand proves the result by short-circuiting (e.g.,
-`Unresolved and false` returns `false`). Errors in operands past the unresolved one
-are suppressed, since a runtime short-circuit could make them unreachable — except
-budget exceedances (`MemoryLimitExceeded` / `OperationLimitExceeded`), which always
-propagate: the memory/operations were spent in this evaluation no matter what a
-runtime short-circuit skips (the same rule as IfExp below).
+`Unresolved and false` returns `false`). Operands after the unresolved one are
+evaluated speculatively (see [Speculative evaluation](#speculative-evaluation)): a
+value error is absorbed, since a runtime short-circuit could make the operand
+unreachable; a budget error propagates. Every operand value the result does not
+carry is released: the unresolved placeholder (the result is a fresh
+`Unresolved(BOOL)`), a concrete operand replaced by the next, and a speculative
+operand that did not decide the result.
+
+### Speculative evaluation
+
+Two constructs evaluate sub-expressions whose failure they may absorb rather than
+propagate: the branches of an unresolved-test conditional, and the operands of a
+boolop after an unresolved one. Both use one helper, `eval_speculative`, which
+applies two rules:
+
+- A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`, directly or
+  inside a compound error's sub-errors) is never absorbed. The memory and
+  operations were spent regardless of what a runtime would skip. It propagates
+  immediately: a conditional whose if-branch exceeds the budget does not evaluate
+  the else-branch.
+- A value error is absorbed and the live footprint (`current_memory`) is reset to
+  what it was before the attempt, because the failed sub-expression's values are
+  gone. Peak memory and the operation count keep what the attempt consumed.
+  Dispatch also releases a failed call's operands (see
+  [Dispatch Flow](#dispatch-flow)); the reset applies regardless of how the
+  sub-expression failed.
+
+The caller decides what an absorbed failure means: an `Unresolved` of the other
+branch's type, a runtime short-circuit, or a compound "both branches fail" error.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
 (see [Target Type Propagation](#target-type-propagation)) and asserts it
 is bool-compatible, then evaluates only the selected branch with the
 parent target type. When the condition is unresolved, both branches are
-evaluated and the result type is the union. If exactly one branch fails
-with a *value* error, the error is absorbed and the result is
-`Unresolved` of the healthy branch's type (a runtime with the condition
-resolved may never take the failing branch); if both fail, a compound
-error carries both as sub-errors. Budget exceedances
-(`MemoryLimitExceeded` / `OperationLimitExceeded`) are exempt from the
-single-branch absorption and always propagate: the memory/operations
-were spent in this evaluation no matter which branch a runtime would
-take.
+evaluated speculatively (see above) and the result is an `Unresolved`
+carrying only a type: the union of both branch types when both succeed;
+the other branch's type when exactly one fails with a value error (a
+runtime with the condition resolved may never take the failing branch);
+a compound error carrying both as sub-errors when both fail. A budget
+error in either branch propagates immediately. Because the result
+carries no value, every branch value is released.
 
 ### Call (`eval_call`)
 Handles both function calls (`len(x)`) and method calls (`x.upper()`).
@@ -395,6 +423,15 @@ Rejects:
 Evaluates list literals. Validates max 2 nesting levels. Coerces elements when mixed
 types are present (int→float, path→string). Empty lists use the target type context
 to determine element type.
+
+Memory accounting: each element is tracked as it is evaluated, then released as the
+elements are consumed into the list, which is charged as one value (or as a
+type-only `Unresolved` placeholder when any element is unresolved). A literal's
+footprint is the list, not the list plus every element again. The error returns
+before that point (a `null` element, excessive nesting) leave the elements
+charged like any failed sub-expression's operands; an enclosing construct that
+absorbs the error resets the footprint (see
+[Speculative evaluation](#speculative-evaluation)).
 
 ### ListComp (`eval_listcomp`)
 Evaluates list comprehensions: `[expr for var in iterable if condition]`.
@@ -464,21 +501,31 @@ The `dispatch` method is the centralized point for calling library functions:
 ```
 dispatch(name, args, ast_node)
     │
-    ├── Release input values from memory tracking
-    │
-    ├── Check if any arg is unresolved
-    │   └── Yes → infer return type from signature, return Unresolved(return_type)
-    │
     ├── Call library.call(name, args, eval_context)
     │   │
+    │   ├── Any arg unresolved → infer return type from signature,
+    │   │                         return Unresolved(return_type)
     │   ├── Phase 1: Exact non-generic match
     │   ├── Phase 2: Non-generic with coercion (skip receiver coercion for methods)
     │   └── Phase 3: Generic match with type variable binding
     │
-    ├── Track output value in memory
+    ├── Release input values from memory tracking (on success and on error)
+    │
+    ├── On success: track output value in memory
     │
     └── On error: attach AST node context for caret formatting
 ```
+
+The arguments are consumed by the call, so they are released from the
+live footprint whether the call succeeds or fails. Releasing on failure
+matters because the error may be absorbed by an enclosing construct (see
+[Speculative evaluation](#speculative-evaluation)) that keeps evaluating
+on the same evaluator: the operands are gone and must not stay charged.
+`eval_call` releases its arguments before dispatch for the same reason;
+the operator paths (`dispatch_with_node` / `dispatch_with_span`, sharing
+`dispatch_released`) do the same. The operation-count check before the
+call is the one exit that does not release; it fails only with a budget
+error, which is never absorbed.
 
 ## Fast Path: Simple Name Lookup
 
