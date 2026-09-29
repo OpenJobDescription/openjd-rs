@@ -71,13 +71,16 @@ fn list_mul_exceeds_limit() {
     // List multiplication checks the projected result size against the
     // memory limit *before* op counting, so an over-memory repetition
     // reports a memory error even when it would also blow the op limit.
+    // 1920000384 = the `[1, 2, 3]` list (charged once; its element
+    // literals are released when the list is built) plus the projected
+    // 30M-element result.
     let e = eval_bounded("[1, 2, 3] * 10000000", 10000)
         .unwrap_err()
         .to_string();
     assert!(
         e.contains(
             &[
-                "Expression memory usage (1920000576 bytes) exceeded limit (10000 bytes)\n",
+                "Expression memory usage (1920000384 bytes) exceeded limit (10000 bytes)\n",
                 "  [1, 2, 3] * 10000000\n",
                 "  ~~~~~~~~~~^~~~~~~~~~",
             ]
@@ -884,9 +887,12 @@ fn memory_limit_exceeded_after_unresolved_boolop_operand_propagates() {
                 .evaluate_with_metrics(&[&st])
         })
         .expect_err("the second operand's budget exceedance must propagate");
+    // 10000136 = the 10 MB string plus per-value overhead. The
+    // unresolved first operand is released once the result is known to
+    // be a fresh `Unresolved(BOOL)`, so it is not in the figure.
     assert!(
         err.message()
-            .contains("Expression memory usage (10000200 bytes) exceeded limit (1048576 bytes)"),
+            .contains("Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"),
         "Got: {}",
         err.message()
     );
@@ -989,16 +995,12 @@ fn boolop_does_not_reabsorb_budget_error_from_nested_conditional() {
     );
 }
 
-/// `contains_budget_error` recurses into compound sub-errors. When
-/// *both* branches of an unresolved-test conditional fail — one with a
-/// budget exceedance, one with a value error — the conditional
-/// produces a compound "Both branches fail" error whose own kind is not
-/// a budget kind; only the recursion can see the budget exceedance
-/// inside it. Wrapped in a boolop suppression site, that compound must
-/// still propagate. (Without the recursion this test fails: the
-/// compound is swallowed as a plain value error.)
+/// A budget error in the if-branch of an unresolved-test conditional
+/// propagates before the else-branch is evaluated, and a boolop
+/// suppression site does not absorb it. The else-branch's value error
+/// must not appear in the message: it was never evaluated.
 #[test]
-fn budget_error_inside_compound_both_branches_fail_error_propagates_through_boolop() {
+fn budget_error_in_if_branch_propagates_before_else_branch_runs() {
     let mut st = SymbolTable::new();
     st.set(
         "Session.Flag",
@@ -1013,14 +1015,20 @@ fn budget_error_inside_compound_both_branches_fail_error_propagates_through_bool
             .with_operation_limit(DEFAULT_OPERATION_LIMIT)
             .evaluate_with_metrics(&[&st])
     })
-    .expect_err("a compound error carrying a budget exceedance must propagate");
+    .expect_err("the if-branch's budget exceedance must propagate through the boolop");
     let msg = err.message();
     assert!(
-        msg.contains("Both branches fail in the if/else:"),
+        msg.starts_with("Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"),
         "Got: {msg}"
     );
-    assert!(msg.contains("exceeded limit (1048576 bytes)"), "Got: {msg}");
-    assert!(msg.contains("Cannot convert 'nope' to int"), "Got: {msg}");
+    assert!(
+        !msg.contains("Both branches fail"),
+        "the else-branch must not have run: {msg}"
+    );
+    assert!(
+        !msg.contains("Cannot convert 'nope'"),
+        "the else-branch must not have run: {msg}"
+    );
 }
 
 /// Control: a compound both-branches-fail error with *no* budget
@@ -1235,7 +1243,10 @@ fn large_element_comprehension_exceedance_reports_true_usage() {
     assert_eq!(
         e,
         [
-            "Expression memory usage (1800768 bytes) exceeded limit (1500000 bytes)\n",
+            // 1800576 = the `[1, 2, 3]` iterable (charged once) plus two
+            // held 600 KB elements, the third being pushed, and the Vec's
+            // projected slack.
+            "Expression memory usage (1800576 bytes) exceeded limit (1500000 bytes)\n",
             "  ['A' * 600000 for x in [1, 2, 3]]\n",
             "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
         ]
@@ -1313,4 +1324,171 @@ fn abandoned_comprehension_cannot_iterate_drops_iterable_charge() {
     assert_iterable_not_charged_after_abandonment(
         "len([x for x in 'C' * 600000] if Session.Flag else []) + len('B' * 600000)",
     );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Absorbed failures and discarded values leave no footprint
+// ══════════════════════════════════════════════════════════════
+
+/// Evaluate `expr` under a 1.5 MB limit. The expression absorbs a
+/// failure or discards a value, then allocates 600 KB. If the discarded
+/// value were still charged, the final allocation would exceed the
+/// limit.
+fn assert_fits_after_absorption(expr: &str) {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: a discarded value must not stay charged: {e}"));
+}
+
+/// When one branch of an unresolved-test conditional fails, the other
+/// branch's value is discarded (the result is an `Unresolved` carrying
+/// only its type) and must be released. Both arms.
+#[test]
+fn ifexp_absorbing_if_branch_failure_releases_else_value() {
+    assert_fits_after_absorption(
+        "len(int('x') if Session.Flag else 'A' * 1000000) + len('B' * 600000)",
+    );
+}
+
+#[test]
+fn ifexp_absorbing_else_branch_failure_releases_if_value() {
+    assert_fits_after_absorption(
+        "len('A' * 1000000 if Session.Flag else int('x')) + len('B' * 600000)",
+    );
+}
+
+/// When both branches succeed, both values are discarded for the union
+/// type. Both are live together while the union is formed (2 MB peak),
+/// which the limit allows; the trailing 1.5 MB allocation fits only if
+/// both were released afterwards.
+#[test]
+fn ifexp_with_unresolved_test_releases_both_branch_values() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    let expr = "len('A' * 1000000 if Session.Flag else 'C' * 1000000) + len('B' * 1500000)";
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(2_500_000).evaluate(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: discarded branch values must not stay charged: {e}"));
+}
+
+/// `'A' * 1000000 - 1` fails inside the binop while the 1 MB string is a
+/// live operand. Absorbed by a boolop after an unresolved operand, the
+/// string must be released.
+#[test]
+fn boolop_past_unresolved_absorbing_failed_binop_releases_its_operands() {
+    assert_fits_after_absorption(
+        "[Session.Flag or 'A' * 1000000 - 1 == 'x', len('B' * 600000) > 0][1]",
+    );
+}
+
+/// The same failed binop, absorbed by a conditional instead of a boolop.
+#[test]
+fn ifexp_absorbing_failed_binop_releases_its_operands() {
+    assert_fits_after_absorption(
+        "len(('A' * 1000000 - 1) if Session.Flag else '') + len('B' * 600000)",
+    );
+}
+
+/// A concrete boolop operand that does not decide the result is
+/// replaced by the next one and must be released, both before and after
+/// the unresolved operand. The operands are the large strings themselves
+/// (a non-empty string is truthy, so `and` moves past it).
+#[test]
+fn boolop_releases_non_deciding_concrete_operands() {
+    assert_fits_after_absorption(
+        "[('A' * 1000000 and Session.Flag and 'C' * 1000000), len('B' * 600000) > 0][1]",
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// A list literal is charged once
+// ══════════════════════════════════════════════════════════════
+
+/// A list literal's elements are released when they are consumed into
+/// the list, so the literal is charged for the list only, not for the
+/// list and every element again. One 600 KB element plus a further
+/// 300 KB fits under a 1 MB limit.
+#[test]
+fn list_literal_elements_are_charged_once() {
+    let st = SymbolTable::new();
+    ParsedExpression::new("len(['C' * 600000]) + len('B' * 300000)")
+        .and_then(|p| p.with_memory_limit(1_000_000).evaluate(&[&st]))
+        .expect("a 600 KB single-element literal plus 300 KB must fit under 1 MB");
+    // With a second large literal following, the limit is exceeded while
+    // the second element is being produced, before the second list exists
+    // and before `+` runs (hence the caret on `'B' * 600000`). The figure
+    // is one list charge plus one element in flight.
+    let e = ParsedExpression::new("['C' * 600000] + ['B' * 600000]")
+        .and_then(|p| p.with_memory_limit(1_000_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 1200224 = the 600 KB single-element list (600088) plus the
+            // second 600 KB string as it is produced (600064), its 'B'
+            // operand (72) and the operator's fixed overhead.
+            "Expression memory usage (1200224 bytes) exceeded limit (1000000 bytes)\n",
+            "  ['C' * 600000] + ['B' * 600000]\n",
+            "                    ~~~~^~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// A comparison releases its operands exactly once
+// ══════════════════════════════════════════════════════════════
+
+/// A comparison's operands are released once, by the dispatch that
+/// consumes them. With a 1 MB string held, a comparison of two 200 KB
+/// strings, and a further 700 KB allocation, the live footprint is
+/// 1.7 MB and must exceed a 1.5 MB limit. If the comparison released
+/// its operands twice, 400 KB of the held string would be uncharged
+/// and the expression would fit.
+#[test]
+fn comparison_releases_operands_once() {
+    let st = SymbolTable::new();
+    let e = ParsedExpression::new(
+        "['A' * 1000000, string('C' * 200000 == 'D' * 200000), 'B' * 700000]",
+    )
+    .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+    .unwrap_err()
+    .to_string();
+    assert_eq!(
+        e,
+        [
+            // 1700272 = the held 1 MB string (1000064), the "false" result
+            // string (72), the 700 KB string being produced (700064) and
+            // its 'B' operand (72). The comparison's operands are gone.
+            "Expression memory usage (1700272 bytes) exceeded limit (1500000 bytes)\n",
+            "  ['A' * 1000000, string('C' * 200000 == 'D' * 200000), 'B' * 700000]\n",
+            "                                                        ~~~~^~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+/// A chained comparison carries its middle operand from one link to the
+/// next. The carried value is charged once across the chain and released
+/// by the link that consumes it. Three 300 KB operands, two links, then
+/// a 1.45 MB allocation under a 1.5 MB limit: it fits only if the chain
+/// left nothing charged. This guards against a leak; the test above
+/// guards against a double release.
+#[test]
+fn chained_comparison_carries_middle_operand_once() {
+    let st = SymbolTable::new();
+    ParsedExpression::new("[string('A' * 300000 < 'B' * 300000 < 'C' * 300000), 'D' * 1450000]")
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .expect("the chain must leave no footprint");
 }
