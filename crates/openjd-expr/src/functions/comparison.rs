@@ -265,7 +265,11 @@ pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
     let max_bytes = s.len().min(count.saturating_mul(4));
     ctx.check_memory(max_bytes)?;
     let mut result = String::with_capacity(max_bytes);
-    let stride = step.unsigned_abs() as usize;
+    // `count > 1` implies `|step| < len`, which fits in `usize`. When
+    // `count == 1` the stride is irrelevant (`take(1)`), but it must not
+    // be zero: `as usize` would truncate `2^32` or `i64::MIN` to zero on
+    // 32-bit targets such as wasm32, and `step_by(0)` panics.
+    let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
     if step > 0 {
         result.extend(s.chars().skip(sv as usize).step_by(stride).take(count));
     } else {

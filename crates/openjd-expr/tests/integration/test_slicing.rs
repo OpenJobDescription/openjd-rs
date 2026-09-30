@@ -109,7 +109,9 @@ fn str_slice_multibyte_step_and_reverse() {
 
 /// A step near `i64::MAX` / `i64::MIN` selects at most one element; the
 /// index walk must not overflow past it (Python: `'hello'[1::2**63-1]`
-/// is `'e'`).
+/// is `'e'`). Steps that are multiples of 2^32 (including `i64::MIN`)
+/// truncate to zero if cast to a 32-bit `usize`, so they also guard the
+/// string slice on 32-bit targets such as wasm32.
 #[test]
 fn slice_with_extreme_step_selects_one_element() {
     assert_eq!(
@@ -120,6 +122,8 @@ fn slice_with_extreme_step_selects_one_element() {
         eval("'hello'[3::-9223372036854775808]").to_display_string(),
         "l"
     );
+    assert_eq!(eval("'hello'[::4294967296]").to_display_string(), "h");
+    assert_eq!(eval("'hello'[::-4294967296]").to_display_string(), "o");
     assert_eq!(
         eval("[1, 2, 3, 4, 5][1::9223372036854775807]").to_display_string(),
         "[2]"
@@ -127,6 +131,10 @@ fn slice_with_extreme_step_selects_one_element() {
     assert_eq!(
         eval("[1, 2, 3, 4, 5][3::-9223372036854775808]").to_display_string(),
         "[4]"
+    );
+    assert_eq!(
+        eval("[1, 2, 3, 4, 5][::4294967296]").to_display_string(),
+        "[1]"
     );
 }
 
