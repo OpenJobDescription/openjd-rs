@@ -40,13 +40,12 @@ fn append_sub_error(msg: &mut String, err: &ExpressionError, is_last: bool) {
 }
 
 /// Whether an error is (or contains, through compound sub-errors) a
-/// budget exceedance. `eval_ifexp` uses this to decide whether a
-/// failing branch under an unresolved test may be absorbed into an
-/// `Unresolved` result: a *value* error may vanish at run time when the
-/// resolved test selects the other branch, but the budgets are global
-/// to the evaluation — the memory and operations were spent in this
-/// evaluation no matter which branch run time takes — so exhaustion
-/// must propagate.
+/// budget exceedance. `eval_speculative` uses this to decide whether an
+/// error may be absorbed, and `eval_attribute` and `eval_call` use it to
+/// decide whether an error may be rewritten. A value error may not
+/// matter at run time (the resolved test may select the other branch),
+/// but the memory and operations were spent in this evaluation either
+/// way, so a budget error must always propagate.
 ///
 /// Deliberately coarse: when a *compound* error contains a budget
 /// exceedance among value sub-errors, the whole compound propagates
@@ -274,7 +273,8 @@ impl<'a> Evaluator<'a> {
     /// This is the per-node target-type propagation primitive defined by
     /// RFC 0005 §"Target Type Propagation Rules". The target applies to
     /// **this node's result only**: after `evaluate_inner` returns, the
-    /// value is coerced toward `target` via [`ExprValue::coerce`].
+    /// value is coerced toward `target` via [`ExprValue::coerce`], and the
+    /// memory tracking is updated to the coerced value's size.
     ///
     /// Children are evaluated with `target = None` (unconstrained) by
     /// default — a caller's `target_type=string` request must not leak
@@ -327,8 +327,22 @@ impl<'a> Evaluator<'a> {
             }
             Ok(val) => {
                 if let Some(tt) = target {
-                    val.coerce(tt, self.path_format).map_err(|msg| {
+                    // Coercion can change the value's size (int -> string,
+                    // list[int] -> list[string]), and later releases use
+                    // the coerced value's size. Release the value at the
+                    // size it was tracked at, then track the coerced one.
+                    // If coercion fails the value is gone, so it stays
+                    // released.
+                    self.release(&val);
+                    let coerced = val.coerce(tt, self.path_format).map_err(|msg| {
                         let e = ExpressionError::new(msg);
+                        if let Some(src) = &self.expr_source {
+                            e.with_node(src, node)
+                        } else {
+                            e
+                        }
+                    })?;
+                    self.track(coerced).map_err(|e| {
                         if let Some(src) = &self.expr_source {
                             e.with_node(src, node)
                         } else {
@@ -658,8 +672,15 @@ impl<'a> Evaluator<'a> {
         // Fall back: evaluate the value, then access the attribute via library.
         // If the base evaluation fails (e.g., "Param" is a subtable not a value),
         // and we had a dotted path, report the dotted path as undefined with suggestions.
+        //
+        // Both fallback arms below replace the original error with a
+        // friendlier one. A budget error is never replaced: the rewritten
+        // error would be a value error that an enclosing
+        // `eval_speculative` could absorb, and the memory and operations
+        // were spent regardless.
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
+            Err(e) if contains_budget_error(&e) => return Err(e),
             Err(_) if dotted_path.is_some() => {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
@@ -684,6 +705,7 @@ impl<'a> Evaluator<'a> {
         let attr_node = ast::Expr::Attribute(a.clone());
         match self.dispatch_with_node(&prop_name, vec![value.clone()], Some(&attr_node)) {
             Ok(v) => Ok(v),
+            Err(e) if contains_budget_error(&e) => Err(e),
             Err(_) => {
                 let src = self.expr_source.unwrap_or("");
                 let val_type = value.expr_type();
@@ -1187,7 +1209,11 @@ impl<'a> Evaluator<'a> {
                 let result = result.map_err(|e| {
                     let src = self.expr_source.unwrap_or("");
                     let call_node = ast::Expr::Call(c.clone());
+                    // Like `eval_attribute`'s fallbacks: never replace a
+                    // budget error with a value error that an enclosing
+                    // `eval_speculative` could absorb.
                     if is_method_call
+                        && !contains_budget_error(&e)
                         && !lib
                             .get_signatures(&format!("__property_{name}__"))
                             .is_empty()
@@ -1342,56 +1368,56 @@ impl<'a> Evaluator<'a> {
 
         // Handle slice syntax: value[start:stop:step]
         if let ast::Expr::Slice(sl) = &*s.slice {
-            let start = match sl
-                .lower
-                .as_ref()
-                .map(|e| self.eval_node(e, None))
-                .transpose()?
-            {
-                Some(v) => v,
-                None => ExprValue::Null,
+            // An omitted bound is passed to dispatch as a `Null`
+            // placeholder. Dispatch releases every operand, so the
+            // placeholder must be tracked like an evaluated bound;
+            // otherwise the release would subtract bytes that were never
+            // added.
+            let start = match &sl.lower {
+                Some(e) => self.eval_node(e, None)?,
+                None => self.track(ExprValue::Null)?,
             };
-            let stop = match sl
-                .upper
-                .as_ref()
-                .map(|e| self.eval_node(e, None))
-                .transpose()?
-            {
-                Some(v) => v,
-                None => ExprValue::Null,
+            let stop = match &sl.upper {
+                Some(e) => self.eval_node(e, None)?,
+                None => self.track(ExprValue::Null)?,
             };
-            let step = match sl
-                .step
-                .as_ref()
-                .map(|e| self.eval_node(e, None))
-                .transpose()?
-            {
-                Some(v) => v,
-                None => ExprValue::Null,
+            let step = match &sl.step {
+                Some(e) => self.eval_node(e, None)?,
+                None => self.track(ExprValue::Null)?,
             };
 
             if let ExprValue::Int(0) = &step {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
 
-            if value.is_unresolved() {
+            // When the result is a type-only `Unresolved`, the operands
+            // are discarded. Release them before tracking the result;
+            // this is a success path, so nothing else would reset the
+            // memory tracking.
+            let unresolved_result = if value.is_unresolved() {
                 let inner = unwrap_unresolved(&value.expr_type());
-                if let Some(elem) = inner.list_element_type() {
-                    return self.track(ExprValue::unresolved(ExprType::list(elem.clone())));
-                }
-                return self.track(ExprValue::unresolved(inner));
-            }
-
-            // If any slice bound is unresolved, propagate unresolved
-            let any_bound_unresolved =
-                start.is_unresolved() || stop.is_unresolved() || step.is_unresolved();
-            if any_bound_unresolved {
+                Some(match inner.list_element_type() {
+                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())),
+                    None => ExprValue::unresolved(inner),
+                })
+            } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
+                // Any unresolved bound makes the result unresolved.
                 if value.is_list() {
                     let elem_type = value.list_elem_type().unwrap();
-                    return self.track(ExprValue::unresolved(ExprType::list(elem_type.clone())));
+                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())))
                 } else if matches!(&value, ExprValue::String(_)) {
-                    return self.track(ExprValue::unresolved(ExprType::STRING));
+                    Some(ExprValue::unresolved(ExprType::STRING))
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
+            if let Some(result) = unresolved_result {
+                for operand in [&value, &start, &stop, &step] {
+                    self.release(operand);
+                }
+                return self.track(result);
             }
 
             // Dispatch 4-arg __getitem__ through the library

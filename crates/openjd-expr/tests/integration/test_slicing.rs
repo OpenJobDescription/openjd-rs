@@ -99,6 +99,36 @@ fn str_slice_reverse() {
 fn str_slice_step() {
     assert_eq!(eval("'hello'[::2]").to_display_string(), "hlo");
 }
+#[test]
+fn str_slice_multibyte_step_and_reverse() {
+    assert_eq!(eval("'aé漢😀b'[1:4]").to_display_string(), "é漢😀");
+    assert_eq!(eval("'aé漢😀b'[::2]").to_display_string(), "a漢b");
+    assert_eq!(eval("'aé漢😀b'[::-1]").to_display_string(), "b😀漢éa");
+    assert_eq!(eval("'aé漢😀b'[3:0:-1]").to_display_string(), "😀漢é");
+}
+
+/// A step near `i64::MAX` / `i64::MIN` selects at most one element; the
+/// index walk must not overflow past it (Python: `'hello'[1::2**63-1]`
+/// is `'e'`).
+#[test]
+fn slice_with_extreme_step_selects_one_element() {
+    assert_eq!(
+        eval("'hello'[1::9223372036854775807]").to_display_string(),
+        "e"
+    );
+    assert_eq!(
+        eval("'hello'[3::-9223372036854775808]").to_display_string(),
+        "l"
+    );
+    assert_eq!(
+        eval("[1, 2, 3, 4, 5][1::9223372036854775807]").to_display_string(),
+        "[2]"
+    );
+    assert_eq!(
+        eval("[1, 2, 3, 4, 5][3::-9223372036854775808]").to_display_string(),
+        "[4]"
+    );
+}
 
 // === TestRangeExprSlicing ===
 #[test]

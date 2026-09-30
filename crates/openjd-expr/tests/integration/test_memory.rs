@@ -604,11 +604,13 @@ fn reverse_range_slice_memory_checked_before_walk() {
         .unwrap_err()
         .to_string();
     // 128,000,000 = 2,000,000 × size_of::<ExprValue>() (64); the
-    // remainder is the tracked RangeExpr and slice-argument values.
+    // remainder is the tracked RangeExpr and the three slice operands:
+    // the `-1` step and the two `Null` placeholders for the omitted
+    // start and stop.
     assert_eq!(
         e,
         [
-            "Expression memory usage (128000160 bytes) exceeded limit (10000 bytes)\n",
+            "Expression memory usage (128000288 bytes) exceeded limit (10000 bytes)\n",
             "  range_expr('1-2000000')[::-1]\n",
             "  ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~",
         ]
@@ -1491,4 +1493,362 @@ fn chained_comparison_carries_middle_operand_once() {
     ParsedExpression::new("[string('A' * 300000 < 'B' * 300000 < 'C' * 300000), 'D' * 1450000]")
         .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
         .expect("the chain must leave no footprint");
+}
+
+// ══════════════════════════════════════════════════════════════
+// A coerced value is tracked at its coerced size
+// ══════════════════════════════════════════════════════════════
+
+/// Target-type coercion runs after a node's value is tracked and can
+/// change its size. The evaluator releases the original and tracks the
+/// coerced value, so the memory limit applies to what the expression
+/// actually produces. A `range_expr` is a few dozen bytes; coerced to
+/// `list[int]` it becomes 100,000 ints (800 KB), which exceeds a 100 KB
+/// limit. Previously only the small `range_expr` was ever tracked.
+#[test]
+fn root_target_coercion_is_charged_at_coerced_size() {
+    let st = SymbolTable::new();
+    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::INT);
+    let e = ParsedExpression::new("range_expr('1-100000')")
+        .and_then(|p| {
+            p.with_memory_limit(100_000)
+                .with_target_type(&target)
+                .evaluate(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 800064 = the coerced list[int] alone (64 + 100,000 × 8). The
+            // range_expr it replaced was released first.
+            "Expression memory usage (800064 bytes) exceeded limit (100000 bytes)\n",
+            "  range_expr('1-100000')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+/// `eval_call` releases its arguments at their coerced size. If they had
+/// been tracked at the pre-coercion size, the release would subtract more
+/// than was added, and part of some other live value would go uncounted.
+/// Under a `list[string]` target each element is evaluated toward
+/// `string`, so `join` receives argument targets and `range(2000)` (16 KB
+/// as `list[int]`) is coerced to `list[string]` (about 55 KB). A 1 MB
+/// string is live at the same time; a further 500 KB then totals 1.51 MB
+/// and fails a 1.5 MB limit. With the old under-count, 39 KB of the 1 MB
+/// string went uncounted and the expression fit.
+#[test]
+fn call_argument_coercion_releases_what_was_charged() {
+    let st = SymbolTable::new();
+    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::STRING);
+    let e = ParsedExpression::new("['A' * 1000000, join(range(2000), ','), 'B' * 500000]")
+        .and_then(|p| {
+            p.with_memory_limit(1_500_000)
+                .with_target_type(&target)
+                .evaluate(&[&st])
+        })
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 1509153 = the 1 MB string (1000064), the joined string
+            // (8953: 6890 digits and 1999 commas), the 'B' operand (72),
+            // the `500000` operand (64), and the 500,000 bytes the
+            // multiplication checks for its result before building it.
+            // The coerced argument has been released.
+            "Expression memory usage (1509153 bytes) exceeded limit (1500000 bytes)\n",
+            "  ['A' * 1000000, join(range(2000), ','), 'B' * 500000]\n",
+            "                                          ~~~~^~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Attribute access never rewrites a budget error
+// ══════════════════════════════════════════════════════════════
+
+/// Symbol table with an unresolved `Session.Flag`, a `Big` path whose
+/// string is 1 MB long (tracking it exceeds any limit below 1 MB), and a
+/// `Deep` path of 200,000 components (`.parts` builds a list far past
+/// the limits used here).
+fn attribute_symtab() -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st.set(
+        "Big",
+        ExprValue::new_path(
+            format!("/{}", "a".repeat(1_000_000)),
+            openjd_expr::PathFormat::Posix,
+        ),
+    )
+    .unwrap();
+    st.set(
+        "Deep",
+        ExprValue::new_path("/a".repeat(200_000), openjd_expr::PathFormat::Posix),
+    )
+    .unwrap();
+    st
+}
+
+fn eval_attribute_expr(expr: &str, mem: usize) -> Result<ExprValue, openjd_expr::ExpressionError> {
+    let st = attribute_symtab();
+    ParsedExpression::new(expr).and_then(|p| {
+        p.with_memory_limit(mem)
+            .with_path_format(openjd_expr::PathFormat::Posix)
+            .evaluate(&[&st])
+    })
+}
+
+/// `Big.name` is not a symbol, so the evaluator falls back to evaluating
+/// `Big` and dispatching the property. Tracking the 1 MB path exceeds
+/// the limit inside that base evaluation. The fallback that would
+/// otherwise report "Undefined variable 'Big.name'" must let the budget
+/// error through.
+#[test]
+fn attribute_base_lookup_propagates_memory_error() {
+    let e = eval_attribute_expr("Big.name", 500_000)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "Expression memory usage (1000065 bytes) exceeded limit (500000 bytes)\n",
+            "  Big.name\n",
+            "  ^~~",
+        ]
+        .concat()
+    );
+}
+
+/// The same base-lookup failure inside a construct that absorbs value
+/// errors. If the budget error were rewritten as an undefined-variable
+/// error, the `or` would absorb it and the expression would succeed
+/// with an `Unresolved` result.
+#[test]
+fn attribute_base_lookup_memory_error_is_not_absorbed() {
+    let e = eval_attribute_expr("Session.Flag or Big.name == 'x'", 500_000)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.starts_with("Expression memory usage (1000065 bytes) exceeded limit (500000 bytes)"),
+        "expected the memory error to propagate, got:\n{e}"
+    );
+}
+
+/// `Deep.parts` fails inside the property dispatch: the 200,001-element
+/// result list fails the memory check before it is built. The fallback
+/// that would otherwise report "'parts' property is not available for
+/// path" must let the budget error through.
+#[test]
+fn attribute_property_dispatch_propagates_memory_error() {
+    let e = eval_attribute_expr("Deep.parts", 2_000_000)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 13400129 = the 400 KB path (400064) plus the estimate for
+            // the 200,001 one-character parts (the root "/" and 200,000
+            // "a"s): 200,001 × 64 slots plus 200,001 bytes of heap.
+            "Expression memory usage (13400129 bytes) exceeded limit (2000000 bytes)\n",
+            "  Deep.parts\n",
+            "  ~~~~~^~~~~",
+        ]
+        .concat()
+    );
+}
+
+/// The same property-dispatch failure inside an absorbing construct.
+#[test]
+fn attribute_property_dispatch_memory_error_is_not_absorbed() {
+    let e = eval_attribute_expr("Session.Flag or len(Deep.parts) == 0", 2_000_000)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.starts_with("Expression memory usage ("),
+        "expected the memory error to propagate, got:\n{e}"
+    );
+}
+
+/// Control: a real value error in the property dispatch is still
+/// rewritten to the friendlier message, and can still be absorbed.
+#[test]
+fn attribute_value_error_is_still_rewritten_and_absorbable() {
+    let e = eval_attribute_expr("'abc'.name", 1_000_000)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            "'name' property is not available for string. Available for: path\n",
+            "  'abc'.name\n",
+            "  ~~~~~~^~~~",
+        ]
+        .concat()
+    );
+    let v = eval_attribute_expr("Session.Flag or 'abc'.name == 'x'", 1_000_000).unwrap();
+    assert!(v.is_unresolved());
+}
+
+/// `eval_call` has its own rewrite: a failed method call whose name is
+/// also a property becomes "'name' is a property, not a method". No
+/// method in the default library shares a name with a property, so this
+/// needs a custom library. Here the default library is extended with a
+/// `stem(path, int)` method that exhausts the operation budget. The
+/// budget error must not be rewritten, so it must not be absorbable.
+#[test]
+fn call_property_method_rewrite_exempts_budget_errors() {
+    use openjd_expr::function_library::{EvalContext, FunctionLibrary};
+    fn exhausting_stem(
+        ctx: &mut dyn EvalContext,
+        _args: &[ExprValue],
+    ) -> Result<ExprValue, openjd_expr::ExpressionError> {
+        ctx.count_ops(usize::MAX / 2)?;
+        Ok(ExprValue::String(String::new()))
+    }
+    let mut lib: FunctionLibrary =
+        (*FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current())).clone();
+    lib.register_sig("stem", "(path, int) -> string", exhausting_stem)
+        .unwrap();
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st.set(
+        "P",
+        ExprValue::new_path("/a/b.txt", openjd_expr::PathFormat::Posix),
+    )
+    .unwrap();
+    let run = |expr: &str| {
+        ParsedExpression::new(expr).and_then(|p| {
+            p.with_library(&lib)
+                .with_path_format(openjd_expr::PathFormat::Posix)
+                .evaluate(&[&st])
+        })
+    };
+
+    // Top level: the budget error is reported as itself.
+    let e = run("P.stem(1)").unwrap_err().to_string();
+    assert!(
+        e.starts_with("Expression operation count ("),
+        "expected the operation-limit error to propagate, got:\n{e}"
+    );
+    // Inside a construct that absorbs value errors: not absorbed.
+    let e = run("Session.Flag or P.stem(1) == 'x'")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.starts_with("Expression operation count ("),
+        "expected the operation-limit error to propagate, got:\n{e}"
+    );
+    // Control: a real value error still gets the rewrite.
+    let e = run("P.stem()").unwrap_err().to_string();
+    assert_eq!(
+        e,
+        [
+            "'stem' is a property, not a method. Use .stem instead of .stem()\n",
+            "  P.stem()\n",
+            "  ~~^~~~~~",
+        ]
+        .concat()
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Slice operands are tracked and released symmetrically
+// ══════════════════════════════════════════════════════════════
+
+/// An omitted slice bound is passed to dispatch as a `Null` placeholder,
+/// and dispatch releases every operand. The placeholders are tracked when
+/// created so the release matches. This is only visible when something
+/// else is live: with a 300 KB string live, `[:]` on a 500 KB string, and
+/// then a 700 KB string, the reported figure is exact. Untracked
+/// placeholders would have subtracted 192 bytes (three omitted bounds)
+/// that were never added.
+#[test]
+fn slice_placeholders_are_charged_before_dispatch_releases_them() {
+    let st = SymbolTable::new();
+    let e = ParsedExpression::new("['C' * 300000, ('A' * 500000)[:], 'B' * 700000]")
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 1500264 = the 300 KB string (300064), the sliced 500 KB
+            // result (500064; the slice shrinks its buffer, so capacity
+            // equals length), the 'B' operand (72), the `700000` operand
+            // (64), and the 700,000 bytes the multiplication checks for
+            // its result before building it.
+            "Expression memory usage (1500264 bytes) exceeded limit (1500000 bytes)\n",
+            "  ['C' * 300000, ('A' * 500000)[:], 'B' * 700000]\n",
+            "                                    ~~~~^~~~~~~~",
+        ]
+        .concat()
+    );
+}
+
+/// A string slice checks the memory budget for its result before
+/// allocating anything. The input is still tracked at that point, so the
+/// input and the projected result count together. A 1 MB string sliced
+/// whole under a 1.5 MB limit fails at the slice, with the input, the
+/// three placeholders, and the projected result in the figure.
+/// Previously the slice built an untracked `Vec<char>` (4 MB) and index
+/// vector (8 MB), then a result whose capacity had grown to 1048576, and
+/// the expression passed because the input was released before the
+/// result was tracked.
+#[test]
+fn string_slice_budgets_result_before_allocating() {
+    let st = SymbolTable::new();
+    let e = ParsedExpression::new("('A' * 1000000)[:]")
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 2000256 = the 1 MB input (1000064), three `Null` placeholders
+            // (192) and the projected 1,000,000-byte result.
+            "Expression memory usage (2000256 bytes) exceeded limit (1500000 bytes)\n",
+            "  ('A' * 1000000)[:]\n",
+            "  ~~~~~~~~~~~~~~^~~~",
+        ]
+        .concat()
+    );
+    // The bound also depends on the number of selected characters: a
+    // step-8 slice selects 125,000 characters and projects 500,000 bytes
+    // (four per character), which fits.
+    let v = ParsedExpression::new("len(('A' * 1000000)[::8])")
+        .and_then(|p| p.with_memory_limit(1_600_000).evaluate(&[&st]))
+        .expect("an eighth-size slice must fit where the whole does not");
+    assert_eq!(v, ExprValue::Int(125000));
+}
+
+/// When a slice bound is unresolved the result is a type-only
+/// `Unresolved`, and the sliced value is discarded. It must be released
+/// on that exit. This is a success path, so nothing else would reset the
+/// memory tracking, and the 1 MB string would otherwise stay counted and
+/// the following 600 KB would exceed a 1.5 MB limit.
+#[test]
+fn slice_with_unresolved_bound_releases_sliced_value() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Start",
+        ExprValue::unresolved(openjd_expr::ExprType::INT),
+    )
+    .unwrap();
+    let expr = "len(('A' * 1000000)[Session.Start:]) + len('B' * 600000)";
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: the discarded sliced value must be released: {e}"));
 }
