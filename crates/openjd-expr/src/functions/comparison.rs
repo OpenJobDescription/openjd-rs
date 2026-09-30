@@ -171,25 +171,43 @@ fn compute_slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: 
     }
 }
 
-fn collect_indices(start: i64, stop: i64, step: i64) -> Vec<usize> {
-    let mut indices = Vec::new();
+/// Indices a slice visits, in order, produced lazily so no index vector
+/// is allocated. The step is added with saturation so a step near
+/// `i64::MAX` or `i64::MIN` cannot overflow; a saturated index is past
+/// every bound `compute_slice_indices` can return, so the walk ends.
+fn slice_indices(start: i64, stop: i64, step: i64) -> impl Iterator<Item = usize> {
+    let forward = step > 0;
     let mut idx = start;
-    if step > 0 {
-        while idx < stop {
-            if idx >= 0 {
-                indices.push(idx as usize);
-            }
-            idx += step;
+    std::iter::from_fn(move || {
+        let in_range = if forward { idx < stop } else { idx > stop };
+        if !in_range {
+            return None;
         }
+        let current = idx;
+        idx = idx.saturating_add(step);
+        Some(current)
+    })
+    .filter(|&i| i >= 0)
+    .map(|i| i as usize)
+}
+
+/// Number of indices [`slice_indices`] yields for the same arguments.
+/// Computed arithmetically so callers can check the memory budget before
+/// building the result. Expects `(start, stop)` from
+/// [`compute_slice_indices`]: for a forward step `start >= 0`, and for a
+/// backward step `stop >= -1`, so a negative `start` yields nothing (as
+/// `slice_indices`'s `i >= 0` filter would).
+fn slice_len(start: i64, stop: i64, step: i64) -> usize {
+    let span = if step > 0 {
+        stop.saturating_sub(start)
     } else {
-        while idx > stop {
-            if idx >= 0 {
-                indices.push(idx as usize);
-            }
-            idx += step;
-        }
+        start.saturating_sub(stop)
+    };
+    if span <= 0 {
+        return 0;
     }
-    indices
+    // ceil(span / |step|), in u64 so `|i64::MIN|` cannot overflow.
+    ((span as u64 - 1) / step.unsigned_abs() + 1) as usize
 }
 
 pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -202,12 +220,18 @@ pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let start = extract_int_or_none(&a[1]);
     let stop = extract_int_or_none(&a[2]);
     let (s, e) = compute_slice_indices(len, start, stop, step);
-    let result: Vec<ExprValue> = collect_indices(s, e, step)
-        .into_iter()
-        .filter_map(|i| a[0].list_get(i as i64))
-        .collect();
-    ctx.count_ops(result.len())?;
-    ExprValue::make_list_checked(ctx, result, elem_type.clone())
+    // Reserve the result's exact capacity once (checked against the
+    // budget), then charge each element as it is pushed. Nothing else is
+    // allocated: the indices are produced lazily.
+    let count = slice_len(s, e, step);
+    ctx.count_ops(count)?;
+    let mut result = BudgetedVec::with_capacity(ctx, count)?;
+    for i in slice_indices(s, e, step) {
+        if let Some(v) = a[0].list_get(i as i64) {
+            result.push(ctx, v)?;
+        }
+    }
+    ExprValue::make_list_checked(ctx, result.into_vec(), elem_type.clone())
 }
 
 pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -220,16 +244,42 @@ pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
     if step == 0 {
         return Err(ExpressionError::new("Slice step cannot be zero"));
     }
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len() as i64;
+    let len = s.chars().count() as i64;
     let start = extract_int_or_none(&a[1]);
     let stop = extract_int_or_none(&a[2]);
     let (sv, ev) = compute_slice_indices(len, start, stop, step);
-    let result: String = collect_indices(sv, ev, step)
-        .into_iter()
-        .filter(|&i| i < chars.len())
-        .map(|i| chars[i])
-        .collect();
+    let count = slice_len(sv, ev, step);
+    if count == 0 {
+        return Ok(ExprValue::String(String::new()));
+    }
+    // A non-zero step never visits an index twice, so each selected
+    // character is a distinct character of `s`. The result is therefore
+    // at most `s.len()` bytes and at most 4 bytes per selected character.
+    // Check that bound before allocating, then copy the characters
+    // directly from `s` (no index vector, no `Vec<char>`) and shrink the
+    // buffer so the tracked size equals the actual size.
+    let max_bytes = s.len().min(count.saturating_mul(4));
+    ctx.check_memory(max_bytes)?;
+    let mut result = String::with_capacity(max_bytes);
+    // `count > 1` implies `|step| < len`, which fits in `usize`. When
+    // `count == 1` the stride is irrelevant (`take(1)`), but it must not
+    // be zero: `as usize` would truncate `2^32` or `i64::MIN` to zero on
+    // 32-bit targets such as wasm32, and `step_by(0)` panics.
+    let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
+    if step > 0 {
+        result.extend(s.chars().skip(sv as usize).step_by(stride).take(count));
+    } else {
+        // Walking from the end, the k-th character has index `len - 1 - k`.
+        // `count > 0` guarantees `0 <= sv < len`.
+        result.extend(
+            s.chars()
+                .rev()
+                .skip((len - 1 - sv) as usize)
+                .step_by(stride)
+                .take(count),
+        );
+    }
+    result.shrink_to_fit();
     Ok(ExprValue::String(result))
 }
 
@@ -360,5 +410,72 @@ mod tests {
             err.to_string(),
             "__contains__ on a range_expr requires an int or float item"
         );
+    }
+
+    /// `slice_len` must agree with `slice_indices` for every argument
+    /// combination `compute_slice_indices` can produce, since it is used
+    /// to check the budget for the result built from `slice_indices`.
+    #[test]
+    fn slice_len_matches_slice_indices() {
+        let bounds: Vec<Option<i64>> = std::iter::once(None)
+            .chain((-9..=9).map(Some))
+            .chain([i64::MIN, i64::MAX, -1_000_000, 1_000_000].map(Some))
+            .collect();
+        let steps = [1, 2, 3, 7, -1, -2, -3, -7, i64::MAX, i64::MIN];
+        for len in 0..=7 {
+            for &start in &bounds {
+                for &stop in &bounds {
+                    for &step in &steps {
+                        let (s, e) = compute_slice_indices(len, start, stop, step);
+                        assert_eq!(
+                            slice_len(s, e, step),
+                            slice_indices(s, e, step).count(),
+                            "len={len} start={start:?} stop={stop:?} step={step}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `slice_string` must select the same characters as indexing into a
+    /// collected `Vec<char>`, including multi-byte characters and
+    /// backward steps.
+    #[test]
+    fn slice_string_matches_char_indexing() {
+        let text = "aé漢😀bçdz";
+        let chars: Vec<char> = text.chars().collect();
+        let len = chars.len() as i64;
+        let bounds: Vec<Option<i64>> = std::iter::once(None)
+            .chain((-(len + 2)..=(len + 2)).map(Some))
+            .collect();
+        for &start in &bounds {
+            for &stop in &bounds {
+                for step in [1, 2, 3, -1, -2, -3] {
+                    let (s, e) = compute_slice_indices(len, start, stop, step);
+                    let expected: String = slice_indices(s, e, step)
+                        .filter(|&i| i < chars.len())
+                        .map(|i| chars[i])
+                        .collect();
+                    let to_val = |b: Option<i64>| b.map_or(ExprValue::Null, ExprValue::Int);
+                    let got = slice_string(
+                        &mut TestContext,
+                        &[
+                            ExprValue::String(text.to_string()),
+                            to_val(start),
+                            to_val(stop),
+                            ExprValue::Int(step),
+                        ],
+                    )
+                    .unwrap();
+                    let ExprValue::String(got) = got else {
+                        panic!("slice_string returned a non-string");
+                    };
+                    assert_eq!(got, expected, "start={start:?} stop={stop:?} step={step}");
+                    // The buffer is shrunk, so capacity equals length.
+                    assert_eq!(got.capacity(), got.len());
+                }
+            }
+        }
     }
 }

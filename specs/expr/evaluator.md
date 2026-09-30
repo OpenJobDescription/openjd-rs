@@ -175,6 +175,16 @@ evaluator is consumed once, at the root `evaluate` entry point. A node
 kind added later is therefore unconstrained-by-default rather than
 inheriting the caller's target by accident.
 
+Coercion can change a value's size (`int` → `string`, `list[int]` →
+`list[string]`, `range_expr` → `list[int]`), and later releases of the
+value use the coerced size. So `eval_node` releases the value at the size
+the child tracked it at, coerces, and tracks the coerced value. This is
+also the only memory check a materialized `range_expr` gets: `coerce`
+runs outside the budget (it is a post-evaluation hook and a public API),
+so the `list[int]` is allocated first, capped by `coerce` itself at the
+default operation limit's worth of elements, and then tracked, which is
+where it is checked against the memory limit.
+
 **Symbolic parameter types unconstrain their position.** `sorted:
 (list[T1]) -> list[T1]` constrains its argument to any list type, which
 is not a type `ExprValue::coerce` can coerce toward, so the position gets
@@ -216,6 +226,15 @@ Handles dotted access like `Param.Frame` or `path.name`. Resolution order:
 
 This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 `my_path.name` works as a property access, using the same syntax.
+
+Steps 2 and 3 replace the original error with a friendlier one: a failed base
+evaluation with a dotted path becomes "Undefined variable 'Param.Frame'" with
+a suggestion, and a failed property dispatch becomes "'name' property is not
+available for string" (or "is a method, not a property"). Budget errors are
+not replaced; they propagate unchanged. A replaced budget error would be a
+value error that an enclosing construct may absorb (see
+[Speculative evaluation](#speculative-evaluation)), and the memory and
+operations were spent regardless.
 
 ### Operator dispatch table (`eval/op_table.rs`)
 
@@ -389,6 +408,12 @@ applies two rules:
 The caller decides what an absorbed failure means: an `Unresolved` of the other
 branch's type, a runtime short-circuit, or a compound "both branches fail" error.
 
+The first rule requires that every construct between the budget failure and
+the absorbing one passes the error through unchanged. Two places replace
+errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
+fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
+error for a failed method call. Both leave budget errors as they are.
+
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
 (see [Target Type Propagation](#target-type-propagation)) and asserts it
@@ -417,7 +442,13 @@ are evaluated unconstrained; coercion is signature-driven inside
 
 Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
-- Calling properties as methods (`path.name()` — use `path.name` instead)
+- Calling properties as methods (`path.name()` — use `path.name` instead).
+  When a method call fails and a property of the same name exists, the
+  original error is replaced with "is a property, not a method". Budget
+  errors are not replaced (see
+  [Speculative evaluation](#speculative-evaluation)). No method in the
+  default library shares a name with a property, so this only applies to
+  custom libraries.
 
 ### List (`eval_list`)
 Evaluates list literals. Validates max 2 nesting levels. Coerces elements when mixed
@@ -493,6 +524,13 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   target describes the subscript's *result*, so `[10, 20, 30][0]` with
   `target_type=int` must not coerce the `list[int]` receiver or the index
   (issue #291, case A)
+- A slice's four operands (receiver, start, stop, step) are tracked and
+  released symmetrically. An omitted bound is passed to `__getitem__` as
+  a `Null` placeholder, which is tracked when created so that dispatch's
+  release of every operand matches. When the result is a type-only
+  `Unresolved` (the receiver or any bound is unresolved), the operands
+  are released before the result is tracked. This is a success path, so
+  nothing else would reset the memory tracking.
 
 ## Dispatch Flow
 
