@@ -4,6 +4,17 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.10.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.10.0...openjd-expr-v0.10.1) - 2026-09-30
+
+### Bug fixes
+
+- Fix memory accounting gaps in coercion, attributes, and slices ([#418](https://github.com/OpenJobDescription/openjd-rs/pull/418))
+
+- Keep the live memory footprint accurate when errors are absorbed ([#417](https://github.com/OpenJobDescription/openjd-rs/pull/417))
+
+- Close the resolved-value follow-ups from the #404 and #407 reviews ([#410](https://github.com/OpenJobDescription/openjd-rs/pull/410))
+
+
 ## [0.10.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.9.0...openjd-expr-v0.10.0) - 2026-09-28
 
 ### Features

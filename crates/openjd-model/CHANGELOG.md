@@ -4,6 +4,13 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.10.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.10.0...openjd-model-v0.10.1) - 2026-09-30
+
+### Bug fixes
+
+- Close the resolved-value follow-ups from the #404 and #407 reviews ([#410](https://github.com/OpenJobDescription/openjd-rs/pull/410))
+
+
 ## [0.10.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.9.0...openjd-model-v0.10.0) - 2026-09-28
 
 ### Features
