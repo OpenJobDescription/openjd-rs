@@ -1834,6 +1834,75 @@ fn string_slice_budgets_result_before_allocating() {
     assert_eq!(v, ExprValue::Int(125000));
 }
 
+/// A list slice reserves its result's slots once, checked against the
+/// budget, and charges each element as it is pushed. With the input list
+/// still tracked (it is released by dispatch afterwards), a whole-list
+/// slice of 50,000 ints under a limit that fits the input but not two
+/// copies fails at the slice, and the figure is the input plus the
+/// reservation. Previously the result grew by doubling with no check
+/// until it was complete, and an index vector was allocated alongside.
+#[test]
+fn list_slice_reserves_result_before_building() {
+    let mut st = SymbolTable::new();
+    st.set("L", ExprValue::ListInt((0..50_000).collect()))
+        .unwrap();
+    let e = ParsedExpression::new("L[:]")
+        .and_then(|p| p.with_memory_limit(3_500_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 3600256 = the 50,000-int input list (64 + 50,000 × 8 =
+            // 400064), three `Null` placeholders (192), and the reserved
+            // 50,000 result slots (50,000 × 64 = 3,200,000; the result
+            // holds ExprValues until make_list_checked packs them). The
+            // reservation alone is under the limit; the input still being
+            // tracked pushes the total over.
+            "Expression memory usage (3600256 bytes) exceeded limit (3500000 bytes)\n",
+            "  L[:]\n",
+            "  ~^~~",
+        ]
+        .concat()
+    );
+    // Elements are charged as they are pushed, so a slice of large
+    // strings fails partway through, at the push that crosses the limit,
+    // rather than after every element has been cloned. 100 strings of
+    // 100 KB under a 12 MB limit: the input (about 10 MB) and the 100
+    // reserved slots fit; the 20th clone does not.
+    let mut st = SymbolTable::new();
+    st.set(
+        "S",
+        ExprValue::make_list(
+            (0..100)
+                .map(|_| ExprValue::String("x".repeat(100_000)))
+                .collect(),
+            openjd_expr::ExprType::STRING,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let e = ParsedExpression::new("S[:]")
+        .and_then(|p| p.with_memory_limit(12_000_000).evaluate(&[&st]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        e,
+        [
+            // 12009056 = the input list (64 + 100 × 24 for the String
+            // headers + 100 × 100,000 = 10,002,464), three placeholders
+            // (192), and 20 pushed clones (20 × 100,064 = 2,001,280) with
+            // the remaining 80 reserved slots (80 × 64 = 5,120) still
+            // counted. Before per-push charging, all 100 clones were built
+            // first and the figure was the input plus the whole result.
+            "Expression memory usage (12009056 bytes) exceeded limit (12000000 bytes)\n",
+            "  S[:]\n",
+            "  ~^~~",
+        ]
+        .concat()
+    );
+}
+
 /// When a slice bound is unresolved the result is a type-only
 /// `Unresolved`, and the sliced value is discarded. It must be released
 /// on that exit. This is a success path, so nothing else would reset the

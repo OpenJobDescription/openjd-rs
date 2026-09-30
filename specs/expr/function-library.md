@@ -185,10 +185,12 @@ The following function families use this pattern:
   output.
 - **Slicing** (`__getitem__` with a slice on a `string` or `list`) computes the
   number of selected elements arithmetically (`slice_len`, tested to agree
-  with the index walk `collect_indices`) before building anything. A list
-  slice checks `count × size_of::<ExprValue>()` before allocating the index
-  vector and the element vector; `make_list_checked` then checks again with
-  the elements' heap sizes. A string slice checks
+  with the lazy index iterator `slice_indices`) before building anything. A
+  list slice reserves the result's exact capacity once through
+  `BudgetedVec::with_capacity`, which checks `count × size_of::<ExprValue>()`,
+  then charges each element as it is pushed; `make_list_checked` then checks
+  again with the elements' heap sizes. No index vector is allocated. A
+  string slice checks
   `min(input bytes, 4 × count)`: every selected character is a distinct
   character of the input, so both are upper bounds. It then copies the
   characters directly from the input, with no `Vec<char>` or index vector,

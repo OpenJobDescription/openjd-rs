@@ -171,37 +171,32 @@ fn compute_slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: 
     }
 }
 
-/// Indices a slice visits, in order. The step is added with saturation so
-/// a step near `i64::MAX` or `i64::MIN` cannot overflow; a saturated index
-/// is past every bound `compute_slice_indices` can return, so the loop
-/// ends.
-fn collect_indices(start: i64, stop: i64, step: i64) -> Vec<usize> {
-    let mut indices = Vec::new();
+/// Indices a slice visits, in order, produced lazily so no index vector
+/// is allocated. The step is added with saturation so a step near
+/// `i64::MAX` or `i64::MIN` cannot overflow; a saturated index is past
+/// every bound `compute_slice_indices` can return, so the walk ends.
+fn slice_indices(start: i64, stop: i64, step: i64) -> impl Iterator<Item = usize> {
+    let forward = step > 0;
     let mut idx = start;
-    if step > 0 {
-        while idx < stop {
-            if idx >= 0 {
-                indices.push(idx as usize);
-            }
-            idx = idx.saturating_add(step);
+    std::iter::from_fn(move || {
+        let in_range = if forward { idx < stop } else { idx > stop };
+        if !in_range {
+            return None;
         }
-    } else {
-        while idx > stop {
-            if idx >= 0 {
-                indices.push(idx as usize);
-            }
-            idx = idx.saturating_add(step);
-        }
-    }
-    indices
+        let current = idx;
+        idx = idx.saturating_add(step);
+        Some(current)
+    })
+    .filter(|&i| i >= 0)
+    .map(|i| i as usize)
 }
 
-/// Number of indices [`collect_indices`] yields for the same arguments.
+/// Number of indices [`slice_indices`] yields for the same arguments.
 /// Computed arithmetically so callers can check the memory budget before
 /// building the result. Expects `(start, stop)` from
 /// [`compute_slice_indices`]: for a forward step `start >= 0`, and for a
 /// backward step `stop >= -1`, so a negative `start` yields nothing (as
-/// `collect_indices`'s `idx >= 0` filter would).
+/// `slice_indices`'s `i >= 0` filter would).
 fn slice_len(start: i64, stop: i64, step: i64) -> usize {
     let span = if step > 0 {
         stop.saturating_sub(start)
@@ -225,17 +220,18 @@ pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let start = extract_int_or_none(&a[1]);
     let stop = extract_int_or_none(&a[2]);
     let (s, e) = compute_slice_indices(len, start, stop, step);
-    // Check the result's slot count before allocating the index vector
-    // or the element vector. `make_list_checked` checks again with the
-    // elements' heap sizes once they are known.
+    // Reserve the result's exact capacity once (checked against the
+    // budget), then charge each element as it is pushed. Nothing else is
+    // allocated: the indices are produced lazily.
     let count = slice_len(s, e, step);
     ctx.count_ops(count)?;
-    ctx.check_memory(count.saturating_mul(std::mem::size_of::<ExprValue>()))?;
-    let result: Vec<ExprValue> = collect_indices(s, e, step)
-        .into_iter()
-        .filter_map(|i| a[0].list_get(i as i64))
-        .collect();
-    ExprValue::make_list_checked(ctx, result, elem_type.clone())
+    let mut result = BudgetedVec::with_capacity(ctx, count)?;
+    for i in slice_indices(s, e, step) {
+        if let Some(v) = a[0].list_get(i as i64) {
+            result.push(ctx, v)?;
+        }
+    }
+    ExprValue::make_list_checked(ctx, result.into_vec(), elem_type.clone())
 }
 
 pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
@@ -416,11 +412,11 @@ mod tests {
         );
     }
 
-    /// `slice_len` must agree with `collect_indices` for every argument
+    /// `slice_len` must agree with `slice_indices` for every argument
     /// combination `compute_slice_indices` can produce, since it is used
-    /// to check the budget for the result `collect_indices` then builds.
+    /// to check the budget for the result built from `slice_indices`.
     #[test]
-    fn slice_len_matches_collect_indices() {
+    fn slice_len_matches_slice_indices() {
         let bounds: Vec<Option<i64>> = std::iter::once(None)
             .chain((-9..=9).map(Some))
             .chain([i64::MIN, i64::MAX, -1_000_000, 1_000_000].map(Some))
@@ -433,7 +429,7 @@ mod tests {
                         let (s, e) = compute_slice_indices(len, start, stop, step);
                         assert_eq!(
                             slice_len(s, e, step),
-                            collect_indices(s, e, step).len(),
+                            slice_indices(s, e, step).count(),
                             "len={len} start={start:?} stop={stop:?} step={step}"
                         );
                     }
@@ -457,8 +453,7 @@ mod tests {
             for &stop in &bounds {
                 for step in [1, 2, 3, -1, -2, -3] {
                     let (s, e) = compute_slice_indices(len, start, stop, step);
-                    let expected: String = collect_indices(s, e, step)
-                        .into_iter()
+                    let expected: String = slice_indices(s, e, step)
                         .filter(|&i| i < chars.len())
                         .map(|i| chars[i])
                         .collect();
