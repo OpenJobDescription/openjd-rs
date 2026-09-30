@@ -80,19 +80,55 @@ pub struct StepTemplate {
 
 ### SimpleAction (FEATURE_BUNDLE_1)
 
-Syntax sugar that expands into a `StepScript` with an embedded file and `onRun` action.
-The `resolve_syntax_sugar()` method performs this expansion. A step must have either `script`
-or exactly one simple action field — never both.
+Syntax sugar that expands into a `StepScript` with an embedded file and `onRun` action
+(Template Schemas §8). A step must have either `script` or exactly one simple action
+field — never both.
 
 ```rust
 pub struct SimpleAction {
     pub let_bindings: Option<Vec<String>>,
-    pub script: String,
+    /// `<DataString>`, `@fmtstring[host]` — parsed at deserialization, so
+    /// malformed `{{ ... }}` fails at parse time like any other format string.
+    pub script: FormatString,
     pub args: Option<Vec<FormatString>>,
     pub timeout: Option<FormatString>,
     pub cancelation: Option<CancelationMode>,
 }
+
+/// Which interpreter key the SimpleAction was written under.
+pub enum SimpleActionKind { Python, Bash, Cmd, Powershell, Node }
+
+impl SimpleActionKind {
+    pub const ALL: [SimpleActionKind; 5];          // the order resolve_syntax_sugar considers them
+    pub fn field_name(self) -> &'static str;       // "bash", … — also the desugared `command`
+    pub fn file_extension(self) -> &'static str;   // ".sh", ".py", ".bat", ".ps1", ".js"
+    pub fn arg_prefix(self) -> &'static [&'static str]; // ["/C"] for cmd, ["-File"] for powershell, else []
+    pub fn synthetic_arg_count(self) -> usize;     // arg_prefix().len() + 1 (the Task.File reference)
+    pub fn desugar(self, step_name: &str, sa: &SimpleAction) -> StepScript;
+    pub fn remap_desugared_path(self, rel: &[PathElement]) -> Vec<PathElement>;
+}
+
+impl StepTemplate {
+    pub fn simple_actions(&self) -> impl Iterator<Item = (SimpleActionKind, &SimpleAction)>;
+    pub fn simple_action(&self, kind: SimpleActionKind) -> Option<&SimpleAction>;
+    /// `script.clone()` if present, else the first SimpleAction desugared; `None` if neither.
+    pub fn resolve_syntax_sugar(&self) -> Option<StepScript>;
+}
 ```
+
+`desugar` builds the generated embedded file's name from the step name
+(every character outside `[A-Za-z0-9]` → `_`, as in `openjd-model-for-python`;
+at most 200 chars; `_`-prefixed if it would start with a digit; suffixed
+`_script` — always a valid identifier, so the generated reference always
+parses), sets `command` to the interpreter name,
+and produces `args = [<arg_prefix>..., "{{Task.File.<name>}}", <authored args>...]`.
+
+`remap_desugared_path` maps a validation-error path on the desugared
+`StepScript` (relative to its `script` node) back onto the sugar field the
+author wrote, so a diagnostic never names a node that does not exist in the
+template — see `specs/model/validation.md` § Reporting on desugared forms
+for the table. Validation (passes 6 and 8) and job creation all validate the
+desugared form and report through this remap.
 
 ### StepDependency (§3.2)
 

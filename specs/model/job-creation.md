@@ -207,7 +207,10 @@ budgets template validation and the session runtime apply.
    and `Step.Name` (per step) into the symbol table
 4. Carry forward session/task-scope fields as FormatString (plus action
    `timeout`/`notifyPeriodInSeconds`, which validate in template scope but
-   resolve on the worker)
+   resolve on the worker). A SimpleAction step (§8) is desugared here via
+   `StepTemplate::resolve_syntax_sugar` — infallible, since the sugar's
+   `script` is already a parsed `FormatString` — so the job's `Step` always
+   carries a full `StepScript`.
 5. Run the resolved-value checks on the carried-forward fields
    (next section)
 6. Convert environments from template to job types
@@ -285,6 +288,13 @@ Failures are `ModelError::ModelValidation` at the same field paths
 pass 8 uses, e.g.
 `steps[0] -> script -> actions -> onRun -> args[0]:` /
 `resolves to at least 100000 characters, exceeding the maximum of 1024.`
+For a SimpleAction step (§8) the checks run on the desugared
+`StepScript` — the same form pass 8 validated — and the paths are
+re-rooted onto the field the author wrote through the same
+`SimpleActionKind::remap_desugared_path` table pass 8 uses
+(`steps[0] -> bash -> script`, `steps[0] -> cmd -> args[1]`, …; see
+`specs/model/validation.md` § Reporting on desugared forms). No
+diagnostic from this stage names a synthesized node.
 Violations accumulate within one scope (a step script, one
 environment's fields), but the first failing scope stops instantiation
 — consistent with the fail-fast resolved-value re-checks `create_job`

@@ -155,6 +155,16 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Embedded files: no duplicate names, type must be `TEXT`, valid identifier names,
   data required; `filename` must be a single safe path component — non-empty, no
   path separators (`/` or `\`), no null characters, and not `.` or `..`
+- SimpleAction fields (`bash`/`python`/`cmd`/`powershell`/`node`, §8; only
+  when FEATURE_BUNDLE_1 is enabled — otherwise pass 7 rejects the field):
+  the field is desugared (`SimpleActionKind::desugar`) and the resulting
+  `StepScript` runs through the *same* script-action and embedded-file
+  checks above, so the sugar and its expansion can never disagree on
+  what is valid. Plus one check the desugared form cannot express: an
+  authored `args: []` is rejected (the desugared list always holds the
+  generated file reference). See
+  [Reporting on desugared forms](#reporting-on-desugared-forms) for how
+  the paths are reported.
 
 **Cycle detection:**
 - Iterative DFS with tri-state marking (Unvisited/Started/Completed) on the step
@@ -170,7 +180,9 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 Validates or rejects features gated behind `FEATURE_BUNDLE_1`:
 
 - **SimpleAction fields** (bash, python, cmd, powershell, node): Rejected without extension;
-  mutually exclusive with `script` when enabled
+  mutually exclusive with `script` when enabled. This pass only gates the
+  field's presence — its contents are validated by passes 6 and 8 on the
+  desugared form (see Pass 8 § Step Scripts and SimpleActions).
 - **`endOfLine` on embedded files**: Rejected without extension; must be `LF`, `CRLF`, or
   `AUTO` when enabled
 
@@ -208,6 +220,71 @@ session/task scope.
 4. **Task scope** — For step scripts. Adds `Task.Param.*`, `Task.RawParam.*`,
    `Task.File.*`. With EXPR: adds `Job.Name`, `Step.Name`, `Env.File.*` from
    step and job environments.
+
+### Step Scripts and SimpleActions
+
+One helper (`validate_step_script_format_strings`) validates a `StepScript`
+in full — script-level `let` bindings (into the task symtab), the
+EXPR-gated complex-expression rejection, the `onRun` action's
+`command`/`args` in task scope with the opt-in `max_resolved_arg_len`
+bound, `timeout`/`cancelation` in template scope, each embedded file's
+`data` in task scope with the opt-in `max_resolved_data_len` bound, and
+the comprehension-variable rules (against the step's and the script's
+`let` names) on `command`, `args`, and embedded `data`.
+
+An authored `script` runs through it once. Each SimpleAction field the
+step sets (§8; only when FEATURE_BUNDLE_1 is enabled and the step has no
+`script` — pass 7 rejects both other cases, and validating sugar against
+a task symtab whose `Task.File.*` came from an authored `script` would
+report the generated file reference as undefined) is desugared and runs
+through the **same helper**, so a `bash:` step is validated exactly as
+its `script:` equivalent would be — the design goal that job creation
+"re-runs exactly the checks pass 8 applies" holds for sugar too. Each
+field gets a clone of the task symtab, so its `let` bindings do not leak
+into a sibling field. Consequences worth naming, because they changed
+behaviour (all of these previously passed `check`): a SimpleAction `let`
+without EXPR is now rejected (it was silently ignored); undefined
+references in `script`/`args`/`timeout`/`notifyPeriodInSeconds` are
+checked at decode; a static `script` over an opted-in
+`max_resolved_data_len` fails `check` (it used to surface only at
+`create_job`); and the pass-6 structural checks now reach the sugar —
+`script: ""`, `args: []`, control characters in `args[k]`, literal
+`timeout: 0` / `notifyPeriodInSeconds: 700`, and a dangling
+`{{Task.File.Other}}` in `args`.
+
+#### Reporting on desugared forms
+
+Every diagnostic must name a node that exists in the template the author
+wrote — never `steps[0] -> script -> embeddedFiles[0] -> data` for a step
+that has no `script`. Validation of a desugared SimpleAction therefore runs
+into a scratch `ValidationErrors` rooted at the synthesized `script` node
+(path `[]`), and `ValidationErrors::extend_remapped` re-roots each error
+through `SimpleActionKind::remap_desugared_path` before it joins the real
+collection (messages and structured detail are carried unchanged):
+
+| Desugared path (relative to `script`)          | Reported path (relative to `steps[i] -> <kind>`) |
+|------------------------------------------------|--------------------------------------------------|
+| `let[j]`                                       | `let[j]`                                         |
+| `actions -> onRun -> args`                     | `args`                                           |
+| `actions -> onRun -> args[k]`, `k ≥ offset`    | `args[k − offset]`                               |
+| `actions -> onRun -> timeout`                  | `timeout`                                        |
+| `actions -> onRun -> cancelation`              | `cancelation`                                    |
+| `embeddedFiles[0] -> data`                     | `script`                                         |
+| anything synthesized — `command`, the `onRun` node itself, `args[k]` for `k < offset`, the generated file's `name`/`filename` | the `<kind>` field itself |
+
+`offset` is `SimpleActionKind::synthetic_arg_count()`: the interpreter
+prefix (`/C` for `cmd`, `-File` for `powershell`, none otherwise) plus the
+generated `{{Task.File.<name>}}` reference — `1` for `bash`/`python`/`node`,
+`2` for `cmd`/`powershell`. Pass 6 and job creation use the same remap, so
+a violation is reported at the same authored path whichever stage finds
+it (a dangling `Task.File.*` reference is still reported by both pass 6 —
+at the field, as the script node — and pass 8 — at the arg — exactly as
+for an authored `script`).
+
+`SimpleAction.script` is a `FormatString` (the spec types it `<DataString>`,
+`@fmtstring[host]`), so malformed `{{ ... }}` syntax fails at parse time
+like every other format-string field; it no longer survives to job
+creation.
 
 ### Let Binding Validation
 

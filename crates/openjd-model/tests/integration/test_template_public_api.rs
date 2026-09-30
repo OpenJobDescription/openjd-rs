@@ -246,7 +246,7 @@ fn simple_action_sugar_field_access() {
     let s = &jt.steps[0];
     assert!(s.script.is_none());
     let bash: &SimpleAction = s.bash.as_ref().unwrap();
-    assert_eq!(bash.script, "echo hi");
+    assert_eq!(bash.script.raw(), "echo hi");
     assert!(s.python.is_none());
 }
 

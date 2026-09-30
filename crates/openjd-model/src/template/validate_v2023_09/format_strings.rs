@@ -238,13 +238,7 @@ fn build_task_scope_symtab(
     // so the runtime allocates embedded file paths — defining Task.File.* —
     // before evaluating `let`, mirroring the environment runner's Env.File.*
     // ordering.
-    if let Some(script) = step
-        .resolve_syntax_sugar()
-        .ok()
-        .flatten()
-        .as_ref()
-        .or(step.script.as_ref())
-    {
+    if let Some(script) = step.resolve_syntax_sugar() {
         if let Some(files) = &script.embedded_files {
             for f in files {
                 symtab
@@ -1092,6 +1086,218 @@ fn validate_fs_with(
     }
 }
 
+/// Pass-8 checks for one step script (§3.5), rooted at `script_path`:
+/// script-level `let` bindings (evaluated into `task_symtab`), the
+/// EXPR-gated complex-expression rejection, the `onRun` action's
+/// `command`/`args` (task scope), `timeout`/`cancelation` (template scope),
+/// each embedded file's `data` (task scope), and comprehension-variable
+/// rules against the step + script `let` names.
+///
+/// Shared by the authored `script` field and the desugared SimpleAction
+/// forms (§8); the latter run it into a scratch collection rooted at `[]`
+/// and re-root the paths onto the sugar field via
+/// [`SimpleActionKind::remap_desugared_path`].
+#[allow(clippy::too_many_arguments)]
+fn validate_step_script_format_strings(
+    script: &StepScript,
+    script_path: &[PathElement],
+    step: &StepTemplate,
+    task_symtab: &mut SymbolTable,
+    step_template_symtab: &SymbolTable,
+    host_ev: &FsEval<'_>,
+    host_profile: &openjd_expr::ExprProfile,
+    template_ev: &FsEval<'_>,
+    ctx: &ValidationContext,
+    expr_active: bool,
+    errors: &mut ValidationErrors,
+) {
+    // Script-level let bindings (TASK scope — host_lib). Task.File.*
+    // is in scope: file paths are allocated before `let` evaluation
+    // at runtime (filenames are plain strings, so allocation cannot
+    // depend on `let` values).
+    if let Some(bindings) = &script.let_bindings {
+        let let_path = path_field(script_path, "let");
+        if !expr_active {
+            errors.add(&let_path, "'let' requires the EXPR extension.");
+        } else {
+            let enclosing: HashSet<String> = step
+                .let_bindings
+                .as_ref()
+                .map(|bs| {
+                    bs.iter()
+                        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut script_let_names = HashSet::new();
+            validate_let_bindings(
+                bindings,
+                &let_path,
+                &enclosing,
+                &mut script_let_names,
+                task_symtab,
+                host_ev,
+                host_profile,
+                errors,
+            );
+        }
+    }
+
+    // Complex expressions: reject if not EXPR
+    if !expr_active {
+        let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+        if script.actions.on_run.command.has_complex_expressions() {
+            errors.add(
+                &path_field(&action_path, "command"),
+                "complex expressions require the EXPR extension.",
+            );
+        }
+        if let Some(args) = &script.actions.on_run.args {
+            let args_path = path_field(&action_path, "args");
+            for (j, arg) in args.iter().enumerate() {
+                if arg.has_complex_expressions() {
+                    errors.add(
+                        &path_index(&args_path, j),
+                        "complex expressions require the EXPR extension.",
+                    );
+                }
+            }
+        }
+    }
+
+    // Validate all format string references (both base and EXPR)
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action_fs(
+        &script.actions.on_run,
+        task_symtab,
+        host_ev,
+        &action_path,
+        ctx.caller_limits.max_resolved_arg_len,
+        errors,
+    );
+
+    // Timeout and notifyPeriodInSeconds are plain @fmtstring
+    // (resolved at job creation, before any session exists), so
+    // they validate against the template-scope symtab: no
+    // Session.*, no Task.*, no Env.File.*, no host functions.
+    if let Some(timeout) = &script.actions.on_run.timeout {
+        validate_fs_with(
+            timeout,
+            step_template_symtab,
+            template_ev,
+            &path_field(&action_path, "timeout"),
+            Some(&TIMEOUT_CONSTRAINT),
+            errors,
+        );
+    }
+    let (mode_fs, notify_fs) = match &script.actions.on_run.cancelation {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds,
+        }) => (None, notify_period_in_seconds.as_ref()),
+        Some(CancelationMode::DeferredMode {
+            mode,
+            notify_period_in_seconds,
+        }) => (Some(mode), notify_period_in_seconds.as_ref()),
+        _ => (None, None),
+    };
+    if let Some(mode) = mode_fs {
+        validate_fs_with(
+            mode,
+            step_template_symtab,
+            template_ev,
+            &path_field(&action_path, "cancelation"),
+            Some(&ResolvedConstraint::CancelationMode),
+            errors,
+        );
+    }
+    if let Some(notify) = notify_fs {
+        validate_fs_with(
+            notify,
+            step_template_symtab,
+            template_ev,
+            &path_field(&action_path, "cancelation"),
+            Some(&NOTIFY_PERIOD_CONSTRAINT),
+            errors,
+        );
+    }
+
+    // Embedded files
+    if let Some(files) = &script.embedded_files {
+        let files_path = path_field(script_path, "embeddedFiles");
+        let data_constraint = ctx
+            .caller_limits
+            .max_resolved_data_len
+            .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+        for (j, f) in files.iter().enumerate() {
+            let f_path = path_index(&files_path, j);
+            if let Some(data) = &f.data {
+                validate_fs_with(
+                    data,
+                    task_symtab,
+                    host_ev,
+                    &path_field(&f_path, "data"),
+                    data_constraint.as_ref(),
+                    errors,
+                );
+            }
+            // `filename` is a plain string per the 2023-09 schema
+            // (not @fmtstring) — no format-string validation.
+        }
+    }
+
+    // EXPR-only: comprehension variable validation
+    if expr_active {
+        let mut all_let_names: HashSet<String> = HashSet::new();
+        if let Some(bindings) = &step.let_bindings {
+            for b in bindings {
+                if let Some(eq) = b.find('=') {
+                    all_let_names.insert(b[..eq].trim().to_string());
+                }
+            }
+        }
+        if let Some(bindings) = &script.let_bindings {
+            for b in bindings {
+                if let Some(eq) = b.find('=') {
+                    all_let_names.insert(b[..eq].trim().to_string());
+                }
+            }
+        }
+        if !all_let_names.is_empty() {
+            if let Err(e) = script
+                .actions
+                .on_run
+                .command
+                .validate_comprehension_vars(&all_let_names)
+            {
+                errors.add(&path_field(&action_path, "command"), e.to_string());
+            }
+            if let Some(args) = &script.actions.on_run.args {
+                let args_path = path_field(&action_path, "args");
+                for (j, arg) in args.iter().enumerate() {
+                    if let Err(e) = arg.validate_comprehension_vars(&all_let_names) {
+                        errors.add(&path_index(&args_path, j), e.to_string());
+                    }
+                }
+            }
+            // Embedded-file `data` sees the same `let` names as `args`
+            // (a SimpleAction's `script` desugars to it).
+            if let Some(files) = &script.embedded_files {
+                let files_path = path_field(script_path, "embeddedFiles");
+                for (j, f) in files.iter().enumerate() {
+                    if let Some(data) = &f.data {
+                        if let Err(e) = data.validate_comprehension_vars(&all_let_names) {
+                            errors.add(
+                                &path_field(&path_index(&files_path, j), "data"),
+                                e.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Validate a format string in an action (command + args). When the
 /// caller opted into `CallerLimits::max_resolved_arg_len`, the resolved
 /// command string and each argv entry the args produce are bounded by it
@@ -1322,6 +1528,7 @@ pub fn validate_format_strings(
     errors: &mut ValidationErrors,
 ) {
     let expr_active = ctx.profile.has_extension(ModelExtension::Expr);
+    let fb1_active = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
     // Template/task-range validation uses HostContext::None (host functions
     // are not available in those scopes). Session/task scopes use
     // HostContext::Unresolved so apply_path_mapping type-checks.
@@ -1799,177 +2006,56 @@ pub fn validate_format_strings(
         }
 
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
-
-            // Script-level let bindings (TASK scope — host_lib). Task.File.*
-            // is in scope: file paths are allocated before `let` evaluation
-            // at runtime (filenames are plain strings, so allocation cannot
-            // depend on `let` values).
-            if let Some(bindings) = &script.let_bindings {
-                let let_path = path_field(&script_path, "let");
-                if !expr_active {
-                    errors.add(&let_path, "'let' requires the EXPR extension.");
-                } else {
-                    let enclosing: HashSet<String> = step
-                        .let_bindings
-                        .as_ref()
-                        .map(|bs| {
-                            bs.iter()
-                                .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let mut script_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &enclosing,
-                        &mut script_let_names,
-                        &mut task_symtab,
-                        &host_ev,
-                        &host_profile,
-                        errors,
-                    );
-                }
-            }
-
-            // Complex expressions: reject if not EXPR
-            if !expr_active {
-                let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-                if script.actions.on_run.command.has_complex_expressions() {
-                    errors.add(
-                        &path_field(&action_path, "command"),
-                        "complex expressions require the EXPR extension.",
-                    );
-                }
-                if let Some(args) = &script.actions.on_run.args {
-                    let args_path = path_field(&action_path, "args");
-                    for (j, arg) in args.iter().enumerate() {
-                        if arg.has_complex_expressions() {
-                            errors.add(
-                                &path_index(&args_path, j),
-                                "complex expressions require the EXPR extension.",
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Validate all format string references (both base and EXPR)
-            let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-            validate_action_fs(
-                &script.actions.on_run,
-                &task_symtab,
+            validate_step_script_format_strings(
+                script,
+                &path_field(&step_path, "script"),
+                step,
+                &mut task_symtab,
+                &step_template_symtab,
                 &host_ev,
-                &action_path,
-                ctx.caller_limits.max_resolved_arg_len,
+                &host_profile,
+                &template_ev,
+                ctx,
+                expr_active,
                 errors,
             );
+        }
 
-            // Timeout and notifyPeriodInSeconds are plain @fmtstring
-            // (resolved at job creation, before any session exists), so
-            // they validate against the template-scope symtab: no
-            // Session.*, no Task.*, no Env.File.*, no host functions.
-            if let Some(timeout) = &script.actions.on_run.timeout {
-                validate_fs_with(
-                    timeout,
+        // SimpleAction fields (§8, FEATURE_BUNDLE_1): validate the desugared
+        // script with exactly the same code, into a scratch collection
+        // rooted at the synthesized `script` node, then re-root every error
+        // onto the field the author wrote (`steps[i] -> bash -> script`,
+        // `-> args[k]`, `-> timeout`, ...). Each field gets its own copy of
+        // the task symtab so its `let` bindings do not leak into a sibling.
+        // Skipped when the extension is off (pass 7 rejects the field) and
+        // when the step also has `script` (pass 7 rejects the combination,
+        // and the task symtab's `Task.File.*` were seeded from the authored
+        // script — validating the sugar against it would report the
+        // generated file reference as undefined, naming a node the author
+        // never wrote).
+        if fb1_active && step.script.is_none() {
+            for (kind, sa) in step.simple_actions() {
+                let sa_path = path_field(&step_path, kind.field_name());
+                let mut sa_symtab = task_symtab.clone();
+                let mut scratch = ValidationErrors::default();
+                validate_step_script_format_strings(
+                    &kind.desugar(&step.name, sa),
+                    &[],
+                    step,
+                    &mut sa_symtab,
                     &step_template_symtab,
+                    &host_ev,
+                    &host_profile,
                     &template_ev,
-                    &path_field(&action_path, "timeout"),
-                    Some(&TIMEOUT_CONSTRAINT),
-                    errors,
+                    ctx,
+                    expr_active,
+                    &mut scratch,
                 );
-            }
-            let (mode_fs, notify_fs) = match &script.actions.on_run.cancelation {
-                Some(CancelationMode::NotifyThenTerminate {
-                    notify_period_in_seconds,
-                }) => (None, notify_period_in_seconds.as_ref()),
-                Some(CancelationMode::DeferredMode {
-                    mode,
-                    notify_period_in_seconds,
-                }) => (Some(mode), notify_period_in_seconds.as_ref()),
-                _ => (None, None),
-            };
-            if let Some(mode) = mode_fs {
-                validate_fs_with(
-                    mode,
-                    &step_template_symtab,
-                    &template_ev,
-                    &path_field(&action_path, "cancelation"),
-                    Some(&ResolvedConstraint::CancelationMode),
-                    errors,
-                );
-            }
-            if let Some(notify) = notify_fs {
-                validate_fs_with(
-                    notify,
-                    &step_template_symtab,
-                    &template_ev,
-                    &path_field(&action_path, "cancelation"),
-                    Some(&NOTIFY_PERIOD_CONSTRAINT),
-                    errors,
-                );
-            }
-
-            // Embedded files
-            if let Some(files) = &script.embedded_files {
-                let files_path = path_field(&script_path, "embeddedFiles");
-                let data_constraint = ctx
-                    .caller_limits
-                    .max_resolved_data_len
-                    .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
-                for (j, f) in files.iter().enumerate() {
-                    let f_path = path_index(&files_path, j);
-                    if let Some(data) = &f.data {
-                        validate_fs_with(
-                            data,
-                            &task_symtab,
-                            &host_ev,
-                            &path_field(&f_path, "data"),
-                            data_constraint.as_ref(),
-                            errors,
-                        );
-                    }
-                    // `filename` is a plain string per the 2023-09 schema
-                    // (not @fmtstring) — no format-string validation.
-                }
-            }
-
-            // EXPR-only: comprehension variable validation
-            if expr_active {
-                let mut all_let_names: HashSet<String> = HashSet::new();
-                if let Some(bindings) = &step.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            all_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if let Some(bindings) = &script.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            all_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if !all_let_names.is_empty() {
-                    if let Err(e) = script
-                        .actions
-                        .on_run
-                        .command
-                        .validate_comprehension_vars(&all_let_names)
-                    {
-                        errors.add(&path_field(&action_path, "command"), e.to_string());
-                    }
-                    if let Some(args) = &script.actions.on_run.args {
-                        let args_path = path_field(&action_path, "args");
-                        for (j, arg) in args.iter().enumerate() {
-                            if let Err(e) = arg.validate_comprehension_vars(&all_let_names) {
-                                errors.add(&path_index(&args_path, j), e.to_string());
-                            }
-                        }
-                    }
-                }
+                errors.extend_remapped(scratch, |rel| {
+                    let mut p = sa_path.clone();
+                    p.extend(kind.remap_desugared_path(rel));
+                    p
+                });
             }
         }
 
@@ -2052,75 +2138,6 @@ pub fn validate_format_strings(
                     ctx.caller_limits.max_resolved_data_len,
                     errors,
                 );
-            }
-        }
-
-        // SimpleAction let bindings (requires both FB1 and EXPR)
-        if expr_active {
-            for sa in [
-                &step.bash,
-                &step.python,
-                &step.cmd,
-                &step.powershell,
-                &step.node,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let mut sa_let_names: HashSet<String> = HashSet::new();
-                if let Some(bindings) = &step.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            sa_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if let Some(let_bindings) = &sa.let_bindings {
-                    if ctx.profile.has_extension(ModelExtension::FeatureBundle1) {
-                        let enclosing: HashSet<String> = step
-                            .let_bindings
-                            .as_ref()
-                            .map(|bs| {
-                                bs.iter()
-                                    .filter_map(|b| {
-                                        b.find('=').map(|eq| b[..eq].trim().to_string())
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let mut new_names = HashSet::new();
-                        validate_let_bindings(
-                            let_bindings,
-                            &step_path,
-                            &enclosing,
-                            &mut new_names,
-                            &mut task_symtab,
-                            &host_ev,
-                            &host_profile,
-                            errors,
-                        );
-                        sa_let_names.extend(new_names);
-                    }
-                }
-                if !sa_let_names.is_empty() {
-                    match FormatString::new(&sa.script) {
-                        Ok(fs) => {
-                            if let Err(e) = fs.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
-                            }
-                        }
-                        Err(e) => {
-                            errors.add(&step_path, format!("SimpleAction script: {e}"));
-                        }
-                    }
-                    if let Some(args) = &sa.args {
-                        for arg in args {
-                            if let Err(e) = arg.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
-                            }
-                        }
-                    }
-                }
             }
         }
     }

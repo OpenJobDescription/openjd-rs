@@ -180,6 +180,25 @@ impl ValidationErrors {
         self.errors.len()
     }
 
+    /// Append every error in `other`, rewriting its path through `remap`.
+    ///
+    /// Used when validation runs against a synthesized structure (a
+    /// desugared SimpleAction) whose node paths do not exist in the authored
+    /// template: the checks run into a scratch `ValidationErrors` rooted at
+    /// the synthesized node, and `remap` translates each relative path onto
+    /// the field the author actually wrote before the errors join the real
+    /// collection. Messages and structured detail are carried unchanged.
+    pub(crate) fn extend_remapped(
+        &mut self,
+        other: ValidationErrors,
+        remap: impl Fn(&[PathElement]) -> Vec<PathElement>,
+    ) {
+        for mut err in other.errors {
+            err.path = remap(&err.path);
+            self.errors.push(err);
+        }
+    }
+
     pub fn into_result(self, model_name: &str) -> Result<(), ModelError> {
         if self.errors.is_empty() {
             Ok(())
