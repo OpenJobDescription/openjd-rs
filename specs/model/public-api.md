@@ -1046,11 +1046,11 @@ are anchored and what sources are allowed.
 ```rust
 pub struct PathParameterOptions<'a> {
     /// Directory containing the job template. Relative PATH defaults
-    /// are joined to this.
+    /// (and relative `LIST[PATH]` default elements) are joined to this.
     pub job_template_dir: &'a str,
 
-    /// Current working directory. Relative PATH user values are joined
-    /// to this.
+    /// Current working directory. Relative PATH user values (and
+    /// relative `LIST[PATH]` user value elements) are joined to this.
     pub current_working_dir: &'a str,
 
     /// How path strings are interpreted. `PathFormat::host()` for
@@ -1059,9 +1059,9 @@ pub struct PathParameterOptions<'a> {
     /// farms).
     pub path_format: openjd_expr::path_mapping::PathFormat,
 
-    /// If false, PATH defaults must be relative and within
-    /// `job_template_dir`. If true, absolute defaults and `..`
-    /// walk-up are permitted.
+    /// If false, PATH defaults (and `LIST[PATH]` default elements)
+    /// must be relative and within `job_template_dir`. If true,
+    /// absolute defaults and `..` walk-up are permitted.
     pub allow_template_dir_walk_up: bool,
 
     /// If true, URI values (`scheme://...`) in PATH parameters are

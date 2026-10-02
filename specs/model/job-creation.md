@@ -71,11 +71,27 @@ pub struct PathParameterOptions<'a> {
 7. Validate merged constraints across multiple definitions
 8. Error on still-missing required parameters
 
-**PATH handling:**
-- User-provided relative paths joined to `current_working_dir`
-- Default relative paths joined to `job_template_dir`
-- URI paths (`s3://`, `https://`) preserved as-is when EXPR extension is enabled
-- `allow_template_dir_walk_up` controls whether paths can traverse above `job_template_dir`. When `false`, a default is rejected unless its normalized form is `job_template_dir` itself or a descendant. Containment is checked per path component, not by raw string prefix.
+**PATH handling** (Template Schemas §2.2; §2.12 applies the same rules to each `LIST[PATH]` element):
+- User-provided relative paths joined to `current_working_dir` and lexically normalized (`.` removed,
+  `..` applied, no symlink resolution). Absolute user-provided paths are kept as written, and a
+  user-provided path may walk up out of `current_working_dir`.
+- Default relative paths joined to `job_template_dir` and lexically normalized. An absolute default is
+  an error.
+- URI paths (`s3://`, `https://`) preserved as-is when EXPR extension is enabled and
+  `allow_uri_path_values` is set; rejected otherwise. URIs are never joined.
+- `allow_template_dir_walk_up` controls whether paths can traverse above `job_template_dir`. When `false`, a default is rejected unless its normalized form is `job_template_dir` itself or a descendant. Containment is checked per path component, not by raw string prefix. When `true`, absolute and escaping defaults are accepted.
+- `LIST[PATH]` errors name the element in the same `item[i]` form `check_constraints` uses
+  (`The default value of LIST[PATH] parameter P at item[1] is an absolute path. ...`), and every bad
+  element is reported, not just the first.
+- Lexical normalization follows the path format: under `PathFormat::Windows` both `/` and `\` separate
+  components; under POSIX only `/` does, and a backslash is an ordinary filename character.
+- `allowedValues`, `minLength`, and `maxLength` (and `item.*` for `LIST[PATH]`) are checked at two
+  stages (Template Schemas §2.2, §2.12). Template validation checks a default as written. Job
+  creation checks the joined value, for submitted values and defaults alike, because the join is done
+  by the submitting client and the job may be created elsewhere from the joined values. A relative
+  default therefore passes both only if `allowedValues` contains both the default as written and its
+  joined path. `preprocess_job_parameters` checks every merged parameter, including those contributed
+  only by environment templates; `create_job` re-checks the job template's own parameters.
 
 **Value coercion:**
 - `coerce_from_str` — Parses string input (CLI): numeric parsing, boolean aliases
@@ -86,13 +102,14 @@ pub struct PathParameterOptions<'a> {
 **Round trip:** a value `preprocess_job_parameters` returns should be a value it accepts as input.
 Both its input and output types are public, so a caller can hand its output straight back to it.
 `create_job` relies on something adjacent for every caller: it re-runs `check_constraints` over each
-value it is given (`create_job/mod.rs:54`-`:59`).
+value it is given (`create_job/mod.rs`, the "Validate parameter values against template constraints"
+loop at the start of `create_job`).
 
-A goal rather than an established invariant. One case is known to violate it: a scalar `PATH` with a
-**relative** default plus a `maxLength`, `minLength` or `allowedValues` constraint. The first pass joins
-the default to `job_template_dir` and does not constrain-check a default, while the second pass receives
-the joined absolute path as submitted input and measures the constraint against it. Measured, a relative
-default of `out` under `maxLength: 8` reports `value length 72 exceeds maximum 8` on the second pass.
+For `PATH` this holds because both passes check constraints against the same resolved value: the
+first pass joins a relative default and checks the joined path, and the second pass receives that
+absolute path as a submitted value, leaves it as written, and checks it again. Earlier, the first pass
+skipped the check for defaults, so a relative default under a `maxLength` passed the first pass and
+failed the second.
 
 For lists it holds by construction, because **a job parameter stores a path as a string.** A path is
 context-sensitive: the same value does not denote the same file on a Windows submitter and a Linux
@@ -393,7 +410,7 @@ validation wouldn't find.
 
 ### Path Normalization Without Filesystem Access
 
-`normalize_path` performs pure path normalization (resolving `.` and `..` components)
+`normalize_path_str` performs pure path normalization (resolving `.` and `..` components)
 without filesystem access. This is important because:
 - Templates may reference paths that don't exist yet
 - The crate should be usable in environments without filesystem access
