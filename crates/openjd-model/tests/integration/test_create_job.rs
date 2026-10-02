@@ -316,8 +316,10 @@ fn test_path_user_value_joined_to_cwd() {
     )
     .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        // Joined and lexically normalized (§2.2), so separators are native.
         let exp = std::path::Path::new(td.cwd())
-            .join("my/output")
+            .join("my")
+            .join("output")
             .to_string_lossy()
             .to_string();
         assert_eq!(s, &exp);
@@ -835,8 +837,8 @@ fn test_posix_path_is_relative_under_windows_format() {
     .unwrap();
     match &result["Dir"].value {
         openjd_expr::ExprValue::String(s) => {
-            // Root-relative: drive from cwd + the /foo/bar path
-            assert_eq!(s, "C:/foo/bar");
+            // Root-relative: drive from cwd + the /foo/bar path, then normalized (§2.2)
+            assert_eq!(s, "C:\\foo\\bar");
         }
         other => panic!("Expected String, got {:?}", other),
     }
@@ -961,7 +963,8 @@ fn test_relative_path_still_joined_with_expr() {
     match &result["LocalFile"].value {
         openjd_expr::ExprValue::String(s) => {
             let exp = std::path::Path::new(td.cwd())
-                .join("subdir/file.txt")
+                .join("subdir")
+                .join("file.txt")
                 .to_string_lossy()
                 .to_string();
             assert_eq!(s, &exp);
@@ -6010,12 +6013,14 @@ fn test_create_job_range_element_list_param_flattens() {
     // same rule as `args` items): a LIST[*] parameter reference expands
     // to one range element per list element, and literal elements can be
     // mixed with expansions.
-    let job = parse_and_create(
-        r#"{
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        yaml_val(
+            r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
-        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["/a", "/b"]}],
+        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["a", "b"]}],
         "steps": [{
             "name": "S",
             "parameterSpace": {"taskParameterDefinitions": [
@@ -6024,12 +6029,38 @@ fn test_create_job_range_element_list_param_flattens() {
             "script": {"actions": {"onRun": {"command": "echo"}}}
         }]
     }"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
         &[],
-    );
+        &openjd_model::PathParameterOptions::new(td.template(), td.cwd()),
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
+    let joined = |n: &str| {
+        std::path::Path::new(td.template())
+            .join(n)
+            .to_string_lossy()
+            .to_string()
+    };
     let space = job.steps[0].parameter_space.as_ref().expect("space");
     match &space.task_parameter_definitions["P"] {
         job::TaskParameter::String { range } => {
-            assert_eq!(range, &["first", "/a", "/b", "last"]);
+            // The relative defaults are joined with the template dir (§2.12).
+            assert_eq!(
+                range,
+                &[
+                    "first".to_string(),
+                    joined("a"),
+                    joined("b"),
+                    "last".to_string()
+                ]
+            );
         }
         other => panic!("expected STRING task parameter, got {other:?}"),
     }
@@ -6476,9 +6507,8 @@ fn preprocess_accepts_its_own_non_empty_list_path_output() {
     // Control: this half already worked, since make_list promotes String elements to a
     // ListString. A fix that only moved the failure would show up here.
     //
-    // Relative defaults deliberately. LIST[PATH] skips every PATH default check, so
-    // absolute and `..` defaults are accepted where a scalar PATH refuses them -- issue
-    // #385. A test about round tripping should not pin that either way.
+    // The first pass joins the relative defaults with the template dir (§2.12); the
+    // second pass receives them as absolute submitted values and leaves them alone.
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "b.exr"]}"#,
@@ -6486,10 +6516,19 @@ fn preprocess_accepts_its_own_non_empty_list_path_output() {
     );
     let result = preprocess_again(&jt, &filled, &td).expect("a non-empty LIST[PATH] round trips");
     assert_carried_through(&result);
+    let expected: Vec<String> = ["a.exr", "b.exr"]
+        .iter()
+        .map(|n| {
+            std::path::Path::new(td.template())
+                .join(n)
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
     assert!(
         matches!(
             &result["Paths"].value,
-            openjd_expr::ExprValue::ListString(v, _) if v == &["a.exr", "b.exr"]
+            openjd_expr::ExprValue::ListString(v, _) if v == &expected
         ),
         "Paths arrived as {:?}, expected ListString of both paths",
         result["Paths"].value
@@ -6682,5 +6721,402 @@ fn preprocess_accepts_its_own_nested_list_output() {
         matches!(&outer[1], openjd_expr::ExprValue::ListInt(v) if v == &[1, 2]),
         "inner[1] arrived as {:?}, expected ListInt([1, 2])",
         outer[1]
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// LIST[PATH] elements follow the PATH value rules (§2.2, §2.12)
+// ══════════════════════════════════════════════════════════════
+
+fn posix_path_options(
+    walk_up: bool,
+    allow_uri: bool,
+) -> openjd_model::PathParameterOptions<'static> {
+    openjd_model::PathParameterOptions {
+        job_template_dir: "/a/job1",
+        current_working_dir: "/tmp/cwd",
+        path_format: PathFormat::Posix,
+        allow_template_dir_walk_up: walk_up,
+        allow_uri_path_values: allow_uri,
+    }
+}
+
+fn list_path_strings(v: &openjd_expr::ExprValue) -> Vec<String> {
+    match v {
+        openjd_expr::ExprValue::ListString(items, _) => items.clone(),
+        other => panic!("expected ListString, got {other:?}"),
+    }
+}
+
+fn preprocess_expr_params(
+    params: &str,
+    input: &JobParameterInputValues,
+    options: &openjd_model::PathParameterOptions<'_>,
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let jt = decode_job_template(
+        minimal_expr_job_template(params),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    preprocess_job_parameters(&jt, input, &[], options)
+}
+
+#[test]
+fn list_path_default_elements_joined_and_normalized() {
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["./output", "sub/dir", "sub/../other", "."]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        [
+            "/a/job1/output",
+            "/a/job1/sub/dir",
+            "/a/job1/other",
+            "/a/job1"
+        ]
+    );
+}
+
+#[test]
+fn list_path_default_absolute_element_rejected() {
+    // The bad element is second so a check of only the first element would miss it.
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "/abs/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+    );
+}
+
+#[test]
+fn list_path_default_absolute_element_rejected_windows() {
+    let jt = decode_job_template(
+        minimal_expr_job_template(
+            r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["renders\\a.exr", "D:\\renders\\b.exr"]}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: r"C:\templates\job1",
+            current_working_dir: r"C:\cwd",
+            path_format: PathFormat::Windows,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+    );
+}
+
+#[test]
+fn list_path_default_escaping_element_rejected() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["inside/a.exr", "../outside/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_reports_every_bad_element() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["/x", "ok", "a/../../y"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[0] is an absolute path. Default paths must be relative, and are joined to the job template's directory.\n\
+         The default value of LIST[PATH] parameter Paths at item[2] references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_walk_up_allowed() {
+    // allow_template_dir_walk_up accepts absolute and escaping elements, as for PATH.
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["/abs/a.exr", "../up/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(true, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        ["/abs/a.exr", "/a/up/b.exr"]
+    );
+}
+
+#[test]
+fn list_path_default_uri_elements() {
+    let def = r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "s3://bucket/key"]}"#;
+    let params =
+        preprocess_expr_params(def, &Default::default(), &posix_path_options(false, true)).unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        ["/a/job1/a.exr", "s3://bucket/key"]
+    );
+    let err = preprocess_expr_params(def, &Default::default(), &posix_path_options(false, false))
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Paths': URI path values are not permitted in defaults. Got 's3://bucket/key' at item[1]"
+    );
+}
+
+#[test]
+fn list_path_submitted_elements_joined_with_cwd() {
+    // Relative elements are joined with the cwd and normalized; absolute ones are kept.
+    // Submitted values may walk up: only defaults are confined to the template dir.
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Paths".into(),
+        openjd_expr::ExprValue::String(r#"["rel/a.exr", "./b.exr", "/abs/c.exr", "../up"]"#.into()),
+    );
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]"}"#,
+        &input,
+        &posix_path_options(false, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        [
+            "/tmp/cwd/rel/a.exr",
+            "/tmp/cwd/b.exr",
+            "/abs/c.exr",
+            "/tmp/up"
+        ]
+    );
+}
+
+#[test]
+fn list_path_submitted_uri_element_rejected_when_not_allowed() {
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Paths".into(),
+        openjd_expr::ExprValue::String(r#"["a.exr", "s3://bucket/key"]"#.into()),
+    );
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]"}"#,
+        &input,
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Paths': URI path values are not permitted. Got 's3://bucket/key' at item[1]"
+    );
+}
+
+#[test]
+fn path_submitted_relative_value_normalized() {
+    let mut input = JobParameterInputValues::new();
+    input.insert("Dot".into(), openjd_expr::ExprValue::String(".".into()));
+    input.insert(
+        "DotRelative".into(),
+        openjd_expr::ExprValue::String("./b.exr".into()),
+    );
+    input.insert(
+        "Interior".into(),
+        openjd_expr::ExprValue::String("sub/../other".into()),
+    );
+    let jt = decode_job_template(
+        minimal_job_template(
+            r#"{"name": "Dot", "type": "PATH"},
+               {"name": "DotRelative", "type": "PATH"},
+               {"name": "Interior", "type": "PATH"}"#,
+        ),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params =
+        preprocess_job_parameters(&jt, &input, &[], &posix_path_options(false, false)).unwrap();
+    assert_eq!(params["Dot"].value.to_display_string(), "/tmp/cwd");
+    assert_eq!(
+        params["DotRelative"].value.to_display_string(),
+        "/tmp/cwd/b.exr"
+    );
+    assert_eq!(
+        params["Interior"].value.to_display_string(),
+        "/tmp/cwd/other"
+    );
+}
+
+#[test]
+fn list_path_item_allowed_values_checked_after_join() {
+    // The template is valid (the literal default is in allowedValues), but the joined
+    // default is not, so job parameter preprocessing fails.
+    let err = preprocess_expr_params(
+        r#"{"name": "Scenes", "type": "LIST[PATH]", "default": ["assets/a.blend"],
+            "item": {"allowedValues": ["assets/a.blend", "assets/b.blend"]}}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Scenes': item[0] value '/a/job1/assets/a.blend' is not in allowed values"
+    );
+}
+
+#[test]
+fn path_default_max_length_checked_after_join() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Short", "type": "PATH", "default": "a", "maxLength": 3}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Short': value length 9 exceeds maximum 3"
+    );
+}
+
+#[test]
+fn env_template_path_defaults_checked_after_join() {
+    // create_job only re-checks job-template parameters, so preprocessing is the only
+    // place an environment template's defaults are constraint-checked.
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Unused", "type": "STRING", "default": "x"}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        yaml_val(
+            r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["EXPR"],
+            "parameterDefinitions": [
+                {"name": "EnvScalar", "type": "PATH", "default": "cfg/a", "allowedValues": ["cfg/a"]},
+                {"name": "EnvPaths", "type": "LIST[PATH]", "default": ["env/a"],
+                 "item": {"allowedValues": ["env/a"]}}
+            ],
+            "environment": {"name": "Env", "script": {"actions": {"onEnter": {"command": "echo"}}}}
+        }"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[et],
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'EnvScalar': value '/a/job1/cfg/a' is not in allowed values\n\
+         Parameter 'EnvPaths': item[0] value '/a/job1/env/a' is not in allowed values"
+    );
+}
+
+#[test]
+fn path_default_walk_up_edge_cases() {
+    // Mirrors the conformance walk-up cases: escapes that do not start with "../",
+    // and look-alikes that must be accepted.
+    let options = posix_path_options(false, false);
+    for (default, expected) in [
+        ("a/..", "/a/job1"),
+        ("a/../b", "/a/job1/b"),
+        ("./a/./../b/.", "/a/job1/b"),
+        ("..name", "/a/job1/..name"),
+        ("...", "/a/job1/..."),
+        ("a/b/c/../../../d", "/a/job1/d"),
+    ] {
+        let params = preprocess_expr_params(
+            &format!(r#"{{"name": "P", "type": "PATH", "default": "{default}"}}"#),
+            &Default::default(),
+            &options,
+        )
+        .unwrap_or_else(|e| panic!("{default} should be accepted: {e}"));
+        assert_eq!(params["P"].value.to_display_string(), expected, "{default}");
+    }
+    for default in [
+        "..",
+        "a/../../b",
+        "./../b",
+        "a/../..",
+        "a/b/c/../../../../d",
+    ] {
+        let err = preprocess_expr_params(
+            &format!(r#"{{"name": "P", "type": "PATH", "default": "{default}"}}"#),
+            &Default::default(),
+            &options,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted.",
+            "{default}"
+        );
+    }
+}
+
+#[test]
+fn path_default_walk_up_mixed_separators_windows() {
+    let jt = decode_job_template(
+        minimal_job_template(
+            r#"{"name": "A", "type": "PATH", "default": "a\\..\\..\\b"},
+               {"name": "B", "type": "PATH", "default": "a/..\\../b"},
+               {"name": "C", "type": "PATH", "default": "a\\../b"}"#,
+        ),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let options = openjd_model::PathParameterOptions {
+        job_template_dir: r"C:\templates\job1",
+        current_working_dir: r"C:\cwd",
+        path_format: PathFormat::Windows,
+        allow_template_dir_walk_up: false,
+        allow_uri_path_values: false,
+    };
+    let err = preprocess_job_parameters(&jt, &Default::default(), &[], &options).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of PATH parameter A references a path outside of the template directory. Walking up from the template directory is not permitted.\n\
+         The default value of PATH parameter B references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_interior_walk_up_rejected_after_valid_elements() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a/..", "..name", "a/../../b"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[2] references a path outside of the template directory. Walking up from the template directory is not permitted."
     );
 }

@@ -801,15 +801,18 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
 
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
 pub struct PathParameterOptions<'a> {
-    /// Directory containing the job template. Relative PATH defaults are joined to this.
+    /// Directory containing the job template. Relative PATH defaults (and relative
+    /// `LIST[PATH]` default elements) are joined to this.
     pub job_template_dir: &'a str,
-    /// Current working directory. Relative PATH user values are joined to this.
+    /// Current working directory. Relative PATH user values (and relative `LIST[PATH]`
+    /// user value elements) are joined to this.
     pub current_working_dir: &'a str,
     /// How path strings are interpreted for absolute/relative checks.
     /// Use `PathFormat::host()` for local filesystem paths, or `PathFormat::Posix` /
     /// `PathFormat::Windows` when paths originate from a known platform.
     pub path_format: openjd_expr::path_mapping::PathFormat,
-    /// If `false`, PATH defaults must be relative and within `job_template_dir`.
+    /// If `false`, PATH defaults (and `LIST[PATH]` default elements) must be relative
+    /// and within `job_template_dir`.
     /// If `true`, absolute defaults and `..` walk-up are permitted.
     pub allow_template_dir_walk_up: bool,
     /// If `true`, URI values (`scheme://...`) in PATH parameters are preserved as-is
@@ -884,44 +887,39 @@ pub fn preprocess_job_parameters(
         .as_ref()
         .is_some_and(|exts| exts.iter().any(|e| e.as_str() == "EXPR"));
 
+    let resolver = PathResolver {
+        job_template_dir,
+        current_working_dir,
+        path_format,
+        allow_job_template_dir_walk_up,
+        allow_uri_path_values,
+        has_expr,
+    };
+
     for param in &merged {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
             let coerced_opt: Option<openjd_expr::ExprValue> =
                 if param.param_type == JobParameterType::Path {
                     let s = input_val.as_str_repr();
-                    if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
-                        // EXPR extension: URI handling depends on allow_uri_path_values
-                        if !allow_uri_path_values {
-                            errors.push(format!(
-                                "Parameter '{}': URI path values are not permitted. Got '{}'",
-                                param.name, s
-                            ));
+                    match resolver.resolve(&s, PathOrigin::Submitted, &param.name, None) {
+                        Ok(Some(resolved)) => Some(openjd_expr::ExprValue::String(resolved)),
+                        Ok(None) => Some(input_val.clone()),
+                        Err(e) => {
+                            errors.push(e);
                             None
-                        } else {
-                            Some(input_val.clone())
                         }
-                    } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
-                        // Relative path: join with current_working_dir if non-empty.
-                        if current_working_dir.is_empty() {
-                            Some(input_val.clone())
-                        } else {
-                            Some(openjd_expr::ExprValue::String(
-                                openjd_expr::functions::path::non_uri_join(
-                                    current_working_dir,
-                                    &s,
-                                    path_format,
-                                ),
-                            ))
-                        }
-                    } else {
-                        Some(input_val.clone())
                     }
                 } else {
                     Some(input_val.clone())
                 };
             let Some(coerced) = coerced_opt else { continue };
-            match coerce_to_job_parameter_type(&coerced, param_type) {
+            let coerced = coerce_to_job_parameter_type(&coerced, param_type)
+                .map_err(|e| format!("Parameter '{}': {e}", param.name))
+                .and_then(|v| {
+                    resolver.resolve_list_path(v, param_type, PathOrigin::Submitted, &param.name)
+                });
+            match coerced {
                 Ok(expr_value) => {
                     if let Err(e) = param.check_constraints(&expr_value) {
                         errors.push(model_err_message(e));
@@ -935,56 +933,16 @@ pub fn preprocess_job_parameters(
                         );
                     }
                 }
-                Err(e) => {
-                    errors.push(format!("Parameter '{}': {e}", param.name));
-                }
+                Err(e) => errors.push(e),
             }
         } else if let Some(default) = &param.default {
-            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path
-                && !default.is_empty()
-            {
-                if has_expr && allow_uri_path_values && openjd_expr::uri_path::is_uri(default) {
-                    // EXPR + allow: URI preserved as-is
-                    Some(default.clone())
-                } else if has_expr
-                    && !allow_uri_path_values
-                    && openjd_expr::uri_path::is_uri(default)
-                {
-                    errors.push(format!(
-                        "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
-                        param.name, default
-                    ));
-                    None
-                } else if is_absolute_for_format_no_uri(default, path_format) {
-                    if !allow_job_template_dir_walk_up {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
-                            param.name
-                        ));
+            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path {
+                match resolver.resolve(default, PathOrigin::Default, &param.name, None) {
+                    Ok(resolved) => Some(resolved.unwrap_or_else(|| default.clone())),
+                    Err(e) => {
+                        errors.push(e);
                         None
-                    } else {
-                        Some(default.clone())
                     }
-                } else if !allow_job_template_dir_walk_up
-                    && is_absolute_for_format(job_template_dir, path_format)
-                {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    let normalized = normalize_path_str(&joined, path_format);
-                    let normalized_dir = normalize_path_str(job_template_dir, path_format);
-                    if !path_is_within(&normalized, &normalized_dir, path_format) {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
-                            param.name
-                        ));
-                        None
-                    } else {
-                        Some(normalized)
-                    }
-                } else if is_absolute_for_format(job_template_dir, path_format) {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    Some(normalize_path_str(&joined, path_format))
-                } else {
-                    Some(default.clone())
                 }
             } else {
                 Some(default.clone())
@@ -992,17 +950,29 @@ pub fn preprocess_job_parameters(
             let Some(value_str) = value_str_opt else {
                 continue;
             };
-            match coerce_from_str(&value_str, param_type) {
+            let coerced = coerce_from_str(&value_str, param_type)
+                .map_err(|e| format!("Parameter '{}': {e}", param.name))
+                .and_then(|v| {
+                    resolver.resolve_list_path(v, param_type, PathOrigin::Default, &param.name)
+                });
+            match coerced {
+                // Constraints apply to the joined default (§2.2, §2.12). `create_job`
+                // re-checks job-template parameters, but only this pass sees parameters
+                // contributed by environment templates.
                 Ok(expr_value) => {
-                    result.insert(
-                        param.name.clone(),
-                        JobParameterValue {
-                            param_type,
-                            value: expr_value,
-                        },
-                    );
+                    if let Err(e) = param.check_constraints(&expr_value) {
+                        errors.push(model_err_message(e));
+                    } else {
+                        result.insert(
+                            param.name.clone(),
+                            JobParameterValue {
+                                param_type,
+                                value: expr_value,
+                            },
+                        );
+                    }
                 }
-                Err(e) => errors.push(format!("Parameter '{}': {e}", param.name)),
+                Err(e) => errors.push(e),
             }
         } else {
             missing.push(param.name.clone());
@@ -1051,6 +1021,154 @@ fn model_err_message(e: ModelError) -> String {
     }
 }
 
+/// Where a PATH value came from, which decides how a relative value is resolved (§2.2).
+#[derive(Clone, Copy)]
+enum PathOrigin {
+    /// A value supplied at submission: a relative value is joined with the current
+    /// working directory. Absolute values and walk-up are permitted.
+    Submitted,
+    /// The template's `default`: it must be relative, is joined with the job template
+    /// directory, and must stay within it (unless walk-up is allowed).
+    Default,
+}
+
+/// Applies the §2.2 PATH value rules to a scalar PATH value or to one element of a
+/// `LIST[PATH]` value (§2.12 applies the same rules element-wise).
+struct PathResolver<'a> {
+    job_template_dir: &'a str,
+    current_working_dir: &'a str,
+    path_format: openjd_expr::path_mapping::PathFormat,
+    allow_job_template_dir_walk_up: bool,
+    allow_uri_path_values: bool,
+    has_expr: bool,
+}
+
+impl PathResolver<'_> {
+    /// Resolve one path string.
+    ///
+    /// Returns `Ok(None)` when the value is used as written (empty, absolute submitted
+    /// value, permitted URI, ...), `Ok(Some(resolved))` when it was joined and
+    /// lexically normalized, and `Err(message)` when it violates the rules. `index` is
+    /// the element position for a `LIST[PATH]` value, and `None` for a scalar PATH.
+    fn resolve(
+        &self,
+        s: &str,
+        origin: PathOrigin,
+        name: &str,
+        index: Option<usize>,
+    ) -> Result<Option<String>, String> {
+        let fmt = self.path_format;
+        if s.is_empty() {
+            return Ok(None);
+        }
+        // Element position in the `item[i]` form `check_constraints` also uses.
+        let at_item = || index.map(|i| format!(" at item[{i}]")).unwrap_or_default();
+        if self.has_expr && openjd_expr::uri_path::is_uri(s) {
+            // EXPR extension: URIs are never joined; whether they are accepted at all
+            // is the caller's policy.
+            if self.allow_uri_path_values {
+                return Ok(None);
+            }
+            let in_defaults = if matches!(origin, PathOrigin::Default) {
+                " in defaults"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "Parameter '{name}': URI path values are not permitted{in_defaults}. Got '{s}'{}",
+                at_item()
+            ));
+        }
+        match origin {
+            PathOrigin::Submitted => {
+                if is_absolute_for_format_no_uri(s, fmt) || self.current_working_dir.is_empty() {
+                    return Ok(None);
+                }
+                let joined =
+                    openjd_expr::functions::path::non_uri_join(self.current_working_dir, s, fmt);
+                Ok(Some(normalize_path_str(&joined, fmt)))
+            }
+            PathOrigin::Default => {
+                let subject = match index {
+                    None => format!("The default value of PATH parameter {name}"),
+                    Some(_) => format!(
+                        "The default value of LIST[PATH] parameter {name}{}",
+                        at_item()
+                    ),
+                };
+                if is_absolute_for_format_no_uri(s, fmt) {
+                    if self.allow_job_template_dir_walk_up {
+                        return Ok(None);
+                    }
+                    return Err(format!(
+                        "{subject} is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+                    ));
+                }
+                // Without walk-up the template dir was checked to be absolute up front;
+                // with walk-up a relative template dir leaves the default as written.
+                if !is_absolute_for_format(self.job_template_dir, fmt) {
+                    return Ok(None);
+                }
+                let joined = join_for_format(self.job_template_dir, s, fmt);
+                let normalized = normalize_path_str(&joined, fmt);
+                if !self.allow_job_template_dir_walk_up {
+                    let normalized_dir = normalize_path_str(self.job_template_dir, fmt);
+                    if !path_is_within(&normalized, &normalized_dir, fmt) {
+                        return Err(format!(
+                            "{subject} references a path outside of the template directory. Walking up from the template directory is not permitted."
+                        ));
+                    }
+                }
+                Ok(Some(normalized))
+            }
+        }
+    }
+
+    /// Resolve each element of a `LIST[PATH]` value; any other type is returned as is.
+    ///
+    /// Every element is checked so that all bad elements are reported, not just the
+    /// first. The messages are joined by newlines, matching the accumulated error
+    /// format of [`preprocess_job_parameters`].
+    fn resolve_list_path(
+        &self,
+        value: openjd_expr::ExprValue,
+        param_type: JobParameterType,
+        origin: PathOrigin,
+        name: &str,
+    ) -> Result<openjd_expr::ExprValue, String> {
+        if param_type != JobParameterType::ListPath {
+            return Ok(value);
+        }
+        // Coercion always produces a ListString for LIST[PATH]; see `value_matches_type`.
+        let openjd_expr::ExprValue::ListString(items, _) = value else {
+            return Ok(value);
+        };
+        let mut errors = Vec::new();
+        let resolved: Vec<openjd_expr::ExprValue> = items
+            .into_iter()
+            .enumerate()
+            .map(
+                |(i, item)| match self.resolve(&item, origin, name, Some(i)) {
+                    Ok(Some(r)) => openjd_expr::ExprValue::String(r),
+                    Ok(None) => openjd_expr::ExprValue::String(item),
+                    Err(e) => {
+                        errors.push(e);
+                        openjd_expr::ExprValue::String(item)
+                    }
+                },
+            )
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+        // Every element is a String, so make_list yields a ListString and cannot fail in
+        // practice; openjd-expr has no public Vec<String> -> ListString constructor, and
+        // the error is still propagated rather than unwrapped.
+        openjd_expr::ExprValue::make_list(resolved, openjd_expr::ExprType::STRING)
+            .map_err(|e| format!("Parameter '{name}': Invalid list value: {e}"))
+    }
+}
+
 /// Check whether a path string is absolute according to the given path format.
 ///
 /// Delegates to `openjd_expr::functions::path::is_absolute` which handles
@@ -1092,33 +1210,44 @@ fn join_for_format(
 /// `preprocess_job_parameters`) should be aware that filesystem-level
 /// canonicalization (e.g. `std::fs::canonicalize`) is needed downstream
 /// before performing actual file I/O to prevent symlink-based traversal.
+///
+/// Under [`PathFormat::Windows`] both `/` and `\` separate components and
+/// drive-letter and UNC roots are recognized. Under POSIX only `/` is a
+/// separator; a backslash is an ordinary filename character, as in Python's
+/// `posixpath.normpath`.
 fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat) -> String {
     use openjd_expr::path_mapping::PathFormat;
-    let sep = match format {
-        PathFormat::Windows => '\\',
-        PathFormat::Posix | PathFormat::Uri => '/',
-    };
+    let is_windows = format == PathFormat::Windows;
+    let sep = if is_windows { '\\' } else { '/' };
+    let is_sep = |c: char| c == '/' || (is_windows && c == '\\');
+    let bytes = path.as_bytes();
 
     // Detect and preserve the root prefix
-    let (root, rest, min_components) = if path.len() >= 3
-        && path.as_bytes()[0].is_ascii_alphabetic()
-        && path.as_bytes()[1] == b':'
-        && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
+    let (root, rest, min_components) = if is_windows
+        && bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && is_sep(bytes[2] as char)
     {
         // Windows drive root: "C:\" or "C:/"
         let root = format!("{}:{sep}", path.chars().next().unwrap());
         (root, &path[3..], 0)
-    } else if path.starts_with("\\\\") || path.starts_with("//") {
+    } else if is_windows && bytes.len() >= 2 && is_sep(bytes[0] as char) && is_sep(bytes[1] as char)
+    {
         // UNC path — server and share components must be preserved
         (format!("{sep}{sep}"), &path[2..], 2)
-    } else if path.starts_with('/') || path.starts_with('\\') {
+    } else if !is_windows && path.starts_with("//") && !path.starts_with("///") {
+        // POSIX permits an implementation-defined meaning for exactly two leading
+        // slashes; preserve them as posixpath.normpath does.
+        ("//".to_string(), &path[2..], 0)
+    } else if path.starts_with(is_sep) {
         (sep.to_string(), &path[1..], 0)
     } else {
         (String::new(), path, 0)
     };
 
     let mut components: Vec<&str> = Vec::new();
-    for part in rest.split(['/', '\\']) {
+    for part in rest.split(is_sep) {
         match part {
             ".." => {
                 if components.len() > min_components {
@@ -1347,6 +1476,35 @@ mod tests {
         // More .. than components should clamp at server\share
         let result = normalize_path_str(r"\\server\share\..\..\..\..", PathFormat::Windows);
         assert_eq!(result, r"\\server\share", "got {result}");
+    }
+
+    #[test]
+    fn normalize_posix_treats_backslash_as_filename_character() {
+        // Matches posixpath.normpath: only '/' separates components under POSIX.
+        assert_eq!(
+            normalize_path_str(r"/cwd/C:\foo\..\bar", PathFormat::Posix),
+            r"/cwd/C:\foo\..\bar"
+        );
+        assert_eq!(
+            normalize_path_str("/cwd/./a/../b", PathFormat::Posix),
+            "/cwd/b"
+        );
+        assert_eq!(
+            normalize_path_str("//srv/./x", PathFormat::Posix),
+            "//srv/x"
+        );
+        assert_eq!(
+            normalize_path_str("///srv/./x", PathFormat::Posix),
+            "/srv/x"
+        );
+    }
+
+    #[test]
+    fn normalize_windows_accepts_both_separators() {
+        assert_eq!(
+            normalize_path_str(r"C:\cwd/./a\..\b", PathFormat::Windows),
+            r"C:\cwd\b"
+        );
     }
 
     #[test]
