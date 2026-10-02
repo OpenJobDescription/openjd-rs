@@ -59,7 +59,7 @@ The structural template types — `template::JobTemplate`,
 `template::StepActions`, `template::CancelationMode`,
 `template::HostRequirements`, `template::AmountRequirement`,
 `template::AttributeRequirement`, `template::StepDependency`,
-`template::SimpleAction`, `template::Description`,
+`template::SimpleAction`, `template::SimpleActionKind`, `template::Description`,
 `template::ExtensionName`, `template::TaskParameterDefinition`
 and its 5 per-variant inner struct types
 (`IntTaskParameterDefinition`, `FloatTaskParameterDefinition`,
@@ -89,6 +89,41 @@ useful for callers that want to inspect a template before
 instantiation — for example, the `openjd-python` bindings expose
 typed `template::*` pyclasses so Python tools can introspect job
 templates.
+
+`template::StepTemplate` additionally exposes the SimpleAction (§8,
+FEATURE_BUNDLE_1) surface:
+
+```rust
+impl StepTemplate {
+    /// Each SimpleAction field the step sets, with its kind, in
+    /// `SimpleActionKind::ALL` order.
+    pub fn simple_actions(&self) -> impl Iterator<Item = (SimpleActionKind, &SimpleAction)>;
+    pub fn simple_action(&self, kind: SimpleActionKind) -> Option<&SimpleAction>;
+    /// `script.clone()` when present, otherwise the first SimpleAction
+    /// desugared; `None` when the step has neither. Infallible —
+    /// `SimpleAction.script` is already a parsed `FormatString`.
+    pub fn resolve_syntax_sugar(&self) -> Option<StepScript>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SimpleActionKind { Python, Bash, Cmd, Powershell, Node }
+
+impl SimpleActionKind {
+    pub const ALL: [SimpleActionKind; 5];
+    pub fn field_name(self) -> &'static str;
+    pub fn file_extension(self) -> &'static str;
+    pub fn arg_prefix(self) -> &'static [&'static str];
+    pub fn synthetic_arg_count(self) -> usize;
+    pub fn desugar(self, step_name: &str, sa: &SimpleAction) -> StepScript;
+    /// Map a validation-error path on the desugared `StepScript` (relative
+    /// to its `script` node) back onto the authored sugar field.
+    pub fn remap_desugared_path(self, rel: &[PathElement]) -> Vec<PathElement>;
+}
+```
+
+See `specs/model/template-types.md` § SimpleAction for the desugaring
+rules and `specs/model/validation.md` § Reporting on desugared forms for
+the path table.
 
 ## Entry Points at the Crate Root
 

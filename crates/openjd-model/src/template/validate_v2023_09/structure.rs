@@ -162,6 +162,9 @@ pub fn validate_structure(
 
     // Step validation
     let all_step_names: HashSet<String> = jt.steps.iter().map(|s| s.name.clone()).collect();
+    let fb1_active = ctx
+        .profile
+        .has_extension(crate::types::ModelExtension::FeatureBundle1);
     let mut step_names = HashSet::new();
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
@@ -293,51 +296,47 @@ pub fn validate_structure(
 
         // Script actions
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
-            let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-            validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
+            validate_step_script(
+                script,
+                &path_field(&step_path, "script"),
+                limits,
+                rules,
+                errors,
+            );
+        }
 
-            // Task.File.* references
-            let file_names: HashSet<String> = script
-                .embedded_files
-                .as_ref()
-                .map(|files| files.iter().map(|f| f.name.clone()).collect())
-                .unwrap_or_default();
-            let all_fs: Vec<&openjd_expr::FormatString> = {
-                let mut v = vec![&script.actions.on_run.command];
-                if let Some(args) = &script.actions.on_run.args {
-                    v.extend(args.iter());
+        // SimpleAction fields (§8): validate the desugared script with the
+        // same code, then re-root every error onto the authored field so no
+        // diagnostic names a synthesized node. Skipped when the extension
+        // is off (pass 7 rejects the field outright) and when the step also
+        // has `script` (pass 7 rejects the combination; validating the sugar
+        // against a step whose `Task.File.*` come from the authored script
+        // would only add noise about the generated file).
+        if fb1_active && step.script.is_none() {
+            for (kind, sa) in step.simple_actions() {
+                let sa_path = path_field(&step_path, kind.field_name());
+                // The desugared `args` always holds the generated file
+                // reference, so the shared check cannot see an authored
+                // empty list (Python's `ArgListType` requires ≥ 1).
+                if sa.args.as_ref().is_some_and(Vec::is_empty) {
+                    errors.add(
+                        &path_field(&sa_path, "args"),
+                        "if provided, must not be empty.",
+                    );
                 }
-                v
-            };
-            for fs in &all_fs {
-                for name in fs.expression_names() {
-                    if let Some(tail) = name.strip_prefix("Task.File.") {
-                        // Only the first dotted segment is the embedded-file
-                        // key. `Task.File.<name>` is `path` typed, so any
-                        // further segments are property access on that value —
-                        // RFC 0005 uses `{{Task.File.Run.name}}` directly.
-                        // Embedded file names are identifiers (no dots, see
-                        // the name validation below), so the first segment is
-                        // unambiguous.
-                        let file_name = tail.split_once('.').map_or(tail, |(key, _)| key);
-                        if !file_names.contains(file_name) {
-                            errors.add(
-                                &script_path,
-                                format!("references undefined embedded file '{file_name}'."),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Embedded files
-            if let Some(files) = &script.embedded_files {
-                let files_path = path_field(&script_path, "embeddedFiles");
-                if files.is_empty() {
-                    errors.add(&files_path, "must not be empty.");
-                }
-                validate_embedded_files(files, &files_path, errors);
+                let mut scratch = ValidationErrors::default();
+                validate_step_script(
+                    &kind.desugar(&step.name, sa),
+                    &[],
+                    limits,
+                    rules,
+                    &mut scratch,
+                );
+                errors.extend_remapped(scratch, |rel| {
+                    let mut p = sa_path.clone();
+                    p.extend(kind.remap_desugared_path(rel));
+                    p
+                });
             }
         }
     }
@@ -448,6 +447,64 @@ pub fn validate_single_environment(
             }
             validate_embedded_files(files, &files_path, errors);
         }
+    }
+}
+
+/// Structural checks for a step script (§3.5) rooted at `script_path`: the
+/// `onRun` action, `Task.File.*` references against the embedded file names,
+/// and the embedded files themselves. Shared by the authored `script` field
+/// and the desugared SimpleAction forms.
+fn validate_step_script(
+    script: &StepScript,
+    script_path: &[PathElement],
+    limits: &super::EffectiveLimits,
+    rules: &EffectiveRules,
+    errors: &mut ValidationErrors,
+) {
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
+
+    // Task.File.* references
+    let file_names: HashSet<String> = script
+        .embedded_files
+        .as_ref()
+        .map(|files| files.iter().map(|f| f.name.clone()).collect())
+        .unwrap_or_default();
+    let all_fs: Vec<&openjd_expr::FormatString> = {
+        let mut v = vec![&script.actions.on_run.command];
+        if let Some(args) = &script.actions.on_run.args {
+            v.extend(args.iter());
+        }
+        v
+    };
+    for fs in &all_fs {
+        for name in fs.expression_names() {
+            if let Some(tail) = name.strip_prefix("Task.File.") {
+                // Only the first dotted segment is the embedded-file
+                // key. `Task.File.<name>` is `path` typed, so any
+                // further segments are property access on that value —
+                // RFC 0005 uses `{{Task.File.Run.name}}` directly.
+                // Embedded file names are identifiers (no dots, see
+                // the name validation below), so the first segment is
+                // unambiguous.
+                let file_name = tail.split_once('.').map_or(tail, |(key, _)| key);
+                if !file_names.contains(file_name) {
+                    errors.add(
+                        script_path,
+                        format!("references undefined embedded file '{file_name}'."),
+                    );
+                }
+            }
+        }
+    }
+
+    // Embedded files
+    if let Some(files) = &script.embedded_files {
+        let files_path = path_field(script_path, "embeddedFiles");
+        if files.is_empty() {
+            errors.add(&files_path, "must not be empty.");
+        }
+        validate_embedded_files(files, &files_path, errors);
     }
 }
 

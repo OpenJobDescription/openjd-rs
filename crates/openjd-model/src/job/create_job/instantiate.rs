@@ -76,8 +76,15 @@ pub(super) fn instantiate_step(
         }
     }
 
-    let script_template = st.resolve_syntax_sugar()?.or_else(|| st.script.clone());
+    let script_template = st.resolve_syntax_sugar();
     let script = script_template.as_ref().map(convert_step_script);
+    // When the script came from a SimpleAction (§8), diagnostics on the
+    // desugared form must point at the field the author wrote.
+    let sugar_kind = if st.script.is_none() {
+        st.simple_actions().next().map(|(kind, _)| kind)
+    } else {
+        None
+    };
 
     // Check symbol table for the step script's carried-forward
     // (session/task-scope) format strings: `step_symtab`'s concrete
@@ -112,21 +119,42 @@ pub(super) fn instantiate_step(
     // `data` — against the check symbol table, where job parameters are
     // bound to real values. A violation template validation could only
     // lower-bound is decidable here: fail at submission, not on every
-    // worker.
+    // worker. These are exactly the checks pass 8 applies — to the same
+    // desugared form for a SimpleAction step, with the same path remap
+    // back onto the authored field.
     if let (Some(s), Some(cst)) = (&script_template, &check_symtab) {
         let mut check_errors = ValidationErrors::default();
-        let script_path = [
+        let step_path = [
             PathElement::Field("steps".to_string()),
             PathElement::Index(step_index),
-            PathElement::Field("script".to_string()),
         ];
-        crate::template::validate_v2023_09::format_strings::check_carried_forward_step_script(
-            s,
-            cst,
-            ctx,
-            &script_path,
-            &mut check_errors,
-        );
+        match sugar_kind {
+            Some(kind) => {
+                let mut scratch = ValidationErrors::default();
+                crate::template::validate_v2023_09::format_strings::check_carried_forward_step_script(
+                    s,
+                    cst,
+                    ctx,
+                    &[],
+                    &mut scratch,
+                );
+                let sa_path = path_field(&step_path, kind.field_name());
+                check_errors.extend_remapped(scratch, |rel| {
+                    let mut p = sa_path.clone();
+                    p.extend(kind.remap_desugared_path(rel));
+                    p
+                });
+            }
+            None => {
+                crate::template::validate_v2023_09::format_strings::check_carried_forward_step_script(
+                    s,
+                    cst,
+                    ctx,
+                    &path_field(&step_path, "script"),
+                    &mut check_errors,
+                );
+            }
+        }
         check_errors.into_result("JobTemplate")?;
     }
 

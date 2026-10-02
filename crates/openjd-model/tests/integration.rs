@@ -71,6 +71,8 @@ mod test_resolved_value_constraints;
 mod test_scope_library_split;
 #[path = "integration/test_simple_action_let.rs"]
 mod test_simple_action_let;
+#[path = "integration/test_simple_action_validation.rs"]
+mod test_simple_action_validation;
 #[path = "integration/test_step_dependency_graph.rs"]
 mod test_step_dependency_graph;
 #[path = "integration/test_step_param_space_iter.rs"]
