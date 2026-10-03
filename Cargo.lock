@@ -2388,7 +2388,7 @@ dependencies = [
  "rand 0.10.3",
  "rayon",
  "rusqlite",
- "s3s",
+ "s3s 0.16.1",
  "s3s-aws",
  "s3s-fs",
  "serde",
@@ -3063,9 +3063,68 @@ dependencies = [
  "pin-project-lite",
  "quick-xml",
  "regex",
- "s3s-rfc2047",
- "s3s-sigv2",
- "s3s-sigv4",
+ "s3s-rfc2047 0.16.1",
+ "s3s-sigv2 0.16.1",
+ "s3s-sigv4 0.16.1",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "smallvec",
+ "std-next",
+ "subtle",
+ "sync_wrapper",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "transform-stream",
+ "url",
+ "urlencoding",
+ "xxhash-rust",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "030a43692a1fd97bbd2c594eeaad8f5c1e452a9d29ad6a3eebce1650937c4a77"
+dependencies = [
+ "arc-swap",
+ "arrayvec",
+ "async-trait",
+ "atoi",
+ "base64-simd",
+ "bytes",
+ "bytestring",
+ "cfg-if",
+ "chrono",
+ "crc-fast",
+ "futures",
+ "hex-simd",
+ "hmac 0.13.0",
+ "http 1.5.0",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "itoa",
+ "jiff",
+ "md-5",
+ "memchr",
+ "mime",
+ "nom",
+ "numeric_cast",
+ "phf 0.14.0",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "s3s-multipart",
+ "s3s-rfc2047 0.17.0",
+ "s3s-sigv2 0.17.0",
+ "s3s-sigv4 0.17.0",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -3100,7 +3159,7 @@ dependencies = [
  "aws-smithy-types-convert",
  "futures",
  "hyper",
- "s3s",
+ "s3s 0.16.1",
  "std-next",
  "sync_wrapper",
  "tracing",
@@ -3109,9 +3168,9 @@ dependencies = [
 
 [[package]]
 name = "s3s-fs"
-version = "0.16.1"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33cc522e1766edd49e75234525f314fccd05647913358d6b96d5cf528eb0273"
+checksum = "42664753862217444ecae595cb6b2746faf1b8c2d3c104d696aa10592eb042d8"
 dependencies = [
  "async-trait",
  "base64-simd",
@@ -3123,7 +3182,7 @@ dependencies = [
  "mime",
  "numeric_cast",
  "path-absolutize",
- "s3s",
+ "s3s 0.17.0",
  "s3s-test",
  "serde",
  "serde_json",
@@ -3139,6 +3198,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "s3s-multipart"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a543079d42c20c81781b7e31704ecacd64b0e3819b2384db5bf4869abf6c6f01"
+dependencies = [
+ "arrayvec",
+ "bytes",
+ "futures-core",
+ "httparse",
+ "memchr",
+ "thiserror",
+]
+
+[[package]]
 name = "s3s-rfc2047"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3149,10 +3222,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "s3s-rfc2047"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "918b207c39474baef4774355100e712dfea46020e3289ddd5b4bc6e21927b826"
+dependencies = [
+ "base64-simd",
+ "thiserror",
+]
+
+[[package]]
 name = "s3s-sigv2"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d96880b5ad8d639c9224155126741708aeb62ad3682e0476d2fd14290af808ef"
+dependencies = [
+ "base64-simd",
+ "hmac 0.13.0",
+ "jiff",
+ "sha1 0.11.0",
+ "smallvec",
+ "thiserror",
+]
+
+[[package]]
+name = "s3s-sigv2"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0979baf8cdf30e38bdfba8e58ee2776d78e55bb3bd3d1f3502f917829da79933"
 dependencies = [
  "base64-simd",
  "hmac 0.13.0",
@@ -3183,10 +3280,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "s3s-test"
-version = "0.16.1"
+name = "s3s-sigv4"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fd35fa7a24d0ce24b51e83b6e13ea7b5bbf6daca66e71e6c2c26392aeda472b"
+checksum = "330996b9a24804b3df4ad37e62e7817968857d99cf6029c21512b6b64b97f645"
+dependencies = [
+ "arrayvec",
+ "base64-simd",
+ "hex-simd",
+ "hmac 0.13.0",
+ "jiff",
+ "nom",
+ "serde",
+ "sha2 0.11.0",
+ "smallvec",
+ "std-next",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s-test"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8b9ba61de2952acfe762d56c3f4743324465be961c685eb26c3ed49ef93d13f"
 dependencies = [
  "backtrace",
  "clap",
