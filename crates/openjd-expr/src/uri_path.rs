@@ -16,15 +16,27 @@ pub struct UriParts {
 }
 
 /// Return `true` if `path` has a `scheme://` prefix.
+///
+/// The scheme must match `^[a-zA-Z][a-zA-Z0-9+.-]+://` — at least two
+/// characters. RFC 3986 permits a single-letter scheme, but `C://scenes/a.ma`
+/// is also a valid Windows absolute path (a drive letter with a doubled
+/// separator), and single-letter schemes are essentially unused in practice.
+/// Such values are treated as filesystem paths, per Expression Language §1.2.1
+/// and RFC 0006: classifying them as URIs would make consumers skip
+/// relative-path resolution (and, in tools like the Deadline Cloud client,
+/// path mapping and asset upload) for what is really a local file.
 pub fn is_uri(path: &str) -> bool {
     parse(path).is_some()
 }
 
 /// Parse a URI into authority + path parts, or `None` if not a URI.
+///
+/// See [`is_uri`] for the scheme rule.
 pub fn parse(path: &str) -> Option<UriParts> {
     let scheme_end = path.find("://")?;
     let scheme = &path[..scheme_end];
-    if scheme.is_empty() || !scheme.as_bytes()[0].is_ascii_alphabetic() {
+    // At least two characters: a lone letter is a Windows drive, not a scheme.
+    if scheme.len() < 2 || !scheme.as_bytes()[0].is_ascii_alphabetic() {
         return None;
     }
     if !scheme
@@ -162,6 +174,35 @@ mod tests {
     #[test]
     fn not_uri_windows() {
         assert!(!is_uri("C:\\path"));
+    }
+    #[test]
+    fn not_uri_windows_drive_double_slash() {
+        // `C://...` is a Windows drive-rooted path, not a URI with scheme `c`.
+        assert!(!is_uri("C://scenes/a.ma"));
+        assert!(!is_uri("c://scenes/a.ma"));
+        assert!(parse("C://scenes/a.ma").is_none());
+    }
+    #[test]
+    fn not_uri_single_letter_scheme() {
+        assert!(!is_uri("x://y/z"));
+    }
+    #[test]
+    fn two_letter_scheme_is_uri() {
+        assert!(is_uri("ab://host"));
+        assert!(is_uri("a1://host"));
+        assert!(is_uri("a+://host"));
+    }
+    #[test]
+    fn not_uri_scheme_starting_with_digit() {
+        assert!(!is_uri("3s://bucket/key"));
+    }
+    #[test]
+    fn not_uri_empty_scheme() {
+        assert!(!is_uri("://host/path"));
+    }
+    #[test]
+    fn not_uri_invalid_scheme_char() {
+        assert!(!is_uri("s_3://bucket/key"));
     }
     #[test]
     fn s3_is_uri() {

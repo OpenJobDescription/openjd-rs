@@ -640,5 +640,9 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   resolution. For Windows, drive letters and UNC prefixes follow pathlib's rules:
   a different drive replaces everything, a root-only component replaces from root
   while keeping the existing drive, and a same-drive relative component appends.
+  If the first element is a URI (per `uri_path::is_uri`, so the scheme must be at
+  least two characters), all elements are joined with `/` verbatim and no
+  normalization is applied — `path(["s3://bucket", "a", "", "b"])` is
+  `s3://bucket/a//b`.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)

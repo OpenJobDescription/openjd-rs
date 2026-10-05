@@ -1369,7 +1369,9 @@ pub fn path_mapping::apply_rules_with_format(
     rules: &[PathMappingRule], path: &str, output_format: PathFormat,
 ) -> String;
 
-/// True iff `path` has a `scheme://` URI prefix.
+/// True iff `path` has a `scheme://` URI prefix, where the scheme matches
+/// `^[a-zA-Z][a-zA-Z0-9+.-]+://` (at least two characters, so `C://...` is a
+/// Windows drive path, not a URI). Delegates to `uri_path::is_uri`.
 pub fn path_mapping::is_uri(path: &str) -> bool;
 ```
 
@@ -1385,7 +1387,12 @@ pub struct uri_path::UriParts {
     pub path_parts: Vec<String>,
 }
 
+/// True iff `path` has a `scheme://` prefix with a scheme matching
+/// `^[a-zA-Z][a-zA-Z0-9+.-]+://`. The scheme must be at least two characters
+/// so that a Windows drive path with a doubled separator (`C://data/x`) is not
+/// mistaken for a URI with scheme `c`.
 pub fn uri_path::is_uri(path: &str) -> bool;
+/// Parse into authority + path parts; `None` if `is_uri` would be false.
 pub fn uri_path::parse(path: &str) -> Option<UriParts>;
 
 pub fn uri_path::name(path: &str) -> String;
