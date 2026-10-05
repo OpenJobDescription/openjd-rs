@@ -784,6 +784,74 @@ fn test_uri_default_rejected_when_not_allowed() {
 }
 
 #[test]
+fn test_drive_letter_double_slash_is_not_a_uri_under_expr() {
+    // `C://data/file.txt` is a Windows absolute path with a doubled separator, not a URI
+    // with scheme `c`. With EXPR and allow_uri_path_values=false it must NOT be rejected
+    // as a URI. Under Windows format it is absolute, so like any absolute submitted
+    // value it is kept as given (host-format separator conversion happens when the
+    // session sets `Param.*`).
+    let jt_val = expr_job_template_with_path_param("Scene", None);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Scene".into(),
+        openjd_expr::ExprValue::String("C://data/file.txt".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: r"C:\tmpl",
+            current_working_dir: r"C:\work",
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::Windows,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    match &result["Scene"].value {
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(s, "C://data/file.txt");
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_drive_letter_double_slash_is_relative_under_posix_format() {
+    // Under POSIX format `C://data/file.txt` is a relative path (`C:` is an ordinary
+    // component), so with EXPR it is joined with cwd and normalized like any other
+    // relative value — not passed through untouched as a URI would be.
+    let jt_val = expr_job_template_with_path_param("Scene", None);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Scene".into(),
+        openjd_expr::ExprValue::String("C://data/file.txt".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmpl",
+            current_working_dir: "/work",
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Scene"].value {
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(s, "/work/C:/data/file.txt");
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_posix_absolute_path_recognized_with_posix_format() {
     // /foo/bar is absolute under PathFormat::Posix — should not be joined with cwd
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);

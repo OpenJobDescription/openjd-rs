@@ -98,7 +98,7 @@ because the module already provides that namespace.
 
 | Function | Purpose |
 |----------|---------|
-| `is_uri(s)` | Check if string has a `scheme://` prefix |
+| `is_uri(s)` | Check if string has a `scheme://` prefix matching `^[a-zA-Z][a-zA-Z0-9+.-]+://` (scheme ≥ 2 chars) |
 | `parse(s) -> Option<UriParts>` | Parse into `{ authority, path_parts }` or `None` |
 | `name(s)` | Last component (like `Path.name`) |
 | `parent(s)` | Parent URI (like `Path.parent`) |
@@ -108,6 +108,17 @@ because the module already provides that namespace.
 | `parts(s)` | Split into components: `[authority, seg1, seg2, ...]` |
 | `join(s, child)` | Append a child component to a URI path |
 | `from_parts(parts)` | Reconstruct URI from `parts(...)` output |
+
+### Scheme must be at least two characters
+
+`is_uri` and `parse` require the scheme to match `^[a-zA-Z][a-zA-Z0-9+.-]+://`.
+RFC 3986 permits a one-letter scheme, but `C://scenes/a.ma` is also a valid Windows
+absolute path (a drive letter with a doubled separator), and users produce that
+spelling by hand-editing or pasting from tools that emit forward slashes. Treating it
+as a URI with scheme `c` would silently bypass path mapping and relative-path
+resolution for a real local file. Single-letter schemes are essentially unused in
+practice, so such values are handled as filesystem paths. This matches the
+Expression Language spec §1.2.1 and RFC 0006.
 
 ### Why URI paths are opaque
 

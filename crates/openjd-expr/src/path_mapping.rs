@@ -219,7 +219,10 @@ pub fn apply_rules_with_format(
     path.to_string()
 }
 
-/// Check if a string is a URI (has a scheme:// prefix).
+/// Check if a string is a URI (has a `scheme://` prefix).
+///
+/// Delegates to [`crate::uri_path::is_uri`]: the scheme must be at least two
+/// characters, so `C://data/x` is a Windows drive path, not a URI.
 pub fn is_uri(path: &str) -> bool {
     crate::uri_path::is_uri(path)
 }
