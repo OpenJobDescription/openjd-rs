@@ -215,7 +215,14 @@ template scope — with `Job.Name`/`Step.Name`/step `let` bindings where
 applicable, but no `Session.*`, no `Env.File.*`, no `Task.*`, and the
 template function library (no `apply_path_mapping`) — even though they sit
 on actions whose `command`/`args` are `@fmtstring[host]` and validate in
-session/task scope.
+session/task scope. One helper (`validate_action_timing_fs`, wrapped per
+environment by `validate_env_actions_timing_fs`, which adds the
+unresolved `WrappedAction.*` scope on the RFC 0008 wrap hooks) applies
+the `timeout` / `notifyPeriodInSeconds` / deferred `mode` constraints for
+every action; job creation calls the same helpers with the parameters
+bound, so a parameter-dependent violation (`timeout: "{{ Param.T }}"`
+with `T = 0`) fails at submission at the same path with the same
+message (see `specs/model/job-creation.md`).
 
 4. **Task scope** — For step scripts. Adds `Task.Param.*`, `Task.RawParam.*`,
    `Task.File.*`. With EXPR: adds `Job.Name`, `Step.Name`, `Env.File.*` from
@@ -299,6 +306,16 @@ Let bindings are validated with these rules:
 - On error, the binding is added as `unresolved(ANY)` to the symbol table to prevent
   cascading type errors in subsequent bindings that reference it. (The `unresolved(ANY)`
   type is from the `openjd-expr` type system — see `specs/expr/type-system.md`.)
+- An expression error is reported at `<scope> -> let[j]` as
+  `Invalid expression in let binding '<name>': <error>`, the caret aligned to the
+  full `name = expr` binding string.
+
+The per-binding parse/evaluate/report step (`evaluate_let_binding`) is shared
+with job creation, which re-evaluates every `let` block with the parameters
+bound (`check_carried_forward_let_bindings`, without the structural rules
+above) — so a value-dependent failure reads identically at both stages,
+including the `unresolved(ANY)` continuation. See
+`specs/model/job-creation.md`.
 
 ### Function Libraries
 

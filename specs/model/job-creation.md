@@ -219,7 +219,8 @@ budgets template validation and the session runtime apply.
      on field presence at decode. Attribute `anyOf`/`allOf` values get the same
      treatment in `instantiate`. String-backed FLOAT range elements are trimmed
      and must resolve to finite `f64` values.
-   - Step-level let bindings
+   - Step-level let bindings (template scope; a failure is reported at
+     `steps[i] -> let[j]` — see the carried-forward checks below)
 3. With EXPR extension: inject `Job.Name` (before step instantiation)
    and `Step.Name` (per step) into the symbol table
 4. Carry forward session/task-scope fields as FormatString (plus action
@@ -229,7 +230,9 @@ budgets template validation and the session runtime apply.
    `script` is already a parsed `FormatString` — so the job's `Step` always
    carries a full `StepScript`.
 5. Run the resolved-value checks on the carried-forward fields
-   (next section)
+   (next section) — job environments first, then each step as it is
+   instantiated — accumulating every failure into one collection that
+   is reported once, after all steps
 6. Convert environments from template to job types
 7. Build step dependency list
 8. Attach resolved symbol table to each step
@@ -241,15 +244,34 @@ validation, job creation, task execution on the worker host), job
 creation is the first at which job parameters have real values. The
 session/task-scope format strings it carries forward unresolved —
 action `command`/`args`, environment `variables` values, embedded-file
-`data` — are statically evaluated against a **check symbol table**, and
-exactly the resolved-value checks pass 8 applies to those fields re-run
-on the result:
+`data` — and the template-scope action fields that also resolve on the
+worker — `timeout`, cancelation `notifyPeriodInSeconds` and deferred
+`mode` — are statically evaluated against a **check symbol table**,
+and exactly the resolved-value checks pass 8 applies to those fields
+re-run on the result:
 
 | Field | Constraint |
 |---|---|
 | environment `variables` values | resolved-length bound vs 2048 (§4.4.2, spec-mandated, always on) |
 | action `command`, each `args[*]` entry | bound vs `CallerLimits::max_resolved_arg_len`, if set |
 | embedded file `data` | bound vs `CallerLimits::max_resolved_data_len`, if set |
+| action `timeout` (FB1) | coerced integer > 0; `null` = unset (spec-mandated) |
+| cancelation `notifyPeriodInSeconds` (FB1) | coerced integer > 0, ≤ 600; `null` = unset (spec-mandated) |
+| deferred cancelation `mode` (FB1) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = unset (spec-mandated) |
+
+The last three rows run through the same helper pass 8 uses
+(`validate_action_timing_fs`, with `TIMEOUT_CONSTRAINT`,
+`NOTIFY_PERIOD_CONSTRAINT`, and `ResolvedConstraint::CancelationMode`),
+so `timeout: "{{ Param.T }}"` submitted with `T = 0` fails here with
+pass 8's `timeout must be > 0.` instead of on the worker. They evaluate
+against the **template-scope** table pass 8 uses for them, with real
+values: concrete non-PATH `Param.*`, `RawParam.*`, `Job.Name`, and — for
+a step script or step environment — `Step.Name` and the step-level
+`let` bindings. On the RFC 0008 wrap hooks the `WrappedAction.*` scope
+is seeded unresolved on top, exactly as at pass 8, so round-trip
+forwarding (`timeout: "{{ WrappedAction.Timeout }}"`) passes. Every
+action is covered: step `onRun`, and environment `onEnter`/`onExit`
+plus the three wrap hooks.
 
 At template validation every `Param.*` is unresolved and contributes 0
 to the lower bound; here the parameters are bound to real values, so a
@@ -282,24 +304,43 @@ time, with everything only a session can know left `Unresolved`:
   the real parameter values and would deterministically recur in every
   session that enters the environment.
 
-Both scopes evaluate their script-level `let` bindings through one
-shared path: each binding is **parsed under the context's host
-profile** — the same profile pass 8 parsed it with, never the latest
-profile, so syntax the profile does not enable is refused here exactly
-as at template validation (and a crate upgrade cannot make job creation
-accept what pass 8 refused, or vice versa) — then evaluated under
-`PathFormat::Posix` with the caller's budgets. Failures from either
-scope carry the same `script let binding '<name>': <error>` diagnostic,
-with the caret aligned to the bare expression (pass 8 and the run-time
-path align it to the full `name = expr` binding string; the check path
-reports the expression alone because its message already names the
-binding). Structurally malformed bindings — no `=`, empty name, empty
-expression — are skipped rather than reported: pass 8 rejects all three
-at decode, so they cannot reach a template that came through
-`decode_job_template`, and a hand-built `JobTemplate` that bypassed
-decode still fails on them at run time. The public
-`evaluate_let_bindings` (below) is the run-time entry point used by
-`openjd-sessions` and `openjd-for-js`; the check symtabs do not use it.
+**`let` bindings.** Every `let` block job creation evaluates —
+step-level (template scope, `HostContext::None`), step-script and
+environment script-level (`HostContext::Unresolved`) — goes through
+`check_carried_forward_let_bindings`, which calls the same per-binding
+evaluation helper pass 8 uses (`evaluate_let_binding`). Each binding is
+**parsed under the context's profile** — the same profile pass 8
+parsed it with, never the latest profile, so syntax the profile does
+not enable is refused here exactly as at template validation (and a
+crate upgrade cannot make job creation accept what pass 8 refused, or
+vice versa) — then evaluated under `PathFormat::Posix` with the
+caller's budgets. A failure is a check failure like any other: reported
+at the binding's path — `steps[i] -> let[j]`,
+`steps[i] -> script -> let[j]`,
+`steps[i] -> stepEnvironments[k] -> script -> let[j]`,
+`jobEnvironments[k] -> script -> let[j]`, or for a SimpleAction
+`steps[i] -> <kind> -> let[j]` — with pass 8's message
+`Invalid expression in let binding '<name>': <error>` and the caret
+aligned to the full `name = expr` binding string, as pass 8 and the
+run-time path align it. **Continuation:** as at pass 8, the failed name
+is bound `Unresolved(ANY)` and the scope's remaining bindings and
+checks still run — a later binding or format string referencing it
+evaluates to `Unresolved` instead of cascading `Undefined variable`
+errors, and the scope's unrelated violations are still reported. A
+failed **step-level** binding additionally makes the step
+uninstantiable (host requirements and the parameter space are resolved
+for real and need its value), so those two are skipped for that step —
+its carried-forward checks, and every later step's, still run, and job
+creation fails with the aggregate. Structural checks (names,
+duplicates, shadowing, self-reference, count) are template
+validation's job and are not repeated; structurally malformed bindings
+— no `=`, empty name, empty expression — are skipped rather than
+reported: pass 8 rejects all three at decode, so they cannot reach a
+template that came through `decode_job_template`, and a hand-built
+`JobTemplate` that bypassed decode still fails on them at run time.
+The public `evaluate_let_bindings` (below) is the run-time entry point
+used by `openjd-sessions` and `openjd-for-js`; the check symtabs do not
+use it.
 
 Failures are `ModelError::ModelValidation` at the same field paths
 pass 8 uses, e.g.
@@ -309,13 +350,30 @@ For a SimpleAction step (§8) the checks run on the desugared
 `StepScript` — the same form pass 8 validated — and the paths are
 re-rooted onto the field the author wrote through the same
 `SimpleActionKind::remap_desugared_path` table pass 8 uses
-(`steps[0] -> bash -> script`, `steps[0] -> cmd -> args[1]`, …; see
+(`steps[0] -> bash -> script`, `steps[0] -> cmd -> args[1]`,
+`steps[0] -> bash -> timeout`, `steps[0] -> bash -> let[0]`, …; see
 `specs/model/validation.md` § Reporting on desugared forms). No
 diagnostic from this stage names a synthesized node.
-Violations accumulate within one scope (a step script, one
-environment's fields), but the first failing scope stops instantiation
-— consistent with the fail-fast resolved-value re-checks `create_job`
-already performs, and unlike pass 8's whole-template aggregation.
+
+**Aggregation.** Like pass 8, job creation reports every check failure
+in the template at once: one `ValidationErrors` collection is threaded
+through the job environments and every step (`instantiate_step` takes
+it as `&mut`) and converted to a single `ModelError::ModelValidation`
+once, after all steps are instantiated and before the caller-limit
+task-count and size checks. The order is deterministic and is pass 8's
+order: `jobEnvironments` in template order, then each step in template
+order — its step-level `let`, its script (`let`, `onRun`
+`command`/`args`, `timeout`/`cancelation`, embedded-file `data`), then
+its `stepEnvironments` in order (`let`, `variables`, every action's
+`command`/`args`, every action's `timeout`/`cancelation`, embedded-file
+`data`). **Non-check failures abort immediately and are reported
+alone**, without the check failures accumulated so far: resolving a
+step's host requirements or parameter space for real (a value that
+cannot coerce, a duplicate resolved capability name, an association
+length mismatch, …), the job name, parameter constraints, and the
+caller task-count / size caps. These leave the job unconstructible
+rather than describing a defect in a carried-forward field, and they
+are reported with their own (pre-existing) error kinds and formats.
 
 **Error policy.** Evaluation/parse errors are reported exactly as in
 pass 8. `create_job` requires a context whose revision matches the

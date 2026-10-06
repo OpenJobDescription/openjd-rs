@@ -645,3 +645,82 @@ fn simple_action_under_caps_creates_job() {
         .collect();
     assert_eq!(args, ["{{Task.File.S_script}}", "--flag", "{{Param.X}}"]);
 }
+
+// ── Job creation: template-scope action fields and `let`, re-rooted ──
+
+fn param_timing_template(kind: &str, fields: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1", "EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "T", "type": "INT"}},
+            {{"name": "M", "type": "STRING", "default": "TERMINATE"}}
+        ],
+        "steps": [{{"name": "S", "{kind}": {{"script": "echo", {fields}}}}}]
+    }}"#
+    )
+}
+
+#[test]
+fn timeout_from_param_fails_at_create_job_at_sugar_timeout() {
+    // Desugared path `script -> actions -> onRun -> timeout` re-roots
+    // onto the authored `bash -> timeout`.
+    let t = param_timing_template("bash", r#""timeout": "{{ Param.T }}""#);
+    let msg = create_with_limits(&t, &[("T", "0")], CallerLimits::default())
+        .expect_err("T = 0 must fail at create_job");
+    assert_eq!(
+        msg,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> bash -> timeout:\n\ttimeout must be > 0."
+    );
+    create_with_limits(&t, &[("T", "5")], CallerLimits::default())
+        .expect("positive timeout must pass");
+}
+
+#[test]
+fn notify_period_from_param_fails_at_create_job_at_sugar_cancelation() {
+    let t = param_timing_template(
+        "python",
+        r#""cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{ Param.T }}"}"#,
+    );
+    assert_contains(
+        &create_with_limits(&t, &[("T", "601")], CallerLimits::default())
+            .expect_err("T = 601 must fail at create_job"),
+        &["steps[0] -> python -> cancelation:\n\tnotifyPeriodInSeconds must not exceed 600."],
+    );
+    create_with_limits(&t, &[("T", "60")], CallerLimits::default())
+        .expect("in-range period must pass");
+}
+
+#[test]
+fn deferred_mode_from_param_fails_at_create_job_at_sugar_cancelation() {
+    let t = param_timing_template("cmd", r#""cancelation": {"mode": "{{ Param.M }}"}"#);
+    assert_contains(
+        &create_with_limits(&t, &[("T", "1"), ("M", "KILL")], CallerLimits::default())
+            .expect_err("an invalid mode must fail at create_job"),
+        &["steps[0] -> cmd -> cancelation:\n\tmode must resolve to TERMINATE or NOTIFY_THEN_TERMINATE, got 'KILL'."],
+    );
+}
+
+#[test]
+fn let_failure_at_create_job_reported_at_sugar_let_with_other_violations() {
+    // The SimpleAction's `let` desugars to the script's `let`: a failure
+    // at job creation re-roots onto `bash -> let[k]`, caret aligned to
+    // the full binding, and is reported together with the action's other
+    // violations (the timeout below).
+    let t = param_timing_template(
+        "bash",
+        r#""let": ["ok = 1", "q = 1 / Param.T"], "timeout": "{{ Param.T }}""#,
+    );
+    let msg = create_with_limits(&t, &[("T", "0")], CallerLimits::default())
+        .expect_err("T = 0 must fail at create_job");
+    assert_eq!(
+        msg,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> bash -> let[1]:\n\tInvalid expression in let binding 'q': Division by zero\n  \
+         q = 1 / Param.T\n      ~~^~~~~~~~~\n\
+         steps[0] -> bash -> timeout:\n\ttimeout must be > 0."
+    );
+}

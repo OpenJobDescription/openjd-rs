@@ -5,14 +5,16 @@
 //! Resolved-value checks at job creation (`create_job`) — the
 //! carried-forward session/task-scope format strings: action
 //! `command`/`args`, environment `variables` values, and embedded-file
-//! `data`. See the Resolved-Value Checks on Carried-Forward Fields
+//! `data`; the template-scope action fields that also resolve on the
+//! worker (`timeout`, `cancelation`); and the `let` bindings feeding
+//! them. See the Resolved-Value Checks on Carried-Forward Fields
 //! section of `specs/model/job-creation.md`.
 //!
 //! Every violation here depends only on job parameter values, so it is
 //! not statically knowable at template validation (which sees an
 //! unresolved `Param.*` and a lower bound of 0) but is fully decidable
 //! at job creation, when the parameters are bound — before any worker
-//! runs a task.
+//! runs a task. All of them across the template are reported together.
 //!
 //! Failure tests assert the full field path + message per the repo's
 //! error-message test standard. Passing controls keep partially
@@ -674,70 +676,420 @@ fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
 // Step-script and environment `let` bindings share one check path
 // ══════════════════════════════════════════════════════════════
 
-/// Both check-symtab builders evaluate `let` bindings through the same
-/// helper: parsed under the caller's host profile (as pass 8 parsed
-/// them — never the latest profile, which would accept syntax pass 8
-/// refused or vice versa after a crate upgrade), evaluated under POSIX
-/// with the caller's budgets, and reported with one message format. A
-/// value-dependent failure in an environment `let` is therefore
-/// reported exactly like the same failure in a step-script `let`.
-fn let_failure_message(template: &str, params: &[(&str, &str)]) -> String {
-    let msg = create_default(template, params).expect_err("expected the let binding to fail");
-    // Isolate the let-binding diagnostic (path/context prefixes differ
-    // between the two scopes by design; the binding message must not).
-    let start = msg
-        .find("script let binding")
-        .unwrap_or_else(|| panic!("no let-binding diagnostic in:\n{msg}"));
-    msg[start..].to_string()
+/// Every `let` scope job creation evaluates — step-level, step script,
+/// step environment, job environment — goes through pass 8's own
+/// evaluation helper: parsed under the caller's profile (as pass 8
+/// parsed them — never the latest profile, which would accept syntax
+/// pass 8 refused or vice versa after a crate upgrade), evaluated under
+/// POSIX with the caller's budgets. A value-dependent failure is
+/// reported at the binding's field path with pass 8's message, the
+/// caret aligned to the full `name = expr` binding string.
+fn let_template(script_let: &str, step_let: &str, step_env_let: &str, job_env_let: &str) -> String {
+    let opt = |l: &str| {
+        if l.is_empty() {
+            String::new()
+        } else {
+            format!(r#""let": ["{l}"],"#)
+        }
+    };
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "jobEnvironments": [{{"name": "JobEnv", "script": {{
+            {}
+            "actions": {{"onEnter": {{"command": "echo"}}}}
+        }}}}],
+        "steps": [{{
+            "name": "S",
+            {}
+            "stepEnvironments": [{{"name": "StepEnv", "script": {{
+                {}
+                "actions": {{"onEnter": {{"command": "echo"}}}}
+            }}}}],
+            "script": {{
+                {}
+                "actions": {{"onRun": {{"command": "echo"}}}}
+            }}
+        }}]
+    }}"#,
+        opt(job_env_let),
+        opt(step_let),
+        opt(step_env_let),
+        opt(script_let),
+    )
+}
+
+const DIV_LET: &str = "q = 1 / int(Param.X)";
+
+/// The full diagnostic pass 8 and job creation report for a failing
+/// `q = 1 / int(Param.X)` binding at `path`.
+fn div_let_error(path: &str) -> String {
+    named_div_let_error(path, 'q')
+}
+
+/// [`div_let_error`] for the same binding under a one-letter `name`
+/// (same caret columns).
+fn named_div_let_error(path: &str, name: char) -> String {
+    format!(
+        "{path}:\n\tInvalid expression in let binding '{name}': Division by zero\n  \
+         {name} = 1 / int(Param.X)\n      ~~^~~~~~~~~~~~~~"
+    )
 }
 
 #[test]
-fn env_let_and_script_let_failures_report_identically_at_create_job() {
-    let script_let = r#"{
+fn script_let_failure_reported_at_its_path_at_create_job() {
+    assert_err_contains(
+        create_default(&let_template(DIV_LET, "", "", ""), &[("X", "0")]),
+        &[&div_let_error("steps[0] -> script -> let[0]")],
+    );
+}
+
+#[test]
+fn step_env_let_failure_reported_at_its_path_at_create_job() {
+    assert_err_contains(
+        create_default(&let_template("", "", DIV_LET, ""), &[("X", "0")]),
+        &[&div_let_error(
+            "steps[0] -> stepEnvironments[0] -> script -> let[0]",
+        )],
+    );
+}
+
+#[test]
+fn job_env_let_failure_reported_at_its_path_at_create_job() {
+    assert_err_contains(
+        create_default(&let_template("", "", "", DIV_LET), &[("X", "0")]),
+        &[&div_let_error("jobEnvironments[0] -> script -> let[0]")],
+    );
+}
+
+#[test]
+fn step_level_let_failure_reported_at_its_path_at_create_job() {
+    assert_err_contains(
+        create_default(&let_template("", DIV_LET, "", ""), &[("X", "0")]),
+        &[&div_let_error("steps[0] -> let[0]")],
+    );
+}
+
+#[test]
+fn let_failures_in_every_scope_report_together_in_template_order() {
+    // One failing binding per scope (distinct names: script and
+    // step-environment bindings may not shadow the step's); all four
+    // are reported in a single error, jobEnvironments first (pass 8's
+    // order), then the step's `let`, script, and step environments.
+    let template = let_template(
+        "b = 1 / int(Param.X)",
+        "a = 1 / int(Param.X)",
+        "c = 1 / int(Param.X)",
+        DIV_LET,
+    );
+    let msg =
+        create_default(&template, &[("X", "0")]).expect_err("expected the let bindings to fail");
+    let expected = [
+        "Model validation error: 4 validation errors for JobTemplate".to_string(),
+        div_let_error("jobEnvironments[0] -> script -> let[0]"),
+        named_div_let_error("steps[0] -> let[0]", 'a'),
+        named_div_let_error("steps[0] -> script -> let[0]", 'b'),
+        named_div_let_error("steps[0] -> stepEnvironments[0] -> script -> let[0]", 'c'),
+    ]
+    .join("\n");
+    assert_eq!(msg, expected);
+
+    // Control: a non-zero divisor passes every scope.
+    create_default(&template, &[("X", "2")]).expect("non-zero divisor must pass");
+}
+
+#[test]
+fn failed_let_does_not_cascade_and_the_scope_keeps_checking() {
+    // The failed binding is bound unresolved, as at pass 8: a later
+    // binding using it evaluates (no "Undefined variable" cascade), and
+    // the scope's other checks still run — the over-limit variable in
+    // the same environment is reported alongside the let failure.
+    let template = format!(
+        r#"{{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR"],
         "name": "Test",
-        "parameterDefinitions": [
-            {"name": "X", "type": "STRING"},
-            {"name": "N", "type": "INT"}
-        ],
-        "steps": [{"name": "S", "script": {
-            "let": ["q = 1 / int(Param.X)"],
-            "actions": {"onRun": {"command": "echo", "args": ["{{ q }}"]}}
-        }}]
-    }"#;
-    let env_let = r#"{
-        "specificationVersion": "jobtemplate-2023-09",
-        "extensions": ["EXPR"],
-        "name": "Test",
-        "parameterDefinitions": [
-            {"name": "X", "type": "STRING"},
-            {"name": "N", "type": "INT"}
-        ],
-        "jobEnvironments": [{"name": "Env", "script": {
-            "let": ["q = 1 / int(Param.X)"],
-            "actions": {"onEnter": {"command": "echo", "args": ["{{ q }}"]}}
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "jobEnvironments": [{{
+            "name": "Env",
+            "variables": {{"FOO": "{}", "BAR": "{}"}},
+            "script": {{
+                "let": ["q = 1 / int(Param.X)", "r = q + 1"],
+                "actions": {{"onEnter": {{"command": "echo"}}}}
+            }}
         }}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+    }}"#,
+        "{{ r }}", "{{ Param.X * 3000 }}"
+    );
+    let msg = create_default(&template, &[("X", "0")]).expect_err("expected failures");
+    let expected = [
+        "Model validation error: 2 validation errors for JobTemplate".to_string(),
+        div_let_error("jobEnvironments[0] -> script -> let[0]"),
+        "jobEnvironments[0] -> variables -> BAR:\n\tresolves to at least 3000 characters, \
+         exceeding the maximum of 2048."
+            .to_string(),
+    ]
+    .join("\n");
+    assert_eq!(msg, expected);
+}
+
+#[test]
+fn failed_step_level_let_still_checks_later_steps() {
+    // A failed step-level binding leaves that step's host requirements
+    // and parameter space unresolvable (skipped), but the step's own
+    // carried-forward checks and every later step's still run.
+    let template = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "steps": [
+            {{
+                "name": "A",
+                "let": ["q = 1 / int(Param.X)"],
+                "parameterSpace": {{"taskParameterDefinitions": [
+                    {{"name": "F", "type": "INT", "range": "{}"}}
+                ]}},
+                "stepEnvironments": [{{"name": "E", "variables": {{"V": "{}"}}}}],
+                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+            }},
+            {{
+                "name": "B",
+                "stepEnvironments": [{{"name": "E", "variables": {{"V": "{}"}}}}],
+                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+            }}
+        ]
+    }}"#,
+        "1-{{ q }}", "{{ Param.X * 3000 }}", "{{ Param.X * 3000 }}"
+    );
+    let msg = create_default(&template, &[("X", "0")]).expect_err("expected failures");
+    let over_var = "resolves to at least 3000 characters, exceeding the maximum of 2048.";
+    let expected = [
+        "Model validation error: 3 validation errors for JobTemplate".to_string(),
+        div_let_error("steps[0] -> let[0]"),
+        format!("steps[0] -> stepEnvironments[0] -> variables -> V:\n\t{over_var}"),
+        format!("steps[1] -> stepEnvironments[0] -> variables -> V:\n\t{over_var}"),
+    ]
+    .join("\n");
+    assert_eq!(msg, expected);
+}
+
+// ══════════════════════════════════════════════════════════════
+// Whole-template aggregation — every carried-forward check failure
+// across job environments, steps, and step environments is reported
+// together, in pass 8's order
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn violations_across_steps_and_environments_are_reported_together() {
+    let template = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "jobEnvironments": [
+            {{"name": "J0", "variables": {{"V": "{x}"}}}},
+            {{"name": "J1", "script": {{"actions": {{"onEnter": {{"command": "echo", "args": ["{x}"]}}}}}}}}
+        ],
+        "steps": [
+            {{
+                "name": "S0",
+                "stepEnvironments": [{{"name": "E", "variables": {{"V": "{x}"}}}}],
+                "script": {{"actions": {{"onRun": {{"command": "echo", "args": ["{x}", "ok", "{x}"]}}}}}}
+            }},
+            {{"name": "S1", "script": {{"actions": {{"onRun": {{"command": "{x}"}}}}}}}}
+        ]
+    }}"#,
+        x = "{{ Param.X * 3000 }}"
+    );
+    let msg = create_with_limits(&template, &[("X", "A")], arg_cap(100))
+        .expect_err("expected every violation to be reported");
+    let over_arg = "resolves to at least 3000 characters, exceeding the maximum of 100.";
+    let over_var = "resolves to at least 3000 characters, exceeding the maximum of 2048.";
+    let expected = [
+        "Model validation error: 6 validation errors for JobTemplate".to_string(),
+        format!("jobEnvironments[0] -> variables -> V:\n\t{over_var}"),
+        format!("jobEnvironments[1] -> script -> actions -> onEnter -> args[0]:\n\t{over_arg}"),
+        format!("steps[0] -> script -> actions -> onRun -> args[0]:\n\t{over_arg}"),
+        format!("steps[0] -> script -> actions -> onRun -> args[2]:\n\t{over_arg}"),
+        format!("steps[0] -> stepEnvironments[0] -> variables -> V:\n\t{over_var}"),
+        format!("steps[1] -> script -> actions -> onRun -> command:\n\t{over_arg}"),
+    ]
+    .join("\n");
+    assert_eq!(msg, expected);
+}
+
+#[test]
+fn resolution_failure_aborts_alone_ahead_of_check_failures() {
+    // Host requirements are resolved for real: a step whose amount
+    // cannot resolve is uninstantiable, so job creation stops there and
+    // reports that failure alone — check failures accumulated so far
+    // (the job environment's) are not reported with it.
+    let template = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "X", "type": "STRING"}}],
+        "jobEnvironments": [{{"name": "J", "variables": {{"V": "{}"}}}}],
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"amounts": [{{"name": "amount.worker.vcpu", "min": "{}"}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#,
+        "{{ Param.X * 3000 }}", "{{ Param.X }}"
+    );
+    let msg = create_default(&template, &[("X", "nope")]).expect_err("expected failure");
+    // Exactly this one error: no `jobEnvironments` entry alongside it.
+    assert_eq!(
+        msg,
+        "Format string error: hostRequirements amount min: Cannot coerce string to float?\n  \
+         Param.X\n  ~~~~~~^"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Template-scope numeric/enum action fields — `timeout`,
+// `cancelation.notifyPeriodInSeconds`, deferred cancelation `mode`
+// (FEATURE_BUNDLE_1): re-checked with the parameters bound
+// ══════════════════════════════════════════════════════════════
+
+fn timing_step_template(action_fields: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "T", "type": "INT", "default": 10}},
+            {{"name": "N", "type": "INT", "default": 30}},
+            {{"name": "M", "type": "STRING", "default": "TERMINATE"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "let": ["t2 = Param.T * 2"],
+            "script": {{"actions": {{"onRun": {{"command": "echo", {action_fields}}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+#[test]
+fn step_timeout_from_param_fails_at_create_job() {
+    // Pass 8 sees Param.T unresolved; T = 0 is only decidable here.
+    let t = timing_step_template(r#""timeout": "{{ Param.T }}""#);
+    assert_err_contains(
+        create_default(&t, &[("T", "0")]),
+        &["steps[0] -> script -> actions -> onRun -> timeout:\n\ttimeout must be > 0."],
+    );
+    create_default(&t, &[("T", "5")]).expect("positive timeout must pass");
+}
+
+#[test]
+fn step_timeout_from_step_level_let_fails_at_create_job() {
+    // `timeout` resolves in template scope, which includes the step's
+    // `let` bindings — evaluated with the bound parameter here.
+    let t = timing_step_template(r#""timeout": "{{ t2 - 10 }}""#);
+    assert_err_contains(
+        create_default(&t, &[("T", "5")]),
+        &["steps[0] -> script -> actions -> onRun -> timeout:\n\ttimeout must be > 0."],
+    );
+    create_default(&t, &[("T", "6")]).expect("positive timeout must pass");
+}
+
+#[test]
+fn step_notify_period_from_param_fails_at_create_job() {
+    let t = timing_step_template(
+        r#""cancelation": {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{ Param.N }}"}"#,
+    );
+    assert_err_contains(
+        create_default(&t, &[("N", "601")]),
+        &["steps[0] -> script -> actions -> onRun -> cancelation:\n\tnotifyPeriodInSeconds must not exceed 600."],
+    );
+    assert_err_contains(
+        create_default(&t, &[("N", "0")]),
+        &["steps[0] -> script -> actions -> onRun -> cancelation:\n\tnotifyPeriodInSeconds must be > 0."],
+    );
+    create_default(&t, &[("N", "600")]).expect("in-range period must pass");
+}
+
+#[test]
+fn step_deferred_cancelation_mode_from_param_fails_at_create_job() {
+    let t = timing_step_template(r#""cancelation": {"mode": "{{ Param.M }}"}"#);
+    assert_err_contains(
+        create_default(&t, &[("M", "KILL")]),
+        &["steps[0] -> script -> actions -> onRun -> cancelation:\n\tmode must resolve to TERMINATE or NOTIFY_THEN_TERMINATE, got 'KILL'."],
+    );
+    create_default(&t, &[("M", "NOTIFY_THEN_TERMINATE")]).expect("valid mode must pass");
+}
+
+#[test]
+fn env_action_timing_fields_from_param_fail_at_create_job() {
+    // onEnter/onExit of a job environment (job template scope) and of a
+    // step environment (step template scope, with the step's `let`),
+    // all reported together.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "T", "type": "INT"},
+            {"name": "M", "type": "STRING"}
+        ],
+        "jobEnvironments": [{"name": "J", "script": {"actions": {
+            "onEnter": {"command": "echo", "timeout": "{{ Param.T }}"},
+            "onExit": {"command": "echo", "cancelation": {"mode": "{{ Param.M }}", "notifyPeriodInSeconds": "{{ Param.T }}"}}
+        }}}],
+        "steps": [{
+            "name": "S",
+            "let": ["t = Param.T - 1"],
+            "stepEnvironments": [{"name": "E", "script": {"actions": {
+                "onEnter": {"command": "echo", "timeout": "{{ t }}"}
+            }}}],
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let msg = create_default(template, &[("T", "0"), ("M", "KILL")])
+        .expect_err("expected the timing fields to fail");
+    let expected = [
+        "Model validation error: 4 validation errors for JobTemplate",
+        "jobEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\ttimeout must be > 0.",
+        "jobEnvironments[0] -> script -> actions -> onExit -> cancelation:\n\tmode must resolve to TERMINATE or NOTIFY_THEN_TERMINATE, got 'KILL'.",
+        "jobEnvironments[0] -> script -> actions -> onExit -> cancelation:\n\tnotifyPeriodInSeconds must be > 0.",
+        "steps[0] -> stepEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\ttimeout must be > 0.",
+    ]
+    .join("\n");
+    assert_eq!(msg, expected);
+    create_default(template, &[("T", "2"), ("M", "TERMINATE")]).expect("valid values must pass");
+}
+
+#[test]
+fn wrap_hook_timeout_from_param_fails_at_create_job() {
+    // Wrap hooks resolve `timeout` with the WrappedAction.* scope
+    // seeded (unresolved here): a forwarded `WrappedAction.Timeout`
+    // passes, a parameter-dependent value is checked.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "T", "type": "INT"}],
+        "jobEnvironments": [{"name": "W", "script": {"actions": {
+            "onWrapEnvEnter": {"command": "echo", "timeout": "{{ WrappedAction.Timeout }}"},
+            "onWrapTaskRun": {"command": "echo", "timeout": "{{ Param.T }}"},
+            "onWrapEnvExit": {"command": "echo"}
+        }}}],
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
     }"#;
-    let params = [("X", "0"), ("N", "1")];
-    let from_script = let_failure_message(script_let, &params);
-    let from_env = let_failure_message(env_let, &params);
-    assert_eq!(
-        from_script, from_env,
-        "the two scopes must report identically"
+    assert_err_contains(
+        create_default(template, &[("T", "0")]),
+        &["jobEnvironments[0] -> script -> actions -> onWrapTaskRun -> timeout:\n\ttimeout must be > 0."],
     );
-    assert!(
-        from_env.starts_with("script let binding 'q': Division by zero"),
-        "Got:\n{from_env}"
-    );
-    assert!(
-        from_env.contains("  1 / int(Param.X)\n"),
-        "Got:\n{from_env}"
-    );
-    assert!(from_env.contains("  ~~^~~~~~~~~~~~~~"), "Got:\n{from_env}");
-
-    // Control: a non-zero divisor passes both scopes.
-    create_default(script_let, &[("X", "2"), ("N", "1")]).expect("script let must pass");
-    create_default(env_let, &[("X", "2"), ("N", "1")]).expect("env let must pass");
+    create_default(template, &[("T", "3")]).expect("positive timeout must pass");
 }
