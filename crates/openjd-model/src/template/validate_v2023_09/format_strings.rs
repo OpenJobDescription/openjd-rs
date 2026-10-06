@@ -2695,6 +2695,10 @@ fn evaluate_let_binding(
                 Ok(result) => {
                     // Set the binding in the symtab with its inferred value/type
                     // so subsequent bindings and format strings see the correct type.
+                    // `set` only fails when the key path collides with an existing
+                    // scalar; binding names are validated to start lowercase or `_`
+                    // (above, at template validation), so they can never collide with
+                    // the uppercase-rooted scopes, and ignoring the result is safe.
                     let _ = symtab.set(name, result);
                 }
                 Err(e) => {

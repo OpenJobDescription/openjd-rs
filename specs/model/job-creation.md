@@ -360,18 +360,21 @@ in the template at once: one `ValidationErrors` collection is threaded
 through the job environments and every step (`instantiate_step` takes
 it as `&mut`) and converted to a single `ModelError::ModelValidation`
 once, after all steps are instantiated and before the caller-limit
-task-count and size checks. The order is deterministic and is pass 8's
-order: `jobEnvironments` in template order, then each step in template
+task-count and size checks. The order is pass 8's order — deterministic
+except within one environment's `variables`, which is a `HashMap` and
+iterates in arbitrary order (shared with pass 8): `jobEnvironments` in template order, then each step in template
 order — its step-level `let`, its script (`let`, `onRun`
 `command`/`args`, `timeout`/`cancelation`, embedded-file `data`), then
 its `stepEnvironments` in order (`let`, `variables`, every action's
 `command`/`args`, every action's `timeout`/`cancelation`, embedded-file
-`data`). **Non-check failures abort immediately and are reported
-alone**, without the check failures accumulated so far: resolving a
-step's host requirements or parameter space for real (a value that
-cannot coerce, a duplicate resolved capability name, an association
-length mismatch, …), the job name, parameter constraints, and the
-caller task-count / size caps. These leave the job unconstructible
+`data`). **Non-check failures are reported alone.** The job name and
+parameter constraints are checked before any check failure is
+collected, and the caller task-count / size caps after the collection
+is converted, so neither interacts with it. Resolving a step's host
+requirements or parameter space for real (a value that cannot coerce,
+a duplicate resolved capability name, an association length mismatch,
+…) aborts immediately, discarding any check failures collected from
+earlier scopes. These leave the job unconstructible
 rather than describing a defect in a carried-forward field, and they
 are reported with their own (pre-existing) error kinds and formats.
 
