@@ -410,11 +410,11 @@ fn octal_upper() {
 }
 #[test]
 fn old_octal_rejected() {
-    assert_err("0777", &["Syntax error: Invalid decimal integer literal\n"]);
+    assert_err("0777", &["Syntax error: leading zeros in decimal integer literals are not permitted; use an 0o prefix for octal integers\n"]);
 }
 #[test]
 fn leading_zero_rejected() {
-    assert_err("007", &["Syntax error: Invalid decimal integer literal\n"]);
+    assert_err("007", &["Syntax error: leading zeros in decimal integer literals are not permitted; use an 0o prefix for octal integers\n"]);
 }
 #[test]
 fn double_zero() {
@@ -450,11 +450,11 @@ fn underscore_start_is_var() {
 }
 #[test]
 fn underscore_end_rejected() {
-    assert_err("123_", &["Syntax error: Unexpected token"]);
+    assert_err("123_", &["Syntax error: invalid decimal literal"]);
 }
 #[test]
 fn double_underscore_rejected() {
-    assert_err("1__000", &["Syntax error: Unexpected token"]);
+    assert_err("1__000", &["Syntax error: invalid decimal literal"]);
 }
 #[test]
 fn underscore_after_hex_prefix() {
@@ -510,7 +510,7 @@ fn underscore_exponent() {
 }
 #[test]
 fn underscore_adj_decimal_rejected() {
-    assert_err("1_.5", &["Syntax error: Unexpected token"]);
+    assert_err("1_.5", &["Syntax error: invalid decimal literal"]);
 }
 #[test]
 fn underscore_after_decimal_rejected() {
@@ -518,11 +518,11 @@ fn underscore_after_decimal_rejected() {
 }
 #[test]
 fn underscore_adj_exponent_rejected() {
-    assert_err("1_e10", &["Syntax error: Unexpected token"]);
+    assert_err("1_e10", &["Syntax error: invalid decimal literal"]);
 }
 #[test]
 fn underscore_after_exponent_rejected() {
-    assert_err("1e_10", &["Syntax error: Unexpected token"]);
+    assert_err("1e_10", &["Syntax error: invalid decimal literal"]);
 }
 
 // === TestUnsupportedPythonFeatures ===

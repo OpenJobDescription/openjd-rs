@@ -296,8 +296,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - name: Install MSRV toolchain
         run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup override set 1.96.0
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup override set 1.97.0
       - uses: actions/cache@v6
         with:
           path: |

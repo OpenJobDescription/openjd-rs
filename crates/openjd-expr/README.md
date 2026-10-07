@@ -35,7 +35,7 @@ uses in Ruff and the OpenJD spec recommends for Rust implementations.
 
 ## Minimum supported Rust version
 
-Rust **1.96.0**. Enforced in CI.
+Rust **1.97.0**. Enforced in CI.
 
 ## Quick example
 

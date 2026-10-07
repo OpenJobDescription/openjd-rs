@@ -99,7 +99,7 @@ let json = encode_snapshot_v2023(&rel)?;
 
 ## Minimum supported Rust version
 
-Rust **1.96.0**. Enforced in CI.
+Rust **1.97.0**. Enforced in CI.
 
 ## License
 

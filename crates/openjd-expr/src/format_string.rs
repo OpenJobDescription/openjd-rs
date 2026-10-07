@@ -709,9 +709,8 @@ fn check_comprehension_vars(
             check_comprehension_vars(&u.operand, let_names)?;
         }
         ast::Expr::Compare(c) => {
-            check_comprehension_vars(&c.left, let_names)?;
-            for r in &c.comparators {
-                check_comprehension_vars(r, let_names)?;
+            for operand in &c.operands {
+                check_comprehension_vars(operand, let_names)?;
             }
         }
         ast::Expr::BoolOp(b) => {

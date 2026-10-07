@@ -71,10 +71,12 @@ fn parser_survives_deeply_nested_parens() {
 
 #[test]
 fn parser_survives_very_deeply_nested_parens() {
-    // 5000 nested parens — exercises the worker thread's enlarged stack.
-    let expr = format!("{}1{}", "(".repeat(5000), ")".repeat(5000));
+    // 199 nested parens — the deepest the lexer accepts (it rejects at 200,
+    // matching CPython). Redundant parens never deepen the AST, so this
+    // parses and evaluates.
+    let expr = format!("{}1{}", "(".repeat(199), ")".repeat(199));
     let parsed = ParsedExpression::new(&expr)
-        .expect("5000 parens must parse (worker thread has ample stack)");
+        .expect("199 parens must parse (worker thread has ample stack)");
     let v = parsed
         .evaluate(&SymbolTable::new())
         .expect("evaluation must succeed");
@@ -354,9 +356,24 @@ fn parser_survives_deeply_nested_list_literals() {
     // `[[[[...1...]]]]` — nested list literals also recurse in the parser.
     // The spec's own validator rejects lists deeper than 2 levels, but
     // the parser must survive long enough to hand the AST to the walker.
-    let depth = 2000;
+    // 150 stays under ruff's 200-bracket lexer limit (see
+    // `lexer_rejects_brackets_nested_past_cpython_limit`) and over
+    // MAX_EXPRESSION_DEPTH, so the AST depth walker is what rejects it.
+    let depth = 150;
     let expr = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
     expect_too_deep(&expr);
+}
+
+#[test]
+fn lexer_rejects_brackets_nested_past_cpython_limit() {
+    // Since rustpython-ruff_python_parser 0.16.10 the lexer caps bracket
+    // nesting at 200, matching CPython's "too many nested parentheses".
+    // Inputs that deep never reach the AST walker.
+    for (open, close) in [("(", ")"), ("[", "]")] {
+        let expr = format!("{}1{}", open.repeat(2000), close.repeat(2000));
+        let err = ParsedExpression::new(&expr).expect_err("2000 nested brackets must be rejected");
+        assert_eq!(err.message(), "Syntax error: too many nested parentheses");
+    }
 }
 
 #[test]
