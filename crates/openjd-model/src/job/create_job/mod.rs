@@ -89,6 +89,14 @@ impl EvalBudgets {
 ///
 /// When `ctx.caller_limits.max_task_count` is set, the total task count
 /// across all steps is checked after parameter spaces are resolved.
+///
+/// The resolved-value re-checks on carried-forward fields (and the
+/// `let` bindings feeding them) are reported together: every such
+/// failure across job environments, steps, and step environments
+/// becomes one `ModelError::ModelValidation`, in template-validation
+/// order. Failures that make a step uninstantiable (resolving its host
+/// requirements or parameter space) abort immediately and are reported
+/// alone.
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
@@ -213,14 +221,67 @@ pub fn create_job(
         })
         .collect();
 
-    let steps = job_template
-        .steps
-        .iter()
-        .enumerate()
-        .map(|(step_index, st)| {
-            instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx, step_index, budgets)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // Re-run the carried-forward resolved-value checks (and evaluate the
+    // `let` bindings feeding them) against check symbol tables where job
+    // parameters are bound to real values. A violation template
+    // validation could only lower-bound is decidable here — fail at
+    // submission, not on the worker.
+    //
+    // Every check failure across the whole template accumulates into
+    // this one collection and is reported together as a single
+    // `ModelValidation` error, in pass 8's order: `jobEnvironments`
+    // first, then each step in turn (step `let`, script, step
+    // environments). Resolution failures that leave a step
+    // uninstantiable (host requirements, parameter space) are not
+    // checks: they abort immediately, reported alone.
+    let mut check_errors = crate::error::ValidationErrors::default();
+    if let Some(envs) = &job_template.job_environments {
+        for (i, env) in envs.iter().enumerate() {
+            let env_path = [
+                crate::error::PathElement::Field("jobEnvironments".to_string()),
+                crate::error::PathElement::Index(i),
+            ];
+            let env_symtab = instantiate::build_env_check_symtab(
+                env,
+                &symtab,
+                has_expr,
+                ctx,
+                &env_path,
+                &mut check_errors,
+            )?;
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
+                env,
+                &env_symtab,
+                &symtab,
+                ctx,
+                limits.max_env_var_value_len,
+                &env_path,
+                &mut check_errors,
+            );
+        }
+    }
+
+    let mut steps = Vec::with_capacity(job_template.steps.len());
+    for (step_index, st) in job_template.steps.iter().enumerate() {
+        steps.push(instantiate::instantiate_step(
+            st,
+            &symtab,
+            has_expr,
+            &limits,
+            ctx,
+            step_index,
+            budgets,
+            &mut check_errors,
+        )?);
+    }
+    check_errors.into_result("JobTemplate")?;
+    // `instantiate_step` only declines to build a step after recording
+    // the failure in `check_errors`, so every step is present here.
+    let steps: Vec<job::Step> = steps.into_iter().collect::<Option<_>>().ok_or_else(|| {
+        ModelError::DecodeValidation(
+            "internal error: a step was skipped without a recorded error".to_string(),
+        )
+    })?;
 
     // Caller-imposed total task count limit across all steps
     if let Some(max_task_count) = ctx.caller_limits.max_task_count {
@@ -244,32 +305,6 @@ pub fn create_job(
                 )),
             ));
         }
-    }
-
-    // Re-run the carried-forward format-string resolved-value checks on
-    // each job environment against a session-scope check symbol table,
-    // where job parameters are bound to real values. A violation
-    // template validation could only lower-bound is decidable here —
-    // fail at submission, not on the worker.
-    if let Some(envs) = &job_template.job_environments {
-        let mut check_errors = crate::error::ValidationErrors::default();
-        for (i, env) in envs.iter().enumerate() {
-            let env_symtab =
-                instantiate::build_env_check_symtab(env, &symtab, has_expr, ctx, budgets)?;
-            let env_path = [
-                crate::error::PathElement::Field("jobEnvironments".to_string()),
-                crate::error::PathElement::Index(i),
-            ];
-            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
-                env,
-                &env_symtab,
-                ctx,
-                limits.max_env_var_value_len,
-                &env_path,
-                &mut check_errors,
-            );
-        }
-        check_errors.into_result("JobTemplate")?;
     }
 
     let job_environments = job_template.job_environments.as_ref().map(|envs| {

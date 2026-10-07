@@ -207,9 +207,12 @@ pub fn convert_environment_with_symtab(
 [`create_job`] is the high-level entry point: it resolves the job name
 (template scope), instantiates every step, runs the resolved-value
 checks on the carried-forward session/task-scope fields
-(action `command`/`args`, environment `variables`, embedded-file `data`
+(action `command`/`args`/`timeout`/`cancelation`, environment
+`variables`, embedded-file `data`, and the `let` bindings feeding them
 — see the Resolved-Value Checks on Carried-Forward Fields section of
-[job-creation.md](job-creation.md)), runs the final task-count
+[job-creation.md](job-creation.md); every such failure across the
+template is reported together in one `ModelError::ModelValidation`),
+runs the final task-count
 limit from [`CallerLimits`], and returns the complete [`job::Job`]. The
 `ctx` it takes is a full [`ValidationContext`] — i.e. revision +
 extensions + caller limits — and callers commonly get one from

@@ -1180,46 +1180,13 @@ fn validate_step_script_format_strings(
     // (resolved at job creation, before any session exists), so
     // they validate against the template-scope symtab: no
     // Session.*, no Task.*, no Env.File.*, no host functions.
-    if let Some(timeout) = &script.actions.on_run.timeout {
-        validate_fs_with(
-            timeout,
-            step_template_symtab,
-            template_ev,
-            &path_field(&action_path, "timeout"),
-            Some(&TIMEOUT_CONSTRAINT),
-            errors,
-        );
-    }
-    let (mode_fs, notify_fs) = match &script.actions.on_run.cancelation {
-        Some(CancelationMode::NotifyThenTerminate {
-            notify_period_in_seconds,
-        }) => (None, notify_period_in_seconds.as_ref()),
-        Some(CancelationMode::DeferredMode {
-            mode,
-            notify_period_in_seconds,
-        }) => (Some(mode), notify_period_in_seconds.as_ref()),
-        _ => (None, None),
-    };
-    if let Some(mode) = mode_fs {
-        validate_fs_with(
-            mode,
-            step_template_symtab,
-            template_ev,
-            &path_field(&action_path, "cancelation"),
-            Some(&ResolvedConstraint::CancelationMode),
-            errors,
-        );
-    }
-    if let Some(notify) = notify_fs {
-        validate_fs_with(
-            notify,
-            step_template_symtab,
-            template_ev,
-            &path_field(&action_path, "cancelation"),
-            Some(&NOTIFY_PERIOD_CONSTRAINT),
-            errors,
-        );
-    }
+    validate_action_timing_fs(
+        &script.actions.on_run,
+        step_template_symtab,
+        template_ev,
+        &action_path,
+        errors,
+    );
 
     // Embedded files
     if let Some(files) = &script.embedded_files {
@@ -1298,6 +1265,96 @@ fn validate_step_script_format_strings(
     }
 }
 
+/// Validate an action's template-scope numeric/enum fields: `timeout`
+/// against [`TIMEOUT_CONSTRAINT`], and the cancelation's deferred `mode`
+/// ([`ResolvedConstraint::CancelationMode`]) and `notifyPeriodInSeconds`
+/// ([`NOTIFY_PERIOD_CONSTRAINT`]) — the latter two reported at the
+/// `cancelation` path. `symtab`/`ev` are the template scope (plus the
+/// unresolved `WrappedAction.*` scope for an RFC 0008 wrap hook).
+///
+/// Shared by pass 8 and the job-creation re-check, so the constraints,
+/// target types, paths, and messages cannot drift between the stages.
+fn validate_action_timing_fs(
+    action: &Action,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    action_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    if let Some(timeout) = &action.timeout {
+        validate_fs_with(
+            timeout,
+            symtab,
+            ev,
+            &path_field(action_path, "timeout"),
+            Some(&TIMEOUT_CONSTRAINT),
+            errors,
+        );
+    }
+    let (mode_fs, notify_fs) = match &action.cancelation {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds,
+        }) => (None, notify_period_in_seconds.as_ref()),
+        Some(CancelationMode::DeferredMode {
+            mode,
+            notify_period_in_seconds,
+        }) => (Some(mode), notify_period_in_seconds.as_ref()),
+        _ => (None, None),
+    };
+    if let Some(mode) = mode_fs {
+        validate_fs_with(
+            mode,
+            symtab,
+            ev,
+            &path_field(action_path, "cancelation"),
+            Some(&ResolvedConstraint::CancelationMode),
+            errors,
+        );
+    }
+    if let Some(notify) = notify_fs {
+        validate_fs_with(
+            notify,
+            symtab,
+            ev,
+            &path_field(action_path, "cancelation"),
+            Some(&NOTIFY_PERIOD_CONSTRAINT),
+            errors,
+        );
+    }
+}
+
+/// [`validate_action_timing_fs`] for every action of an environment
+/// script. On the plain lifecycle actions (`onEnter`/`onExit`) these
+/// fields resolve at job creation, before any session exists, so they
+/// validate against the template-scope `template_symtab`. On the RFC 0008
+/// wrap hooks they resolve at run time with the `WrappedAction.*`
+/// variables seeded — that is what makes round-trip forwarding
+/// (`timeout: "{{WrappedAction.Timeout}}"`,
+/// `mode: "{{WrappedAction.Cancelation.Mode}}"`) possible — so they see
+/// that scope too, unresolved.
+fn validate_env_actions_timing_fs(
+    script: &EnvironmentScript,
+    template_symtab: &SymbolTable,
+    template_ev: &FsEval<'_>,
+    actions_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let wrap_hook_names: [&str; 3] = ["onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit"];
+    for (name, action) in script.actions.iter_named() {
+        let action_path = path_field(actions_path, name);
+        let scoped_symtab: SymbolTable;
+        let field_symtab: &SymbolTable = if wrap_hook_names.contains(&name) {
+            let mut st = template_symtab.clone();
+            add_wrapped_action_scope(&mut st);
+            scoped_symtab = st;
+            &scoped_symtab
+        } else {
+            template_symtab
+        };
+        validate_action_timing_fs(action, field_symtab, template_ev, &action_path, errors);
+    }
+}
+
 /// Validate a format string in an action (command + args). When the
 /// caller opted into `CallerLimits::max_resolved_arg_len`, the resolved
 /// command string and each argv entry the args produce are bounded by it
@@ -1343,12 +1400,15 @@ fn validate_action_fs(
 // `create_job` carries the session/task-scope format strings — action
 // `command`/`args`, environment `variables` values, embedded-file
 // `data` — forward unresolved (only a worker host can bind `Session.*`
-// / `Task.*` / `Env.File.*`). Of the spec's three processing stages
+// / `Task.*` / `Env.File.*`), along with action `timeout` /
+// `cancelation`, which are template scope but also resolve on the
+// worker. Of the spec's three processing stages
 // (Template Schemas §7.4: template validation, job creation, task
 // execution on the worker host), job creation is the first at which
-// `Param.*` / `RawParam.*` have real values. The two functions below
+// `Param.*` / `RawParam.*` have real values. The functions below
 // re-run exactly the resolved-value checks pass 8 applies to those
-// fields, against a symbol table with the parameters bound: a violation
+// fields (and to the `let` bindings feeding them), against symbol
+// tables with the parameters bound: a violation
 // pass 8 could only lower-bound becomes decidable at job creation, and
 // fails at submission instead of on every worker.
 //
@@ -1357,18 +1417,24 @@ fn validate_action_fs(
 // the same caller budgets (`FsEval`).
 
 /// Job-creation resolved-value checks for a step script: the `onRun` action's
-/// `command`/`args` against `CallerLimits::max_resolved_arg_len` and
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, its
+/// `timeout` / `cancelation` (deferred `mode`, `notifyPeriodInSeconds`)
+/// against the spec-mandated `Int`/`CancelationMode` constraints, and
 /// each embedded file's `data` against
-/// `CallerLimits::max_resolved_data_len` (both opt-in, `None` = no
-/// check beyond evaluation itself).
+/// `CallerLimits::max_resolved_data_len` (the two caps are opt-in,
+/// `None` = no check beyond evaluation itself) — in pass 8's order.
 ///
 /// `symtab` is the task-scope check table: concrete `Param.*` /
 /// `RawParam.*` / `Job.Name` / `Step.Name` / `let` bindings, with
 /// `Unresolved` placeholders for `Session.*`, `Task.*`, and PATH
-/// `Param.*`.
+/// `Param.*`. `template_symtab` is the step's template-scope table
+/// (concrete `Param.*` minus PATH, `RawParam.*`, `Job.Name`,
+/// `Step.Name`, step-level `let` bindings) that `timeout` /
+/// `cancelation` resolve against, as at pass 8.
 pub(crate) fn check_carried_forward_step_script(
     script: &StepScript,
     symtab: &SymbolTable,
+    template_symtab: &SymbolTable,
     ctx: &ValidationContext,
     script_path: &[PathElement],
     errors: &mut ValidationErrors,
@@ -1378,6 +1444,9 @@ pub(crate) fn check_carried_forward_step_script(
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let host_lib = FunctionLibrary::for_profile(&host_profile);
     let ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+    let template_lib = FunctionLibrary::for_profile(&template_profile);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
     let action_path = path_field(&path_field(script_path, "actions"), "onRun");
     validate_action_fs(
         &script.actions.on_run,
@@ -1385,6 +1454,13 @@ pub(crate) fn check_carried_forward_step_script(
         &ev,
         &action_path,
         ctx.caller_limits.max_resolved_arg_len,
+        errors,
+    );
+    validate_action_timing_fs(
+        &script.actions.on_run,
+        template_symtab,
+        &template_ev,
+        &action_path,
         errors,
     );
     check_embedded_files_data(
@@ -1400,9 +1476,10 @@ pub(crate) fn check_carried_forward_step_script(
 /// Job-creation resolved-value checks for an environment (job-level or
 /// step-level): each `variables` value against §4.4.2's
 /// `max_env_var_value_len` (spec-mandated, always on), every action's
-/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, and
-/// each embedded file's `data` against
-/// `CallerLimits::max_resolved_data_len`.
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, every
+/// action's `timeout` / `cancelation` against the spec-mandated
+/// `Int`/`CancelationMode` constraints, and each embedded file's `data`
+/// against `CallerLimits::max_resolved_data_len` — in pass 8's order.
 ///
 /// `symtab` is the session-scope check table: concrete `Param.*` /
 /// `RawParam.*` / `Job.Name` (and `Step.Name` for step environments) /
@@ -1410,9 +1487,13 @@ pub(crate) fn check_carried_forward_step_script(
 /// `Env.File.*`, and PATH `Param.*`. The RFC 0008 wrap hooks
 /// additionally see their `WrappedAction.*` / `WrappedEnv.Name` /
 /// `WrappedStep.Name` scopes, unresolved, exactly as in pass 8.
+/// `template_symtab` is the template-scope table `timeout` /
+/// `cancelation` resolve against (the job's table for a job
+/// environment, the step's for a step environment), as at pass 8.
 pub(crate) fn check_carried_forward_environment(
     env: &Environment,
     symtab: &SymbolTable,
+    template_symtab: &SymbolTable,
     ctx: &ValidationContext,
     max_env_var_value_len: usize,
     path: &[PathElement],
@@ -1481,6 +1562,16 @@ pub(crate) fn check_carried_forward_environment(
                 errors,
             );
         }
+        let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+        let template_lib = FunctionLibrary::for_profile(&template_profile);
+        let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
+        validate_env_actions_timing_fs(
+            script,
+            template_symtab,
+            &template_ev,
+            &actions_path,
+            errors,
+        );
         check_embedded_files_data(
             script.embedded_files.as_deref(),
             symtab,
@@ -2354,67 +2445,10 @@ fn validate_env_format_strings(
             );
         }
         // Timeout, cancelation mode (DeferredMode), and
-        // notifyPeriodInSeconds on env actions are @fmtstring fields. On
-        // the plain lifecycle actions they resolve at job creation, before
-        // any session exists, so they validate against the template-scope
-        // symtab. On the RFC 0008 wrap hooks they resolve at run time with
-        // the `WrappedAction.*` variables seeded — that is what makes
-        // round-trip forwarding (`timeout: "{{WrappedAction.Timeout}}"`,
-        // `mode: "{{WrappedAction.Cancelation.Mode}}"`) possible — so they
-        // validate against the wrapped-action scope.
-        let wrap_hook_names: [&str; 3] = ["onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit"];
-        for (name, action) in script.actions.iter_named() {
-            let action_path = path_field(&actions_path, name);
-            let scoped_symtab: SymbolTable;
-            let field_symtab: &SymbolTable = if wrap_hook_names.contains(&name) {
-                let mut st = template_symtab.clone();
-                add_wrapped_action_scope(&mut st);
-                scoped_symtab = st;
-                &scoped_symtab
-            } else {
-                template_symtab
-            };
-            if let Some(timeout) = &action.timeout {
-                validate_fs_with(
-                    timeout,
-                    field_symtab,
-                    template_ev,
-                    &path_field(&action_path, "timeout"),
-                    Some(&TIMEOUT_CONSTRAINT),
-                    errors,
-                );
-            }
-            let (mode_fs, notify_fs) = match &action.cancelation {
-                Some(CancelationMode::NotifyThenTerminate {
-                    notify_period_in_seconds,
-                }) => (None, notify_period_in_seconds.as_ref()),
-                Some(CancelationMode::DeferredMode {
-                    mode,
-                    notify_period_in_seconds,
-                }) => (Some(mode), notify_period_in_seconds.as_ref()),
-                _ => (None, None),
-            };
-            if let Some(mode) = mode_fs {
-                validate_fs_with(
-                    mode,
-                    field_symtab,
-                    template_ev,
-                    &path_field(&action_path, "cancelation"),
-                    Some(&ResolvedConstraint::CancelationMode),
-                    errors,
-                );
-            }
-            if let Some(notify) = notify_fs {
-                validate_fs_with(
-                    notify,
-                    field_symtab,
-                    template_ev,
-                    &path_field(&action_path, "cancelation"),
-                    Some(&NOTIFY_PERIOD_CONSTRAINT),
-                    errors,
-                );
-            }
-        }
+        // notifyPeriodInSeconds on env actions are @fmtstring fields,
+        // validated in template scope (wrap hooks: plus the
+        // wrapped-action scope) — see validate_env_actions_timing_fs.
+        validate_env_actions_timing_fs(script, template_symtab, template_ev, &actions_path, errors);
         if let Some(files) = &script.embedded_files {
             let files_path = path_field(&script_path, "embeddedFiles");
             for (j, f) in files.iter().enumerate() {
@@ -2606,51 +2640,123 @@ fn validate_let_bindings(
         }
         out_names.insert(name.to_string());
 
-        // Evaluate the expression for type checking (Phase 1: static type check).
-        // The prefix is included in error messages so caret positions align with
-        // the full binding string, matching Python's behavior.
-        let expr_start =
-            eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len();
-        let prefix = &binding[..expr_start];
-        match ParsedExpression::with_profile(expr, profile) {
-            Ok(parsed) => {
-                // Check self-reference using the parsed AST's accessed symbols
-                // rather than heuristic regex matching on the raw expression string.
-                if parsed.accessed_symbols().contains(name) {
-                    errors.add(&b_path, format!("'{name}' references itself."));
-                }
-                match ev
-                    .budgeted(parsed.with_library(ev.lib))
-                    .evaluate(&[symtab as &SymbolTable])
-                {
-                    Ok(result) => {
-                        // Set the binding in the symtab with its inferred value/type
-                        // so subsequent bindings and format strings see the correct type.
-                        let _ = symtab.set(name, result);
-                    }
-                    Err(e) => {
-                        errors.add(
-                            &b_path,
-                            format!(
-                                "Invalid expression in let binding '{name}': {}",
-                                e.message_with_expr_prefix(prefix)
-                            ),
-                        );
-                        // Still add as unresolved(ANY) so later bindings don't cascade errors
-                        let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
-                    }
-                }
+        evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
+    }
+}
+
+/// Parse and evaluate one well-formed `name = expr` binding (`eq_pos` is
+/// the `=`) into `symtab`, reporting a failure at `b_path` as
+/// `Invalid expression in let binding '<name>': <error>` with the caret
+/// aligned to the full binding string (matching Python and the run-time
+/// `evaluate_let_bindings`). A failed binding is bound as
+/// `Unresolved(ANY)` so later bindings and format strings in the scope
+/// still evaluate instead of cascading "Undefined variable" errors.
+///
+/// `check_self_reference` adds pass 8's structural self-reference check
+/// (the job-creation re-check leaves structure to template validation).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_let_binding(
+    binding: &str,
+    eq_pos: usize,
+    b_path: &[PathElement],
+    check_self_reference: bool,
+    symtab: &mut SymbolTable,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) {
+    let name = binding[..eq_pos].trim();
+    let expr = binding[eq_pos + 1..].trim();
+    // The prefix is included in error messages so caret positions align with
+    // the full binding string, matching Python's behavior.
+    let expr_start =
+        eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len();
+    let prefix = &binding[..expr_start];
+    let report = |e: &openjd_expr::ExpressionError, errors: &mut ValidationErrors| {
+        errors.add(
+            b_path,
+            format!(
+                "Invalid expression in let binding '{name}': {}",
+                e.message_with_expr_prefix(prefix)
+            ),
+        );
+    };
+    match ParsedExpression::with_profile(expr, profile) {
+        Ok(parsed) => {
+            // Check self-reference using the parsed AST's accessed symbols
+            // rather than heuristic regex matching on the raw expression string.
+            if check_self_reference && parsed.accessed_symbols().contains(name) {
+                errors.add(b_path, format!("'{name}' references itself."));
             }
-            Err(e) => {
-                errors.add(
-                    &b_path,
-                    format!(
-                        "Invalid expression in let binding '{name}': {}",
-                        e.message_with_expr_prefix(prefix)
-                    ),
-                );
-                let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+            match ev
+                .budgeted(parsed.with_library(ev.lib))
+                .evaluate(&[symtab as &SymbolTable])
+            {
+                Ok(result) => {
+                    // Set the binding in the symtab with its inferred value/type
+                    // so subsequent bindings and format strings see the correct type.
+                    // `set` only fails when the key path collides with an existing
+                    // scalar; binding names are validated to start lowercase or `_`
+                    // (above, at template validation), so they can never collide with
+                    // the uppercase-rooted scopes, and ignoring the result is safe.
+                    let _ = symtab.set(name, result);
+                }
+                Err(e) => {
+                    report(&e, errors);
+                    // Still add as unresolved(ANY) so later bindings don't cascade errors
+                    let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+                }
             }
         }
+        Err(e) => {
+            report(&e, errors);
+            let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+        }
+    }
+}
+
+/// Job-creation evaluation of a `let` block into a check symbol table
+/// (step-level bindings with `host_context = None`, script-level ones in
+/// step scripts and environments with `Unresolved`): each binding is
+/// parsed under the context's profile for `host_context` — the profile
+/// pass 8 parsed it with — and evaluated under `PathFormat::Posix` with
+/// the caller's budgets, through the same [`evaluate_let_binding`] pass 8
+/// uses. A failure is reported at `let_path[j]` with pass 8's message
+/// and caret, and the name is bound `Unresolved(ANY)` so the scope's
+/// remaining bindings and checks still run (pass 8's continuation
+/// policy).
+///
+/// Structural checks (names, duplicates, shadowing, count) are template
+/// validation's job and are not repeated; a structurally malformed
+/// binding — no `=`, empty name or expression, which decode rejects — is
+/// skipped.
+pub(crate) fn check_carried_forward_let_bindings(
+    bindings: &[String],
+    let_path: &[PathElement],
+    symtab: &mut SymbolTable,
+    ctx: &ValidationContext,
+    host_context: openjd_expr::HostContext,
+    errors: &mut ValidationErrors,
+) {
+    let profile = ctx.profile.to_expr_profile(host_context);
+    let lib = FunctionLibrary::for_profile(&profile);
+    let ev = FsEval::new(&lib, &ctx.caller_limits);
+    for (j, binding) in bindings.iter().enumerate() {
+        let Some(eq_pos) = binding.find('=') else {
+            continue;
+        };
+        if binding[..eq_pos].trim().is_empty() || binding[eq_pos + 1..].trim().is_empty() {
+            continue;
+        }
+        evaluate_let_binding(
+            binding,
+            eq_pos,
+            &path_index(let_path, j),
+            false,
+            symtab,
+            &ev,
+            &profile,
+            errors,
+        );
     }
 }
