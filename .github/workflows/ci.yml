@@ -108,9 +108,14 @@ jobs:
         id: rustc
         shell: bash
         run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Restore here; the matching save step is at the end of the job and only
+      # runs on pushes to main. Caches saved from a PR run are scoped to that
+      # PR's ref and can't be reused by other PRs or main, so saving them
+      # only consumed the repo's 10 GB cache quota (and pushed main's caches
+      # out via LRU eviction). PRs still restore main's caches.
       - name: Restore cargo cache
         id: cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -168,6 +173,8 @@ jobs:
       # the exact nextest version. That key doesn't change with Cargo.lock
       # or the toolchain, so the install only runs when the version below
       # is bumped. Dependabot doesn't track this pin; update it by hand.
+      # Unlike the other caches, this one also saves from PRs: it's small,
+      # and a PR only misses (and saves) when it bumps the version.
       - name: Restore cargo-nextest
         id: nextest-cache
         uses: actions/cache@v6
@@ -231,6 +238,21 @@ jobs:
             target/release/openjd
             target/release/openjd.exe
           if-no-files-found: error
+      # Save last, so target/ includes everything the job built. The implicit
+      # success() condition matches actions/cache's default of saving only
+      # when the job succeeded. Skipped on an exact hit, since that key
+      # already exists.
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+            crates/openjd-sessions/src/helper/target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   # Full-feature clippy exercises optional-feature code paths (like the
   # openjd-snapshots `bench` feature that pulls in clap, rand, tempfile, and
@@ -327,7 +349,10 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           rustup override set 1.97.0
-      - uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -339,6 +364,16 @@ jobs:
             rust-msrv-
       - name: Check compilation
         run: cargo check --workspace
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   doc:
     name: Documentation
@@ -349,7 +384,10 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -363,6 +401,16 @@ jobs:
         run: cargo doc --no-deps --workspace
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   cross-user:
     name: Cross-User Tests (${{ matrix.variant }})
@@ -465,8 +513,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - name: Cache cargo
-        uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/bin/wasm-bindgen
@@ -481,3 +531,12 @@ jobs:
         run: cd crates/openjd-for-js && npm run build
       - name: Run JS tests
         run: cd crates/openjd-for-js && npx vitest run
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/registry
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
