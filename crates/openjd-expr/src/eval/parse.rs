@@ -756,20 +756,20 @@ fn validate_structure_inner(
                     }
                 }
             }
-            validate_structure_inner(&c.left, source, depth + 1, profile)?;
             // Chained comparisons (1<2<3<...) also grow without bound via the
-            // comparators vector; treat each comparator as +1 depth to catch
+            // operator list; treat each comparison link as +1 depth to catch
             // `1<2<3<...<N` patterns that would otherwise be O(N) wide but
-            // shallow in terms of recursion.
-            if c.comparators.len() > MAX_EXPRESSION_DEPTH {
+            // shallow in terms of recursion. `ops.len()` is the number of
+            // operands after the first (`operands.len() == ops.len() + 1`).
+            if c.ops.len() > MAX_EXPRESSION_DEPTH {
                 return Err(ExpressionError::expression_too_deep(
-                    c.comparators.len(),
+                    c.ops.len(),
                     MAX_EXPRESSION_DEPTH,
                 )
                 .with_node(source, node));
             }
-            for comp in &c.comparators {
-                validate_structure_inner(comp, source, depth + 1, profile)?;
+            for operand in &c.operands {
+                validate_structure_inner(operand, source, depth + 1, profile)?;
             }
         }
         ast::Expr::If(i) => {
@@ -923,9 +923,8 @@ fn check_comprehension_shadowing(
             }
         }
         ast::Expr::Compare(c) => {
-            check_comprehension_shadowing(&c.left, outer_scope, source)?;
-            for comp in &c.comparators {
-                check_comprehension_shadowing(comp, outer_scope, source)?;
+            for operand in &c.operands {
+                check_comprehension_shadowing(operand, outer_scope, source)?;
             }
         }
         ast::Expr::If(i) => {
@@ -1042,9 +1041,8 @@ fn collect_symbols(
             }
         }
         ast::Expr::Compare(c) => {
-            collect_symbols(&c.left, renames, symbols, functions, locals);
-            for comp in &c.comparators {
-                collect_symbols(comp, renames, symbols, functions, locals);
+            for operand in &c.operands {
+                collect_symbols(operand, renames, symbols, functions, locals);
             }
         }
         ast::Expr::If(i) => {

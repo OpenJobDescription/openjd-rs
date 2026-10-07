@@ -25,9 +25,19 @@ project republishes it under this name. Users seeing `rustpython-ruff_python_par
 - rustpython-parser has had no substantive code changes since early 2025
 
 ```toml
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.16.5" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.16.5" }
+ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
+ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
+ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }
 ```
+
+**Exact version pin.** The ruff crates are pinned with `=` because they make
+breaking AST changes in 0.x patch releases. For example, 0.16.10 replaced
+`ExprCompare`'s `left` and `comparators` fields with a single `operands` list.
+With the earlier `^0.16.5` requirement, anything that resolved dependencies
+without our `Cargo.lock` failed to compile `openjd-expr`. That included
+downstream users and the cargo-semver-checks step in the release-plz workflow.
+Upgrade all three crates together and review the upstream AST changes as part
+of each bump.
 
 ## Parsing Pipeline
 
@@ -150,8 +160,9 @@ Three independent mechanisms work together:
    carries a `depth` counter and bumps it on every recursive descent into
    a child node. If the counter exceeds `MAX_EXPRESSION_DEPTH`, validation
    fails with `ExpressionErrorKind::ExpressionTooDeep`. Chained comparisons
-   (`a < b < c < ...`) are also checked against the limit via their
-   comparators vector length.
+   (`a < b < c < ...`) are also checked against the limit via the number of
+   comparison operators (`ExprCompare::ops.len()`, one less than the number
+   of operands).
 
 The evaluator applies a parallel check: `Evaluator::evaluate` — the single
 entry point through which every sub-node evaluation flows — carries a

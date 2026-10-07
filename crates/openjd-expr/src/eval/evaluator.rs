@@ -883,7 +883,13 @@ impl<'a> Evaluator<'a> {
             table.cmpop(*op)?;
         }
 
-        let mut left = self.eval_node(&c.left, None)?;
+        // `operands` holds every operand in source order (`a < b <= c` is
+        // `[a, b, c]`); the parser always produces at least two.
+        let (first, comparators) = c
+            .operands
+            .split_first()
+            .ok_or_else(|| ExpressionError::new("Comparison has no operands"))?;
+        let mut left = self.eval_node(first, None)?;
         // An unresolved operand still goes through dispatch: the library
         // matches the operand types against the operator's signatures and
         // returns `unresolved[bool]` on success, so a comparison whose types
@@ -892,7 +898,7 @@ impl<'a> Evaluator<'a> {
         // the worker. Only the value is deferred, not the type check.
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
-        for (index, (op, right_node)) in c.ops.iter().zip(c.comparators.iter()).enumerate() {
+        for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {
             let right = self.eval_node(right_node, None)?;
             let dispatch = table.cmpop(*op)?;
             let op_name = dispatch.dunder;
