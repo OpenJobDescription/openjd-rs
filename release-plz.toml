@@ -27,7 +27,15 @@ git_release_type = "auto"
 # Pre-release 0.x bumps: under semver 0.x, feat = patch (not minor), because
 # 0.x is considered pre-stable. Once any crate reaches 1.0, remove or tune
 # this per-crate.
-semver_check = true
+#
+# TEMPORARILY DISABLED. cargo-semver-checks compares against the latest
+# published release as its baseline. That baseline can no longer be built:
+# openjd-expr 0.10.1 (required by openjd-model 0.11.0) declares
+# `rustpython-ruff_* ^0.16.5`, and fresh resolution picks ruff 0.16.10,
+# which made breaking AST changes in a patch release. Main now pins ruff
+# exactly (#429). Re-enable once the published releases are built against
+# the exact pin, i.e. after the next release of openjd-expr and openjd-model.
+semver_check = false
 
 # Changelog settings — inherits git-cliff defaults unless overridden below.
 changelog_update = true
