@@ -1,0 +1,343 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from openjd.model import DecodeValidationError, decode_environment_template
+from openjd.model._parse import _parse_model
+from openjd.model.v2023_09 import EnvironmentTemplate
+
+# Some minimal data to reference in tests.
+ENV_SCRIPT = {"actions": {"onEnter": {"command": "foo"}}}
+ENVIRONMENT = {"name": "Foo", "script": ENV_SCRIPT}
+
+
+class TestEnvironmentTemplate:
+    @pytest.mark.parametrize(
+        "data",
+        (
+            pytest.param(
+                {"specificationVersion": "environment-2023-09", "environment": ENVIRONMENT},
+                id="minimum required",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "environment": {
+                        "name": "Foo",
+                        "script": {"actions": {"onExit": {"command": "foo"}}},
+                    },
+                },
+                id="script with onExit only",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [{"name": "P", "type": "INT"}],
+                    "environment": ENVIRONMENT,
+                },
+                id="with least parameters",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {"name": f"P{i}", "type": "INT"} for i in range(0, 50)
+                    ],
+                    "environment": ENVIRONMENT,
+                },
+                id="with most parameters",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [{"name": "P", "type": "INT"}],
+                    "environment": {
+                        "name": "AnEnv",
+                        "script": {
+                            "embeddedFiles": [
+                                {"name": "Enter", "type": "TEXT", "data": "testing {{Param.P}}"}
+                            ],
+                            "actions": {
+                                "onEnter": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]},
+                                "onExit": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]},
+                            },
+                        },
+                        "variables": {"Foo": "{{Param.P}}"},
+                    },
+                },
+                id="with parameter references",
+            ),
+        ),
+    )
+    def test_parse_success(self, data: dict[str, Any]) -> None:
+        # Parsing tests of valid Open Job Description Environment Template
+        # It is sufficient to check that parsing the input does not
+        # raise an exception. We trust the Pydantic package's testing
+        # so, if the input parses then our EnvironmentTemplate model is correctly
+        # constructed for valid input.
+
+        # WHEN
+        _parse_model(model=EnvironmentTemplate, obj=data)
+
+        # THEN
+        # no exception was raised.
+
+    @pytest.mark.parametrize(
+        "data,expected_num_errors",
+        (
+            pytest.param({}, 2, id="empty object"),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "environment": ENVIRONMENT,
+                },
+                1,
+                id="incorrect spec ver",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "environment": ENVIRONMENT,
+                    "unknown": "key",
+                },
+                1,
+                id="unknown key",
+            ),
+            pytest.param(
+                {
+                    "environment": ENVIRONMENT,
+                },
+                1,
+                id="missing spec ver",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "environment": None,
+                },
+                1,
+                id="environment is None",
+            ),
+            #
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [],
+                    "environment": ENVIRONMENT,
+                },
+                1,
+                id="empty parameters",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {"name": f"P{i}", "type": "INT"} for i in range(0, 51)
+                    ],
+                    "environment": ENVIRONMENT,
+                },
+                1,
+                id="too many job parameters",
+            ),
+            #
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [{"name": "P", "type": "INT"} for i in range(0, 2)],
+                    "environment": ENVIRONMENT,
+                },
+                1,
+                id="duplicate parameter names",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {
+                            "name": "foo",
+                        },
+                    ],
+                    "environment": ENVIRONMENT,
+                },
+                # If the discriminator ("type" field) is missing then we should only see a single
+                # error if the typed union discriminator is set up correctly. If it's not
+                # set up correctly, then we'll get one error for every type in the union.
+                1,
+                id="discriminator missing",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {"name": "foo", "type": "INT", "default": "nine"},
+                    ],
+                    "environment": ENVIRONMENT,
+                },
+                # If have a single error in the parameter definition and the Union discriminator
+                # is set up correctly, then we should only see a single error for the field in
+                # the specific Unioned type. If it's not set up correctly, then we'll
+                # see at least an error from each type in the Union.
+                1,
+                id="discriminator works",
+            ),
+            #
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [{"name": "P", "type": "INT"}],
+                    "environment": {
+                        "name": "AnEnv",
+                        "script": {
+                            "embeddedFiles": [
+                                {
+                                    "name": "Enter",
+                                    "type": "TEXT",
+                                    "data": "testing {{Param.Unknown}}",
+                                }
+                            ],
+                            "actions": {
+                                "onEnter": {
+                                    "command": "{{Param.Unknown}}",
+                                    "args": ["{{Param.Unknown}}"],
+                                },
+                                "onExit": {
+                                    "command": "{{Param.Unknown}}",
+                                    "args": ["{{Param.Unknown}}"],
+                                },
+                            },
+                        },
+                        "variables": {"Foo": "{{Param.Unknown}}"},
+                    },
+                },
+                6,
+                id="unknown parameter reference",
+            ),
+            # Test that we still properly collect parameter definitions for format string
+            # validation when we have a validation error in a parameter definition.
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {"name": "Foo", "type": "INT", "default": "Blah"},
+                        {"name": "Fuzz", "type": "INT"},
+                    ],
+                    "environment": {
+                        "name": "DemoEnvironment",
+                        "script": {
+                            "actions": {
+                                "onEnter": {
+                                    "command": "echo",
+                                    "args": [
+                                        "{{Param.Foo}}",
+                                        "{{Param.Fuzz}}",
+                                        "{{Task.Param.Foo}}",
+                                        "{{Task.Param.Fuzz}}",
+                                    ],
+                                }
+                            }
+                        },
+                    },
+                },
+                3,  # "Blah" is not a valid integer + Validation of Job Foo & Task Foo
+                id="all parameter symbols are defined when validation errors",
+            ),
+        ),
+    )
+    def test_parse_fails(self, data: dict[str, Any], expected_num_errors: int) -> None:
+        # Failure case testing for Open Job Description EnvironmentTemplate.
+        # - Constraint tests
+        # - extra field test
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=EnvironmentTemplate, obj=data)
+
+        # THEN
+        assert len(excinfo.value.errors()) == expected_num_errors
+
+
+class TestEnvironmentTemplateParameterTypeNameCase:
+    """Template Schemas §2: job parameter type names are case-sensitive in base
+    2023-09 and case-insensitive when the EXPR extension is enabled. An
+    environment template's ``parameterDefinitions`` carries the same
+    ``JobParameterDefinition`` union as a job template's, so the same rule applies.
+
+    ``EnvironmentTemplate`` is the third registration site of the shared fold, and
+    it is the one an audit found unpinned: neutering it left the whole model_v0
+    suite green. The job template counterpart is
+    ``test_list_parameters.py::TestJobParameterTypeNameCase`` and the task
+    parameter one is ``test_parameter_space.py::TestTaskParameterTypeNameCase``.
+    """
+
+    @staticmethod
+    def _tmpl(type_name: str, *, extensions: tuple[str, ...] = ("EXPR",)) -> dict[str, Any]:
+        template: dict[str, Any] = {
+            "specificationVersion": "environment-2023-09",
+            "parameterDefinitions": [{"name": "P", "type": type_name}],
+            "environment": ENVIRONMENT,
+        }
+        if extensions:
+            template["extensions"] = list(extensions)
+        return template
+
+    @staticmethod
+    def _decode(template: dict[str, Any]) -> None:
+        decode_environment_template(template=template, supported_extensions=["EXPR"])
+
+    # (canonical spelling, a mis-cased spelling)
+    TYPES: tuple = (
+        pytest.param("STRING", "string", id="string"),
+        pytest.param("INT", "iNt", id="int"),
+        pytest.param("PATH", "pAtH", id="path"),
+    )
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_no_expr_canonical_case_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 1 of 4.
+        self._decode(self._tmpl(canonical, extensions=()))
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_no_expr_miscased_rejected(self, canonical: str, miscased: str) -> None:
+        # Case 2 of 4. Fails if the fold is registered without its EXPR gate.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(self._tmpl(miscased, extensions=()))
+        message = str(excinfo.value)
+        assert "parameterDefinitions[0]" in message, message
+        assert f"'{miscased}'" in message, message
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_canonical_case_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 3 of 4.
+        self._decode(self._tmpl(canonical))
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_miscased_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 4 of 4. Fails if the fold is not registered on this model at all,
+        # which is the state an audit found untested.
+        self._decode(self._tmpl(miscased))
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_miscased_param_referenceable(self, canonical: str, miscased: str) -> None:
+        # A non-canonically-cased type name is just as valid under EXPR, so it
+        # must still define Param.P for the variable-reference
+        # prevalidation, which resolves the raw `type` discriminator before the
+        # case fold runs. Regression: the definition was accepted but every
+        # {{ Param.P }} reference was rejected with "does not exist at this
+        # location".
+        template = self._tmpl(miscased)
+        template["environment"] = {
+            "name": "E",
+            "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{ Param.P }}"]}}},
+        }
+        self._decode(template)
+
+    @pytest.mark.parametrize("type_name", ("\u0131NT", "\u017fTRING", "\ufb02OAT"))
+    def test_non_ascii_lookalike_rejected_with_expr(self, type_name: str) -> None:
+        # str.upper() folds U+0131 to 'I', U+017F to 'S' and U+FB02 (ﬂ) to 'FL',
+        # so a Unicode-aware fold would read these as INT, STRING and FLOAT.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(self._tmpl(type_name))
+        assert f"'{type_name}'" in str(excinfo.value), str(excinfo.value)

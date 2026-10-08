@@ -1,0 +1,41 @@
+*~
+*#
+*.swp
+*.pdb
+
+*.DS_Store
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+/.coverage
+/.coverage.*
+/.cache
+/.pytest_cache
+/.mypy_cache
+/.ruff_cache
+/.attach_pid*
+/.venv
+
+/doc/_apidoc/
+/build
+/dist
+_version.py
+
+# scripts/maturin_build.py backup file
+/pyproject.toml.vcs-bak
+
+# Rust build artifacts
+/target/
+/rust-bindings/target/
+# Cargo.lock is committed so the `_openjd_rs.abi3.so` Python extension
+# gives reproducible wheel builds and keeps the `THIRD-PARTY-LICENSES.txt`
+# check stable across CI runs.
+
+# Compiled extension modules
+*.so
+*.pyd
+*.dylib
+.hypothesis/

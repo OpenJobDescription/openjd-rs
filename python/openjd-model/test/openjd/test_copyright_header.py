@@ -1,0 +1,78 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+import re
+from pathlib import Path
+
+# For distributed open source and proprietary code, we must include a copyright header in source every file:
+_copyright_header_re = re.compile(
+    r"Copyright Amazon\.com, Inc\. or its affiliates\. All Rights Reserved\.", re.IGNORECASE
+)
+
+
+def _check_file(filename: Path) -> None:
+    # Source files in this repo are UTF-8 (comments use Unicode box-
+    # drawing characters and the occasional emoji). Open explicitly
+    # as UTF-8 so this test runs identically on Windows, where the
+    # default Python encoding is cp1252.
+    with open(filename, encoding="utf-8") as infile:
+        lines_read = 0
+        for line in infile:
+            if _copyright_header_re.search(line):
+                return  # success
+            lines_read += 1
+            if lines_read > 10:
+                raise Exception(
+                    f"Could not find a valid Amazon.com copyright header in the top of {filename}."
+                    " Please add one."
+                )
+        else:
+            # __init__.py files are usually empty, this is to catch that.
+            raise Exception(
+                f"Could not find a valid Amazon.com copyright header in the top of {filename}."
+                " Please add one."
+            )
+
+
+def _is_version_file(filename: Path) -> bool:
+    return filename.name == "_version.py"
+
+
+def test_copyright_headers():
+    """Verifies every source file has an Amazon copyright header."""
+    root_project_dir = Path(__file__)
+    # The root of the project is the directory that contains the test directory.
+    while not (root_project_dir / "test").exists():
+        root_project_dir = root_project_dir.parent
+    # Choose only a few top level directories to test.
+    # That way we don't snag any virtual envs a developer might create, at the risk of missing
+    # some top level .py files.
+    # Additionally, ignore any files in the `node_modules` directory that we use in the VS Code
+    # extension.
+    top_level_dirs = [
+        "src",
+        "test",
+        "scripts",
+        "testing_containers",
+        "openjdvscode!(/node_modules)",
+        "rust-bindings/src",
+        "rust-bindings/tests",
+    ]
+    file_count = 0
+    for top_level_dir in top_level_dirs:
+        for glob_pattern in ("**/*.py", "**/*.sh", "**/Dockerfile", "**/*.ts", "**/*.rs"):
+            for path in Path(root_project_dir / top_level_dir).glob(glob_pattern):
+                # Skip anything under a `target/` build artefact directory
+                # — `Path.glob` happily follows them.
+                if any(p.name == "target" for p in path.parents):
+                    continue
+                print(path)
+                if not _is_version_file(path):
+                    _check_file(path)
+                file_count += 1
+
+    print(f"test_copyright_headers checked {file_count} files successfully.")
+    assert file_count > 0, "Test misconfiguration"
+
+
+if __name__ == "__main__":
+    test_copyright_headers()

@@ -1,0 +1,69 @@
+name: "Release: Publish"
+run-name: "Release: ${{ github.event.head_commit.message || inputs.tag }}"
+
+on:
+  push:
+    branches:
+      - mainline
+    paths:
+      - CHANGELOG.md
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: Specify a tag to re-run a release.
+
+concurrency:
+  group: release
+
+permissions:
+  contents: read
+
+jobs:
+  TagRelease:
+    uses: OpenJobDescription/.github/.github/workflows/reusable_tag_release.yml@mainline
+    secrets: inherit
+    with:
+      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+
+  UnitTests:
+    name: Unit Tests
+    needs: TagRelease
+    uses: ./.github/workflows/code_quality.yml
+    with:
+      tag: ${{ needs.TagRelease.outputs.tag }}
+
+  PreRelease:
+    needs: [TagRelease, UnitTests]
+    uses: OpenJobDescription/.github/.github/workflows/reusable_maturin_prerelease.yml@mainline
+    secrets: inherit
+    with:
+      tag: ${{ needs.TagRelease.outputs.tag }}
+
+  Release:
+    needs: [TagRelease, PreRelease]
+    uses: OpenJobDescription/.github/.github/workflows/reusable_release.yml@mainline
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: write
+    with:
+      tag: ${{ needs.TagRelease.outputs.tag }}
+
+  # PyPI does not support reusable workflows yet
+  # See https://github.com/pypi/warehouse/issues/11096
+  PublishToPyPI:
+    needs: [TagRelease, Release, PreRelease]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: build-artifact
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
