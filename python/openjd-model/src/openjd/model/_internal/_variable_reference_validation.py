@@ -436,7 +436,11 @@ def _validate_model_template_variable_references(
     # Recursively validate the contents of FormatStrings within the model.
     for field_name, field_info in model.model_fields.items():
         field_value = value.get(field_name)
-        field_model = field_info.annotation
+        # pydantic 2.14 annotates FieldInfo.annotation as TypeForm[Any]; the helpers
+        # below take the runtime type object it holds. (pydantic 2.13, the last
+        # release for Python 3.9, annotates it as type[Any] | None, so a cast would be
+        # redundant there.)
+        field_model: Optional[Type[Any]] = field_info.annotation  # type: ignore[assignment]
         if field_value is None or field_model is None:
             continue
         if typing.get_origin(field_model) is Literal:
@@ -1004,7 +1008,11 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
     # Collect the variable definitions exported by the fields of the model
     for field_name, field_info in model.model_fields.items():
         field_value = value.get(field_name)
-        field_model = field_info.annotation
+        # pydantic 2.14 annotates FieldInfo.annotation as TypeForm[Any]; the helpers
+        # below take the runtime type object it holds. (pydantic 2.13, the last
+        # release for Python 3.9, annotates it as type[Any] | None, so a cast would be
+        # redundant there.)
+        field_model: Optional[Type[Any]] = field_info.annotation  # type: ignore[assignment]
         if field_value is None or field_model is None:
             continue
 
