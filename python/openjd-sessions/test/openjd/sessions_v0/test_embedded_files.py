@@ -1,0 +1,1087 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+import errno
+import os
+import stat
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+from openjd.sessions._os_checker import is_posix, is_windows
+import pytest
+
+from utils.windows_acl_helper import MODIFY_READ_WRITE_MASK, principal_has_access_to_object
+
+from openjd.model import SymbolTable
+from openjd.model.v2023_09 import DataString as DataString_2023_09
+from openjd.model.v2023_09 import (
+    EmbeddedFileText as EmbeddedFileText_2023_09,
+)
+from openjd.model.v2023_09 import (
+    EmbeddedFileTypes as EmbeddedFileTypes_2023_09,
+)
+from openjd.model.v2023_09 import (
+    EndOfLine as EndOfLine_2023_09,
+)
+from openjd.sessions._embedded_files import (
+    EmbeddedFiles,
+    EmbeddedFilesScope,
+    _validate_embedded_filename,
+    chown_group,
+    write_file_for_user,
+)
+from openjd.sessions._session_user import PosixSessionUser, WindowsSessionUser
+
+from .conftest import (
+    has_posix_target_user,
+    has_windows_user,
+    nonexistent_group_name,
+    resolvable_member_groups,
+    WIN_SET_TEST_ENV_VARS_MESSAGE,
+    POSIX_SET_TARGET_USER_ENV_VARS_MESSAGE,
+)
+
+
+# tmp_path - builtin temporary directory
+@pytest.mark.usefixtures("tmp_path")
+class TestEmbeddedFiles:
+    class TestGetSymtabEntry:
+        """Tests for EmbeddedFiles._get_symtab_entry().
+        Note: Also tests EmbeddedFiles._find_value_prefix() indirectly.
+        """
+
+        @pytest.mark.parametrize(
+            "scope,expected_symbol",
+            [
+                pytest.param(
+                    EmbeddedFilesScope.STEP,
+                    "Task.File.Foo",
+                    id="step scope",
+                ),
+                pytest.param(
+                    EmbeddedFilesScope.ENV,
+                    "Env.File.Foo",
+                    id="environment scope",
+                ),
+            ],
+        )
+        def test_given_filename(
+            self, scope: EmbeddedFilesScope, expected_symbol: str, tmp_path: Path
+        ) -> None:
+            # Test that we just use the given filename for the file, and that we don't create the file.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=scope, session_files_directory=tmp_path
+            )
+            filename = "test_filename.txt"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                filename=filename,
+                data=DataString_2023_09("some data"),
+            )
+
+            # WHEN
+            result_symbol, result_filename = test_obj._get_symtab_entry(test_file)
+
+            # THEN
+            assert result_symbol == expected_symbol
+            assert result_filename == tmp_path / filename
+            assert not os.path.exists(result_filename)
+
+        @pytest.mark.parametrize(
+            "scope,expected_symbol",
+            [
+                pytest.param(
+                    EmbeddedFilesScope.STEP,
+                    "Task.File.Foo",
+                    id="step scope",
+                ),
+                pytest.param(
+                    EmbeddedFilesScope.ENV,
+                    "Env.File.Foo",
+                    id="environment scope",
+                ),
+            ],
+        )
+        def test_generate_filename(
+            self, scope: EmbeddedFilesScope, expected_symbol: str, tmp_path: Path
+        ) -> None:
+            # Test that we generate a random filename under the given files directory,
+            # and that the file exists.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=scope, session_files_directory=tmp_path
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09("some data"),
+            )
+
+            # WHEN
+            result_symbol, result_filename = test_obj._get_symtab_entry(test_file)
+
+            # THEN
+            assert result_symbol == expected_symbol
+            assert os.path.exists(result_filename)
+            assert result_filename.parent == tmp_path
+
+        def test_allows_dotfile_basename(self, tmp_path: Path) -> None:
+            # A leading-dot basename (e.g. ".bashrc") is a legitimate filename
+            # and must NOT be rejected by the traversal guard.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=tmp_path,
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                filename=".bashrc",
+                data=DataString_2023_09("some data"),
+            )
+
+            # WHEN
+            _symbol, result_filename = test_obj._get_symtab_entry(test_file)
+
+            # THEN
+            assert result_filename == tmp_path / ".bashrc"
+
+        @pytest.mark.skipif(not is_posix(), reason="symlink semantics are posix-specific")
+        def test_rejects_symlink_escape(self, tmp_path: Path) -> None:
+            # If the destination basename already exists as a symlink that
+            # resolves outside the session directory (e.g. planted by the
+            # queue-configured job user between Tasks), the containment check
+            # must reject it even though the filename itself is a valid basename.
+
+            # GIVEN
+            outside = tmp_path / "outside"
+            outside.mkdir()
+            session_dir = tmp_path / "session"
+            session_dir.mkdir()
+            target = outside / "secret.txt"
+            target.write_text("original")
+            (session_dir / "foo.txt").symlink_to(target)
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=session_dir,
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                filename="foo.txt",
+                data=DataString_2023_09("some data"),
+            )
+
+            # WHEN / THEN
+            with pytest.raises(ValueError):
+                test_obj._get_symtab_entry(test_file)
+
+        @pytest.mark.skipif(not is_posix(), reason="symlink semantics are posix-specific")
+        def test_materialize_surfaces_rejection_as_runtimeerror(self, tmp_path: Path) -> None:
+            # materialize() must convert the embedded-file ValueError into a
+            # RuntimeError (the contract the script runner catches to fail the
+            # action). Triggered via a model-valid basename ("foo.txt") that is a
+            # symlink escaping the session dir, so it exercises the sessions guard
+            # independently of the openjd-model version, and must not write the
+            # symlink target outside the session directory.
+
+            # GIVEN
+            outside = tmp_path / "outside"
+            outside.mkdir()
+            session_dir = tmp_path / "session"
+            session_dir.mkdir()
+            target = outside / "secret.txt"
+            target.write_text("original")
+            (session_dir / "foo.txt").symlink_to(target)
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=session_dir,
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                filename="foo.txt",
+                data=DataString_2023_09("payload"),
+            )
+
+            # WHEN / THEN
+            with pytest.raises(RuntimeError):
+                test_obj.materialize([test_file], SymbolTable())
+            assert target.read_text() == "original"
+
+    @pytest.mark.skipif(not is_posix(), reason="O_NOFOLLOW is posix-specific")
+    class TestWriteFileForUserPosix:
+        """Tests that write_file_for_user() refuses to follow symlinks."""
+
+        def test_refuses_to_follow_symlink(self, tmp_path: Path) -> None:
+            # write_file_for_user must not follow a symlink at the destination
+            # (O_NOFOLLOW), so it cannot be tricked into truncating/overwriting
+            # a file outside the intended location.
+
+            # GIVEN
+            target = tmp_path / "target.txt"
+            target.write_text("original-contents")
+            link = tmp_path / "link.txt"
+            link.symlink_to(target)
+
+            # WHEN / THEN
+            with pytest.raises(OSError):
+                write_file_for_user(link, "overwritten", user=None)
+            # AND the symlink target is untouched
+            assert target.read_text() == "original-contents"
+
+    @pytest.mark.skipif(not is_posix(), reason="posix-specific test")
+    class TestMaterializeFilePosix:
+        """Tests for EmbeddedFiles._materialize_file() on posix systems.
+        Note: Also tests EmbeddedFiles._find_value_prefix() indirectly.
+        """
+
+        def test_writes_file(self, tmp_path: Path) -> None:
+            # Basic test -- make sure that we write the correct data to the file, and that
+            #  the file permissions are set correctly.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            statinfo = os.stat(filename)
+            assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+            assert statinfo.st_gid == os.getegid(), "File group is this process' group"  # type: ignore
+            assert statinfo.st_mode & stat.S_IRWXU == (stat.S_IRUSR | stat.S_IWUSR), "Owner has r/w"
+            assert statinfo.st_mode & stat.S_IRWXG == 0, "Group has no permissions"
+            assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+        def test_truncates_file(self, tmp_path: Path) -> None:
+            # Make sure that when we write the embedded file that we open it truncated.
+            # Else we'll have extra data at the end.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+            with open(filename, "w") as file:
+                file.write("This needs to be longer than our test data to test truncation")
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+        def test_writes_file_runnable(self, tmp_path: Path) -> None:
+            # As test_writes_file() but also setting the execute bit on the file.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+                runnable=True,
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            statinfo = os.stat(filename)
+            assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+            assert statinfo.st_gid == os.getegid(), "File group is this process' group"  # type: ignore
+            assert statinfo.st_mode & stat.S_IRWXU == stat.S_IRWXU, "Owner has r/w/x"
+            assert statinfo.st_mode & stat.S_IRWXG == 0, "Group has no permissions"
+            assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+        def test_resolves_formatstring(self, tmp_path: Path) -> None:
+            # Addition to the writes_file test that now ensures that the FormatStrings in the file
+            # are correctly resolved.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            testdata = "{{ Var.Value }}"
+            testdataresult = "some data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            testdataresult = "some data"
+            symtab = SymbolTable(source={"Var.Value": testdataresult})
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdataresult, "File contents are as expected"
+
+        @pytest.mark.xfail(
+            not has_posix_target_user(),
+            reason=POSIX_SET_TARGET_USER_ENV_VARS_MESSAGE,
+        )
+        @pytest.mark.usefixtures("posix_target_user")
+        def test_changes_owner(self, tmp_path: Path, posix_target_user: PosixSessionUser) -> None:
+            # Test that the group of the file is properly changed when a user is given.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=tmp_path,
+                user=posix_target_user,
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+            import grp
+
+            gid = grp.getgrnam(posix_target_user.group).gr_gid  # type: ignore
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            statinfo = os.stat(filename)
+            assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+            assert statinfo.st_gid == gid, "File group is the user's group"
+            assert statinfo.st_mode & stat.S_IRWXU == (stat.S_IRUSR | stat.S_IWUSR), "Owner has r/w"
+            assert statinfo.st_mode & stat.S_IRWXG == (stat.S_IRGRP | stat.S_IWGRP), "Group has r/w"
+            assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+        @pytest.mark.xfail(
+            not has_posix_target_user(),
+            reason=POSIX_SET_TARGET_USER_ENV_VARS_MESSAGE,
+        )
+        @pytest.mark.usefixtures("posix_target_user")
+        def test_changes_owner_runnable(
+            self, tmp_path: Path, posix_target_user: PosixSessionUser
+        ) -> None:
+            # As test_changes_owner(), but also checks that the group execute bit is set if the file is runnable.
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=tmp_path,
+                user=posix_target_user,
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+                runnable=True,
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+            import grp
+
+            gid = grp.getgrnam(posix_target_user.group).gr_gid  # type: ignore
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            statinfo = os.stat(filename)
+            assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+            assert statinfo.st_gid == gid, "File group is the user's group"
+            assert statinfo.st_mode & stat.S_IRWXU == stat.S_IRWXU, "Owner has r/w/x"
+            assert statinfo.st_mode & stat.S_IRWXG == stat.S_IRWXG, "Group has r/w/x"
+            assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+    @pytest.mark.skipif(not is_windows(), reason="Windows-specific tests")
+    class TestMaterializeFileWindows:
+
+        @pytest.mark.xfail(
+            not has_windows_user(),
+            reason=WIN_SET_TEST_ENV_VARS_MESSAGE,
+        )
+        def test_changes_owner(self, tmp_path: Path, windows_user: WindowsSessionUser) -> None:
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.STEP,
+                session_files_directory=tmp_path,
+                user=windows_user,
+            )
+            testdata = "some text data"
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(testdata),
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            assert os.path.exists(filename)
+            assert principal_has_access_to_object(
+                str(filename), windows_user.user, MODIFY_READ_WRITE_MASK
+            ), "Windows user has access"
+            with open(filename, "r") as file:
+                result_contents = file.read()
+            assert result_contents == testdata, "File contents are as expected"
+
+    class TestEndOfLine:
+        """Tests for endOfLine handling in embedded files."""
+
+        @pytest.mark.parametrize(
+            "end_of_line,input_data,expected_bytes",
+            [
+                pytest.param(
+                    EndOfLine_2023_09.LF,
+                    "line1\nline2\nline3",
+                    b"line1\nline2\nline3",
+                    id="LF-only",
+                ),
+                pytest.param(
+                    EndOfLine_2023_09.LF,
+                    "line1\r\nline2\r\nline3",
+                    b"line1\nline2\nline3",
+                    id="LF-converts-CRLF",
+                ),
+                pytest.param(
+                    EndOfLine_2023_09.CRLF,
+                    "line1\nline2\nline3",
+                    b"line1\r\nline2\r\nline3",
+                    id="CRLF-converts-LF",
+                ),
+                pytest.param(
+                    EndOfLine_2023_09.CRLF,
+                    "line1\r\nline2\r\nline3",
+                    b"line1\r\nline2\r\nline3",
+                    id="CRLF-preserves-CRLF",
+                ),
+            ],
+        )
+        def test_end_of_line_conversion(
+            self,
+            tmp_path: Path,
+            end_of_line: EndOfLine_2023_09,
+            input_data: str,
+            expected_bytes: bytes,
+        ) -> None:
+            # Test that endOfLine correctly converts line endings
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09(input_data),
+                endOfLine=end_of_line,
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            with open(filename, "rb") as file:
+                result_bytes = file.read()
+            assert result_bytes == expected_bytes
+
+        @pytest.mark.skipif(is_windows(), reason="Cannot simulate POSIX file I/O on Windows")
+        def test_auto_uses_lf_on_posix(self, tmp_path: Path) -> None:
+            # Test that AUTO mode uses LF on POSIX systems
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09("line1\r\nline2"),
+                endOfLine=EndOfLine_2023_09.AUTO,
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            with open(filename, "rb") as file:
+                result_bytes = file.read()
+            assert result_bytes == b"line1\nline2"
+
+        @pytest.mark.skipif(not is_windows(), reason="Windows-specific test")
+        def test_auto_uses_crlf_on_windows(self, tmp_path: Path) -> None:
+            # Test that AUTO mode uses CRLF on Windows systems
+
+            # GIVEN
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.STEP, session_files_directory=tmp_path
+            )
+            test_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09("line1\nline2"),
+                endOfLine=EndOfLine_2023_09.AUTO,
+            )
+            filename = tmp_path / uuid.uuid4().hex
+            symtab = SymbolTable()
+
+            # WHEN
+            with patch("os.name", "nt"):
+                test_obj._materialize_file(filename, test_file, symtab)
+
+            # THEN
+            with open(filename, "rb") as file:
+                result_bytes = file.read()
+            assert result_bytes == b"line1\r\nline2"
+
+    class TestMaterialize:
+        """Tests for EmbeddedFiles.materialize()"""
+
+        def test_basic(self, tmp_path: Path) -> None:
+            # Basic test - we can write several files and they show up in the filesystem
+            # where reported.
+
+            # GIVEN
+            @dataclass(frozen=True)
+            class Datum:
+                name: str
+                data: str
+                symbol: str
+                runnable: bool = False
+
+            symtab = SymbolTable()  # empty
+            test_data: list[Datum] = [
+                Datum(
+                    data="foo's data",
+                    symbol="Env.File.Foo",
+                    name="Foo",
+                ),
+                Datum(
+                    data="bar's data",
+                    symbol="Env.File.Bar",
+                    name="Bar",
+                    runnable=True,
+                ),
+                Datum(
+                    data="baz's data",
+                    symbol="Env.File.Baz",
+                    name="Baz",
+                ),
+            ]
+            given_files = [
+                EmbeddedFileText_2023_09(
+                    name=f.name,
+                    type=EmbeddedFileTypes_2023_09.TEXT,
+                    data=DataString_2023_09(f.data),
+                    runnable=f.runnable,
+                )
+                for f in test_data
+            ]
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.ENV, session_files_directory=tmp_path
+            )
+
+            # WHEN
+            test_obj.materialize(given_files, symtab)
+
+            # THEN
+            for data in test_data:
+                assert data.symbol in symtab, f"Symbol for {data.name} is in the symtab"
+                filename = symtab[data.symbol]
+                assert os.path.exists(filename), f"File exists for {data.name}"
+                with open(filename, "r") as file:
+                    result_contents = file.read()
+                assert result_contents == data.data, "File contents are as expected"
+                # Check file permissions
+                if is_posix():
+                    statinfo = os.stat(filename)
+                    assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+                    assert statinfo.st_gid == os.getegid(), "File group is this process' group"  # type: ignore
+                    if data.runnable:
+                        assert statinfo.st_mode & stat.S_IRWXU == stat.S_IRWXU, "Owner has r/w/x"
+                    else:
+                        assert statinfo.st_mode & stat.S_IRWXU == (
+                            stat.S_IRUSR | stat.S_IWUSR
+                        ), "Owner has r/w"
+                    assert statinfo.st_mode & stat.S_IRWXG == 0, "Group has no permissions"
+                    assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+
+        @pytest.mark.skipif(not is_posix(), reason="posix-specific test")
+        @pytest.mark.xfail(
+            not has_posix_target_user(),
+            reason=POSIX_SET_TARGET_USER_ENV_VARS_MESSAGE,
+        )
+        @pytest.mark.usefixtures("posix_target_user")
+        def test_basic_as_user_posix(
+            self, tmp_path: Path, posix_target_user: PosixSessionUser
+        ) -> None:
+            # Basic test - we can write several files and they show up in the filesystem
+            # where reported.
+
+            # GIVEN
+            @dataclass(frozen=True)
+            class Datum:
+                name: str
+                data: str
+                symbol: str
+                runnable: bool = False
+
+            symtab = SymbolTable()  # empty
+            test_data: list[Datum] = [
+                Datum(
+                    data="foo's data",
+                    symbol="Env.File.Foo",
+                    name="Foo",
+                ),
+                Datum(
+                    data="bar's data",
+                    symbol="Env.File.Bar",
+                    name="Bar",
+                    runnable=True,
+                ),
+                Datum(
+                    data="baz's data",
+                    symbol="Env.File.Baz",
+                    name="Baz",
+                ),
+            ]
+            given_files = [
+                EmbeddedFileText_2023_09(
+                    name=f.name,
+                    type=EmbeddedFileTypes_2023_09.TEXT,
+                    data=DataString_2023_09(f.data),
+                    runnable=f.runnable,
+                )
+                for f in test_data
+            ]
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.ENV,
+                session_files_directory=tmp_path,
+                user=posix_target_user,
+            )
+            import grp
+
+            gid = grp.getgrnam(posix_target_user.group).gr_gid  # type: ignore
+
+            # WHEN
+            test_obj.materialize(given_files, symtab)
+
+            # THEN
+            for data in test_data:
+                assert data.symbol in symtab, f"Symbol for {data.name} is in the symtab"
+                filename = symtab[data.symbol]
+                assert os.path.exists(filename), f"File exists for {data.name}"
+                with open(filename, "r") as file:
+                    result_contents = file.read()
+                assert result_contents == data.data, "File contents are as expected"
+                # Check file permissions
+                statinfo = os.stat(filename)
+                assert statinfo.st_uid == os.geteuid(), "File owner is this process's owner"  # type: ignore
+                assert statinfo.st_gid == gid, "File group is the user's group"
+                if data.runnable:
+                    assert statinfo.st_mode & stat.S_IRWXU == stat.S_IRWXU, "Owner has r/w/x"
+                    assert statinfo.st_mode & stat.S_IRWXG == stat.S_IRWXG, "Group has r/w/x"
+                else:
+                    assert statinfo.st_mode & stat.S_IRWXU == (
+                        stat.S_IRUSR | stat.S_IWUSR
+                    ), "Owner has r/w"
+                    assert statinfo.st_mode & stat.S_IRWXG == (
+                        stat.S_IRGRP | stat.S_IWGRP
+                    ), "Group has r/w"
+                assert statinfo.st_mode & stat.S_IRWXO == 0, "Others have no permissions"
+
+        @pytest.mark.skipif(not is_windows(), reason="Windows-specific test")
+        @pytest.mark.xfail(
+            not has_windows_user(),
+            reason=WIN_SET_TEST_ENV_VARS_MESSAGE,
+        )
+        def test_basic_as_user_windows(
+            self, tmp_path: Path, windows_user: WindowsSessionUser
+        ) -> None:
+            # Basic test - we can write several files and they show up in the filesystem
+            # where reported.
+
+            # GIVEN
+            @dataclass(frozen=True)
+            class Datum:
+                name: str
+                data: str
+                symbol: str
+                runnable: bool = False
+
+            symtab = SymbolTable()  # empty
+            test_data: list[Datum] = [
+                Datum(
+                    data="foo's data",
+                    symbol="Env.File.Foo",
+                    name="Foo",
+                ),
+                Datum(
+                    data="bar's data",
+                    symbol="Env.File.Bar",
+                    name="Bar",
+                    runnable=True,
+                ),
+                Datum(
+                    data="baz's data",
+                    symbol="Env.File.Baz",
+                    name="Baz",
+                ),
+            ]
+            given_files = [
+                EmbeddedFileText_2023_09(
+                    name=f.name,
+                    type=EmbeddedFileTypes_2023_09.TEXT,
+                    data=DataString_2023_09(f.data),
+                    runnable=f.runnable,
+                )
+                for f in test_data
+            ]
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.ENV,
+                session_files_directory=tmp_path,
+                user=windows_user,
+            )
+
+            # WHEN
+            test_obj.materialize(given_files, symtab)
+
+            # THEN
+            for data in test_data:
+                assert data.symbol in symtab, f"Symbol for {data.name} is in the symtab"
+                filename = symtab[data.symbol]
+                assert os.path.exists(filename), f"File exists for {data.name}"
+                with open(filename, "r") as file:
+                    result_contents = file.read()
+                assert result_contents == data.data, "File contents are as expected"
+                # Check file permissions
+                assert principal_has_access_to_object(
+                    filename, windows_user.user, MODIFY_READ_WRITE_MASK
+                ), "Windows user has access"
+
+        def test_resolves_symbols(self, tmp_path: Path) -> None:
+            # Tests that the set of files can reference themselves and each other
+            # in their file data, and that we write the correct data.
+
+            # GIVEN
+            @dataclass(frozen=True)
+            class Datum:
+                name: str
+                symbol: str
+                filename: str
+
+            symtab = SymbolTable(source={"Given.Symbol": "Symbol"})  # empty
+            test_data: list[Datum] = [
+                Datum(
+                    symbol="Env.File.Foo",
+                    name="Foo",
+                    filename="foo.txt",
+                ),
+                Datum(
+                    symbol="Env.File.Bar",
+                    name="Bar",
+                    filename="bar.txt",
+                ),
+                Datum(
+                    symbol="Env.File.Baz",
+                    name="Baz",
+                    filename="baz.txt",
+                ),
+            ]
+            # We'll put the same data in each file. That data will reference
+            # all symbols that should exist in the symbol table. If we construct the
+            # symbol table at the correct time within materialize, then we'll get the
+            # expected result.
+            given_file_data: str = f"""
+            {{{{ Given.Symbol }}}}
+            {{{{ {test_data[0].symbol} }}}}
+            {{{{ {test_data[1].symbol} }}}}
+            {{{{ {test_data[2].symbol} }}}}
+            """
+            expected_file_data: str = f"""
+            Symbol
+            {str(tmp_path / test_data[0].filename)}
+            {str(tmp_path / test_data[1].filename)}
+            {str(tmp_path / test_data[2].filename)}
+            """
+            given_files = [
+                EmbeddedFileText_2023_09(
+                    name=f.name,
+                    type=EmbeddedFileTypes_2023_09.TEXT,
+                    data=DataString_2023_09(given_file_data),
+                    filename=f.filename,
+                )
+                for f in test_data
+            ]
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(), scope=EmbeddedFilesScope.ENV, session_files_directory=tmp_path
+            )
+
+            # WHEN
+            test_obj.materialize(given_files, symtab)
+
+            # THEN
+            for data in test_data:
+                assert data.symbol in symtab, f"Symbol for {data.name} is in the symtab"
+                filename = symtab[data.symbol]
+                assert os.path.exists(filename), f"File exists for {data.name}"
+                with open(filename, "r") as file:
+                    result_contents = file.read()
+                assert result_contents == expected_file_data, "File contents are as expected"
+
+        @pytest.mark.skipif(not is_posix(), reason="group ownership is posix-specific")
+        def test_unresolvable_group_fails_as_runtimeerror(self, tmp_path: Path) -> None:
+            """Pins: a group name that does not resolve must fail materialize()
+            through its existing handler, as RuntimeError.
+
+            shutil.chown raises LookupError for an unknown group, and LookupError
+            is neither OSError nor ValueError -- the two classes
+            write_file_contents() catches -- so before chown_group() it escaped
+            this handler (and every other one in the chain) and surfaced as a
+            bare LookupError out of the public Session API. PosixSessionUser
+            does not validate its group, so a caller only has to pass a group
+            that does not exist.
+
+            pytest.raises(RuntimeError) does not catch LookupError, so if the
+            translation is removed this test errors out with the escaping
+            LookupError -- which is exactly the defect.
+            """
+
+            # GIVEN
+            # Only `group` matters on this path; the user is never resolved by it.
+            user = PosixSessionUser(user="nobody", group=nonexistent_group_name())
+            test_obj = EmbeddedFiles(
+                logger=MagicMock(),
+                scope=EmbeddedFilesScope.ENV,
+                session_files_directory=tmp_path,
+                user=user,
+            )
+            given_file = EmbeddedFileText_2023_09(
+                name="Foo",
+                type=EmbeddedFileTypes_2023_09.TEXT,
+                data=DataString_2023_09("some data"),
+            )
+
+            # WHEN
+            with pytest.raises(RuntimeError) as excinfo:
+                test_obj.materialize([given_file], SymbolTable())
+
+            # THEN
+            # The failure is the group ownership change, not something incidental:
+            # the offending group name is carried through to the message.
+            assert user.group in str(excinfo.value)
+
+
+class TestValidateEmbeddedFilename:
+    """Unit tests for the _validate_embedded_filename() basename guard.
+
+    The guard is host-flavored, so backslash separators and drive specifiers are
+    only rejected on Windows (a backslash is a legal filename character on
+    POSIX). The OS-agnostic rejection happens earlier, in openjd-model.
+    """
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            pytest.param("foo.txt", id="simple"),
+            pytest.param(".bashrc", id="dotfile"),
+            pytest.param("a_b-c.1", id="punctuation"),
+            pytest.param("café.txt", id="non-ascii"),
+            pytest.param("foo.bar.baz", id="multi-dot"),
+        ],
+    )
+    def test_accepts_valid_basenames(self, filename: str) -> None:
+        # WHEN / THEN (must not raise)
+        _validate_embedded_filename(filename)
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            pytest.param("", id="empty"),
+            pytest.param(".", id="dot"),
+            pytest.param("..", id="parent"),
+            pytest.param("../x", id="parent-rel"),
+            pytest.param("a/b", id="sep"),
+            pytest.param("foo/", id="trailing-sep"),
+            pytest.param("/abs", id="absolute"),
+        ],
+    )
+    def test_rejects_non_basenames(self, filename: str) -> None:
+        # WHEN / THEN
+        with pytest.raises(ValueError):
+            _validate_embedded_filename(filename)
+
+    @pytest.mark.skipif(not is_windows(), reason="backslash/drive are separators only on Windows")
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            pytest.param("..\\x", id="windows-parent"),
+            pytest.param("a\\b", id="windows-sep"),
+            pytest.param("C:x", id="drive-relative"),
+            pytest.param("C:\\x", id="drive-absolute"),
+            pytest.param("\\\\srv\\share", id="unc"),
+        ],
+    )
+    def test_rejects_windows_non_basenames(self, filename: str) -> None:
+        # WHEN / THEN
+        with pytest.raises(ValueError):
+            _validate_embedded_filename(filename)
+
+
+@pytest.mark.skipif(not is_posix(), reason="shutil.chown's group handling is posix-only")
+class TestChownGroup:
+    """Unit tests for chown_group(), the shutil.chown wrapper.
+
+    Defect pinned: shutil.chown raises LookupError when the group name does not
+    resolve. LookupError is neither OSError nor ValueError, and every handler
+    around file materialization or session-directory setup in this package
+    catches some combination of OSError/ValueError/RuntimeError -- so an
+    unresolvable group escaped all of them and reached the caller of the public
+    Session API as a bare LookupError. chown_group() translates it at the call
+    site instead, because a group that cannot be resolved *is* a failure to
+    change ownership and callers already treat that as OSError.
+    """
+
+    def test_unresolvable_group_raises_oserror(self, tmp_path: Path) -> None:
+        """The translation itself: OSError out, not LookupError.
+
+        pytest.raises(OSError) cannot catch a LookupError, so removing the
+        translation makes this test error out with the escaping LookupError. It
+        also fails if the wrapper raises some other class (e.g. ValueError) or
+        swallows the failure entirely.
+        """
+        # GIVEN
+        filename = tmp_path / "file.txt"
+        filename.write_text("some data")
+        group = nonexistent_group_name()
+
+        # WHEN
+        with pytest.raises(OSError) as excinfo:
+            chown_group(filename, group)
+
+        # THEN
+        # Both the path and the group are named, so an operator can tell which
+        # file and which group configuration failed.
+        assert str(filename) in str(excinfo.value)
+        assert group in str(excinfo.value)
+        # AND the original LookupError is preserved as the cause, which proves
+        # this OSError is the translated group lookup and not an unrelated
+        # filesystem error.
+        assert isinstance(excinfo.value.__cause__, LookupError)
+
+    def test_resolvable_group_succeeds(self, tmp_path: Path) -> None:
+        """The wrapper must not break the success path.
+
+        The gid assertion is what makes this non-vacuous: it only holds if the
+        chown actually happened. A group other than the file's current group is
+        preferred so that the assertion cannot pass by accident.
+        """
+        # GIVEN
+        candidates = resolvable_member_groups()
+        if not candidates:
+            pytest.skip("this process is not a member of any group that has a name")
+        filename = tmp_path / "file.txt"
+        filename.write_text("some data")
+        current_gid = filename.stat().st_gid
+        gid, group = next(
+            ((gid, name) for gid, name in candidates if gid != current_gid), candidates[0]
+        )
+
+        # WHEN
+        chown_group(filename, group)
+
+        # THEN
+        assert filename.stat().st_gid == gid
+
+    def test_real_oserror_is_passed_through_unchanged(self, tmp_path: Path) -> None:
+        """A genuine failure from shutil.chown must reach the caller as-is.
+
+        The wrapper only exists to reclassify LookupError; if it broadened to
+        catch more than that, a real errno would be flattened into a generic
+        error and the handlers upstream would report the wrong cause. Using a
+        resolvable group with a missing path gets shutil.chown past its group
+        lookup and into os.chown, so the ENOENT here comes from the real syscall
+        rather than from a mock.
+        """
+        # GIVEN
+        candidates = resolvable_member_groups()
+        if not candidates:
+            pytest.skip("this process is not a member of any group that has a name")
+        _gid, group = candidates[0]
+        missing = tmp_path / "no-such-file.txt"
+
+        # WHEN
+        with pytest.raises(FileNotFoundError) as excinfo:
+            chown_group(missing, group)
+
+        # THEN
+        # Same class, same errno, and no re-raise chain: it is the original error.
+        assert excinfo.value.errno == errno.ENOENT
+        assert excinfo.value.__cause__ is None

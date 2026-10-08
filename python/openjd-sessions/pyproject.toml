@@ -1,0 +1,246 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openjd-sessions"
+authors = [
+  {name = "Amazon Web Services"},
+]
+dynamic = ["version"]
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+description = "Provides a library that can be used to build a runtime that is able to run Jobs in a Session as defined by Open Job Description."
+# https://pypi.org/classifiers/
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries"
+]
+dependencies = [
+  # 0.13 is the floor so that this package and the packages that depend on it,
+  # such as openjd-cli, use the latest openjd-model release.
+  "openjd-model >= 0.13,< 0.14",
+  "pywin32 >= 307; platform_system == 'Windows'",
+  "psutil >= 5.9,< 7.3; platform_system == 'Windows'",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenJobDescription/openjd-sessions-for-python"
+Source = "https://github.com/OpenJobDescription/openjd-sessions-for-python"
+
+[tool.hatch.build]
+artifacts = [
+  "*_version.py",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "post-release"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_version_hook.py"
+
+[[tool.hatch.build.hooks.custom.copy_map]]
+sources = [
+  "_version.py",
+]
+destinations = [
+  "src/openjd/sessions",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/openjd",
+  "hatch_version_hook.py",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "src/openjd",
+]
+only-include = [
+  "src/openjd",
+]
+
+[tool.mypy]
+check_untyped_defs = false
+show_error_codes = false
+pretty = true
+ignore_missing_imports = true
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+show_error_context = true
+strict_equality = false
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = false
+# Tell mypy that there's a namespace package at src/openjd
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+
+# See: https://docs.pydantic.dev/mypy_plugin/
+#  - Helps mypy understand pydantic typing.
+plugins = "pydantic.mypy"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+  "E501",
+  # Double Check if this should be fixed
+  "E731",
+]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = [
+  "classmethod",
+  # pydantic decorators are classmethod decorators
+  # suppress N805 errors on classes decorated with them
+  "pydantic.validator",
+  "pydantic.root_validator",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "openjd",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# We need to use a platform assertion to short-circuit mypy type checking on non-Windows platforms
+# https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+# This causes imports to come after regular Python statements causing flake8 rule E402 to be flagged
+"src/openjd/sessions/_win32/*.py" = ["E402"]
+"src/openjd/sessions/_v1/_win32/*.py" = ["E402"]
+
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+xfail_strict = false
+testpaths = [
+    "test"
+]
+addopts = [
+    "-rfEx",
+    "--durations=5",
+    "--cov=src/openjd/sessions/",
+    "--color=yes",
+    "--cov-report=html:build/coverage",
+    "--cov-report=xml:build/coverage/coverage.xml",
+    "--cov-report=term-missing",
+    "--numprocesses=auto",
+    # loadgroup, not the default load: it honours @pytest.mark.xdist_group, which
+    # the tests that race a real subprocess against the wall clock rely on to run
+    # serially with respect to each other (see conftest.serial_process). Behaves
+    # exactly like `load` for every test that is not in a group.
+    "--dist=loadgroup",
+    "--timeout=30",
+    "--log-format=%(asctime)s.%(msecs)03d %(levelname)s %(filename)20s:%(lineno)-3s %(message)s",
+    "--log-date-format=%H:%M:%S"
+]
+markers = [
+  "requires_cap_kill: tests that require CAP_KILL Linux capability",
+]
+
+
+[tool.coverage.run]
+branch = true
+parallel = true
+plugins = [
+  "coverage_conditional_plugin"
+]
+
+[tool.coverage.paths]
+source = [
+  "src/"
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 50
+
+# https://github.com/wemake-services/coverage-conditional-plugin
+[tool.coverage.coverage_conditional_plugin.omit]
+"sys_platform != 'win32'" = [
+  "src/openjd/sessions/_win32/*.py",
+  "src/openjd/sessions/_scripts/_windows/*.py",
+  "src/openjd/sessions/_windows*.py"
+]
+"sys_platform != 'linux'" = [
+  "src/openjd/sessions/_linux/*.py",
+]
+
+[tool.coverage.coverage_conditional_plugin.rules]
+# This cannot be empty otherwise coverage-conditional-plugin crashes with:
+# AttributeError: 'NoneType' object has no attribute 'items'
+#
+# =========== WARNING TO REVIEWERS ============
+#
+# Any rules added here are ran through Python's
+# eval() function so watch for code injection
+# attacks.
+#
+# =========== WARNING TO REVIEWERS ============
+
+[tool.semantic_release]
+# Can be removed or set to true once we are v1
+major_on_zero = false
+tag_format = "{version}"
+allow_zero_version = true
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "style",
+    "refactor",
+    "test",
+]
+minor_tags = []
+patch_tags = [
+  "chore",
+  "feat",
+  "fix",
+  "refactor",
+  "perf",
+]
+
+[tool.semantic_release.publish]
+upload_to_vcs_release = false
+
+[tool.semantic_release.changelog]
+template_dir = ".semantic_release"
+
+[tool.semantic_release.changelog.environment]
+trim_blocks = true
+lstrip_blocks = true
+
+[tool.semantic_release.branches.release]
+match = "(mainline|release|patch_.*)"
