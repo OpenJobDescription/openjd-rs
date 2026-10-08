@@ -2,7 +2,7 @@
 
 [![pypi](https://img.shields.io/pypi/v/openjd-sessions.svg)](https://pypi.python.org/pypi/openjd-sessions)
 [![python](https://img.shields.io/pypi/pyversions/openjd-sessions.svg?style=flat)](https://pypi.python.org/pypi/openjd-sessions)
-[![license](https://img.shields.io/pypi/l/openjd-sessions.svg?style=flat)](https://github.com/OpenJobDescription/openjd-sessions/blob/mainline/LICENSE)
+[![license](https://img.shields.io/pypi/l/openjd-sessions.svg?style=flat)](https://github.com/OpenJobDescription/openjd-rs/blob/main/python/openjd-sessions/LICENSE)
 
 Open Job Description is a flexible open specification for defining render jobs which are portable
 between studios and render solutions. This package provides a library that can be used to build
@@ -284,11 +284,11 @@ If running in a Windows Service, then you must ensure that:
 
 You can download this package from:
 - [PyPI](https://pypi.org/project/openjd-sessions/)
-- [GitHub releases](https://github.com/OpenJobDescription/openjd-sessions-for-python/releases)
+- [GitHub releases](https://github.com/OpenJobDescription/openjd-rs/releases?q=python-openjd-sessions) (tagged `python-openjd-sessions-v<version>`; releases before the move to openjd-rs are in [openjd-sessions-for-python](https://github.com/OpenJobDescription/openjd-sessions-for-python/releases))
 
 ### Verifying GitHub Releases
 
-See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-sessions-for-python?tab=security-ov-file#verifying-github-releases) for more information.
+See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-rs?tab=security-ov-file#verifying-github-releases) for more information.
 
 ## Security
 

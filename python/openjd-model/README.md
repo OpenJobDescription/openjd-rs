@@ -2,7 +2,7 @@
 
 [![pypi](https://img.shields.io/pypi/v/openjd-model.svg)](https://pypi.python.org/pypi/openjd-model)
 [![python](https://img.shields.io/pypi/pyversions/openjd-model.svg?style=flat)](https://pypi.python.org/pypi/openjd-model)
-[![license](https://img.shields.io/pypi/l/openjd-model.svg?style=flat)](https://github.com/OpenJobDescription/openjd-model/blob/mainline/LICENSE)
+[![license](https://img.shields.io/pypi/l/openjd-model.svg?style=flat)](https://github.com/OpenJobDescription/openjd-rs/blob/main/python/openjd-model/LICENSE)
 
 Open Job Description is a flexible open specification for defining render jobs which are portable
 between studios and render management solutions. This package provides a Python implementation of the
@@ -335,11 +335,11 @@ for step in job.steps:
 
 You can download this package from:
 - [PyPI](https://pypi.org/project/openjd-model/)
-- [GitHub releases](https://github.com/OpenJobDescription/openjd-model-for-python/releases)
+- [GitHub releases](https://github.com/OpenJobDescription/openjd-rs/releases?q=python-openjd-model) (tagged `python-openjd-model-v<version>`; releases before the move to openjd-rs are in [openjd-model-for-python](https://github.com/OpenJobDescription/openjd-model-for-python/releases))
 
 ### Verifying GitHub Releases
 
-See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-model-for-python?tab=security-ov-file#verifying-github-releases) for more information.
+See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-rs?tab=security-ov-file#verifying-github-releases) for more information.
 
 ## Security
 

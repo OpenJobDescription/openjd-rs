@@ -4,7 +4,7 @@
 
 openjd-rs is a Rust implementation of the [Open Job Description](https://github.com/OpenJobDescription) specification. It provides a model library, expression language, sessions runtime, job attachments snapshots, and CLI for working with OpenJD job templates.
 
-The canonical specification lives in [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications). The reference Python implementations are [openjd-model-for-python](https://github.com/OpenJobDescription/openjd-model-for-python), [openjd-sessions-for-python](https://github.com/OpenJobDescription/openjd-sessions-for-python), and [openjd-cli](https://github.com/OpenJobDescription/openjd-cli).
+The canonical specification lives in [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications). The Python packages live in this repository under `python/`: `python/openjd-model` (the `openjd-model` PyPI package, including the PyO3 bindings to `openjd-expr`, `openjd-model`, and `openjd-sessions`), `python/openjd-sessions`, and `python/openjd-cli`. Each has its own `AGENTS.md`/`DEVELOPMENT.md`; they were previously the openjd-model-for-python, openjd-sessions-for-python, and openjd-cli repositories, and their pure-Python implementations are the reference the Rust port was made from.
 
 See [README.md](README.md) for user-facing documentation and [DEVELOPMENT.md](DEVELOPMENT.md) for general developer setup.
 
@@ -34,9 +34,18 @@ openjd-cli
 
 openjd-snapshots (standalone, experimental)
 openjd-for-js (depends on openjd-model + openjd-expr, experimental)
+
+python/openjd-cli        (PyPI openjd-cli; release anchor crate openjd-cli-py)
+└── python/openjd-sessions   (PyPI openjd-sessions; anchor openjd-sessions-py)
+    └── python/openjd-model  (PyPI openjd-model; PyO3 crate openjd-model-py)
+        ├── openjd-expr
+        ├── openjd-model
+        └── openjd-sessions
 ```
 
-Changes to `openjd-expr` can affect all other crates. `openjd-snapshots` has no in-workspace dependents.
+Changes to `openjd-expr` can affect all other crates and the Python packages. `openjd-snapshots` has no in-workspace dependents. A change to `openjd-expr`, `openjd-model`, or `openjd-sessions` that alters behavior Python users see must update the Python tests in the same PR (the Python workflow builds the bindings from the in-repo crates).
+
+The `python/` crates are workspace members but not `default-members`, so plain `cargo build`/`cargo test` skip them; `--workspace` includes them.
 
 ### openjd-expr (`crates/openjd-expr`)
 
@@ -243,6 +252,7 @@ PRs run these checks (all must pass):
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
+| **Python** (`python.yml`) | For changes under `python/` or to `openjd-expr`/`-model`/`-sessions`: `hatch run lint`, `hatch build`, `hatch run test` for each Python package on all three platforms and its supported Python versions; openjd-sessions macOS cross-user tests; openjd-model `THIRD-PARTY-LICENSES.txt`; `scripts/sync_python_pins.py --check` |
 
 If a dependency update bumps `wasm-bindgen`, also bump the matching
 `wasm-bindgen-cli` version pinned in the `openjd-for-js` job in
@@ -261,6 +271,7 @@ Releases are automated via [release-plz](https://release-plz.dev/). Every push t
 
 - Published crates: `openjd-expr`, `openjd-model`, `openjd-sessions`, `openjd-cli`, `openjd-snapshots` — independent versions, conventional-commit-driven bumps.
 - Non-published crate: `openjd-for-js` — marked `publish = false`.
+- Python packages: `openjd-model`, `openjd-sessions`, `openjd-cli` — versioned by release-plz from their `Cargo.toml` (`git_only`, tags `python-<distribution>-v<version>`) and published to PyPI by the same workflow.
 
 See [RELEASING.md](RELEASING.md) for the full process, one-time setup steps, and how to add new crates.
 

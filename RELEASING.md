@@ -1,6 +1,8 @@
 # Releasing openjd-rs
 
-This document describes how openjd-rs crates are released to [crates.io](https://crates.io/).
+This document describes how openjd-rs crates are released to [crates.io](https://crates.io/),
+and how the Python packages under `python/` are released to [PyPI](https://pypi.org/)
+(see [Python packages](#python-packages)).
 
 ## Overview
 
@@ -111,6 +113,43 @@ Yanks are not automated by release-plz.
 Add `publish = false` to `[package]` in its `Cargo.toml`, and an entry in
 `release-plz.toml` with `publish = false`, `release = false`,
 `changelog_update = false`. Then update the crate lists below.
+
+## Python packages
+
+The Python packages under `python/` (`openjd-model`, `openjd-sessions`,
+`openjd-cli`) are released by the same release-plz Release PR as the crates.
+
+- **Version source.** Each package's version is the `version` in its
+  `Cargo.toml`: for `openjd-model` that's the PyO3 bindings crate
+  (`openjd-model-py`); for `openjd-sessions` and `openjd-cli` it's an empty
+  `publish = false` release anchor crate (`openjd-sessions-py`,
+  `openjd-cli-py`). maturin and hatch read the version from there.
+- **Bumps.** The packages are `git_only` in `release-plz.toml`, so release-plz
+  takes the last release from the `python-<distribution>-v<version>` tag and
+  bumps the version from conventional commits that touch the package's
+  directory. A release of `openjd-expr`, `openjd-model`, or `openjd-sessions`
+  cascades into `openjd-model-py` through its Cargo dependencies, and from
+  there into the other two, so a Rust fix reaches PyPI in the same release.
+- **Pins.** release-plz doesn't edit `pyproject.toml`. After it updates the
+  Release PR, the workflow runs `scripts/sync_python_pins.py` on the PR branch
+  to move the pins between the Python packages to the new versions. CI runs
+  `scripts/sync_python_pins.py --check` on every PR.
+- **Publishing.** When the Release PR is merged, `release-plz release` creates
+  the tags and GitHub Releases. For each Python tag, the workflow builds the
+  wheels (six platforms for the abi3 `openjd-model` extension) and sdist from
+  the tag, PGP-signs every file, attaches the files and signatures to the
+  GitHub Release, and uploads to PyPI in dependency order.
+
+### One-time setup
+
+- **PyPI trusted publishing.** For each of `openjd-model`, `openjd-sessions`
+  and `openjd-cli` on PyPI, add a trusted publisher for repository
+  `OpenJobDescription/openjd-rs`, workflow `release-plz.yml`, environment
+  `release`. Without it, the PyPI upload step fails (and can be re-run once
+  the publisher exists).
+- **Signing secrets.** The `release` environment needs `AWS_PGP_KEY_SECRET_ROLE`,
+  `AWS_PGP_KEY_SECRET` and `PGP_USER`, the same secrets the per-package
+  repositories used.
 
 ## Crate lists to keep in sync
 

@@ -21,18 +21,16 @@ fi
 PYTHON_LIB=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
 
 # Build the stub_gen binary (without extension-module so it can link against libpython)
-LIBRARY_PATH="$PYTHON_LIB" cargo build --manifest-path rust-bindings/Cargo.toml --features stub-gen --bin stub_gen
+LIBRARY_PATH="$PYTHON_LIB" cargo build --manifest-path Cargo.toml --features stub-gen --bin stub_gen
+TARGET_DIR=$(cargo metadata --format-version 1 --no-deps --manifest-path Cargo.toml | python3 -c "import json, sys; print(json.load(sys.stdin)['target_directory'])")
 
-# Create a temporary pyproject.toml symlink for pyo3-stub-gen
-ln -sf ../pyproject.toml rust-bindings/pyproject.toml
-
-# Run the generator
-CARGO_MANIFEST_DIR=rust-bindings LD_LIBRARY_PATH="$PYTHON_LIB" ./target/debug/stub_gen
+# Run the generator. pyo3-stub-gen reads pyproject.toml from CARGO_MANIFEST_DIR,
+# which is this package's root (Cargo.toml and pyproject.toml sit side by side).
+CARGO_MANIFEST_DIR=. LD_LIBRARY_PATH="$PYTHON_LIB" "$TARGET_DIR/debug/stub_gen"
 
 # Move to correct location
-mv rust-bindings/src/openjd/_openjd_rs/__init__.pyi src/openjd/_openjd_rs.pyi
-rm -rf rust-bindings/src/openjd
-rm rust-bindings/pyproject.toml
+mv src/openjd/_openjd_rs/__init__.pyi src/openjd/_openjd_rs.pyi
+rmdir src/openjd/_openjd_rs
 
 # Post-process: fix Rust raw identifiers and remove internal types
 sed -i 's/r#type/type/g' src/openjd/_openjd_rs.pyi

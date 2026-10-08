@@ -2,7 +2,7 @@
 
 [![pypi](https://img.shields.io/pypi/v/openjd-cli.svg)](https://pypi.python.org/pypi/openjd-cli)
 [![python](https://img.shields.io/pypi/pyversions/openjd-cli.svg?style=flat)](https://pypi.python.org/pypi/openjd-cli)
-[![license](https://img.shields.io/pypi/l/openjd-cli.svg?style=flat)](https://github.com/OpenJobDescription/openjd-cli/blob/mainline/LICENSE)
+[![license](https://img.shields.io/pypi/l/openjd-cli.svg?style=flat)](https://github.com/OpenJobDescription/openjd-rs/blob/main/python/openjd-cli/LICENSE)
 
 Open Job Description (OpenJD) is a flexible open specification for defining render jobs which are portable
 between studios and render solutions. This package provides a command-line interface that can be used
@@ -173,11 +173,11 @@ $ openjd schema --version jobtemplate-2023-09
 
 You can download this package from:
 - [PyPI](https://pypi.org/project/openjd-cli/)
-- [GitHub releases](https://github.com/OpenJobDescription/openjd-cli/releases)
+- [GitHub releases](https://github.com/OpenJobDescription/openjd-rs/releases?q=python-openjd-cli) (tagged `python-openjd-cli-v<version>`; releases before the move to openjd-rs are in [openjd-cli](https://github.com/OpenJobDescription/openjd-cli/releases))
 
 ### Verifying GitHub Releases
 
-See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-cli?tab=security-ov-file#verifying-github-releases) for more information.
+See [Verifying GitHub Releases](https://github.com/OpenJobDescription/openjd-rs?tab=security-ov-file#verifying-github-releases) for more information.
 
 ## Security
 

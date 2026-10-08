@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`openjd-model-for-python` is the Python distribution of [Open Job Description](https://github.com/OpenJobDescription)'s data model, the expression language used inside templates, and the session runtime types those models drive. It ships a single PyPI package (`openjd-model`) with three import roots — `openjd.expr`, `openjd.model`, and (consumed from a sibling repo) `openjd.sessions` — backed by a single PyO3 extension module, `openjd._openjd_rs`.
+`python/openjd-model` (formerly the openjd-model-for-python repository) is the Python distribution of [Open Job Description](https://github.com/OpenJobDescription)'s data model, the expression language used inside templates, and the session runtime types those models drive. It ships a single PyPI package (`openjd-model`) with three import roots — `openjd.expr`, `openjd.model`, and (consumed from `python/openjd-sessions`) `openjd.sessions` — backed by a single PyO3 extension module, `openjd._openjd_rs`.
 
-The canonical specification lives in [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications). The Rust implementation that this repository wraps lives in [openjd-rs](https://github.com/OpenJobDescription/openjd-rs) and is consumed via crates.io: `rust-bindings/Cargo.toml` pins `openjd-expr`, `openjd-model`, and `openjd-sessions` to specific published versions. A commented-out `[patch.crates-io]` block at the bottom of that file documents how to redirect to a sibling `~/openjd-rs` checkout when iterating across both repos; see "Working with `openjd-rs` in flight" below.
+The canonical specification lives in [openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications). The Rust crates it wraps, `openjd-expr`, `openjd-model`, and `openjd-sessions`, are in the same repository under `crates/`, and the bindings depend on them by path, so a change to a crate and the bindings that expose it land together. See "Changing the Rust crates and the bindings together" below.
 
 This package is currently in transition from a pure-Python implementation to Rust-backed bindings:
 
@@ -17,12 +17,11 @@ See [README.md](README.md) for user-facing documentation and [DEVELOPMENT.md](DE
 ## Quick Reference
 
 ```bash
-# Build the extension into your active environment (uses the maturin wrapper
-# that injects a VCS-derived version — see _build_backend.py).
-python scripts/maturin_build.py develop --manifest-path rust-bindings/Cargo.toml
+# Run from python/openjd-model. Build the extension into your active
+# environment (hatch does this for its own environments).
+maturin develop
 
-# Same, but also rebuild the .pyi type stub (needs the patched stub-gen tool).
-python scripts/maturin_build.py develop --features stub-gen --manifest-path rust-bindings/Cargo.toml
+# Rebuild the .pyi type stub (needs the patched stub-gen tool).
 scripts/generate_stubs.sh
 
 hatch run test                          # Full suite — enforces the 94% coverage gate
@@ -32,32 +31,32 @@ hatch run lint                          # ruff + black --check
 hatch run fmt                           # black + lint
 hatch run typing                        # mypy
 
-# Rust-side checks against the bindings crate.
-cargo build  --manifest-path rust-bindings/Cargo.toml --all-targets
-cargo clippy --manifest-path rust-bindings/Cargo.toml --all-targets
-cargo test   --manifest-path rust-bindings/Cargo.toml
-cargo test   --manifest-path rust-bindings/Cargo.toml --doc
+# Rust-side checks against the bindings crate (openjd-model-py). The crate has
+# no Rust tests; it's tested from Python.
+cargo build  -p openjd-model-py --all-targets
+cargo clippy -p openjd-model-py --all-targets -- -D warnings
 ```
 
-Python: **3.9+** (declared via `abi3-py39` in `rust-bindings/Cargo.toml`, enforced by `pyproject.toml` `requires-python`).
+Python: **3.9+** (declared via `abi3-py39` in `Cargo.toml`, enforced by `pyproject.toml` `requires-python`).
 
 ## Component Map
 
-The PyO3 extension exports one Python module — `openjd._openjd_rs` — that wraps three Rust crates from the sibling `openjd-rs` workspace, each surfaced under its own Python import root:
+The PyO3 extension exports one Python module — `openjd._openjd_rs` — that wraps three Rust crates from this workspace's `crates/` directory, each surfaced under its own Python import root:
 
 ```
-rust-bindings/                         (PyO3 crate, name=openjd-python, lib=_openjd_rs)
+Cargo.toml                             (PyO3 crate, name=openjd-model-py, lib=_openjd_rs)
+rust-bindings/
 ├── src/lib.rs                         #[pymodule] _openjd_rs registration
 ├── src/expr/      ──→ openjd.expr     wraps openjd-rs::openjd-expr
 ├── src/model/     ──→ openjd.model._v1 wraps openjd-rs::openjd-model
-├── src/sessions/  ──→ openjd.sessions._v1 (re-exported from openjd-sessions-for-python)
+├── src/sessions/  ──→ openjd.sessions._v1 (re-exported from python/openjd-sessions)
 │                                      wraps openjd-rs::openjd-sessions
 └── src/bin/stub_gen.rs                pyo3-stub-gen entry point (feature-gated)
 ```
 
 Changes to `rust-bindings/src/lib.rs` (exception registration, class registration, function registration) affect **every** import root — review them carefully.
 
-The crate name is `openjd-python` and the cdylib name is `_openjd_rs`. Every `#[pyclass]` in the bindings has a `Py`-prefixed Rust identifier (e.g. `PyJob`) but is registered under its public Python name via `#[pyo3(name = "...")]` and the `register_renamed_exception` helper in `lib.rs`. Without that helper, `repr`, pickle, and tracebacks leak the `Py`-prefixed names — so when you add a new `create_exception!` exception, you **must** call `register_renamed_exception` for it.
+The crate name is `openjd-model-py` and the cdylib name is `_openjd_rs`. Every `#[pyclass]` in the bindings has a `Py`-prefixed Rust identifier (e.g. `PyJob`) but is registered under its public Python name via `#[pyo3(name = "...")]` and the `register_renamed_exception` helper in `lib.rs`. Without that helper, `repr`, pickle, and tracebacks leak the `Py`-prefixed names — so when you add a new `create_exception!` exception, you **must** call `register_renamed_exception` for it.
 
 ### `expr` — `rust-bindings/src/expr/`
 
@@ -92,16 +91,16 @@ Spec entry point: `specs/python-model-interface.md`. Python wrappers: pure-Pytho
 
 ### `sessions` — `rust-bindings/src/sessions/`
 
-Sessions binding source lives **here**, but the Python wrapper module lives in [openjd-sessions-for-python](https://github.com/OpenJobDescription/openjd-sessions-for-python) (the `bindings-rs` branch). Both repos must change together when the binding API changes. Wraps `openjd-rs::openjd-sessions`.
+Sessions binding source lives **here**, but the Python wrapper module lives in `python/openjd-sessions`. Change both in the same PR when the binding API changes. Wraps `openjd-rs::openjd-sessions`.
 
 - **Session lifecycle** (`session.rs`) — `PySession`, `PySessionState`, `PyActionState`, `PyActionStatus`, `PyActionResult`, `PyScriptRunnerState`.
 - **Cross-user execution** (`session_user.rs`) — `PyPosixSessionUser`, `PyWindowsSessionUser`, `PyBadCredentialsException`. Platform-specific: PosixSessionUser on Unix, WindowsSessionUser on Windows.
 - **Types** (`types.rs`) — Action and session enum/state types exposed to Python.
 - **Errors** (`errors.rs`) — `PySessionError`.
 
-Spec entry point: `specs/python-sessions-interface.md`. Python wrapper: `~/openjd-sessions-for-python/src/openjd/sessions/_v1/`. Tests: `~/openjd-sessions-for-python/test/openjd/sessions-v0/` and `sessions-v1/`. Reference branch for parity: `OpenJobDescription/openjd-sessions-for-python` `mainline`.
+Spec entry point: `specs/python-sessions-interface.md`. Python wrapper: `../openjd-sessions/src/openjd/sessions/_v1/`. Tests: `../openjd-sessions/test/openjd/sessions_v0/` and `sessions_v1/`.
 
-When working on `sessions`, edit both repos in the same change set. The wrapper module re-exports symbols from `openjd._openjd_rs`, so a binding rename without a wrapper update will silently break imports.
+When working on `sessions`, edit both packages in the same change set. The wrapper module re-exports symbols from `openjd._openjd_rs`, so a binding rename without a wrapper update will silently break imports.
 
 ## Navigating the Codebase
 
@@ -126,8 +125,8 @@ Every binding component has **four** artifacts that must stay aligned:
 
 1. **Python interface spec** — `specs/python-<component>-interface.md`.
 2. **PyO3 binding source** — `rust-bindings/src/<component>/` plus the relevant registration block in `rust-bindings/src/lib.rs`.
-3. **Python wrapper module** — `src/openjd/<component>/__init__.py` (or `src/openjd/model/_v1/__init__.py` for `model`; `~/openjd-sessions-for-python/src/openjd/sessions/_v1/__init__.py` for `sessions`).
-4. **Tests** — `test/openjd/<component>/` (or `test/openjd/model_v0/` and `test/openjd/model_v1/` for `model`; the corresponding `test/openjd/sessions-v0/` and `sessions-v1/` in the sibling repo for `sessions`).
+3. **Python wrapper module** — `src/openjd/<component>/__init__.py` (or `src/openjd/model/_v1/__init__.py` for `model`; `../openjd-sessions/src/openjd/sessions/_v1/__init__.py` for `sessions`).
+4. **Tests** — `test/openjd/<component>/` (or `test/openjd/model_v0/` and `test/openjd/model_v1/` for `model`; the corresponding `test/openjd/sessions_v0/` and `sessions_v1/` in `../openjd-sessions` for `sessions`).
 
 A spec change without a wrapper update is invisible to users. A binding rename without a wrapper update breaks imports silently. A new exception class without `register_renamed_exception` shows up in tracebacks under its `Py`-prefixed internal name. A new symbol that is not in the spec is unsupported even if it works. **Treat all four artifacts as one unit when reviewing or modifying a component.**
 
@@ -167,9 +166,9 @@ Current reports:
 
 ### Commit Messages
 
-This repo uses [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) syntax — required by `python-semantic-release`, which derives the next version from commit history. All commits must use it.
+This repo uses [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) syntax — required by release-plz, which derives the next version from the commits that touch this directory. All commits must use it.
 
-Allowed types (from `[tool.semantic_release.commit_parser_options]` in `pyproject.toml`): `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `style`, `refactor`, `test`. Patch-bumping types are `chore`, `feat`, `fix`, `refactor`, `perf`. Append `!` for breaking changes (e.g., `feat!: ...`) and include a `BREAKING CHANGE` footer. While the major version is `0.x`, the project is in pre-release: minor bumps cover backwards-incompatible changes and patch bumps cover bug fixes and backwards-compatible changes (see README "Versioning").
+Types and bump rules are the repository's (see the root `AGENTS.md` and `RELEASING.md`): `feat`, `fix`, `test`, `docs`, `refactor`, `ci`, `chore`, `perf`. Append `!` for breaking changes (e.g., `feat!: ...`) and include a `BREAKING CHANGE` footer. While the major version is `0.x`, minor bumps cover backwards-incompatible changes and patch bumps cover bug fixes and backwards-compatible changes (see README "Versioning").
 
 ### Test Quality Standard
 
@@ -181,7 +180,7 @@ Every `decode_*` / `create_job` / `evaluate_*` failure test must assert the exce
 
 **Reference parity**
 
-For every pure-Python reference test under `test/openjd/model_v0/` (and the equivalent in `~/openjd-sessions-for-python/test/openjd/sessions-v0/`), there should be an equivalent test under `test/openjd/model_v1/` (or `sessions-v1/`) exercising the same behaviour through the binding. New behaviour added on the binding side without a v0 counterpart is a divergence — note it in the relevant `reports/<component>-bindings-quality-evaluation-report.md`.
+For every pure-Python reference test under `test/openjd/model_v0/` (and the equivalent in `../openjd-sessions/test/openjd/sessions_v0/`), there should be an equivalent test under `test/openjd/model_v1/` (or `sessions-v1/`) exercising the same behaviour through the binding. New behaviour added on the binding side without a v0 counterpart is a divergence — note it in the relevant `reports/<component>-bindings-quality-evaluation-report.md`.
 
 **Why:** The Python contract for v1 is supposed to be the same as the v0 contract (modulo the documented differences in the spec like Pydantic-vs-no-Pydantic). Catching message regressions and missing reference tests is how we keep that promise.
 
@@ -215,25 +214,21 @@ PRs run these checks (all must pass):
 
 | Workflow | What it does |
 |----------|--------------|
-| **Code Quality** (`code_quality.yml`) | Python build + tests on `{ubuntu, windows, macos} × {3.9, 3.10, 3.11, 3.12, 3.13, 3.14}`. Uses the shared `OpenJobDescription/.github` reusable workflow, which runs `hatch run lint`, `hatch run typing`, and `hatch run test`. Transitively builds the Rust extension via the `maturin develop` step in `hatch.toml`. |
-| **Rust Quality** (`rust_quality.yml`) | `cargo build --all-targets`, `cargo clippy --all-targets -- -D warnings` (hard gate), `cargo test`, and `cargo test --doc` against `rust-bindings/`. Runs on `{ubuntu, windows, macos}`. Resolves `openjd-*` dependencies from crates.io at the versions pinned in `rust-bindings/Cargo.toml`. |
-| **CodeQL** (`codeql.yml`) | GitHub's static analysis. |
-| **PR opened/responded/auto_approve/stale_prs_and_issues/record_pr** | Repo housekeeping; not relevant to code changes. |
-| **Release Bump / Release Publish** (`release_bump.yml`, `release_publish.yml`) | Driven by python-semantic-release; only run on `mainline`/`release` branches. |
+| **Python** (`python.yml` at the repo root) | `hatch run lint`, `hatch build`, and `hatch run test` on `{ubuntu, windows, macos} × {3.9 … 3.14}`. hatch installs this package through the maturin build backend, which compiles the extension from the in-repo crates. Also checks `THIRD-PARTY-LICENSES.txt`. Runs for changes under `python/` or to `openjd-expr`/`-model`/`-sessions`. |
+| **CI** (`ci.yml` at the repo root) | rustfmt, clippy (`-D warnings`), rustdoc, and cargo-deny over the whole workspace, including this crate. |
+| **CodeQL** (`codeql.yml` at the repo root) | GitHub's static analysis for Rust and Python. |
 
 Before recommending the user push, at minimum run:
 
 ```bash
 hatch run lint
 hatch run test
-cargo build  --manifest-path rust-bindings/Cargo.toml --all-targets
-cargo test   --manifest-path rust-bindings/Cargo.toml
+cargo clippy -p openjd-model-py --all-targets -- -D warnings
 ```
 
 If you've changed a public binding signature, also regenerate the stubs:
 
 ```bash
-python scripts/maturin_build.py develop --features stub-gen --manifest-path rust-bindings/Cargo.toml
 scripts/generate_stubs.sh
 ```
 
@@ -241,44 +236,13 @@ and commit the resulting `src/openjd/_openjd_rs.pyi`.
 
 ## Releasing
 
-Releases are automated via [python-semantic-release](https://python-semantic-release.readthedocs.io/), driven by conventional-commit history on `mainline`/`release`/`patch_*` branches. Configuration is in `pyproject.toml` under `[tool.semantic_release]` and the workflows in `.github/workflows/release_bump.yml` (computes the next version) and `.github/workflows/release_publish.yml` (publishes to PyPI and creates the GitHub release).
+Releases are automated by the repository's release-plz workflow; see the "Python packages" section of the root `RELEASING.md`. The package version is the `version` in this directory's `Cargo.toml`, which release-plz bumps on the Release PR from conventional commits that touch this directory, or when one of the Rust crates the bindings depend on is released. maturin reads it from there for the wheel, and `openjd.model.version` reads it back from the installed package's metadata.
 
-The wheel version comes from git via `setuptools_scm`, plumbed through the in-tree PEP 517 build backend `_build_backend.py` and the developer-facing `scripts/maturin_build.py`. Both write `src/openjd/model/_version.py` and patch `pyproject.toml`'s `dynamic = ["version"]` to a static version for the duration of the build, so the wheel and `__version__` agree. Don't commit `_version.py` — it's gitignored.
+## Changing the Rust crates and the bindings together
 
-## Working with `openjd-rs` in flight
+`Cargo.toml` depends on `openjd-expr`, `openjd-model`, and `openjd-sessions` by path (`../../crates/...`), so the bindings always build against the crates in the same commit. To expose a new crate API to Python, change the crate, the binding source, the wrapper module, the spec, and the tests in one PR. If a crate change alters behavior Python users can see (an error type or message, say), the Python tests here fail in the same PR; update them, and mark the commit as breaking if the Python behavior change is breaking.
 
-`rust-bindings/Cargo.toml` consumes the three Rust workspace crates from crates.io:
-
-```toml
-openjd-expr     = "0.1.1"
-openjd-model    = "0.2.0"
-openjd-sessions = "0.2.2"
-```
-
-For day-to-day work — including CI — this is the source of truth. No sibling-repo checkout is needed; `cargo build --manifest-path rust-bindings/Cargo.toml` resolves the dependencies straight from the registry.
-
-When a change spans both repos (e.g. a new public API in `openjd-rs` that needs to be wired into `rust-bindings/src/<component>/`), there are two workflows depending on whether the upstream change is shipped or in flight.
-
-**Upstream change is already published.** Bump the version pin in `rust-bindings/Cargo.toml`, run `cargo update -p openjd-<crate>`, then wire the new symbols into the binding source, wrapper module, spec, and tests. Regenerate `_openjd_rs.pyi` if any public binding signature changed.
-
-**Upstream change is still in flight in `~/openjd-rs`.** Uncomment the `[patch.crates-io]` block at the bottom of `rust-bindings/Cargo.toml`:
-
-```toml
-[patch.crates-io]
-openjd-expr     = { path = "../../openjd-rs/crates/openjd-expr" }
-openjd-model    = { path = "../../openjd-rs/crates/openjd-model" }
-openjd-sessions = { path = "../../openjd-rs/crates/openjd-sessions" }
-```
-
-This redirects the dependency resolver to your local `~/openjd-rs` checkout for as long as the patch is active. Iterate freely. **Re-comment the block before committing.** The committed `Cargo.toml` should always resolve from crates.io so CI and any downstream consumer reproduce the exact pinned versions.
-
-The merge sequence for a cross-repo feature is therefore:
-
-1. Land and publish the change in `openjd-rs` first — get the new version onto crates.io.
-2. Bump the `openjd-*` version in `rust-bindings/Cargo.toml`.
-3. Wire the new symbols into the binding source, the wrapper module, the spec, and the tests in this repo. Regenerate `_openjd_rs.pyi` if any binding signature changed.
-
-The `[patch.crates-io]` block is for the iterative work *between* steps 1 and 2 — it keeps the inner dev loop fast without requiring a publish-per-change cadence.
+There is no `[patch.crates-io]` step and no publish-then-bump sequence: merging the PR and then the Release PR ships both the crates and this package.
 
 ## Compliance and Copyright Headers
 

@@ -25,6 +25,35 @@ crates.io.
 
 [pre-1.0]: https://doc.rust-lang.org/cargo/reference/semver.html
 
+## Python packages
+
+The Python packages are developed and released from this repository too.
+Each is tested against the in-repo versions of the others and of the crates
+above, and released to PyPI from the same [release-plz](https://release-plz.dev)
+Release PR as the crates (see [RELEASING.md](RELEASING.md#python-packages)).
+
+| Package | PyPI | Description |
+|---------|------|-------------|
+| [`python/openjd-model`](python/openjd-model) | [`openjd-model`](https://pypi.org/project/openjd-model/) | `openjd.model` and `openjd.expr`, plus the `openjd._openjd_rs` PyO3 extension built from `openjd-expr`, `openjd-model`, and `openjd-sessions` |
+| [`python/openjd-sessions`](python/openjd-sessions) | [`openjd-sessions`](https://pypi.org/project/openjd-sessions/) | `openjd.sessions`: the session runtime for running job actions |
+| [`python/openjd-cli`](python/openjd-cli) | [`openjd-cli`](https://pypi.org/project/openjd-cli/) | The Python `openjd` CLI |
+
+These were previously the
+[openjd-model-for-python](https://github.com/OpenJobDescription/openjd-model-for-python),
+[openjd-sessions-for-python](https://github.com/OpenJobDescription/openjd-sessions-for-python),
+and [openjd-cli](https://github.com/OpenJobDescription/openjd-cli) repositories;
+their history is preserved under `python/`, with their tags renamed to
+`legacy/<repository>/<version>`.
+
+Each package is built and tested with [hatch](https://hatch.pypa.io) from its
+own directory:
+
+```bash
+cd python/openjd-model   # or openjd-sessions, openjd-cli
+hatch run test
+hatch run lint
+```
+
 ## Building
 
 ```bash
