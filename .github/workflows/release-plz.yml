@@ -21,7 +21,12 @@
 #                  openjd-snapshots
 #   - Excluded:    openjd-for-js  (publish = false + explicit
 #                  `release = false` entry in release-plz.toml)
-#   - Independent versions per crate, driven by conventional commits.
+#   - Python packages (python/openjd-model, -sessions, -cli): versioned by
+#     release-plz from their Cargo.toml (`git_only`, never on crates.io),
+#     tagged `python-<distribution>-v<version>`. When `release` creates one of
+#     those tags, the python-* jobs below build the wheels and sdists, sign
+#     them, attach them to the GitHub Release, and upload them to PyPI.
+#   - Independent versions per crate/package, driven by conventional commits.
 #
 # See release-plz.toml for the tool configuration.
 
@@ -59,6 +64,11 @@ jobs:
       pull-requests: read
       # Exchange an OIDC token with crates.io for trusted publishing.
       id-token: write
+    outputs:
+      python-model-tag: ${{ steps.python.outputs.openjd-model }}
+      python-sessions-tag: ${{ steps.python.outputs.openjd-sessions }}
+      python-cli-tag: ${{ steps.python.outputs.openjd-cli }}
+      python-released: ${{ steps.python.outputs.released }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
@@ -96,17 +106,44 @@ jobs:
           set -euo pipefail
           bash scripts/generate_third_party_licenses.sh THIRD-PARTY-LICENSES
           # `releases` is a JSON array of { package_name, tag, version, ... }.
-          # Attach the attribution file to each GitHub Release tag created here.
-          echo "$RELEASES_JSON" | jq -r '.[].tag' | while read -r tag; do
+          # Attach the attribution file to each crate's GitHub Release created
+          # here. Python package releases carry their own license files.
+          echo "$RELEASES_JSON" | jq -r '.[] | select(.tag | startswith("python-") | not) | .tag' | while read -r tag; do
             [ -n "$tag" ] || continue
             echo "Uploading THIRD-PARTY-LICENSES to release $tag"
             gh release upload "$tag" THIRD-PARTY-LICENSES --clobber
           done
+      # Map the released Python packages to their tags for the python-* jobs.
+      # The Cargo package names (openjd-*-py) are the release-plz handles; the
+      # outputs are keyed by Python distribution name.
+      - name: Find released Python packages
+        id: python
+        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        env:
+          RELEASES_JSON: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          set -euo pipefail
+          released=false
+          for dist in openjd-model openjd-sessions openjd-cli; do
+            tag="$(echo "$RELEASES_JSON" | jq -r --arg p "$dist-py" '.[] | select(.package_name == $p) | .tag')"
+            echo "$dist=$tag" >> "$GITHUB_OUTPUT"
+            if [ -n "$tag" ]; then
+              released=true
+              echo "Released $dist as $tag"
+            fi
+          done
+          echo "released=$released" >> "$GITHUB_OUTPUT"
 
   # Open or update the Release PR. This runs on every push to main.
   release-plz-pr:
     name: Release-plz PR
-    if: ${{ github.repository == 'OpenJobDescription/openjd-rs' }}
+    # Wait for the release job so the Release PR is computed from the tags it
+    # just created. Run in parallel, release-pr can check out the repository
+    # before a Python package's new python-* tag exists (git_only packages read
+    # their last release from tags) and open a Release PR for a version that
+    # is being released in this same run.
+    needs: release-plz-release
+    if: ${{ !cancelled() && github.repository == 'OpenJobDescription/openjd-rs' }}
     runs-on: ubuntu-latest
     permissions:
       # Create/update branch with version bumps, changelog, Cargo.lock.
@@ -130,8 +167,255 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup override set stable
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # release-plz bumps each Python package's Cargo.toml version, and the
+      # Cargo dependencies between them cascade a bump into dependents, but it
+      # doesn't know about pyproject.toml. Move the pins between the in-repo
+      # Python packages to the new versions on the Release PR branch.
+      - name: Sync Python package pins on the Release PR
+        if: ${{ steps.release-plz.outputs.prs_created == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ fromJSON(steps.release-plz.outputs.pr).head_branch }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPOSITORY}.git"
+          git fetch --quiet "$remote" "$HEAD_BRANCH"
+          git checkout --quiet -B "$HEAD_BRANCH" FETCH_HEAD
+          python3 scripts/sync_python_pins.py
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet --all --message "chore: sync Python package pins"
+          git push --quiet "$remote" "HEAD:$HEAD_BRANCH"
+
+  # ── Python packages ────────────────────────────────────────────────────────
+  # The jobs below run only when the release job above created a
+  # python-<distribution>-v<version> tag. They build from that tag, so the
+  # artifacts match the released commit exactly.
+
+  # openjd-model is an abi3 extension module: one wheel per platform covers
+  # every supported Python version.
+  python-model-wheels:
+    name: openjd-model wheel (${{ matrix.platform.target }})
+    needs: release-plz-release
+    if: ${{ needs.release-plz-release.outputs.python-model-tag != '' }}
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, manylinux: auto }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, manylinux: auto }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ needs.release-plz-release.outputs.python-model-tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python/openjd-model
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux || 'auto' }}
+          rust-toolchain: stable
+          args: --release --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-openjd-model-wheel-${{ matrix.platform.target }}
+          path: python/openjd-model/dist/*.whl
+          if-no-files-found: error
+
+  python-model-sdist:
+    name: openjd-model sdist
+    needs: release-plz-release
+    if: ${{ needs.release-plz-release.outputs.python-model-tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ needs.release-plz-release.outputs.python-model-tag }}
+          persist-credentials: false
+      # maturin copies the in-repo openjd-expr/-model/-sessions crates the
+      # bindings depend on into the sdist, so it builds on its own.
+      - name: Build sdist
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python/openjd-model
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-openjd-model-sdist
+          path: python/openjd-model/dist/*.tar.gz
+          if-no-files-found: error
+
+  python-pure:
+    name: ${{ matrix.package }} wheel and sdist
+    needs: release-plz-release
+    if: ${{ needs.release-plz-release.outputs.python-sessions-tag != '' || needs.release-plz-release.outputs.python-cli-tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: openjd-sessions
+            tag: ${{ needs.release-plz-release.outputs.python-sessions-tag }}
+          - package: openjd-cli
+            tag: ${{ needs.release-plz-release.outputs.python-cli-tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        if: ${{ matrix.tag != '' }}
+        with:
+          ref: refs/tags/${{ matrix.tag }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        if: ${{ matrix.tag != '' }}
+        with:
+          python-version: "3.12"
+      - name: Build
+        if: ${{ matrix.tag != '' }}
+        working-directory: python/${{ matrix.package }}
+        run: |
+          pip install --upgrade hatch "click<8.3"
+          hatch build
+      - uses: actions/upload-artifact@v7
+        if: ${{ matrix.tag != '' }}
+        with:
+          name: python-${{ matrix.package }}-dist
+          path: python/${{ matrix.package }}/dist/*
+          if-no-files-found: error
+
+  # Signs every artifact, attaches the artifacts and signatures to the GitHub
+  # Releases that release-plz created, then uploads to PyPI in dependency
+  # order (openjd-model, openjd-sessions, openjd-cli) so a new dependent never
+  # reaches PyPI before the release it requires.
+  #
+  # PyPI trusted publishing must list this repository, this workflow file and
+  # the `release` environment for each of the three PyPI projects.
+  python-publish:
+    name: Sign and publish Python packages
+    needs: [release-plz-release, python-model-wheels, python-model-sdist, python-pure]
+    # Run when at least one Python package was released and every build that
+    # ran succeeded (skipped builds are for packages that weren't released).
+    if: >-
+      ${{ always() && needs.release-plz-release.outputs.python-released == 'true' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      # Upload the artifacts to the GitHub Releases.
+      contents: write
+      # Assume the PGP signing role, and exchange an OIDC token with PyPI.
+      id-token: write
+    env:
+      MODEL_TAG: ${{ needs.release-plz-release.outputs.python-model-tag }}
+      SESSIONS_TAG: ${{ needs.release-plz-release.outputs.python-sessions-tag }}
+      CLI_TAG: ${{ needs.release-plz-release.outputs.python-cli-tag }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: python-openjd-model-*
+          path: dist/openjd-model
+          merge-multiple: true
+        if: ${{ env.MODEL_TAG != '' }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-openjd-sessions-dist
+          path: dist/openjd-sessions
+        if: ${{ env.SESSIONS_TAG != '' }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-openjd-cli-dist
+          path: dist/openjd-cli
+        if: ${{ env.CLI_TAG != '' }}
+      - name: List artifacts
+        run: find dist -type f | sort
+
+      # Same signing scheme as the Python packages used in their own
+      # repositories: a detached PGP signature (<file>.sig) for each artifact.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_PGP_KEY_SECRET_ROLE }}
+          aws-region: us-west-2
+          mask-aws-account-id: true
+      - name: Import PGP key
+        env:
+          PGP_KEY_SECRET: ${{ secrets.AWS_PGP_KEY_SECRET }}
+        run: |
+          set -euo pipefail
+          secret="$(aws secretsmanager get-secret-value --secret-id "$PGP_KEY_SECRET" --query SecretString --output text)"
+          echo "$secret" | jq -r .PrivateKey | gpg --batch --pinentry-mode loopback --import --armor
+          passphrase="$(echo "$secret" | jq -r .Passphrase)"
+          echo "::add-mask::$passphrase"
+          echo "PGP_KEY_PASSPHRASE=$passphrase" >> "$GITHUB_ENV"
+      - name: Sign artifacts
+        env:
+          PGP_USER: ${{ secrets.PGP_USER }}
+        run: |
+          set -euo pipefail
+          find dist -type f ! -name '*.sig' | sort | while read -r file; do
+            printenv PGP_KEY_PASSPHRASE | gpg --batch --pinentry-mode loopback --local-user "$PGP_USER" \
+              --passphrase-fd 0 --output "$file.sig" --detach-sign "$file"
+          done
+
+      - name: Attach artifacts to the GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for pair in "openjd-model:$MODEL_TAG" "openjd-sessions:$SESSIONS_TAG" "openjd-cli:$CLI_TAG"; do
+            package="${pair%%:*}"
+            tag="${pair#*:}"
+            [ -n "$tag" ] || continue
+            gh release upload "$tag" dist/"$package"/* --clobber --repo "$REPOSITORY"
+          done
+
+      # PyPI rejects .sig files, so upload from per-package copies without them.
+      - name: Stage PyPI uploads
+        run: |
+          set -euo pipefail
+          for package in openjd-model openjd-sessions openjd-cli; do
+            [ -d "dist/$package" ] || continue
+            mkdir -p "pypi/$package"
+            find "dist/$package" -type f ! -name '*.sig' -exec cp {} "pypi/$package/" \;
+          done
+      - name: Publish openjd-model to PyPI
+        if: ${{ env.MODEL_TAG != '' }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/openjd-model
+      - name: Publish openjd-sessions to PyPI
+        if: ${{ env.SESSIONS_TAG != '' }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/openjd-sessions
+      - name: Publish openjd-cli to PyPI
+        if: ${{ env.CLI_TAG != '' }}
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/openjd-cli

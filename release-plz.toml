@@ -102,6 +102,46 @@ name = "openjd-cli"
 [[package]]
 name = "openjd-snapshots"
 
+# ── Python packages ─────────────────────────────────────────────────────────
+# Each Python package under python/ has a Cargo.toml whose `version` is the
+# Python package version (for openjd-model it's the PyO3 bindings crate; for
+# openjd-sessions and openjd-cli it's an empty release anchor). They are never
+# published to crates.io (`publish = false` in each Cargo.toml). Instead:
+#
+#   - `git_only`: the last released version comes from the package's git tag
+#     rather than crates.io, so release-plz bumps the version for any
+#     conventional commit that touches the package directory.
+#   - Tags are `python-<distribution>-v<version>`, distinct from the Rust
+#     crates' `<crate>-v<version>` tags (openjd-cli is both a crate and a
+#     Python distribution).
+#   - The GitHub Release that release-plz creates for the tag triggers the
+#     wheel build and PyPI upload in release-plz.yml.
+#
+# A Rust change to openjd-expr/-model/-sessions cascades into openjd-model-py
+# (and from there into the other two) through their Cargo dependencies, so a
+# Rust fix ships to PyPI in the same release as it ships to crates.io.
+
+[[package]]
+name = "openjd-model-py"
+git_only = true
+git_tag_name = "python-openjd-model-v{{ version }}"
+git_release_name = "python-openjd-model-v{{ version }}"
+semver_check = false
+
+[[package]]
+name = "openjd-sessions-py"
+git_only = true
+git_tag_name = "python-openjd-sessions-v{{ version }}"
+git_release_name = "python-openjd-sessions-v{{ version }}"
+semver_check = false
+
+[[package]]
+name = "openjd-cli-py"
+git_only = true
+git_tag_name = "python-openjd-cli-v{{ version }}"
+git_release_name = "python-openjd-cli-v{{ version }}"
+semver_check = false
+
 # ── Non-publishable crates ──────────────────────────────────────────────────
 # release-plz reads `publish = false` from Cargo.toml and will automatically
 # skip publishing for these crates. The explicit entries below also disable
