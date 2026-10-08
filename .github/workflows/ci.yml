@@ -75,6 +75,18 @@ jobs:
   build-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Build the release profile (workspace and all dependencies) at
+    # opt-level 1 instead of 3. CI builds are only used for tests, clippy,
+    # and the conformance binary; nothing published is built here. Measured
+    # locally on Windows: ~21% faster cold builds and ~19% faster
+    # workspace-only rebuilds, with no measurable change in test run time
+    # (the slow tests wait on subprocesses, not CPU). Setting it via env
+    # keeps output in target/release/, which build.rs (helper binary) and
+    # the artifact upload rely on. clippy-all-features and
+    # cross-user-windows must use the same value to reuse this job's cache,
+    # and the value is part of the cache key.
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: 1
     strategy:
       fail-fast: false
       matrix:
@@ -96,9 +108,14 @@ jobs:
         id: rustc
         shell: bash
         run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      # Restore here; the matching save step is at the end of the job and only
+      # runs on pushes to main. Caches saved from a PR run are scoped to that
+      # PR's ref and can't be reused by other PRs or main, so saving them
+      # only consumed the repo's 10 GB cache quota (and pushed main's caches
+      # out via LRU eviction). PRs still restore main's caches.
       - name: Restore cargo cache
         id: cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -106,11 +123,11 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
-            rust-release-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
-            rust-release-${{ matrix.os }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-${{ matrix.os }}-
       # On a restore-key (non-exact) hit, target/ contains artifacts built
       # against a different Cargo.lock. Cargo will spend a long time scanning
       # fingerprints and discovering staleness, especially on Windows. Starting
@@ -147,13 +164,29 @@ jobs:
       # clean step failure with full logs preserved, rather than a
       # "runner lost communication" abort whose logs are truncated.
       # Install cargo-nextest from crates.io. We avoid third-party
-      # marketplace actions for this repo; `cargo install --locked` adds
-      # ~3-5 min on a cold cache but is fully reproducible from the
-      # registry and doesn't introduce a new supply-chain dependency.
-      # The cargo cache (set up earlier in this job) carries the binary
-      # across runs so steady-state cost is negligible.
+      # marketplace actions for this repo; `cargo install --locked` takes
+      # ~3-6 min but is fully reproducible from the registry and doesn't
+      # introduce a new supply-chain dependency.
+      #
+      # The installed binary lives in ~/.cargo/bin, which the main cache
+      # above does not include, so it gets its own small cache keyed on
+      # the exact nextest version. That key doesn't change with Cargo.lock
+      # or the toolchain, so the install only runs when the version below
+      # is bumped. Dependabot doesn't track this pin; update it by hand.
+      # Unlike the other caches, this one also saves from PRs: it's small,
+      # and a PR only misses (and saves) when it bumps the version.
+      - name: Restore cargo-nextest
+        id: nextest-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-nextest*
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.146
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked --version ^0.9
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
+        # Built once and cached, so use the normal release opt-level.
+        env:
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: 3
+        run: cargo install cargo-nextest --locked --version 0.9.146
       - name: Run tests (nextest)
         timeout-minutes: 20
         run: cargo nextest run --release --workspace --exclude openjd-for-js --no-fail-fast
@@ -205,6 +238,21 @@ jobs:
             target/release/openjd
             target/release/openjd.exe
           if-no-files-found: error
+      # Save last, so target/ includes everything the job built. The implicit
+      # success() condition matches actions/cache's default of saving only
+      # when the job succeeded. Skipped on an exact hit, since that key
+      # already exists.
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+            crates/openjd-sessions/src/helper/target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   # Full-feature clippy exercises optional-feature code paths (like the
   # openjd-snapshots `bench` feature that pulls in clap, rand, tempfile, and
@@ -215,6 +263,9 @@ jobs:
     name: Clippy (all features)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Must match build-test so its cache is reusable.
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: 1
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust stable with clippy
@@ -236,11 +287,11 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
-            rust-release-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
-            rust-release-ubuntu-latest-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-
       - name: Run cargo clippy (all features)
         run: cargo clippy --release --all-features --all-targets --workspace --exclude openjd-for-js -- -D warnings
 
@@ -298,7 +349,10 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           rustup override set 1.97.0
-      - uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -310,6 +364,16 @@ jobs:
             rust-msrv-
       - name: Check compilation
         run: cargo check --workspace
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   doc:
     name: Documentation
@@ -320,7 +384,10 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup override set stable
-      - uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -334,6 +401,16 @@ jobs:
         run: cargo doc --no-deps --workspace
         env:
           RUSTDOCFLAGS: -D warnings
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   cross-user:
     name: Cross-User Tests (${{ matrix.variant }})
@@ -361,6 +438,9 @@ jobs:
     name: Cross-User Tests (Windows)
     needs: build-test
     runs-on: windows-latest
+    # Must match build-test so its cache is reusable.
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: 1
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust stable
@@ -381,11 +461,11 @@ jobs:
             ~/.cargo/git/db
             target
             crates/openjd-sessions/src/helper/target
-          key: rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          key: rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
-            rust-release-windows-latest-${{ steps.rustc.outputs.hash }}-
-            rust-release-windows-latest-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-windows-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-windows-latest-${{ steps.rustc.outputs.hash }}-
+            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-windows-latest-
       - name: Create test user
         shell: pwsh
         run: |
@@ -433,8 +513,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - name: Cache cargo
-        uses: actions/cache@v6
+      # Restore on every run, save only on pushes to main (see build-test).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/bin/wasm-bindgen
@@ -449,3 +531,12 @@ jobs:
         run: cd crates/openjd-for-js && npm run build
       - name: Run JS tests
         run: cd crates/openjd-for-js && npx vitest run
+      - name: Save cargo cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/registry
+            target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
