@@ -21,6 +21,27 @@ updates:
         update-types:
           - "minor"
           - "patch"
+  - package-ecosystem: "pip"
+    directories:
+      - "/python/openjd-model"
+      - "/python/openjd-sessions"
+      - "/python/openjd-cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps):"
+    ignore:
+      # black 26+ drops Python 3.9 support and formats differently.
+      - dependency-name: "black"
+        update-types: ["version-update:semver-major"]
+    groups:
+      pip-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:

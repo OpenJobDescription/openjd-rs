@@ -14,12 +14,17 @@ permissions: {}
 
 jobs:
   analyze:
-    name: Analyze (rust)
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       # Required for github/codeql-action/init + codeql-action/analyze.
       contents: read
       security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # python covers the Python packages under python/.
+        language: [rust, python]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
@@ -27,11 +32,11 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4.38.2
         with:
-          languages: rust
-          # Rust's CodeQL extractor does not support `autobuild` (it errors
-          # out with "Rust does not support the autobuild build mode"). The
-          # extractor reads source files directly via the rust-analyzer-style
-          # frontend; no cargo invocation is needed for the database build.
+          languages: ${{ matrix.language }}
+          # Neither extractor needs a build. Rust's doesn't support `autobuild`
+          # (it errors out with "Rust does not support the autobuild build
+          # mode"); it reads source files directly via the rust-analyzer-style
+          # frontend, so no cargo invocation is needed for the database build.
           build-mode: none
           queries: +security-and-quality
 

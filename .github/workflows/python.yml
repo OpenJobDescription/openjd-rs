@@ -1,0 +1,224 @@
+name: Python
+
+# Lint, build, and test the Python packages under python/: openjd-model (the
+# PyO3 bindings plus its Python wrappers), openjd-sessions, and openjd-cli.
+#
+# Each package is tested against the other in-repo packages, not against their
+# PyPI releases: openjd-model builds its extension from crates/openjd-expr,
+# -model, and -sessions in this workspace, and the openjd-sessions and
+# openjd-cli hatch environments install the in-repo openjd-model (and
+# openjd-sessions) first. A Rust change that breaks a Python package therefore
+# fails here, in the same pull request.
+#
+# The Rust-side checks for the bindings crate (rustfmt, clippy, rustdoc,
+# cargo-deny) run in ci.yml with the rest of the workspace.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "python/**"
+      - "crates/openjd-expr/**"
+      - "crates/openjd-model/**"
+      - "crates/openjd-sessions/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "about.toml"
+      - "about.hbs"
+      - "scripts/sync_python_pins.py"
+      - ".github/workflows/python.yml"
+  pull_request:
+    branches: [main, release, "patch_*"]
+    paths:
+      - "python/**"
+      - "crates/openjd-expr/**"
+      - "crates/openjd-model/**"
+      - "crates/openjd-sessions/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "about.toml"
+      - "about.hbs"
+      - "scripts/sync_python_pins.py"
+      - ".github/workflows/python.yml"
+
+concurrency:
+  group: python-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.package }} (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        package: [openjd-model, openjd-sessions, openjd-cli]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        exclude:
+          # openjd-cli was tested on 3.9-3.12 in its own repository; widening
+          # its matrix is a separate change.
+          - package: openjd-cli
+            python-version: "3.13"
+          - package: openjd-cli
+            python-version: "3.14"
+    defaults:
+      run:
+        working-directory: python/${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # A short target directory outside the checkout. Building openjd-model
+      # from its extracted sdist (`hatch build`) nests deeply enough to hit the
+      # Windows MAX_PATH limit (LNK1104) under the default target/.
+      - name: Set cargo target directory
+        shell: bash
+        run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/cargo-target" >> "$GITHUB_ENV"
+
+      - name: Install rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Every package builds openjd-model's extension (directly, or as a
+      # dependency), so all jobs on an OS share one cache. Restore everywhere;
+      # save only from one job per OS on pushes to main (see ci.yml for why PR
+      # caches aren't saved).
+      - name: Restore cargo cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/cargo-target
+          key: python-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            python-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
+
+      - name: Install hatch
+        # virtualenv 21 removed an API that the hatch versions resolvable on
+        # Python 3.9 still call.
+        run: pip install --upgrade hatch "click<8.3" "virtualenv<21"
+
+      - name: Lint
+        run: hatch -v run lint
+
+      - name: Build
+        run: hatch -v build
+
+      - name: Test
+        run: hatch run test
+
+      - name: Save cargo cache
+        if: >-
+          github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true' &&
+          matrix.package == 'openjd-sessions' && matrix.python-version == '3.12'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/cargo-target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  # Runs openjd-sessions' POSIX user-impersonation tests, which xfail when the
+  # OPENJD_TEST_SUDO_* variables are unset, on a macOS runner. Provisioning, the
+  # run and the teardown all live in scripts/run_macos_sudo_tests.sh so a
+  # developer can reproduce this job with `hatch run cross-user-test-macos`.
+  sessions-macos-cross-user:
+    name: openjd-sessions cross-user (macOS, Python ${{ matrix.python-version }})
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    defaults:
+      run:
+        working-directory: python/openjd-sessions
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install hatch
+        run: pip install --upgrade hatch 'virtualenv<21; python_version < "3.10"'
+
+      - name: Provision, run cross-user tests, and tear down
+        # --keep skips the teardown: the runner is throwaway, so leaving the
+        # environment in place costs nothing and keeps a failed run inspectable.
+        run: bash scripts/run_macos_sudo_tests.sh --keep
+
+  checks:
+    name: Python package checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The pyproject.toml pins between the in-repo packages must match their
+      # Cargo.toml versions. release-plz.yml rewrites them on the Release PR;
+      # this catches a hand edit that gets them out of step.
+      - name: Check in-repo Python package pins
+        run: python scripts/sync_python_pins.py --check
+
+      - name: Install rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup override set stable
+
+      # Cached by version only, like cargo-nextest in ci.yml.
+      - name: Restore cargo-about
+        id: cargo-about-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-about*
+          key: cargo-about-${{ runner.os }}-${{ runner.arch }}-0.9.2
+
+      - name: Install cargo-about
+        if: steps.cargo-about-cache.outputs.cache-hit != 'true'
+        # The `cli` feature is required to build the binary.
+        run: cargo install cargo-about --locked --features cli --version 0.9.2
+
+      # openjd-model ships THIRD-PARTY-LICENSES.txt in its wheel, covering
+      # both its Python and its Rust dependencies, so it must stay in step
+      # with pyproject.toml and Cargo.lock.
+      - name: Check openjd-model THIRD-PARTY-LICENSES.txt
+        working-directory: python/openjd-model
+        run: bash scripts/check_third_party_licenses.sh
