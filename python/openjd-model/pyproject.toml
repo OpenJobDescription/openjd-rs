@@ -1,7 +1,6 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0", "setuptools_scm"]
-build-backend = "_build_backend"
-backend-path = ["."]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 dependencies = [
@@ -34,49 +33,19 @@ classifiers = [
   "Topic :: Software Development :: Libraries"
 ]
 [project.urls]
-Homepage = "https://github.com/OpenJobDescription/openjd-model-for-python"
-Source = "https://github.com/OpenJobDescription/openjd-model-for-python"
+Homepage = "https://github.com/OpenJobDescription/openjd-rs/tree/main/python/openjd-model"
+Source = "https://github.com/OpenJobDescription/openjd-rs/tree/main/python/openjd-model"
 
 [tool.maturin]
 python-source = "src"
 module-name = "openjd._openjd_rs"
-manifest-path = "rust-bindings/Cargo.toml"
 features = ["extension-module"]
-# Files outside maturin's default sdist/wheel walk that we need
-# bundled anyway:
-#
-# * `src/openjd/model/_version.py` — generated at build time by
-#   `_build_backend.py` (or `scripts/generate_version.py`) and is
-#   gitignored. Maturin honors `.gitignore` when walking
-#   `python-source`, so without this entry the file is excluded
-#   from the wheel and `from .._version import version` fails at
-#   import time on the deploy target. Needs to be in the wheel.
-#
-# * `_build_backend.py` and `scripts/generate_version.py` —
-#   required when pip builds a wheel from the extracted sdist
-#   (PEP 517 build-from-sdist, which is what `hatch build` does
-#   in CI). `pyproject.toml` declares
-#   `build-backend = "_build_backend"` with `backend-path = ["."]`,
-#   and `_build_backend.py` imports `generate_version` from the
-#   `scripts/` directory. Without these entries the file isn't
-#   shipped in the sdist and the second-stage wheel build fails
-#   with `BackendUnavailable: Cannot find module '_build_backend'`.
-#   These only need to be in the sdist; they're build-time
-#   tooling, not runtime code.
+# Files outside maturin's default sdist walk that the sdist still needs.
 include = [
     { path = ".gitignore", format = "sdist" },
     { path = "LICENSE", format = "sdist" },
     { path = "NOTICE", format = "sdist" },
-    "src/openjd/model/_version.py",
-    { path = "_build_backend.py", format = "sdist" },
-    { path = "scripts/generate_version.py", format = "sdist" },
 ]
-
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.version.raw-options]
-version_scheme = "post-release"
 
 [tool.mypy]
 check_untyped_defs = false
@@ -175,44 +144,3 @@ source = [
 
 [tool.coverage.report]
 show_missing = true
-
-[tool.semantic_release]
-# Can be removed or set to true once we are v1
-major_on_zero = false
-tag_format = "{version}"
-allow_zero_version = true
-
-[tool.semantic_release.commit_parser_options]
-allowed_tags = [
-    "build",
-    "chore",
-    "ci",
-    "docs",
-    "feat",
-    "fix",
-    "perf",
-    "style",
-    "refactor",
-    "test",
-]
-minor_tags = []
-patch_tags = [
-  "chore",
-  "feat",
-  "fix",
-  "refactor",
-  "perf",
-]
-
-[tool.semantic_release.publish]
-upload_to_vcs_release = false
-
-[tool.semantic_release.changelog]
-template_dir = ".semantic_release"
-
-[tool.semantic_release.changelog.environment]
-trim_blocks = true
-lstrip_blocks = true
-
-[tool.semantic_release.branches.release]
-match = "(mainline|release|patch_.*)"

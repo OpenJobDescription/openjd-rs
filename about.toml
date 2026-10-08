@@ -1,5 +1,8 @@
 accepted = [
     "Apache-2.0",
+    # pyo3's target-lexicon (python/openjd-model). Strictly more permissive than
+    # plain Apache-2.0.
+    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "MIT-0",
     "BSD-2-Clause",

@@ -309,7 +309,7 @@ class TestSyntaxErrorCarets:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("(1 + 2", values=SymbolTable())
         expected = [
-            "Syntax error: unexpected EOF while parsing\n",
+            "Syntax error: '(' was never closed\n",
             "  (1 + 2\n",
             "  ^~~~~~",
         ]
@@ -320,7 +320,7 @@ class TestSyntaxErrorCarets:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("[1, 2, 3", values=SymbolTable())
         expected = [
-            "Syntax error: unexpected EOF while parsing\n",
+            "Syntax error: '[' was never closed\n",
             "  [1, 2, 3\n",
             "  ^~~~~~~~",
         ]
@@ -331,7 +331,7 @@ class TestSyntaxErrorCarets:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("'unclosed", values=SymbolTable())
         expected = [
-            "Syntax error: missing closing quote in string literal\n",
+            "Syntax error: unterminated string literal (detected at line 1)\n",
             "  'unclosed\n",
             "  ^~~~~~~~~",
         ]

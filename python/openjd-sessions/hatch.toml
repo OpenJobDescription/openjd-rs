@@ -1,5 +1,8 @@
 [envs.default]
+# Install the in-repo openjd-model first so tests run against it rather than
+# the PyPI release. Its version satisfies this package's openjd-model range.
 pre-install-commands = [
+  "pip install ../openjd-model",
   "pip install -r requirements-testing.txt"
 ]
 
@@ -30,11 +33,3 @@ lint = [
 python = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
 [envs.container.env-vars]
-
-[envs.release]
-detached = true
-
-[envs.release.scripts]
-deps = "pip install -r requirements-release.txt"
-bump = "semantic-release -v --strict version --no-push --no-commit --no-tag --skip-build {args}"
-version = "semantic-release -v --strict version --print {args}"

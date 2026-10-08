@@ -1,14 +1,51 @@
-[workspace]
-members = ["rust-bindings"]
-resolver = "2"
+[package]
+# PyO3 extension module (`openjd._openjd_rs`) for the `openjd-model` Python
+# package. This manifest also carries the Python package's version: maturin
+# reads `version` below for the wheel, and release-plz bumps it from
+# conventional commits under python/openjd-model/ (see release-plz.toml).
+# Python-only changes therefore count as changes to this crate, which is why
+# the manifest lives at the Python package root rather than in rust-bindings/.
+name = "openjd-model-py"
+version = "0.13.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "PyO3 bindings exposing openjd-expr, openjd-model, and openjd-sessions to Python."
+repository = "https://github.com/OpenJobDescription/openjd-rs"
+publish = false
 
-# ── Local-development overrides (opt-in) ──────────────────────────────
-# Redirect the openjd-* crates to a sibling ~/openjd-rs checkout so the
-# bindings build against the in-flight Rust workspace instead of crates.io.
-# Cargo only honors [patch] at the workspace root, so it lives here rather
-# than in rust-bindings/Cargo.toml. Paths are relative to this file.
-# Re-comment before committing so CI/published wheels resolve from crates.io.
-# [patch.crates-io]
-# openjd-expr     = { path = "../openjd-rs/crates/openjd-expr" }
-# openjd-model    = { path = "../openjd-rs/crates/openjd-model" }
-# openjd-sessions = { path = "../openjd-rs/crates/openjd-sessions" }
+[lib]
+name = "_openjd_rs"
+path = "rust-bindings/src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+# The bindings are tested from Python (python/openjd-model/test). A Rust test
+# binary for this crate would link libpython and fail to load wherever
+# libpython isn't on the loader path, which breaks `cargo test --workspace`.
+test = false
+doctest = false
+
+[dependencies]
+openjd-expr = { path = "../../crates/openjd-expr", version = "0.11.0" }
+openjd-model = { path = "../../crates/openjd-model", version = "0.12.0" }
+openjd-sessions = { path = "../../crates/openjd-sessions", version = "0.8.0" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+serde_json = "1"
+pyo3 = { version = "0.29.3", features = ["abi3-py39"] }
+pyo3-log = "0.13"
+log = "0.4"
+pyo3-stub-gen = { version = "0.23", optional = true }
+
+[[bin]]
+name = "stub_gen"
+path = "rust-bindings/src/bin/stub_gen.rs"
+required-features = ["stub-gen"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+stub-gen = ["pyo3-stub-gen"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+] }

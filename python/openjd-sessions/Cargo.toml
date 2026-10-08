@@ -1,0 +1,23 @@
+[package]
+# Release anchor for the pure-Python `openjd-sessions` package. This is not a
+# real Rust crate. It exists so release-plz can version the Python package
+# alongside the Rust crates: release-plz bumps `version` below from
+# conventional commits under python/openjd-sessions/, and hatch reads it back as
+# the Python package version (see [tool.hatch.version] in pyproject.toml).
+name = "openjd-sessions-py"
+version = "0.13.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/OpenJobDescription/openjd-rs"
+publish = false
+
+[lib]
+path = "release_anchor.rs"
+test = false
+doctest = false
+
+# Mirrors this package's runtime dependencies on the other in-repo Python
+# packages. When one of them is released, release-plz bumps this package too,
+# and scripts/sync_python_pins.py moves the matching pin in pyproject.toml.
+[dependencies]
+openjd-model-py = { path = "../openjd-model", version = "0.13.0" }

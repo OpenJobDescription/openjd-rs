@@ -1,6 +1,5 @@
 # Directories
 .github
-.semantic_release
 build
 dist
 pipeline

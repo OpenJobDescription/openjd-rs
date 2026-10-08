@@ -21,7 +21,6 @@ __pycache__/
 /doc/_apidoc/
 /build
 /dist
-_version.py
 *.log
 
 # Local one-off helper scripts (not part of the project)

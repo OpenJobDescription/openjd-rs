@@ -6,6 +6,21 @@ members = [
     "crates/openjd-cli",
     "crates/openjd-snapshots",
     "crates/openjd-for-js",
+    "python/openjd-model",
+    "python/openjd-sessions",
+    "python/openjd-cli",
+]
+# Plain `cargo build` / `cargo test` cover the Rust crates. The python/
+# members are built by maturin and hatch (see python/), and building the
+# PyO3 extension outside maturin can need libpython at link time. Use
+# `--workspace` or `-p <name>` to include them.
+default-members = [
+    "crates/openjd-expr",
+    "crates/openjd-model",
+    "crates/openjd-sessions",
+    "crates/openjd-cli",
+    "crates/openjd-snapshots",
+    "crates/openjd-for-js",
 ]
 resolver = "2"
 

@@ -8,7 +8,6 @@ import pytest
 from pathlib import Path
 from typing import Any, Optional
 
-from openjd.expr import ExpressionError
 from openjd.model._v1 import (
     CallerLimits,
     ModelProfile,
@@ -2903,10 +2902,14 @@ class TestCreateJobLetFailureMessages:
     the caller's profile with the same diagnostic as a step script's ``let``. On
     0.10.0 the environment form read ``Error evaluating let binding 'q': ...`` and
     quoted the whole binding, ``q = 1 / int(Param.X)``.
+
+    Since openjd-model 0.12.0 (openjd-rs#428) a failing ``let`` in ``create_job`` is
+    reported like ``openjd check`` reports it: a ``ModelValidationError`` at the
+    binding's template path, rather than an ``ExpressionError`` with no location.
     """
 
     _LET = ["q = 1 / int(Param.X)"]
-    _EXPECTED = "script let binding 'q': Division by zero\n  1 / int(Param.X)\n  ~~^~~~~~~~~~~~~~"
+    _PATHS = {"step": "steps[0]", "job environment": "jobEnvironments[0]"}
 
     @classmethod
     def _decoded(cls, where: str) -> Any:
@@ -2931,9 +2934,15 @@ class TestCreateJobLetFailureMessages:
 
     @pytest.mark.parametrize("where", ["step", "job environment"])
     def test_the_diagnostic_is_the_same_for_both(self, where: str) -> None:
-        with pytest.raises(ExpressionError) as excinfo:
+        with pytest.raises(ModelValidationError) as excinfo:
             create_job(job_template=self._decoded(where), job_parameter_values={"X": "0", "N": "1"})
-        assert str(excinfo.value) == self._EXPECTED
+        assert str(excinfo.value) == (
+            "1 validation error for JobTemplate\n"
+            f"{self._PATHS[where]} -> script -> let[0]:\n"
+            "\tInvalid expression in let binding 'q': Division by zero\n"
+            "  q = 1 / int(Param.X)\n"
+            "      ~~^~~~~~~~~~~~~~"
+        )
 
     @pytest.mark.parametrize("where", ["step", "job environment"])
     def test_a_value_that_evaluates_creates_the_job(self, where: str) -> None:

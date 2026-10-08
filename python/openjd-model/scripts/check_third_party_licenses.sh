@@ -109,15 +109,15 @@ python -m venv "$venv_dir"
 
 # ── Rust deps ─────────────────────────────────────────────────────────
 #
-# `cargo about` reads the workspace's Cargo.lock, the `about.toml`
+# `cargo about` reads the workspace's Cargo.lock, the repo-root `about.toml`
 # config (which excludes build- and dev-dependencies), and renders
 # every unique (crate, license) pair through `about.hbs`.
 
 echo "Generating Rust section via cargo about..."
 cargo about generate \
-    --config about.toml \
-    --manifest-path rust-bindings/Cargo.toml \
-    about.hbs > "$rust_section_raw"
+    --config ../../about.toml \
+    --manifest-path Cargo.toml \
+    ../../about.hbs > "$rust_section_raw"
 
 # cargo-about's `private.ignore` flag only excludes workspace members
 # marked `publish = false`. The bindings crate `openjd-python` is
@@ -126,7 +126,7 @@ cargo about generate \
 # safety net (matches the openjd-rs pattern).
 workspace_pattern="$(
     cargo metadata --no-deps --format-version=1 \
-        --manifest-path rust-bindings/Cargo.toml \
+        --manifest-path Cargo.toml \
         | jq -r '.packages[].name' \
         | tr -d '\r' \
         | paste -sd'|' -

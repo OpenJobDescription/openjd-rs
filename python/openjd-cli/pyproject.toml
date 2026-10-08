@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
@@ -36,51 +36,34 @@ dependencies = [
   # `resolved_symtab`, so there is no version satisfying both channels and the
   # floor has to move rather than being feature-detected. Below 0.12.0 every
   # call site here raises TypeError on the unexpected `resolved_symtab`.
-  "openjd-sessions >= 0.12.0,< 0.13",
+  # The floor tracks the in-repo openjd-sessions (python/openjd-sessions), which
+  # CI installs alongside this package, so the range must include its version.
+  "openjd-sessions >= 0.13.0,< 0.14",
   # 0.11.4 is the first release exporting `create_job_with_symbol_tables` and
   # `JobWithSymbolTables`. 0.11.3 and below have `create_job` only, so the
-  # step-scope resolved symbol tables cannot be obtained at all.
-  "openjd-model >= 0.11.4,< 0.12"
+  # step-scope resolved symbol tables cannot be obtained at all. openjd-sessions
+  # 0.13 requires openjd-model 0.13, so that is the effective floor.
+  "openjd-model >= 0.13.0,< 0.14"
 ]
 
 [project.urls]
-Homepage = "https://github.com/OpenJobDescription/openjd-cli"
-Source = "https://github.com/OpenJobDescription/openjd-cli"
-
+Homepage = "https://github.com/OpenJobDescription/openjd-rs/tree/main/python/openjd-cli"
+Source = "https://github.com/OpenJobDescription/openjd-rs/tree/main/python/openjd-cli"
 
 [project.scripts]
 openjd = "openjd.cli:main"
 
-
-[tool.hatch.build]
-artifacts = [
-  "*_version.py",
-]
-
+# The version lives in Cargo.toml, which release-plz bumps (see the comment in
+# that file). Cargo.toml is included in the sdist so a wheel built from the
+# sdist resolves the same version.
 [tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.version.raw-options]
-version_scheme = "post-release"
-
-[tool.hatch.build.hooks.vcs]
-version-file = "_version.py"
-
-[tool.hatch.build.hooks.custom]
-path = "hatch_version_hook.py"
-
-[[tool.hatch.build.hooks.custom.copy_map]]
-sources = [
-  "_version.py",
-]
-destinations = [
-  "src/openjd/cli",
-]
+path = "Cargo.toml"
+pattern = '(?m)^version = "(?P<version>[^"]+)"'
 
 [tool.hatch.build.targets.sdist]
 include = [
   "src/openjd",
-  "hatch_version_hook.py",
+  "Cargo.toml",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -157,11 +140,9 @@ addopts = [
     "--timeout=60"
 ]
 
-
 [tool.coverage.run]
 branch = true
 parallel = true
-
 
 [tool.coverage.paths]
 source = [
@@ -174,44 +155,3 @@ fail_under = 92
 omit= [
   "src/openjd/cli/_version.py"
 ]
-
-[tool.semantic_release]
-# Can be removed or set to true once we are v1
-major_on_zero = false
-tag_format = "{version}"
-allow_zero_version = true
-
-[tool.semantic_release.commit_parser_options]
-allowed_tags = [
-    "build",
-    "chore",
-    "ci",
-    "docs",
-    "feat",
-    "fix",
-    "perf",
-    "style",
-    "refactor",
-    "test",
-]
-minor_tags = []
-patch_tags = [
-  "chore",
-  "feat",
-  "fix",
-  "refactor",
-  "perf",
-]
-
-[tool.semantic_release.publish]
-upload_to_vcs_release = false
-
-[tool.semantic_release.changelog]
-template_dir = ".semantic_release"
-
-[tool.semantic_release.changelog.environment]
-trim_blocks = true
-lstrip_blocks = true
-
-[tool.semantic_release.branches.release]
-match = "(mainline|release|patch_.*)"
