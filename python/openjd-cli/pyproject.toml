@@ -1,0 +1,217 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openjd-cli"
+authors = [
+  {name = "Amazon Web Services"},
+]
+dynamic = ["version"]
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+description = "Provides a command-line interface for working with Open Job Description templates."
+# https://pypi.org/classifiers/
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop"
+]
+dependencies = [
+  # 0.12.0 is the first release carrying `resolved_symtab` on all three of
+  # Session.enter_environment, Session.exit_environment and Session.run_task.
+  # It is also the release that removed `extra_let_bindings` from
+  # enter_environment: 0.10.11 through 0.11.0 have that keyword and no
+  # `resolved_symtab`, so there is no version satisfying both channels and the
+  # floor has to move rather than being feature-detected. Below 0.12.0 every
+  # call site here raises TypeError on the unexpected `resolved_symtab`.
+  "openjd-sessions >= 0.12.0,< 0.13",
+  # 0.11.4 is the first release exporting `create_job_with_symbol_tables` and
+  # `JobWithSymbolTables`. 0.11.3 and below have `create_job` only, so the
+  # step-scope resolved symbol tables cannot be obtained at all.
+  "openjd-model >= 0.11.4,< 0.12"
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenJobDescription/openjd-cli"
+Source = "https://github.com/OpenJobDescription/openjd-cli"
+
+
+[project.scripts]
+openjd = "openjd.cli:main"
+
+
+[tool.hatch.build]
+artifacts = [
+  "*_version.py",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "post-release"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_version_hook.py"
+
+[[tool.hatch.build.hooks.custom.copy_map]]
+sources = [
+  "_version.py",
+]
+destinations = [
+  "src/openjd/cli",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/openjd",
+  "hatch_version_hook.py",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "src/openjd",
+]
+only-include = [
+  "src/openjd",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/openjd/__main__.py" = "openjd/__main__.py"
+
+[tool.mypy]
+check_untyped_defs = false
+show_error_codes = false
+pretty = true
+ignore_missing_imports = true
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+show_error_context = true
+strict_equality = false
+python_version = "3.9"
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = false
+# Tell mypy that there's a namespace package at src/openjd
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+
+# See: https://docs.pydantic.dev/mypy_plugin/
+#  - Helps mypy understand pydantic typing.
+plugins = "pydantic.mypy"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+  "E501",
+  # Double Check if this should be fixed
+  "E731",
+]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = [
+  "classmethod",
+  # pydantic decorators are classmethod decorators
+  # suppress N805 errors on classes decorated with them
+  "pydantic.validator",
+  "pydantic.root_validator",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "openjd",
+]
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+xfail_strict = false
+addopts = [
+    "-rfEx",
+    "--durations=5",
+    "--cov=src/openjd/cli",
+    "--color=yes",
+    "--cov-report=html:build/coverage",
+    "--cov-report=xml:build/coverage/coverage.xml",
+    "--cov-report=term-missing",
+    "--numprocesses=auto",
+    "--timeout=60"
+]
+
+
+[tool.coverage.run]
+branch = true
+parallel = true
+
+
+[tool.coverage.paths]
+source = [
+  "src/"
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 92
+omit= [
+  "src/openjd/cli/_version.py"
+]
+
+[tool.semantic_release]
+# Can be removed or set to true once we are v1
+major_on_zero = false
+tag_format = "{version}"
+allow_zero_version = true
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "style",
+    "refactor",
+    "test",
+]
+minor_tags = []
+patch_tags = [
+  "chore",
+  "feat",
+  "fix",
+  "refactor",
+  "perf",
+]
+
+[tool.semantic_release.publish]
+upload_to_vcs_release = false
+
+[tool.semantic_release.changelog]
+template_dir = ".semantic_release"
+
+[tool.semantic_release.changelog.environment]
+trim_blocks = true
+lstrip_blocks = true
+
+[tool.semantic_release.branches.release]
+match = "(mainline|release|patch_.*)"
