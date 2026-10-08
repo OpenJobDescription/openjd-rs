@@ -1,3 +1,16 @@
+# Changelog
+
+All notable changes to this crate are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.7.8](https://github.com/OpenJobDescription/openjd-rs/releases/tag/python-openjd-cli-v0.7.8) - 2026-10-08
+
+### Miscellaneous
+
+- Require openjd-model 0.14 and openjd-sessions 0.13.1.
+- Move the package from the openjd-cli repository into the openjd-rs repository, under `python/openjd-cli`. The version now comes from the package's `Cargo.toml`.
+
 ## 0.7.7 (2026-09-02)
 
 

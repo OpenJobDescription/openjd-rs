@@ -1,3 +1,26 @@
+# Changelog
+
+All notable changes to this crate are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.14.0](https://github.com/OpenJobDescription/openjd-rs/releases/tag/python-openjd-model-v0.14.0) - 2026-10-08
+
+### Features
+
+- [**breaking**] Build the native extension from the openjd-rs workspace crates instead of their crates.io releases. This release moves from openjd-expr 0.10.1, openjd-model 0.11.0 and openjd-sessions 0.7.3 to openjd-expr 0.11.0, openjd-model 0.12.0 and openjd-sessions 0.8.0, which changes:
+  - `create_job` raises `ModelValidationError` at the binding's template path, such as `steps[0] -> script -> let[0]`, instead of `ExpressionError` when a `let` binding fails to evaluate. It also reports every job-creation error at once rather than only the first, and rejects parameter values that make an action's `timeout`, `cancelation.notifyPeriodInSeconds` or `cancelation.mode` invalid ([openjd-rs#428](https://github.com/OpenJobDescription/openjd-rs/pull/428)).
+  - Expression syntax errors use CPython's wording, for example `'(' was never closed` instead of `unexpected EOF while parsing` ([openjd-rs#429](https://github.com/OpenJobDescription/openjd-rs/pull/429)).
+  - Single-letter URI schemes, such as the `C:` in `C:/renders`, are treated as filesystem paths ([openjd-rs#424](https://github.com/OpenJobDescription/openjd-rs/pull/424)).
+
+### Bug fixes
+
+- Satisfy mypy with pydantic 2.14's `TypeForm` annotations.
+
+### Miscellaneous
+
+- Move the package from openjd-model-for-python into the openjd-rs repository, under `python/openjd-model`. The version now comes from the package's `Cargo.toml`.
+
 ## 0.13.0 (2026-10-05)
 
 

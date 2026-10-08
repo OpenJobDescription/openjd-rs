@@ -36,14 +36,15 @@ dependencies = [
   # `resolved_symtab`, so there is no version satisfying both channels and the
   # floor has to move rather than being feature-detected. Below 0.12.0 every
   # call site here raises TypeError on the unexpected `resolved_symtab`.
-  # The floor tracks the in-repo openjd-sessions (python/openjd-sessions), which
-  # CI installs alongside this package, so the range must include its version.
-  "openjd-sessions >= 0.13.0,< 0.14",
+  #
+  # Both pins below are on packages in this repository. Their floors are the
+  # in-repo versions, which this package is tested against;
+  # scripts/sync_python_pins.py moves them when those packages are released.
+  "openjd-sessions >= 0.13.1,< 0.14",
   # 0.11.4 is the first release exporting `create_job_with_symbol_tables` and
   # `JobWithSymbolTables`. 0.11.3 and below have `create_job` only, so the
-  # step-scope resolved symbol tables cannot be obtained at all. openjd-sessions
-  # 0.13 requires openjd-model 0.13, so that is the effective floor.
-  "openjd-model >= 0.13.0,< 0.14"
+  # step-scope resolved symbol tables cannot be obtained at all.
+  "openjd-model >= 0.14.0,< 0.15"
 ]
 
 [project.urls]

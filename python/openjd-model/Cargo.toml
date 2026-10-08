@@ -6,7 +6,7 @@
 # Python-only changes therefore count as changes to this crate, which is why
 # the manifest lives at the Python package root rather than in rust-bindings/.
 name = "openjd-model-py"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "PyO3 bindings exposing openjd-expr, openjd-model, and openjd-sessions to Python."

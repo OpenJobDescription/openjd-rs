@@ -2364,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-cli-py"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "openjd-model-py",
  "openjd-sessions-py",
@@ -2415,7 +2415,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-model-py"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "log",
  "openjd-expr",
@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions-py"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "openjd-model-py",
 ]
