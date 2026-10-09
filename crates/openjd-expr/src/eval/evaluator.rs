@@ -1303,50 +1303,12 @@ impl<'a> Evaluator<'a> {
             let list = ExprValue::make_list_checked(self, coerced?, elem_t.clone())?;
             return self.track(list);
         }
-        // Check type consistency
-        if !elements.is_empty() {
-            let mut seen_types: Vec<ExprType> = Vec::new();
-            for e in elements.iter() {
-                let t = e.expr_type();
-                if !seen_types.contains(&t) {
-                    seen_types.push(t);
-                }
-            }
-            // Check compatibility: allow int/float mixing and path/string mixing
-            let dominated: Vec<&ExprType> = seen_types
-                .iter()
-                .filter(|t| {
-                    // nulltype is compatible with anything
-                    t.code() == crate::types::TypeCode::NullType ||
-                // int is compatible if float is also present (promotion)
-                (**t == ExprType::INT && seen_types.contains(&ExprType::FLOAT)) ||
-                // float is compatible if int is also present (promotion)
-                (**t == ExprType::FLOAT && seen_types.contains(&ExprType::INT)) ||
-                // path is compatible if string is also present
-                (**t == ExprType::PATH && seen_types.contains(&ExprType::STRING)) ||
-                // string is compatible if path is also present
-                (**t == ExprType::STRING && seen_types.contains(&ExprType::PATH))
-                })
-                .collect();
-            // If all types are in compatible pairs, it's fine; otherwise error
-            let compatible = dominated.len() == seen_types.len() ||
-                seen_types.len() == 1 ||
-                // All list types are compatible (make_list handles inner promotion)
-                seen_types.iter().all(|t| t.code() == crate::types::TypeCode::List || t.code() == crate::types::TypeCode::NullType);
-            if !compatible {
-                let type_strs: Vec<String> = seen_types.iter().map(|t| t.to_string()).collect();
-                let msg = if type_strs.len() == 2 {
-                    format!(
-                        "List literal contains incompatible types: {} and {}",
-                        type_strs[0], type_strs[1]
-                    )
-                } else {
-                    let last = type_strs.last().unwrap();
-                    let rest = type_strs[..type_strs.len() - 1].join(", ");
-                    format!("List literal contains incompatible types: {rest}, and {last}")
-                };
-                return Err(ExpressionError::new(msg));
-            }
+        // Check type consistency with the shared list-element join, the
+        // same one `make_list` and the unresolved hoisting use.
+        if crate::types::join_list_element_types(elements.iter().map(ExprValue::expr_type)).is_err()
+        {
+            let types: Vec<ExprType> = elements.iter().map(ExprValue::expr_type).collect();
+            return Err(incompatible_list_types_error(&types));
         }
         let elem_type = if elements.is_empty() {
             ExprType::NULLTYPE
@@ -1599,7 +1561,16 @@ impl<'a> Evaluator<'a> {
         let body_val = child.evaluate(&lc.elt);
         self.absorb_spend_and_reset(&child, memory_baseline);
         let body_val = body_val?;
+        // The body's type as a list element: the members that can be part
+        // of a built list (`int?` gives `list[int]`; `list[T] |
+        // list[nulltype]` gives `list[list[T]]`). A body that can only be
+        // `null` keeps its type — the comprehension still succeeds when
+        // the iterable is empty.
         let body_type = unwrap_unresolved(&body_val.expr_type());
+        let body_type = match crate::types::list_element_contribution(&body_type) {
+            Some(t) => crate::types::simplify_joined_list_element(t),
+            None => body_type,
+        };
         self.track(ExprValue::unresolved(ExprType::list(body_type)))
     }
 
@@ -1939,64 +1910,61 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
 /// nesting an `Unresolved` — the invariant that makes
 /// [`ExprValue::is_unresolved`] a complete concreteness check.
 ///
-/// Checks element type compatibility (allowing int/float and path/string
-/// mixing) and computes the promoted element type the resolved list will
-/// have. Used by list literal evaluation and by list comprehensions whose
-/// body produced unresolved elements; `ExprValue::make_list` itself rejects
-/// unresolved elements, since it constructs concrete lists.
+/// The element type `T` is the fold of [`crate::types::join_list_element`]
+/// over the elements' types (an unresolved element contributes its
+/// constraint) — the same join `ExprValue::make_list` applies to the
+/// concrete list, so a mix of concrete and unresolved elements is accepted
+/// when some resolution of the unresolved ones builds a list, and
+/// `T` is the element type that list has (a union when different
+/// resolutions give different types). Used by list literal evaluation and
+/// by list comprehensions whose body produced unresolved elements;
+/// `ExprValue::make_list` itself rejects unresolved elements, since it
+/// constructs concrete lists.
 fn unresolved_list_from_elements(elements: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
-    // Check type compatibility even with unresolved elements
-    if !elements.is_empty() {
-        let first_type = unwrap_unresolved(&elements[0].expr_type());
-        for e in elements.iter().skip(1) {
+    // A concrete `null` element (e.g. a comprehension body yielding
+    // `None`) fails exactly as `ExprValue::make_list` reports it when the
+    // list is built from concrete values. List literals reject `null`
+    // earlier, in `eval_list`.
+    if elements.iter().any(|e| matches!(e, ExprValue::Null)) {
+        return Err(ExpressionError::type_error(
+            "Cannot create list from null elements",
+        ));
+    }
+    // Each element as the type it contributes to a built list (`int?`
+    // contributes `int`), so the error names the types that conflict.
+    let types: Vec<ExprType> = elements
+        .iter()
+        .map(|e| {
             let t = unwrap_unresolved(&e.expr_type());
-            // Allow int/float and path/string mixing
-            if (first_type == ExprType::INT && t == ExprType::FLOAT)
-                || (first_type == ExprType::FLOAT && t == ExprType::INT)
-                || (first_type == ExprType::PATH && t == ExprType::STRING)
-                || (first_type == ExprType::STRING && t == ExprType::PATH)
-            {
-                continue;
-            }
-            if t.code() == crate::types::TypeCode::Unresolved
-                || first_type.code() == crate::types::TypeCode::Unresolved
-            {
-                continue;
-            }
-            if t != first_type {
-                return Err(ExpressionError::new(format!(
-                    "List literal contains incompatible types: {first_type}, {t}"
-                )));
-            }
+            crate::types::list_element_contribution(&t).unwrap_or(t)
+        })
+        .collect();
+    let elem_type = crate::types::join_list_element_types(types.iter().cloned())
+        .map_err(|_| incompatible_list_types_error(&types))?
+        .unwrap_or(ExprType::NULLTYPE);
+    Ok(ExprValue::unresolved(ExprType::list(elem_type)))
+}
+
+/// The "List literal contains incompatible types" error, listing each
+/// distinct element type once in first-seen order (`int and string`,
+/// `int, float, and string`).
+fn incompatible_list_types_error(types: &[ExprType]) -> ExpressionError {
+    let mut seen: Vec<&ExprType> = Vec::new();
+    for t in types {
+        if !seen.contains(&t) {
+            seen.push(t);
         }
     }
-    let elem_type = if elements.is_empty() {
-        ExprType::NULLTYPE
-    } else {
-        // Compute coerced element type: int+float→float, path+string→string
-        let mut result = unwrap_unresolved(&elements[0].expr_type());
-        for e in elements.iter().skip(1) {
-            let t = unwrap_unresolved(&e.expr_type());
-            if t.code() == crate::types::TypeCode::Unresolved {
-                continue;
-            }
-            if result.code() == crate::types::TypeCode::Unresolved {
-                result = t;
-                continue;
-            }
-            if (result == ExprType::INT && t == ExprType::FLOAT)
-                || (result == ExprType::FLOAT && t == ExprType::INT)
-            {
-                result = ExprType::FLOAT;
-            } else if (result == ExprType::PATH && t == ExprType::STRING)
-                || (result == ExprType::STRING && t == ExprType::PATH)
-            {
-                result = ExprType::STRING;
-            }
-        }
-        result
+    let strs: Vec<String> = seen.iter().map(|t| t.to_string()).collect();
+    let msg = match strs.as_slice() {
+        [a, b] => format!("List literal contains incompatible types: {a} and {b}"),
+        [rest @ .., last] => format!(
+            "List literal contains incompatible types: {}, and {last}",
+            rest.join(", ")
+        ),
+        [] => "List literal contains incompatible types".to_string(),
     };
-    Ok(ExprValue::unresolved(ExprType::list(elem_type)))
+    ExpressionError::new(msg)
 }
 
 /// Walks a chain of `ExprAttribute` nodes by reference and returns the dotted

@@ -53,6 +53,24 @@ fn assert_err(expr: &str, expected: &[&str]) {
 
 // === TestListLiteralTypeInference ===
 #[test]
+fn comp_null_body_is_rejected() {
+    // A comprehension body of `null` (alone or beside other elements)
+    // cannot build a list; `make_list` rejects it before the element join.
+    for expr in [
+        "[None for x in [1, 2]]",
+        "[x if x > 1 else None for x in [1, 2]]",
+    ] {
+        assert_err(
+            expr,
+            &[
+                "Cannot create list from null elements\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+}
+#[test]
 fn list_all_int() {
     assert_eq!(eval("[1, 2, 3]").expr_type().to_string(), "list[int]");
 }
@@ -1770,4 +1788,88 @@ fn flatten_nonempty_comprehension_has_string_type() {
         "expected repr_sh output to contain -e, got: {}",
         result.to_display_string()
     );
+}
+
+// ── Shared list-element join (resolved-value-limits item 24) ──
+//
+// Concrete list literals and comprehensions use the same join as the
+// validation-time hoisting: list types join element-wise with the same
+// promotions as scalars, so `list[int]` beside `list[string]` is an error
+// (RFC 0005 §"List Literal Type Inference" rule 7) rather than a mixed
+// list typed by its first element.
+
+#[test]
+fn nested_list_int_beside_string_fails() {
+    assert_err(
+        "[[1], ['a']]",
+        &[
+            "List literal contains incompatible types: list[int] and list[string]\n",
+            "  [[1], ['a']]\n",
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn nested_list_int_beside_bool_fails() {
+    assert_err(
+        "[[1], [True]]",
+        &[
+            "List literal contains incompatible types: list[int] and list[bool]\n",
+            "  [[1], [True]]\n",
+            "  ^~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn int_float_string_path_fails_pairwise() {
+    // The int/float and path/string pairs do not make all four mutually
+    // compatible. This previously passed the check and panicked in
+    // make_list.
+    assert_err(
+        "[1, 2.0, 'a', path('b')]",
+        &[
+            "List literal contains incompatible types: int, float, string, and path\n",
+            "  [1, 2.0, 'a', path('b')]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_int_float_string_fails_without_panic() {
+    // A comprehension builds through make_list directly; an int, a float
+    // and a string body result previously panicked in its promotion.
+    assert_err(
+        "[1 if x == 1 else (2.5 if x == 2 else 'a') for x in [1, 2, 3]]",
+        &[
+            "make_list expected float element, got string\n",
+            "  [1 if x == 1 else (2.5 if x == 2 else 'a') for x in [1, 2, 3]]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_nested_int_beside_string_fails() {
+    // Previously built a `list[list[string]]` holding `[2]` and `[3]`.
+    assert_err(
+        "[[x] if x > 1 else ['a'] for x in [1, 2, 3]]",
+        &[
+            "make_list expected list[string] element, got list[int]\n",
+            "  [[x] if x > 1 else ['a'] for x in [1, 2, 3]]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_empty_sublist_yields_to_typed_sibling() {
+    let r = eval("[[] if x < 3 else [x] for x in [1, 2, 3]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+    assert_eq!(r.to_display_string(), "[[], [], [3]]");
+    let r = eval("[[x] if x < 2 else [x * 0.5] for x in [1, 2, 3]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[float]]");
+    assert_eq!(r.to_display_string(), "[[1.0], [1.0], [1.5]]");
 }

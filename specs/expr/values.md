@@ -171,7 +171,18 @@ This preserves the separator-normalization invariant workspace-wide: every
 necessary. The `hint_type` parameter determines the element type for empty lists — when
 the list is non-empty, the element type is inferred from the elements themselves.
 
-Promotion rules are applied in priority order — the first matching rule wins:
+Before any promotion, the element types must fold under the shared
+list-element join (see [type-system.md § List element
+join](type-system.md#list-element-join)) — the same join the evaluator uses
+for list literals and for hoisting a list with an `Unresolved` element, so
+every evaluation stage accepts the same combinations. An element that does
+not join the ones before it is a type error, `make_list expected {T}
+element, got {U}`, with `T` the join so far: `[Bool, Int]` →
+`make_list expected bool element, got int`; `[ListInt, ListString]` →
+`make_list expected list[int] element, got list[string]`; `[Int, Float,
+String]` → `make_list expected float element, got string`.
+
+Promotion rules are then applied in priority order — the first matching rule wins:
 
 1. All same type → use that typed variant directly
 2. Mix of INT and FLOAT → promote all to FLOAT (`ListFloat`)
@@ -179,15 +190,18 @@ Promotion rules are applied in priority order — the first matching rule wins:
 4. Nested `list[path]` + `list[string]` → promote inner `ListPath` elements to `ListString`
 5. Mix of PATH and STRING → promote all to STRING (`ListString`)
 6. First element determines variant (homogeneous case)
-7. Incompatible types → error (e.g., INT + STRING, BOOL + FLOAT)
 
 The nested list promotion rules (3, 4) mirror the scalar rules (2, 5) but operate on
 the inner element types. For example, `[ListInt([1,2]), ListFloat([3.0])]` promotes the
 `ListInt` to `ListFloat` before wrapping in `ListList`. This matches the Python
-`_from_list` logic.
+`_from_list` logic. A `ListList` result carries the joined element type, not
+the first element's: an untyped empty list (`list[nulltype]`) beside an
+empty `ListInt` is `list[list[int]]` in either order.
 
 Per the specification (section 1.2.6), incompatible element types are always an error —
-there is no silent fallback to string conversion.
+there is no silent fallback to string conversion, and no list of lists with
+mixed inner element types (`[[1], ['a']]` is an error, not a
+`list[list[int]]` holding a `list[string]`).
 
 Empty list variant selection by `hint_type`:
 
@@ -197,8 +211,9 @@ Empty list variant selection by `hint_type`:
 | INT | `ListInt([])` |
 | FLOAT | `ListFloat([])` |
 | PATH | `ListPath([], host_format)` |
-| LIST[T] | `ListList([], T)` |
-| anything else | `ListInt([])` (canonical empty list) |
+| STRING | `ListString([])` |
+| LIST[T] | `ListList([], LIST[T])` |
+| anything else | `ListList([], NULLTYPE)` (canonical empty list, `list[nulltype]`) |
 
 ## Display Strings
 
