@@ -61,13 +61,126 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
 
 /// Outcome of evaluating a sub-expression whose failure an enclosing
 /// construct may absorb (see [`Evaluator::eval_speculative`]).
-enum Speculative {
-    /// Evaluated to a value; it is tracked.
-    Value(ExprValue),
+enum Speculative<T = ExprValue> {
+    /// Evaluated to a value; a returned `ExprValue` is tracked.
+    Value(T),
     /// Failed with a value error that the caller absorbs. The
     /// evaluator's live footprint has been reset to what it was before
     /// the attempt; the spend (peak memory, operation count) stands.
     Absorbed(ExpressionError),
+}
+
+/// A value an `and`/`or` with an unresolved operand might return at run
+/// time (see [`Evaluator::eval_boolop`]).
+enum BoolOpOutcome {
+    /// Exactly this value. Deduced from an unresolved `bool`, `nulltype`,
+    /// or unknown-typed operand that decides the result — `or` returns a
+    /// `bool` only as `true`, `and` returns any decider only as `false` or
+    /// `null`. Not tracked: it exists only to compare outcomes.
+    Exact(ExprValue),
+    /// Some value of this type: an unresolved operand that may be
+    /// returned. Never `unresolved[T]` itself.
+    Typed(ExprType),
+}
+
+/// Result of [`Evaluator::eval_boolop_outcomes`].
+enum BoolOpEval {
+    /// The result is known: this value, tracked.
+    Value(ExprValue),
+    /// The result is unknown until run time; it is one of `outcomes`.
+    /// Nothing is tracked. A nested `and`/`or` operand passes this list
+    /// to its parent instead of merging it into one union type, so the
+    /// parent still knows that, say, the `bool` of `Flag and 1` can only
+    /// be `false` (`Flag and 1 or 0` → `unresolved[int]`).
+    Outcomes {
+        /// Every value the operator could return. Never empty.
+        outcomes: Vec<BoolOpOutcome>,
+        /// Whether an operand's value error was absorbed (it might
+        /// otherwise have been returned), which rules out a concrete
+        /// result in an enclosing `and`/`or`.
+        absorbed: bool,
+    },
+}
+
+/// Whether the concrete operand `val` decides an `and`/`or` when reached:
+/// `or` returns the first operand that is neither `null` nor `false`,
+/// `and` the first that is. EXPR treats only `null` and `false` as falsy.
+fn boolop_decides(op: ast::BoolOp, val: &ExprValue) -> bool {
+    let falsy = matches!(val, ExprValue::Null | ExprValue::Bool(false));
+    match op {
+        ast::BoolOp::And => falsy,
+        ast::BoolOp::Or => !falsy,
+    }
+}
+
+/// Record what an unresolved, **non-last** `and`/`or` operand of type
+/// `constraint` could return, and report whether it can let evaluation
+/// pass on to the next operand.
+///
+/// Each member of `constraint` (one, or each member of a union) is
+/// classified by the values it denotes:
+///
+/// | Member | `or` returns it as | `or` passes on | `and` returns it as | `and` passes on |
+/// |--------|--------------------|----------------|---------------------|-----------------|
+/// | `nulltype` | — | yes | exactly `null` | no |
+/// | `bool` | exactly `true` | yes (`false`) | exactly `false` | yes (`true`) |
+/// | `any`, a type variable | `any` | yes | exactly `false` or `null` | yes |
+/// | `noreturn` | — | no | — | no |
+/// | any other type `T` | `T` | no | — | yes |
+///
+/// A `false` return means every value of `constraint` decides the
+/// operator (or none returns), so at run time no later operand is ever
+/// evaluated.
+fn unresolved_boolop_outcomes(
+    op: ast::BoolOp,
+    constraint: &ExprType,
+    outcomes: &mut Vec<BoolOpOutcome>,
+) -> bool {
+    use crate::types::TypeCode;
+    let members = if constraint.code() == TypeCode::Union {
+        constraint.params()
+    } else {
+        std::slice::from_ref(constraint)
+    };
+    let mut passes = false;
+    for member in members {
+        match (member.code(), op) {
+            (TypeCode::NoReturn, _) => {}
+            (TypeCode::NullType, ast::BoolOp::Or) => passes = true,
+            (TypeCode::NullType, ast::BoolOp::And) => {
+                outcomes.push(BoolOpOutcome::Exact(ExprValue::Null));
+            }
+            (TypeCode::Bool, ast::BoolOp::Or) => {
+                outcomes.push(BoolOpOutcome::Exact(ExprValue::Bool(true)));
+                passes = true;
+            }
+            (TypeCode::Bool, ast::BoolOp::And) => {
+                outcomes.push(BoolOpOutcome::Exact(ExprValue::Bool(false)));
+                passes = true;
+            }
+            (
+                TypeCode::Any
+                | TypeCode::Unresolved
+                | TypeCode::TypeVarT
+                | TypeCode::TypeVarT1
+                | TypeCode::TypeVarT2
+                | TypeCode::TypeVarT3,
+                _,
+            ) => {
+                match op {
+                    ast::BoolOp::Or => outcomes.push(BoolOpOutcome::Typed(ExprType::ANY)),
+                    ast::BoolOp::And => {
+                        outcomes.push(BoolOpOutcome::Exact(ExprValue::Bool(false)));
+                        outcomes.push(BoolOpOutcome::Exact(ExprValue::Null));
+                    }
+                }
+                passes = true;
+            }
+            (_, ast::BoolOp::Or) => outcomes.push(BoolOpOutcome::Typed(member.clone())),
+            (_, ast::BoolOp::And) => passes = true,
+        }
+    }
+    passes
 }
 
 /// Default memory limit: 100 million bytes.
@@ -295,36 +408,7 @@ impl<'a> Evaluator<'a> {
         node: &ast::Expr,
         target: Option<&crate::types::ExprType>,
     ) -> Result<ExprValue, ExpressionError> {
-        // Bound recursion depth so deep ASTs (e.g., left-associative
-        // binop chains produced from short sources like "1+1+1+...+1")
-        // cannot exhaust the stack. This is the single chokepoint: every
-        // sub-node evaluation goes through `eval_node`, so incrementing
-        // here covers all recursive descent paths.
-        //
-        // See `specs/expr/evaluator.md` (Depth limit) for the rationale.
-        self.recursion_depth += 1;
-        if self.recursion_depth > super::parse::MAX_EXPRESSION_DEPTH {
-            self.recursion_depth -= 1;
-            let err = ExpressionError::expression_too_deep(
-                self.recursion_depth + 1,
-                super::parse::MAX_EXPRESSION_DEPTH,
-            );
-            return Err(match self.expr_source {
-                Some(src) => err.with_node(src, node),
-                None => err,
-            });
-        }
-        let result = self.evaluate_inner(node, target);
-        self.recursion_depth -= 1;
-        // Attach caret context to any error that doesn't already have it
-        match result {
-            Err(e) if e.expr().is_none() => {
-                if let Some(src) = &self.expr_source {
-                    Err(e.with_node(src, node))
-                } else {
-                    Err(e)
-                }
-            }
+        match self.in_node(node, |s| s.evaluate_inner(node, target)) {
             Ok(val) => {
                 if let Some(tt) = target {
                     // Coercion can change the value's size (int -> string,
@@ -351,6 +435,50 @@ impl<'a> Evaluator<'a> {
                     })
                 } else {
                     Ok(val)
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// Run `f`, which evaluates `node`, under the recursion-depth bound,
+    /// and attach `node`'s caret context to an error that has none.
+    /// [`Self::eval_node`] evaluates every sub-node through this; the one
+    /// other caller, [`Self::eval_boolop_operand`], uses it to evaluate a
+    /// nested `and`/`or` to its outcome list rather than to a value.
+    fn in_node<T>(
+        &mut self,
+        node: &ast::Expr,
+        f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,
+    ) -> Result<T, ExpressionError> {
+        // Bound recursion depth so deep ASTs (e.g., left-associative
+        // binop chains produced from short sources like "1+1+1+...+1")
+        // cannot exhaust the stack. This is the single chokepoint: every
+        // sub-node evaluation goes through here, so incrementing here
+        // covers all recursive descent paths.
+        //
+        // See `specs/expr/evaluator.md` (Depth limit) for the rationale.
+        self.recursion_depth += 1;
+        if self.recursion_depth > super::parse::MAX_EXPRESSION_DEPTH {
+            self.recursion_depth -= 1;
+            let err = ExpressionError::expression_too_deep(
+                self.recursion_depth + 1,
+                super::parse::MAX_EXPRESSION_DEPTH,
+            );
+            return Err(match self.expr_source {
+                Some(src) => err.with_node(src, node),
+                None => err,
+            });
+        }
+        let result = f(self);
+        self.recursion_depth -= 1;
+        // Attach caret context to any error that doesn't already have it
+        match result {
+            Err(e) if e.expr().is_none() => {
+                if let Some(src) = &self.expr_source {
+                    Err(e.with_node(src, node))
+                } else {
+                    Err(e)
                 }
             }
             other => other,
@@ -799,79 +927,222 @@ impl<'a> Evaluator<'a> {
         self.dispatch_with_node(op_name, vec![operand], Some(&ast::Expr::UnaryOp(u.clone())))
     }
 
+    /// `and` / `or`. EXPR semantics: `or` returns the first operand that
+    /// is neither `null` nor `false`, `and` the first that is; failing
+    /// that, both return the last operand.
+    ///
+    /// The result is the value [`Self::eval_boolop_outcomes`] computes,
+    /// or, when that is unknown until run time,
+    /// `unresolved(union of the outcome types)`
+    /// (`Task.Param.I or Param.Z` → `unresolved[int]`,
+    /// `Session.HasPathMappingRules and Param.S` →
+    /// `unresolved[bool | string]`).
     fn eval_boolop(&mut self, b: &ast::ExprBoolOp) -> Result<ExprValue, ExpressionError> {
-        self.count_op()?;
-        let mut last = ExprValue::Bool(match b.op {
-            ast::BoolOp::And => true,
-            ast::BoolOp::Or => false,
-        });
-        let mut seen_unresolved = false;
-        let last_index = b.values.len().saturating_sub(1);
-        for (index, node) in b.values.iter().enumerate() {
-            let is_last = index == last_index;
-            if seen_unresolved {
-                // After an unresolved operand, later operands are still
-                // evaluated to catch type errors, but a value error is
-                // absorbed: the unresolved operand might short-circuit
-                // at runtime. A concrete operand that decides the result
-                // is still returned.
-                match self.eval_speculative(node, None)? {
-                    Speculative::Value(val) => match b.op {
-                        ast::BoolOp::And => {
-                            if matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
-                                return Ok(val);
-                            }
-                            self.release(&val);
-                        }
-                        ast::BoolOp::Or => {
-                            if !matches!(&val, ExprValue::Null | ExprValue::Bool(false)) {
-                                return Ok(val);
-                            }
-                            self.release(&val);
-                        }
-                    },
-                    Speculative::Absorbed(_) => {}
-                }
-                continue;
+        match self.eval_boolop_outcomes(b)? {
+            BoolOpEval::Value(val) => Ok(val),
+            BoolOpEval::Outcomes { outcomes, .. } => {
+                let types = outcomes
+                    .into_iter()
+                    .map(|o| match o {
+                        BoolOpOutcome::Exact(v) => v.expr_type(),
+                        BoolOpOutcome::Typed(t) => t,
+                    })
+                    .collect();
+                self.track(ExprValue::unresolved(ExprType::union(types)))
             }
+        }
+    }
+
+    /// Evaluate one `and`/`or` operand. A nested `and`/`or` is evaluated
+    /// to its outcome list (see [`BoolOpEval::Outcomes`]); any other node
+    /// to a value, unconstrained.
+    fn eval_boolop_operand(&mut self, node: &ast::Expr) -> Result<BoolOpEval, ExpressionError> {
+        match node {
+            ast::Expr::BoolOp(inner) => self.in_node(node, |s| s.eval_boolop_outcomes(inner)),
             // RFC 0005: and/or operands evaluate unconstrained. The
             // operator returns one of its operands, so the parent target
             // applies to the *returned* value via this node's own
             // coercion in `eval_node` — not to each operand, which
             // would fail on the discarded ones (`true and 0` with an
             // `int` target must not try to coerce the `true`).
-            last = self.eval_node(node, None)?;
-            if last.is_unresolved() {
-                // The result will be a fresh `Unresolved(BOOL)`, so this
-                // placeholder is not kept.
-                self.release(&last);
-                seen_unresolved = true;
-                continue;
-            }
-            match b.op {
-                // EXPR semantics: and/or only short-circuit on null and bool false
-                ast::BoolOp::And => {
-                    if matches!(&last, ExprValue::Null | ExprValue::Bool(false)) {
-                        return Ok(last);
+            _ => self.eval_node(node, None).map(BoolOpEval::Value),
+        }
+    }
+
+    /// The work of [`Self::eval_boolop`].
+    ///
+    /// Up to the first unresolved operand this is plain short-circuit
+    /// evaluation. From it on, the run-time result may be the unresolved
+    /// operand itself or any operand after it that evaluation can reach,
+    /// so the result is never simply a later concrete operand. Instead the
+    /// loop collects every value the operator could return — see
+    /// [`unresolved_boolop_outcomes`] for what an unresolved operand
+    /// contributes; a nested `and`/`or` operand contributes each of its
+    /// own outcomes that would decide this operator (an exact value by
+    /// [`boolop_decides`], a type like an unresolved operand of that
+    /// type); a reached concrete operand that decides, or the last one,
+    /// contributes itself and ends the loop — and returns:
+    ///
+    /// - that value, concretely, when every outcome is the same value — a
+    ///   lone reached concrete operand (`Task.Param.I and Param.N` →
+    ///   `Param.N`: an `int` never decides `and`), or one exact `bool` /
+    ///   `null` (`Session.HasPathMappingRules and false` → `false`) — and
+    ///   no operand was absorbed;
+    /// - the first absorbed error, when no outcome is left: every
+    ///   operand before it passes on, so every run reaches a failure;
+    /// - otherwise [`BoolOpEval::Outcomes`].
+    ///
+    /// Operands after an unresolved one are evaluated speculatively: a
+    /// value error is absorbed (run time may never reach the operand, and
+    /// one that is reached fails, returning nothing), a budget error
+    /// propagates. Evaluation stops at an unresolved operand whose type
+    /// always decides (`Task.Param.I or …`: an `int` is never falsy), since
+    /// run time never evaluates anything after it.
+    fn eval_boolop_outcomes(&mut self, b: &ast::ExprBoolOp) -> Result<BoolOpEval, ExpressionError> {
+        self.count_op()?;
+        let mut seen_unresolved = false;
+        // The first value error absorbed in this operator's operands.
+        let mut absorbed: Option<ExpressionError> = None;
+        // Whether a nested `and`/`or` operand absorbed one.
+        let mut nested_absorbed = false;
+        let mut outcomes: Vec<BoolOpOutcome> = Vec::new();
+        // The reached concrete operand that ends the loop after an
+        // unresolved one (it decides, or is last). It stays tracked.
+        let mut concrete: Option<ExprValue> = None;
+        let last_index = b.values.len().saturating_sub(1);
+        for (index, node) in b.values.iter().enumerate() {
+            let is_last = index == last_index;
+            let operand = if seen_unresolved {
+                match self.speculate(|s| s.eval_boolop_operand(node))? {
+                    Speculative::Value(operand) => operand,
+                    Speculative::Absorbed(e) => {
+                        absorbed.get_or_insert(e);
+                        continue;
                     }
                 }
-                ast::BoolOp::Or => {
-                    if !matches!(&last, ExprValue::Null | ExprValue::Bool(false)) {
-                        return Ok(last);
+            } else {
+                self.eval_boolop_operand(node)?
+            };
+            // Whether evaluation can pass on to the next operand.
+            let passes = match operand {
+                BoolOpEval::Outcomes {
+                    outcomes: inner,
+                    absorbed: inner_absorbed,
+                } => {
+                    seen_unresolved = true;
+                    nested_absorbed |= inner_absorbed;
+                    let mut passes = false;
+                    for outcome in inner {
+                        match outcome {
+                            BoolOpOutcome::Exact(v) => {
+                                if is_last || boolop_decides(b.op, &v) {
+                                    outcomes.push(BoolOpOutcome::Exact(v));
+                                } else {
+                                    passes = true;
+                                }
+                            }
+                            BoolOpOutcome::Typed(t) if is_last => {
+                                outcomes.push(BoolOpOutcome::Typed(t));
+                            }
+                            BoolOpOutcome::Typed(t) => {
+                                passes |= unresolved_boolop_outcomes(b.op, &t, &mut outcomes);
+                            }
+                        }
+                    }
+                    passes
+                }
+                BoolOpEval::Value(val) if val.is_unresolved() => {
+                    // The result carries only types, so the placeholder
+                    // is not kept.
+                    let constraint = unwrap_unresolved(&val.expr_type());
+                    self.release(&val);
+                    seen_unresolved = true;
+                    if is_last {
+                        // The last operand is returned whatever its value.
+                        let t = if constraint.code() == crate::types::TypeCode::Unresolved {
+                            ExprType::ANY
+                        } else {
+                            constraint
+                        };
+                        outcomes.push(BoolOpOutcome::Typed(t));
+                        true
+                    } else {
+                        unresolved_boolop_outcomes(b.op, &constraint, &mut outcomes)
                     }
                 }
-            }
-            // This operand did not decide the result and is replaced by
-            // the next one. The final operand is returned, so it stays
-            // tracked.
-            if !is_last {
-                self.release(&last);
+                BoolOpEval::Value(val) => {
+                    if boolop_decides(b.op, &val) || is_last {
+                        if !seen_unresolved {
+                            return Ok(BoolOpEval::Value(val));
+                        }
+                        concrete = Some(val);
+                        break;
+                    }
+                    // This operand did not decide the result and is never
+                    // returned.
+                    self.release(&val);
+                    true
+                }
+            };
+            if !passes {
+                break;
             }
         }
-        if seen_unresolved {
-            return self.track(ExprValue::unresolved(ExprType::BOOL));
+        if !seen_unresolved {
+            // Unreachable: the parser gives a boolop at least two
+            // operands, and without an unresolved one the last returns.
+            let val = self.track(ExprValue::Bool(matches!(b.op, ast::BoolOp::And)))?;
+            return Ok(BoolOpEval::Value(val));
         }
-        Ok(last)
+        let any_absorbed = absorbed.is_some() || nested_absorbed;
+        // Every possible result is one value: return it concretely. An
+        // absorbed operand might have been the one returned, had it not
+        // failed, so it rules this out.
+        if !any_absorbed {
+            // Exact outcomes are only `bool`/`null`; compare variants
+            // directly so no cross-type equality can merge them.
+            let same = |a: &ExprValue, b: &ExprValue| match (a, b) {
+                (ExprValue::Null, ExprValue::Null) => true,
+                (ExprValue::Bool(x), ExprValue::Bool(y)) => x == y,
+                _ => false,
+            };
+            let mut exact: Option<&ExprValue> = concrete.as_ref();
+            let mut agree = true;
+            for outcome in &outcomes {
+                match outcome {
+                    BoolOpOutcome::Exact(v) => match exact {
+                        None => exact = Some(v),
+                        Some(e) => agree &= same(e, v),
+                    },
+                    BoolOpOutcome::Typed(_) => agree = false,
+                }
+            }
+            if agree {
+                if let Some(c) = concrete {
+                    return Ok(BoolOpEval::Value(c));
+                }
+                if let Some(v) = exact {
+                    let v = v.clone();
+                    return Ok(BoolOpEval::Value(self.track(v)?));
+                }
+            }
+        }
+        if let Some(c) = concrete {
+            // Folded into the outcome list, which tracks nothing.
+            self.release(&c);
+            outcomes.push(match c {
+                ExprValue::Null | ExprValue::Bool(_) => BoolOpOutcome::Exact(c),
+                other => BoolOpOutcome::Typed(other.expr_type()),
+            });
+        } else if outcomes.is_empty() {
+            if let Some(e) = absorbed {
+                return Err(e);
+            }
+        }
+        Ok(BoolOpEval::Outcomes {
+            outcomes,
+            absorbed: any_absorbed,
+        })
     }
 
     fn eval_compare(&mut self, c: &ast::ExprCompare) -> Result<ExprValue, ExpressionError> {
@@ -1494,8 +1765,18 @@ impl<'a> Evaluator<'a> {
         node: &ast::Expr,
         target: Option<&crate::types::ExprType>,
     ) -> Result<Speculative, ExpressionError> {
+        self.speculate(|s| s.eval_node(node, target))
+    }
+
+    /// [`Self::eval_speculative`] for an arbitrary evaluation `f` (a
+    /// nested `and`/`or` evaluated to its outcomes), with the same two
+    /// absorption rules.
+    fn speculate<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,
+    ) -> Result<Speculative<T>, ExpressionError> {
         let baseline = self.current_memory;
-        match self.eval_node(node, target) {
+        match f(self) {
             Ok(v) => Ok(Speculative::Value(v)),
             Err(e) if contains_budget_error(&e) => Err(e),
             Err(e) => {
