@@ -672,6 +672,139 @@ fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
         .expect("an unresolved comprehension filter must not fail job creation");
 }
 
+/// A list literal or comprehension mixing a concrete `Param.*`-derived
+/// element with an unresolved `Task.*` one joins element types exactly as
+/// the concrete list does: an empty concrete list (`list[nulltype]`, here
+/// a comprehension over `range(Param.N)` that filters to nothing) yields
+/// to the unresolved `list[int]` sibling. Regression test
+/// (resolved-value-limits item 24): `openjd check` passed this template
+/// while `create_job` rejected both args with "List literal contains
+/// incompatible types: list[nulltype], list[int]" (and `list[int],
+/// list[nulltype]`), though every session evaluates them cleanly.
+#[test]
+fn list_join_empty_concrete_list_beside_task_param_list_passes_create_job() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "ListJoin",
+        "parameterDefinitions": [
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": "1-2"}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": [
+                    "{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}",
+                    "{{ repr_json([[] if x > 1 else [Task.Param.Frame] for x in range(Param.N)]) }}"
+                ]
+            }}}
+        }]
+    }"#;
+    let job = create_default(template, &[("X", "x"), ("N", "3")])
+        .expect("a concrete empty list beside an unresolved list must not fail job creation");
+    assert_eq!(job.steps.len(), 1);
+    // The task-scope args are carried forward unresolved, for the worker
+    // to evaluate per task.
+    let args = job.steps[0].script.actions.on_run.args.as_ref().unwrap();
+    let raws: Vec<&str> = args.iter().map(|a| a.raw()).collect();
+    assert_eq!(
+        raws,
+        [
+            "{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}",
+            "{{ repr_json([[] if x > 1 else [Task.Param.Frame] for x in range(Param.N)]) }}",
+        ]
+    );
+}
+
+/// An `or` whose first operand is a task parameter always returns that
+/// parameter at run time — an `INT` is never null or false — so a later
+/// `Param.*` operand that would fail (here `Param.Z = 0` as a divisor) is
+/// never used. Regression test (resolved-value-limits item 25):
+/// `openjd check` passed this template while `create_job` rejected it with
+/// "Division by zero", because `eval_boolop` returned the concrete
+/// `Param.Z` after the unresolved `Task.Param.Frame`.
+#[test]
+fn boolop_or_task_param_before_failing_param_operand_passes_create_job() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "BoolOp",
+        "parameterDefinitions": [
+            {"name": "Z", "type": "INT"}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": "1-2"}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": ["{{ 10 // (Task.Param.Frame or Param.Z) }}"]
+            }}}
+        }]
+    }"#;
+    let job = create_default(template, &[("Z", "0")])
+        .expect("a later and/or operand the run time never returns must not fail job creation");
+    let args = job.steps[0].script.actions.on_run.args.as_ref().unwrap();
+    let raws: Vec<&str> = args.iter().map(|a| a.raw()).collect();
+    assert_eq!(raws, ["{{ 10 // (Task.Param.Frame or Param.Z) }}"]);
+}
+
+/// The `cond and A or B` idiom: the inner `and` returns its condition
+/// only as `false`, which passes the outer `or` on, so the result is
+/// `A`'s or `B`'s type — never `bool`. Regression test for the item-25
+/// fix: merging the inner `and` to `unresolved[bool | float]` made
+/// `openjd check` (template decode) reject both args ("Cannot use '*'
+/// operator with bool | float and int", "Index must be an integer"),
+/// though every run succeeds.
+#[test]
+fn boolop_cond_and_value_or_fallback_idiom_passes_check_and_create_job() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "BoolOp",
+        "parameterDefinitions": [
+            {"name": "Scale", "type": "FLOAT"},
+            {"name": "Name", "type": "STRING"}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": "1-3"}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": [
+                    "{{ (Task.Param.Frame > 1 and Param.Scale or 1.0) * 2 }}",
+                    "{{ Param.Name[Task.Param.Frame > 1 and 1 or 0] }}"
+                ]
+            }}}
+        }]
+    }"#;
+    let job = create_default(template, &[("Scale", "2.5"), ("Name", "ab")])
+        .expect("`cond and A or B` must pass template validation and job creation");
+    let args = job.steps[0].script.actions.on_run.args.as_ref().unwrap();
+    let raws: Vec<&str> = args.iter().map(|a| a.raw()).collect();
+    assert_eq!(
+        raws,
+        [
+            "{{ (Task.Param.Frame > 1 and Param.Scale or 1.0) * 2 }}",
+            "{{ Param.Name[Task.Param.Frame > 1 and 1 or 0] }}"
+        ]
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // Step-script and environment `let` bindings share one check path
 // ══════════════════════════════════════════════════════════════

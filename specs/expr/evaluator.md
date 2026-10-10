@@ -375,16 +375,82 @@ of its operands, the parent's target applies to the returned value via
 the node's own result coercion — never to the operands themselves, which
 would fail on the discarded ones (issue #291, case B).
 
-When an earlier operand is unresolved, subsequent operands are still evaluated (to
-catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
-subsequent concrete operand proves the result by short-circuiting (e.g.,
-`Unresolved and false` returns `false`). Operands after the unresolved one are
-evaluated speculatively (see [Speculative evaluation](#speculative-evaluation)): a
-value error is absorbed, since a runtime short-circuit could make the operand
-unreachable; a budget error propagates. Every operand value the result does not
-carry is released: the unresolved placeholder (the result is a fresh
-`Unresolved(BOOL)`), a concrete operand replaced by the next, and a speculative
-operand that did not decide the result.
+Up to the first unresolved operand, evaluation is plain short-circuiting. From it
+on, the run-time result may be the unresolved operand itself or any operand after
+it that evaluation can reach, so a later concrete operand is never returned just
+because it would decide the result: at job creation (`Param.*` concrete,
+`Task.*`/`Session.*` unresolved) that would return a value run time never
+produces, and a value error on it would reject a valid job
+(`10 // (Task.Param.I or Param.Z)` with `Param.Z = 0`; resolved-value-limits
+item 25). Instead the evaluator collects every value the operator could return.
+An unresolved operand of type `T`, when it is **not** the last, contributes per
+member of `T` (each union member, or `T` itself):
+
+| Member | `or` returns it as | `or` passes on | `and` returns it as | `and` passes on |
+|--------|--------------------|----------------|---------------------|-----------------|
+| `nulltype` | — | yes | exactly `null` | no |
+| `bool` | exactly `true` | yes (`false`) | exactly `false` | yes (`true`) |
+| `any`, a type variable | `any` | yes | exactly `false` or `null` | yes |
+| `noreturn` | — | no | — | no |
+| any other type `U` | `U` | no | — | yes |
+
+An unresolved **last** operand contributes its whole type (it is returned
+whatever its value). A reached concrete operand that decides, or the last one,
+contributes itself. Evaluation stops at that concrete operand, and also at an
+unresolved operand none of whose members passes on (`Task.Param.I or …`: an `int`
+is never falsy) — run time never evaluates anything after it, so nothing after it
+is evaluated or charged against the budget here either.
+
+A **nested** `and`/`or` operand (`cond and A or B` parses as
+`(cond and A) or B`) whose own result is unknown is not merged into one union
+first: it hands its outcome list to the parent (`eval_boolop_outcomes`), and
+each outcome is classified for the parent operator — an exact value decides it
+or passes on per the falsy rule, a type is classified like an unresolved operand
+of that type (or contributed whole when the nested operator is the last
+operand). This keeps the fact that the `bool` of `Flag and A` can only be
+`false`, which passes `or` on, so `Flag and 1 or 0` → `unresolved[int]` and
+`(Flag and Param.F or 1.0) * 2` type-checks; merging first would give
+`unresolved[bool | int]` and keep a `bool` member that no run can return.
+
+The result is:
+
+- **concrete** when no operand was absorbed (in this operator or a nested one)
+  and every outcome is the same value: a lone reached concrete operand
+  (`Task.Param.I and Param.N` → `Param.N`, since an `int` never decides `and`),
+  or one exact `bool`/`null` (`Session.HasPathMappingRules and false` → `false`;
+  `X or true` → `true` when `X` is `bool`- or `nulltype`-typed — an `any` or
+  other-typed `X` may itself be returned, giving a union);
+- **the first absorbed error**, re-raised, when no outcome remains and an
+  operand was absorbed: every operand before it passes on, so every run reaches
+  a failure (`Task.Param.I and fail('x')` reports `x`, not a coercion error on
+  `noreturn`);
+- otherwise **`unresolved(union of the outcome types)`**, normalized by
+  `ExprType::union`: `Task.Param.I or Param.Z` → `unresolved[int]`,
+  `Session.HasPathMappingRules and Param.S` → `unresolved[bool | string]` (so
+  `(… and Param.S).upper()` type-checks: dispatch accepts a union receiver a
+  member of which matches), `Task.Param.O or Param.S` with `O: int | nulltype` →
+  `unresolved[int | string]`, `Task.Param.NB and false` with
+  `NB: bool | nulltype` → `unresolved[bool | nulltype]`. A boolop with no
+  possible outcome and nothing absorbed (every candidate `noreturn`) is
+  `unresolved[noreturn]`.
+
+The parent target still applies only to the returned value, through
+`eval_node`'s coercion; for a union-typed `Unresolved`, `ExprValue::coerce`
+keeps the members that have a rule toward the target
+(`Session.HasPathMappingRules or Param.S` with a `bool` target →
+`unresolved[bool]`).
+
+Operands after the first unresolved one are evaluated speculatively (see
+[Speculative evaluation](#speculative-evaluation)): a value error is absorbed —
+run time may never reach the operand, and if it does the evaluation fails there,
+so the operand contributes no outcome — and a budget error propagates. Every
+operand value the result does not carry is released: unresolved placeholders (the
+result carries only types), a concrete operand that did not decide, and a decided
+concrete operand folded into an `unresolved` union. A nested `and`/`or` that
+hands up its outcome list has released everything it evaluated; it is still
+evaluated through the same depth bound, caret attachment (`in_node`), and
+absorption rules (`speculate`, the generic form of `eval_speculative`) as any
+other operand.
 
 ### Speculative evaluation
 
@@ -455,6 +521,36 @@ Evaluates list literals. Validates max 2 nesting levels. Coerces elements when m
 types are present (int→float, path→string). Empty lists use the target type context
 to determine element type.
 
+Without a `list[T]` target, the element types must join under the shared
+list-element join (see [type-system.md § List element
+join](type-system.md#list-element-join)); otherwise the literal fails with
+"List literal contains incompatible types: …", listing each distinct element
+type once in first-seen order (`int and string`, `int, float, string, and
+path`). The same join decides the concrete list's element type in
+`make_list` and the hoisted element type below, so the three evaluation
+stages — template validation (all symbols unresolved), job creation
+(`Param.*` concrete, `Task.*`/`Session.*` unresolved), and run time (all
+concrete) — accept and reject the same combinations.
+
+A literal with any `Unresolved` element hoists to a top-level
+`unresolved(list[T])` (`unresolved_list_from_elements`), never a list
+nesting an `Unresolved`. `T` is the join of the element types, an unresolved
+element contributing its constraint: a concrete empty list `list[nulltype]`
+yields to an unresolved `list[int]` sibling (`[[], [Task.Param.I]]` →
+`unresolved[list[list[int]]]`), nested lists promote (`[[Param.N],
+[Task.Param.F]]` → `unresolved[list[list[float]]]`), and a union element
+joins through its compatible members (`[Task.Param.I ** 2, Param.N]` →
+`unresolved[list[float | int]]`; `[([] if H else [1]), [Task.Param.S]]` →
+`unresolved[list[list[string]]]` through the union's empty-list member). An optional element contributes its
+non-null member (`[Task.Param.I if H else None]` → `unresolved[list[int]]`),
+so `[I if H else None, S if H else None]` fails as the `int and string`
+conflict and its nested form as `list[int] and list[string]` — every value of
+either fails at run time. Incompatible elements are the same error as for a
+concrete literal, naming each element by the type it contributes. A
+concrete `null` element (only a comprehension body can produce one — a
+literal rejects `None` first) fails as "Cannot create list from null
+elements", the message `make_list` gives the same list at run time.
+
 Memory accounting: each element is tracked as it is evaluated, then released as the
 elements are consumed into the list, which is charged as one value (or as a
 type-only `Unresolved` placeholder when any element is unresolved). A literal's
@@ -482,6 +578,27 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   a hard error here would reject templates that both validate and run.
   A filter whose *type* can never be a boolean is still an error on
   both paths.
+- Over a concrete iterable, the results build through `make_list`, which
+  applies the shared list-element join; an incompatible pair fails with
+  "make_list expected `T` element, got `U`" (`T` the join of the elements
+  before it). When any result is `Unresolved` (the body references an
+  unresolved symbol on some iterations), the comprehension hoists exactly
+  as a list literal does, with the joined element type:
+  `[[] if x > 2 else [Task.Param.I] for x in Param.L]` at job creation is
+  `unresolved[list[list[int]]]`, and `[[x] if x > 2 else [Task.Param.F] for
+  x in Param.L]` is `unresolved[list[list[float]]]` — the types run time
+  builds. `[[x] if x > 2 else [Task.Param.S] for x in Param.L]` fails at
+  job creation as it does at run time (`list[int]` beside `list[string]`),
+  though template validation, typing the body once as a union, accepts it.
+- Over an unresolved iterable (or an unresolved filter), the result is
+  `unresolved(list[T])` with `T` the body type's list-element contribution
+  (see [type-system.md § List element join](type-system.md#list-element-join)):
+  a `null` member is dropped (`int?` gives `list[int]`) and the result is
+  simplified as a join result, so `list[nulltype]` yields to a typed list
+  member and `[[] if x > 2 else [Task.Param.S] for x
+  in Param.L]` is `unresolved[list[list[string]]]` at template validation as
+  at job creation. A body that can only be `null` keeps its type (the
+  comprehension still succeeds over an empty iterable).
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**

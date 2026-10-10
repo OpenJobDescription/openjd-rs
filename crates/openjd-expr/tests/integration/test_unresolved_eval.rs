@@ -521,7 +521,7 @@ fn list_unknown_incompatible_error() {
         "[A, B]",
         &st,
         &[
-            "List literal contains incompatible types: int, string\n",
+            "List literal contains incompatible types: int and string\n",
             "  [A, B]\n",
             "  ^~~~~~",
         ],
@@ -1722,4 +1722,1039 @@ fn comp_filter_unresolved_unconstrained_succeeds() {
     let st = st_unresolved(vec![("L", "list[int]"), ("P", "unresolved")]);
     let r = eval_u("[x for x in L if P]", &st);
     assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+}
+
+// ══════════════════════════════════════════════════════════════
+// List element join under mixed resolution (resolved-value-limits item 24)
+//
+// List literals and comprehensions with an unresolved element hoist to
+// `unresolved[list[T]]`, with `T` computed by the same join `make_list`
+// applies to the concrete list. The three symbol states a template sees:
+// pass 8 (everything unresolved), gate 2 / `create_job` (`Param.*`
+// concrete, `Task.*` / `Session.*` unresolved), and run time (everything
+// concrete). Each case asserts the hoisted type at the unresolved stages
+// and the concrete type at run time.
+// ══════════════════════════════════════════════════════════════
+
+/// The three symbol states for the item-24 cases: `Param.L = [1, 2, 3]`,
+/// `Param.N = 3`, `Param.F = 2.5`, `Param.S = 'abc'`; `Task.Param.I/F/S/P`
+/// int/float/string/path; `Session.HasPathMappingRules` bool.
+fn join_states() -> [SymbolTable; 3] {
+    let float = |f: f64| ExprValue::Float(value::Float64::new(f).unwrap());
+    let params = [
+        ("Param.L", "list[int]", ExprValue::ListInt(vec![1, 2, 3])),
+        ("Param.N", "int", ExprValue::Int(3)),
+        ("Param.F", "float", float(2.5)),
+        ("Param.S", "string", ExprValue::String("abc".into())),
+    ];
+    let tasks = [
+        ("Task.Param.I", "int", ExprValue::Int(2)),
+        ("Task.Param.F", "float", float(1.5)),
+        ("Task.Param.S", "string", ExprValue::String("x".into())),
+        (
+            "Task.Param.P",
+            "path",
+            ExprValue::new_path("/tmp/a", PathFormat::host()),
+        ),
+        ("Session.HasPathMappingRules", "bool", ExprValue::Bool(true)),
+    ];
+    let (mut pass8, mut gate2, mut run) =
+        (SymbolTable::new(), SymbolTable::new(), SymbolTable::new());
+    for (k, t, v) in params {
+        pass8.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        gate2.set(k, v.clone()).unwrap();
+        run.set(k, v).unwrap();
+    }
+    for (k, t, v) in tasks {
+        pass8.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        gate2.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        run.set(k, v).unwrap();
+    }
+    [pass8, gate2, run]
+}
+
+/// Assert the result type of `expr` at pass 8, gate 2, and run time.
+fn assert_join_types(expr: &str, pass8: &str, gate2: &str, run: &str) {
+    let [p8, g2, rt] = join_states();
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp(pass8), "pass 8: {expr}");
+    assert_eq!(eval_u(expr, &g2).expr_type(), tp(gate2), "gate 2: {expr}");
+    assert_eq!(eval_u(expr, &rt).expr_type(), tp(run), "run time: {expr}");
+}
+
+#[test]
+fn join_union_with_empty_list_member_beside_other_list_type() {
+    // Auditor iteration-2 finding B1: the `[]` member of the conditional
+    // joins with `list[string]` (the run with H true builds
+    // `[[], ['x']]`), so the union's other member `list[int]` failing to
+    // join does not reject the list.
+    assert_join_types(
+        "[([] if Session.HasPathMappingRules else [1]), [Task.Param.S]]",
+        "unresolved[list[list[string]]]",
+        "unresolved[list[list[string]]]",
+        "list[list[string]]",
+    );
+    assert_join_types(
+        "[[Task.Param.S], ([] if Session.HasPathMappingRules else Param.L)]",
+        "unresolved[list[list[string]]]",
+        "unresolved[list[list[string]]]",
+        "list[list[string]]",
+    );
+}
+
+#[test]
+fn join_gate2_listcomp_empty_list_beside_unresolved_list() {
+    // Previously gate 2: "List literal contains incompatible types:
+    // list[int], list[nulltype]".
+    assert_join_types(
+        "[[] if x > 2 else [Task.Param.I] for x in Param.L]",
+        "unresolved[list[list[int]]]",
+        "unresolved[list[list[int]]]",
+        "list[list[int]]",
+    );
+    // Auditor finding N1: over an unresolved iterable (pass 8) the body's
+    // `list[string] | list[nulltype]` is joined to `list[string]`, so the
+    // element's methods type-check as they do at gate 2 and run time.
+    assert_join_types(
+        "[[] if x > 2 else [Task.Param.S] for x in Param.L][0][0].upper()",
+        "unresolved[string]",
+        "unresolved[string]",
+        "string",
+    );
+}
+
+#[test]
+fn join_gate2_empty_concrete_comprehension_beside_unresolved_list() {
+    // An empty concrete comprehension is `list[nulltype]`; it yields to
+    // the unresolved `list[int]` sibling, also through enclosing calls.
+    let inner = "[[x for x in Param.L if x > 100], [Task.Param.I]]";
+    assert_join_types(
+        inner,
+        "unresolved[list[list[int]]]",
+        "unresolved[list[list[int]]]",
+        "list[list[int]]",
+    );
+    assert_join_types(
+        &format!("repr_json({inner})"),
+        "unresolved[string]",
+        "unresolved[string]",
+        "string",
+    );
+    assert_join_types(
+        &format!("flatten({inner})"),
+        "unresolved[list[int]]",
+        "unresolved[list[int]]",
+        "list[int]",
+    );
+    assert_join_types(
+        &format!("len({inner})"),
+        "unresolved[int]",
+        "unresolved[int]",
+        "int",
+    );
+}
+
+#[test]
+fn join_gate2_listcomp_list_int_beside_list_float() {
+    // Previously gate 2: "list[float], list[int]".
+    assert_join_types(
+        "[[x] if x > 2 else [Task.Param.F] for x in Param.L]",
+        "unresolved[list[list[float] | list[int]]]",
+        "unresolved[list[list[float]]]",
+        "list[list[float]]",
+    );
+    assert_join_types(
+        "[Param.L if x > 2 else [Task.Param.F] for x in Param.L]",
+        "unresolved[list[list[float] | list[int]]]",
+        "unresolved[list[list[float]]]",
+        "list[list[float]]",
+    );
+}
+
+#[test]
+fn join_gate2_listcomp_list_string_beside_list_path() {
+    // Previously gate 2: "list[path], list[string]".
+    assert_join_types(
+        "[[Task.Param.S] if x > 2 else [Task.Param.P] for x in Param.L]",
+        "unresolved[list[list[path] | list[string]]]",
+        "unresolved[list[list[string]]]",
+        "list[list[string]]",
+    );
+}
+
+#[test]
+fn join_gate2_listcomp_union_beside_member() {
+    // Previously gate 2: "float | int, int". The values decide whether the
+    // run-time list is `list[int]` (here) or `list[float]`, so the hoisted
+    // element type is the union of both.
+    assert_join_types(
+        "[x if x > 2 else (Task.Param.I if Session.HasPathMappingRules else Param.F) for x in Param.L]",
+        "unresolved[list[float | int]]",
+        "unresolved[list[float | int]]",
+        "list[int]",
+    );
+}
+
+#[test]
+fn join_pass8_empty_list_beside_unresolved_list() {
+    assert_join_types(
+        "[[], [Task.Param.I]]",
+        "unresolved[list[list[int]]]",
+        "unresolved[list[list[int]]]",
+        "list[list[int]]",
+    );
+}
+
+#[test]
+fn join_pass8_nested_int_float_and_string_path() {
+    assert_join_types(
+        "[[Param.N], [Task.Param.F]]",
+        "unresolved[list[list[float]]]",
+        "unresolved[list[list[float]]]",
+        "list[list[float]]",
+    );
+    assert_join_types(
+        "[[Param.S], [Task.Param.P]]",
+        "unresolved[list[list[string]]]",
+        "unresolved[list[list[string]]]",
+        "list[list[string]]",
+    );
+    assert_join_types(
+        "flatten([[Task.Param.F], Param.L])",
+        "unresolved[list[float]]",
+        "unresolved[list[float]]",
+        "list[float]",
+    );
+}
+
+#[test]
+fn join_pass8_union_beside_member() {
+    // `int ** int` is `float | int` (a negative exponent gives a float).
+    assert_join_types(
+        "[Task.Param.I ** 2, Param.N]",
+        "unresolved[list[float | int]]",
+        "unresolved[list[float | int]]",
+        "list[int]",
+    );
+}
+
+#[test]
+fn join_stays_sound_nested_int_beside_string() {
+    // The join does not accept what the concrete list rejects:
+    // `list[int]` beside `list[string]` is incompatible at every stage.
+    let [p8, g2, rt] = join_states();
+    for st in [&p8, &g2, &rt] {
+        assert_err_w(
+            "[[Param.N], [Task.Param.S]]",
+            st,
+            &[
+                "List literal contains incompatible types: list[int] and list[string]\n",
+                "  [[Param.N], [Task.Param.S]]\n",
+                "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            ],
+        );
+    }
+}
+
+#[test]
+fn join_stays_sound_listcomp_int_beside_string() {
+    // Pass 8 types the body once as a union and accepts; gate 2 sees one
+    // concrete `list[int]` beside an unresolved `list[string]` and rejects,
+    // exactly as run time does when it builds the list.
+    let expr = "[[x] if x > 2 else [Task.Param.S] for x in Param.L]";
+    let [p8, g2, rt] = join_states();
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[list[list[int] | list[string]]]")
+    );
+    assert_err_w(
+        expr,
+        &g2,
+        &[
+            "List literal contains incompatible types: list[string] and list[int]\n",
+            "  [[x] if x > 2 else [Task.Param.S] for x in Param.L]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+    assert_err_w(
+        expr,
+        &rt,
+        &[
+            "make_list expected list[string] element, got list[int]\n",
+            "  [[x] if x > 2 else [Task.Param.S] for x in Param.L]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn join_union_drops_incompatible_and_null_members() {
+    // A union element joins through its compatible members only: a value
+    // of an incompatible member fails at run time, so it never contributes
+    // to a list that is built.
+    let st = st_unresolved(vec![("U", "int | string"), ("N", "int?"), ("I", "int")]);
+    assert_eq!(
+        eval_u("[U, I]", &st).expr_type(),
+        tp("unresolved[list[int]]")
+    );
+    assert_eq!(
+        eval_u("[N, 1]", &st).expr_type(),
+        tp("unresolved[list[int]]")
+    );
+    assert_err_w(
+        "[U, I, path('a')]",
+        &st,
+        &[
+            "List literal contains incompatible types: int | string, int, and path\n",
+            "  [U, I, path('a')]\n",
+            "  ^~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn join_optional_elements_drop_null_member() {
+    // Auditor finding B1: a `null` element always fails, so an optional
+    // element contributes only its non-null member — never a top-level
+    // `nulltype` element type.
+    let [p8, g2, rt] = join_states();
+    let expr = "[Task.Param.I if Session.HasPathMappingRules else None]";
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(eval_u(expr, &g2).expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(eval_u(expr, &rt).expr_type(), tp("list[int]"));
+    let expr = "[Task.Param.I if Session.HasPathMappingRules else None, Param.F]";
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[list[float]]"));
+    assert_eq!(eval_u(expr, &g2).expr_type(), tp("unresolved[list[float]]"));
+    assert_eq!(eval_u(expr, &rt).expr_type(), tp("list[float]"));
+}
+
+#[test]
+fn join_optional_elements_of_incompatible_types_are_rejected() {
+    // Auditor finding B1, probe 1: `int?` beside `string?` previously
+    // joined member-wise to `nulltype` and was accepted, although every
+    // run-time value fails (int/string conflict, or a null element).
+    let [p8, g2, _] = join_states();
+    let expr = "[Task.Param.I if Session.HasPathMappingRules else None, \
+                Task.Param.S if Session.HasPathMappingRules else None]";
+    for st in [&p8, &g2] {
+        assert_err_w(
+            expr,
+            st,
+            &[
+                "List literal contains incompatible types: int and string\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn join_nested_optional_elements_of_incompatible_types_are_rejected() {
+    // Auditor finding B1, probe 3: each inner literal is `list[int]` /
+    // `list[string]` (its optional element contributes the non-null
+    // member), and those two lists do not join.
+    let [p8, g2, rt] = join_states();
+    let expr = "[[Task.Param.I if Session.HasPathMappingRules else None], \
+                [Task.Param.S if Session.HasPathMappingRules else None]]";
+    for st in [&p8, &g2] {
+        assert_err_w(
+            expr,
+            st,
+            &[
+                "List literal contains incompatible types: list[int] and list[string]\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+    assert_err_w(
+        expr,
+        &rt,
+        &[
+            "List literal contains incompatible types: list[int] and list[string]\n",
+            &format!("  {expr}\n"),
+            &format!("  ^{}", "~".repeat(expr.len() - 1)),
+        ],
+    );
+}
+
+#[test]
+fn join_optional_list_elements_of_incompatible_types_are_rejected() {
+    // Auditor finding B1, probe 2: `list[int]?` beside `list[string]?`.
+    let st = st_unresolved(vec![
+        ("L", "list[int]"),
+        ("LS", "list[string]"),
+        ("H", "bool"),
+    ]);
+    let expr = "[(L if H else None), (LS if H else None)]";
+    assert_err_w(
+        expr,
+        &st,
+        &[
+            "List literal contains incompatible types: list[int] and list[string]\n",
+            &format!("  {expr}\n"),
+            &format!("  ^{}", "~".repeat(expr.len() - 1)),
+        ],
+    );
+}
+
+#[test]
+fn join_union_empty_list_member_is_used_once() {
+    // Auditor iteration-3 finding N2: the conditional's `[]` member joins
+    // with `list[string]`, but the result `list[string]` then conflicts
+    // with the trailing `[2]` (and the conditional's `list[int]` member
+    // conflicts with `list[string]`), so no run builds the list and every
+    // unresolved stage rejects it.
+    let [p8, g2, rt] = join_states();
+    let expr = "[([] if Session.HasPathMappingRules else [1]), [Task.Param.S], [2]]";
+    for st in [&p8, &g2] {
+        assert_err_w(
+            expr,
+            st,
+            &[
+                "List literal contains incompatible types: list[int] | list[nulltype], list[string], and list[int]\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+    // Run time (H true) builds `[[], ['x'], [2]]`: `list[string]` beside
+    // `list[int]`.
+    assert_err_w(
+        expr,
+        &rt,
+        &[
+            "List literal contains incompatible types: list[nulltype], list[string], and list[int]\n",
+            &format!("  {expr}\n"),
+            &format!("  ^{}", "~".repeat(expr.len() - 1)),
+        ],
+    );
+}
+
+#[test]
+fn join_gate2_listcomp_null_body_reports_null_element() {
+    // Auditor iteration-3 finding N1: a concrete `None` produced by the
+    // comprehension body beside an unresolved element fails at gate 2 with
+    // the run-time message rather than an int/nulltype type conflict.
+    let [p8, g2, rt] = join_states();
+    let expr = "[None if x > 2 else Task.Param.I for x in Param.L]";
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[list[int]]"));
+    for st in [&g2, &rt] {
+        assert_err_w(
+            expr,
+            st,
+            &[
+                "Cannot create list from null elements\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn join_always_null_unresolved_element_reports_null_element() {
+    // PR #434 review: an unresolved element whose type contributes nothing
+    // to a list (`unresolved[nulltype]`) used to reach the incompatible-
+    // types formatter with a single type, producing "incompatible types:
+    // , and nulltype". Such an element is null on every run, so every
+    // stage reports the run-time null error of the construct: a list
+    // literal's, or a comprehension's (`make_list`'s).
+    let [p8, g2, rt] = join_states();
+    let err_lines = |expr: &str, msg: &str| {
+        [
+            format!("{msg}\n"),
+            format!("  {expr}\n"),
+            format!("  ^{}", "~".repeat(expr.len() - 1)),
+        ]
+    };
+    for expr in [
+        "[None if Session.HasPathMappingRules else None]",
+        "[Task.Param.I, None if Session.HasPathMappingRules else None]",
+    ] {
+        let lines = err_lines(expr, "null is not allowed in list literals");
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        for st in [&p8, &g2, &rt] {
+            assert_err_w(expr, st, &lines);
+        }
+    }
+    // Over a concrete iterable (gate 2, run time) the comprehension
+    // reports `make_list`'s null error. At pass 8 the iterable is
+    // unresolved and may be empty, so the body type is kept and the
+    // result is a sound `unresolved[list[nulltype]]`.
+    let expr = "[(None if Session.HasPathMappingRules else None) for x in Param.L]";
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[list[nulltype]]")
+    );
+    let lines = err_lines(expr, "Cannot create list from null elements");
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    for st in [&g2, &rt] {
+        assert_err_w(expr, st, &lines);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// and/or under mixed resolution (resolved-value-limits item 25)
+//
+// After an unresolved operand an `and`/`or` never returns a later
+// concrete operand: the unresolved one may decide the result at run
+// time. The result is `unresolved[union of every type that could be
+// returned]`, or a concrete `bool`/`null` when every possible result is
+// that one value. Each case asserts the result at pass 8 (everything
+// unresolved), gate 2 / `create_job` (`Param.*` concrete, `Task.*` /
+// `Session.*` unresolved), and run time (everything concrete).
+// ══════════════════════════════════════════════════════════════
+
+/// The three symbol states for the item-25 cases: `Param.L = [1, 2, 3]`,
+/// `Param.N = 3`, `Param.Z = 0`, `Param.S = 'abc'`, `Param.F = 2.5`,
+/// `Param.Null` a `nulltype`; `Task.Param.I = 2` (int),
+/// `Task.Param.F = 0.0` (float), `Task.Param.O = null` (`int | nulltype`),
+/// `Task.Param.NB = null` (`bool | nulltype`), `Task.Param.A = 4` (`any`),
+/// `Session.HasPathMappingRules` (bool) `has_rules`.
+fn boolop_states(has_rules: bool) -> [SymbolTable; 3] {
+    let float = |f: f64| ExprValue::Float(value::Float64::new(f).unwrap());
+    let params = [
+        ("Param.L", "list[int]", ExprValue::ListInt(vec![1, 2, 3])),
+        ("Param.N", "int", ExprValue::Int(3)),
+        ("Param.Z", "int", ExprValue::Int(0)),
+        ("Param.S", "string", ExprValue::String("abc".into())),
+        ("Param.F", "float", float(2.5)),
+    ];
+    let tasks = [
+        ("Task.Param.I", "int", ExprValue::Int(2)),
+        ("Task.Param.F", "float", float(0.0)),
+        ("Task.Param.O", "int | nulltype", ExprValue::Null),
+        ("Task.Param.NB", "bool | nulltype", ExprValue::Null),
+        ("Task.Param.A", "any", ExprValue::Int(4)),
+        (
+            "Session.HasPathMappingRules",
+            "bool",
+            ExprValue::Bool(has_rules),
+        ),
+    ];
+    let (mut pass8, mut gate2, mut run) =
+        (SymbolTable::new(), SymbolTable::new(), SymbolTable::new());
+    for (k, t, v) in params {
+        pass8.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        gate2.set(k, v.clone()).unwrap();
+        run.set(k, v).unwrap();
+    }
+    for (k, t, v) in tasks {
+        pass8.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        gate2.set(k, ExprValue::unresolved(tp(t))).unwrap();
+        run.set(k, v).unwrap();
+    }
+    [pass8, gate2, run]
+}
+
+fn eval_target(expr: &str, st: &SymbolTable, target: Option<&str>) -> ExprValue {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let tt = target.map(tp);
+    let result = match &tt {
+        Some(t) => parsed.with_target_type(t).evaluate(&[st]),
+        None => parsed.evaluate(st),
+    };
+    result.unwrap_or_else(|e| panic!("{expr}: {e}"))
+}
+
+/// The full error (message, expression, caret) of `expr` coerced to
+/// `target`.
+fn eval_target_err(expr: &str, st: &SymbolTable, target: Option<&str>) -> String {
+    let parsed = ParsedExpression::new(expr).unwrap();
+    let tt = target.map(tp);
+    let result = match &tt {
+        Some(t) => parsed.with_target_type(t).evaluate(&[st]),
+        None => parsed.evaluate(st),
+    };
+    match result {
+        Ok(v) => panic!("{expr}: expected an error, got {v:?}"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// Assert `expr` coerced to `target` fails in `st` with exactly the
+/// message, expression line, and caret in `expected`.
+fn assert_target_err(expr: &str, st: &SymbolTable, target: Option<&str>, expected: &[&str]) {
+    let e = eval_target_err(expr, st, target);
+    let joined = expected.concat();
+    assert!(e.contains(&joined), "got:\n{e}\nexpected:\n{joined}");
+}
+
+/// Assert the result type of `expr` (coerced to `target`) at pass 8 and
+/// gate 2, and the value at run time (with `Session.HasPathMappingRules`
+/// true and false).
+fn assert_boolop(expr: &str, target: Option<&str>, pass8: &str, gate2: &str, run: [ExprValue; 2]) {
+    let [p8, g2, _] = boolop_states(true);
+    assert_eq!(
+        eval_target(expr, &p8, target).expr_type(),
+        tp(pass8),
+        "pass 8: {expr}"
+    );
+    assert_eq!(
+        eval_target(expr, &g2, target).expr_type(),
+        tp(gate2),
+        "gate 2: {expr}"
+    );
+    for (has_rules, expected) in [true, false].into_iter().zip(run) {
+        let [_, _, rt] = boolop_states(has_rules);
+        assert_eq!(
+            eval_target(expr, &rt, target),
+            expected,
+            "run time (rules={has_rules}): {expr}"
+        );
+    }
+}
+
+#[test]
+fn boolop_gate2_or_floordiv_by_later_zero_operand() {
+    // Previously gate 2: "Division by zero" — `Task.Param.I or Param.Z`
+    // returned `Param.Z`, but an int is never falsy, so run time always
+    // returns `Task.Param.I`.
+    assert_boolop(
+        "10 // (Task.Param.I or Param.Z)",
+        None,
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(5), ExprValue::Int(5)],
+    );
+}
+
+#[test]
+fn boolop_gate2_or_index_by_later_out_of_range_operand() {
+    // Previously gate 2: "Index 3 out of bounds for list of length 3"
+    // (and the string equivalent).
+    assert_boolop(
+        "Param.L[Task.Param.I or Param.N]",
+        None,
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(3), ExprValue::Int(3)],
+    );
+    assert_boolop(
+        "Param.S[Task.Param.I or Param.N]",
+        None,
+        "unresolved[string]",
+        "unresolved[string]",
+        [ExprValue::String("c".into()), ExprValue::String("c".into())],
+    );
+}
+
+#[test]
+fn boolop_gate2_or_bool_target_not_applied_to_later_operand() {
+    // Previously gate 2: "Cannot convert 'abc' to bool". The result is
+    // `true` (the flag) or `'abc'`, and the bool target applies to the
+    // union.
+    let [p8, g2, _] = boolop_states(true);
+    let expr = "Session.HasPathMappingRules or Param.S";
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[bool | string]")
+    );
+    assert_eq!(
+        eval_u(expr, &g2).expr_type(),
+        tp("unresolved[bool | string]")
+    );
+    assert_eq!(
+        eval_target(expr, &g2, Some("bool")).expr_type(),
+        tp("unresolved[bool]")
+    );
+    let [_, _, rt] = boolop_states(true);
+    assert_eq!(eval_target(expr, &rt, Some("bool")), ExprValue::Bool(true));
+    // With the flag false run time returns `'abc'`, which the target
+    // rejects.
+    let [_, _, rt] = boolop_states(false);
+    assert_target_err(
+        expr,
+        &rt,
+        Some("bool"),
+        &[
+            "Cannot convert 'abc' to bool\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn boolop_gate2_or_int_target_not_applied_to_later_float() {
+    // Previously gate 2: "Cannot coerce float to int: 2.5 is not a whole
+    // number". Run time always returns `Task.Param.F` (0.0).
+    assert_boolop(
+        "Task.Param.F or Param.F",
+        Some("int"),
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(0), ExprValue::Int(0)],
+    );
+}
+
+#[test]
+fn boolop_pass8_and_returns_union_of_operand_types() {
+    // Previously typed `unresolved[bool]` and rejected at pass 8 with
+    // "upper() is not available for bool". Run time with the flag true
+    // returns `Param.S`.
+    let [p8, g2, rt] = boolop_states(true);
+    let expr = "Session.HasPathMappingRules and Param.S";
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[bool | string]")
+    );
+    assert_eq!(
+        eval_u(expr, &g2).expr_type(),
+        tp("unresolved[bool | string]")
+    );
+    assert_eq!(eval_u(expr, &rt), ExprValue::String("abc".into()));
+    let expr = "(Session.HasPathMappingRules and Param.S).upper()";
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[string]"));
+    assert_eq!(eval_u(expr, &g2).expr_type(), tp("unresolved[string]"));
+    assert_eq!(eval_u(expr, &rt), ExprValue::String("ABC".into()));
+}
+
+#[test]
+fn boolop_unresolved_last_operand_keeps_its_type() {
+    // Previously `unresolved[bool]`: the last operand is returned
+    // whatever its value.
+    assert_boolop(
+        "Param.N and Task.Param.I",
+        None,
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(2), ExprValue::Int(2)],
+    );
+}
+
+#[test]
+fn boolop_and_never_decided_by_non_falsy_unresolved_operand() {
+    // An `int` never decides `and`, so the later concrete operand is the
+    // result — concrete at gate 2, as at run time.
+    assert_boolop(
+        "Task.Param.I and Param.N",
+        None,
+        "unresolved[int]",
+        "int",
+        [ExprValue::Int(3), ExprValue::Int(3)],
+    );
+}
+
+#[test]
+fn boolop_or_nullable_operand_unions_non_null_member_with_fallback() {
+    // `int | nulltype` returns from `or` only as an int; otherwise the
+    // fallback string is returned.
+    assert_boolop(
+        "Task.Param.O or Param.S",
+        None,
+        "unresolved[int | string]",
+        "unresolved[int | string]",
+        [
+            ExprValue::String("abc".into()),
+            ExprValue::String("abc".into()),
+        ],
+    );
+    // `and` returns it only as `null`.
+    assert_boolop(
+        "Task.Param.O and Param.S",
+        None,
+        "unresolved[nulltype | string]",
+        "unresolved[nulltype | string]",
+        [ExprValue::Null, ExprValue::Null],
+    );
+}
+
+#[test]
+fn boolop_concrete_when_every_outcome_is_the_same_bool() {
+    // The flag returns from `and` only as `false`, and the last operand is
+    // `false`: every possible result is `false`.
+    assert_boolop(
+        "Session.HasPathMappingRules and false",
+        None,
+        "bool",
+        "bool",
+        [ExprValue::Bool(false), ExprValue::Bool(false)],
+    );
+    assert_boolop(
+        "Session.HasPathMappingRules or Session.HasPathMappingRules or true",
+        None,
+        "bool",
+        "bool",
+        [ExprValue::Bool(true), ExprValue::Bool(true)],
+    );
+    // Outcomes `false` (the flag) and `true` (the last operand) differ.
+    assert_boolop(
+        "Session.HasPathMappingRules and true",
+        None,
+        "unresolved[bool]",
+        "unresolved[bool]",
+        [ExprValue::Bool(true), ExprValue::Bool(false)],
+    );
+}
+
+#[test]
+fn boolop_absorbed_operand_prevents_concrete_result() {
+    // The flag returns from `or` only as `true`, but when it is false run
+    // time fails in `fail()` — the result is not known to be `true`.
+    let [p8, g2, _] = boolop_states(true);
+    let expr = "Session.HasPathMappingRules or fail('no rules')";
+    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[bool]"));
+    assert_eq!(eval_u(expr, &g2).expr_type(), tp("unresolved[bool]"));
+    let [_, _, rt] = boolop_states(true);
+    assert_eq!(eval_u(expr, &rt), ExprValue::Bool(true));
+    let [_, _, rt] = boolop_states(false);
+    assert_err_w(
+        expr,
+        &rt,
+        &[
+            "no rules\n",
+            &format!("  {expr}\n"),
+            "                                 ^~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn boolop_stops_after_unresolved_operand_that_always_decides() {
+    // `Task.Param.I` always decides `or`, so run time never evaluates
+    // the later operand and its budget exceedance is not charged.
+    let [_, g2, _] = boolop_states(true);
+    let r = ParsedExpression::new("Task.Param.I or len('A' * 10000000)")
+        .and_then(|p| {
+            p.with_memory_limit(1024 * 1024)
+                .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+                .evaluate_with_metrics(&[&g2])
+        })
+        .unwrap();
+    assert_eq!(r.value.expr_type(), tp("unresolved[int]"));
+}
+
+#[test]
+fn boolop_error_method_on_operand_that_always_decides() {
+    // `Task.Param.I` always decides `or`, so the result is an int at run
+    // time and `upper()` fails. (Previously typed `unresolved[string]` at
+    // pass 8 and gate 2 and accepted.)
+    let expr = "(Task.Param.I or Param.S).upper()";
+    for st in boolop_states(true) {
+        assert_err_w(
+            expr,
+            &st,
+            &[
+                "upper() is not available for int. Available for: string\n",
+                &format!("  {expr}\n"),
+                "  ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~",
+            ],
+        );
+    }
+}
+
+#[test]
+fn boolop_error_no_union_member_matches_operator() {
+    // The result is `false` or `'abc'`; neither supports `- 1`.
+    let [p8, g2, rt] = boolop_states(true);
+    let expr = "(Session.HasPathMappingRules and Param.S) - 1";
+    // The caret marks the `-` (index 42) inside the whole binop span.
+    let caret = format!("  {}^~~", "~".repeat(42));
+    for st in [&p8, &g2] {
+        assert_err_w(
+            expr,
+            st,
+            &[
+                "Cannot use '-' operator with bool | string and int\n",
+                &format!("  {expr}\n"),
+                &caret,
+            ],
+        );
+    }
+    assert_err_w(
+        expr,
+        &rt,
+        &[
+            "Cannot use '-' operator with string and int\n",
+            &format!("  {expr}\n"),
+            &caret,
+        ],
+    );
+}
+
+#[test]
+fn boolop_nested_cond_and_value_or_fallback_idiom() {
+    // `cond and A or B`: the inner `and` returns the flag only as
+    // `false`, which passes the outer `or` on, so `bool` is never a
+    // possible result. (Before nested outcomes were kept, the inner
+    // `and` merged to `unresolved[bool | int]` and the outer `or` kept
+    // the `bool`, so the subscript was rejected with "Index must be an
+    // integer".)
+    assert_boolop(
+        "Session.HasPathMappingRules and 1 or 0",
+        None,
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(1), ExprValue::Int(0)],
+    );
+    assert_boolop(
+        "Param.L[Session.HasPathMappingRules and 1 or 0]",
+        None,
+        "unresolved[int]",
+        "unresolved[int]",
+        [ExprValue::Int(2), ExprValue::Int(1)],
+    );
+    let float = |f: f64| ExprValue::Float(value::Float64::new(f).unwrap());
+    // Previously "Cannot use '*' operator with bool | float and int".
+    assert_boolop(
+        "(Session.HasPathMappingRules and Param.F or 1.0) * 2",
+        None,
+        "unresolved[float]",
+        "unresolved[float]",
+        [float(5.0), float(2.0)],
+    );
+    // A compare-typed condition works the same way.
+    assert_boolop(
+        "Task.Param.I > 1 and Param.S or 'none'",
+        None,
+        "unresolved[string]",
+        "unresolved[string]",
+        [
+            ExprValue::String("abc".into()),
+            ExprValue::String("abc".into()),
+        ],
+    );
+}
+
+#[test]
+fn boolop_nested_exact_outcome_passes_outer_on() {
+    // The inner `and` is concretely `false` at gate 2 (every outcome is
+    // `false`), so the outer `or` returns its last, concrete operand.
+    assert_boolop(
+        "(Session.HasPathMappingRules and false) or Param.N",
+        None,
+        "unresolved[int]",
+        "int",
+        [ExprValue::Int(3), ExprValue::Int(3)],
+    );
+    // The inner `or` returns `true` (the flag) or `Param.S`; `true` passes
+    // the outer `and` on, `Param.S` never decides it either, so the outer
+    // result is `Param.N`'s.
+    assert_boolop(
+        "(Session.HasPathMappingRules or Param.S) and Param.N",
+        None,
+        "unresolved[int]",
+        "int",
+        [ExprValue::Int(3), ExprValue::Int(3)],
+    );
+}
+
+#[test]
+fn boolop_unresolved_operand_in_the_middle_of_a_chain() {
+    // The leading `Param.Z == 1` is concretely `false` at gate 2 and never
+    // decides `or` (at pass 8 it is an unresolved bool, returned as
+    // `true`); `Task.Param.O` returns only as an int; the last operand is
+    // returned otherwise.
+    assert_boolop(
+        "Param.Z == 1 or Task.Param.O or Param.S",
+        None,
+        "unresolved[bool | int | string]",
+        "unresolved[int | string]",
+        [
+            ExprValue::String("abc".into()),
+            ExprValue::String("abc".into()),
+        ],
+    );
+    // A concrete non-deciding operand after the unresolved one is never
+    // returned: only the flag's `false` and the last operand are.
+    assert_boolop(
+        "Param.N and Session.HasPathMappingRules and Param.S and Param.F",
+        None,
+        "unresolved[bool | float]",
+        "unresolved[bool | float]",
+        [
+            ExprValue::Float(value::Float64::new(2.5).unwrap()),
+            ExprValue::Bool(false),
+        ],
+    );
+}
+
+#[test]
+fn boolop_nullable_bool_operand_and_false_is_not_concrete() {
+    // `Task.Param.NB` (`bool | nulltype`) returns from `and` as `false`
+    // or `null`, so the result is not concretely `false` (as it was
+    // before: run time returns `null` here).
+    assert_boolop(
+        "Task.Param.NB and false",
+        None,
+        "unresolved[bool | nulltype]",
+        "unresolved[bool | nulltype]",
+        [ExprValue::Null, ExprValue::Null],
+    );
+    // From `or` it returns only as `true`.
+    assert_boolop(
+        "Task.Param.NB or Param.S",
+        None,
+        "unresolved[bool | string]",
+        "unresolved[bool | string]",
+        [
+            ExprValue::String("abc".into()),
+            ExprValue::String("abc".into()),
+        ],
+    );
+}
+
+#[test]
+fn boolop_any_typed_operand() {
+    // An `any` operand may be returned by `or` as anything, and by `and`
+    // only as `false` or `null`.
+    assert_boolop(
+        "Task.Param.A or Param.S",
+        None,
+        "unresolved[any]",
+        "unresolved[any]",
+        [ExprValue::Int(4), ExprValue::Int(4)],
+    );
+    assert_boolop(
+        "Task.Param.A and Param.S",
+        None,
+        "unresolved[bool | nulltype | string]",
+        "unresolved[bool | nulltype | string]",
+        [
+            ExprValue::String("abc".into()),
+            ExprValue::String("abc".into()),
+        ],
+    );
+}
+
+#[test]
+fn boolop_error_every_reachable_operand_fails() {
+    // `Task.Param.I` never decides `and`, so every run reaches `fail()`:
+    // the absorbed error is reported, not "Cannot coerce noreturn to
+    // string".
+    let expr = "Task.Param.I and fail('x')";
+    for st in boolop_states(true) {
+        assert_target_err(
+            expr,
+            &st,
+            Some("string"),
+            &[
+                "x\n",
+                &format!("  {expr}\n"),
+                "                   ^~~~~~~~~",
+            ],
+        );
+    }
+    // At gate 2 the division is concrete and fails; at pass 8 `Param.Z`
+    // is unresolved and the division types as `int`.
+    let expr = "Task.Param.I and (10 // Param.Z)";
+    let [p8, g2, rt] = boolop_states(true);
+    assert_eq!(
+        eval_target(expr, &p8, Some("string")).expr_type(),
+        tp("unresolved[string]")
+    );
+    for st in [&g2, &rt] {
+        assert_target_err(
+            expr,
+            st,
+            Some("string"),
+            &[
+                "Division by zero\n",
+                &format!("  {expr}\n"),
+                "                    ~~~^~~~~~~~~~",
+            ],
+        );
+    }
 }

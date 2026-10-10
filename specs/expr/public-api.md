@@ -698,9 +698,14 @@ impl ExprValue {
     // ── List construction ──
 
     /// Build a typed list from elements, promoting element types where
-    /// needed (int+float → float, path+string → string). `hint_type`
-    /// determines the element type for an empty list. An `Unresolved`
-    /// element is rejected: `make_list` constructs concrete lists (the
+    /// needed (int+float → float, path+string → string, element-wise for
+    /// lists of lists). `hint_type` determines the element type for an
+    /// empty list. The element types must join under the list-literal
+    /// join (`list[nulltype]` compatible with every list type; e.g.
+    /// `list[int]` beside `list[string]` is an error); a list of lists
+    /// carries the joined element type. A `Null` or an `Unresolved`
+    /// element is rejected: a list cannot hold `null`, and `make_list`
+    /// constructs concrete lists (the
     /// evaluator hoists unknown-element list expressions instead).
     pub fn make_list(
         elements: Vec<ExprValue>, hint_type: ExprType,
