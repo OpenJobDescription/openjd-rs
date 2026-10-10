@@ -1288,7 +1288,9 @@ impl<'a> Evaluator<'a> {
             self.release(e);
         }
         if elements.iter().any(|e| e.is_unresolved()) {
-            let val = unresolved_list_from_elements(&elements)?;
+            let val = unresolved_list_from_elements(&elements, || {
+                ExpressionError::new("null is not allowed in list literals")
+            })?;
             return self.track(val);
         }
         // If we have a list element target, coerce each element and skip homogeneity check
@@ -1801,7 +1803,9 @@ impl<'a> Evaluator<'a> {
         // top-level unresolved(list[T]), exactly as eval_list does —
         // make_list rejects unresolved elements.
         if result.iter().any(|e| e.is_unresolved()) {
-            let val = unresolved_list_from_elements(&result)?;
+            let val = unresolved_list_from_elements(&result, || {
+                ExpressionError::type_error("Cannot create list from null elements")
+            })?;
             return self.track(val);
         }
         let elem_type = if result.is_empty() {
@@ -1920,15 +1924,22 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
 /// by list comprehensions whose body produced unresolved elements;
 /// `ExprValue::make_list` itself rejects unresolved elements, since it
 /// constructs concrete lists.
-fn unresolved_list_from_elements(elements: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
-    // A concrete `null` element (e.g. a comprehension body yielding
-    // `None`) fails exactly as `ExprValue::make_list` reports it when the
-    // list is built from concrete values. List literals reject `null`
-    // earlier, in `eval_list`.
-    if elements.iter().any(|e| matches!(e, ExprValue::Null)) {
-        return Err(ExpressionError::type_error(
-            "Cannot create list from null elements",
-        ));
+fn unresolved_list_from_elements(
+    elements: &[ExprValue],
+    null_error: fn() -> ExpressionError,
+) -> Result<ExprValue, ExpressionError> {
+    // An element that is always `null` — a concrete `null` (e.g. a
+    // comprehension body yielding `None`) or an unresolved element whose
+    // type contributes nothing (`unresolved[nulltype]`, e.g.
+    // `None if Session.HasPathMappingRules else None`) — fails every
+    // run. Report it with the caller's run-time error: list literals say
+    // "null is not allowed in list literals", comprehensions report
+    // `ExprValue::make_list`'s "Cannot create list from null elements".
+    if elements.iter().any(|e| {
+        matches!(e, ExprValue::Null)
+            || crate::types::list_element_contribution(&unwrap_unresolved(&e.expr_type())).is_none()
+    }) {
+        return Err(null_error());
     }
     // Each element as the type it contributes to a built list (`int?`
     // contributes `int`), so the error names the types that conflict.
@@ -1958,6 +1969,10 @@ fn incompatible_list_types_error(types: &[ExprType]) -> ExpressionError {
     let strs: Vec<String> = seen.iter().map(|t| t.to_string()).collect();
     let msg = match strs.as_slice() {
         [a, b] => format!("List literal contains incompatible types: {a} and {b}"),
+        // Not reached by the callers (a lone type always joins with
+        // itself except `nulltype`, which they report as a null error
+        // first), but never format an empty "{rest}, and" list.
+        [only] => format!("List literal contains incompatible types: {only}"),
         [rest @ .., last] => format!(
             "List literal contains incompatible types: {}, and {last}",
             rest.join(", ")

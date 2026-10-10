@@ -2151,3 +2151,45 @@ fn join_gate2_listcomp_null_body_reports_null_element() {
         );
     }
 }
+
+#[test]
+fn join_always_null_unresolved_element_reports_null_element() {
+    // PR #434 review: an unresolved element whose type contributes nothing
+    // to a list (`unresolved[nulltype]`) used to reach the incompatible-
+    // types formatter with a single type, producing "incompatible types:
+    // , and nulltype". Such an element is null on every run, so every
+    // stage reports the run-time null error of the construct: a list
+    // literal's, or a comprehension's (`make_list`'s).
+    let [p8, g2, rt] = join_states();
+    let err_lines = |expr: &str, msg: &str| {
+        [
+            format!("{msg}\n"),
+            format!("  {expr}\n"),
+            format!("  ^{}", "~".repeat(expr.len() - 1)),
+        ]
+    };
+    for expr in [
+        "[None if Session.HasPathMappingRules else None]",
+        "[Task.Param.I, None if Session.HasPathMappingRules else None]",
+    ] {
+        let lines = err_lines(expr, "null is not allowed in list literals");
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        for st in [&p8, &g2, &rt] {
+            assert_err_w(expr, st, &lines);
+        }
+    }
+    // Over a concrete iterable (gate 2, run time) the comprehension
+    // reports `make_list`'s null error. At pass 8 the iterable is
+    // unresolved and may be empty, so the body type is kept and the
+    // result is a sound `unresolved[list[nulltype]]`.
+    let expr = "[(None if Session.HasPathMappingRules else None) for x in Param.L]";
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[list[nulltype]]")
+    );
+    let lines = err_lines(expr, "Cannot create list from null elements");
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    for st in [&g2, &rt] {
+        assert_err_w(expr, st, &lines);
+    }
+}

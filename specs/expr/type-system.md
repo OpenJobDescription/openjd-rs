@@ -155,7 +155,12 @@ holding a typed list drops its `list[nulltype]` member
 `unresolved[list[int]]`, and `int?` against `string?` is the `int` / `string`
 conflict — every value of that literal fails at run time — rather than a
 member-wise join to `nulltype`. Concrete `make_list` reports a `null` element
-as "Cannot create list from null elements" before the join.
+as "Cannot create list from null elements" before the join. The unresolved
+hoisting (`unresolved_list_from_elements`) does the same for an element that is
+null on every run — a concrete `null`, or an unresolved element that contributes
+nothing (`unresolved[nulltype]`, e.g. `None if H else None`) — reporting the
+construct's run-time error: "null is not allowed in list literals" for a list
+literal, "Cannot create list from null elements" for a comprehension.
 
 Conflicts include `bool` against `int`, a scalar against a list,
 `range_expr` against `list[int]` (unlike `unify_binding`), `list[int]` against
