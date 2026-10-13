@@ -88,10 +88,14 @@ threads instead:
   stdin ──────────> │  Main thread                │
   (cancel cmds)     │  - reads stdin lines        │
                     │  - on cancel: signal child  │
+                    │  - drains bounded queue,    │ ──> stdout
+                    │    sends {"out":...} lines  │     (to session)
                     │                             │
-                    │  Stdout thread              │
-                    │  - reads child stdout       │ ──> stdout
-                    │  - sends {"out":...} lines  │     (to session)
+                    │  Stdout / Stderr threads    │
+                    │  - read child pipe in 8 KiB │
+                    │    chunks via LineFramer    │
+                    │  - push lines to bounded    │
+                    │    queue (256 slots)        │
                     │                             │
                     │  Child process (job-user)   │
                     │  - CREATE_NEW_PROCESS_GROUP │
@@ -110,10 +114,24 @@ inside the helper.
 - `{"cancel": "TERMINATE"}` → `kill_process_tree(child_pid)` using
   `TerminateProcess` on each process in the tree.
 
-**I/O multiplexing**: Two threads sharing a channel:
-- Thread 1 (main): reads stdin for cancel commands, signals child on cancel
-- Thread 2: reads child stdout line-by-line, sends `{"out":...}` responses
-- Main thread joins stdout thread after child exits, then sends `{"exited":...}`
+**I/O multiplexing**: Three threads sharing a bounded channel
+(`sync_channel`, 256 slots):
+- Thread 1 (main): polls cancel commands and the channel, sends each queued
+  line as `{"out":...}`, signals child on cancel
+- Threads 2 and 3: read child stdout and stderr in 8 KiB chunks through the
+  shared `LineFramer`, push framed lines to the channel
+- After the child exits, main thread drains the channel until both senders
+  disconnect, joins the reader threads, then sends `{"exited":...}`
+
+**Output bounds** (same `framer.rs` as the Unix runner):
+- Per line: 64 KiB cap (excess dropped to the next `\n`), invalid UTF-8
+  escaped as `\xNN`, trailing partial line flushed at EOF, JSON payload capped
+  at the 128 KiB response limit
+- Aggregate: 256 slots × 64 KiB ≈ 16 MiB. A full channel parks the reader
+  threads, the child's pipe fills, and the child stalls
+- Why a bounded channel: the Unix runner reads and emits in one `poll()` loop,
+  so a blocked write back-pressures the read for free. Threads break that
+  link; the bound restores it
 
 ### Helper launch (`cross_user_helper.rs`) — add `#[cfg(windows)]` spawn
 
@@ -188,6 +206,8 @@ to the child's `hStdInput`, the write end is returned in
 Implemented `run_command` for Windows using two threads for I/O multiplexing.
 Handle cancel commands by calling `GenerateConsoleCtrlEvent` or
 `kill_process_tree`. Three integration tests pass (echo, cancel, nonexistent).
+Reader threads route child stdout and stderr through the shared `LineFramer`
+into a bounded channel; see "Output bounds" above.
 
 ### Step 3: Add `#[cfg(windows)]` spawn in `cross_user_helper.rs` ✅
 
